@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-    // CORS headers
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -8,7 +8,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-if (req.method !== 'POST' && req.method !== 'OPTIONS') {
+
+  if (req.method !== 'POST' && req.method !== 'OPTIONS') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -19,13 +20,25 @@ if (req.method !== 'POST' && req.method !== 'OPTIONS') {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
+  // Map zip to territory based on first 2 digits
+  const zipPrefix = zip.substring(0, 2);
+  const zipTerritoryMap = {
+    '80': '1685582903241x973573877706522600', // Denver
+    '77': '1707514546803x280800015001583600', // Houston
+    '78': '1724797832896x339501352491155460'  // Austin
+  };
+
+  const territoryId = zipTerritoryMap[zipPrefix];
+  if (!territoryId) {
+    return res.status(400).json({ error: `Service not available for zip ${zip}` });
+  }
+
   const size = selections.size;
   const bracket = selections.bracket;
   const lift = selections.lift;
   const fp = selections.fp;
   const wire = selections.wire;
   const extras = selections.extras || [];
-
   const isTvLarge = size?.large === true;
   const minProviders = isTvLarge ? '2' : '1';
 
@@ -62,7 +75,7 @@ if (req.method !== 'POST' && req.method !== 'OPTIONS') {
   ];
 
   const payload = {
-    territory_id: 'REPLACE_WITH_YOUR_TERRITORY_ID',
+    territory_id: territoryId,
     customer: {
       name: `${customer.first_name} ${customer.last_name}`,
       phone: customer.phone,
