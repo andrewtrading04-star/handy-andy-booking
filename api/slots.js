@@ -1,9 +1,6 @@
 // /api/slots.js
-// Returns available Zenbooker timeslots for a territory.
-// Supports both GET (query params) and POST (JSON body).
-
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -18,7 +15,7 @@ export default async function handler(req, res) {
   const { territory_id, duration, date, days, lat, lng } = src;
 
   if (!territory_id) return res.status(400).json({ error: 'territory_id is required' });
-  if (!duration)     return res.status(400).json({ error: 'duration (minutes) is required' });
+  if (!duration)     return res.status(400).json({ error: 'duration is required' });
 
   try {
     const url = new URL('https://api.zenbooker.com/v1/scheduling/timeslots');
@@ -29,14 +26,10 @@ export default async function handler(req, res) {
     if (lat) url.searchParams.set('lat', String(lat));
     if (lng) url.searchParams.set('lng', String(lng));
 
-    const r = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${ZBK_KEY}` },
-    });
+    const r    = await fetch(url.toString(), { headers: { Authorization: `Bearer ${ZBK_KEY}` } });
     const data = await r.json().catch(() => ({}));
 
-    if (!r.ok) {
-      return res.status(r.status).json({ error: data?.message || 'Zenbooker error', details: data });
-    }
+    if (!r.ok) return res.status(r.status).json({ error: data?.message || 'Zenbooker error', details: data });
     return res.status(200).json(data);
   } catch (err) {
     return res.status(500).json({ error: 'Timeslot lookup failed', message: err.message });
