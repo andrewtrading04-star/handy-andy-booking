@@ -43,6 +43,9 @@ export default async function handler(req, res) {
       postal_code: postal_code || customer.zip || '',
       country:     'US',
     },
+    // Auto-enable both notification switches on every booking
+    email_notifications: true,
+    sms_notifications:   true,
   };
 
   try {
