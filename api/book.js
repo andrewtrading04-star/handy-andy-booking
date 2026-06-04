@@ -1,4 +1,10 @@
 // /api/book.js
+// Confirmed working payload format via live API testing:
+//   - services[].selections[] with selected_options[] for multi-select sections
+//   - services[].selections[] with option_id (flat) for single-select sections
+//   - customer.name (full name string, not first/last separately)
+//   - address requires: line1, city, state, postal_code, country
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -12,15 +18,15 @@ export default async function handler(req, res) {
   const {
     territory_id, service_id, selectedSlot,
     customer, city, state, postal_code,
-    zbk_selections
+    zbk_selections, stripe_payment_method_id,
   } = req.body || {};
 
-  if (!territory_id)      return res.status(400).json({ error: 'territory_id required' });
-  if (!service_id)        return res.status(400).json({ error: 'service_id required' });
-  if (!selectedSlot)      return res.status(400).json({ error: 'selectedSlot required' });
-  if (!customer?.email)   return res.status(400).json({ error: 'customer.email required' });
-  if (!customer?.phone)   return res.status(400).json({ error: 'customer.phone required' });
-  if (!customer?.address) return res.status(400).json({ error: 'customer.address required' });
+  if (!territory_id)       return res.status(400).json({ error: 'territory_id required' });
+  if (!service_id)         return res.status(400).json({ error: 'service_id required' });
+  if (!selectedSlot)       return res.status(400).json({ error: 'selectedSlot required' });
+  if (!customer?.email)    return res.status(400).json({ error: 'customer.email required' });
+  if (!customer?.phone)    return res.status(400).json({ error: 'customer.phone required' });
+  if (!customer?.address)  return res.status(400).json({ error: 'customer.address required' });
 
   const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
 
@@ -43,6 +49,8 @@ export default async function handler(req, res) {
       postal_code: postal_code || customer.zip || '',
       country:     'US',
     },
+    // Stripe payment method ID — holds card in Zenbooker without charging
+    ...(stripe_payment_method_id && { manual_payment_method: stripe_payment_method_id }),
   };
 
   try {
@@ -51,13 +59,18 @@ export default async function handler(req, res) {
       headers: { Authorization: `Bearer ${ZBK_KEY}`, 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
     });
+
     const data = await r.json().catch(() => ({}));
+
     if (!r.ok) {
       console.error('[book] Zenbooker error', r.status, JSON.stringify(data));
-      return res.status(r.status).json({ error: data?.error?.message || 'Booking failed', details: data });
+      return res.status(r.status).json({ error: data?.error?.message || data?.message || 'Booking failed', details: data });
     }
+
     return res.status(200).json({ success: true, job_id: data.job_id, status: data.status });
+
   } catch (err) {
+    console.error('[book] fetch error:', err.message);
     return res.status(500).json({ error: 'Booking request failed', message: err.message });
   }
 }
