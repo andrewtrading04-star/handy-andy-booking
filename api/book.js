@@ -1,10 +1,4 @@
 // /api/book.js
-// Confirmed working payload format via live API testing:
-//   - services[].selections[] with selected_options[] for multi-select sections
-//   - services[].selections[] with option_id (flat) for single-select sections
-//   - customer.name (full name string, not first/last separately)
-//   - address requires: line1, city, state, postal_code, country
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -18,7 +12,7 @@ export default async function handler(req, res) {
   const {
     territory_id, service_id, selectedSlot,
     customer, city, state, postal_code,
-    zbk_selections, stripe_payment_method_id,
+    zbk_selections,
   } = req.body || {};
 
   if (!territory_id)       return res.status(400).json({ error: 'territory_id required' });
@@ -49,8 +43,6 @@ export default async function handler(req, res) {
       postal_code: postal_code || customer.zip || '',
       country:     'US',
     },
-    // Stripe payment method ID — holds card in Zenbooker without charging
-    ...(stripe_payment_method_id && { manual_payment_method: stripe_payment_method_id }),
   };
 
   try {
