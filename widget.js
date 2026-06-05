@@ -1085,6 +1085,33 @@
     try{
       const r=await fetch(`${API_BASE}/book`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(r.ok){
+        // Save a booking summary for the thank-you page (stays in the browser only — never in the URL)
+        try{
+          const res=await r.json().catch(()=>({}));
+          const slot=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot)||{};
+          const df=selectedDate?fmtDate(selectedDate):null;
+          const lines=[];
+          for(const sec of serviceConfig.sections){
+            for(const sel of(selections[sec.id]||[])){
+              const opt=sec.options.find(o=>o.id===sel.option_id);
+              if(opt&&sel.quantity>0)lines.push({label:opt.label,qty:sel.quantity,amount:(opt.price||0)*sel.quantity});
+            }
+          }
+          const loc=TERRITORY_LOCATION[territoryId]||{city:'',state:''};
+          localStorage.setItem('ha_booking',JSON.stringify({
+            firstName:customer.first_name||'',
+            name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
+            email:customer.email||'', phone:customer.phone||'',
+            address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
+            dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
+            timeWindow:slot.arrival_window||'',
+            lines, total:calcTotal(), tip:tipAmount||0,
+            twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
+            jobId:(res&&(res.job_id||res.id))||'',
+            rescheduleUrl:(res&&res.reschedule_url)||'',
+            ts:Date.now()
+          }));
+        }catch(e){}
         window.location.href=THANKYOU_URL;
       }else{
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
