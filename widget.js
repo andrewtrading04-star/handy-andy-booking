@@ -132,8 +132,8 @@
             {id:'1698905037955x771952325080383500',label:'Soundbar Installation',                             price:50},
             {id:'1698905090848x173584167038615550',label:'Install shelf under TV',                            price:45},
             {id:'1698905111338x528324964985864200',label:'LED Lights',                                        price:50},
-            {id:'1715820772054x920882061736149000',label:'1 hour of Handyman Labor',                          price:85},
-            {id:'1698905159794x117137493532868600',label:'Other',                                             price:0},
+            {id:'1715820772054x920882061736149000',label:'1 hour of Handyman Labor',                          price:85,allowText:true},
+            {id:'1698905159794x117137493532868600',label:'Other',                                             price:0,allowText:true},
           ]
         },
         {
@@ -244,8 +244,8 @@
             {id:'1724797768116x299580540855954900',label:'Soundbar Installation', price:45},
             {id:'1724797768116x917721356073396700',label:'Install shelf under TV', price:45},
             {id:'1724797768116x423659180367796740',label:'LED Lights',             price:45},
-            {id:'1724797768116x234539799179230620',label:'1 hour of Handyman Labor',price:85},
-            {id:'1724797768116x790768026842265000',label:'Other',                  price:0},
+            {id:'1724797768116x234539799179230620',label:'1 hour of Handyman Labor',price:85,allowText:true},
+            {id:'1724797768116x790768026842265000',label:'Other',                  price:0,allowText:true},
           ]
         },
         {
@@ -264,7 +264,8 @@
   let serviceConfig=null, selections={}, selectedSlot=null;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
   let customer={first_name:'',last_name:'',email:'',phone:'',address:''};
-  let tipAmount=0, couponCode='', otherNote='';
+  let tipAmount=0, couponCode='';
+  let optionComments={}; // { [optionId]: "free text" } for Handyman / Other
   // Stripe
   let _stripe=null, _stripeElements=null, _stripeCard=null;
 
@@ -322,6 +323,8 @@
   }
   // Show "behind the wall" if ANY TV has drywall — fireplace status doesn't block all TVs
   function canHideBehindWall(){ return hasDrywall(); }
+  // Denver requires 2 techs for 98"+ TVs (techs work solo there; other cities have helpers)
+  function needsTwoTechs(){ return territoryId===DENVER_ID && hasLargeTV(); }
 
   function shouldSkip(k){
     // Skip bracket only if ALL TVs are Frame/Gallery (no regular TVs mixed in)
@@ -744,11 +747,10 @@
   function bExtras(){
     const sec=getSec('extras');
     const visible=sec.options.filter(o=>!o.frameOnly);
-    const otherOpt=visible.find(o=>o.label==='Other');
-    const otherSelected=otherOpt?getQty(sec.id,otherOpt.id)>0:false;
+    // Each option renders; if it allows text AND is selected, a textarea drops in beneath it
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
-      return `<div style="${S.qRow(q>0)}">
+      const row=`<div style="${S.qRow(q>0)}">
         <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
@@ -756,13 +758,14 @@
           <button class="ha-inc" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">+</button>
         </div>
       </div>`;
-    }).join('');
-    const otherInput=otherSelected?`
-      <div style="margin-bottom:12px!important;">
-        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 6px 0!important;">Describe what you need:</p>
-        <textarea id="other-note" rows="3" style="width:100%!important;padding:11px 14px!important;background:#27272a!important;border:1px solid #ff6600!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="e.g. I need some curtains hung, a shelf mounted...">${otherNote}</textarea>
+      const showText=o.allowText&&q>0;
+      const ph=o.label==='Other'?'e.g. I need some curtains hung...':'Tell us what you need the handyman for...';
+      const textBox=showText?`<div style="margin:-2px 0 10px 0!important;">
+        <textarea class="ha-comment" data-o="${o.id}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid #ff6600!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
       </div>`:'';
-    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${opts}${otherInput}
+      return row+textBox;
+    }).join('');
+    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${opts}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${S.btnPri}">Continue →</button>
@@ -959,7 +962,7 @@
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
     root.querySelectorAll('.ha-tip').forEach(b=>b.addEventListener('click',()=>{tipAmount=parseInt(b.dataset.tip);render();}));
-    root.querySelector('#other-note')?.addEventListener('input',e=>{otherNote=e.target.value;});
+    root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{optionComments[e.target.dataset.o]=e.target.value;}));
     // Card inputs replaced by Stripe Elements — no manual binding needed
   }
 
@@ -1007,7 +1010,8 @@
   // ─── Slots fetch ──────────────────────────────────────────────────────────
   async function fetchSlots(){
     try{
-      const r=await fetch(`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=30`);
+      const provReq=needsTwoTechs()?2:1;
+      const r=await fetch(`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=30&min_providers_needed=${provReq}`);
       const d=await r.json();
       slotsByDate={};calYear=null;calMonth=null;
       for(const day of(d.days||[])){
@@ -1058,7 +1062,9 @@
 
     const multiTypes=new Set(['qty_multi','qty_match','multi_select']);
     const zbk_selections=serviceConfig.sections.map(sec=>{
-      const opts=(selections[sec.id]||[]).filter(o=>o.quantity>0);
+      const opts=(selections[sec.id]||[]).filter(o=>o.quantity>0)
+        // Attach customer free-text as `comments` on the option (Handyman / Other)
+        .map(o=>{const c=(optionComments[o.option_id]||'').trim();return c?{...o,comments:c}:o;});
       if(!opts.length)return null;
       return multiTypes.has(sec.type)
         ?{section_id:sec.id,selected_options:opts}
@@ -1071,8 +1077,8 @@
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,
-      ...(otherNote.trim()&&{other_note:otherNote.trim()}),
-      stripe_payment_method_id: stripePaymentMethodId,
+      // Denver 98"+ → require & auto-assign 2 technicians
+      ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
     };
     const submitBtn=root.querySelector('#btn-submit');
     if(submitBtn){submitBtn.textContent='Booking…';submitBtn.disabled=true;}
