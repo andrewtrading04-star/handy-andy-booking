@@ -1,4 +1,10 @@
 // /api/book.js
+// Confirmed working payload format via live API testing:
+//   - services[].selections[] with selected_options[] for multi-select sections
+//   - services[].selections[] with option_id (flat) for single-select sections
+//   - customer.name (full name string, not first/last separately)
+//   - address requires: line1, city, state, postal_code, country
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -29,6 +35,9 @@ export default async function handler(req, res) {
     timeslot_id: selectedSlot,
     services: [{
       service_id,
+      // zbk_selections already in correct Zenbooker format:
+      //   multi: { section_id, selected_options: [{option_id, quantity}] }
+      //   single: { section_id, option_id }
       selections: zbk_selections || [],
     }],
     customer: {
@@ -43,8 +52,10 @@ export default async function handler(req, res) {
       postal_code: postal_code || customer.zip || '',
       country:     'US',
     },
+    // Auto-enable both notification switches on every booking
     email_notifications: true,
     sms_notifications:   true,
+    // Denver 98"+ → require & auto-assign 2 technicians
     ...(min_providers_needed && { min_providers_needed: String(min_providers_needed) }),
     ...(assignment_method   && { assignment_method }),
   };
@@ -63,7 +74,14 @@ export default async function handler(req, res) {
       return res.status(r.status).json({ error: data?.error?.message || data?.message || 'Booking failed', details: data });
     }
 
-    return res.status(200).json({ success: true, job_id: data.job_id, status: data.status });
+    // Best-effort: pull a customer-facing reschedule/manage link if Zenbooker returns one
+    const job = data?.job || data?.data || data || {};
+    const reschedule_url =
+      data?.reschedule_url || data?.manage_url || data?.customer_url || data?.booking_url || data?.url ||
+      job?.reschedule_url || job?.manage_url || job?.customer_url || job?.booking_url || job?.url ||
+      job?.customer_facing_url || '';
+
+    return res.status(200).json({ success: true, job_id: data.job_id, status: data.status, reschedule_url });
 
   } catch (err) {
     console.error('[book] fetch error:', err.message);
