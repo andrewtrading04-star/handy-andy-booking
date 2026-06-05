@@ -9,6 +9,7 @@
 
   const API_BASE    = 'https://handy-andy-booking.vercel.app/api';
   const TARGET_ID   = 'ha-widget';
+  const DENVER_ID   = '1685582903241x973573877706522600'; // Only Denver requires 2 techs for 98"+ TVs
   const STRIPE_KEY  = 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
   const THANKYOU_URL= 'https://www.ihandyandy.com/thankyou/';
 
@@ -263,7 +264,7 @@
   let serviceConfig=null, selections={}, selectedSlot=null;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
   let customer={first_name:'',last_name:'',email:'',phone:'',address:''};
-  let tipAmount=0, couponCode='';
+  let tipAmount=0, couponCode='', otherNote='';
   // Stripe
   let _stripe=null, _stripeElements=null, _stripeCard=null;
 
@@ -328,7 +329,12 @@
       const onlyFrame=isFrameTV&&!(selections['__frame_type']||[]).includes('regular');
       if(onlyFrame)return true;
     }
-    if(k==='lifting'&&getMaxSizeCat()==='small')return true;
+    if(k==='lifting'){
+      const cat=getMaxSizeCat();
+      if(cat==='small')return true;
+      // Skip lifting entirely for large TVs outside Denver (no 2-tech requirement)
+      if(cat==='large'&&territoryId!==DENVER_ID)return true;
+    }
     return false;
   }
   function visibleStepNum(){let n=0;for(let i=0;i<=stepIdx;i++)if(!shouldSkip(STEP_KEYS[i]))n++;return n;}
@@ -694,11 +700,8 @@
       </p>
 
       <div style="background:#1f1f23!important;border:1px solid #3f3f46!important;border-radius:10px!important;padding:14px!important;margin-bottom:12px!important;">
-        <div style="display:flex!important;align-items:center!important;gap:8px!important;margin-bottom:10px!important;">
-          <span style="font-size:14px!important;font-weight:700!important;color:#fff!important;">How It Works</span>
-          <span style="background:${gold}!important;color:#fff!important;padding:2px 10px!important;border-radius:100px!important;font-size:11px!important;font-weight:700!important;">Only $35</span>
-        </div>
-        ${['Add the service when you book your TV installation','Call or book online when you move to request removal','We remove your TV at <strong style="color:#fff!important;">no additional cost</strong>','We even patch the bolt holes for you!'].map(t=>`<div style="display:flex!important;gap:8px!important;align-items:flex-start!important;font-size:13px!important;color:#d4d4d8!important;margin-bottom:7px!important;"><span style="color:${gold}!important;font-size:15px!important;line-height:1.3!important;flex-shrink:0!important;">✔</span><span>${t}</span></div>`).join('')}
+        <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;margin-bottom:10px!important;">How It Works</div>
+        ${['We remove your TV at <strong style="color:#fff!important;">no additional cost</strong>','We even patch the bolt holes for you!'].map(t=>`<div style="display:flex!important;gap:8px!important;align-items:flex-start!important;font-size:13px!important;color:#d4d4d8!important;margin-bottom:7px!important;"><span style="color:${gold}!important;font-size:15px!important;line-height:1.3!important;flex-shrink:0!important;">✔</span><span>${t}</span></div>`).join('')}
       </div>
 
       <div style="display:grid!important;grid-template-columns:1fr 1fr 1fr!important;gap:8px!important;margin-bottom:12px!important;">
@@ -707,11 +710,11 @@
           <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Removal Cost</div>
         </div>
         <div style="background:#1f1f23!important;border:1.5px solid ${gold}!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
-          <div style="font-size:20px!important;font-weight:800!important;color:${gold}!important;">$35</div>
-          <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">One-Time Fee</div>
+          <div style="font-size:13px!important;font-weight:700!important;color:${gold}!important;line-height:1.3!important;">Professional</div>
+          <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Dismounting</div>
         </div>
-        <div style="background:#1f1f23!important;border:1.5px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
-          <div style="font-size:18px!important;color:#4ade80!important;line-height:1.2!important;">✓</div>
+        <div style="background:#1f1f23!important;border:1.5px solid ${gold}!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
+          <div style="font-size:18px!important;color:${gold}!important;line-height:1.2!important;">✓</div>
           <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Holes Patched Free</div>
         </div>
       </div>
@@ -740,8 +743,9 @@
 
   function bExtras(){
     const sec=getSec('extras');
-    // Always hide OneConnect from Extras — it's only shown on the Wires card for Frame TV + drywall
     const visible=sec.options.filter(o=>!o.frameOnly);
+    const otherOpt=visible.find(o=>o.label==='Other');
+    const otherSelected=otherOpt?getQty(sec.id,otherOpt.id)>0:false;
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       return `<div style="${S.qRow(q>0)}">
@@ -753,7 +757,12 @@
         </div>
       </div>`;
     }).join('');
-    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${opts}
+    const otherInput=otherSelected?`
+      <div style="margin-bottom:12px!important;">
+        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 6px 0!important;">Describe what you need:</p>
+        <textarea id="other-note" rows="3" style="width:100%!important;padding:11px 14px!important;background:#27272a!important;border:1px solid #ff6600!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="e.g. I need some curtains hung, a shelf mounted...">${otherNote}</textarea>
+      </div>`:'';
+    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${opts}${otherInput}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${S.btnPri}">Continue →</button>
@@ -950,6 +959,7 @@
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
     root.querySelectorAll('.ha-tip').forEach(b=>b.addEventListener('click',()=>{tipAmount=parseInt(b.dataset.tip);render();}));
+    root.querySelector('#other-note')?.addEventListener('input',e=>{otherNote=e.target.value;});
     // Card inputs replaced by Stripe Elements — no manual binding needed
   }
 
@@ -960,7 +970,7 @@
     // If entering slots, fetch them
     if(STEP_KEYS[ni]==='slots')fetchSlots();
     // If entering lifting and cat is large, auto-select
-    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='large'){
+    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='large'&&territoryId===DENVER_ID){
       const sec=getSec('lifting');
       const opt=sec?.options.find(o=>o.forCat==='large');
       if(opt)selectOnly(sec.id,opt.id);
@@ -1061,6 +1071,7 @@
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,
+      ...(otherNote.trim()&&{other_note:otherNote.trim()}),
       stripe_payment_method_id: stripePaymentMethodId,
     };
     const submitBtn=root.querySelector('#btn-submit');
