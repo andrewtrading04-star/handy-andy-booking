@@ -26,6 +26,7 @@
 
   // Day-of-week discounts: 0=Sun(-$15), 2=Tue(-$10)
   const WEEKDAY_DISC = { 0:15, 2:10 };
+  const TAX_RATE = 0.0825;
 
   const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','customer'];
 
@@ -904,13 +905,23 @@
         <input type="text" id="c-coupon" style="${S.inputL};margin-bottom:0!important;" placeholder="Coupon code (optional)" value="${couponCode}">
       </div>
       <div style="background:rgba(34,197,94,0.08)!important;border:1.5px solid rgba(34,197,94,0.25)!important;border-radius:10px!important;padding:16px 18px!important;margin-bottom:18px!important;">
-        <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:8px!important;">
-          <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">Your estimated total for this job</div>
-          <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${calcTotal()}</div>
+        <div style="font-size:13px!important;color:#a0a0ab!important;margin-bottom:8px!important;">
+          <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Subtotal</span>
+            <span id="ha-subtotal" style="color:#fff!important;">$${Math.round(calcTotal()*100)/100}</span>
+          </div>
+          <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Tax (8.25%)</span>
+            <span id="ha-tax" style="color:#fff!important;">$${Math.round(calcTotal()*TAX_RATE*100)/100}</span>
+          </div>
+          ${tipAmount>0?`<div id="ha-tip-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Tip</span>
+            <span id="ha-tip-amt" style="color:#fff!important;">$${tipAmount}</span>
+          </div>`:`<div id="ha-tip-row" style="display:none!important;"></div>`}
         </div>
-        <div style="font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
-          Taxes &amp; adjustments applied at checkout.<br>
-          You can add or remove services with the technician at the time of the appointment.
+        <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
+          <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">Total</div>
+          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((calcTotal()*(1+TAX_RATE)+tipAmount)*100)/100}</div>
         </div>
       </div>
       <div style="${S.actions}">
@@ -1076,7 +1087,7 @@
       territory_id:territoryId, service_id:serviceConfig.service_id,
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
-      zbk_selections, tip:tipAmount, coupon:couponCode,
+      zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
     };
