@@ -102,6 +102,19 @@ export default async function handler(req, res) {
           if (!ar.ok) throw new Error(pm?.error?.message || 'Attach failed');
 
           const db = new URLSearchParams(); db.set('invoice_settings[default_payment_method]', payment_method_id);
+
+          // 4) Link the Zenbooker customer to this Stripe customer so Zenbooker displays the card in the Payment Methods section.
+          if (zbkCustomerId) {
+            try {
+              await fetch(`https://api.zenbooker.com/v1/customers/${zbkCustomerId}`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${ZBK_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ stripe_customer_id: stripeCustomerId }),
+              });
+            } catch (updateErr) {
+              console.warn("[book] Failed to link Zenbooker customer to Stripe:", updateErr.message);
+            }
+          }
           await fetch(`https://api.stripe.com/v1/customers/${stripeCustomerId}`, { method: 'POST', headers: sAuth, body: db });
 
           const brand = pm?.card?.brand || 'card';
