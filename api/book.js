@@ -119,7 +119,7 @@ export default async function handler(req, res) {
 
           const brand = pm?.card?.brand || 'card';
           const last4 = pm?.card?.last4 || '????';
-          cardNote = `Card on file: ${brand} ending ${last4}. Charge in Stripe -> Customers -> ${stripeCustomerId} (payment method ${payment_method_id}).`;
+          cardNote = `Card is on file. To access card click "Payment method > Edit > Click card on file."`;
         } catch (e) {
           console.error('[book] stripe save error:', e.message);
           cardNote = `Payment method captured (${payment_method_id}) but saving on file failed: ${e.message}`;
@@ -140,7 +140,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card on file/.test(cardNote) });
+    return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card is on file/.test(cardNote) });
   } catch (err) {
     console.error('[book] fetch error:', err.message);
     return res.status(500).json({ error: 'Booking request failed', message: err.message });
