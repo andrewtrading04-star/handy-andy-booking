@@ -71,8 +71,8 @@ export default async function handler(req, res) {
     },
     assigned_providers:  [STEVE_PROVIDER_ID],
     min_providers_needed:'1',
-    email_notifications: true,
-    sms_notifications:   true,
+    email_notifications: false,
+    sms_notifications:   false,
   };
 
   try {
