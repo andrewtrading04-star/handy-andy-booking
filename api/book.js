@@ -119,6 +119,7 @@ export default async function handler(req, res) {
 
           const brand = pm?.card?.brand || 'card';
           const last4 = pm?.card?.last4 || '????';
+          // Customer-friendly card-on-file note shown on the job.
           cardNote = `Card is on file. To access card click "Payment method > Edit > Click card on file."`;
         } catch (e) {
           console.error('[book] stripe save error:', e.message);
