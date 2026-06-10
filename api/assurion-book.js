@@ -100,7 +100,7 @@ export default async function handler(req, res) {
       '',
       ...payoutLines,
       '',
-      `Total payout: $${totalPayout}`,
+      `Tech pay: $${totalPayout}`,
     ].join('\n');
 
     // Write job note so Steve sees full request detail
