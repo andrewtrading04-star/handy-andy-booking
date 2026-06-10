@@ -24,7 +24,7 @@ const PAYOUTS = {
   'Smart Hub':                           90,    // 150 × 0.60
   'Thermostat':                          75,    // 125 × 0.60
   'Light Dimmer':                        60,    // 100 × 0.60
-  'Truck Roll Fee (if job can\'t be completed)': 36, // 60 × 0.60
+  'Truck Roll Fee (if job can\'t be completed)': 60, // hardcoded
   // Special Mount (Articulating or Motion) — NO PAYOUT
 };
 
