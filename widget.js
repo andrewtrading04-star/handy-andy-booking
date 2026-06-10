@@ -28,6 +28,18 @@
   const WEEKDAY_DISC = { 0:15, 2:10 };
   const TAX_RATE = 0.0825;
 
+  // Zenbooker per-territory price adjustments for the TV Installation service.
+  // Mirrors Zenbooker's "Territory Adjustments" so the quoted total matches what
+  // Zenbooker charges. Zenbooker applies these to the job automatically — this is
+  // DISPLAY ONLY (it is NOT sent to /api/book, which would double-charge).
+  // To update: Zenbooker → Services → TV Installation → Territory Adjustments.
+  const TERRITORY_ADJUSTMENTS = {
+    '1707513178246x806633139915194400': 25, // Denver #2
+    '1687393551618x123774611115737090': 35, // Denver #3
+    '1723559782141x609094402068185100': 60, // Denver #4 Boulder/Colorado Springs
+  };
+  function territoryAdjustment(){ return TERRITORY_ADJUSTMENTS[territoryId] || 0; }
+
   const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','customer'];
 
   // ─── Service configs (sections in DISPLAY order — surface before wires) ───
@@ -874,6 +886,8 @@
   }
 
   function bCustomer(){
+    const adj=territoryAdjustment();
+    const base=calcTotal()+adj;
     const tips=[0,5,10,15,20];
     const tipHtml=tips.map(t=>`<button class="ha-tip" data-tip="${t}"
       style="background:${tipAmount===t?'#ff6600':'#27272a'}!important;color:#fff!important;border:1.5px solid ${tipAmount===t?'#ff6600':'#3f3f46'}!important;border-radius:6px!important;padding:8px 14px!important;font-size:14px!important;cursor:pointer!important;flex:1!important;">
@@ -910,9 +924,13 @@
             <span>Subtotal</span>
             <span id="ha-subtotal" style="color:#fff!important;">$${Math.round(calcTotal()*100)/100}</span>
           </div>
+          ${adj>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Service area surcharge</span>
+            <span style="color:#fff!important;">+$${adj}</span>
+          </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax (8.25%)</span>
-            <span id="ha-tax" style="color:#fff!important;">$${Math.round(calcTotal()*TAX_RATE*100)/100}</span>
+            <span id="ha-tax" style="color:#fff!important;">$${Math.round(base*TAX_RATE*100)/100}</span>
           </div>
           ${tipAmount>0?`<div id="ha-tip-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tip</span>
@@ -921,7 +939,7 @@
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
           <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">Total</div>
-          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((calcTotal()*(1+TAX_RATE)+tipAmount)*100)/100}</div>
+          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount)*100)/100}</div>
         </div>
       </div>
       <div style="${S.actions}">
@@ -1108,6 +1126,7 @@
               if(opt&&sel.quantity>0)lines.push({label:opt.label,qty:sel.quantity,amount:(opt.price||0)*sel.quantity});
             }
           }
+          if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
           const loc=TERRITORY_LOCATION[territoryId]||{city:'',state:''};
           localStorage.setItem('ha_booking',JSON.stringify({
             firstName:customer.first_name||'',
@@ -1116,7 +1135,7 @@
             address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
             dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
             timeWindow:slot.arrival_window||'',
-            lines, total:calcTotal(), tip:tipAmount||0,
+            lines, total:calcTotal()+territoryAdjustment(), tip:tipAmount||0,
             twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
             jobId:(res&&(res.job_id||res.id))||'',
             rescheduleUrl:(res&&res.reschedule_url)||'',
