@@ -11,19 +11,19 @@
   const TARGET_ID   = 'techs-to-you-widget';
 
   // ── Numbered booking steps (after zip gate)
-  const STEPS = ['bracket', 'services', 'slots', 'customer'];
+  const STEPS = ['services', 'slots', 'customer'];
 
   // ── Service list from TTY pay card
   const SVC_GROUPS = [
     { label: 'TV & Audio',
-      items: ['Television', 'Sound Bar'] },
+      items: ['Television', 'Sound Bar', 'Frame TV (Art Style)', 'Special Mount (Articulating or Motion)'] },
     { label: 'Security Devices',
       items: ['Alarm Keypad', 'Alarm Range Extender', 'Alarm Panic Button',
               'Flood Sensor', 'Glass Break Sensor', 'Contact Sensor', 'Security Camera'] },
     { label: 'Smart Home',
       items: ['Door Locks', 'Door Bell', 'Smart Hub', 'Thermostat', 'Light Dimmer'] },
     { label: 'Add-ons',
-      items: ['Frame TV (Art Style)', 'Special Mount (Articulating or Motion)', 'Extra Man (TV over 50")'] },
+      items: ['Extra Man (TV over 50")'] },
   ];
 
   // ── State
@@ -34,7 +34,6 @@
   let matchedTerr    = null;    // { id, name }
 
   let stepIdx        = 0;
-  let specialBracket = null;    // 'yes' | 'no'
   let selServices    = new Set();
   let slotsByDate    = {}, selectedDate = null, selectedSlot = null;
   let calYear        = null, calMonth = null;
@@ -81,7 +80,6 @@
                    `<div style="${S.stepLbl}">Step ${stepIdx + 1} of ${STEPS.length}</div>`;
       let body = '';
       switch (STEPS[stepIdx]) {
-        case 'bracket':  body = bBracket();  break;
         case 'services': body = bServices(); break;
         case 'slots':    body = bSlots();    break;
         case 'customer': body = bCustomer(); break;
@@ -95,8 +93,8 @@
   function bZip() {
     return `
       <div style="text-align:center!important;padding-bottom:10px!important;">
-        <div style="font-size:12px!important;color:#ff6600!important;font-weight:700!important;text-transform:uppercase!important;letter-spacing:1.5px!important;margin-bottom:14px!important;">Asurion / Techs To You</div>
-        <h1 style="${S.h1};text-align:center!important;font-size:32px!important;">Custom Booking</h1>
+        <h1 style="margin:0 0 6px 0!important;font-size:42px!important;font-weight:900!important;color:#fff!important;text-align:center!important;line-height:1.1!important;letter-spacing:-1px!important;">Asurion / Techs To You</h1>
+        <div style="font-size:22px!important;font-weight:600!important;color:#a0a0ab!important;text-align:center!important;margin-bottom:28px!important;">Custom Booking</div>
         <p style="${S.sub};text-align:center!important;margin-bottom:28px!important;">Enter your ZIP code to confirm we service your area.</p>
         <div style="max-width:300px!important;margin:0 auto!important;">
           <input type="text" id="zip-input" style="${S.inp};text-align:center!important;font-size:22px!important;letter-spacing:3px!important;margin-bottom:8px!important;" placeholder="ZIP Code" maxlength="10" inputmode="numeric" value="${zipVal}">
@@ -106,27 +104,7 @@
       </div>`;
   }
 
-  // ── Step 1: Bracket
-  function bBracket() {
-    const ok = specialBracket !== null;
-    return `
-      <h1 style="${S.h1}">TV Mounting</h1>
-      <p style="${S.sub}">Does this job require a special bracket?</p>
-      ${mkRow('Yes — Special Bracket (Articulating / Motion)', specialBracket === 'yes', 'tty-bracket', 'data-v="yes"')}
-      ${mkRow('No — Standard Bracket', specialBracket === 'no', 'tty-bracket', 'data-v="no"')}
-      <div style="${S.acts}">
-        <span></span>
-        <button id="btn-next" style="${ok ? S.pri : S.dis}" ${!ok ? 'disabled' : ''}>Continue →</button>
-      </div>`;
-  }
-  function mkRow(label, on, cls, data) {
-    return `<div class="${cls}" ${data} style="${S.row(on)}">
-      <span>${label}</span>
-      <span style="color:${on ? '#ff6600' : '#52525b'}!important;font-size:20px!important;">${on ? '●' : '○'}</span>
-    </div>`;
-  }
-
-  // ── Step 2: Services multi-select
+  // ── Step 1: Services multi-select
   function bServices() {
     const hasSel = selServices.size > 0;
     let inner = '';
@@ -143,7 +121,7 @@
       inner += `</div>`;
     }
     return `
-      <h1 style="${S.h1}">What devices / services?</h1>
+      <h1 style="${S.h1}">What services does your customer need?</h1>
       <p style="${S.sub}">Select everything that applies to this job — pick as many as needed.</p>
       <div style="max-height:400px!important;overflow-y:auto!important;padding-right:4px!important;">
         ${inner}
@@ -240,10 +218,7 @@
   // ── Step 4: Customer details
   function bCustomer() {
     const services = [...selServices];
-    const summaryLines = [
-      specialBracket === 'yes' ? 'Special Bracket' : 'Standard Bracket',
-      services.length ? services.join(', ') : null,
-    ].filter(Boolean).join(' · ');
+    const summaryLines = services.join(', ') || 'No services selected';
 
     return `
       <h1 style="${S.h1}">Please enter your customer's<br>information for the appointment.</h1>
@@ -309,11 +284,6 @@
       if (calMonth !== null) { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } render(); }
     });
 
-    // Bracket choice
-    root.querySelectorAll('.tty-bracket').forEach(c =>
-      c.addEventListener('click', () => { specialBracket = c.dataset.v; render(); })
-    );
-
     // Services multi-select
     root.querySelectorAll('.tty-svc').forEach(c =>
       c.addEventListener('click', () => {
@@ -371,8 +341,7 @@
   // ── Navigation
   function goNext() {
     const key = STEPS[stepIdx];
-    if (key === 'bracket' && specialBracket === null) return;
-    if (key === 'services' && selServices.size === 0)  return;
+    if (key === 'services' && selServices.size === 0) return;
     if (key === 'slots' && !selectedSlot) return;
     stepIdx++; render();
   }
@@ -421,13 +390,9 @@
     if (!customer.address) return alert('Please enter the customer\'s street address.');
 
     const services = [...selServices];
-    const lines    = [
-      specialBracket === 'yes' ? 'Special Bracket (Articulating / Motion)' : 'Standard Bracket',
-      ...services,
-    ];
-    const notes = [
+    const lines    = services.length ? services : ['Asurion TV Service'];
+    const notes    = [
       'Asurion / Techs To You Booking (Steve).',
-      `Bracket: ${specialBracket === 'yes' ? 'Special (Articulating/Motion)' : 'Standard'}`,
       services.length ? `Services: ${services.join(', ')}` : '',
     ].filter(Boolean).join('\n');
 
