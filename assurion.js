@@ -255,7 +255,7 @@
       <div style="text-align:center!important;padding:20px 8px!important;">
         <div style="width:70px!important;height:70px!important;border-radius:50%!important;background:rgba(34,197,94,0.15)!important;border:2px solid #22c55e!important;margin:0 auto 20px auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:34px!important;">✓</div>
         <h1 style="${S.h1};text-align:center!important;font-size:26px!important;">Booking Confirmed!</h1>
-        <p style="${S.sub};text-align:center!important;">Steve will reach out to confirm the appointment.${df ? `<br><strong style="color:#fff!important;">${df.long}, ${df.date}</strong>${slot.arrival_window ? ` · ${slot.arrival_window}` : ''}` : ''}</p>
+        <p style="${S.sub};text-align:center!important;">You can count on Steve to take care of your customer on${df ? `<br><strong style="color:#fff!important;">${df.long}, ${df.date}</strong>${slot.arrival_window ? ` · ${slot.arrival_window}` : ''}` : ''}</p>
         <p style="color:#71717a!important;font-size:13px!important;margin-top:14px!important;">Confirmation sent to ${customer.email || 'your email'}.</p>
       </div>`;
   }
