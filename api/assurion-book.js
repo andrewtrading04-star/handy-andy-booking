@@ -6,26 +6,26 @@
 const STEVE_PROVIDER_ID  = '1688834379840x866068852960133100'; // Steve B.
 const DEFAULT_TERRITORY  = '1685582903241x973573877706522600'; // Denver #1 fallback
 
-// Payout rates from TTY pay card (left column = single-device flat rate)
+// Payout rates: hardcoded values + 60% of flat rate
 const PAYOUTS = {
-  'Television':                          125,
-  'Sound Bar':                            85,
-  'Frame TV (Art Style)':               100,
-  'Special Mount (Articulating or Motion)': 30,
-  'Alarm Keypad':                        125,
-  'Alarm Range Extender':                125,
-  'Alarm Panic Button':                  125,
-  'Flood Sensor':                        100,
-  'Glass Break Sensor':                  100,
-  'Contact Sensor':                      100,
-  'Security Camera':                     125,
-  'Door Locks':                          125,
-  'Door Bell':                           125,
-  'Smart Hub':                           150,
-  'Thermostat':                          125,
-  'Light Dimmer':                        100,
-  'Extra Man (TV over 50")':              50,
-  'Truck Roll Fee (if job can\'t be completed)': 60,
+  'Television':                          60,    // hardcoded
+  'Frame TV (Art Style)':                15,    // hardcoded
+  'Extra Man (TV over 50")':             50,    // hardcoded
+  'Sound Bar':                           51,    // 85 × 0.60
+  'Alarm Keypad':                        75,    // 125 × 0.60
+  'Alarm Range Extender':                75,    // 125 × 0.60
+  'Alarm Panic Button':                  75,    // 125 × 0.60
+  'Flood Sensor':                        60,    // 100 × 0.60
+  'Glass Break Sensor':                  60,    // 100 × 0.60
+  'Contact Sensor':                      60,    // 100 × 0.60
+  'Security Camera':                     75,    // 125 × 0.60
+  'Door Locks':                          75,    // 125 × 0.60
+  'Door Bell':                           75,    // 125 × 0.60
+  'Smart Hub':                           90,    // 150 × 0.60
+  'Thermostat':                          75,    // 125 × 0.60
+  'Light Dimmer':                        60,    // 100 × 0.60
+  'Truck Roll Fee (if job can\'t be completed)': 36, // 60 × 0.60
+  // Special Mount (Articulating or Motion) — NO PAYOUT
 };
 
 export default async function handler(req, res) {
