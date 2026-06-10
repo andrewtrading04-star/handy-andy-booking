@@ -6,6 +6,28 @@
 const STEVE_PROVIDER_ID  = '1688834379840x866068852960133100'; // Steve B.
 const DEFAULT_TERRITORY  = '1685582903241x973573877706522600'; // Denver #1 fallback
 
+// Payout rates from TTY pay card (left column = single-device flat rate)
+const PAYOUTS = {
+  'Television':                          125,
+  'Sound Bar':                            85,
+  'Frame TV (Art Style)':               100,
+  'Special Mount (Articulating or Motion)': 30,
+  'Alarm Keypad':                        125,
+  'Alarm Range Extender':                125,
+  'Alarm Panic Button':                  125,
+  'Flood Sensor':                        100,
+  'Glass Break Sensor':                  100,
+  'Contact Sensor':                      100,
+  'Security Camera':                     125,
+  'Door Locks':                          125,
+  'Door Bell':                           125,
+  'Smart Hub':                           150,
+  'Thermostat':                          125,
+  'Light Dimmer':                        100,
+  'Extra Man (TV over 50")':              50,
+  'Truck Roll Fee (if job can\'t be completed)': 60,
+};
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -67,13 +89,27 @@ export default async function handler(req, res) {
 
     const jobId = data.job_id || data.id;
 
+    // Build payout note from selected line items
+    const payoutLines = labels.map(label => {
+      const rate = PAYOUTS[label];
+      return rate !== undefined ? `${label} — $${rate}` : `${label} — rate TBD`;
+    });
+    const totalPayout = labels.reduce((sum, label) => sum + (PAYOUTS[label] || 0), 0);
+    const jobNote = [
+      'Assurion job',
+      '',
+      ...payoutLines,
+      '',
+      `Total payout: $${totalPayout}`,
+    ].join('\n');
+
     // Write job note so Steve sees full request detail
-    if (jobId && notes) {
+    if (jobId) {
       try {
         await fetch(`https://api.zenbooker.com/v1/jobs/${jobId}/notes`, {
           method:  'POST',
           headers: { Authorization: `Bearer ${ZBK_KEY}`, 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ text: String(notes).slice(0, 2000) }),
+          body:    JSON.stringify({ text: jobNote.slice(0, 2000) }),
         });
       } catch (e) { console.warn('[assurion-book] note failed:', e.message); }
     }
