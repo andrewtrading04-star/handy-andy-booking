@@ -388,6 +388,9 @@
     if (!customer.email)   return alert('Please enter the customer\'s email address.');
     if (!customer.phone)   return alert('Please enter the customer\'s phone number.');
     if (!customer.address) return alert('Please enter the customer\'s street address.');
+    if (!customer.city)    return alert('Please enter the customer\'s city.');
+    if (!customer.state)   return alert('Please enter the customer\'s state.');
+    if (!customer.zip)     return alert('Please enter the customer\'s ZIP code.');
 
     const services = [...selServices];
     const lines    = services.length ? services : ['Asurion TV Service'];

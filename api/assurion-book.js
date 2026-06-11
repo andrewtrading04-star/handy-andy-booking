@@ -47,6 +47,25 @@ export default async function handler(req, res) {
   const territory = String(territory_id || DEFAULT_TERRITORY);
   const fullName  = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
 
+  // ── Resolve city/state server-side if they arrive empty (mirrors api/book.js).
+  // Zenbooker rejects job creation when the address lacks city or state.
+  let resolvedCity  = (customer.city  || '').trim();
+  let resolvedState = (customer.state || '').trim();
+  const zipForLookup = String(customer.zip || '').trim();
+  if ((!resolvedCity || !resolvedState) && zipForLookup) {
+    try {
+      const url = new URL('https://api.zenbooker.com/v1/scheduling/service_area_check');
+      url.searchParams.set('postal_code', zipForLookup);
+      const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${ZBK_KEY}` } });
+      const d = await r.json().catch(() => ({}));
+      resolvedCity  = resolvedCity  || d.customer_location?.components?.city  || '';
+      resolvedState = resolvedState || d.customer_location?.components?.state || '';
+    } catch (e) { console.warn('[assurion-book] city/state lookup failed:', e.message); }
+  }
+  // Last resort: all Assurion territories are Denver-metro, so never send empty city/state.
+  resolvedCity  = resolvedCity  || 'Denver';
+  resolvedState = resolvedState || 'CO';
+
   // Every selection → $0 custom service line item
   const labels   = Array.isArray(lines) ? lines.filter(Boolean) : [];
   const services = labels.map((label, i) => ({
@@ -64,9 +83,9 @@ export default async function handler(req, res) {
     customer:           { name: fullName, email: customer.email, phone: customer.phone },
     address: {
       line1:       customer.address,
-      city:        customer.city  || '',
-      state:       customer.state || '',
-      postal_code: customer.zip   || '',
+      city:        resolvedCity,
+      state:       resolvedState,
+      postal_code: zipForLookup,
       country:     'US',
     },
     assigned_providers:  [STEVE_PROVIDER_ID],
