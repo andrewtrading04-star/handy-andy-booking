@@ -1,16 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { session_id, event_type, step_name, value, device_type, traffic_source, city, state, zip_code, error_message } = req.body;
 
   try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      return res.status(500).json({ error: 'Missing Supabase credentials' });
+    }
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
     const { error } = await supabase.from('events').insert([
       {
         session_id,
