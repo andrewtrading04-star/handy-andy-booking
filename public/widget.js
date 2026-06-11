@@ -42,6 +42,30 @@
     TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
   };
 
+  // Analytics tracking
+  const SESSION_ID = Math.random().toString(36).slice(2);
+  async function logEvent(event_type, step_name, value = null, error_message = null) {
+    try {
+      const loc = resolveLocation();
+      await fetch('https://handy-andy-booking.vercel.app/api/log-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: SESSION_ID,
+          event_type,
+          step_name,
+          value,
+          device_type: /Mobile/.test(navigator.userAgent) ? 'mobile' : 'desktop',
+          traffic_source: new URLSearchParams(window.location.search).get('source') || 'direct',
+          city: loc.city,
+          state: loc.state,
+          zip_code: customer.zip || null,
+          error_message,
+        }),
+      });
+    } catch (e) { console.error('[analytics] log failed', e); }
+  }
+
   // Day-of-week discounts: 0=Sun(-$15), 2=Tue(-$10)
   const WEEKDAY_DISC = { 0:15, 2:10 };
   const TAX_RATE = 0.0825;
@@ -488,7 +512,7 @@
       case 'extras':   body=bExtras();   break;
       case 'terms':    body=bTerms();    break;
       case 'slots':    body=bSlots();    break;
-      case 'customer': body=bCustomer(); break;
+      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()); break;
     }
     root.innerHTML=prog+body;
     wire(root);
@@ -1177,6 +1201,7 @@
             ts:Date.now()
           }));
         }catch(e){}
+        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()-(COUPONS[couponCode]||0));
         window.location.href=THANKYOU_URL;
       }else{
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
@@ -1202,6 +1227,7 @@
     return el;
   }
   function boot(){
+    logEvent('page_view', 'zip_verify');
     if(!document.getElementById('ha-widget-style')){
       const s=document.createElement('style');
       s.id='ha-widget-style';
