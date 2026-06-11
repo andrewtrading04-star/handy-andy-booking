@@ -80,7 +80,7 @@
             {id:'1685657519214x406129807645840830',label:'33"-59"',    price:109,sizecat:'small'},
             {id:'1685657519214x241977595988204900',label:'60"-69"',    price:119,sizecat:'small'},
             {id:'1685657519214x168809705059288930',label:'70"-84"',    price:149,sizecat:'medium'},
-            {id:'1693451324278x246099356920840200',label:'85"-97"',    price:179,sizecat:'medium'},
+            {id:'1693451324278x246099356920840200',label:'85"-97"',    price:179,sizecat:'large'},
             {id:'1729566606709x280549383678984200',label:'98+',        price:229,sizecat:'large'},
           ]
         },
@@ -93,9 +93,9 @@
             {id:'1685657519638x151782031594280160',label:'Flat',                                   price:45, forSize:'standard'},
             {id:'1685657519638x293251872070913660',label:'Tilting (recommended)',                  price:55, forSize:'standard'},
             {id:'1685657519638x327788739524076600',label:'Full Motion',                            price:85, forSize:'standard'},
-            {id:'1776229587207x710284994703786000',label:'87"-100" TV Flat Bracket',               price:90, forSize:'xl'},
-            {id:'1776229598255x578976769128267800',label:'87"-100" TV Tilting Bracket',            price:110,forSize:'xl'},
-            {id:'1776229610718x521138691917742100',label:'87"-100" TV Full Motion Bracket',        price:190,forSize:'xl'},
+            {id:'1776229587207x710284994703786000',label:'85"-100" TV Flat Bracket',               price:90, forSize:'xl'},
+            {id:'1776229598255x578976769128267800',label:'85"-100" TV Tilting Bracket',            price:110,forSize:'xl'},
+            {id:'1776229610718x521138691917742100',label:'85"-100" TV Full Motion Bracket',        price:190,forSize:'xl'},
             {id:'1736123941131x483930420018151400',label:'I will be using the bracket that comes in the box (Samsung Frame TV)',price:25,forSize:'frame'},
           ]
         },
@@ -141,7 +141,7 @@
             {id:'1685657521270x971699776821509000',label:'My TV is under 70 inches',                         price:0, forCat:'small'},
             {id:'1685657521270x242389337506608420',label:'My TV is 70–85 inches and I can help lift it',     price:0, forCat:'medium'},
             {id:'1685657521270x264421370121691100',label:'My TV is 70–85 inches and I cannot help lift it',  price:70,forCat:'medium'},
-            {id:'1747842781494x315473919196528640',label:'My TV is 86 inches or larger',                     price:70,forCat:'large'},
+            {id:'1747842781494x315473919196528640',label:'My TV is 85 inches or larger',                     price:70,forCat:'large'},
           ]
         },
         {
@@ -194,7 +194,7 @@
             {id:'1724797765604x481821025163112770',label:'33"-59"',    price:99, sizecat:'small'},
             {id:'1724797765604x438257538375731460',label:'60"-69"',    price:109,sizecat:'small'},
             {id:'1724797765604x518845267466906000',label:'70"-84"',    price:139,sizecat:'medium'},
-            {id:'1724797765604x143841244367788560',label:'85"-97"',    price:169,sizecat:'medium'},
+            {id:'1724797765604x143841244367788560',label:'85"-97"',    price:169,sizecat:'large'},
             {id:'1729568390396x482351028241694700',label:'98+',        price:219,sizecat:'large'},
           ]
         },
@@ -207,9 +207,9 @@
             {id:'1724797766027x695942754553271000',label:'Flat',                           price:35, forSize:'standard'},
             {id:'1724797766027x943964834449722200',label:'Tilting (recommended)',          price:46, forSize:'standard'},
             {id:'1724797766027x264025092172061950',label:'Full Motion',                   price:85, forSize:'standard'},
-            {id:'1776229836315x648480753516806100',label:'87"-100" TV Flat Bracket',      price:90, forSize:'xl'},
-            {id:'1776229850923x848868840944959500',label:'87"-100" TV Tilting Bracket',   price:110,forSize:'xl'},
-            {id:'1776229863741x796966835269926900',label:'87"-100" TV Full Motion Bracket',price:190,forSize:'xl'},
+            {id:'1776229836315x648480753516806100',label:'85"-100" TV Flat Bracket',      price:90, forSize:'xl'},
+            {id:'1776229850923x848868840944959500',label:'85"-100" TV Tilting Bracket',   price:110,forSize:'xl'},
+            {id:'1776229863741x796966835269926900',label:'85"-100" TV Full Motion Bracket',price:190,forSize:'xl'},
             {id:'1736124206975x556289593228656640',label:'I will be using the bracket that comes in the box (Samsung Frame TV)',price:25,forSize:'frame'},
           ]
         },
@@ -254,7 +254,7 @@
             {id:'1724797767615x862955223994130700',label:'My TV is under 70 inches',                        price:0, forCat:'small'},
             {id:'1724797767615x715957457515909400',label:'My TV is 70–85 inches and I can help lift it',    price:0, forCat:'medium'},
             {id:'1727409857684x617202431885574100',label:'My TV is 70–85 inches and I cannot help lift it', price:70,forCat:'medium'},
-            {id:'1747843192832x310647085776502800',label:'My TV is 86 inches or larger',                    price:70,forCat:'large'},
+            {id:'1747843192832x310647085776502800',label:'My TV is 85 inches or larger',                    price:70,forCat:'large'},
           ]
         },
         {
