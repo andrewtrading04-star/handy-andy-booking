@@ -54,7 +54,7 @@
   const TERRITORY_ADJUSTMENTS = {
     '1707513178246x806633139915194400': 25, // Denver #2
     '1687393551618x123774611115737090': 35, // Denver #3
-    '1723559782141x609094402068185100': 60, // Denver #4 Boulder/Colorado Springs
+    '1723559782141x609094402068185100': 100, // Denver #4 Boulder/Colorado Springs
   };
   function territoryAdjustment(){ return TERRITORY_ADJUSTMENTS[territoryId] || 0; }
 
