@@ -81,7 +81,7 @@
             {id:'1685657519214x241977595988204900',label:'60"-69"',    price:119,sizecat:'small'},
             {id:'1685657519214x168809705059288930',label:'70"-84"',    price:149,sizecat:'medium'},
             {id:'1693451324278x246099356920840200',label:'85"-97"',    price:179,sizecat:'large'},
-            {id:'1729566606709x280549383678984200',label:'98+',        price:229,sizecat:'large'},
+            {id:'1729566606709x280549383678984200',label:'98+',        price:229,sizecat:'xlarge'},
           ]
         },
         {
@@ -195,7 +195,7 @@
             {id:'1724797765604x438257538375731460',label:'60"-69"',    price:109,sizecat:'small'},
             {id:'1724797765604x518845267466906000',label:'70"-84"',    price:139,sizecat:'medium'},
             {id:'1724797765604x143841244367788560',label:'85"-97"',    price:169,sizecat:'large'},
-            {id:'1729568390396x482351028241694700',label:'98+',        price:219,sizecat:'large'},
+            {id:'1729568390396x482351028241694700',label:'98+',        price:219,sizecat:'xlarge'},
           ]
         },
         {
@@ -316,6 +316,7 @@
   function getMaxSizeCat(){
     const sec=getSec('size'); if(!sec)return 'small';
     const sels=selections[sec.id]||[];
+    for(const s of sels){if(sec.options.find(o=>o.id===s.option_id)?.sizecat==='xlarge')return 'xlarge';}
     for(const s of sels){if(sec.options.find(o=>o.id===s.option_id)?.sizecat==='large')return 'large';}
     for(const s of sels){if(sec.options.find(o=>o.id===s.option_id)?.sizecat==='medium')return 'medium';}
     return 'small';
@@ -332,7 +333,14 @@
     const sec=getSec('size');if(!sec)return false;
     return(selections[sec.id]||[]).some(s=>{
       const o=sec.options.find(x=>x.id===s.option_id);
-      return o&&o.sizecat==='large'&&s.quantity>0;
+      return o&&(o.sizecat==='large'||o.sizecat==='xlarge')&&s.quantity>0;
+    });
+  }
+  function hasXLargeTV(){
+    const sec=getSec('size');if(!sec)return false;
+    return(selections[sec.id]||[]).some(s=>{
+      const o=sec.options.find(x=>x.id===s.option_id);
+      return o&&o.sizecat==='xlarge'&&s.quantity>0;
     });
   }
   function totalTVs(){
@@ -355,7 +363,7 @@
   // Show "behind the wall" if ANY TV has drywall AND no TVs are above a fireplace (can't run wires behind fireplaces)
   function canHideBehindWall(){ return hasDrywall() && !hasFireplace(); }
   // Denver requires 2 techs for 98"+ TVs (techs work solo there; other cities have helpers)
-  function needsTwoTechs(){ return territoryId===DENVER_ID && hasLargeTV(); }
+  function needsTwoTechs(){ return territoryId===DENVER_ID && hasXLargeTV(); }
 
   function shouldSkip(k){
     // Skip bracket only if ALL TVs are Frame/Gallery (no regular TVs mixed in)
@@ -366,8 +374,8 @@
     if(k==='lifting'){
       const cat=getMaxSizeCat();
       if(cat==='small')return true;
-      // Skip lifting entirely for large TVs outside Denver (no 2-tech requirement)
-      if(cat==='large'&&territoryId!==DENVER_ID)return true;
+      // Skip lifting entirely for 98"+ TVs outside Denver (no 2-tech requirement there)
+      if(cat==='xlarge'&&territoryId!==DENVER_ID)return true;
     }
     return false;
   }
@@ -674,8 +682,8 @@
   function bLifting(){
     const sec=getSec('lifting');
     const cat=getMaxSizeCat();
-    // Large TV: auto-selected, show message only
-    if(cat==='large'){
+    // 98"+ TV: auto-selected, show 2-tech required message
+    if(cat==='xlarge'){
       const autoOpt=sec.options.find(o=>o.forCat==='large');
       if(autoOpt)selectOnly(sec.id,autoOpt.id);
       return `
@@ -1025,7 +1033,7 @@
     // If entering slots, fetch them
     if(STEP_KEYS[ni]==='slots')fetchSlots();
     // If entering lifting and cat is large, auto-select
-    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='large'&&territoryId===DENVER_ID){
+    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='xlarge'&&territoryId===DENVER_ID){
       const sec=getSec('lifting');
       const opt=sec?.options.find(o=>o.forCat==='large');
       if(opt)selectOnly(sec.id,opt.id);
