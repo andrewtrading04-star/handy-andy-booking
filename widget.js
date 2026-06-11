@@ -1008,7 +1008,12 @@
     root.querySelectorAll('.ha-sel').forEach(c=>c.addEventListener('click',()=>{selectOnly(c.dataset.s,c.dataset.o);render();}));
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
-    root.querySelectorAll('.ha-tip').forEach(b=>b.addEventListener('click',()=>{tipAmount=parseInt(b.dataset.tip);render();}));
+    root.querySelectorAll('.ha-tip').forEach(b=>b.addEventListener('click',()=>{
+      // Snapshot current field values before re-rendering so they aren't lost
+      const fn=root.querySelector('#c-fn'),ln=root.querySelector('#c-ln'),em=root.querySelector('#c-em'),ph=root.querySelector('#c-ph'),ad=root.querySelector('#c-ad'),zp=root.querySelector('#c-zip'),cp=root.querySelector('#c-coupon');
+      if(fn)customer.first_name=fn.value;if(ln)customer.last_name=ln.value;if(em)customer.email=em.value;if(ph)customer.phone=ph.value;if(ad)customer.address=ad.value;if(zp)customer.zip=zp.value.replace(/\D/g,'');if(cp)couponCode=cp.value;
+      tipAmount=parseInt(b.dataset.tip);render();
+    }));
     root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{optionComments[e.target.dataset.o]=e.target.value;}));
     // Card inputs replaced by Stripe Elements — no manual binding needed
   }
