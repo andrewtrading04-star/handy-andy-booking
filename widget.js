@@ -352,8 +352,8 @@
     const did=sec.options.find(o=>o.isDrywall)?.id;
     return sels.some(s=>s.option_id===did&&s.quantity>0);
   }
-  // Show "behind the wall" if ANY TV has drywall — fireplace status doesn't block all TVs
-  function canHideBehindWall(){ return hasDrywall(); }
+  // Show "behind the wall" if ANY TV has drywall AND no TVs are above a fireplace (can't run wires behind fireplaces)
+  function canHideBehindWall(){ return hasDrywall() && !hasFireplace(); }
   // Denver requires 2 techs for 98"+ TVs (techs work solo there; other cities have helpers)
   function needsTwoTechs(){ return territoryId===DENVER_ID && hasLargeTV(); }
 
