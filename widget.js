@@ -32,6 +32,16 @@
     '1724797832896x339501352491155460': 'austin',
   };
 
+  // Valid coupon codes → discount in dollars. Must match COUPONS in api/book.js,
+  // which is the enforcing copy — this one only gives instant feedback pre-Stripe
+  // and shows the discount on the thank-you summary.
+  const COUPONS = {
+    MCDENVER20: 20, MP10: 10, AUS10: 10, HOU10: 10, DEN10: 10,
+    ISREAL15: 15, STEVE15: 15, BATCITY10: 10, FBD15: 15, FB15: 15,
+    ANNIVERSARY15: 15, BING10: 10, OLIVE10: 10, STV10: 10, G10TV: 10,
+    TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
+  };
+
   // Day-of-week discounts: 0=Sun(-$15), 2=Tue(-$10)
   const WEEKDAY_DISC = { 0:15, 2:10 };
   const TAX_RATE = 0.0825;
@@ -1071,10 +1081,11 @@
     customer.email=root.querySelector('#c-em').value.trim();
     customer.phone=root.querySelector('#c-ph').value.trim();
     customer.address=root.querySelector('#c-ad').value.trim();
-    couponCode=root.querySelector('#c-coupon')?.value.trim()||'';
+    couponCode=root.querySelector('#c-coupon')?.value.trim().toUpperCase()||'';
     if(!customer.email)return alert('Please enter your email address.');
     if(!customer.phone)return alert('Please enter your phone number.');
     if(!customer.address)return alert('Please enter your street address.');
+    if(couponCode&&!(couponCode in COUPONS))return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');
 
     // Tokenize card with Stripe
     let stripePaymentMethodId=null;
@@ -1136,6 +1147,8 @@
             }
           }
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
+          const couponDisc=COUPONS[couponCode]||0;
+          if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
           const loc=resolveLocation();
           localStorage.setItem('ha_booking',JSON.stringify({
             firstName:customer.first_name||'',
@@ -1144,7 +1157,7 @@
             address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
             dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
             timeWindow:slot.arrival_window||'',
-            lines, total:calcTotal()+territoryAdjustment(), tip:tipAmount||0,
+            lines, total:calcTotal()+territoryAdjustment()-couponDisc, tip:tipAmount||0,
             twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
             jobId:(res&&(res.job_id||res.id))||'',
             rescheduleUrl:(res&&res.reschedule_url)||'',
