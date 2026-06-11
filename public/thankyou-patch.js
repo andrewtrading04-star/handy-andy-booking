@@ -5,10 +5,11 @@ document.addEventListener('DOMContentLoaded', function() {
   var lbl = document.querySelector('#ha-ty .total .tl');
   if (lbl) lbl.textContent = 'Total';
 
-  // Rename line item "My TV is 85 inches or larger" → "Second Technician"
+  // Rename lifting line items → "Second Technician"
   document.querySelectorAll('#ha-ty .lineitem .nm').forEach(function(el) {
     var t = el.textContent || '';
-    if (t === 'My TV is 85 inches or larger') {
+    if (t === 'My TV is 85 inches or larger' ||
+        t.indexOf('I cannot help lift') !== -1) {
       el.textContent = 'Second Technician';
     }
   });
