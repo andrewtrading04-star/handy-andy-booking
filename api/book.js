@@ -13,6 +13,7 @@ export default async function handler(req, res) {
   const {
     territory_id, service_id, selectedSlot,
     customer, city, state, postal_code, zbk_selections, tip, payment_method_id,
+    min_providers_needed, assignment_method,
   } = req.body || {};
 
   if (!territory_id)      return res.status(400).json({ error: 'territory_id required' });
@@ -74,6 +75,9 @@ export default async function handler(req, res) {
     },
     email_notifications: true,
     sms_notifications:   true,
+    // Denver 98"+ → require & auto-assign 2 technicians
+    ...(min_providers_needed && { min_providers_needed: String(min_providers_needed) }),
+    ...(assignment_method   && { assignment_method }),
     ...(selectedSlot && { timeslot_id: selectedSlot }),
   };
 
