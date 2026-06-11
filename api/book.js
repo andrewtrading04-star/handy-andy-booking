@@ -26,6 +26,36 @@ export default async function handler(req, res) {
 
   const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
 
+  // ── Resolve city/state server-side if the widget didn't send them.
+  // Zenbooker rejects bookings whose address lacks city or state, and older
+  // cached copies of widget.js only knew city/state for 4 territories.
+  let resolvedCity  = (city  || '').trim();
+  let resolvedState = (state || '').trim();
+  const zipForLookup = String(postal_code || customer.zip || '').trim();
+  if ((!resolvedCity || !resolvedState) && zipForLookup) {
+    try {
+      const url = new URL('https://api.zenbooker.com/v1/scheduling/service_area_check');
+      url.searchParams.set('postal_code', zipForLookup);
+      const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${ZBK_KEY}` } });
+      const d = await r.json().catch(() => ({}));
+      resolvedCity  = resolvedCity  || d.customer_location?.components?.city  || '';
+      resolvedState = resolvedState || d.customer_location?.components?.state || '';
+    } catch (e) { console.warn('[book] city/state lookup failed:', e.message); }
+  }
+  // Last resort: metro-level fallback by territory so the booking never fails on empty city/state.
+  const TERRITORY_FALLBACK = {
+    '1707514546803x280800015001583600': { city: 'Houston',     state: 'TX' }, // Houston #1
+    '1685582903241x973573877706522600': { city: 'Denver',      state: 'CO' }, // Denver #1
+    '1707513178246x806633139915194400': { city: 'Denver',      state: 'CO' }, // Denver #2
+    '1687393551618x123774611115737090': { city: 'Denver',      state: 'CO' }, // Denver #3
+    '1723559782141x609094402068185100': { city: 'Denver',      state: 'CO' }, // Denver #4 Boulder/CS
+    '1724797832896x339501352491155460': { city: 'Austin',      state: 'TX' },
+    '1760944311332x492178768310304800': { city: 'Los Angeles', state: 'CA' },
+  };
+  const fb = TERRITORY_FALLBACK[territory_id] || {};
+  resolvedCity  = resolvedCity  || fb.city  || '';
+  resolvedState = resolvedState || fb.state || '';
+
   const services = [{ service_id, selections: zbk_selections || [] }];
   if (tip && Number(tip) > 0) {
     services.push({ custom_service: { name: 'Tip for technician', price: Number(tip), duration: 0, taxable: false } });
@@ -37,9 +67,9 @@ export default async function handler(req, res) {
     customer: { name: fullName, email: customer.email, phone: customer.phone },
     address: {
       line1:       customer.address,
-      city:        city        || '',
-      state:       state       || '',
-      postal_code: postal_code || customer.zip || '',
+      city:        resolvedCity,
+      state:       resolvedState,
+      postal_code: zipForLookup,
       country:     'US',
     },
     email_notifications: true,

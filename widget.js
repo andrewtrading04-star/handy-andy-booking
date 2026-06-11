@@ -13,12 +13,20 @@
   const STRIPE_KEY  = 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
   const THANKYOU_URL= 'https://www.ihandyandy.com/thankyou/';
 
+  // Fallback only — the zip check returns the customer's real city/state, which takes priority.
   const TERRITORY_LOCATION = {
-    '1707514546803x280800015001583600': { city:'Houston',     state:'TX' },
-    '1685582903241x973573877706522600': { city:'Denver',      state:'CO' },
+    '1707514546803x280800015001583600': { city:'Houston',     state:'TX' }, // Houston #1
+    '1685582903241x973573877706522600': { city:'Denver',      state:'CO' }, // Denver #1
+    '1707513178246x806633139915194400': { city:'Denver',      state:'CO' }, // Denver #2
+    '1687393551618x123774611115737090': { city:'Denver',      state:'CO' }, // Denver #3
+    '1723559782141x609094402068185100': { city:'Denver',      state:'CO' }, // Denver #4 Boulder/CS
     '1724797832896x339501352491155460': { city:'Austin',      state:'TX' },
     '1760944311332x492178768310304800': { city:'Los Angeles', state:'CA' },
   };
+  function resolveLocation(){
+    const fall=TERRITORY_LOCATION[territoryId]||{city:'',state:''};
+    return { city:areaCity||fall.city, state:areaState||fall.state };
+  }
 
   const TERRITORY_CONFIG_MAP = {
     '1724797832896x339501352491155460': 'austin',
@@ -273,7 +281,7 @@
   };
 
   // ─── State ────────────────────────────────────────────────────────────────
-  let stepIdx=0, isFrameTV=false, territoryId='', enteredZip='';
+  let stepIdx=0, isFrameTV=false, territoryId='', enteredZip='', areaCity='', areaState='';
   let serviceConfig=null, selections={}, selectedSlot=null;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
   let customer={first_name:'',last_name:'',email:'',phone:'',address:''};
@@ -1031,6 +1039,7 @@
       const d=await r.json();
       if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
+      areaCity=d.city||''; areaState=d.state||'';
       serviceConfig=SERVICE_CONFIGS[TERRITORY_CONFIG_MAP[territoryId]||'default'];
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;alert('Network error. Please try again.');}
@@ -1100,7 +1109,7 @@
         :{section_id:sec.id,option_id:opts[0].option_id};
     }).filter(Boolean);
 
-    const loc=TERRITORY_LOCATION[territoryId]||{city:'',state:''};
+    const loc=resolveLocation();
     const payload={
       territory_id:territoryId, service_id:serviceConfig.service_id,
       selectedSlot, customer:{...customer,zip:enteredZip},
@@ -1127,7 +1136,7 @@
             }
           }
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
-          const loc=TERRITORY_LOCATION[territoryId]||{city:'',state:''};
+          const loc=resolveLocation();
           localStorage.setItem('ha_booking',JSON.stringify({
             firstName:customer.first_name||'',
             name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
