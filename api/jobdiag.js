@@ -43,14 +43,18 @@ export default async function handler(req, res) {
     if (d.ok && d.j && (String(d.j.job_number) === jobNum || String(d.j.id) === jobNum)) out._found = d.j;
   }
 
-  // 2) Scan recent jobs by cursor for a matching job_number
+  // 2) Scan jobs by cursor for a matching job_number, within an optional date window
+  const fromDate = req.query.from || null; // e.g. 2026-06-01
+  const toDate   = req.query.to   || null; // e.g. 2026-08-01
   let found = out._found || null;
   if (!found) {
     let cursor = null, pages = 0, scanned = 0;
     let minDate = null, maxDate = null;
-    while (pages < 25) {
+    while (pages < 40) {
       const u = new URL('https://api.zenbooker.com/v1/jobs');
       u.searchParams.set('limit', '100');
+      if (fromDate) u.searchParams.set('start_date_min', String(fromDate));
+      if (toDate)   u.searchParams.set('start_date_max', String(toDate));
       if (cursor != null) u.searchParams.set('cursor', String(cursor));
       const { ok, j } = await get(u.toString());
       if (!ok) { out.scan.error = j; break; }
