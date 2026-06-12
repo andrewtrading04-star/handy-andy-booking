@@ -81,11 +81,18 @@
 <script>
 const QUESTION_LABELS = {
   frame_tv:'TV Type', size:'TV Size', bracket:'Bracket Choice', fireplace:'Fireplace',
-  surface:'Wall Surface', wires:'Wire Concealment', lifting:'Lifting Help', dismount:'Guaranteed Dismount - Yes or No',
+  surface:'Wall Surface', wires:'Wire Concealment', lifting:'Lifting Help', dismount:'Guaranteed Dismount',
   extras:'Add-ons Picked', slot:'Chosen Time Slot', slot_day:'Chosen Day of Week',
   tip:'Tip Selected', coupon:'Coupon Used',
 };
 const QUESTION_ORDER = ['frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','slot_day','slot','tip','coupon'];
+const ANSWER_SHORT = { dismount: a => /^yes/i.test(a)?'Yes':/^no/i.test(a)?'No':a };
+const METRO_GROUPS = {
+  Houston: ['houston','bellaire','pearland','sugar land','katy','the woodlands','pasadena','friendswood','league city','baytown','humble','spring','kingwood','tomball','cypress','stafford','missouri city','rosenberg','conroe','galveston','manvel','alvin','webster','clear lake','nassau bay','texas city','deer park','la porte','seabrook','kemah','dickinson'],
+  Denver: ['denver','littleton','aurora','lakewood','arvada','westminster','thornton','englewood','centennial','highlands ranch','parker','castle rock','golden','boulder','broomfield','longmont','fort collins','colorado springs','pueblo','greeley','commerce city','northglenn','federal heights','wheat ridge','lone tree','greenwood village','cherry hills village'],
+  Austin: ['austin','round rock','cedar park','georgetown','pflugerville','leander','kyle','buda','san marcos','bastrop','taylor','liberty hill','bee cave','dripping springs','lakeway','manor','hutto','del valle','rollingwood','west lake hills','jonestown','sunset valley'],
+};
+function getCityMetro(city){ const lc=(city||'').toLowerCase(); for(const [m,cs] of Object.entries(METRO_GROUPS)){ if(cs.some(c=>lc===c||lc.includes(c))) return m; } return 'Other'; }
 let currentDays = 30, charts = {}, timer = null;
 
 document.getElementById('ranges').addEventListener('click', e => {
@@ -159,7 +166,7 @@ function render(d){
 
   // Geo
   html += `<div class="grid three section">
-    <div class="card"><h2>Top Cities</h2>${tbl(d.byCity,'City')}</div>
+    <div class="card"><h2>Top Cities</h2>${citiesTbl(d.byCity)}</div>
     <div class="card"><h2>Top ZIP Codes</h2>${tbl(d.byZip,'ZIP')}</div>
     <div class="card"><h2>ZIPs We Turned Away</h2>${unservedTbl(d.unservedZips)}</div>
   </div>`;
@@ -195,6 +202,20 @@ function tbl(rows, name){
   return `<table><tr><th>${name}</th><th class="num">Sessions</th><th class="num">Bookings</th><th class="num">Conv</th></tr>` +
     rows.map(r=>`<tr><td>${esc(r.key)}</td><td class="num">${r.sessions}</td><td class="num">${r.bookings}</td><td class="num">${convCell(r.conv,r.bookings)}</td></tr>`).join('') + `</table>`;
 }
+function citiesTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
+  const groups={Houston:[],Denver:[],Austin:[],Other:[]};
+  rows.forEach(r=>{const m=getCityMetro(r.key);(groups[m]||groups.Other).push(r);});
+  let out=`<table><tr><th>City</th><th class="num">Sessions</th><th class="num">Bookings</th><th class="num">Conv</th></tr>`;
+  ['Houston','Denver','Austin','Other'].forEach(metro=>{
+    const cs=groups[metro]; if(!cs.length) return;
+    const ts=cs.reduce((s,r)=>s+r.sessions,0),tb=cs.reduce((s,r)=>s+r.bookings,0),tc=ts>0?Math.round(tb/ts*100):0;
+    out+=`<tr style="background:#f4f5f7;"><td style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:var(--ink);padding-top:10px;padding-bottom:4px;">${metro}</td><td class="num" style="font-weight:700;padding-top:10px;">${ts}</td><td class="num" style="font-weight:700;padding-top:10px;">${tb}</td><td class="num" style="padding-top:10px;">${convCell(tc,tb)}</td></tr>`;
+    cs.forEach(r=>out+=`<tr><td style="padding-left:18px;color:#555;">↳ ${esc(r.key)}</td><td class="num">${r.sessions}</td><td class="num">${r.bookings}</td><td class="num">${convCell(r.conv,r.bookings)}</td></tr>`);
+  });
+  return out+`</table>`;
+}
+function dispAnswer(q,a){ return ANSWER_SHORT[q]?ANSWER_SHORT[q](a):a; }
 function unservedTbl(rows){
   if(!rows||!rows.length) return `<div class="empty">None — every ZIP checked was in your service area.</div>`;
   return `<table><tr><th>ZIP</th><th class="num">Times Checked</th></tr>` +
@@ -210,7 +231,7 @@ function answersHtml(answers){
     const max = Math.max(...a.options.map(o=>o.picked), 1);
     return `<div class="qblock"><div class="qtitle">${QUESTION_LABELS[q]||q}</div>` +
       a.options.map(o=>`<div class="abar">
-        <div class="alabel" title="${esc(o.answer)}">${esc(o.answer.length>42?o.answer.slice(0,40)+'…':o.answer)}</div>
+        <div class="alabel" title="${esc(o.answer)}">${esc((d=>d.length>42?d.slice(0,40)+'…':d)(dispAnswer(q,o.answer)))}</div>
         <div class="atrack"><div class="afill" style="width:${Math.round(o.picked/max*100)}%;"></div></div>
         <div class="acount">${o.picked}</div>
         <div class="aconv">${o.booked>0?o.conv+'% book':''}</div>
