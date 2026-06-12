@@ -34,6 +34,26 @@ export default async function handler(req, res) {
     catch (e) { return { status: 0, ok: false, j: { error: e.message } }; }
   };
 
+  // Optional: inspect specific team members (territories/skills/status) to find phantom providers
+  if (req.query.members) {
+    const ids = String(req.query.members).split(',').map(s => s.trim()).filter(Boolean);
+    const members = [];
+    for (const id of ids) {
+      const r = await get(`https://api.zenbooker.com/v1/team_members/${encodeURIComponent(id)}`);
+      const m = r.j || {};
+      members.push({
+        id, status: r.status,
+        name: m.display_name || m.name || [m.first_name, m.last_name].filter(Boolean).join(' ') || null,
+        active: m.active, member_status: m.status, role: m.role, type: m.type,
+        can_be_assigned: m.can_be_assigned, bookable: m.bookable,
+        territories: m.territories || m.territory_ids || m.territory,
+        skill_tags: m.skill_tags || m.skills,
+        allKeys: Object.keys(m),
+      });
+    }
+    return res.status(200).json({ members });
+  }
+
   const out = { jobNum, scan: {} };
 
   // 1) Direct hit in case caller passed the long bubble id
