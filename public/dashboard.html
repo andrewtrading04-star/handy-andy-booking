@@ -163,12 +163,12 @@
             </div>
             <div class="funnel-step">
               <div class="funnel-label">Step 2: Price Shown</div>
-              <div class="funnel-bar" style="width: ${(funnel.priceDisplayed / funnel.pageViews * 100)}%;">${funnel.priceDisplayed}</div>
+              <div class="funnel-bar" style="width: ${funnel.pageViews > 0 ? (funnel.priceDisplayed / funnel.pageViews * 100) : 0}%;">${funnel.priceDisplayed}</div>
               <div class="funnel-count">${funnel.priceDisplayed}</div>
             </div>
             <div class="funnel-step">
               <div class="funnel-label">Step 3: Booking</div>
-              <div class="funnel-bar" style="width: ${(funnel.bookingsConfirmed / funnel.pageViews * 100)}%;">${funnel.bookingsConfirmed}</div>
+              <div class="funnel-bar" style="width: ${funnel.pageViews > 0 ? (funnel.bookingsConfirmed / funnel.pageViews * 100) : 0}%;">${funnel.bookingsConfirmed}</div>
               <div class="funnel-count">${funnel.bookingsConfirmed}</div>
             </div>
           </div>
