@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).end();
 
   const { session_id, event_type, step_name, value, device_type, traffic_source, city, state, zip_code, error_message } = req.body;
