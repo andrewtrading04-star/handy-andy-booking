@@ -42,13 +42,32 @@
     TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
   };
 
-  // Analytics tracking
-  const SESSION_ID = Math.random().toString(36).slice(2);
+  // Analytics tracking — session id is "<visitorId>.<sessionId>" so repeat visitors can be identified
+  let _vid = '';
+  try {
+    _vid = localStorage.getItem('ha_vid') || '';
+    if (!_vid) { _vid = Math.random().toString(36).slice(2, 10); localStorage.setItem('ha_vid', _vid); }
+  } catch (e) {}
+  const SESSION_ID = (_vid ? _vid + '.' : '') + Math.random().toString(36).slice(2, 10);
+  function trafficSource() {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const s = p.get('source') || p.get('utm_source');
+      if (s) return s;
+      if (document.referrer) {
+        const h = new URL(document.referrer).hostname.replace(/^www\./, '');
+        if (h && h !== location.hostname.replace(/^www\./, '')) return h;
+      }
+    } catch (e) {}
+    return 'direct';
+  }
+  const TRAFFIC_SOURCE = trafficSource();
   async function logEvent(event_type, step_name, value = null, error_message = null) {
     try {
       const loc = resolveLocation();
       await fetch('https://handy-andy-booking.vercel.app/api/log-event', {
         method: 'POST',
+        keepalive: true,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: SESSION_ID,
@@ -56,14 +75,47 @@
           step_name,
           value,
           device_type: /Mobile/.test(navigator.userAgent) ? 'mobile' : 'desktop',
-          traffic_source: new URLSearchParams(window.location.search).get('source') || 'direct',
+          traffic_source: TRAFFIC_SOURCE,
           city: loc.city,
           state: loc.state,
-          zip_code: customer.zip || null,
+          zip_code: customer.zip || enteredZip || null,
           error_message,
         }),
       });
     } catch (e) { console.error('[analytics] log failed', e); }
+  }
+  // Log each step the first time the visitor reaches it — powers the drop-off funnel
+  const _seenSteps = new Set();
+  function trackStep(key) {
+    if (_seenSteps.has(key)) return;
+    _seenSteps.add(key);
+    logEvent('step_view', key, STEP_KEYS.indexOf(key));
+  }
+  // Log what the visitor chose on the step they're leaving — powers per-question analytics
+  function logStepAnswers(key) {
+    try {
+      if (key === 'frame_tv') {
+        (selections['__frame_type'] || []).forEach(t =>
+          logEvent('answer', 'frame_tv:' + (t === 'frame' ? 'Frame/Gallery TV' : 'Regular TV'), 1));
+        return;
+      }
+      if (key === 'slots') {
+        if (selectedDate) {
+          const sl = (slotsByDate[selectedDate] || []).find(s => s.id === selectedSlot);
+          logEvent('answer', 'slot:' + (sl ? sl.arrival_window : '') + ' on ' + selectedDate);
+          const d = new Date(selectedDate + 'T12:00:00');
+          logEvent('answer', 'slot_day:' + ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()]);
+        }
+        return;
+      }
+      if (key === 'terms' || key === 'zip' || key === 'customer') return;
+      const sec = getSec(key);
+      if (!sec) return;
+      for (const sel of (selections[sec.id] || [])) {
+        const opt = sec.options.find(o => o.id === sel.option_id);
+        if (opt && sel.quantity > 0) logEvent('answer', key + ':' + opt.label, sel.quantity);
+      }
+    } catch (e) {}
   }
 
   // Day-of-week discounts: 0=Sun(-$15), 2=Tue(-$10)
@@ -496,6 +548,7 @@
     const root=document.getElementById(TARGET_ID); if(!root)return;
     root.style.cssText=S.host;
     const key=STEP_KEYS[stepIdx];
+    trackStep(key);
     const pct=Math.round(visibleStepNum()/totalVisibleSteps()*100);
     const prog=key==='zip'?'':`<div style="${S.bar}"><div style="${S.fill(pct)}"></div></div><div style="${S.step}">Step ${visibleStepNum()} of ${totalVisibleSteps()}</div>`;
     let body='';
@@ -1052,6 +1105,7 @@
 
   // ─── Navigation ───────────────────────────────────────────────────────────
   function goNext(){
+    logStepAnswers(STEP_KEYS[stepIdx]);
     let ni=stepIdx+1;
     while(ni<STEP_KEYS.length&&shouldSkip(STEP_KEYS[ni]))ni++;
     // If entering slots, fetch them
@@ -1081,15 +1135,17 @@
     if(!zip||zip.length<5)return alert('Please enter a valid 5-digit zip code.');
     const btn=root.querySelector('#btn-zip');
     btn.textContent='Checking…'; btn.disabled=true;
+    customer.zip=zip;
     try{
       const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zip})});
       const d=await r.json();
-      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
+      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
       serviceConfig=SERVICE_CONFIGS[TERRITORY_CONFIG_MAP[territoryId]||'default'];
+      logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
-    }catch{btn.textContent='Check Area →';btn.disabled=false;alert('Network error. Please try again.');}
+    }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}
   }
 
   // ─── Slots fetch ──────────────────────────────────────────────────────────
@@ -1107,8 +1163,9 @@
       // Init calendar to first available month
       const dates=Object.keys(slotsByDate).sort();
       if(dates.length){const f=new Date(dates[0]+'T12:00:00');calYear=f.getFullYear();calMonth=f.getMonth();}
+      else logEvent('error','slots',null,'no slots returned');
       render();
-    }catch{slotsByDate={};render();}
+    }catch{slotsByDate={};logEvent('error','slots',null,'slots fetch failed');render();}
   }
 
   // ─── Submit ───────────────────────────────────────────────────────────────
@@ -1119,10 +1176,12 @@
     customer.phone=root.querySelector('#c-ph').value.trim();
     customer.address=root.querySelector('#c-ad').value.trim();
     couponCode=root.querySelector('#c-coupon')?.value.trim().toUpperCase()||'';
-    if(!customer.email)return alert('Please enter your email address.');
-    if(!customer.phone)return alert('Please enter your phone number.');
-    if(!customer.address)return alert('Please enter your street address.');
-    if(couponCode&&!(couponCode in COUPONS))return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');
+    if(!customer.email){logEvent('form_error','customer',null,'missing email');return alert('Please enter your email address.');}
+    if(!customer.phone){logEvent('form_error','customer',null,'missing phone');return alert('Please enter your phone number.');}
+    if(!customer.address){logEvent('form_error','customer',null,'missing address');return alert('Please enter your street address.');}
+    if(couponCode&&!(couponCode in COUPONS)){logEvent('form_error','customer',null,'invalid coupon: '+couponCode);return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');}
+    if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
+    if(couponCode)logEvent('answer','coupon:'+couponCode);
 
     // Tokenize card with Stripe
     let stripePaymentMethodId=null;
@@ -1141,6 +1200,7 @@
       });
       if(error){
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
+        logEvent('booking_failed','customer',null,'card: '+error.message);
         return alert(error.message);
       }
       stripePaymentMethodId=paymentMethod.id;
@@ -1206,10 +1266,12 @@
       }else{
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
         const err=await r.json().catch(()=>({}));
+        logEvent('booking_failed','customer',null,err.error||('HTTP '+r.status));
         alert(err.error||'Booking failed. Please try again.');
       }
     }catch{
       if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
+      logEvent('booking_failed','customer',null,'connection error');
       alert('Connection error. Please try again.');
     }
   }
