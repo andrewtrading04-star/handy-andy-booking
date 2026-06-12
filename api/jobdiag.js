@@ -112,6 +112,7 @@ export default async function handler(req, res) {
     estimated_duration_seconds: found.estimated_duration_seconds,
     time_slot: found.time_slot, timezone: found.timezone,
     territory: found.territory && (found.territory.name || found.territory.id),
+    territoryId: found.territory && found.territory.id,
     min_providers_required: found.min_providers_required,
     unable_to_auto_assign: found.unable_to_auto_assign,
     skill_tags_required: found.skill_tags_required,
@@ -140,7 +141,8 @@ export default async function handler(req, res) {
       return {
         job_number: jb.job_number, id: jb.id, status: jb.status, canceled: jb.canceled,
         start_date: jb.start_date, end_date: jb.end_date, created: jb.created,
-        territory: jb.territory && (jb.territory.name || jb.territory.id),
+        territoryName: jb.territory && jb.territory.name,
+        territoryId: jb.territory && jb.territory.id,
         time_slot: jb.time_slot && jb.time_slot.name,
         unable_to_auto_assign: jb.unable_to_auto_assign,
         providers: ap.map(p => ({ id: p.id || p.provider_id || p.provider?.id, name: p.display_name || p.name || p.provider?.display_name || p.provider?.name || [p.first_name, p.last_name].filter(Boolean).join(' ') })),
