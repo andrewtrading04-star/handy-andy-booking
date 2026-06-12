@@ -100,38 +100,48 @@ export default async function handler(req, res) {
     service_name: found.service_name,
   };
 
-  // 4) Same-day jobs for each assigned provider — to locate the actual overlap
+  // 4) All jobs in the same territory window — to see who is occupied at #662894's time
   const provIds = out.assignedProviders.map(p => p.id).filter(Boolean);
   out.providerIds = provIds;
   const sd = found.start_date;
   if (sd) {
     const day = String(sd).slice(0, 10);
+    const nextDay = new Date(new Date(day + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
     const u = new URL('https://api.zenbooker.com/v1/jobs');
     u.searchParams.set('start_date_min', day);
-    u.searchParams.set('start_date_max', day);
+    u.searchParams.set('start_date_max', nextDay); // max is exclusive of `day`, so bump to next day
     u.searchParams.set('limit', '100');
     const { j } = await get(u.toString());
+    const tStart = new Date(found.start_date).getTime();
+    const tEnd = new Date(found.end_date).getTime();
     const all = (j.results || []).map(jb => {
       const ap = Array.isArray(jb.assigned_providers) ? jb.assigned_providers : [];
+      const s = new Date(jb.start_date).getTime(), e = new Date(jb.end_date).getTime();
       return {
         job_number: jb.job_number, id: jb.id, status: jb.status, canceled: jb.canceled,
-        start_date: jb.start_date, end_date: jb.end_date,
-        estimated_duration_seconds: jb.estimated_duration_seconds,
+        start_date: jb.start_date, end_date: jb.end_date, created: jb.created,
         territory: jb.territory && (jb.territory.name || jb.territory.id),
-        time_slot: jb.time_slot,
-        providerIds: ap.map(p => p.id || p.provider_id || p.provider?.id).filter(Boolean),
-        providerNames: ap.map(p => p.display_name || p.name || p.provider?.display_name || p.provider?.name).filter(Boolean),
+        time_slot: jb.time_slot && jb.time_slot.name,
+        unable_to_auto_assign: jb.unable_to_auto_assign,
+        providers: ap.map(p => ({ id: p.id || p.provider_id || p.provider?.id, name: p.display_name || p.name || p.provider?.display_name || p.provider?.name || [p.first_name, p.last_name].filter(Boolean).join(' ') })),
+        overlapsTarget: (s < tEnd && e > tStart && !jb.canceled && jb.id !== found.id),
       };
     });
     out.sameDayCount = all.length;
-    // Jobs sharing at least one assigned provider with #662894, that overlap its time window
-    const tStart = new Date(found.start_date).getTime();
-    const tEnd = new Date(found.end_date).getTime();
-    out.sameProviderJobs = all.filter(x => x.id !== found.id && x.providerIds.some(id => provIds.includes(id)));
-    out.overlappingJobs = out.sameProviderJobs.filter(x => {
-      const s = new Date(x.start_date).getTime(), e = new Date(x.end_date).getTime();
-      return s < tEnd && e > tStart && !x.canceled; // time intervals intersect
-    });
+    out.sameDayJobs = all;
+    out.overlappingJobs = all.filter(x => x.overlapsTarget);
+  }
+
+  // 5) Providers in this territory (who *could* serve it) + their status/skills
+  {
+    const r = await get('https://api.zenbooker.com/v1/providers');
+    const list = Array.isArray(r.j) ? r.j : (r.j.results || r.j.data || []);
+    out.providers = (list || []).slice(0, 60).map(p => ({
+      id: p.id, name: p.display_name || p.name || [p.first_name, p.last_name].filter(Boolean).join(' '),
+      status: p.status, active: p.active,
+      territories: p.territories || p.territory_ids || (p.territory && [p.territory.name || p.territory.id]),
+      skill_tags: p.skill_tags || p.skills,
+    }));
   }
 
   return res.status(200).json(out);
