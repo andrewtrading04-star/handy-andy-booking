@@ -132,16 +132,34 @@ export default async function handler(req, res) {
     out.overlappingJobs = all.filter(x => x.overlapsTarget);
   }
 
-  // 5) Providers in this territory (who *could* serve it) + their status/skills
+  // 5) LIVE timeslots probe — does the endpoint still offer the conflicted window,
+  //    and does adding the required skill / the actual provider remove it?
   {
-    const r = await get('https://api.zenbooker.com/v1/providers');
-    const list = Array.isArray(r.j) ? r.j : (r.j.results || r.j.data || []);
-    out.providers = (list || []).slice(0, 60).map(p => ({
-      id: p.id, name: p.display_name || p.name || [p.first_name, p.last_name].filter(Boolean).join(' '),
-      status: p.status, active: p.active,
-      territories: p.territories || p.territory_ids || (p.territory && [p.territory.name || p.territory.id]),
-      skill_tags: p.skill_tags || p.skills,
-    }));
+    const TERR = (found.territory && found.territory.id) || '1707514546803x280800015001583600'; // Houston #1
+    const probeDate = String(found.start_date).slice(0, 10);
+    const skillIds = (found.skill_tags_required || []).map(s => s.id).filter(Boolean).join(',');
+    // provider id of the overlapping job (Juan), to test per-provider availability
+    const conflictProv = (out.overlappingJobs[0] && out.overlappingJobs[0].providers[0] && out.overlappingJobs[0].providers[0].id) || '';
+    const probe = async (extra) => {
+      const u = new URL('https://api.zenbooker.com/v1/scheduling/timeslots');
+      u.searchParams.set('territory', TERR);
+      u.searchParams.set('date', probeDate);
+      u.searchParams.set('duration', '120');
+      u.searchParams.set('days', '1');
+      u.searchParams.set('min_providers_needed', '1');
+      for (const [k, v] of Object.entries(extra)) if (v) u.searchParams.set(k, v);
+      const { status, j } = await get(u.toString());
+      const day = (j.days || []).find(d => d.date === probeDate) || (j.days || [])[0] || null;
+      const windows = day ? (day.timeslots || []).map(t => t.formatted || (t.time_slot && t.time_slot.name) || t.name) : [];
+      return { status, params: Object.assign({ territory: TERR, date: probeDate, duration: 120, min_providers_needed: 1 }, extra),
+               count: windows.length, has_2pm: windows.some(w => /2:00\s*PM/i.test(String(w))), windows };
+    };
+    out.probe = {
+      asWidgetSends_noSkill: await probe({}),
+      withRequiredSkill: await probe({ required_skills: skillIds }),
+      withConflictProvider: await probe({ service_providers: conflictProv }),
+      skillIds, conflictProv,
+    };
   }
 
   return res.status(200).json(out);
