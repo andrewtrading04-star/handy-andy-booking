@@ -120,6 +120,29 @@ export default async function handler(req, res) {
     const jobId = data.job_id || data.id;
     const zbkCustomerId = data.customer_id || data.customer?.id || null;
 
+    // ---- Detect a job Zenbooker could not staff -------------------------------------
+    // Zenbooker's territory availability can offer a timeslot that no qualified tech is
+    // actually free for; it then creates the job but leaves it unassigned. Without this
+    // check that job sits silently unstaffed at a time the tech is already booked. We
+    // flag it on the job and in the response so the office is alerted to reassign/reschedule.
+    let autoAssignFailed = false;
+    try {
+      let jobState = data;
+      if (jobState.unable_to_auto_assign === undefined && jobState.assigned_providers === undefined && data.id) {
+        const jr = await fetch(`https://api.zenbooker.com/v1/jobs/${data.id}`, { headers: { Authorization: `Bearer ${ZBK_KEY}` } });
+        jobState = await jr.json().catch(() => ({}));
+      }
+      autoAssignFailed = jobState.unable_to_auto_assign === true
+        || (Array.isArray(jobState.assigned_providers) && jobState.assigned_providers.length === 0);
+      if (autoAssignFailed && jobId) {
+        await fetch(`https://api.zenbooker.com/v1/jobs/${jobId}/notes`, {
+          method:  'POST',
+          headers: { Authorization: `Bearer ${ZBK_KEY}`, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ text: '⚠️ NO TECHNICIAN AUTO-ASSIGNED — Zenbooker reported no available qualified tech for this time slot, so this online booking is currently UNSTAFFED. Please manually assign a technician or contact the customer to reschedule.' }),
+        });
+      }
+    } catch (e) { console.warn('[book] auto-assign check failed:', e.message); }
+
     // ---- Save the card on file in Stripe so it appears as a payment method and can be charged later ----
     let cardNote = '';
     if (payment_method_id) {
@@ -199,7 +222,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card is on file/.test(cardNote) });
+    return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card is on file/.test(cardNote), auto_assign_failed: autoAssignFailed });
   } catch (err) {
     console.error('[book] fetch error:', err.message);
     return res.status(500).json({ error: 'Booking request failed', message: err.message });
