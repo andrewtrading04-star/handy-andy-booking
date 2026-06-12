@@ -75,24 +75,35 @@ export default async function handler(req, res) {
 
   if (!found) { out.note = 'job not found in scan window — widen with ?job= or it may be outside the scanned range'; return res.status(200).json(out); }
 
-  // 3) Report schedule + provider for the found job (PII stripped), plus the full key list/schema
+  // 3) Report schedule + provider for the found job, plus full key list/schema
   out.jobKeys = Object.keys(found);
-  const providerRaw = found.provider || found.team_member || found.assigned_provider || found.providers || found.team || null;
-  out.job = redact({
+  const provs = Array.isArray(found.assigned_providers) ? found.assigned_providers : [];
+  // Technician identity is the owner's own staff (not customer PII) — surface it un-redacted.
+  out.assignedProviders = provs.map(p => ({
+    id: p.id || p.provider_id || p.provider?.id,
+    name: p.display_name || p.name || p.provider?.display_name || p.provider?.name ||
+          [p.first_name, p.last_name].filter(Boolean).join(' ') || null,
+    raw_keys: Object.keys(p),
+  }));
+  out.job = {
     job_number: found.job_number, id: found.id, status: found.status, canceled: found.canceled,
-    start_date: found.start_date, end_date: found.end_date, scheduled_at: found.scheduled_at,
-    duration: found.duration, duration_minutes: found.duration_minutes, total_duration: found.total_duration,
-    arrival_window: found.arrival_window, arrival_window_minutes: found.arrival_window_minutes,
+    rescheduled: found.rescheduled, recurring: found.recurring, recurring_instance: found.recurring_instance,
+    start_date: found.start_date, end_date: found.end_date,
+    estimated_duration_seconds: found.estimated_duration_seconds,
+    time_slot: found.time_slot, timezone: found.timezone,
     territory: found.territory && (found.territory.name || found.territory.id),
-    provider: providerRaw,
-    services: (found.services || []).map(s => ({ name: s.name || s.service_name, duration: s.duration, pricing_summary: s.pricing_summary })),
-    service_fields: found.service_fields,
-  });
+    min_providers_required: found.min_providers_required,
+    unable_to_auto_assign: found.unable_to_auto_assign,
+    skill_tags_required: found.skill_tags_required,
+    job_offer: found.job_offer,
+    created: found.created, created_by: found.created_by,
+    service_name: found.service_name,
+  };
 
-  // 4) Same-day jobs for the assigned provider — to locate the actual overlap
-  const provId = (providerRaw && (providerRaw.id || (Array.isArray(providerRaw) && providerRaw[0] && providerRaw[0].id))) || null;
-  out.providerId = provId;
-  const sd = found.start_date || found.scheduled_at;
+  // 4) Same-day jobs for each assigned provider — to locate the actual overlap
+  const provIds = out.assignedProviders.map(p => p.id).filter(Boolean);
+  out.providerIds = provIds;
+  const sd = found.start_date;
   if (sd) {
     const day = String(sd).slice(0, 10);
     const u = new URL('https://api.zenbooker.com/v1/jobs');
@@ -101,18 +112,26 @@ export default async function handler(req, res) {
     u.searchParams.set('limit', '100');
     const { j } = await get(u.toString());
     const all = (j.results || []).map(jb => {
-      const p = jb.provider || jb.team_member || jb.assigned_provider || (jb.providers && jb.providers[0]) || null;
+      const ap = Array.isArray(jb.assigned_providers) ? jb.assigned_providers : [];
       return {
         job_number: jb.job_number, id: jb.id, status: jb.status, canceled: jb.canceled,
-        start_date: jb.start_date, end_date: jb.end_date, scheduled_at: jb.scheduled_at,
-        duration: jb.duration || jb.duration_minutes || jb.total_duration,
-        arrival_window: jb.arrival_window, arrival_window_minutes: jb.arrival_window_minutes,
-        providerId: p && p.id, providerName: p && (p.display_name || p.name),
+        start_date: jb.start_date, end_date: jb.end_date,
+        estimated_duration_seconds: jb.estimated_duration_seconds,
+        territory: jb.territory && (jb.territory.name || jb.territory.id),
+        time_slot: jb.time_slot,
+        providerIds: ap.map(p => p.id || p.provider_id || p.provider?.id).filter(Boolean),
+        providerNames: ap.map(p => p.display_name || p.name || p.provider?.display_name || p.provider?.name).filter(Boolean),
       };
     });
     out.sameDayCount = all.length;
-    out.sameDayForProvider = provId ? all.filter(x => x.providerId === provId) : all;
-    out.sameDayAll = all; // provider may live under a key we didn't guess; keep raw-ish (no PII fields included)
+    // Jobs sharing at least one assigned provider with #662894, that overlap its time window
+    const tStart = new Date(found.start_date).getTime();
+    const tEnd = new Date(found.end_date).getTime();
+    out.sameProviderJobs = all.filter(x => x.id !== found.id && x.providerIds.some(id => provIds.includes(id)));
+    out.overlappingJobs = out.sameProviderJobs.filter(x => {
+      const s = new Date(x.start_date).getTime(), e = new Date(x.end_date).getTime();
+      return s < tEnd && e > tStart && !x.canceled; // time intervals intersect
+    });
   }
 
   return res.status(200).json(out);
