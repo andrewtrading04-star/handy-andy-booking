@@ -597,13 +597,13 @@
     return `
       <h1 style="${S.h1}">What type of TV(s) are you mounting?</h1>
       <p style="${S.sub}">Select all that apply. Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</p>
-      <div class="ha-tv-type" data-type="frame" style="${S.card(frameOn)}">
-        <span>I have a Samsung Frame TV or LG Gallery TV</span>
-        <span style="color:${frameOn?'#ff6600':'#52525b'}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
-      </div>
       <div class="ha-tv-type" data-type="regular" style="${S.card(regOn)}">
         <span>I have a regular TV</span>
         <span style="color:${regOn?'#ff6600':'#52525b'}!important;font-size:18px!important;">${regOn?'✓':'☐'}</span>
+      </div>
+      <div class="ha-tv-type" data-type="frame" style="${S.card(frameOn)}">
+        <span>I have a Samsung Frame TV or LG Gallery TV</span>
+        <span style="color:${frameOn?'#ff6600':'#52525b'}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
       </div>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
