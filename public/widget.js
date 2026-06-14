@@ -677,7 +677,7 @@
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       return `<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}</span>
+        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -764,7 +764,7 @@
       const sid=o._altSection||sec.id;
       const q=getQty(sid,o.id);
       return `<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}</span>
+        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sid}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -891,7 +891,7 @@
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       const row=`<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}</span>
+        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
