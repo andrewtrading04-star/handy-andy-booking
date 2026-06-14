@@ -512,6 +512,30 @@
     // — already included above since extras section is iterated
     return Math.max(sum, serviceConfig.minPrice||139);
   }
+  // Customer-facing itemized line items for the checkout summary AND the thank-you page.
+  // Only options that actually cost money are listed — a $0 selection (e.g. "I can help
+  // lift it / no second technician needed") is omitted so it never looks like a free add-on.
+  // The paid lifting option is relabeled "Second Technician" so the receipt reads cleanly.
+  function buildLineItems(){
+    if(!serviceConfig)return [];
+    const liftSec=getSec('lifting');
+    const items=[];
+    for(const sec of serviceConfig.sections){
+      for(const sel of(selections[sec.id]||[])){
+        const opt=sec.options.find(o=>o.id===sel.option_id);
+        if(!opt)continue;
+        const amount=Math.round((opt.price||0)*sel.quantity*100)/100;
+        if(amount<=0)continue; // hide $0 selections (incl. the "no second technician" choice)
+        const label=(liftSec&&sec.id===liftSec.id)?'Second Technician':opt.label;
+        items.push({label,qty:sel.quantity,amount});
+      }
+    }
+    // Reconcile with the service minimum so the lines always sum to the subtotal.
+    const sum=items.reduce((s,it)=>s+it.amount,0);
+    const floored=calcTotal();
+    if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
+    return items;
+  }
   function slotSurcharge(sl){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
     if(!m)return 0;let h=parseInt(m[1]);
@@ -616,7 +640,7 @@
     const opts=sec.options.map(o=>{
       const q=getQty(sec.id,o.id);
       return `<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
+        <span style="flex:1!important;">${o.label}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -653,7 +677,7 @@
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       return `<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
+        <span style="flex:1!important;">${o.label}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -685,7 +709,7 @@
       optsHtml=sec.options.map(o=>{
         const q=getQty(sec.id,o.id);
         return `<div style="${S.qRow(q>0)}">
-          <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
+          <span style="flex:1!important;">${o.label}</span>
           <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
             <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
             <span style="${S.qNum}">${q}</span>
@@ -697,7 +721,7 @@
       optsHtml=sec.options.map(o=>{
         const on=getQty(sec.id,o.id)>0;
         return `<div class="ha-tog" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
-          <span>${o.label}${S.price(o.price)}</span>
+          <span>${o.label}</span>
           <span style="color:${on?'#ff6600':'#52525b'}!important;font-size:18px!important;">${on?'✓':'○'}</span>
         </div>`;
       }).join('');
@@ -740,7 +764,7 @@
       const sid=o._altSection||sec.id;
       const q=getQty(sid,o.id);
       return `<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
+        <span style="flex:1!important;">${o.label}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sid}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -792,7 +816,7 @@
       const on=cur===o.id;
       const displayLabel=LIFT_LABELS[o.id]||o.label;
       return `<div class="ha-sel" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
-        <span>${displayLabel}${S.price(o.price)}</span>
+        <span>${displayLabel}</span>
         <span style="color:${on?'#ff6600':'#52525b'}!important;font-size:18px!important;">${on?'●':'○'}</span>
       </div>`;
     }).join('');
@@ -867,7 +891,7 @@
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       const row=`<div style="${S.qRow(q>0)}">
-        <span style="flex:1!important;">${o.label}${S.price(o.price)}</span>
+        <span style="flex:1!important;">${o.label}</span>
         <div style="display:flex!important;align-items:center!important;gap:8px!important;flex-shrink:0!important;">
           <button class="ha-dec" data-s="${sec.id}" data-o="${o.id}" style="${S.qBtn}">−</button>
           <span style="${S.qNum}">${q}</span>
@@ -991,6 +1015,11 @@
   function bCustomer(){
     const adj=territoryAdjustment();
     const base=calcTotal()+adj;
+    const items=buildLineItems();
+    const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
+            <span style="color:#fff!important;">$${it.amount}</span>
+          </div>`).join('');
     const tips=[0,5,10,15,20];
     const tipHtml=tips.map(t=>`<button class="ha-tip" data-tip="${t}"
       style="background:${tipAmount===t?'#ff6600':'#27272a'}!important;color:#fff!important;border:1.5px solid ${tipAmount===t?'#ff6600':'#3f3f46'}!important;border-radius:6px!important;padding:8px 14px!important;font-size:14px!important;cursor:pointer!important;flex:1!important;">
@@ -1023,6 +1052,8 @@
       </div>
       <div style="background:rgba(34,197,94,0.08)!important;border:1.5px solid rgba(34,197,94,0.25)!important;border-radius:10px!important;padding:16px 18px!important;margin-bottom:18px!important;">
         <div style="font-size:13px!important;color:#a0a0ab!important;margin-bottom:8px!important;">
+          ${itemsHtml}
+          <div style="border-top:1px solid rgba(255,255,255,0.08)!important;margin:8px 0!important;"></div>
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Subtotal</span>
             <span id="ha-subtotal" style="color:#fff!important;">$${Math.round(calcTotal()*100)/100}</span>
@@ -1236,13 +1267,7 @@
           const res=await r.json().catch(()=>({}));
           const slot=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot)||{};
           const df=selectedDate?fmtDate(selectedDate):null;
-          const lines=[];
-          for(const sec of serviceConfig.sections){
-            for(const sel of(selections[sec.id]||[])){
-              const opt=sec.options.find(o=>o.id===sel.option_id);
-              if(opt&&sel.quantity>0)lines.push({label:opt.label,qty:sel.quantity,amount:(opt.price||0)*sel.quantity});
-            }
-          }
+          const lines=buildLineItems();
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
           const couponDisc=COUPONS[couponCode]||0;
           if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
