@@ -73,6 +73,18 @@
       <button data-days="7">7 Days</button>
       <button data-days="30" class="on">30 Days</button>
       <button data-days="0">All Time</button>
+      <button id="compare-btn" style="margin-left:12px;background:#f0f1f4;color:var(--mute);">Compare</button>
+    </div>
+    <div id="compare-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:12px;padding:24px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:700;">Compare to</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="compare-opt" data-offset="1" style="padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;">Previous Day</button>
+          <button class="compare-opt" data-offset="7" style="padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;">Previous 7 Days</button>
+          <button class="compare-opt" data-offset="30" style="padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;">Previous 30 Days</button>
+          <button id="compare-close" style="padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:center;font-size:14px;color:var(--mute);margin-top:8px;">Cancel</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="content" class="loading">Loading analytics…</div>
@@ -93,13 +105,32 @@ const METRO_GROUPS = {
   Austin: ['austin','round rock','cedar park','georgetown','pflugerville','leander','kyle','buda','san marcos','bastrop','taylor','liberty hill','bee cave','dripping springs','lakeway','manor','hutto','del valle','rollingwood','west lake hills','jonestown','sunset valley'],
 };
 function getCityMetro(city){ const lc=(city||'').toLowerCase(); for(const [m,cs] of Object.entries(METRO_GROUPS)){ if(cs.some(c=>lc===c||lc.includes(c))) return m; } return 'Other'; }
-let currentDays = 30, charts = {}, timer = null;
+let currentDays = 30, compareDays = null, charts = {}, timer = null;
 
 document.getElementById('ranges').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
+  const b = e.target.closest('button'); if (!b || b.id === 'compare-btn') return;
   currentDays = parseInt(b.dataset.days);
-  document.querySelectorAll('#ranges button').forEach(x => x.classList.toggle('on', x === b));
+  compareDays = null;
+  document.querySelectorAll('#ranges button:not(#compare-btn)').forEach(x => x.classList.toggle('on', x === b));
+  document.getElementById('compare-btn').style.color = 'var(--mute)';
   load();
+});
+
+document.getElementById('compare-btn').addEventListener('click', () => {
+  document.getElementById('compare-modal').style.display = 'flex';
+});
+
+document.getElementById('compare-close').addEventListener('click', () => {
+  document.getElementById('compare-modal').style.display = 'none';
+});
+
+document.querySelectorAll('.compare-opt').forEach(btn => {
+  btn.addEventListener('click', () => {
+    compareDays = parseInt(btn.dataset.offset);
+    document.getElementById('compare-modal').style.display = 'none';
+    document.getElementById('compare-btn').style.color = 'var(--accent)';
+    load();
+  });
 });
 
 function fmt$(n){ if(n==null)return '—'; return '$' + Number(n).toLocaleString('en-US',{maximumFractionDigits:0}); }
@@ -113,6 +144,14 @@ async function load(){
     if(!r.ok) throw new Error('API error ' + r.status);
     const d = await r.json();
     if(d.error) throw new Error(d.error);
+
+    if(compareDays){
+      const rc = await fetch('/api/analytics?days=' + compareDays);
+      if(!rc.ok) throw new Error('Compare API error ' + rc.status);
+      const dc = await rc.json();
+      if(dc.error) throw new Error(dc.error);
+      d.comparison = dc;
+    }
     render(d);
   }catch(err){
     document.getElementById('content').innerHTML = `<div class="card err" style="padding:18px;">Error loading analytics: ${esc(err.message)}</div>`;
@@ -123,6 +162,20 @@ function render(d){
   const t = d.totals;
   document.getElementById('updated').textContent =
     'Updated ' + new Date(d.lastUpdated).toLocaleTimeString() + ' · times in Mountain Time · auto-refreshes';
+
+  let html = '';
+  if(d.comparison){
+    const tc = d.comparison.totals;
+    const chg = (curr, prev) => { if(!prev || !curr) return '—'; const pct = ((curr - prev) / prev * 100).toFixed(0); return pct > 0 ? `<span style="color:var(--green);">+${pct}%</span>` : `<span style="color:${pct < 0 ? 'var(--red)' : 'var(--mute)';};">${pct}%</span>`; };
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;"><div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">This Period</div>
+      <div style="display:grid;gap:8px;"><div><span style="font-size:13px;color:var(--mute);">Sessions</span> <span style="font-weight:700;">${t.sessions}</span></div>
+      <div><span style="font-size:13px;color:var(--mute);">Bookings</span> <span style="font-weight:700;">${t.bookings}</span> (${t.conversion}%)</div>
+      <div><span style="font-size:13px;color:var(--mute);">Revenue</span> <span style="font-weight:700;">${fmt$(t.revenue)}</span></div></div></div>
+      <div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">Previous Period</div>
+      <div style="display:grid;gap:8px;"><div><span style="font-size:13px;color:var(--mute);">Sessions</span> <span style="font-weight:700;">${tc.sessions}</span> ${chg(t.sessions, tc.sessions)}</div>
+      <div><span style="font-size:13px;color:var(--mute);">Bookings</span> <span style="font-weight:700;">${tc.bookings}</span> (${tc.conversion}%) ${chg(t.bookings, tc.bookings)}</div>
+      <div><span style="font-size:13px;color:var(--mute);">Revenue</span> <span style="font-weight:700;">${fmt$(tc.revenue)}</span> ${chg(t.revenue, tc.revenue)}</div></div></div></div>`;
+  }
 
   const kpis = [
     ['Sessions', t.sessions, `${t.visitors} unique visitors`],
@@ -136,7 +189,7 @@ function render(d){
     ['Bounced', t.bounces, 'left on first step'],
     ['ZIP Checks', (t.zipServed+t.zipUnserved), `<span class="bad">${t.zipUnserved} outside area</span>`],
   ];
-  let html = `<div class="grid kpis">` + kpis.map(k =>
+  html += `<div class="grid kpis">` + kpis.map(k =>
     `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
   ).join('') + `</div>`;
 
