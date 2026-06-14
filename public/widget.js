@@ -167,8 +167,8 @@
           options:[
             {id:'1685657519638x296785870103780400',label:'I have my own bracket',                  price:0,  forSize:'any'},
             {id:'1685657519638x151782031594280160',label:'Flat',                                   price:45, forSize:'standard'},
-            {id:'1685657519638x293251872070913660',label:'Tilting (recommended)',                  price:55, forSize:'standard'},
-            {id:'1685657519638x327788739524076600',label:'Full Motion',                            price:85, forSize:'standard'},
+            {id:'1685657519638x293251872070913660',label:'Tilting (recommended)',                  price:60, forSize:'standard'},
+            {id:'1685657519638x327788739524076600',label:'Full Motion',                            price:110, forSize:'standard'},
             {id:'1776229587207x710284994703786000',label:'85"-100" TV Flat Bracket',               price:90, forSize:'xl'},
             {id:'1776229598255x578976769128267800',label:'85"-100" TV Tilting Bracket',            price:110,forSize:'xl'},
             {id:'1776229610718x521138691917742100',label:'85"-100" TV Full Motion Bracket',        price:190,forSize:'xl'},
