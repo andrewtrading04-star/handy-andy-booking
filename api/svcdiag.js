@@ -34,7 +34,9 @@ export default async function handler(req, res) {
         }),
       };
     }) : null;
-    return { topKeys, groupKey: gk, groups: parsed };
+    const scalars = {};
+    for (const k of ['base_price', 'min_price', 'base_duration', 'pricing_method', 'price_prefix', 'name']) scalars[k] = svc[k];
+    return { topKeys, groupKey: gk, scalars, groups: parsed };
   }
 
   const ids = (req.query.ids || '').split(',').filter(Boolean);
