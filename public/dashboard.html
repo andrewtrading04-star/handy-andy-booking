@@ -164,7 +164,7 @@ async function load(){
 function render(d){
   const t = d.totals;
   document.getElementById('updated').textContent =
-    'Updated ' + new Date(d.lastUpdated).toLocaleTimeString() + ' · times in Mountain Time · auto-refreshes';
+    'Updated ' + new Date(d.lastUpdated).toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit', hour12: true }) + ' · times in Mountain Time · auto-refreshes';
 
   let html = '';
   if(d.comparison){
@@ -342,7 +342,7 @@ function errStepTbl(byStep){
 function errTbl(recent){
   if(!recent||!recent.length) return `<div class="empty">No errors recorded. 🎉</div>`;
   return `<table><tr><th>When</th><th>Type</th><th>Message</th></tr>` +
-    recent.map(e=>`<tr><td style="white-space:nowrap;">${new Date(e.at).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td>
+    recent.map(e=>`<tr><td style="white-space:nowrap;">${new Date(e.at).toLocaleString('en-US', {timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
       <td><span class="pill ${e.type==='booking_failed'?'red':'gray'}">${esc(e.type)}</span></td>
       <td>${esc(e.message||'—')}</td></tr>`).join('') + `</table>`;
 }
@@ -350,7 +350,7 @@ function sessionsTbl(rows){
   if(!rows||!rows.length) return `<div class="empty">No sessions yet in this period.</div>`;
   return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Status</th><th>Got As Far As</th><th>Quoted/Paid</th><th>Device</th><th>Source</th><th>City</th><th>ZIP</th><th>Time Spent</th><th></th></tr>` +
     rows.map(s=>`<tr>
-      <td style="white-space:nowrap;">${new Date(s.when).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td>
+      <td style="white-space:nowrap;">${new Date(s.when).toLocaleString('en-US', {timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
       <td>${s.booked?'<span class="pill green">BOOKED</span>':(s.hadError?'<span class="pill red">error</span>':'<span class="pill gray">left</span>')}</td>
       <td>${esc(s.furthest)}</td>
       <td class="num">${s.value?fmt$(s.value):'—'}</td>
@@ -377,7 +377,7 @@ function drawCharts(d){
   const hr = document.getElementById('ch-hour');
   if(hr) charts.hr = new Chart(hr, {
     type:'bar',
-    data:{ labels:d.byHour.map(x=>{const h=x.hour%12||12;return h+(x.hour<12?'a':'p');}),
+    data:{ labels:d.byHour.map(x=>{const h=x.hour%12||12;return h+(x.hour<12?' AM':' PM');}),
       datasets:[
         { label:'Sessions', data:d.byHour.map(x=>x.sessions), backgroundColor:'rgba(255,102,0,0.35)' },
         { label:'Bookings', data:d.byHour.map(x=>x.bookings), backgroundColor:'#10b981' },
