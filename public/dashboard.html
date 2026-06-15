@@ -59,6 +59,9 @@
   .empty { color:var(--mute); font-size:13px; padding:14px 0; text-align:center; }
   .err { background:#fff5f5; border:1px solid #ffd9d9; border-radius:12px; }
   .loading { text-align:center; padding:60px; color:var(--mute); }
+
+  /* Mobile: prevent answer-row overflow in the question breakdown */
+  @media(max-width:600px){ .abar{flex-wrap:wrap;gap:3px 8px;margin-bottom:10px;} .alabel{width:100%;min-width:0;flex:0 0 100%;} .atrack{flex:1 1 auto;min-width:0;} }
 </style>
 </head>
 <body>
