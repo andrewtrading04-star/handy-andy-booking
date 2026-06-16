@@ -24,10 +24,9 @@ export default async function handler(req, res) {
 
     // Try multiple date windows to find the job
     const windows = [
+      { start: '2026-06-15', end: '2026-06-17' },  // June 16 target
+      { start: '2026-06-01', end: '2026-06-30' },
       { start: '2026-01-01', end: '2026-12-31' },
-      { start: '2025-01-01', end: '2025-12-31' },
-      { start: '2024-01-01', end: '2024-12-31' },
-      { start: '2023-01-01', end: '2023-12-31' },
     ];
     let found = [], seen = 0;
     for (const w of windows) {
