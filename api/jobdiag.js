@@ -11,22 +11,33 @@ export default async function handler(req, res) {
   try {
     let url, label;
     if (jobId) {
-      url = `https://api.zenbooker.com/v1/jobs/${jobId}`;
-      label = `job ${jobId}`;
-    } else if (req.query.jobnum) {
-      url = `https://api.zenbooker.com/v1/jobs?job_number=${encodeURIComponent(req.query.jobnum)}&limit=5`;
-      label = `job_number ${req.query.jobnum}`;
-    } else if (name) {
-      url = `https://api.zenbooker.com/v1/jobs?q=${encodeURIComponent(name)}&limit=10`;
-      label = `jobs for ${name}`;
-    } else {
-      return res.status(400).json({ error: 'id, jobnum, or name param required' });
+      // direct fetch by Zenbooker UUID
+      const r = await fetch(`https://api.zenbooker.com/v1/jobs/${jobId}`, { headers: { Authorization: `Bearer ${KEY}` } });
+      const j = await r.json();
+      return res.status(r.status).json(j);
     }
-    const r = await fetch(url, {
-      headers: { Authorization: `Bearer ${KEY}` }
-    });
-    const j = await r.json();
-    res.status(r.status).json({ query: label, ...j });
+
+    // Paginate backwards from most-recent jobs, collect up to 300, filter client-side
+    const targetNum  = req.query.jobnum || '';
+    const targetName = (name || '').toLowerCase();
+    if (!targetNum && !targetName) return res.status(400).json({ error: 'id, jobnum, or name required' });
+
+    let cursor = 0, found = [], seen = 0;
+    for (let page = 0; page < 6; page++) {
+      const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${cursor}&sort=-created`, { headers: { Authorization: `Bearer ${KEY}` } });
+      const j = await r.json();
+      const results = j.results || [];
+      if (!results.length) break;
+      seen += results.length;
+      for (const job of results) {
+        const numMatch  = targetNum  && String(job.job_number) === String(targetNum).replace(/^0+/, '');
+        const nameMatch = targetName && (job.customer?.name || '').toLowerCase().includes(targetName);
+        if (numMatch || nameMatch) found.push(job);
+      }
+      if (found.length) break; // stop as soon as we find a match
+      cursor = j.cursor + results.length;
+    }
+    return res.status(200).json({ query: `jobnum=${targetNum} name=${name}`, scanned: seen, found });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
