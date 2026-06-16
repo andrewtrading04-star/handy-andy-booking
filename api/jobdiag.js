@@ -6,14 +6,24 @@ export default async function handler(req, res) {
   if (!KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });
 
   const jobId = req.query.id;
-  if (!jobId) return res.status(400).json({ error: 'id param required' });
+  const name = req.query.name;
 
   try {
-    const r = await fetch(`https://api.zenbooker.com/v1/jobs/${jobId}`, {
+    let url, label;
+    if (jobId) {
+      url = `https://api.zenbooker.com/v1/jobs/${jobId}`;
+      label = `job ${jobId}`;
+    } else if (name) {
+      url = `https://api.zenbooker.com/v1/jobs?customer_name=${encodeURIComponent(name)}&limit=10`;
+      label = `jobs for ${name}`;
+    } else {
+      return res.status(400).json({ error: 'id or name param required' });
+    }
+    const r = await fetch(url, {
       headers: { Authorization: `Bearer ${KEY}` }
     });
     const j = await r.json();
-    res.status(r.status).json(j);
+    res.status(r.status).json({ query: label, ...j });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
