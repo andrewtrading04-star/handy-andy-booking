@@ -13,11 +13,14 @@ export default async function handler(req, res) {
     if (jobId) {
       url = `https://api.zenbooker.com/v1/jobs/${jobId}`;
       label = `job ${jobId}`;
+    } else if (req.query.jobnum) {
+      url = `https://api.zenbooker.com/v1/jobs?job_number=${encodeURIComponent(req.query.jobnum)}&limit=5`;
+      label = `job_number ${req.query.jobnum}`;
     } else if (name) {
-      url = `https://api.zenbooker.com/v1/jobs?customer_name=${encodeURIComponent(name)}&limit=10`;
+      url = `https://api.zenbooker.com/v1/jobs?q=${encodeURIComponent(name)}&limit=10`;
       label = `jobs for ${name}`;
     } else {
-      return res.status(400).json({ error: 'id or name param required' });
+      return res.status(400).json({ error: 'id, jobnum, or name param required' });
     }
     const r = await fetch(url, {
       headers: { Authorization: `Bearer ${KEY}` }
