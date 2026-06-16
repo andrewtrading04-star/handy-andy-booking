@@ -22,20 +22,31 @@ export default async function handler(req, res) {
     const targetName = (name || '').toLowerCase();
     if (!targetNum && !targetName) return res.status(400).json({ error: 'id, jobnum, or name required' });
 
-    let cursor = 0, found = [], seen = 0;
-    for (let page = 0; page < 6; page++) {
-      const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${cursor}&sort=-created`, { headers: { Authorization: `Bearer ${KEY}` } });
-      const j = await r.json();
-      const results = j.results || [];
-      if (!results.length) break;
-      seen += results.length;
-      for (const job of results) {
-        const numMatch  = targetNum  && String(job.job_number) === String(targetNum).replace(/^0+/, '');
-        const nameMatch = targetName && (job.customer?.name || '').toLowerCase().includes(targetName);
-        if (numMatch || nameMatch) found.push(job);
+    // Try multiple date windows to find the job
+    const windows = [
+      { start: '2026-01-01', end: '2026-12-31' },
+      { start: '2025-01-01', end: '2025-12-31' },
+      { start: '2024-01-01', end: '2024-12-31' },
+      { start: '2023-01-01', end: '2023-12-31' },
+    ];
+    let found = [], seen = 0;
+    for (const w of windows) {
+      let cursor = 0;
+      for (let page = 0; page < 6; page++) {
+        const url = `https://api.zenbooker.com/v1/jobs?limit=50&cursor=${cursor}&start_date_after=${w.start}&start_date_before=${w.end}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${KEY}` } });
+        const j = await r.json();
+        const results = j.results || [];
+        seen += results.length;
+        for (const job of results) {
+          const numMatch  = targetNum  && (String(job.job_number) === String(targetNum) || String(job.job_number) === String(targetNum).replace(/^0+/, ''));
+          const nameMatch = targetName && (job.customer?.name || '').toLowerCase().includes(targetName);
+          if (numMatch || nameMatch) found.push({ ...job, _window: w });
+        }
+        if (!results.length || results.length < 50) break;
+        cursor = (j.cursor || 0) + results.length;
       }
-      if (found.length) break; // stop as soon as we find a match
-      cursor = j.cursor + results.length;
+      if (found.length) break;
     }
     return res.status(200).json({ query: `jobnum=${targetNum} name=${name}`, scanned: seen, found });
   } catch (e) {
