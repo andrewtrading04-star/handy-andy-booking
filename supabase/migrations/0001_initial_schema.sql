@@ -34,6 +34,10 @@ create extension if not exists pgcrypto;   -- gen_random_uuid(), crypt(), gen_sa
 -- ----------------------------------------------------------------------------
 create schema if not exists app;
 set search_path = app, public, extensions;
+-- Don't validate function bodies at CREATE time. crypt()/gen_salt() (pgcrypto,
+-- installed in the `extensions` schema on Supabase) are resolved at call time
+-- via each function's own search_path. Avoids a false "crypt does not exist".
+set check_function_bodies = off;
 
 -- ----------------------------------------------------------------------------
 -- Enumerated types
