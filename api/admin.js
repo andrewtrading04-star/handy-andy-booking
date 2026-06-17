@@ -39,6 +39,8 @@ export default async function handler(req, res) {
     switch (action) {
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
+      case 'calendar':          return await calendar(req, res, db, auth);
+      case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
@@ -155,6 +157,59 @@ async function summary(req, res, db, auth) {
       unassigned: (today || []).filter(b => !b.technician_id && b.status !== 'cancelled').length,
     },
   });
+}
+
+// ── Calendar (week/day grid) ─────────────────────────────────────────────────
+// Bookings within an explicit [from, to) window, plus the technicians and
+// service areas the sidebar needs to render filters and avatars — one call
+// bootstraps the whole calendar view.
+async function calendar(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const from = (req.query.from || '').toString();
+  const to = (req.query.to || '').toString();
+  if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+  const { data: bk, error } = await db.from('bookings').select(bookingSelect())
+    .eq('business_id', biz.id)
+    .gte('scheduled_at', from).lt('scheduled_at', to)
+    .order('scheduled_at', { ascending: true }).limit(2000);
+  if (error) throw error;
+
+  const { data: techs } = await db.from('technicians')
+    .select('id, name, status, color, active').eq('business_id', biz.id).eq('active', true).order('name');
+  const { data: areas } = await db.from('service_areas')
+    .select('id, name, state').eq('business_id', biz.id).eq('active', true).order('name');
+
+  return res.status(200).json({
+    business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: biz.timezone || 'America/Denver' },
+    bookings: (bk || []).map(shapeBooking),
+    technicians: techs || [],
+    areas: areas || [],
+  });
+}
+
+// All techs' weekly availability + upcoming exceptions for one business, so the
+// calendar's "Availability" view can show who's free per day/slot.
+async function availabilityOverview(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data: techs } = await db.from('technicians')
+    .select('id, name, color').eq('business_id', biz.id).eq('active', true).order('name');
+  const ids = (techs || []).map(t => t.id);
+
+  let availability = [], exceptions = [];
+  if (ids.length) {
+    const { data: av } = await db.from('technician_availability')
+      .select('technician_id, day_of_week, slot_key').in('technician_id', ids);
+    availability = av || [];
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: ex } = await db.from('technician_availability_exceptions')
+      .select('technician_id, exception_date, slot_key, is_available')
+      .in('technician_id', ids).gte('exception_date', today);
+    exceptions = (ex || []).map(r => ({
+      technician_id: r.technician_id, date: r.exception_date, slot_key: r.slot_key, is_available: r.is_available,
+    }));
+  }
+  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions });
 }
 
 // ── Bookings list ────────────────────────────────────────────────────────────
@@ -431,11 +486,11 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 
 // ── Shared shaping ───────────────────────────────────────────────────────────
 function bookingSelect() {
-  return `id, status, source, scheduled_at, scheduled_end, price, notes, customer_notes,
-          review_rating, review_text, technician_id,
+  return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status,
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
-          technician:technicians ( id, name, status ),
+          technician:technicians ( id, name, status, color ),
           service:services ( id, name )`;
 }
 
@@ -446,12 +501,15 @@ function shapeBooking(b) {
     source: b.source,
     scheduled_at: b.scheduled_at,
     scheduled_end: b.scheduled_end,
+    duration_minutes: b.duration_minutes,
     price: b.price,
+    payment_status: b.payment_status,
     notes: b.notes,
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,
     review_text: b.review_text,
     technician_id: b.technician_id,
+    service_area_id: b.service_area_id,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
     customer: b.customer || null,
     technician: b.technician || null,

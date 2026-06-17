@@ -4,87 +4,175 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
-<title>Booking Admin</title>
+<title>Schedule — Admin</title>
 <style>
   :root{
-    --navy:#0A1628; --navy-2:#0f2036; --navy-3:#16304f; --orange:#FF6B35; --orange-d:#e85a28;
-    --ink:#e8eef6; --mute:#8aa0bd; --line:#1d3552; --card:#0f2036;
-    --green:#27c093; --red:#ff5d5d; --amber:#ffb020; --blue:#4aa3ff;
+    --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694; --accent:#2563eb; --accent-soft:#eaf1ff;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --orange:#ff6b35; --purple:#9333ea;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
   button{font-family:inherit;cursor:pointer;}
-  input,select{font-family:inherit;}
+  input,select,textarea{font-family:inherit;}
+  a{color:var(--accent);}
   .hidden{display:none !important;}
 
-  /* Login */
+  /* ───────── Login ───────── */
   .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
-  .login{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 24px 60px rgba(0,0,0,.45);}
+  .login{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 18px 50px rgba(20,30,50,.10);}
   .login h1{font-size:20px;margin-bottom:4px;}
   .login .sub{color:var(--mute);font-size:13px;margin-bottom:22px;}
-  .login input{width:100%;background:var(--navy);border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:12px;}
-  .login input:focus{outline:none;border-color:var(--orange);}
-  .btn{background:var(--orange);color:#fff;border:none;border-radius:10px;padding:13px 16px;font-size:15px;font-weight:700;width:100%;}
-  .btn:hover{background:var(--orange-d);}
-  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--mute);font-weight:600;}
+  .login input{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:12px;}
+  .login input:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:700;width:100%;}
+  .btn:hover{filter:brightness(.96);}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
   .btn.sm{width:auto;padding:7px 12px;font-size:13px;border-radius:8px;}
   .err{color:var(--red);font-size:13px;margin-top:6px;min-height:18px;}
 
-  /* App chrome */
-  .topbar{position:sticky;top:0;z-index:20;background:var(--navy-2);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-  .brand{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;}
-  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--orange);}
-  .switcher{display:flex;gap:6px;margin-left:4px;flex-wrap:wrap;}
-  .switcher button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;}
-  .switcher button.on{background:var(--orange);border-color:var(--orange);color:#fff;}
-  .spacer{flex:1;}
-  .who{font-size:12px;color:var(--mute);}
-  .tabs{display:flex;gap:4px;padding:8px 16px 0;overflow-x:auto;background:var(--navy-2);border-bottom:1px solid var(--line);position:sticky;top:53px;z-index:19;}
-  .tabs button{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mute);padding:10px 14px;font-size:14px;font-weight:600;white-space:nowrap;}
-  .tabs button.on{color:var(--ink);border-bottom-color:var(--orange);}
-  .wrap{max-width:1100px;margin:0 auto;padding:16px;}
+  /* ───────── App shell ───────── */
+  .app-shell{display:flex;min-height:100vh;}
+  .sidebar{width:248px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;position:sticky;top:0;overflow-y:auto;}
+  .side-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;flex:1;min-width:0;}
+  .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+  .logo .ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .plus{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:18px;line-height:1;flex-shrink:0;}
+  .switcher{display:flex;gap:5px;padding:0 14px 8px;flex-wrap:wrap;}
+  .switcher button{background:#fff;border:1px solid var(--line);color:var(--mute);padding:5px 11px;border-radius:16px;font-size:12px;font-weight:600;}
+  .switcher button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
 
-  /* KPIs */
-  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px;}
-  @media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr);}}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;}
-  .kpi .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;}
-  .kpi .v{font-size:23px;font-weight:800;margin-top:4px;}
+  .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
+  .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
+  .seg button.on{background:#fff;color:var(--accent);box-shadow:0 1px 3px rgba(20,30,50,.10);}
 
-  /* Cards / list */
-  .section-title{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:18px 0 10px;}
-  .job{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;}
+  .side-nav{display:flex;flex-direction:column;gap:1px;padding:0 8px 6px;}
+  .side-nav button{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font-size:14px;font-weight:600;text-align:left;width:100%;}
+  .side-nav button .ic{width:18px;text-align:center;}
+  .side-nav button:hover{background:var(--line2);}
+  .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
+
+  .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
+  .side-list{display:flex;flex-direction:column;gap:1px;padding:0 8px;}
+  .sl{display:flex;align-items:center;gap:8px;background:transparent;border:none;color:var(--ink-2);padding:8px 10px;border-radius:8px;font-size:13.5px;font-weight:600;text-align:left;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sl:hover{background:var(--line2);}
+  .sl.on{color:var(--accent);font-weight:700;}
+  .sl .ic{width:16px;text-align:center;color:var(--mute);flex-shrink:0;}
+  .side-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+  .who{font-size:12px;color:var(--mute);flex:1;}
+
+  /* avatars */
+  .av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:800;flex-shrink:0;letter-spacing:.3px;}
+  .av.sm{width:20px;height:20px;font-size:9px;}
+  .av.av-un{background:#c4ccd6;color:#fff;}
+
+  /* ───────── Main / calendar ───────── */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .mobilebar{display:none;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;}
+  .mobilebar .ham{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:16px;}
+  .cal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:#fff;flex-wrap:wrap;position:sticky;top:0;z-index:20;}
+  .cal-nav{display:flex;align-items:center;gap:8px;}
+  .cal-nav .arrow{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:16px;}
+  .range-pill{border:1px solid var(--line);border-radius:20px;padding:8px 18px;font-weight:700;font-size:15px;min-width:170px;text-align:center;}
+  .view-toggle{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+  .view-toggle button{background:#fff;border:none;border-left:1px solid var(--line);color:var(--mute);padding:8px 14px;font-size:13px;font-weight:700;}
+  .view-toggle button:first-child{border-left:none;}
+  .view-toggle button.on{background:var(--accent-soft);color:var(--accent);}
+  .view-scroll{flex:1;overflow:auto;}
+  #view{padding:0;}
+
+  .week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-height:calc(100vh - 64px);}
+  .week.one{grid-template-columns:minmax(0,520px);}
+  .daycol{border-right:1px solid var(--line);min-width:0;}
+  .daycol:last-child{border-right:none;}
+  .dayhead{padding:11px 12px 4px;font-size:12.5px;font-weight:800;letter-spacing:.4px;color:var(--ink-2);display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line2);}
+  .dayhead.today{color:var(--accent);}
+  .todot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;}
+  .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
+  .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
+  .evt{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
+  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);}
+  .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
+  .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .evt-b{display:flex;align-items:center;gap:6px;}
+  .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
+  .evt.s-pending{border-left-color:var(--amber);}
+  .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
+  .evt.s-cancelled,.evt.s-no_show{border-left-color:#c4ccd6;opacity:.6;}
+  .evt.s-cancelled .evt-n{text-decoration:line-through;}
+  .dayempty{height:6px;}
+
+  /* availability grid */
+  .availgrid{display:grid;grid-template-columns:130px repeat(7,minmax(0,1fr));}
+  .agcell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px;min-height:54px;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;}
+  .agcell:nth-child(8n){border-right:none;}
+  .aghead{font-size:12px;font-weight:800;color:var(--ink-2);position:sticky;top:0;background:#fff;letter-spacing:.4px;}
+  .aghead.today{color:var(--accent);}
+  .agmd{font-weight:600;color:var(--mute);font-size:11px;}
+  .agslot{font-size:12px;font-weight:700;color:var(--ink-2);align-items:center;}
+  .agnone{color:#c4ccd6;font-size:13px;}
+  .agcorner{background:#fff;}
+
+  /* generic content (bookings / customers / technicians render here) */
+  .wrap{padding:16px 18px;max-width:1100px;}
+  .section-title{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;font-weight:700;}
+  .job{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:9px;}
   .job .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
   .job .name{font-weight:700;font-size:15px;}
-  .job .meta{color:var(--mute);font-size:13px;margin-top:3px;line-height:1.5;}
-  .job .time{font-weight:700;font-size:14px;text-align:right;white-space:nowrap;}
-  .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;}
-  select.assign,select.filter{background:var(--navy);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:13px;}
-  .badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:capitalize;}
-  .b-pending{background:rgba(255,176,32,.16);color:var(--amber);}
-  .b-confirmed{background:rgba(74,163,255,.16);color:var(--blue);}
-  .b-assigned{background:rgba(74,163,255,.16);color:var(--blue);}
-  .b-on_the_way,.b-arrived,.b-in_progress{background:rgba(255,107,53,.18);color:var(--orange);}
-  .b-completed{background:rgba(39,192,147,.16);color:var(--green);}
-  .b-cancelled,.b-no_show{background:rgba(255,93,93,.16);color:var(--red);}
-  .t-status{font-size:11px;font-weight:700;}
+  .job .meta{color:var(--mute);font-size:13px;margin-top:4px;line-height:1.6;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .job .time{font-weight:700;font-size:13px;text-align:right;white-space:nowrap;color:var(--ink-2);}
+  .job.evt-row{cursor:pointer;}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;}
+  select.assign,select.filter{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:13px;}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:capitalize;}
+  .b-pending{background:#fef3c7;color:#b45309;}
+  .b-confirmed,.b-assigned{background:#dbeafe;color:#1d4ed8;}
+  .b-on_the_way,.b-arrived,.b-in_progress{background:#ffedd5;color:#c2410c;}
+  .b-completed{background:#dcfce7;color:#15803d;}
+  .b-cancelled,.b-no_show{background:#fee2e2;color:#b91c1c;}
+  .t-status{font-size:12px;font-weight:600;}
   .dot-s{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;}
-  .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:var(--mute);}
-  .search{width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:12px 14px;font-size:15px;margin-bottom:14px;}
-  .search:focus{outline:none;border-color:var(--orange);}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:8px;border-bottom:1px solid var(--line);}
-  td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
-  .empty{color:var(--mute);text-align:center;padding:40px 0;}
+  .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:#c4ccd6;}
+  .search{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:11px 13px;font-size:14px;margin-bottom:12px;}
+  .search:focus{outline:none;border-color:var(--accent);}
+  table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
+  td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
+  .empty{color:var(--mute);text-align:center;padding:48px 0;}
   .stars{color:var(--amber);}
-  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.4);z-index:50;}
-  /* Availability editor */
+  .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
+  .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
+  .pay-authorized{background:#dbeafe;color:#1d4ed8;} .pay-refunded{background:#fee2e2;color:#b91c1c;}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.25);z-index:80;}
+
+  /* modals */
+  .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;box-shadow:0 24px 60px rgba(20,30,50,.22);}
+  .sheet h2{font-size:17px;margin-bottom:14px;}
+  .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
+  .bk-row span:first-child{width:18px;flex-shrink:0;}
+  .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
+  .bk-assign{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);}
+  .bk-assign select{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;}
+
+  /* availability editor (reused) */
   .avail-day{margin-bottom:12px;}
   .avail-day .dl{font-size:13px;font-weight:700;margin-bottom:6px;}
   .avail-chips{display:flex;gap:6px;flex-wrap:wrap;}
-  .slotchip{background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12px;font-weight:600;}
-  .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip{background:#fff;border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12px;font-weight:600;}
+  .slotchip.on{background:var(--accent);border-color:var(--accent);color:#fff;}
   .slotchip.on::after{content:' ✓';font-weight:800;}
+  .sub{color:var(--mute);}
+
+  @media(max-width:880px){
+    .sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:50;box-shadow:0 0 40px rgba(0,0,0,.2);}
+    .sidebar.open{transform:none;}
+    .mobilebar{display:flex;}
+    .week,.availgrid{min-width:880px;}
+    .view-scroll{overflow:auto;}
+  }
 </style>
 </head>
 <body>
@@ -92,7 +180,7 @@
 <!-- ───────── Login ───────── -->
 <div id="login" class="login-wrap">
   <form class="login" id="loginForm">
-    <h1>Booking Admin</h1>
+    <h1>Schedule Admin</h1>
     <div class="sub">Enter your password to continue</div>
     <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
     <button class="btn" type="submit">Sign in</button>
@@ -101,28 +189,67 @@
 </div>
 
 <!-- ───────── App ───────── -->
-<div id="app" class="hidden">
-  <div class="topbar">
-    <div class="brand"><span class="dot"></span><span id="bizName">Admin</span></div>
+<div id="app" class="app-shell hidden">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-head">
+      <div class="logo"><span class="dot">🛠️</span><span class="ttl" id="bizName">Schedule</span></div>
+      <button class="plus" id="newBookingBtn" title="New booking">＋</button>
+    </div>
     <div class="switcher" id="switcher"></div>
-    <div class="spacer"></div>
-    <span class="who" id="who"></span>
-    <button class="btn sm" id="newBookingBtn">＋ New</button>
-    <button class="btn ghost sm" id="logout">Log out</button>
-  </div>
-  <div class="tabs" id="tabs">
-    <button data-tab="today" class="on">Today</button>
-    <button data-tab="bookings">Bookings</button>
-    <button data-tab="customers">Customers</button>
-    <button data-tab="technicians">Technicians</button>
-  </div>
-  <div class="wrap" id="view"></div>
+
+    <div class="seg" id="modeSeg">
+      <button data-mode="jobs" class="on">Jobs</button>
+      <button data-mode="availability">Availability</button>
+    </div>
+
+    <nav class="side-nav" id="sideNav">
+      <button data-nav="schedule" class="on"><span class="ic">📅</span> Schedule</button>
+      <button data-nav="bookings"><span class="ic">📋</span> Bookings</button>
+      <button data-nav="customers"><span class="ic">👥</span> Customers</button>
+      <button data-nav="technicians"><span class="ic">🔧</span> Technicians</button>
+    </nav>
+
+    <div id="schedSidebar">
+      <div class="side-section">Territories</div>
+      <div class="side-list" id="territoryList"></div>
+      <div class="side-section">Jobs Assigned To</div>
+      <div class="side-list" id="assignList"></div>
+    </div>
+
+    <div class="side-foot">
+      <span class="who" id="who"></span>
+      <button class="btn ghost sm" id="logout">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="mobilebar">
+      <button class="ham" id="ham">☰</button>
+      <strong id="mobTitle">Schedule</strong>
+    </div>
+
+    <div class="cal-head" id="calHead">
+      <div class="cal-nav">
+        <button class="arrow" id="prevWk">‹</button>
+        <div class="range-pill" id="rangeLabel">…</div>
+        <button class="arrow" id="nextWk">›</button>
+        <button class="btn ghost sm" id="todayBtn">Today</button>
+      </div>
+      <div class="view-toggle" id="viewToggle">
+        <button data-view="list">List</button>
+        <button data-view="week" class="on">Week</button>
+        <button data-view="day">Day</button>
+      </div>
+    </div>
+
+    <div class="view-scroll"><div id="view"></div></div>
+  </main>
 </div>
 
 <!-- New booking modal -->
-<div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 14px;">
-  <div style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;">
-    <h2 style="font-size:17px;margin-bottom:14px;">New Booking</h2>
+<div id="modal" class="modal hidden">
+  <div class="sheet">
+    <h2>New Booking</h2>
     <form id="nbForm" style="display:grid;gap:10px;">
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email"></div>
@@ -141,11 +268,22 @@
   </div>
 </div>
 
+<!-- Booking detail modal -->
+<div id="bkModal" class="modal hidden">
+  <div class="sheet">
+    <h2 id="bkTitle">Booking</h2>
+    <div id="bkBody"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn ghost" type="button" id="bkClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Technician availability modal -->
-<div id="availModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 14px;">
-  <div style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:520px;">
-    <h2 style="font-size:17px;margin-bottom:4px;" id="availTitle">Availability</h2>
-    <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:16px;">Set the normal weekly schedule, plus any one-time changes for specific dates.</div>
+<div id="availModal" class="modal hidden">
+  <div class="sheet" style="max-width:520px;">
+    <h2 id="availTitle">Availability</h2>
+    <div class="sub" style="font-size:13px;margin:-8px 0 16px;">Set the normal weekly schedule, plus any one-time changes for specific dates.</div>
     <div id="availBody"><div class="empty">Loading…</div></div>
     <div style="display:flex;gap:8px;margin-top:16px;">
       <button class="btn" type="button" id="availSaveBtn">Save</button>
@@ -160,9 +298,24 @@ const API = '/api/admin';
 let token = localStorage.getItem('ha_admin_token') || '';
 let role = localStorage.getItem('ha_admin_role') || '';
 let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
-let current = null;           // current business object
-let tab = 'today';
+let current = null;            // current business object
+
+// view state
+let section = 'schedule';      // schedule | bookings | customers | technicians
+let calMode = 'jobs';          // jobs | availability
+let calView = 'week';          // week | day | list
+let anchorDate = '';           // 'YYYY-MM-DD' anchor for the displayed week/day
+let filterArea = '';           // '' = all territories, else service_area id
+let filterTech = 'all';        // all | unassigned | tech id
 let pollTimer = null;
+
+// caches
+let techCache = [];
+let areaCache = [];
+let calBookings = [];
+let availData = null;          // { slug, slots, days, technicians, recurringSet, exMap }
+
+const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
 // ── API helper ───────────────────────────────────────────────────────────
 async function api(action, { method='GET', params={}, body=null } = {}) {
@@ -179,9 +332,40 @@ async function api(action, { method='GET', params={}, body=null } = {}) {
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
-
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ── Date / format helpers (business-timezone aware) ────────────────────────
+function tz(){ return (current && current.timezone) || 'America/Denver'; }
+function todayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: tz() }); }
+function addDays(ds, n){ const d=new Date(ds+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+function dowOf(ds){ return new Date(ds+'T12:00:00Z').getUTCDay(); }
+function sundayOf(ds){ return addDays(ds, -dowOf(ds)); }
+function weekDates(start){ const out=[]; for(let i=0;i<7;i++) out.push(addDays(start,i)); return out; }
+function currentWeekDates(){ return weekDates(sundayOf(anchorDate)); }
+function localDateOf(iso){ try{ return new Date(iso).toLocaleDateString('en-CA',{ timeZone: tz() }); }catch{ return ''; } }
+function colHeadLabel(ds){
+  const d=new Date(ds+'T12:00:00Z');
+  return { dow:d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'}).toUpperCase(),
+           md:d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'}).toUpperCase() };
+}
+function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString('en-US',{timeZone:tz(),hour:'numeric',minute:'2-digit'}).replace(':00',''); }catch{ return ''; } }
+function fmtTimeRange(b){ const s=fmtClock(b.scheduled_at); const e=b.scheduled_end?fmtClock(b.scheduled_end):''; return e?`${s} - ${e}`:s; }
+function fmtDuration(b){
+  let mins=b.duration_minutes;
+  if(!mins && b.scheduled_end && b.scheduled_at) mins=Math.round((new Date(b.scheduled_end)-new Date(b.scheduled_at))/60000);
+  if(!mins||mins<=0) return '';
+  const h=Math.floor(mins/60), m=mins%60;
+  return (h?h+'h':'')+(m?(h?' ':'')+m+'m':'');
+}
+function fmtDateTime(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString('en-US',{timeZone:tz(),weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch{ return iso; } }
+function fmtTime(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString('en-US',{timeZone:tz(),weekday:'short',hour:'numeric',minute:'2-digit'}); }catch{ return iso; } }
+function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function stars(n){ return n ? '<span class="stars">'+'★'.repeat(n)+'</span>' : ''; }
+function hashCode(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h; }
+function initials(name){ const p=String(name||'').trim().split(/\s+/).filter(Boolean); if(!p.length) return '?'; if(p.length===1) return p[0].slice(0,2).toUpperCase(); return (p[0][0]+p[p.length-1][0]).toUpperCase(); }
+function techColor(t){ return (t&&t.color)||PALETTE[hashCode(String((t&&t.id)||''))%PALETTE.length]; }
+function avatar(t, sm){ return t ? `<span class="av${sm?' sm':''}" style="background:${techColor(t)}" title="${esc(t.name)}">${esc(initials(t.name))}</span>` : `<span class="av${sm?' sm':''} av-un">?</span>`; }
 
 // ── Auth ─────────────────────────────────────────────────────────────────
 document.getElementById('loginForm').addEventListener('submit', async (e)=>{
@@ -196,7 +380,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     enterApp();
   } catch(err){ errEl.textContent = err.message; }
 });
-
 function logout(){
   token=''; role=''; businesses=[]; current=null;
   localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_biz');
@@ -211,124 +394,250 @@ function enterApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = role==='owner' ? 'Owner' : 'Secretary';
   current = businesses[0] || null;
+  anchorDate = todayStr();
   renderSwitcher();
-  selectTab('today');
+  navTo('schedule');
 }
 
 function renderSwitcher(){
   const el = document.getElementById('switcher');
+  if(businesses.length<2){ el.innerHTML=''; return; }
   el.innerHTML = businesses.map(b =>
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
-    renderSwitcher(); selectTab(tab);
+    availData=null; renderSwitcher(); navTo(section);
   }));
 }
 
-// ── Tabs ─────────────────────────────────────────────────────────────────
-document.getElementById('tabs').querySelectorAll('button').forEach(b=>
-  b.addEventListener('click',()=>selectTab(b.dataset.tab)));
+// ── Navigation ─────────────────────────────────────────────────────────────
+document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
+  b.addEventListener('click',()=>{ navTo(b.dataset.nav); closeSidebar(); }));
 
-function selectTab(t){
-  tab=t;
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  document.getElementById('bizName').textContent = current ? current.name : 'Admin';
+function navTo(s){
+  section=s;
+  document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
+  const sched = s==='schedule';
+  document.getElementById('schedSidebar').classList.toggle('hidden',!sched);
+  document.getElementById('modeSeg').classList.toggle('hidden',!sched);
+  document.getElementById('calHead').classList.toggle('hidden',!sched);
+  document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',customers:'Customers',technicians:'Technicians'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
-  if(t==='today'){ renderToday(); pollTimer=setInterval(()=>{ if(tab==='today') renderToday(true); }, 20000); }
-  else if(t==='bookings') renderBookings();
-  else if(t==='customers') renderCustomers();
-  else if(t==='technicians') renderTechnicians();
-}
-
-function fmtTime(iso){
-  if(!iso) return '—';
-  try{ return new Date(iso).toLocaleString('en-US',{ timeZone:current.timezone, weekday:'short', hour:'numeric', minute:'2-digit' }); }
-  catch{ return new Date(iso).toLocaleString(); }
-}
-function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
-function stars(n){ return n ? '<span class="stars">'+'★'.repeat(n)+'</span>' : ''; }
-
-// ── Today ────────────────────────────────────────────────────────────────
-let techCache = [];
-async function renderToday(silent){
   const view=document.getElementById('view');
-  if(!silent) view.innerHTML='<div class="empty">Loading…</div>';
+  if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
+  else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+    if(s==='bookings') renderBookings();
+    else if(s==='customers') renderCustomers();
+    else if(s==='technicians') renderTechnicians();
+  }
+}
+function refreshCurrent(){
+  if(section==='schedule') renderSchedule();
+  else if(section==='bookings') renderBookings();
+  else if(section==='customers') renderCustomers();
+  else if(section==='technicians') renderTechnicians();
+}
+
+// mobile sidebar
+document.getElementById('ham').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); }
+
+// ── Calendar: mode + view + nav ──────────────────────────────────────────
+document.getElementById('modeSeg').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  calMode=b.dataset.mode;
+  document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.toggle('on',x.dataset.mode===calMode));
+  renderCalBody();
+}));
+document.getElementById('viewToggle').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  calView=b.dataset.view;
+  document.querySelectorAll('#viewToggle button').forEach(x=>x.classList.toggle('on',x.dataset.view===calView));
+  renderCalBody();
+}));
+document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); });
+document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); });
+document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); });
+
+function rangeBounds(dates){
+  return [ addDays(dates[0],-1)+'T00:00:00.000Z', addDays(dates[6],2)+'T00:00:00.000Z' ];
+}
+
+async function renderSchedule(silent){
+  const dates = currentWeekDates();
+  const [from,to] = rangeBounds(dates);
+  const view=document.getElementById('view');
+  if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
   try{
-    const d = await api('summary', { params:{ business: current.slug } });
-    techCache = d.technicians;
-    const techOpts = (selId)=>['<option value="">— Unassigned —</option>',
-      ...d.technicians.map(t=>`<option value="${t.id}" ${t.id===selId?'selected':''}>${esc(t.name)}</option>`)].join('');
-
-    const kpis = `
-      <div class="kpis">
-        <div class="kpi"><div class="l">Revenue Today</div><div class="v">${money(d.revenue.today)}</div></div>
-        <div class="kpi"><div class="l">This Week</div><div class="v">${money(d.revenue.week)}</div></div>
-        <div class="kpi"><div class="l">This Month</div><div class="v">${money(d.revenue.month)}</div></div>
-        <div class="kpi"><div class="l">Today's Jobs</div><div class="v">${d.counts.todayTotal}</div></div>
-        <div class="kpi"><div class="l">Unassigned</div><div class="v">${d.counts.unassigned}</div></div>
-      </div>`;
-
-    const techStrip = `<div class="section-title">Technicians</div>
-      <div class="job"><div style="display:flex;gap:18px;flex-wrap:wrap;">${
-        d.technicians.map(t=>`<span class="t-status"><span class="dot-s s-${t.status}"></span>${esc(t.name)} · ${t.status.replace('_',' ')}</span>`).join('') || '<span class="empty">No technicians</span>'
-      }</div></div>`;
-
-    const jobs = d.today.length ? d.today.map(b=>jobCard(b, techOpts)).join('')
-      : '<div class="empty">No jobs scheduled today.</div>';
-
-    view.innerHTML = kpis + techStrip + `<div class="section-title">Today's Jobs</div>` + jobs;
-    bindJobCards();
+    const d = await api('calendar', { params:{ business: current.slug, from, to } });
+    techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
+    if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
+    renderSidebarFilters();
+    renderCalBody();
   }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
-function jobCard(b, techOpts){
-  const canAssign = !['cancelled','completed','no_show'].includes(b.status);
-  return `<div class="job" data-id="${b.id}">
-    <div class="row">
-      <div>
-        <div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
-        <div class="meta">${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''}<br>${esc(b.address||'')}
-        ${b.customer?.phone?'<br>☎ '+esc(b.customer.phone):''}
-        ${b.customer_notes?'<br>📝 '+esc(b.customer_notes):''}
-        ${b.review_rating?'<br>'+stars(b.review_rating):''}</div>
-      </div>
-      <div class="time">${fmtTime(b.scheduled_at)}</div>
-    </div>
-    <div class="actions">
-      ${canAssign?`<select class="assign" data-act="assign">${techOpts(b.technician_id)}</select>`:''}
-      ${b.status==='pending'?`<button class="btn sm" data-act="confirm">Confirm</button>`:''}
-      ${canAssign?`<button class="btn ghost sm" data-act="reschedule">Reschedule</button>`:''}
-      ${canAssign?`<button class="btn ghost sm" data-act="cancel">Cancel</button>`:''}
-    </div>
-  </div>`;
+function renderSidebarFilters(){
+  const tl=document.getElementById('territoryList');
+  tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">📍</span> All Territories</button>`+
+    areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">📍</span> ${esc(a.name)}</button>`).join('');
+  tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
+
+  const al=document.getElementById('assignList');
+  al.innerHTML=`<button class="sl ${filterTech==='all'?'on':''}" data-tech="all"><span class="ic">👥</span> All Jobs</button>
+    <button class="sl ${filterTech==='unassigned'?'on':''}" data-tech="unassigned"><span class="ic">🚫</span> Unassigned</button>`+
+    techCache.map(t=>`<button class="sl ${filterTech===t.id?'on':''}" data-tech="${t.id}">${avatar(t,true)} ${esc(t.name)}</button>`).join('');
+  al.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterTech=b.dataset.tech; renderSidebarFilters(); renderCalBody(); }));
 }
 
-function bindJobCards(){
-  document.querySelectorAll('.job[data-id]').forEach(card=>{
-    const id=card.dataset.id;
-    const sel=card.querySelector('select.assign');
-    if(sel) sel.addEventListener('change',()=>updateBooking({ id, action:'assign', technician_id: sel.value||null }));
-    card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const act=btn.dataset.act;
-      if(act==='confirm') await updateBooking({ id, action:'confirm' });
-      if(act==='cancel'){ if(confirm('Cancel this booking?')) await updateBooking({ id, action:'cancel' }); }
-      if(act==='reschedule'){
-        const v=prompt('New date & time (YYYY-MM-DD HH:MM):');
-        if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id, action:'reschedule', scheduled_at: iso }); }
-      }
-    }));
+function passFilters(b){
+  if(filterArea && b.service_area_id!==filterArea) return false;
+  if(filterTech==='unassigned'){ if(b.technician_id) return false; }
+  else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
+  return true;
+}
+
+function updateRangeLabel(dates){
+  const o={timeZone:'UTC',month:'short',day:'numeric'};
+  if(calView==='day'){
+    const d=new Date(anchorDate+'T12:00:00Z');
+    document.getElementById('rangeLabel').textContent=d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'});
+  } else {
+    const a=new Date(dates[0]+'T12:00:00Z'), b=new Date(dates[6]+'T12:00:00Z');
+    const yr=b.toLocaleDateString('en-US',{timeZone:'UTC',year:'numeric'});
+    document.getElementById('rangeLabel').textContent=`${a.toLocaleDateString('en-US',o)} - ${b.toLocaleDateString('en-US',o)}, ${yr}`;
+  }
+}
+
+function renderCalBody(){
+  if(section!=='schedule') return;
+  const dates=currentWeekDates();
+  updateRangeLabel(dates);
+  if(calMode==='availability') renderAvailabilityGrid(dates);
+  else renderJobsView(dates);
+}
+
+// ── Jobs view ──────────────────────────────────────────────────────────────
+function evtCard(b){
+  return `<div class="evt s-${b.status}" data-id="${b.id}">
+    <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}</div>
+  </div>`;
+}
+function dayColumn(ds){
+  const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b))
+                         .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  const h=colHeadLabel(ds);
+  const isToday=ds===todayStr();
+  return `<div class="daycol">
+    <div class="dayhead ${isToday?'today':''}">${isToday?'<span class="todot"></span>':''}${h.dow}, ${h.md}</div>
+    <div class="daycount">${items.length} JOB${items.length===1?'':'S'}</div>
+    <div class="daybody">${items.map(evtCard).join('')||'<div class="dayempty"></div>'}</div>
+  </div>`;
+}
+function renderJobsView(dates){
+  const view=document.getElementById('view');
+  if(calView==='list'){ renderListView(dates); return; }
+  if(calView==='day'){ view.innerHTML=`<div class="week one">${dayColumn(anchorDate)}</div>`; }
+  else { view.innerHTML=`<div class="week">${dates.map(dayColumn).join('')}</div>`; }
+  document.querySelectorAll('.evt[data-id]').forEach(el=>el.addEventListener('click',()=>{
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+  }));
+}
+function renderListView(dates){
+  const view=document.getElementById('view');
+  let html='<div class="wrap">';
+  let any=false;
+  dates.forEach(ds=>{
+    const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b)).sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+    if(!items.length) return; any=true;
+    const h=colHeadLabel(ds);
+    html+=`<div class="section-title">${h.dow}, ${h.md} · ${items.length} job${items.length===1?'':'s'}</div>`;
+    html+=items.map(b=>`<div class="job evt-row" data-id="${b.id}"><div class="row">
+        <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
+        <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
+        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div></div>`).join('');
   });
+  html+='</div>';
+  view.innerHTML = any ? html : '<div class="empty">No jobs this week.</div>';
+  document.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+  }));
+}
+
+// ── Availability view (all techs, who's free per day/slot) ─────────────────
+async function renderAvailabilityGrid(dates){
+  const view=document.getElementById('view');
+  if(!availData || availData.slug!==current.slug){
+    view.innerHTML='<div class="empty">Loading…</div>';
+    try{
+      const d=await api('availability_overview',{ params:{ business: current.slug }});
+      availData={ slug:current.slug, slots:d.slots, days:d.days, technicians:d.technicians||[],
+        recurringSet:new Set((d.availability||[]).map(a=>`${a.technician_id}:${a.day_of_week}:${a.slot_key}`)),
+        exMap:Object.fromEntries((d.exceptions||[]).map(e=>[`${e.technician_id}:${e.date}:${e.slot_key}`, e.is_available])) };
+    }catch(err){ view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
+  }
+  const availTechFor=(ds,slot)=>{
+    const dow=dowOf(ds);
+    return availData.technicians.filter(t=>{
+      let on=availData.recurringSet.has(`${t.id}:${dow}:${slot}`);
+      const k=`${t.id}:${ds}:${slot}`;
+      if(k in availData.exMap) on=availData.exMap[k];
+      return on;
+    });
+  };
+  let html='<div class="availgrid"><div class="agcell aghead agcorner"></div>';
+  dates.forEach(ds=>{ const h=colHeadLabel(ds); html+=`<div class="agcell aghead ${ds===todayStr()?'today':''}">${h.dow}<br><span class="agmd">${h.md}</span></div>`; });
+  availData.slots.forEach(s=>{
+    html+=`<div class="agcell agslot">${esc(s.label)}</div>`;
+    dates.forEach(ds=>{
+      const techs=availTechFor(ds,s.key);
+      html+=`<div class="agcell">${techs.map(t=>avatar(t,true)).join('')||'<span class="agnone">—</span>'}</div>`;
+    });
+  });
+  html+='</div>';
+  view.innerHTML=html;
+}
+
+// ── Booking detail modal ───────────────────────────────────────────────────
+function openBooking(b){
+  const m=document.getElementById('bkModal');
+  const canAssign=!['cancelled','completed','no_show'].includes(b.status);
+  const techOpts=['<option value="">— Unassigned —</option>',
+    ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>`;
+  document.getElementById('bkBody').innerHTML=`
+    <div class="bk-row"><span>🕑</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
+    <div class="bk-row"><span>🔧</span><div>${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''} <span class="pay pay-${b.payment_status||'unpaid'}">${esc(b.payment_status||'unpaid')}</span></div></div>
+    ${b.address?`<div class="bk-row"><span>📍</span><div>${esc(b.address)}</div></div>`:''}
+    ${b.customer?.phone?`<div class="bk-row"><span>📞</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    ${b.customer_notes?`<div class="bk-row"><span>📝</span><div>${esc(b.customer_notes)}</div></div>`:''}
+    ${b.review_rating?`<div class="bk-row"><span>⭐</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
+    <div class="bk-actions">
+      ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
+      ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
+      ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
+      ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
+    </div>`;
+  m.classList.remove('hidden');
+  const close=()=>m.classList.add('hidden');
+  document.getElementById('bkClose').onclick=close;
+  m.onclick=e=>{ if(e.target===m) close(); };
+  const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
+  const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
+  const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
+  const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking?')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
 }
 
 async function updateBooking(payload){
-  try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); selectTab(tab); }
+  try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
   catch(err){ toast(err.message); }
 }
 
-// ── Bookings ─────────────────────────────────────────────────────────────
+// ── Bookings list ─────────────────────────────────────────────────────────
 async function renderBookings(){
   const view=document.getElementById('view');
-  view.innerHTML = `
+  view.innerHTML = `<div class="wrap">
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
       <select class="filter" id="rangeF">
         <option value="today">Today</option><option value="week">This Week</option>
@@ -340,17 +649,20 @@ async function renderBookings(){
         <option>on_the_way</option><option>arrived</option><option>in_progress</option>
         <option>completed</option><option>cancelled</option><option>no_show</option>
       </select>
-    </div><div id="blist"><div class="empty">Loading…</div></div>`;
+    </div><div id="blist"><div class="empty">Loading…</div></div></div>`;
   const load=async()=>{
     const list=document.getElementById('blist');
     try{
       const d=await api('bookings',{ params:{ business:current.slug, range:document.getElementById('rangeF').value, status:document.getElementById('statusF').value }});
       list.innerHTML = d.bookings.length ? d.bookings.map(b=>`
-        <div class="job"><div class="row">
+        <div class="job evt-row" data-id="${b.id}"><div class="row">
           <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
-          <div class="meta">${esc(b.service?.name||'')} · ${esc(b.technician?.name||'Unassigned')}<br>${esc(b.address||'')}</div></div>
+          <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} · ${esc(b.technician?.name||'Unassigned')}<br>${esc(b.address||'')}</div></div>
           <div class="time">${fmtTime(b.scheduled_at)}<br>${money(b.price)}</div>
         </div></div>`).join('') : '<div class="empty">No bookings.</div>';
+      list.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
+        const b=d.bookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+      }));
     }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
   };
   document.getElementById('rangeF').addEventListener('change',load);
@@ -358,11 +670,11 @@ async function renderBookings(){
   load();
 }
 
-// ── Customers ────────────────────────────────────────────────────────────
+// ── Customers ──────────────────────────────────────────────────────────────
 async function renderCustomers(){
   const view=document.getElementById('view');
-  view.innerHTML = `<input class="search" id="custSearch" placeholder="Search name, phone, email, address…">
-    <div id="clist"><div class="empty">Loading…</div></div>`;
+  view.innerHTML = `<div class="wrap"><input class="search" id="custSearch" placeholder="Search name, phone, email, address…">
+    <div id="clist"><div class="empty">Loading…</div></div></div>`;
   const load=async(q)=>{
     const list=document.getElementById('clist');
     try{
@@ -376,13 +688,13 @@ async function renderCustomers(){
   load('');
 }
 
-// ── Technicians ──────────────────────────────────────────────────────────
+// ── Technicians ────────────────────────────────────────────────────────────
 async function renderTechnicians(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="empty">Loading…</div>';
+  view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('technicians',{ params:{ business:current.slug }});
-    view.innerHTML = d.technicians.map(t=>`
+    document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
           <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}</div>
@@ -399,7 +711,7 @@ async function renderTechnicians(){
         </div>
       </div>`).join('') || '<div class="empty">No technicians.</div>';
 
-    view.querySelectorAll('.job[data-id]').forEach(card=>{
+    document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
       const id=card.dataset.id;
       card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
       card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -409,14 +721,14 @@ async function renderTechnicians(){
         if(btn.dataset.act==='toggle'){ saveTech({ id, active: btn.textContent==='Activate' }); }
       }));
     });
-  }catch(err){ view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+  }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 async function saveTech(payload){
-  try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); renderTechnicians(); }
+  try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
   catch(err){ toast(err.message); }
 }
 
-// ── Technician availability editor ─────────────────────────────────────────
+// ── Technician availability editor (weekly + one-time exceptions) ───────────
 let availTechId=null, availDefs=null, availState=new Set();
 let availExceptions=[], exEditState=new Set();
 document.getElementById('availCloseBtn').addEventListener('click',()=>document.getElementById('availModal').classList.add('hidden'));
@@ -438,11 +750,11 @@ async function openAvailability(techId, techName){
       }</div></div>`).join('');
     body.innerHTML=`<div id="availWeekly">${weekly}</div>
       <div style="border-top:1px solid var(--line);margin:16px 0 12px;"></div>
-      <div class="dl" style="margin-bottom:4px;">One-time changes</div>
-      <div class="sub" style="color:var(--mute);font-size:12px;margin-bottom:10px;">Give this tech a specific day off (or an extra slot) without changing their weekly schedule.</div>
-      <input type="date" id="exDate" style="width:100%;background:var(--navy);border:1px solid var(--line);color:#fff;padding:9px;border-radius:8px;font-size:14px;">
+      <div class="dl" style="margin-bottom:4px;font-weight:700;">One-time changes</div>
+      <div class="sub" style="font-size:12px;margin-bottom:10px;">Give this tech a specific day off (or an extra slot) without changing their weekly schedule.</div>
+      <input type="date" id="exDate" style="width:100%;background:#fff;border:1px solid var(--line);color:var(--ink);padding:9px;border-radius:8px;font-size:14px;">
       <div id="exEditor" class="hidden" style="margin-top:10px;">
-        <div class="sub" id="exEditorLabel" style="color:var(--mute);font-size:12px;margin-bottom:6px;"></div>
+        <div class="sub" id="exEditorLabel" style="font-size:12px;margin-bottom:6px;"></div>
         <div class="avail-chips" id="exSlots"></div>
         <button type="button" class="btn ghost sm" id="exSave" style="margin-top:10px;">Save this date</button>
       </div>
@@ -457,7 +769,6 @@ async function openAvailability(techId, techName){
     renderExceptionList();
   }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
-
 function recurringKeysFor(dow){ return availDefs.slots.filter(s=>availState.has(dow+':'+s.key)).map(s=>s.key); }
 function effectiveKeysForDate(dateStr){
   const dow=new Date(dateStr+'T00:00:00').getDay();
@@ -488,7 +799,7 @@ async function saveException(){
   const btn=document.getElementById('exSave'); btn.disabled=true;
   try{
     await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:[...exEditState]}});
-    toast('Saved for '+dateLabel(date));
+    toast('Saved for '+dateLabel(date)); availData=null;
     const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
     renderExceptionList();
   }catch(e){ toast(e.message); }
@@ -501,16 +812,16 @@ function renderExceptionList(){
   for(const ex of availExceptions){ (byDate[ex.date]=byDate[ex.date]||[]).push(ex); }
   const dates=Object.keys(byDate).sort();
   if(!dates.length){ el.innerHTML=''; return; }
-  el.innerHTML=`<div class="sub" style="color:var(--mute);font-size:12px;margin-bottom:6px;">Upcoming changes:</div>`+
+  el.innerHTML=`<div class="sub" style="font-size:12px;margin-bottom:6px;">Upcoming changes:</div>`+
     dates.map(date=>{
       const offs=byDate[date].filter(e=>!e.is_available).map(e=>labelOf(e.slot_key));
       const ons =byDate[date].filter(e=> e.is_available).map(e=>labelOf(e.slot_key));
       const parts=[];
       if(offs.length) parts.push(`Off: ${offs.join(', ')}`);
       if(ons.length)  parts.push(`Working: ${ons.join(', ')}`);
-      return `<div style="background:var(--navy);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+      return `<div style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
         <div style="font-weight:700;font-size:13px;">${esc(dateLabel(date))}</div>
-        <div style="color:var(--mute);font-size:12px;margin:2px 0 7px;">${esc(parts.join(' · '))}</div>
+        <div class="sub" style="font-size:12px;margin:2px 0 7px;">${esc(parts.join(' · '))}</div>
         <button type="button" class="btn ghost sm" data-revert="${esc(date)}">Revert to normal</button>
       </div>`;
     }).join('');
@@ -519,7 +830,7 @@ function renderExceptionList(){
     const dow=new Date(date+'T00:00:00').getDay();
     try{
       await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:recurringKeysFor(dow)}});
-      toast('Reverted '+dateLabel(date));
+      toast('Reverted '+dateLabel(date)); availData=null;
       const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
       if(document.getElementById('exDate').value===date) openExceptionEditor(date);
       renderExceptionList();
@@ -532,7 +843,7 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
   const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
   try{
     await api('tech_availability_set',{ method:'POST', body:{ business:current.slug, tech_id:availTechId, slots }});
-    toast('Availability saved'); document.getElementById('availModal').classList.add('hidden');
+    toast('Availability saved'); availData=null; document.getElementById('availModal').classList.add('hidden');
   }catch(err){ document.getElementById('availErr').textContent=err.message; }
   btn.disabled=false;
 });
@@ -540,12 +851,13 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
 document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 async function openNewBooking(){
   if(!current) return;
+  closeSidebar();
   const modal=document.getElementById('modal');
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
-  // populate services + technicians for current business
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
@@ -584,13 +896,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       notes: document.getElementById('nbNotes').value.trim()||null,
     }});
     document.getElementById('modal').classList.add('hidden');
-    toast('Booking created'); selectTab(tab);
+    toast('Booking created'); refreshCurrent();
   }catch(e2){ err.textContent=e2.message; }
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 async function tryAutoLogin(){
-  // If the server is in no-password dev mode, log in automatically as owner.
   try{
     const d = await api('login', { method:'POST', body:{ password:'' } });
     token=d.token; role=d.role; businesses=d.businesses;
