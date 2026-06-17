@@ -133,6 +133,8 @@
     '1723559782141x609094402068185100': 100, // Denver #4 Boulder/Colorado Springs
   };
   function territoryAdjustment(){ return TERRITORY_ADJUSTMENTS[territoryId] || 0; }
+  const ZIP_DISCOUNTS = { '77011': 10 };
+  function zipDiscount(){ return ZIP_DISCOUNTS[customer.zip] || 0; }
 
   const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','customer'];
 
@@ -1014,7 +1016,8 @@
 
   function bCustomer(){
     const adj=territoryAdjustment();
-    const base=calcTotal()+adj;
+    const zipDisc=zipDiscount();
+    const base=calcTotal()+adj-zipDisc;
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
@@ -1061,6 +1064,10 @@
           ${adj>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Service area surcharge</span>
             <span style="color:#fff!important;">+$${adj}</span>
+          </div>`:''}
+          ${zipDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>ZIP code discount</span>
+            <span style="color:#4ade80!important;">-$${zipDisc}</span>
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax (8.25%)</span>
@@ -1269,6 +1276,7 @@
           const df=selectedDate?fmtDate(selectedDate):null;
           const lines=buildLineItems();
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
+          if(zipDiscount()>0)lines.push({label:'ZIP code discount',qty:1,amount:-zipDiscount()});
           const couponDisc=COUPONS[couponCode]||0;
           if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
           const loc=resolveLocation();
@@ -1279,7 +1287,7 @@
             address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
             dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
             timeWindow:slot.arrival_window||'',
-            lines, total:calcTotal()+territoryAdjustment()-couponDisc, tip:tipAmount||0,
+            lines, total:calcTotal()+territoryAdjustment()-zipDiscount()-couponDisc, tip:tipAmount||0,
             twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
             jobId:(res&&(res.job_id||res.id))||'',
             rescheduleUrl:(res&&res.reschedule_url)||'',
