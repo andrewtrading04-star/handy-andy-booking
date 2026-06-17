@@ -32,6 +32,10 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'login') return await login(req, res, body);
+    // Dev bypass (only when TECH_DEV_BYPASS is set) — log in without a PIN
+    // while the app is still being built. Remove the env var for production.
+    if (action === 'dev_techs') return await devTechs(req, res);
+    if (action === 'dev_login') return await devLogin(req, res, body);
 
     const auth = verifyToken(getBearer(req));
     if (!auth || auth.kind !== 'tech') return res.status(401).json({ error: 'Unauthorized' });
@@ -67,6 +71,38 @@ async function login(req, res, body) {
     token,
     technician: { id: tech.id, name: tech.name, status: tech.status },
   });
+}
+
+function devBypassOn() {
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.TECH_DEV_BYPASS || '').toLowerCase());
+}
+
+// List every technician (with business) so the dev login screen can pick one.
+async function devTechs(req, res) {
+  if (!devBypassOn()) return res.status(403).json({ error: 'Dev bypass disabled' });
+  const db = serviceClient();
+  const { data, error } = await db.from('technicians')
+    .select('id, name, business_id, businesses ( slug, name )')
+    .eq('active', true).order('name');
+  if (error) throw error;
+  return res.status(200).json({
+    technicians: (data || []).map(t => ({
+      id: t.id, name: t.name, business_id: t.business_id,
+      business: t.businesses?.name || '', slug: t.businesses?.slug || '',
+    })),
+  });
+}
+
+// Issue a tech token for a chosen technician, no PIN required.
+async function devLogin(req, res, body) {
+  if (!devBypassOn()) return res.status(403).json({ error: 'Dev bypass disabled' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const db = serviceClient();
+  const { data: tech, error } = await db.from('technicians')
+    .select('id, name, status, business_id').eq('id', body.tech_id).single();
+  if (error || !tech) return res.status(404).json({ error: 'Technician not found' });
+  const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
+  return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status } });
 }
 
 async function jobs(req, res, db, auth) {

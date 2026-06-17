@@ -81,6 +81,12 @@
       <button class="btn big" type="submit">Sign in</button>
       <div class="err" id="loginErr"></div>
     </form>
+    <!-- Dev bypass: only shown when TECH_DEV_BYPASS is set on the server -->
+    <div id="devPanel" class="hidden" style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
+      <div class="field"><label>🛠 Dev login (no PIN)</label>
+        <select id="devTech" class="" style="width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:14px;font-size:15px;"></select></div>
+      <button class="btn ghost" type="button" id="devBtn">Enter as this tech</button>
+    </div>
   </div>
 
   <!-- Jobs list -->
@@ -192,8 +198,28 @@ async function showDetail(id){
     document.getElementById('back').addEventListener('click',showJobs); }
 }
 
+// Dev bypass: probe the server; if enabled, reveal a no-PIN tech picker.
+async function initDevPanel(){
+  try{
+    const res=await fetch(new URL(API+'?action=dev_techs',location.origin));
+    if(!res.ok) return; // 403 = disabled, hide panel
+    const d=await res.json();
+    if(!d.technicians||!d.technicians.length) return;
+    document.getElementById('devTech').innerHTML=d.technicians.map(t=>`<option value="${t.id}">${esc(t.name)} — ${esc(t.business)}</option>`).join('');
+    document.getElementById('devPanel').classList.remove('hidden');
+  }catch{}
+}
+document.getElementById('devBtn').addEventListener('click',async()=>{
+  try{
+    const d=await api('dev_login',{method:'POST',body:{tech_id:document.getElementById('devTech').value}});
+    token=d.token; tech=d.technician;
+    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    showJobs();
+  }catch(e){ document.getElementById('loginErr').textContent=e.message; }
+});
+
 // Boot
-if(token&&tech) showJobs(); else show('login');
+if(token&&tech) showJobs(); else { show('login'); initDevPanel(); }
 </script>
 </body>
 </html>
