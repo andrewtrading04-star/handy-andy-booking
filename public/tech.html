@@ -197,6 +197,17 @@ async function showDetail(id){
       ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
       ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(li.name)}${li.line_total?' — $'+li.line_total:''}</div>`).join('')}</div>`:''}
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
+      ${j.price?`<div class="card"><h3>Payment</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div><div class="sub" style="color:var(--mute);font-size:13px;">Amount</div><div style="font-weight:700;font-size:18px;">$${j.price}</div></div>
+          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${j.payment_status}</div></div>
+        </div>
+        ${j.payment_status!=='paid'&&j.payment_status!=='refunded'?`<div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn sm" id="jobCharge">Charge card</button>
+          <button class="btn ghost sm" id="jobMarkPaid">Mark paid (cash)</button>
+        </div>`:''}
+        ${j.payment_status==='paid'?`<button class="btn ghost sm" id="jobRefund">Refund</button>`:''}
+      </div>`:''}
     </div>
     ${ next ? `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>` :
       (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
@@ -208,9 +219,22 @@ async function showDetail(id){
       try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
       catch(e){ toast(e.message); adv.disabled=false; }
     });
+    // Payment handlers
+    const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=async()=>{ if(confirm('Charge the card on file for $'+j.price+'?')){ await paymentAction(j.id,'charge'); close(); } };
+    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); close(); } };
+    const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); close(); } };
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
 }
+
+async function paymentAction(jobId,action){
+  try{
+    await api('job_payment',{method:'POST',body:{id:jobId,action}});
+    toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
+    setTimeout(()=>showDetail(jobId),500);
+  }catch(e){ toast(e.message); }
+}
+function close(){ showJobs(); }
 
 // ── Weekly availability ─────────────────────────────────────────────────────
 let availDefs=null;                 // { slots, days } from the server

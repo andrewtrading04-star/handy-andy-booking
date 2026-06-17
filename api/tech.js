@@ -14,6 +14,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { localDayStartUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
@@ -46,6 +47,7 @@ export default async function handler(req, res) {
       case 'jobs':             return await jobs(req, res, db, auth);
       case 'job':              return await job(req, res, db, auth);
       case 'status':           return await status(req, res, db, auth, body);
+      case 'job_payment':      return await jobPayment(req, res, db, auth, body);
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
@@ -135,6 +137,7 @@ async function job(req, res, db, auth) {
   const { data, error } = await db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
              address_line1, address_line2, city, state, postal_code, lat, lng,
+             payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
              line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`)
@@ -174,6 +177,78 @@ async function status(req, res, db, auth, body) {
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
   return res.status(200).json({ ok: true, status: next });
+}
+
+// ── Payment (techs can charge or mark-paid at service time) ────────────────────
+async function jobPayment(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const act = (body.action || 'charge').toString();
+
+  const { data: b, error } = await db.from('bookings')
+    .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             customer:customers ( id, name, email, phone, stripe_customer_id )`)
+    .eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+  if (error || !b) return res.status(404).json({ error: 'Job not found' });
+
+  const now = new Date().toISOString();
+
+  if (act === 'mark_paid') {
+    await db.from('bookings').update({ payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'paid' });
+  }
+  if (act === 'mark_unpaid') {
+    await db.from('bookings').update({ payment_status: 'unpaid', paid_at: null }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'unpaid' });
+  }
+
+  if (act === 'refund') {
+    if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this job to refund.' });
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id } }); }
+    catch (e) { return res.status(e.status || 402).json({ error: 'Refund failed: ' + e.message }); }
+    await db.from('bookings').update({ payment_status: 'refunded', paid_at: null }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'refunded' });
+  }
+
+  if (act === 'charge') {
+    if (!stripeConfigured()) return res.status(400).json({ error: 'Payments are not configured on the server.' });
+    const dollars = Number(b.price) || 0;
+    if (dollars <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
+
+    let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
+    let pmId = b.stripe_payment_method_id || null;
+    try {
+      if (!custId && b.customer && b.customer.email) {
+        const r = await findCardOnFileByEmail(b.customer.email);
+        custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+      }
+      if (custId && !pmId) pmId = await defaultPaymentMethod(custId);
+    } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use "Mark paid (cash)" instead.' });
+
+    let pi;
+    try {
+      pi = await stripe('/payment_intents', { body: {
+        amount: Math.round(dollars * 100), currency: 'usd',
+        customer: custId, payment_method: pmId, off_session: true, confirm: true,
+        description: `Job ${id}`, metadata: { job_id: id },
+      }});
+    } catch (e) {
+      return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
+    }
+    if (pi.status !== 'succeeded') {
+      return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
+    }
+
+    await db.from('bookings').update({
+      payment_status: 'paid', paid_at: now, amount_paid: dollars,
+      stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
+    }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, payment_intent_id: pi.id });
+  }
+
+  return res.status(400).json({ error: `Unknown payment action "${act}"` });
 }
 
 // ── Weekly availability (the tech edits their OWN) ──────────────────────────
@@ -266,6 +341,11 @@ function shapeJob(b, full = false) {
     out.notes = b.notes || null;
     out.price = b.price;
     out.line_items = b.line_items || [];
+    out.payment_status = b.payment_status || 'unpaid';
+    out.paid_at = b.paid_at || null;
+    out.stripe_customer_id = b.stripe_customer_id || null;
+    out.stripe_payment_method_id = b.stripe_payment_method_id || null;
+    out.stripe_payment_intent_id = b.stripe_payment_intent_id || null;
   }
   return out;
 }
