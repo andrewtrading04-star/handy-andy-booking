@@ -28,6 +28,14 @@
 create extension if not exists pgcrypto;   -- gen_random_uuid(), crypt(), gen_salt()
 
 -- ----------------------------------------------------------------------------
+-- Dedicated schema so these tables NEVER collide with the existing analytics
+-- tables in `public` (events, bookings, page_metrics, …). Everything below is
+-- created in `app`. The app's API uses a Supabase client pinned to this schema.
+-- ----------------------------------------------------------------------------
+create schema if not exists app;
+set search_path = app, public;
+
+-- ----------------------------------------------------------------------------
 -- Enumerated types
 -- ----------------------------------------------------------------------------
 do $$ begin
@@ -393,7 +401,7 @@ returns table (
 )
 language sql
 security definer
-set search_path = public
+set search_path = app, public
 as $$
   select t.id, t.business_id, t.name, t.phone, t.status
   from technicians t
@@ -408,7 +416,7 @@ create or replace function set_technician_pin(p_id uuid, p_pin text)
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = app, public
 as $$
   update technicians
      set pin_hash = crypt(p_pin, gen_salt('bf')),
@@ -527,3 +535,15 @@ where b.slug = 'handy-andy' and s.name = 'TV Installation' and g.key = 'size'
 --   select b.slug, t.name from technicians t join businesses b on b.id=t.business_id order by 1,2;
 --   select b.slug, a.name from service_areas a join businesses b on b.id=a.business_id order by 1,2;
 -- ============================================================================
+
+-- ============================================================================
+-- Grants: the serverless functions use the service_role key, which must be able
+-- to read/write everything in `app` (RLS still applies to other roles).
+-- ============================================================================
+grant usage on schema app to anon, authenticated, service_role;
+grant all on all tables in schema app to service_role;
+grant all on all sequences in schema app to service_role;
+grant execute on all functions in schema app to service_role;
+alter default privileges in schema app grant all on tables to service_role;
+alter default privileges in schema app grant all on sequences to service_role;
+alter default privileges in schema app grant execute on functions to service_role;

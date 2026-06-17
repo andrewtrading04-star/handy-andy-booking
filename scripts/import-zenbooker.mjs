@@ -34,7 +34,7 @@ if (!ZBK || !SB_URL || !SB_KEY) {
   console.error('Missing env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ZENBOOKER_API_KEY');
   process.exit(1);
 }
-const db = createClient(SB_URL, SB_KEY, { auth: { persistSession: false } });
+const db = createClient(SB_URL, SB_KEY, { auth: { persistSession: false }, db: { schema: 'app' } });
 
 const zbkGet = async (path) => {
   const r = await fetch('https://api.zenbooker.com' + path, { headers: { Authorization: `Bearer ${ZBK}` } });

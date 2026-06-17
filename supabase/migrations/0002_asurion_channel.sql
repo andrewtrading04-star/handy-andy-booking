@@ -6,6 +6,7 @@
 -- Zenbooker provider id (so mirrored Asurion jobs attach to him automatically)
 -- and adds the $0 "Asurion TV Service" line. Run after 0001. Idempotent.
 -- ============================================================================
+set search_path = app, public;
 
 -- Link Steve to his Zenbooker provider id (from api/assurion-book.js).
 update technicians t

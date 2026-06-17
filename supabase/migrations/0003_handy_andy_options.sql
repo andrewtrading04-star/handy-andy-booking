@@ -7,6 +7,7 @@
 -- variance (Austin/Houston) goes in service_options.price_overrides later.
 -- Run after 0001/0002. Idempotent (guards on service_id+key / option id).
 -- ============================================================================
+set search_path = app, public;
 
 -- Helper view of the target service id (Handy Andy TV Installation).
 -- Groups -----------------------------------------------------------------

@@ -12,6 +12,8 @@ export function serviceClient() {
   if (!url || !key) {
     throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
   }
-  _client = createClient(url, key, { auth: { persistSession: false } });
+  // All business-management tables live in the `app` schema (kept separate from
+  // the analytics tables in `public`).
+  _client = createClient(url, key, { auth: { persistSession: false }, db: { schema: 'app' } });
   return _client;
 }
