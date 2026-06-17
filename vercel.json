@@ -1,9 +1,4 @@
 {
-  "public": "public",
-  "functions": {
-    "api/**/*.js": {
-      "memory": 128,
-      "maxDuration": 10
-    }
-  }
+  "buildCommand": "",
+  "outputDirectory": "public"
 }
