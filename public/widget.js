@@ -1066,7 +1066,7 @@
             <span style="color:#fff!important;">+$${adj}</span>
           </div>`:''}
           ${zipDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
-            <span>ZIP code discount</span>
+            <span>Location</span>
             <span style="color:#4ade80!important;">-$${zipDisc}</span>
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
@@ -1276,7 +1276,7 @@
           const df=selectedDate?fmtDate(selectedDate):null;
           const lines=buildLineItems();
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
-          if(zipDiscount()>0)lines.push({label:'ZIP code discount',qty:1,amount:-zipDiscount()});
+          if(zipDiscount()>0)lines.push({label:'Location',qty:1,amount:-zipDiscount()});
           const couponDisc=COUPONS[couponCode]||0;
           if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
           const loc=resolveLocation();
