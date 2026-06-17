@@ -78,7 +78,7 @@ join (values
   ('lifting', '85 inches or larger',                   70::numeric, '1747842781494x315473919196528640', 4),
   -- dismount
   ('dismount', 'Guaranteed Dismount Service',          35::numeric, '1685657521717x559414519649398460', 1),
-  ('dismount', "No, I'll handle TV removal myself",    0::numeric,  '1751646796269x538012740525228000', 2),
+  ('dismount', 'No, I''ll handle TV removal myself',   0::numeric,  '1751646796269x538012740525228000', 2),
   -- extras
   ('extras', 'Install Samsung Frame OneConnect box',   350::numeric,'1736124404151x401859929508413400', 1),
   ('extras', 'Apple TV installation',                  25::numeric, '1711776157524x348981049297469440', 2),
