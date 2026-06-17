@@ -17,6 +17,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { localDayStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
@@ -44,6 +45,7 @@ export default async function handler(req, res) {
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
+      case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
       case 'customers':         return await customers(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
@@ -343,6 +345,83 @@ async function bookingUpdate(req, res, db, auth, body) {
   return res.status(200).json({ ok: true });
 }
 
+// ── Booking payments: charge card on file | mark paid (cash) | refund ────────
+// Business model is "card on file at booking, charged at time of service". The
+// card was attached to a Stripe customer (keyed by email) by the live widget,
+// so we can charge it from here without ever touching the live booking code.
+async function bookingPayment(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const act = (body.action || 'charge').toString();
+
+  const { data: b, error } = await db.from('bookings')
+    .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             customer:customers ( id, name, email, phone, stripe_customer_id )`)
+    .eq('id', id).eq('business_id', biz.id).single();
+  if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+
+  const now = new Date().toISOString();
+
+  // Manual states — no Stripe involved (e.g. paid in cash to the technician).
+  if (act === 'mark_paid') {
+    await db.from('bookings').update({ payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'paid' });
+  }
+  if (act === 'mark_unpaid') {
+    await db.from('bookings').update({ payment_status: 'unpaid', paid_at: null }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'unpaid' });
+  }
+
+  if (act === 'refund') {
+    if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this booking to refund.' });
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id } }); }
+    catch (e) { return res.status(e.status || 400).json({ error: 'Refund failed: ' + e.message }); }
+    await db.from('bookings').update({ payment_status: 'refunded' }).eq('id', id);
+    return res.status(200).json({ ok: true, payment_status: 'refunded' });
+  }
+
+  // Charge the card on file.
+  if (act !== 'charge') return res.status(400).json({ error: `Unknown payment action "${act}"` });
+  if (!stripeConfigured()) return res.status(400).json({ error: 'Payments are not configured (STRIPE_SECRET_KEY missing). Use “Mark paid (cash)”.' });
+  if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
+  const dollars = body.amount != null ? Number(body.amount) : Number(b.price);
+  if (!dollars || dollars <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
+
+  // Resolve a Stripe customer + payment method (stored first, else look up by email).
+  let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
+  let pmId = b.stripe_payment_method_id || null;
+  try {
+    if (!custId && b.customer && b.customer.email) {
+      const r = await findCardOnFileByEmail(b.customer.email);
+      custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+    }
+    if (custId && !pmId) pmId = await defaultPaymentMethod(custId);
+  } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use “Mark paid (cash)” instead.' });
+
+  let pi;
+  try {
+    pi = await stripe('/payment_intents', { body: {
+      amount: Math.round(dollars * 100), currency: 'usd',
+      customer: custId, payment_method: pmId, off_session: true, confirm: true,
+      description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug },
+    }});
+  } catch (e) {
+    return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
+  }
+  if (pi.status !== 'succeeded') {
+    return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
+  }
+
+  await db.from('bookings').update({
+    payment_status: 'paid', paid_at: now, amount_paid: dollars,
+    stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
+  }).eq('id', id);
+  return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, payment_intent_id: pi.id });
+}
+
 // ── Customers (search) ───────────────────────────────────────────────────────
 async function customers(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
@@ -486,7 +565,7 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 
 // ── Shared shaping ───────────────────────────────────────────────────────────
 function bookingSelect() {
-  return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status,
+  return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
@@ -504,6 +583,7 @@ function shapeBooking(b) {
     duration_minutes: b.duration_minutes,
     price: b.price,
     payment_status: b.payment_status,
+    paid_at: b.paid_at,
     notes: b.notes,
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,
