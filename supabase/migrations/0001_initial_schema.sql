@@ -33,7 +33,7 @@ create extension if not exists pgcrypto;   -- gen_random_uuid(), crypt(), gen_sa
 -- created in `app`. The app's API uses a Supabase client pinned to this schema.
 -- ----------------------------------------------------------------------------
 create schema if not exists app;
-set search_path = app, public;
+set search_path = app, public, extensions;
 
 -- ----------------------------------------------------------------------------
 -- Enumerated types
@@ -401,7 +401,7 @@ returns table (
 )
 language sql
 security definer
-set search_path = app, public
+set search_path = app, public, extensions
 as $$
   select t.id, t.business_id, t.name, t.phone, t.status
   from technicians t
@@ -416,7 +416,7 @@ create or replace function set_technician_pin(p_id uuid, p_pin text)
 returns void
 language sql
 security definer
-set search_path = app, public
+set search_path = app, public, extensions
 as $$
   update technicians
      set pin_hash = crypt(p_pin, gen_salt('bf')),
