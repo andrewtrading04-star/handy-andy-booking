@@ -56,11 +56,21 @@ export default async function handler(req, res) {
 async function login(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const password = (body.password || '').toString();
-  if (!password) return res.status(400).json({ error: 'Password required' });
+
+  // DEV BYPASS: if no admin passwords are configured at all (or ADMIN_DEV_BYPASS
+  // is set), the dashboard opens as owner with NO password. Set ADMIN_PASSWORD
+  // later and the gate turns back on automatically.
+  const noPasswords = !process.env.ADMIN_PASSWORD && !process.env.HANDY_ANDY_PASSWORD && !process.env.DOMS_PASSWORD;
+  const forceBypass = ['1', 'true', 'yes', 'on'].includes(String(process.env.ADMIN_DEV_BYPASS || '').toLowerCase());
+  const bypass = noPasswords || forceBypass;
 
   // Resolve which role/scope this password unlocks.
   let role = null, scope = null;
-  if (process.env.ADMIN_PASSWORD && safeEqual(password, process.env.ADMIN_PASSWORD)) {
+  if (bypass) {
+    role = 'owner'; scope = 'all';
+  } else if (!password) {
+    return res.status(400).json({ error: 'Password required' });
+  } else if (process.env.ADMIN_PASSWORD && safeEqual(password, process.env.ADMIN_PASSWORD)) {
     role = 'owner'; scope = 'all';
   } else if (process.env.HANDY_ANDY_PASSWORD && safeEqual(password, process.env.HANDY_ANDY_PASSWORD)) {
     role = 'secretary'; scope = 'handy-andy';
