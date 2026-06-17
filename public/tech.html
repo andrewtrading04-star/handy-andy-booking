@@ -214,7 +214,9 @@ async function showDetail(id){
 
 // ── Weekly availability ─────────────────────────────────────────────────────
 let availDefs=null;                 // { slots, days } from the server
-let availState=new Set();           // selected "day:slot_key" keys
+let availState=new Set();           // selected "day:slot_key" keys (recurring)
+let availExceptions=[];             // [{date, slot_key, is_available}] one-time overrides
+let exEditState=new Set();          // slot keys selected in the open date editor
 document.getElementById('availBtn').addEventListener('click',showAvailability);
 
 async function showAvailability(){
@@ -225,6 +227,7 @@ async function showAvailability(){
     const d=await api('availability');
     availDefs={ slots:d.slots, days:d.days };
     availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
+    availExceptions=d.exceptions||[];
     renderAvailability();
   }catch(e){
     v.innerHTML=`<div class="avail"><button class="back" id="availBack">‹ Today's jobs</button><div class="empty">${esc(e.message)}</div></div>`;
@@ -243,14 +246,28 @@ function renderAvailability(){
   v.innerHTML=`<div class="avail">
       <button class="back" id="availBack">‹ Today's jobs</button>
       <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Availability</div>
-        <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Tap the time slots you can work each day. Tap again to remove.</div></div>
-      ${rows}
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Your normal weekly schedule — set it once. Tap a slot to add or remove it.</div></div>
+      <div id="weeklyCards">${rows}</div>
+
+      <div class="card" id="exceptionCard">
+        <h3>One-time changes</h3>
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:10px;">Need a specific day off, or to pick up a slot you don't normally work? Pick the date and adjust just that day — your weekly schedule stays the same.</div>
+        <input type="date" id="exDate" style="width:100%;background:var(--navy);border:1px solid var(--line);color:#fff;padding:12px;border-radius:10px;font-size:15px;">
+        <div id="exEditor" class="hidden" style="margin-top:12px;">
+          <div class="sub" id="exEditorLabel" style="color:var(--mute);font-size:13px;margin-bottom:8px;"></div>
+          <div class="chips" id="exSlots"></div>
+          <button type="button" class="btn ghost" id="exSave" style="margin-top:12px;">Save this date</button>
+        </div>
+        <div id="exList" style="margin-top:14px;"></div>
+      </div>
+
       <div style="height:80px;"></div>
     </div>
-    <div class="statusbar"><button class="btn big" id="availSave">Save Availability</button></div>`;
+    <div class="statusbar"><button class="btn big" id="availSave">Save Weekly Schedule</button></div>`;
 
   document.getElementById('availBack').addEventListener('click',showJobs);
-  v.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+  // Weekly toggles (scoped so the one-time editor's chips aren't affected).
+  v.querySelectorAll('#weeklyCards .slotchip').forEach(ch=>ch.addEventListener('click',()=>{
     const k=ch.dataset.day+':'+ch.dataset.key;
     if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
     else { availState.add(k); ch.classList.add('on'); }
@@ -258,10 +275,94 @@ function renderAvailability(){
   document.getElementById('availSave').addEventListener('click',async()=>{
     const btn=document.getElementById('availSave'); btn.disabled=true;
     const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
-    try{ await api('availability_set',{method:'POST',body:{slots}}); toast('Availability saved ✓'); }
+    try{ await api('availability_set',{method:'POST',body:{slots}}); toast('Weekly schedule saved ✓'); }
     catch(e){ toast(e.message); }
     btn.disabled=false;
   });
+
+  // One-time changes wiring.
+  document.getElementById('exDate').addEventListener('change',e=>openExceptionEditor(e.target.value));
+  document.getElementById('exSave').addEventListener('click',saveException);
+  renderExceptionList();
+}
+
+// Slot keys the tech normally works on a given weekday (0=Sun..6=Sat).
+function recurringKeysFor(dow){
+  return availDefs.slots.filter(s=>availState.has(dow+':'+s.key)).map(s=>s.key);
+}
+// What the tech is actually available for on an exact date = recurring +/- exceptions.
+function effectiveKeysForDate(dateStr){
+  const dow=new Date(dateStr+'T00:00:00').getDay();
+  const set=new Set(recurringKeysFor(dow));
+  for(const ex of availExceptions){ if(ex.date===dateStr){ ex.is_available?set.add(ex.slot_key):set.delete(ex.slot_key); } }
+  return set;
+}
+function dateLabel(dateStr){
+  try{ return new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }
+  catch{ return dateStr; }
+}
+
+function openExceptionEditor(dateStr){
+  if(!dateStr){ document.getElementById('exEditor').classList.add('hidden'); return; }
+  exEditState=effectiveKeysForDate(dateStr);
+  document.getElementById('exEditorLabel').textContent=`Your availability for ${dateLabel(dateStr)}:`;
+  const box=document.getElementById('exSlots');
+  box.innerHTML=availDefs.slots.map(s=>
+    `<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`
+  ).join('');
+  box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.key;
+    if(exEditState.has(k)){ exEditState.delete(k); ch.classList.remove('on'); }
+    else { exEditState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('exEditor').classList.remove('hidden');
+}
+
+async function saveException(){
+  const date=document.getElementById('exDate').value;
+  if(!date){ toast('Pick a date first'); return; }
+  const btn=document.getElementById('exSave'); btn.disabled=true;
+  try{
+    await api('availability_exception_set',{method:'POST',body:{date,selected:[...exEditState]}});
+    toast('Saved for '+dateLabel(date)+' ✓');
+    const d=await api('availability'); availExceptions=d.exceptions||[];
+    renderExceptionList();
+  }catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+
+function renderExceptionList(){
+  const el=document.getElementById('exList'); if(!el) return;
+  const labelOf=k=>{ const s=availDefs.slots.find(x=>x.key===k); return s?s.label:k; };
+  // Group exceptions by date.
+  const byDate={};
+  for(const ex of availExceptions){ (byDate[ex.date]=byDate[ex.date]||[]).push(ex); }
+  const dates=Object.keys(byDate).sort();
+  if(!dates.length){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:6px;">Upcoming changes:</div>`+
+    dates.map(date=>{
+      const offs=byDate[date].filter(e=>!e.is_available).map(e=>labelOf(e.slot_key));
+      const ons =byDate[date].filter(e=> e.is_available).map(e=>labelOf(e.slot_key));
+      const parts=[];
+      if(offs.length) parts.push(`Off: ${offs.join(', ')}`);
+      if(ons.length)  parts.push(`Working: ${ons.join(', ')}`);
+      return `<div style="background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;">
+        <div style="font-weight:700;font-size:14px;">${esc(dateLabel(date))}</div>
+        <div style="color:var(--mute);font-size:13px;margin:3px 0 8px;">${esc(parts.join(' · '))}</div>
+        <button type="button" class="btn ghost sm" data-revert="${esc(date)}">Revert to normal</button>
+      </div>`;
+    }).join('');
+  el.querySelectorAll('[data-revert]').forEach(b=>b.addEventListener('click',async()=>{
+    const date=b.dataset.revert; b.disabled=true;
+    const dow=new Date(date+'T00:00:00').getDay();
+    try{
+      await api('availability_exception_set',{method:'POST',body:{date,selected:recurringKeysFor(dow)}});
+      toast('Reverted '+dateLabel(date));
+      const d=await api('availability'); availExceptions=d.exceptions||[];
+      if(document.getElementById('exDate').value===date) openExceptionEditor(date);
+      renderExceptionList();
+    }catch(e){ toast(e.message); b.disabled=false; }
+  }));
 }
 
 // Dev bypass: probe the server; if enabled, reveal a no-PIN tech picker.

@@ -145,7 +145,7 @@
 <div id="availModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 14px;">
   <div style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:520px;">
     <h2 style="font-size:17px;margin-bottom:4px;" id="availTitle">Availability</h2>
-    <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:16px;">Select the time slots this technician can work each day.</div>
+    <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:16px;">Set the normal weekly schedule, plus any one-time changes for specific dates.</div>
     <div id="availBody"><div class="empty">Loading…</div></div>
     <div style="display:flex;gap:8px;margin-top:16px;">
       <button class="btn" type="button" id="availSaveBtn">Save</button>
@@ -418,6 +418,7 @@ async function saveTech(payload){
 
 // ── Technician availability editor ─────────────────────────────────────────
 let availTechId=null, availDefs=null, availState=new Set();
+let availExceptions=[], exEditState=new Set();
 document.getElementById('availCloseBtn').addEventListener('click',()=>document.getElementById('availModal').classList.add('hidden'));
 
 async function openAvailability(techId, techName){
@@ -430,16 +431,100 @@ async function openAvailability(techId, techName){
     const d=await api('tech_availability',{ params:{ business:current.slug, tech_id:techId }});
     availDefs={ slots:d.slots, days:d.days };
     availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
-    body.innerHTML=availDefs.days.map((dn,di)=>`
+    availExceptions=d.exceptions||[];
+    const weekly=availDefs.days.map((dn,di)=>`
       <div class="avail-day"><div class="dl">${esc(dn)}</div><div class="avail-chips">${
         availDefs.slots.map(s=>`<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`).join('')
       }</div></div>`).join('');
-    body.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    body.innerHTML=`<div id="availWeekly">${weekly}</div>
+      <div style="border-top:1px solid var(--line);margin:16px 0 12px;"></div>
+      <div class="dl" style="margin-bottom:4px;">One-time changes</div>
+      <div class="sub" style="color:var(--mute);font-size:12px;margin-bottom:10px;">Give this tech a specific day off (or an extra slot) without changing their weekly schedule.</div>
+      <input type="date" id="exDate" style="width:100%;background:var(--navy);border:1px solid var(--line);color:#fff;padding:9px;border-radius:8px;font-size:14px;">
+      <div id="exEditor" class="hidden" style="margin-top:10px;">
+        <div class="sub" id="exEditorLabel" style="color:var(--mute);font-size:12px;margin-bottom:6px;"></div>
+        <div class="avail-chips" id="exSlots"></div>
+        <button type="button" class="btn ghost sm" id="exSave" style="margin-top:10px;">Save this date</button>
+      </div>
+      <div id="exList" style="margin-top:12px;"></div>`;
+    body.querySelectorAll('#availWeekly .slotchip').forEach(ch=>ch.addEventListener('click',()=>{
       const k=ch.dataset.day+':'+ch.dataset.key;
       if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
       else { availState.add(k); ch.classList.add('on'); }
     }));
+    document.getElementById('exDate').addEventListener('change',e=>openExceptionEditor(e.target.value));
+    document.getElementById('exSave').addEventListener('click',saveException);
+    renderExceptionList();
   }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+function recurringKeysFor(dow){ return availDefs.slots.filter(s=>availState.has(dow+':'+s.key)).map(s=>s.key); }
+function effectiveKeysForDate(dateStr){
+  const dow=new Date(dateStr+'T00:00:00').getDay();
+  const set=new Set(recurringKeysFor(dow));
+  for(const ex of availExceptions){ if(ex.date===dateStr){ ex.is_available?set.add(ex.slot_key):set.delete(ex.slot_key); } }
+  return set;
+}
+function dateLabel(dateStr){
+  try{ return new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }
+  catch{ return dateStr; }
+}
+function openExceptionEditor(dateStr){
+  if(!dateStr){ document.getElementById('exEditor').classList.add('hidden'); return; }
+  exEditState=effectiveKeysForDate(dateStr);
+  document.getElementById('exEditorLabel').textContent=`Availability for ${dateLabel(dateStr)}:`;
+  const box=document.getElementById('exSlots');
+  box.innerHTML=availDefs.slots.map(s=>`<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`).join('');
+  box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.key;
+    if(exEditState.has(k)){ exEditState.delete(k); ch.classList.remove('on'); }
+    else { exEditState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('exEditor').classList.remove('hidden');
+}
+async function saveException(){
+  const date=document.getElementById('exDate').value;
+  if(!date){ toast('Pick a date first'); return; }
+  const btn=document.getElementById('exSave'); btn.disabled=true;
+  try{
+    await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:[...exEditState]}});
+    toast('Saved for '+dateLabel(date));
+    const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+    renderExceptionList();
+  }catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+function renderExceptionList(){
+  const el=document.getElementById('exList'); if(!el) return;
+  const labelOf=k=>{ const s=availDefs.slots.find(x=>x.key===k); return s?s.label:k; };
+  const byDate={};
+  for(const ex of availExceptions){ (byDate[ex.date]=byDate[ex.date]||[]).push(ex); }
+  const dates=Object.keys(byDate).sort();
+  if(!dates.length){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="sub" style="color:var(--mute);font-size:12px;margin-bottom:6px;">Upcoming changes:</div>`+
+    dates.map(date=>{
+      const offs=byDate[date].filter(e=>!e.is_available).map(e=>labelOf(e.slot_key));
+      const ons =byDate[date].filter(e=> e.is_available).map(e=>labelOf(e.slot_key));
+      const parts=[];
+      if(offs.length) parts.push(`Off: ${offs.join(', ')}`);
+      if(ons.length)  parts.push(`Working: ${ons.join(', ')}`);
+      return `<div style="background:var(--navy);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+        <div style="font-weight:700;font-size:13px;">${esc(dateLabel(date))}</div>
+        <div style="color:var(--mute);font-size:12px;margin:2px 0 7px;">${esc(parts.join(' · '))}</div>
+        <button type="button" class="btn ghost sm" data-revert="${esc(date)}">Revert to normal</button>
+      </div>`;
+    }).join('');
+  el.querySelectorAll('[data-revert]').forEach(b=>b.addEventListener('click',async()=>{
+    const date=b.dataset.revert; b.disabled=true;
+    const dow=new Date(date+'T00:00:00').getDay();
+    try{
+      await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:recurringKeysFor(dow)}});
+      toast('Reverted '+dateLabel(date));
+      const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+      if(document.getElementById('exDate').value===date) openExceptionEditor(date);
+      renderExceptionList();
+    }catch(e){ toast(e.message); b.disabled=false; }
+  }));
 }
 document.getElementById('availSaveBtn').addEventListener('click',async()=>{
   const btn=document.getElementById('availSaveBtn'); btn.disabled=true;

@@ -13,7 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { localDayStartUTC } from './_lib/time.js';
-import { SLOTS, DAYS, normalizeSlots } from './_lib/availability.js';
+import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
@@ -48,6 +48,7 @@ export default async function handler(req, res) {
       case 'status':           return await status(req, res, db, auth, body);
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
+      case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -183,9 +184,20 @@ async function getAvailability(req, res, db, auth) {
     .select('day_of_week, slot_key')
     .eq('technician_id', auth.tech_id);
   if (error) throw error;
+
+  // Upcoming one-time exceptions (today onward) so the app can show & edit them.
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: exc, error: e2 } = await db.from('technician_availability_exceptions')
+    .select('exception_date, slot_key, is_available')
+    .eq('technician_id', auth.tech_id)
+    .gte('exception_date', today)
+    .order('exception_date');
+  if (e2) throw e2;
+
   return res.status(200).json({
     slots: SLOTS, days: DAYS,
     availability: (data || []).map(r => ({ day_of_week: r.day_of_week, slot_key: r.slot_key })),
+    exceptions: (exc || []).map(r => ({ date: r.exception_date, slot_key: r.slot_key, is_available: r.is_available })),
   });
 }
 
@@ -206,6 +218,33 @@ async function setAvailability(req, res, db, auth, body) {
     if (error) throw error;
   }
   return res.status(200).json({ ok: true, count: rows.length });
+}
+
+// Set a ONE-TIME override for a single date. The client sends the slot keys the
+// tech will actually work that date; we store only the differences from their
+// recurring schedule (so the weekly schedule is never touched). Sending a
+// selection that matches the recurring schedule clears the date back to normal.
+async function setAvailabilityException(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let date, rows;
+  try {
+    date = assertDate(body.date);
+    const dow = dayOfWeekFor(date);
+    const { data: recur, error } = await db.from('technician_availability')
+      .select('slot_key').eq('technician_id', auth.tech_id).eq('day_of_week', dow);
+    if (error) throw error;
+    rows = computeExceptionRows((recur || []).map(r => r.slot_key), body.selected);
+  } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  await db.from('technician_availability_exceptions')
+    .delete().eq('technician_id', auth.tech_id).eq('exception_date', date);
+  if (rows.length) {
+    const { error } = await db.from('technician_availability_exceptions').insert(
+      rows.map(r => ({ business_id: auth.business_id, technician_id: auth.tech_id, exception_date: date, ...r }))
+    );
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, date, count: rows.length });
 }
 
 function shapeJob(b, full = false) {

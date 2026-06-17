@@ -16,7 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { localDayStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
-import { SLOTS, DAYS, normalizeSlots } from './_lib/availability.js';
+import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
@@ -47,6 +47,7 @@ export default async function handler(req, res) {
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
+      case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -357,9 +358,19 @@ async function techAvailability(req, res, db, auth) {
   const { data, error } = await db.from('technician_availability')
     .select('day_of_week, slot_key').eq('technician_id', techId);
   if (error) throw error;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: exc, error: e2 } = await db.from('technician_availability_exceptions')
+    .select('exception_date, slot_key, is_available')
+    .eq('technician_id', techId)
+    .gte('exception_date', today)
+    .order('exception_date');
+  if (e2) throw e2;
+
   return res.status(200).json({
     slots: SLOTS, days: DAYS,
     availability: (data || []).map(r => ({ day_of_week: r.day_of_week, slot_key: r.slot_key })),
+    exceptions: (exc || []).map(r => ({ date: r.exception_date, slot_key: r.slot_key, is_available: r.is_available })),
   });
 }
 
@@ -385,6 +396,37 @@ async function techAvailabilitySet(req, res, db, auth, body) {
     if (error) throw error;
   }
   return res.status(200).json({ ok: true, count: rows.length });
+}
+
+// Set a one-time, date-specific override for a tech (admin acting on their
+// behalf). Same diff-against-recurring model as the tech app.
+async function techAvailabilityExceptionSet(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const techId = (body.tech_id || '').toString();
+  if (!techId) return res.status(400).json({ error: 'tech_id required' });
+  const { data: tech } = await db.from('technicians').select('id').eq('id', techId).eq('business_id', biz.id).single();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  let date, rows;
+  try {
+    date = assertDate(body.date);
+    const dow = dayOfWeekFor(date);
+    const { data: recur, error } = await db.from('technician_availability')
+      .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
+    if (error) throw error;
+    rows = computeExceptionRows((recur || []).map(r => r.slot_key), body.selected);
+  } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  await db.from('technician_availability_exceptions')
+    .delete().eq('technician_id', techId).eq('exception_date', date);
+  if (rows.length) {
+    const { error } = await db.from('technician_availability_exceptions').insert(
+      rows.map(r => ({ business_id: biz.id, technician_id: techId, exception_date: date, ...r }))
+    );
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, date, count: rows.length });
 }
 
 // ── Shared shaping ───────────────────────────────────────────────────────────
