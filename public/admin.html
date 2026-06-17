@@ -100,6 +100,7 @@
     <div class="switcher" id="switcher"></div>
     <div class="spacer"></div>
     <span class="who" id="who"></span>
+    <button class="btn sm" id="newBookingBtn">＋ New</button>
     <button class="btn ghost sm" id="logout">Log out</button>
   </div>
   <div class="tabs" id="tabs">
@@ -109,6 +110,28 @@
     <button data-tab="technicians">Technicians</button>
   </div>
   <div class="wrap" id="view"></div>
+</div>
+
+<!-- New booking modal -->
+<div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 14px;">
+  <div style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;">
+    <h2 style="font-size:17px;margin-bottom:14px;">New Booking</h2>
+    <form id="nbForm" style="display:grid;gap:10px;">
+      <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email"></div>
+      <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
+      <select class="search" style="margin:0" id="nbService"></select>
+      <select class="search" style="margin:0" id="nbTech"></select>
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" type="datetime-local" id="nbWhen"><input class="search" style="margin:0;max-width:120px" id="nbPrice" placeholder="$ Price" inputmode="decimal"></div>
+      <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" type="submit">Create booking</button>
+        <button class="btn ghost" type="button" id="nbCancel">Cancel</button>
+      </div>
+      <div class="err" id="nbErr"></div>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -369,6 +392,57 @@ async function saveTech(payload){
   try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); renderTechnicians(); }
   catch(err){ toast(err.message); }
 }
+
+// ── New booking modal ──────────────────────────────────────────────────────
+document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
+document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+async function openNewBooking(){
+  if(!current) return;
+  const modal=document.getElementById('modal');
+  document.getElementById('nbErr').textContent='';
+  document.getElementById('nbForm').reset();
+  // populate services + technicians for current business
+  try{
+    const [svc, tech] = await Promise.all([
+      api('services',{ params:{ business:current.slug }}),
+      techCache.length ? Promise.resolve({technicians:techCache}) : api('technicians',{ params:{ business:current.slug }}),
+    ]);
+    document.getElementById('nbService').innerHTML='<option value="">— Service —</option>'+
+      svc.services.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
+    document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option>'+
+      tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+  modal.classList.remove('hidden');
+}
+document.getElementById('nbService').addEventListener('change',e=>{
+  const p=e.target.selectedOptions[0]?.dataset.price; if(p && !document.getElementById('nbPrice').value) document.getElementById('nbPrice').value=p;
+});
+document.getElementById('nbForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=document.getElementById('nbErr'); err.textContent='';
+  const name=document.getElementById('nbName').value.trim();
+  const phone=document.getElementById('nbPhone').value.trim();
+  if(!name && !phone){ err.textContent='Name or phone required'; return; }
+  const whenVal=document.getElementById('nbWhen').value;
+  const scheduled_at = whenVal ? new Date(whenVal).toISOString() : null;
+  try{
+    await api('booking_create',{ method:'POST', body:{
+      business: current.slug,
+      customer:{ name, phone, email:document.getElementById('nbEmail').value.trim(),
+        address_line1:document.getElementById('nbAddr').value.trim(),
+        city:document.getElementById('nbCity').value.trim(),
+        state:document.getElementById('nbState').value.trim(),
+        postal_code:document.getElementById('nbZip').value.trim() },
+      service_id: document.getElementById('nbService').value || null,
+      technician_id: document.getElementById('nbTech').value || null,
+      scheduled_at,
+      price: parseFloat(document.getElementById('nbPrice').value)||0,
+      notes: document.getElementById('nbNotes').value.trim()||null,
+    }});
+    document.getElementById('modal').classList.add('hidden');
+    toast('Booking created'); selectTab(tab);
+  }catch(e2){ err.textContent=e2.message; }
+});
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 if(token && businesses.length) enterApp();

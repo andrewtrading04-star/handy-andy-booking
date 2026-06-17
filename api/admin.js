@@ -37,7 +37,9 @@ export default async function handler(req, res) {
 
     switch (action) {
       case 'summary':           return await summary(req, res, db, auth);
+      case 'services':          return await services(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
+      case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
       case 'customers':         return await customers(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
@@ -164,6 +166,63 @@ async function bookings(req, res, db, auth) {
   const { data, error } = await q.order('scheduled_at', { ascending: true }).limit(500);
   if (error) throw error;
   return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
+}
+
+// ── Services (for the New Booking form) ──────────────────────────────────────
+async function services(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data, error } = await db.from('services')
+    .select('id, name, base_price, duration_minutes')
+    .eq('business_id', biz.id).eq('active', true).order('sort_order').order('name');
+  if (error) throw error;
+  return res.status(200).json({ services: data || [] });
+}
+
+// ── Create a manual / phone booking ──────────────────────────────────────────
+async function bookingCreate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const c = body.customer || {};
+  if (!c.name && !c.phone) return res.status(400).json({ error: 'Customer name or phone required' });
+
+  // Reuse an existing customer (by phone, then email) or create one.
+  let customer_id = c.id || null;
+  if (!customer_id && c.phone) {
+    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
+    customer_id = data?.id || null;
+  }
+  if (!customer_id && c.email) {
+    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
+    customer_id = data?.id || null;
+  }
+  if (!customer_id) {
+    const { data, error } = await db.from('customers').insert({
+      business_id: biz.id, name: c.name || 'Customer', phone: c.phone || null, email: c.email || null,
+      address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
+    }).select('id').single();
+    if (error) throw error;
+    customer_id = data.id;
+  }
+
+  const status = body.technician_id ? 'assigned' : 'confirmed';
+  const { data: bRow, error: bErr } = await db.from('bookings').insert({
+    business_id: biz.id, customer_id,
+    technician_id: body.technician_id || null,
+    service_id: body.service_id || null,
+    status, source: 'manual',
+    scheduled_at: body.scheduled_at || null,
+    price: Number(body.price) || 0,
+    notes: body.notes || null,
+    customer_notes: body.customer_notes || null,
+    address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
+  }).select('id').single();
+  if (bErr) throw bErr;
+
+  await db.from('booking_status_events').insert({
+    booking_id: bRow.id, business_id: biz.id, technician_id: body.technician_id || null,
+    status, note: `Created by ${auth.role} (dashboard)`,
+  });
+  return res.status(200).json({ ok: true, id: bRow.id });
 }
 
 // ── Booking update: confirm | cancel | reschedule | assign | status ──────────

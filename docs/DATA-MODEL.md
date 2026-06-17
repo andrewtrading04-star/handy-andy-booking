@@ -77,6 +77,23 @@ through the serverless functions, which use the **service-role key**
 - Admin dashboard: `/admin.html`
 - Technician app: `/tech.html`
 
+## Live data (no import required for new bookings)
+
+`api/book.js` (Handy Andy widget) and `api/assurion-book.js` (Asurion channel)
+now **mirror each new booking into Supabase** right after Zenbooker creates the
+job — see `api/_lib/mirror.js`. It's best-effort: it never blocks or fails a
+booking, and it no-ops if `SUPABASE_SERVICE_ROLE_KEY` isn't set. Prices/times
+come from the Zenbooker response and reconcile later via the importer.
+
+- **Asurion** is a channel into Handy Andy that books **Steve**. Those bookings
+  are `business='handy-andy'`, `source='asurion'`, tech = Steve (linked by his
+  Zenbooker provider id in migration `0002`).
+
+## Manual / phone bookings
+
+The dashboard's **＋ New** button creates a booking by hand (reusing an existing
+customer by phone/email, or creating one). Source is tagged `manual`.
+
 ## Real-time status
 
 The tech app's status buttons (**On My Way → Arrived → Start Job → Job

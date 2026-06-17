@@ -3,6 +3,8 @@
 // - Assigned to STEVE ONLY (server-side enforced).
 // - All line items are $0 custom services.
 // - No credit card / payment method.
+import { mirrorBooking } from './_lib/mirror.js';
+
 const STEVE_PROVIDER_ID  = '1688834379840x866068852960133100'; // Steve B.
 const DEFAULT_TERRITORY  = '1685582903241x973573877706522600'; // Denver #1 fallback
 
@@ -132,6 +134,17 @@ export default async function handler(req, res) {
         });
       } catch (e) { console.warn('[assurion-book] note failed:', e.message); }
     }
+
+    // ---- Mirror into Supabase as a Handy Andy / Asurion-channel booking (best-effort) ----
+    await mirrorBooking({
+      businessSlug: 'handy-andy', source: 'asurion', territory_id: territory,
+      zbkJob: data, zenbooker_job_id: jobId, technician_provider_id: STEVE_PROVIDER_ID,
+      technician_name: 'Steve',
+      customer: { first_name: customer.first_name, last_name: customer.last_name, name: fullName, email: customer.email, phone: customer.phone },
+      address: { line1: customer.address, city: resolvedCity, state: resolvedState, postal_code: zipForLookup },
+      price: 0, service_name: 'Asurion TV Service', notes: jobNote,
+      line_items: labels.map(label => ({ kind: 'service', name: label, unit_price: 0, line_total: 0 })),
+    });
 
     return res.status(200).json({ success: true, job_id: jobId, status: data.status });
   } catch (err) {
