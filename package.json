@@ -2,6 +2,10 @@
   "name": "handy-andy-booking",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "import:zenbooker": "node --env-file=.env scripts/import-zenbooker.mjs",
+    "import:zenbooker:dry": "node --env-file=.env scripts/import-zenbooker.mjs --dry-run"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0"
   }

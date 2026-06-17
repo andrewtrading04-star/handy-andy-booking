@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0A1628">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tech App</title>
+<style>
+  :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
+    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--amber:#ffb020;--blue:#4aa3ff;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;cursor:pointer;}
+  .hidden{display:none !important;}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;}
+
+  /* Login */
+  .login{padding:40px 24px;display:flex;flex-direction:column;min-height:100vh;justify-content:center;}
+  .login h1{font-size:22px;margin-bottom:4px;display:flex;align-items:center;gap:8px;}
+  .login .dot{width:12px;height:12px;border-radius:50%;background:var(--orange);}
+  .login .sub{color:var(--mute);font-size:14px;margin-bottom:26px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  input{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:15px 16px;font-size:17px;}
+  input:focus{outline:none;border-color:var(--orange);}
+  #pin{letter-spacing:10px;text-align:center;font-size:24px;}
+  .btn{background:var(--orange);color:#fff;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:700;width:100%;}
+  .btn:hover{background:var(--orange-d);} .btn:disabled{opacity:.5;}
+  .btn.big{padding:18px;font-size:18px;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:600;}
+  .btn.green{background:var(--green);} .btn.blue{background:var(--blue);}
+  .err{color:var(--red);font-size:14px;margin-top:10px;text-align:center;min-height:20px;}
+
+  /* Header */
+  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;z-index:10;}
+  .hdr .name{font-weight:800;font-size:17px;}
+  .hdr .sub{font-size:12px;color:var(--mute);}
+  .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
+
+  /* Job list */
+  .list{padding:14px;}
+  .jobc{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;}
+  .jobc:active{border-color:var(--orange);}
+  .jobc .t{font-weight:800;font-size:16px;color:var(--orange);}
+  .jobc .n{font-weight:700;font-size:16px;margin-top:4px;}
+  .jobc .m{color:var(--mute);font-size:14px;margin-top:4px;line-height:1.5;}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:capitalize;margin-top:8px;}
+  .b-assigned{background:rgba(74,163,255,.16);color:var(--blue);}
+  .b-on_the_way,.b-arrived,.b-in_progress{background:rgba(255,107,53,.18);color:var(--orange);}
+  .b-completed{background:rgba(39,192,147,.16);color:var(--green);}
+  .b-confirmed,.b-pending{background:rgba(255,176,32,.16);color:var(--amber);}
+  .empty{color:var(--mute);text-align:center;padding:60px 20px;}
+
+  /* Detail */
+  .detail{padding:16px;}
+  .back{background:transparent;border:none;color:var(--orange);font-size:15px;font-weight:600;padding:6px 0;margin-bottom:10px;}
+  .card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;}
+  .card h3{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
+  .card .big-name{font-size:20px;font-weight:800;}
+  .kv{font-size:15px;margin:7px 0;line-height:1.5;}
+  .kv a{color:var(--blue);text-decoration:none;}
+  .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
+  .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login -->
+  <div id="login" class="login">
+    <h1><span class="dot"></span>Technician Login</h1>
+    <div class="sub">Sign in to see today's jobs</div>
+    <form id="loginForm">
+      <div class="field"><label>Phone number</label>
+        <input type="tel" id="phone" placeholder="(555) 123-4567" autocomplete="username"></div>
+      <div class="field"><label>4-digit PIN</label>
+        <input type="tel" id="pin" maxlength="4" inputmode="numeric" placeholder="••••" autocomplete="current-password"></div>
+      <button class="btn big" type="submit">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </form>
+  </div>
+
+  <!-- Jobs list -->
+  <div id="jobsView" class="hidden">
+    <div class="hdr">
+      <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
+      <button id="logout">Log out</button>
+    </div>
+    <div class="list" id="jobsList"></div>
+  </div>
+
+  <!-- Job detail -->
+  <div id="detailView" class="hidden"></div>
+
+</div>
+
+<script>
+const API='/api/tech';
+let token=localStorage.getItem('ha_tech_token')||'';
+let tech=JSON.parse(localStorage.getItem('ha_tech_info')||'null');
+
+async function api(action,{method='GET',params={},body=null}={}){
+  const url=new URL(API,location.origin); url.searchParams.set('action',action);
+  for(const[k,v]of Object.entries(params)) if(v!=null&&v!=='') url.searchParams.set(k,v);
+  const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
+  if(res.status===401){ logout(); throw new Error('Session expired'); }
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||'Request failed');
+  return data;
+}
+function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
+function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}catch{return iso;} }
+
+// Login
+document.getElementById('loginForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=document.getElementById('loginErr'); err.textContent='';
+  try{
+    const d=await api('login',{method:'POST',body:{phone:document.getElementById('phone').value.trim(),pin:document.getElementById('pin').value.trim()}});
+    token=d.token; tech=d.technician;
+    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    showJobs();
+  }catch(e2){ err.textContent=e2.message; }
+});
+function logout(){ token='';tech=null; localStorage.removeItem('ha_tech_token');localStorage.removeItem('ha_tech_info');
+  show('login'); }
+document.getElementById('logout').addEventListener('click',logout);
+
+function show(which){
+  for(const id of ['login','jobsView','detailView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+}
+
+async function showJobs(){
+  show('jobsView');
+  document.getElementById('techName').textContent=tech?tech.name:'';
+  const list=document.getElementById('jobsList'); list.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const d=await api('jobs');
+    document.getElementById('jobsSub').textContent=`${d.jobs.length} job${d.jobs.length===1?'':'s'} today`;
+    list.innerHTML = d.jobs.length ? d.jobs.map(j=>`
+      <div class="jobc" data-id="${j.id}">
+        <div class="t">${fmtTime(j.scheduled_at)}</div>
+        <div class="n">${esc(j.customer_name)}</div>
+        <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
+        <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
+      </div>`).join('') : '<div class="empty">No jobs scheduled today.<br>Enjoy your day! 🎉</div>';
+    list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
+  }catch(e){ list.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+
+const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
+  confirmed:{to:'on_the_way',label:'On My Way',cls:'blue'},
+  on_the_way:{to:'arrived',label:'Arrived',cls:''},
+  arrived:{to:'in_progress',label:'Start Job',cls:''},
+  in_progress:{to:'completed',label:'Job Complete',cls:'green'} };
+
+async function showDetail(id){
+  show('detailView');
+  const v=document.getElementById('detailView'); v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
+  try{
+    const {job:j}=await api('job',{params:{id}});
+    const next=NEXT[j.status];
+    v.innerHTML=`<div class="detail">
+      <button class="back" id="back">‹ Today's jobs</button>
+      <div class="card">
+        <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
+        <div class="big-name">${esc(j.customer_name)}</div>
+        <div class="kv">🔧 ${esc(j.service||'Service')}</div>
+        ${j.customer_phone?`<div class="kv">📞 <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
+        <div class="kv">📍 ${esc(j.address||'No address')}</div>
+        ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">🧭 Get Directions</a>`:''}
+      </div>
+      ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
+      ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(li.name)}${li.line_total?' — $'+li.line_total:''}</div>`).join('')}</div>`:''}
+      ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
+    </div>
+    ${ next ? `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>` :
+      (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
+
+    document.getElementById('back').addEventListener('click',showJobs);
+    const adv=document.getElementById('advance');
+    if(adv) adv.addEventListener('click',async()=>{
+      adv.disabled=true;
+      try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
+      catch(e){ toast(e.message); adv.disabled=false; }
+    });
+  }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
+    document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// Boot
+if(token&&tech) showJobs(); else show('login');
+</script>
+</body>
+</html>
