@@ -64,6 +64,14 @@
   .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
+
+  /* Availability */
+  .avail{padding:16px;}
+  .hdr-actions{display:flex;gap:8px;}
+  .chips{display:flex;flex-direction:column;gap:8px;}
+  .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;}
+  .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip.on::after{content:'✓';float:right;font-weight:800;}
 </style>
 </head>
 <body>
@@ -93,13 +101,19 @@
   <div id="jobsView" class="hidden">
     <div class="hdr">
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
-      <button id="logout">Log out</button>
+      <div class="hdr-actions">
+        <button id="availBtn">My Availability</button>
+        <button id="logout">Log out</button>
+      </div>
     </div>
     <div class="list" id="jobsList"></div>
   </div>
 
   <!-- Job detail -->
   <div id="detailView" class="hidden"></div>
+
+  <!-- Weekly availability -->
+  <div id="availabilityView" class="hidden"></div>
 
 </div>
 
@@ -137,7 +151,7 @@ function logout(){ token='';tech=null; localStorage.removeItem('ha_tech_token');
 document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
-  for(const id of ['login','jobsView','detailView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+  for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
 async function showJobs(){
@@ -196,6 +210,58 @@ async function showDetail(id){
     });
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Weekly availability ─────────────────────────────────────────────────────
+let availDefs=null;                 // { slots, days } from the server
+let availState=new Set();           // selected "day:slot_key" keys
+document.getElementById('availBtn').addEventListener('click',showAvailability);
+
+async function showAvailability(){
+  show('availabilityView');
+  const v=document.getElementById('availabilityView');
+  v.innerHTML='<div class="avail"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('availability');
+    availDefs={ slots:d.slots, days:d.days };
+    availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
+    renderAvailability();
+  }catch(e){
+    v.innerHTML=`<div class="avail"><button class="back" id="availBack">‹ Today's jobs</button><div class="empty">${esc(e.message)}</div></div>`;
+    document.getElementById('availBack').addEventListener('click',showJobs);
+  }
+}
+
+function renderAvailability(){
+  const v=document.getElementById('availabilityView');
+  const rows=availDefs.days.map((dn,di)=>`
+    <div class="card"><h3>${esc(dn)}</h3>
+      <div class="chips">${availDefs.slots.map(s=>
+        `<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`
+      ).join('')}</div>
+    </div>`).join('');
+  v.innerHTML=`<div class="avail">
+      <button class="back" id="availBack">‹ Today's jobs</button>
+      <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Availability</div>
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Tap the time slots you can work each day. Tap again to remove.</div></div>
+      ${rows}
+      <div style="height:80px;"></div>
+    </div>
+    <div class="statusbar"><button class="btn big" id="availSave">Save Availability</button></div>`;
+
+  document.getElementById('availBack').addEventListener('click',showJobs);
+  v.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.day+':'+ch.dataset.key;
+    if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
+    else { availState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('availSave').addEventListener('click',async()=>{
+    const btn=document.getElementById('availSave'); btn.disabled=true;
+    const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
+    try{ await api('availability_set',{method:'POST',body:{slots}}); toast('Availability saved ✓'); }
+    catch(e){ toast(e.message); }
+    btn.disabled=false;
+  });
 }
 
 // Dev bypass: probe the server; if enabled, reveal a no-PIN tech picker.

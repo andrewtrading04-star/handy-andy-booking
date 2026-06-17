@@ -16,6 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { localDayStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
+import { SLOTS, DAYS, normalizeSlots } from './_lib/availability.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
@@ -44,6 +45,8 @@ export default async function handler(req, res) {
       case 'customers':         return await customers(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
+      case 'tech_availability':     return await techAvailability(req, res, db, auth);
+      case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -339,6 +342,49 @@ async function technicianUpdate(req, res, db, auth, body) {
     if (error) throw error;
   }
   return res.status(200).json({ ok: true });
+}
+
+// ── Technician weekly availability ───────────────────────────────────────────
+// Read one tech's selected slots (+ the fixed slot/day definitions). The tech
+// must belong to the requested business (scope already enforced on it).
+async function techAvailability(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const techId = (req.query.tech_id || '').toString();
+  if (!techId) return res.status(400).json({ error: 'tech_id required' });
+  const { data: tech } = await db.from('technicians').select('id').eq('id', techId).eq('business_id', biz.id).single();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  const { data, error } = await db.from('technician_availability')
+    .select('day_of_week, slot_key').eq('technician_id', techId);
+  if (error) throw error;
+  return res.status(200).json({
+    slots: SLOTS, days: DAYS,
+    availability: (data || []).map(r => ({ day_of_week: r.day_of_week, slot_key: r.slot_key })),
+  });
+}
+
+// Replace one tech's availability (full replace). Only the five fixed slots on
+// days 0–6 are accepted; anything else is rejected by normalizeSlots().
+async function techAvailabilitySet(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const techId = (body.tech_id || '').toString();
+  if (!techId) return res.status(400).json({ error: 'tech_id required' });
+  const { data: tech } = await db.from('technicians').select('id').eq('id', techId).eq('business_id', biz.id).single();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  let rows;
+  try { rows = normalizeSlots(body.slots); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  await db.from('technician_availability').delete().eq('technician_id', techId);
+  if (rows.length) {
+    const { error } = await db.from('technician_availability').insert(
+      rows.map(r => ({ business_id: biz.id, technician_id: techId, ...r }))
+    );
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, count: rows.length });
 }
 
 // ── Shared shaping ───────────────────────────────────────────────────────────

@@ -78,6 +78,13 @@
   .empty{color:var(--mute);text-align:center;padding:40px 0;}
   .stars{color:var(--amber);}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.4);z-index:50;}
+  /* Availability editor */
+  .avail-day{margin-bottom:12px;}
+  .avail-day .dl{font-size:13px;font-weight:700;margin-bottom:6px;}
+  .avail-chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .slotchip{background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12px;font-weight:600;}
+  .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip.on::after{content:' ✓';font-weight:800;}
 </style>
 </head>
 <body>
@@ -131,6 +138,20 @@
       </div>
       <div class="err" id="nbErr"></div>
     </form>
+  </div>
+</div>
+
+<!-- Technician availability modal -->
+<div id="availModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 14px;">
+  <div style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:520px;">
+    <h2 style="font-size:17px;margin-bottom:4px;" id="availTitle">Availability</h2>
+    <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:16px;">Select the time slots this technician can work each day.</div>
+    <div id="availBody"><div class="empty">Loading…</div></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn" type="button" id="availSaveBtn">Save</button>
+      <button class="btn ghost" type="button" id="availCloseBtn">Cancel</button>
+    </div>
+    <div class="err" id="availErr"></div>
   </div>
 </div>
 
@@ -371,6 +392,7 @@ async function renderTechnicians(){
             <option value="off" ${t.status==='off'?'selected':''}>off</option></select>
         </div>
         <div class="actions">
+          <button class="btn ghost sm" data-act="availability">Availability</button>
           <button class="btn ghost sm" data-act="phone">Set phone</button>
           <button class="btn ghost sm" data-act="pin">Set PIN</button>
           <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
@@ -381,6 +403,7 @@ async function renderTechnicians(){
       const id=card.dataset.id;
       card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
       card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
+        if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim()); }
         if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }
         if(btn.dataset.act==='pin'){ const p=prompt('New 4-digit PIN:'); if(p){ if(!/^\d{4}$/.test(p)) return toast('PIN must be 4 digits'); saveTech({ id, pin:p }); } }
         if(btn.dataset.act==='toggle'){ saveTech({ id, active: btn.textContent==='Activate' }); }
@@ -392,6 +415,42 @@ async function saveTech(payload){
   try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); renderTechnicians(); }
   catch(err){ toast(err.message); }
 }
+
+// ── Technician availability editor ─────────────────────────────────────────
+let availTechId=null, availDefs=null, availState=new Set();
+document.getElementById('availCloseBtn').addEventListener('click',()=>document.getElementById('availModal').classList.add('hidden'));
+
+async function openAvailability(techId, techName){
+  availTechId=techId;
+  document.getElementById('availTitle').textContent=`Availability — ${techName}`;
+  document.getElementById('availErr').textContent='';
+  const body=document.getElementById('availBody'); body.innerHTML='<div class="empty">Loading…</div>';
+  document.getElementById('availModal').classList.remove('hidden');
+  try{
+    const d=await api('tech_availability',{ params:{ business:current.slug, tech_id:techId }});
+    availDefs={ slots:d.slots, days:d.days };
+    availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
+    body.innerHTML=availDefs.days.map((dn,di)=>`
+      <div class="avail-day"><div class="dl">${esc(dn)}</div><div class="avail-chips">${
+        availDefs.slots.map(s=>`<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`).join('')
+      }</div></div>`).join('');
+    body.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+      const k=ch.dataset.day+':'+ch.dataset.key;
+      if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
+      else { availState.add(k); ch.classList.add('on'); }
+    }));
+  }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+document.getElementById('availSaveBtn').addEventListener('click',async()=>{
+  const btn=document.getElementById('availSaveBtn'); btn.disabled=true;
+  document.getElementById('availErr').textContent='';
+  const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
+  try{
+    await api('tech_availability_set',{ method:'POST', body:{ business:current.slug, tech_id:availTechId, slots }});
+    toast('Availability saved'); document.getElementById('availModal').classList.add('hidden');
+  }catch(err){ document.getElementById('availErr').textContent=err.message; }
+  btn.disabled=false;
+});
 
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);

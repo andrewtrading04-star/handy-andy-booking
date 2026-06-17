@@ -13,6 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { localDayStartUTC } from './_lib/time.js';
+import { SLOTS, DAYS, normalizeSlots } from './_lib/availability.js';
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
@@ -42,10 +43,12 @@ export default async function handler(req, res) {
 
     const db = serviceClient();
     switch (action) {
-      case 'jobs':   return await jobs(req, res, db, auth);
-      case 'job':    return await job(req, res, db, auth);
-      case 'status': return await status(req, res, db, auth, body);
-      default:       return res.status(400).json({ error: `Unknown action "${action}"` });
+      case 'jobs':             return await jobs(req, res, db, auth);
+      case 'job':              return await job(req, res, db, auth);
+      case 'status':           return await status(req, res, db, auth, body);
+      case 'availability':     return await getAvailability(req, res, db, auth);
+      case 'availability_set': return await setAvailability(req, res, db, auth, body);
+      default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
     console.error('[tech]', action, err);
@@ -170,6 +173,39 @@ async function status(req, res, db, auth, body) {
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
   return res.status(200).json({ ok: true, status: next });
+}
+
+// ── Weekly availability (the tech edits their OWN) ──────────────────────────
+// Return this tech's selected slots plus the fixed slot/day definitions so the
+// app renders the picker without hardcoding them.
+async function getAvailability(req, res, db, auth) {
+  const { data, error } = await db.from('technician_availability')
+    .select('day_of_week, slot_key')
+    .eq('technician_id', auth.tech_id);
+  if (error) throw error;
+  return res.status(200).json({
+    slots: SLOTS, days: DAYS,
+    availability: (data || []).map(r => ({ day_of_week: r.day_of_week, slot_key: r.slot_key })),
+  });
+}
+
+// Replace this tech's availability with the provided set (a full replace keeps
+// the client simple and the state unambiguous). Only the five fixed slots on
+// days 0–6 are accepted; anything else is rejected by normalizeSlots().
+async function setAvailability(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let rows;
+  try { rows = normalizeSlots(body.slots); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  await db.from('technician_availability').delete().eq('technician_id', auth.tech_id);
+  if (rows.length) {
+    const { error } = await db.from('technician_availability').insert(
+      rows.map(r => ({ business_id: auth.business_id, technician_id: auth.tech_id, ...r }))
+    );
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, count: rows.length });
 }
 
 function shapeJob(b, full = false) {
