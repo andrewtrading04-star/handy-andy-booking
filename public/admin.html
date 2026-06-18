@@ -166,6 +166,22 @@
   .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
   .nb-slot:hover{border-color:var(--accent);}
   .nb-slot.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  /* New-booking calendar */
+  .nb-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .nb-cal-title{font-size:14px;font-weight:700;color:var(--ink);}
+  .nb-cal-nav{background:#fff;border:1px solid var(--line);color:var(--ink-2);width:30px;height:30px;border-radius:8px;font-size:16px;cursor:pointer;}
+  .nb-cal-nav:hover{border-color:var(--accent);color:var(--accent);}
+  .nb-cal-nav:disabled{opacity:.35;cursor:not-allowed;}
+  .nb-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;}
+  .nb-cal-dow span{text-align:center;font-size:11px;font-weight:700;color:var(--ink-2);}
+  .nb-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .nb-cal-day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:13px;border:1px solid transparent;}
+  .nb-cal-day.empty{visibility:hidden;}
+  .nb-cal-day.avail{background:#fff;border-color:var(--line);color:var(--ink);cursor:pointer;font-weight:600;}
+  .nb-cal-day.avail:hover{border-color:var(--accent);}
+  .nb-cal-day.off{color:#c9c9c9;cursor:not-allowed;text-decoration:line-through;}
+  .nb-cal-day.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;}
+  .nb-cal-hint{font-size:11px;color:var(--ink-2);margin-top:8px;font-style:italic;}
   .nb-optq{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:13px;color:var(--ink);}
   .nb-optq.on{border-color:var(--accent);background:rgba(238,108,40,.07);}
   .nb-optq .nb-optlabel{flex:1;}
@@ -315,23 +331,31 @@
       <input class="search" style="margin:0" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
       <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
-      <input class="search" style="margin:0" type="date" id="nbDate" placeholder="Date">
+      <input type="hidden" id="nbDate">
+      <div id="nbCalWrap" style="display:none;">
+        <div class="nb-cal-head">
+          <button type="button" id="nbCalPrev" class="nb-cal-nav">‹</button>
+          <div id="nbCalTitle" class="nb-cal-title">—</div>
+          <button type="button" id="nbCalNext" class="nb-cal-nav">›</button>
+        </div>
+        <div class="nb-cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div id="nbCalGrid" class="nb-cal-grid"></div>
+        <div class="nb-cal-hint">Only dates with an available technician can be selected.</div>
+      </div>
       <div id="nbSlotsWrap" style="display:none;">
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;">
-          <input type="checkbox" id="nbPaymentRequired" style="cursor:pointer;">
-          <span style="font-size:14px;">Collect payment at booking</span>
-        </label>
-        <select class="search" style="margin:0;flex:1;" id="nbPaymentMethod" disabled>
-          <option value="">Select payment method</option>
-          <option value="card">Credit Card</option>
-          <option value="cash">Cash</option>
-          <option value="quote">Quote (no charge)</option>
-        </select>
+      <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
+        <option value="">Select payment method</option>
+        <option value="card">Credit Card</option>
+        <option value="cash">Cash</option>
+        <option value="quote">Quote (no charge)</option>
+      </select>
+      <div id="nbCardWrap" style="display:none;">
+        <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
+        <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">🔒 Secured by Stripe. The card is saved on file and charged at time of service.</div>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -726,7 +750,7 @@ function openBooking(b){
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
   const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
-  const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking?')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
+  const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? This permanently deletes it.')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
@@ -1069,9 +1093,11 @@ async function openNewBooking(){
   document.getElementById('nbService').style.display='none';
   document.getElementById('nbTravelFee').value='';
   document.getElementById('nbTotalDisplay').textContent='';
-  document.getElementById('nbPaymentRequired').checked=false;
   document.getElementById('nbPaymentMethod').value='';
-  document.getElementById('nbPaymentMethod').disabled=true;
+  document.getElementById('nbCardWrap').style.display='none';
+  document.getElementById('nbDate').value='';
+  document.getElementById('nbCalWrap').style.display='none';
+  nbCalMonth=new Date(); nbCalMonth.setDate(1);
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
@@ -1085,6 +1111,7 @@ async function openNewBooking(){
     renderNbServices('');
     document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option><option value="any">Any Technician</option>'+
       tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
@@ -1120,21 +1147,71 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   }
 });
 
-// ── Date + slot picker ──────────────────────────────────────────────────────
-document.getElementById('nbDate').addEventListener('change',async e=>{
-  const date=e.target.value; nbSelectedSlot=null;
+// ── Calendar date + slot picker ─────────────────────────────────────────────
+// Only dates with an available technician are clickable; only that date's
+// available slots are shown.
+let nbCalMonth=new Date(); nbCalMonth.setDate(1);
+let nbAvailDates=new Set();
+function nbMonthKey(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function nbTodayStr(){ return new Date().toISOString().split('T')[0]; }
+
+async function loadNbCalendar(){
+  const wrap=document.getElementById('nbCalWrap'); wrap.style.display='';
+  const techId=document.getElementById('nbTech').value||'any';
+  document.getElementById('nbCalTitle').textContent=nbCalMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  // Disable going before the current month.
+  const cur=new Date(); cur.setDate(1);
+  document.getElementById('nbCalPrev').disabled=(nbCalMonth.getFullYear()===cur.getFullYear()&&nbCalMonth.getMonth()===cur.getMonth());
+  document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
+  try{
+    const r=await api('available_dates',{ params:{ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:techId }});
+    nbAvailDates=new Set(r.dates||[]);
+  }catch(err){ nbAvailDates=new Set(); }
+  renderNbCalendar();
+}
+function renderNbCalendar(){
+  const grid=document.getElementById('nbCalGrid');
+  const y=nbCalMonth.getFullYear(), m=nbCalMonth.getMonth();
+  const firstDow=new Date(y,m,1).getDay();
+  const days=new Date(y,m+1,0).getDate();
+  const selected=document.getElementById('nbDate').value;
+  let html='';
+  for(let i=0;i<firstDow;i++) html+='<div class="nb-cal-day empty"></div>';
+  for(let d=1;d<=days;d++){
+    const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const avail=nbAvailDates.has(ds);
+    const cls=avail?(ds===selected?'avail sel':'avail'):'off';
+    html+=`<div class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:''}>${d}</div>`;
+  }
+  grid.innerHTML=html;
+}
+document.getElementById('nbCalPrev').addEventListener('click',()=>{ nbCalMonth.setMonth(nbCalMonth.getMonth()-1); loadNbCalendar(); });
+document.getElementById('nbCalNext').addEventListener('click',()=>{ nbCalMonth.setMonth(nbCalMonth.getMonth()+1); loadNbCalendar(); });
+document.getElementById('nbCalGrid').addEventListener('click',async e=>{
+  const cell=e.target.closest('.nb-cal-day.avail'); if(!cell) return;
+  const date=cell.dataset.date;
+  document.getElementById('nbDate').value=date;
+  renderNbCalendar();
+  await loadNbSlots(date);
+});
+async function loadNbSlots(date){
+  nbSelectedSlot=null;
   if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
   const techId=document.getElementById('nbTech').value;
   try{
     const r=await api('available_slots',{ params:{ business:current.slug, date, technician_id:techId||'any' }});
-    const html=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
-    document.getElementById('nbSlots').innerHTML=html;
+    if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
+    else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
     document.getElementById('nbSlotsWrap').style.display='';
+    updateNbTotal();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
-});
-document.getElementById('nbTech').addEventListener('change',e=>{
-  const date=document.getElementById('nbDate').value;
-  if(date) document.getElementById('nbDate').dispatchEvent(new Event('change'));
+}
+document.getElementById('nbTech').addEventListener('change',()=>{
+  // Tech changed — recompute the calendar and clear any prior date/slot pick.
+  document.getElementById('nbDate').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbSlotsWrap').style.display='none';
+  loadNbCalendar();
 });
 document.getElementById('nbTravelFee').addEventListener('change',updateNbTotal);
 document.getElementById('nbSlots').addEventListener('click',e=>{
@@ -1176,6 +1253,19 @@ function nbSelectedSizeTiers(){
   Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add((o.metadata&&o.metadata.bracket_tier)||'standard'); } });
   return tiers;
 }
+// Largest inch value mentioned in a size label (e.g. "70-84 inch" -> 84).
+function nbSizeMaxInches(label){
+  const nums=(label||'').match(/\d+/g); if(!nums) return 0;
+  return Math.max(...nums.map(Number));
+}
+// Lifting help only matters for TVs 70" and up.
+function nbShowLifting(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return false;
+  return Object.entries(nbQty[g.id]).some(([oid,ct])=>{
+    if(ct<=0) return false; const o=g.options.find(x=>x.id===oid);
+    return o && nbSizeMaxInches(o.label)>=70;
+  });
+}
 function nbVisibleOptions(g){
   if(g.key!=='bracket') return g.options;
   const tiers=nbSelectedSizeTiers();
@@ -1191,7 +1281,10 @@ function renderNbSteps(){
   if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
   let html='';
   const tvCount=nbTotalTvs();
+  const showLifting=nbShowLifting();
   nbOptionGroups.forEach(g=>{
+    // Lifting help is only relevant for TVs 70" and up — hide it otherwise.
+    if(g.key==='lifting'){ if(!showLifting){ if(nbQty[g.id]) delete nbQty[g.id]; return; } }
     const qtyMode=NB_QTY_KEYS.has(g.key);
     const tvBound=NB_TV_BOUND.has(g.key);
     const gCount=nbGroupCount(g.id);
@@ -1272,10 +1365,30 @@ document.getElementById('nbService').addEventListener('change',async e=>{
     renderNbSteps();
   }catch(err){ /* no option groups — manual quote */ }
 });
-// ── Payment method toggle ──────────────────────────────────────────────────
-document.getElementById('nbPaymentRequired').addEventListener('change',e=>{
-  document.getElementById('nbPaymentMethod').disabled=!e.target.checked;
-  if(!e.target.checked) document.getElementById('nbPaymentMethod').value='';
+// ── Payment method + Stripe card entry ──────────────────────────────────────
+const NB_STRIPE_KEY='pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
+let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
+function ensureNbStripe(){
+  return new Promise((resolve,reject)=>{
+    if(nbStripeCard){ resolve(); return; }
+    const init=()=>{
+      try{
+        nbStripe=window.Stripe(NB_STRIPE_KEY);
+        nbStripeElements=nbStripe.elements();
+        nbStripeCard=nbStripeElements.create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
+        nbStripeCard.mount('#nbStripeCard');
+        resolve();
+      }catch(err){ reject(err); }
+    };
+    if(window.Stripe){ init(); return; }
+    const s=document.createElement('script'); s.src='https://js.stripe.com/v3/';
+    s.onload=init; s.onerror=()=>reject(new Error('Could not load Stripe.')); document.head.appendChild(s);
+  });
+}
+document.getElementById('nbPaymentMethod').addEventListener('change',async e=>{
+  const isCard=e.target.value==='card';
+  document.getElementById('nbCardWrap').style.display=isCard?'':'none';
+  if(isCard){ try{ await ensureNbStripe(); }catch(err){ document.getElementById('nbErr').textContent=err.message; } }
 });
 
 document.getElementById('nbForm').addEventListener('submit',async e=>{
@@ -1294,12 +1407,29 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const totalPrice=subtotal+tax;
   const techId=document.getElementById('nbTech').value;
-  const paymentRequired=document.getElementById('nbPaymentRequired').checked;
   const paymentMethod=document.getElementById('nbPaymentMethod').value;
+  const email=document.getElementById('nbEmail').value.trim();
+  const submitBtn=e.target.querySelector('button[type="submit"]');
+
+  // For card payments, tokenize the card with Stripe before creating the booking.
+  let paymentMethodId=null;
+  if(paymentMethod==='card'){
+    if(!email){ err.textContent='Email is required to save a card on file'; return; }
+    try{
+      await ensureNbStripe();
+      if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
+      const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
+        type:'card', card:nbStripeCard,
+        billing_details:{ name, email, phone },
+      });
+      if(error){ err.textContent=error.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
+      paymentMethodId=pm.id;
+    }catch(e3){ err.textContent=e3.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
+  }
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
-      customer:{ name, phone, email:document.getElementById('nbEmail').value.trim(),
+      customer:{ name, phone, email,
         address_line1:document.getElementById('nbAddr').value.trim(),
         city:document.getElementById('nbCity').value.trim(),
         state:document.getElementById('nbState').value.trim(),
@@ -1313,12 +1443,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       tax,
       price: totalPrice,
       notes: document.getElementById('nbNotes').value.trim()||null,
-      payment_required: paymentRequired,
-      payment_method: paymentRequired ? paymentMethod : null,
+      payment_method: paymentMethod || null,
+      payment_method_id: paymentMethodId,
     }});
     document.getElementById('modal').classList.add('hidden');
     toast('Booking created'); refreshCurrent();
-  }catch(e2){ err.textContent=e2.message; }
+  }catch(e2){ err.textContent=e2.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } }
 });
 
 // ── Lightbox ────────────────────────────────────────────────────────────────

@@ -46,6 +46,7 @@ export default async function handler(req, res) {
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
+      case 'available_dates':   return await availableDates(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
       case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
@@ -296,31 +297,120 @@ async function availableSlots(req, res, db, auth) {
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
-  let available = [];
-
-  if (!techId || techId === 'any') {
-    // "Any Technician" — return all 5 slots
-    available = SLOTS.map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
-  } else {
-    // Specific technician — check their availability for this day + exceptions
-    const { data: av } = await db.from('technician_availability')
-      .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
-    const slots = new Set((av || []).map(x => x.slot_key));
-
-    // Check for exception on this date
-    const { data: exc } = await db.from('technician_availability_exceptions')
-      .select('slot_key, is_available').eq('technician_id', techId).eq('exception_date', dateStr).single();
-    if (exc) {
-      if (exc.is_available) {
-        available = SLOTS.filter(s => s.key === exc.slot_key).map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
-      }
-      // else: no slots if is_available=false (entire day off)
-    } else {
-      available = SLOTS.filter(s => slots.has(s.key)).map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
-    }
-  }
-
+  const keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow);
+  const available = SLOTS.filter(s => keys.has(s.key))
+    .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
   return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
+}
+
+// Set of slot keys a tech (or ANY tech) is available for on an exact date,
+// honouring recurring availability and one-time exceptions.
+async function availableSlotKeys(db, bizId, techId, dateStr, dow) {
+  if (!techId || techId === 'any') {
+    const { data: techs } = await db.from('technicians')
+      .select('id').eq('business_id', bizId).eq('active', true);
+    const union = new Set();
+    for (const t of (techs || [])) {
+      const ks = await singleTechSlotKeys(db, t.id, dateStr, dow);
+      ks.forEach(k => union.add(k));
+    }
+    return union;
+  }
+  return singleTechSlotKeys(db, techId, dateStr, dow);
+}
+
+async function singleTechSlotKeys(db, techId, dateStr, dow) {
+  const { data: av } = await db.from('technician_availability')
+    .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
+  const slots = new Set((av || []).map(x => x.slot_key));
+  const { data: exc } = await db.from('technician_availability_exceptions')
+    .select('slot_key, is_available').eq('technician_id', techId).eq('exception_date', dateStr);
+  for (const e of (exc || [])) {
+    if (e.is_available) slots.add(e.slot_key); else slots.delete(e.slot_key);
+  }
+  return slots;
+}
+
+// Which dates in a month have at least one available slot (for the date picker).
+async function availableDates(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const month = (req.query.month || '').toString();        // 'YYYY-MM'
+  const techId = (req.query.technician_id || '').toString();
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month required (YYYY-MM)' });
+
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Pull recurring availability + this month's exceptions once, compute in memory.
+  let techFilter = (q) => q;
+  let techIds = null;
+  if (!techId || techId === 'any') {
+    const { data: techs } = await db.from('technicians').select('id').eq('business_id', biz.id).eq('active', true);
+    techIds = (techs || []).map(t => t.id);
+  } else {
+    techIds = [techId];
+  }
+  if (!techIds.length) return res.status(200).json({ dates: [], month });
+
+  const { data: av } = await db.from('technician_availability')
+    .select('technician_id, day_of_week, slot_key').in('technician_id', techIds);
+  const recurring = {};   // `${techId}:${dow}` -> Set(slot_key)
+  for (const r of (av || [])) {
+    const k = `${r.technician_id}:${r.day_of_week}`;
+    (recurring[k] = recurring[k] || new Set()).add(r.slot_key);
+  }
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+  const { data: exc } = await db.from('technician_availability_exceptions')
+    .select('technician_id, exception_date, slot_key, is_available')
+    .in('technician_id', techIds).gte('exception_date', monthStart).lte('exception_date', monthEnd);
+  const excByDate = {};   // `${date}` -> [{tech,slot,is_available}]
+  for (const e of (exc || [])) (excByDate[e.exception_date] = excByDate[e.exception_date] || []).push(e);
+
+  const dates = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${month}-${String(d).padStart(2, '0')}`;
+    if (dateStr < todayStr) continue;                       // no past dates
+    const dow = dayOfWeekFor(dateStr);
+    let anySlot = false;
+    for (const tid of techIds) {
+      const set = new Set(recurring[`${tid}:${dow}`] || []);
+      for (const e of (excByDate[dateStr] || [])) {
+        if (e.technician_id !== tid) continue;
+        if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key);
+      }
+      if (set.size) { anySlot = true; break; }
+    }
+    if (anySlot) dates.push(dateStr);
+  }
+  return res.status(200).json({ dates, month });
+}
+
+// Attach a tokenized payment method to a Stripe customer (card on file).
+// Returns { customerId, pmId } or null if Stripe isn't configured.
+async function saveCardOnFile(pmId, cust) {
+  const SK = process.env.STRIPE_SECRET_KEY;
+  if (!SK) return null;
+  const sAuth = { Authorization: `Bearer ${SK}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+  // Create a Stripe customer for the card.
+  const cb = new URLSearchParams();
+  if (cust.email) cb.set('email', cust.email);
+  if (cust.name) cb.set('name', cust.name);
+  if (cust.phone) cb.set('phone', cust.phone);
+  cb.set('description', 'Dashboard booking customer');
+  const ccr = await fetch('https://api.stripe.com/v1/customers', { method: 'POST', headers: sAuth, body: cb });
+  const cc = await ccr.json();
+  if (!ccr.ok) throw new Error(cc?.error?.message || 'Stripe customer create failed');
+  const customerId = cc.id;
+  // Attach the payment method and make it the default.
+  const ab = new URLSearchParams(); ab.set('customer', customerId);
+  const ar = await fetch(`https://api.stripe.com/v1/payment_methods/${pmId}/attach`, { method: 'POST', headers: sAuth, body: ab });
+  const pm = await ar.json();
+  if (!ar.ok) throw new Error(pm?.error?.message || 'Attach failed');
+  const db = new URLSearchParams(); db.set('invoice_settings[default_payment_method]', pmId);
+  await fetch(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
+  return { customerId, pmId };
 }
 
 // ── Create a manual / phone booking ──────────────────────────────────────────
@@ -373,6 +463,7 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id = (avail && avail[0]) ? avail[0].technician_id : null;
   }
 
+  const paymentMethod = body.payment_method || null;        // card | cash | quote | null
   const status = technician_id ? 'assigned' : 'confirmed';
   const { data: bRow, error: bErr } = await db.from('bookings').insert({
     business_id: biz.id, customer_id,
@@ -385,10 +476,20 @@ async function bookingCreate(req, res, db, auth, body) {
     notes: body.notes || null,
     customer_notes: body.customer_notes || null,
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
-    payment_required: body.payment_required || false,
-    payment_method: (body.payment_required && body.payment_method) ? body.payment_method : null,
+    payment_required: !!paymentMethod && paymentMethod !== 'quote',
+    payment_method: paymentMethod,
   }).select('id').single();
   if (bErr) throw bErr;
+
+  // Save a tokenized card on file in Stripe so it can be charged at service time.
+  if (paymentMethod === 'card' && body.payment_method_id) {
+    try {
+      const ids = await saveCardOnFile(body.payment_method_id, { name: c.name, email: c.email, phone: c.phone });
+      if (ids) await db.from('bookings').update({
+        stripe_customer_id: ids.customerId, stripe_payment_method_id: ids.pmId,
+      }).eq('id', bRow.id);
+    } catch (e) { console.warn('[admin] card-on-file save failed:', e.message); }
+  }
 
   // Frozen price breakdown — one line item per chosen option.
   const selections = Array.isArray(body.selections) ? body.selections : [];
@@ -438,6 +539,14 @@ async function bookingUpdate(req, res, db, auth, body) {
     .select('id, status, technician_id').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
+  // Cancel deletes the booking outright. Child rows (line items, status events,
+  // photos, notes) are removed by ON DELETE CASCADE.
+  if (body.action === 'cancel') {
+    const { error: eDel } = await db.from('bookings').delete().eq('id', id).eq('business_id', biz.id);
+    if (eDel) throw eDel;
+    return res.status(200).json({ ok: true, deleted: true });
+  }
+
   const patch = {};
   let newStatus = null;
   const now = new Date().toISOString();
@@ -445,9 +554,6 @@ async function bookingUpdate(req, res, db, auth, body) {
   switch (body.action) {
     case 'confirm':
       patch.status = newStatus = 'confirmed'; patch.confirmed_at = now; break;
-    case 'cancel':
-      patch.status = newStatus = 'canceled'; patch.canceled_at = now;
-      if (body.reason) patch.cancellation_reason = body.reason; break;
     case 'reschedule':
       if (!body.scheduled_at) return res.status(400).json({ error: 'scheduled_at required' });
       patch.scheduled_at = body.scheduled_at;
