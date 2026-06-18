@@ -40,8 +40,27 @@
   .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
   .hdr button:hover{border-color:var(--ink);color:var(--ink);}
   .hdr-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
-  #scheduleDate{min-width:130px;}
-  #prevBtn,#nextBtn{padding:6px 8px;font-size:16px;font-weight:600;}
+
+  /* Week calendar strip */
+  .weekbar{background:var(--navy-2);border-bottom:1px solid var(--line);padding:10px 8px;}
+  .weekbar-top{display:flex;justify-content:space-between;align-items:center;padding:0 6px 8px;}
+  .weekbar-title{font-size:13px;font-weight:700;color:var(--ink);}
+  .weekbar-nav{display:flex;gap:6px;}
+  .weekbar-nav button{background:transparent;border:1px solid var(--line);color:var(--mute);width:30px;height:30px;border-radius:8px;font-size:15px;display:flex;align-items:center;justify-content:center;}
+  .weekbar-nav button:hover{border-color:var(--ink);color:var(--ink);}
+  .weekbar-today{font-size:12px;padding:0 10px !important;width:auto !important;}
+  .weekgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .daycell{background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:7px 2px 8px;text-align:center;cursor:pointer;position:relative;min-height:58px;display:flex;flex-direction:column;align-items:center;gap:3px;}
+  .daycell:hover{border-color:var(--mute);}
+  .daycell.sel{background:var(--orange);border-color:var(--orange);}
+  .daycell.sel .dc-dow,.daycell.sel .dc-num{color:#fff;}
+  .daycell.today .dc-num{color:var(--orange);font-weight:800;}
+  .daycell.sel.today .dc-num{color:#fff;}
+  .dc-dow{font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;font-weight:700;}
+  .dc-num{font-size:16px;font-weight:700;color:var(--ink);line-height:1;}
+  .dc-count{font-size:10px;font-weight:700;background:var(--blue);color:#fff;border-radius:10px;padding:1px 6px;min-width:18px;}
+  .daycell.sel .dc-count{background:rgba(255,255,255,.3);}
+  .dc-count.empty{visibility:hidden;}
 
   /* Job list */
   .list{padding:14px;}
@@ -125,12 +144,20 @@
     <div class="hdr">
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
       <div class="hdr-actions">
-        <button id="prevBtn" title="Previous day">‹</button>
-        <input type="date" id="scheduleDate" style="width:140px;background:transparent;border:none;color:var(--ink);text-align:center;font-size:14px;font-weight:600;cursor:pointer;">
-        <button id="nextBtn" title="Next day">›</button>
         <button id="availBtn">My Availability</button>
         <button id="logout">Log out</button>
       </div>
+    </div>
+    <div class="weekbar">
+      <div class="weekbar-top">
+        <div class="weekbar-title" id="weekTitle">—</div>
+        <div class="weekbar-nav">
+          <button id="weekToday" class="weekbar-today">Today</button>
+          <button id="weekPrev" title="Previous week">‹</button>
+          <button id="weekNext" title="Next week">›</button>
+        </div>
+      </div>
+      <div class="weekgrid" id="weekGrid"></div>
     </div>
     <div class="list" id="jobsList"></div>
   </div>
@@ -183,31 +210,78 @@ function show(which){
   for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
-let scheduleDate=new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+const todayStr=()=>new Date().toISOString().split('T')[0];
+let scheduleDate=todayStr();           // selected day (YYYY-MM-DD)
+let weekJobs=[];                       // all jobs in the visible week
+
+function ymd(d){ return d.toISOString().split('T')[0]; }
+// Sunday that starts the week containing dateStr.
+function weekStart(dateStr){
+  const d=new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()-d.getDay()); return d;
+}
 
 async function showJobs(date){
   if(date) scheduleDate=date;
   show('jobsView');
   document.getElementById('techName').textContent=tech?tech.name:'';
-  document.getElementById('scheduleDate').value=scheduleDate;
+  await loadWeek();
+}
 
-  const dateObj=new Date(scheduleDate+'T00:00:00');
-  const dateLabel=dateObj.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-  const isToday=scheduleDate===new Date().toISOString().split('T')[0];
+async function loadWeek(){
+  const start=weekStart(scheduleDate);
+  const days=[...Array(7)].map((_,i)=>{ const d=new Date(start); d.setDate(d.getDate()+i); return ymd(d); });
+  const end=days[6];
+  // Week title (e.g. "Jan 12 – 18" or spanning months).
+  const sd=new Date(days[0]+'T00:00:00'), ed=new Date(end+'T00:00:00');
+  const sameMonth=sd.getMonth()===ed.getMonth();
+  document.getElementById('weekTitle').textContent = sameMonth
+    ? `${sd.toLocaleDateString('en-US',{month:'long'})} ${sd.getDate()}–${ed.getDate()}`
+    : `${sd.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${ed.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
 
-  const list=document.getElementById('jobsList'); list.innerHTML='<div class="empty">Loading…</div>';
+  const grid=document.getElementById('weekGrid');
+  const list=document.getElementById('jobsList');
+  grid.innerHTML=days.map(ds=>{ const d=new Date(ds+'T00:00:00'); return `
+    <div class="daycell${ds===scheduleDate?' sel':''}${ds===todayStr()?' today':''}" data-date="${ds}">
+      <span class="dc-dow">${d.toLocaleDateString('en-US',{weekday:'short'}).slice(0,2)}</span>
+      <span class="dc-num">${d.getDate()}</span>
+      <span class="dc-count empty" data-count="${ds}">0</span>
+    </div>`; }).join('');
+  grid.querySelectorAll('.daycell').forEach(c=>c.addEventListener('click',()=>{ scheduleDate=c.dataset.date; renderDay(); markSelected(); }));
+
+  list.innerHTML='<div class="empty">Loading…</div>';
   try{
-    const d=await api('jobs',{params:{date:scheduleDate}});
-    document.getElementById('jobsSub').textContent=`${d.jobs.length} job${d.jobs.length===1?'':'s'} — ${isToday?'Today':dateLabel}`;
-    list.innerHTML = d.jobs.length ? d.jobs.map(j=>`
-      <div class="jobc" data-id="${j.id}">
-        <div class="t">${fmtTime(j.scheduled_at)}</div>
-        <div class="n">${esc(j.customer_name)}</div>
-        <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
-        <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
-      </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dateLabel}.<br>Enjoy your day! 🎉</div>`;
-    list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
+    const d=await api('jobs',{params:{from:days[0],to:end}});
+    weekJobs=d.jobs||[];
+    // Per-day counts on the calendar.
+    const counts={};
+    weekJobs.forEach(j=>{ const ds=ymd(new Date(j.scheduled_at)); counts[ds]=(counts[ds]||0)+1; });
+    grid.querySelectorAll('[data-count]').forEach(el=>{
+      const n=counts[el.dataset.count]||0; el.textContent=n;
+      el.classList.toggle('empty',n===0);
+    });
+    renderDay();
   }catch(e){ list.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function markSelected(){
+  document.querySelectorAll('#weekGrid .daycell').forEach(c=>c.classList.toggle('sel',c.dataset.date===scheduleDate));
+}
+
+function renderDay(){
+  const isToday=scheduleDate===todayStr();
+  const dObj=new Date(scheduleDate+'T00:00:00');
+  const dLabel=dObj.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  const jobs=weekJobs.filter(j=>ymd(new Date(j.scheduled_at))===scheduleDate);
+  document.getElementById('jobsSub').textContent=`${jobs.length} job${jobs.length===1?'':'s'} — ${isToday?'Today':dLabel}`;
+  const list=document.getElementById('jobsList');
+  list.innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="jobc" data-id="${j.id}">
+      <div class="t">${fmtTime(j.scheduled_at)}</div>
+      <div class="n">${esc(j.customer_name)}</div>
+      <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
+      <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
+    </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dLabel}.<br>Enjoy your day! 🎉</div>`;
+  list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
 }
 
 const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
@@ -395,18 +469,14 @@ async function paymentAction(jobId,action){
 function close(){ showJobs(); }
 
 // ── Weekly availability ─────────────────────────────────────────────────────
-// ── Schedule navigation ────────────────────────────────────────────────────
-document.getElementById('prevBtn').addEventListener('click',()=>{
-  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()-1);
-  showJobs(d.toISOString().split('T')[0]);
-});
-document.getElementById('nextBtn').addEventListener('click',()=>{
-  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()+1);
-  showJobs(d.toISOString().split('T')[0]);
-});
-document.getElementById('scheduleDate').addEventListener('change',e=>{
-  if(e.target.value) showJobs(e.target.value);
-});
+// ── Week navigation ─────────────────────────────────────────────────────────
+function shiftWeek(delta){
+  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()+delta*7);
+  scheduleDate=ymd(d); loadWeek();
+}
+document.getElementById('weekPrev').addEventListener('click',()=>shiftWeek(-1));
+document.getElementById('weekNext').addEventListener('click',()=>shiftWeek(1));
+document.getElementById('weekToday').addEventListener('click',()=>{ scheduleDate=todayStr(); loadWeek(); });
 
 let availDefs=null;                 // { slots, days } from the server
 let availState=new Set();           // selected "day:slot_key" keys (recurring)

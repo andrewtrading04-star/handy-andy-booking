@@ -124,10 +124,25 @@ async function devLogin(req, res, body) {
 async function jobs(req, res, db, auth) {
   const { data: biz } = await db.from('businesses').select('timezone').eq('id', auth.business_id).single();
   const tz = biz?.timezone || 'America/Denver';
-  // Optional date param: 'YYYY-MM-DD' to fetch that date (default: today)
-  const dateStr = (req.query.date || '').toString().match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.date : null;
-  const daysOffset = dateStr ? new Date(dateStr + 'T00:00:00').getTime() - new Date().getTime() : 0;
-  const daysAhead = Math.floor(daysOffset / 86400000);
+  const reDate = /^\d{4}-\d{2}-\d{2}$/;
+  const daysFromToday = (dateStr) =>
+    Math.round((new Date(dateStr + 'T00:00:00').getTime() - new Date(new Date().toISOString().split('T')[0] + 'T00:00:00').getTime()) / 86400000);
+
+  // Range mode: from/to (inclusive) span multiple days for the week view.
+  const from = reDate.test((req.query.from || '').toString()) ? req.query.from : null;
+  const to = reDate.test((req.query.to || '').toString()) ? req.query.to : null;
+  // Single-date mode: date (default today).
+  const dateStr = reDate.test((req.query.date || '').toString()) ? req.query.date : null;
+
+  let lo, hi;
+  if (from && to) {
+    lo = localDayStartUTC(tz, daysFromToday(from));
+    hi = localDayStartUTC(tz, daysFromToday(to) + 1);
+  } else {
+    const daysAhead = dateStr ? daysFromToday(dateStr) : 0;
+    lo = localDayStartUTC(tz, daysAhead);
+    hi = localDayStartUTC(tz, daysAhead + 1);
+  }
 
   const { data, error } = await db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
@@ -136,8 +151,8 @@ async function jobs(req, res, db, auth) {
              service:services ( name )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
-    .gte('scheduled_at', localDayStartUTC(tz, daysAhead).toISOString())
-    .lt('scheduled_at', localDayStartUTC(tz, daysAhead + 1).toISOString())
+    .gte('scheduled_at', lo.toISOString())
+    .lt('scheduled_at', hi.toISOString())
     .order('scheduled_at', { ascending: true });
   if (error) throw error;
 
