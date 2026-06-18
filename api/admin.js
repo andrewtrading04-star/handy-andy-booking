@@ -44,6 +44,7 @@ export default async function handler(req, res) {
     switch (action) {
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
+      case 'service_options':   return await serviceOptions(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
       case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
@@ -260,6 +261,32 @@ async function services(req, res, db, auth) {
   return res.status(200).json({ services: data || [] });
 }
 
+// ── Option groups + options for one service (drives the New Booking steps) ────
+async function serviceOptions(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const serviceId = (req.query.service_id || '').toString();
+  if (!serviceId) return res.status(400).json({ error: 'service_id required' });
+
+  const { data: groups, error: gErr } = await db.from('service_option_groups')
+    .select('id, key, label, min_select, max_select, sort_order')
+    .eq('business_id', biz.id).eq('service_id', serviceId).order('sort_order');
+  if (gErr) throw gErr;
+
+  const ids = (groups || []).map(g => g.id);
+  let options = [];
+  if (ids.length) {
+    const { data: opts, error: oErr } = await db.from('service_options')
+      .select('id, group_id, label, price, metadata, sort_order')
+      .in('group_id', ids).eq('active', true).order('sort_order');
+    if (oErr) throw oErr;
+    options = opts || [];
+  }
+  const byGroup = {};
+  for (const o of options) (byGroup[o.group_id] = byGroup[o.group_id] || []).push(o);
+  const result = (groups || []).map(g => ({ ...g, options: byGroup[g.id] || [] }));
+  return res.status(200).json({ groups: result });
+}
+
 // ── Create a manual / phone booking ──────────────────────────────────────────
 async function bookingCreate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -299,6 +326,23 @@ async function bookingCreate(req, res, db, auth, body) {
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
   }).select('id').single();
   if (bErr) throw bErr;
+
+  // Frozen price breakdown — one line item per chosen option.
+  const selections = Array.isArray(body.selections) ? body.selections : [];
+  if (selections.length) {
+    const rows = selections.map(s => {
+      const qty = Number(s.quantity) || 1;
+      const unit = Number(s.price) || 0;
+      return {
+        booking_id: bRow.id, business_id: biz.id,
+        kind: 'option', name: s.label || 'Option',
+        quantity: qty, unit_price: unit, line_total: unit * qty,
+        service_id: body.service_id || null, option_id: s.option_id || null,
+      };
+    });
+    const { error: liErr } = await db.from('booking_line_items').insert(rows);
+    if (liErr) throw liErr;
+  }
 
   await db.from('booking_status_events').insert({
     booking_id: bRow.id, business_id: biz.id, technician_id: body.technician_id || null,

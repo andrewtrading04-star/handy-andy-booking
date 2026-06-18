@@ -153,6 +153,16 @@
   .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
   .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;box-shadow:0 24px 60px rgba(20,30,50,.22);}
   .sheet h2{font-size:17px;margin-bottom:14px;}
+  #nbSteps{display:grid;gap:12px;}
+  #nbSteps:empty{display:none;}
+  .nb-step-t{font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
+  .nb-hint{font-size:13px;color:var(--ink-2);font-style:italic;}
+  .nb-opts{display:grid;gap:6px;}
+  .nb-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;text-align:left;width:100%;}
+  .nb-opt:hover{border-color:var(--accent);}
+  .nb-opt.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  .nb-opt .nb-price{color:var(--ink-2);font-weight:600;flex-shrink:0;}
+  .nb-opt.on .nb-price{color:var(--accent);}
   .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
   .bk-row span:first-child{width:18px;flex-shrink:0;}
   .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
@@ -286,6 +296,7 @@
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0" id="nbService"></select>
+      <div id="nbSteps"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" type="datetime-local" id="nbWhen"><input class="search" style="margin:0;max-width:120px" id="nbPrice" placeholder="$ Price" inputmode="decimal"></div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
@@ -1012,6 +1023,7 @@ async function openNewBooking(){
   const modal=document.getElementById('modal');
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
+  resetNbSteps();
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
@@ -1035,10 +1047,76 @@ function renderNbServices(category){
 }
 document.getElementById('nbCategory').addEventListener('change',e=>{
   renderNbServices(e.target.value);
+  resetNbSteps();
   document.getElementById('nbPrice').value='';
 });
-document.getElementById('nbService').addEventListener('change',e=>{
-  const p=e.target.selectedOptions[0]?.dataset.price; if(p && !document.getElementById('nbPrice').value) document.getElementById('nbPrice').value=p;
+
+// ── Option-step engine (TV Mounting walk-through) ───────────────────────────
+let nbOptionGroups=[]; const nbSel={};   // group_id -> Set(option_id)
+function resetNbSteps(){ for(const k in nbSel) delete nbSel[k]; nbOptionGroups=[]; document.getElementById('nbSteps').innerHTML=''; }
+function nbSizeTier(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbSel[g.id]) return null;
+  const oid=[...nbSel[g.id]][0]; const o=g.options.find(x=>x.id===oid);
+  return o ? ((o.metadata&&o.metadata.bracket_tier)||'standard') : null;
+}
+function nbVisibleOptions(g){
+  if(g.key!=='bracket') return g.options;
+  const tier=nbSizeTier();
+  return g.options.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||fs===tier; });
+}
+function nbIsMulti(g){ return g.max_select===0 || g.max_select>1; }
+function renderNbSteps(){
+  const wrap=document.getElementById('nbSteps');
+  if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
+  let html='';
+  nbOptionGroups.forEach(g=>{
+    html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}</div>`;
+    if(g.key==='bracket' && !nbSizeTier()){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
+    const multi=nbIsMulti(g);
+    html+='<div class="nb-opts">';
+    nbVisibleOptions(g).forEach(o=>{
+      const on=nbSel[g.id]&&nbSel[g.id].has(o.id); const price=Number(o.price)||0;
+      html+=`<button type="button" class="nb-opt${on?' on':''}" data-g="${g.id}" data-o="${o.id}" data-multi="${multi?1:0}">`+
+            `<span>${esc(o.label)}</span><span class="nb-price">${price?'+$'+price:'$0'}</span></button>`;
+    });
+    html+='</div></div>';
+  });
+  wrap.innerHTML=html;
+  updateNbTotal();
+}
+document.getElementById('nbSteps').addEventListener('click',e=>{
+  const btn=e.target.closest('.nb-opt'); if(!btn) return;
+  const gid=btn.dataset.g, oid=btn.dataset.o, multi=btn.dataset.multi==='1';
+  if(!nbSel[gid]) nbSel[gid]=new Set();
+  const set=nbSel[gid];
+  if(multi){ set.has(oid)?set.delete(oid):set.add(oid); }
+  else { const was=set.has(oid); set.clear(); if(!was) set.add(oid); }
+  const grp=nbOptionGroups.find(g=>g.id===gid);
+  if(grp&&grp.key==='size'){ const bg=nbOptionGroups.find(g=>g.key==='bracket'); if(bg&&nbSel[bg.id]) nbSel[bg.id].clear(); }
+  renderNbSteps();
+});
+function nbCollectSelections(){
+  const out=[];
+  nbOptionGroups.forEach(g=>{ const set=nbSel[g.id]; if(!set) return;
+    set.forEach(oid=>{ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`, price:Number(o.price)||0, quantity:1}); });
+  });
+  return out;
+}
+function updateNbTotal(){
+  if(!nbOptionGroups.length) return;
+  const total=nbCollectSelections().reduce((s,x)=>s+x.price*x.quantity,0);
+  document.getElementById('nbPrice').value=total.toFixed(2);
+}
+document.getElementById('nbService').addEventListener('change',async e=>{
+  resetNbSteps();
+  const sid=e.target.value;
+  const p=e.target.selectedOptions[0]?.dataset.price; document.getElementById('nbPrice').value = p||'';
+  if(!sid) return;
+  try{
+    const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
+    nbOptionGroups=r.groups||[];
+    renderNbSteps();
+  }catch(err){ /* no option groups — fall back to manual price */ }
 });
 document.getElementById('nbForm').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -1060,6 +1138,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       technician_id: document.getElementById('nbTech').value || null,
       scheduled_at,
       price: parseFloat(document.getElementById('nbPrice').value)||0,
+      selections: nbCollectSelections(),
       notes: document.getElementById('nbNotes').value.trim()||null,
     }});
     document.getElementById('modal').classList.add('hidden');

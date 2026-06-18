@@ -69,11 +69,11 @@ select s.business_id, s.id, v.key, v.label, v.mins, v.maxs, v.ord
 from services s
 join businesses b on b.id = s.business_id
 cross join (values
-  ('size',      'TV Size',       1, 0, 1),
-  ('bracket',   'Bracket',       1, 0, 2),
-  ('fireplace', 'Fireplace',     1, 0, 3),
-  ('wires',     'Wire Hiding',   0, 0, 4),
-  ('surface',   'Wall Surface',  0, 0, 5),
+  ('size',      'TV Size',       1, 1, 1),
+  ('bracket',   'Bracket',       1, 1, 2),
+  ('fireplace', 'Fireplace',     1, 1, 3),
+  ('wires',     'Wire Hiding',   0, 1, 4),
+  ('surface',   'Wall Surface',  0, 1, 5),
   ('lifting',   'Lifting Help',  1, 1, 6),
   ('dismount',  'Dismount',      1, 1, 7),
   ('extras',    'Add-ons',       0, 0, 8)
