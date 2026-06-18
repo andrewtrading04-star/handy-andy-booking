@@ -148,8 +148,18 @@ function denverMidnight(){
   const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
   return h===0?c:new Date(ymd+'T07:00:00Z');
 }
+function denverEndOfDay(){
+  const now=new Date();
+  const ymd=now.toLocaleDateString('en-CA',{timeZone:'America/Denver'});
+  const [y,m,d]=ymd.split('-').map(Number);
+  const tymd=new Date(Date.UTC(y,m-1,d+1)).toLocaleDateString('en-CA',{timeZone:'UTC'});
+  const c=new Date(tymd+'T06:00:00Z');
+  const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
+  const tm=h===0?c:new Date(tymd+'T07:00:00Z');
+  return new Date(tm.getTime()-1000);
+}
 function buildAnalyticsUrl(mode){
-  if(mode==='today') return '/api/analytics?from='+denverMidnight().toISOString();
+  if(mode==='today') return '/api/analytics?from='+denverMidnight().toISOString()+'&to='+denverEndOfDay().toISOString();
   return '/api/analytics?days='+mode;
 }
 async function load(){
