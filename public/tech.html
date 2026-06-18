@@ -106,6 +106,7 @@
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;}
   .lightbox img{max-width:100%;max-height:100%;border-radius:8px;}
   .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;}
+  .streetview{width:100%;height:auto;border-radius:10px;display:block;margin:12px 0;background:var(--navy);aspect-ratio:4/3;}
 
   /* Availability */
   .avail{padding:16px;}
@@ -315,6 +316,7 @@ async function showDetail(id){
         <div class="kv">🔧 ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">📞 <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
         <div class="kv">📍 ${esc(j.address||'No address')}</div>
+        ${j.lat&&j.lng?`<img class="streetview" src="https://maps.googleapis.com/maps/api/streetview?size=600x450&location=${j.lat},${j.lng}&fov=90&pitch=0" alt="Street View of job location">`:'<div class="sub" style="color:var(--mute);font-size:13px;padding:12px 0;">📍 Address details not available for Street View</div>'}
         ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">🧭 Get Directions</a>`:''}
       </div>
       ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
