@@ -344,13 +344,13 @@ async function status(req, res, db, auth, body) {
   // Reflect availability in the admin dashboard.
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
-  // Send SMS to customer on certain status changes.
-  if (next === 'on_the_way' && existing.customer?.phone) {
+  // Send SMS to customer on certain status changes (if customer opted in).
+  if (next === 'on_the_way' && existing.customer?.phone && existing.sms_consent) {
     const etaMinutes = body.eta_minutes || 30;
     const msg = `Your tech is on the way! ETA ${etaMinutes} minutes.`;
     sendSMS(existing.customer.phone, msg).catch(console.error);
   }
-  if (next === 'completed' && existing.customer?.phone && existing.review_token) {
+  if (next === 'completed' && existing.customer?.phone && existing.review_token && existing.sms_consent) {
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
     const msg = `Your job is complete! How did we do? ${reviewLink}`;

@@ -379,6 +379,10 @@
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
+        <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
+        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment (confirmations, ETA, completion)</label>
+      </div>
       <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
         <option value="">Select payment method</option>
         <option value="card">Credit Card</option>
@@ -1638,6 +1642,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       notes: document.getElementById('nbNotes').value.trim()||null,
       payment_method: paymentMethod || null,
       payment_method_id: paymentMethodId,
+      sms_consent: document.getElementById('nbSmsConsent').checked,
     }});
     document.getElementById('modal').classList.add('hidden');
     toast('Booking created'); refreshCurrent();

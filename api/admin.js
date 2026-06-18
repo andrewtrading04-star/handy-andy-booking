@@ -634,6 +634,7 @@ async function bookingCreate(req, res, db, auth, body) {
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
     payment_required: !!paymentMethod && paymentMethod !== 'quote',
     payment_method: paymentMethod,
+    sms_consent: !!body.sms_consent,
   }).select('id').single();
   if (bErr) throw bErr;
 
@@ -685,8 +686,8 @@ async function bookingCreate(req, res, db, auth, body) {
     status, note: `Created by ${auth.role} (dashboard)`,
   });
 
-  // Send booking confirmation SMS to customer
-  if (c.phone && scheduled_at) {
+  // Send booking confirmation SMS to customer (if they opted in)
+  if (c.phone && scheduled_at && body.sms_consent) {
     const dateStr = new Date(scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     const msg = `Your appointment is booked for ${dateStr}. We'll send you a message when your tech is on the way!`;
     sendSMS(c.phone, msg).catch(console.error);
@@ -763,8 +764,8 @@ async function bookingUpdate(req, res, db, auth, body) {
       status: newStatus, note: `Set by ${auth.role} (dashboard)`,
     });
 
-    // Send SMS when job is completed
-    if (newStatus === 'completed' && existing.customer?.phone && existing.review_token) {
+    // Send SMS when job is completed (if customer opted in)
+    if (newStatus === 'completed' && existing.customer?.phone && existing.review_token && existing.sms_consent) {
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
       const msg = `Your job is complete! How did we do? ${reviewLink}`;
