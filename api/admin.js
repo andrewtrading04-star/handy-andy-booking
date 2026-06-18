@@ -381,6 +381,8 @@ async function bookingCreate(req, res, db, auth, body) {
     notes: body.notes || null,
     customer_notes: body.customer_notes || null,
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
+    payment_required: body.payment_required || false,
+    payment_method: (body.payment_required && body.payment_method) ? body.payment_method : null,
   }).select('id').single();
   if (bErr) throw bErr;
 
@@ -440,7 +442,7 @@ async function bookingUpdate(req, res, db, auth, body) {
     case 'confirm':
       patch.status = newStatus = 'confirmed'; patch.confirmed_at = now; break;
     case 'cancel':
-      patch.status = newStatus = 'cancelled'; patch.cancelled_at = now;
+      patch.status = newStatus = 'canceled'; patch.canceled_at = now;
       if (body.reason) patch.cancellation_reason = body.reason; break;
     case 'reschedule':
       if (!body.scheduled_at) return res.status(400).json({ error: 'scheduled_at required' });

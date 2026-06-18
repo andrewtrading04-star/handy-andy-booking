@@ -151,6 +151,7 @@ async function jobs(req, res, db, auth) {
              service:services ( name )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
+    .neq('status', 'canceled')
     .gte('scheduled_at', lo.toISOString())
     .lt('scheduled_at', hi.toISOString())
     .order('scheduled_at', { ascending: true });
@@ -174,7 +175,7 @@ async function job(req, res, db, auth) {
     .eq('technician_id', auth.tech_id)
     .single();
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
-  return res.status(200).json({ job: shapeJob(data, true) });
+  return res.status(200).json({ job: shapeJob(data, true, true) });
 }
 
 async function status(req, res, db, auth, body) {
@@ -459,7 +460,7 @@ async function setAvailabilityException(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, date, count: rows.length });
 }
 
-function shapeJob(b, full = false) {
+function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
   const out = {
     id: b.id,
@@ -477,7 +478,10 @@ function shapeJob(b, full = false) {
     out.customer_email = b.customer?.email || null;
     out.notes = b.notes || null;
     out.price = b.price;
-    out.line_items = b.line_items || [];
+    // For techs, hide tax and dismount line items
+    out.line_items = (b.line_items || []).filter(li =>
+      forTech ? li.kind !== 'fee' && li.name !== 'Guaranteed Dismount Service' : true
+    );
     out.payment_status = b.payment_status || 'unpaid';
     out.paid_at = b.paid_at || null;
     out.stripe_customer_id = b.stripe_customer_id || null;
