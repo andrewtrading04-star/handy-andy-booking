@@ -1149,7 +1149,7 @@ async function openNewBooking(){
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
-    document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option><option value="any">Any Technician</option>'+
+    document.getElementById('nbTech').innerHTML='<option value="any">Any Technician</option>'+
       tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }

@@ -321,6 +321,27 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow) {
   return singleTechSlotKeys(db, techId, dateStr, dow);
 }
 
+// Pick the first active tech available for an exact date+slot (recurring OR a
+// one-time exception). Falls back to any active tech so the job is never left
+// unassigned when the date was offered as bookable.
+async function pickAvailableTech(db, bizId, dateStr, slotKey) {
+  const { data: techs } = await db.from('technicians')
+    .select('id').eq('business_id', bizId).eq('active', true)
+    .order('created_at', { ascending: true });
+  const list = techs || [];
+  if (!list.length) return null;
+  if (dateStr && slotKey) {
+    const dow = dayOfWeekFor(dateStr);
+    for (const t of list) {
+      const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
+      if (keys.has(slotKey)) return t.id;
+    }
+  }
+  // No one is explicitly available — default to the first active tech so the
+  // job still has an owner who can see it.
+  return list[0].id;
+}
+
 async function singleTechSlotKeys(db, techId, dateStr, dow) {
   const { data: av } = await db.from('technician_availability')
     .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
@@ -455,14 +476,13 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
 
-  // If technician_id='any', pick a first available tech for this slot/date
+  // If technician_id='any', pick the first technician actually available for
+  // this date+slot. Honours one-time exceptions (not just recurring), and falls
+  // back to any active tech so a bookable date never lands as an unassigned job
+  // the technician can't see.
   let technician_id = body.technician_id;
   if (technician_id === 'any') {
-    const { data: avail } = await db.from('technician_availability')
-      .select('technician_id').eq('business_id', biz.id)
-      .eq('day_of_week', new Date(body.scheduled_date + 'T00:00:00Z').getUTCDay())
-      .eq('slot_key', body.scheduled_slot).limit(1);
-    technician_id = (avail && avail[0]) ? avail[0].technician_id : null;
+    technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot);
   }
 
   const paymentMethod = body.payment_method || null;        // card | cash | quote | null
@@ -523,7 +543,7 @@ async function bookingCreate(req, res, db, auth, body) {
   }
 
   await db.from('booking_status_events').insert({
-    booking_id: bRow.id, business_id: biz.id, technician_id: body.technician_id || null,
+    booking_id: bRow.id, business_id: biz.id, technician_id: technician_id || null,
     status, note: `Created by ${auth.role} (dashboard)`,
   });
   return res.status(200).json({ ok: true, id: bRow.id });
