@@ -1364,8 +1364,8 @@ function renderNbServices(category){
   if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
-  svcDiv.innerHTML='<option value="">— Service —</option>'+
-    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
+  svcDiv.innerHTML='<option value="">— Task —</option>'+
+    list.map(s=>{ const showPrice=Number(s.base_price)>0; return `<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)}${showPrice?` ($${s.base_price})`:''}</option>`; }).join('');
 }
 document.getElementById('nbCategory').addEventListener('change',async e=>{
   const cat=e.target.value;
@@ -1477,8 +1477,12 @@ let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
 // Frame/Gallery TVs carry a flat surcharge (covers the in-box bracket install).
 const FRAME_TV_PRICE = 30;
 let nbFrameTvQty={ regular: 0, frame: 0 };
+// Handyman labor — billed by the hour at a flat rate (no TV option groups).
+const HANDYMAN_HOURLY = 85;
+let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
+function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; document.getElementById('nbSteps').innerHTML=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
   // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
@@ -1528,6 +1532,25 @@ function nbPruneBrackets(){
 }
 function renderNbSteps(){
   const wrap=document.getElementById('nbSteps');
+  // Handyman labor — a single hours stepper at $85/hour.
+  if(nbHandymanActive){
+    const hrs=nbHandymanHours, lineTotal=hrs*HANDYMAN_HOURLY;
+    wrap.innerHTML=`<div class="nb-step">`+
+      `<div class="nb-step-t">Handyman Labor — ${esc(nbHandymanLabel)}</div>`+
+      `<div class="nb-hint">Billed at $${HANDYMAN_HOURLY} per hour.</div>`+
+      `<div class="nb-opts"><div class="nb-optq${hrs>0?' on':''}">`+
+        `<span class="nb-optlabel">Hours of labor</span>`+
+        `<span class="nb-price">$${HANDYMAN_HOURLY}/hr</span>`+
+        `<span class="nb-stepper">`+
+          `<button type="button" class="nb-hm-btn" data-d="-1">−</button>`+
+          `<span class="nb-qty">${hrs}</span>`+
+          `<button type="button" class="nb-hm-btn" data-d="1">+</button>`+
+        `</span></div></div>`+
+      `<div class="nb-hint" style="margin-top:8px;font-weight:700;color:var(--ink);">${hrs} hour${hrs===1?'':'s'} × $${HANDYMAN_HOURLY} = $${lineTotal}</div>`+
+    `</div>`;
+    updateNbTotal();
+    return;
+  }
   if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
   let html='';
   // TV Type — first question, only for TV-mounting services (those with a
@@ -1599,6 +1622,8 @@ function renderNbSteps(){
   updateNbTotal();
 }
 document.getElementById('nbSteps').addEventListener('click',e=>{
+  const hmBtn=e.target.closest('.nb-hm-btn');
+  if(hmBtn){ nbHandymanHours=Math.max(0,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
   const tvQBtn=e.target.closest('.nb-tv-q-btn');
   const qBtn=e.target.closest('.nb-q-btn');
   const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
@@ -1628,6 +1653,11 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 function nbCollectSelections(){
   const out=[];
+  // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
+  if(nbHandymanActive){
+    if(nbHandymanHours>0) out.push({option_id:null, label:`Handyman Labor: ${nbHandymanLabel} — ${nbHandymanHours} hour${nbHandymanHours===1?'':'s'}`, price:HANDYMAN_HOURLY, quantity:nbHandymanHours});
+    return out;
+  }
   // Record the TV type ($0) so it's visible on the job — important for
   // Frame/Gallery jobs where the bracket question is hidden.
   if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
@@ -1651,6 +1681,13 @@ document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
   const sid=e.target.value;
   if(!sid){ updateNbTotal(); return; }
+  // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
+  const svc=nbServices.find(s=>s.id===sid);
+  if(isHandymanService(svc)){
+    nbHandymanActive=true; nbHandymanHours=1; nbHandymanLabel=svc.name; nbOptionGroups=[];
+    renderNbSteps();
+    return;
+  }
   try{
     const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
     nbOptionGroups=r.groups||[];

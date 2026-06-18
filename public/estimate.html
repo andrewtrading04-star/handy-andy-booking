@@ -141,7 +141,14 @@ function render(){
   else if(state.step===3) pad.innerHTML = stepTimes();
   else if(state.step===4) pad.innerHTML = stepContact();
   wire();
+  postHeight();
 }
+
+// Report our height to a parent page so an embedding <iframe> can auto-resize.
+function postHeight(){
+  try{ const h=document.body.scrollHeight; parent.postMessage({ type:'estimate-height', height:h }, '*'); }catch(e){}
+}
+window.addEventListener('resize', postHeight);
 
 function shell(tag, title, sub, inner, opts={}){
   const back = state.step>0 ? `<button class="btn ghost" id="back">Back</button>` : '';
@@ -314,6 +321,7 @@ function success(){
       <div class="sub" style="margin-top:8px;">Thanks, ${esc(state.name.trim().split(' ')[0]||'')}! We got your estimate request and will reach out shortly to confirm a time.</div>
       <button class="btn primary" style="margin-top:18px;" onclick="location.reload()">Submit another</button>
     </div>`;
+  postHeight();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
