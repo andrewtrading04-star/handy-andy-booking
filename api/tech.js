@@ -184,7 +184,7 @@ async function jobs(req, res, db, auth) {
              service:services ( name )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
-    .neq('status', 'canceled')
+    .neq('status', 'cancelled')
     .gte('scheduled_at', lo.toISOString())
     .lt('scheduled_at', hi.toISOString())
     .order('scheduled_at', { ascending: true });
@@ -240,7 +240,7 @@ async function debugIdentity(req, res, db, auth) {
     .select('id, scheduled_at, status')
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
-    .neq('status', 'canceled')
+    .neq('status', 'cancelled')
     .gte('scheduled_at', lo.toISOString())
     .lt('scheduled_at', hi.toISOString());
 
