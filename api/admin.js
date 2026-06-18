@@ -935,7 +935,7 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 // ── Shared shaping ───────────────────────────────────────────────────────────
 function bookingSelect() {
   return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, review_token, technician_id, service_area_id,
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
           technician:technicians ( id, name, status, color ),
@@ -959,7 +959,6 @@ function shapeBooking(b) {
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,
     review_text: b.review_text,
-    review_token: b.review_token,
     technician_id: b.technician_id,
     service_area_id: b.service_area_id,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),

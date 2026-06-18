@@ -1272,14 +1272,15 @@ const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','ext
 // choice per TV. Picking 3 TVs allows up to 3 of each of these.
 const NB_TV_BOUND = new Set(['bracket','fireplace','wires','surface']);
 let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
-// TV Type (frame_tv) — a UI-only first question in the admin form. Mirrors the
-// public widget: Samsung Frame / LG Gallery TVs use the in-box bracket, so the
-// bracket question is hidden when ONLY Frame/Gallery TVs are selected.
-let nbFrameType=new Set();                // 'regular' and/or 'frame'
-function nbOnlyFrame(){ return nbFrameType.has('frame') && !nbFrameType.has('regular'); }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameType.clear(); document.getElementById('nbSteps').innerHTML=''; }
+// TV Type — tracked separately with quantities for 'regular' and 'frame' TVs
+let nbFrameTvQty={ regular: 0, frame: 0 };
+function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; document.getElementById('nbSteps').innerHTML=''; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
+  // Total from TV Type question if it has quantities, otherwise from size group
+  const typTotal = nbFrameTvQty.regular + nbFrameTvQty.frame;
+  if(typTotal > 0) return typTotal;
   const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return 0;
   return Object.values(nbQty[g.id]).reduce((s,c)=>s+(c>0?c:0),0);
 }
@@ -1331,11 +1332,24 @@ function renderNbSteps(){
   // size/bracket group). Frame/Gallery use the in-box bracket.
   const isTvService=nbOptionGroups.some(g=>g.key==='bracket'||g.key==='size');
   if(isTvService){
+    const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
       `<div class="nb-hint">Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</div>`+
       `<div class="nb-opts">`+
-        `<button type="button" class="nb-opt${nbFrameType.has('regular')?' on':''}" data-frame="regular"><span>Customer has a regular TV</span></button>`+
-        `<button type="button" class="nb-opt${nbFrameType.has('frame')?' on':''}" data-frame="frame"><span>Customer has a Samsung Frame TV or LG Gallery TV</span></button>`+
+        `<div class="nb-optq${regCt>0?' on':''}">`+
+          `<span class="nb-optlabel">Customer has a regular TV</span>`+
+          `<span class="nb-stepper">`+
+            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
+            `<span class="nb-qty">${regCt}</span>`+
+            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`+
+          `</span></div>`+
+        `<div class="nb-optq${frameCt>0?' on':''}">`+
+          `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
+          `<span class="nb-stepper">`+
+            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
+            `<span class="nb-qty">${frameCt}</span>`+
+            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`+
+          `</span></div>`+
       `</div></div>`;
   }
   const tvCount=nbTotalTvs();
@@ -1381,12 +1395,13 @@ function renderNbSteps(){
   updateNbTotal();
 }
 document.getElementById('nbSteps').addEventListener('click',e=>{
+  const tvQBtn=e.target.closest('.nb-tv-q-btn');
   const qBtn=e.target.closest('.nb-q-btn');
   const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
-  const frameBtn=e.target.closest('.nb-opt[data-frame]');
-  if(frameBtn){
-    const t=frameBtn.dataset.frame;
-    if(nbFrameType.has(t)) nbFrameType.delete(t); else nbFrameType.add(t);
+  if(tvQBtn){
+    const t=tvQBtn.dataset.t, d=Number(tvQBtn.dataset.d);
+    nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
+    nbClampTvBound();
     renderNbSteps();
     return;
   }
@@ -1411,8 +1426,8 @@ function nbCollectSelections(){
   const out=[];
   // Record the TV type ($0) so it's visible on the job — important for
   // Frame/Gallery jobs where the bracket question is hidden.
-  if(nbFrameType.has('regular')) out.push({option_id:null, label:'TV Type: Regular TV', price:0, quantity:1});
-  if(nbFrameType.has('frame'))   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)', price:0, quantity:1});
+  if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
+  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:0, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
     Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
   });
