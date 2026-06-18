@@ -20,6 +20,30 @@ import { uploadImage, deleteImage } from './_lib/storage.js';
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
 
+// ── SMS Helper ──────────────────────────────────────────────────────────────
+async function sendSMS(phoneNumber, message) {
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
+    console.warn('[SMS] Twilio not configured; message not sent:', message);
+    return;
+  }
+  const formData = new URLSearchParams();
+  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
+  formData.append('To', phoneNumber);
+  formData.append('Body', message);
+  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${auth}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Twilio error: ${res.status}`);
+    console.log('[SMS] Sent to', phoneNumber.slice(-4));
+  } catch (e) {
+    console.error('[SMS]', e.message);
+  }
+}
+
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
 const TECH_STATUS = {
@@ -195,7 +219,7 @@ async function status(req, res, db, auth, body) {
 
   // The job must belong to this tech.
   const { data: existing } = await db.from('bookings')
-    .select('id').eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+    .select(`id, scheduled_at, review_token, customer:customers ( name, phone )`).eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
   if (!existing) return res.status(404).json({ error: 'Job not found' });
 
   // Gate completion on photo documentation (also enforced in the UI).
@@ -221,6 +245,18 @@ async function status(req, res, db, auth, body) {
 
   // Reflect availability in the admin dashboard.
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
+
+  // Send SMS to customer on certain status changes.
+  if (next === 'on_the_way' && existing.customer?.phone) {
+    const etaMinutes = body.eta_minutes || 30;
+    const msg = `Your tech is on the way! ETA ${etaMinutes} minutes.`;
+    sendSMS(existing.customer.phone, msg).catch(console.error);
+  }
+  if (next === 'completed' && existing.customer?.phone && existing.review_token) {
+    const reviewLink = `${process.env.VERCEL_URL || 'http://localhost:3000'}/review.html?token=${encodeURIComponent(existing.review_token)}`;
+    const msg = `Your job is complete! How did we do? ${reviewLink}`;
+    sendSMS(existing.customer.phone, msg).catch(console.error);
+  }
 
   return res.status(200).json({ ok: true, status: next });
 }

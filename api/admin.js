@@ -22,6 +22,30 @@ import { uploadImage, deleteImage } from './_lib/storage.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
+// ── SMS Helper ──────────────────────────────────────────────────────────────
+async function sendSMS(phoneNumber, message) {
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
+    console.warn('[SMS] Twilio not configured; message not sent:', message);
+    return;
+  }
+  const formData = new URLSearchParams();
+  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
+  formData.append('To', phoneNumber);
+  formData.append('Body', message);
+  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${auth}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Twilio error: ${res.status}`);
+    console.log('[SMS] Sent to', phoneNumber.slice(-4));
+  } catch (e) {
+    console.error('[SMS]', e.message);
+  }
+}
+
 // Display label for an internal note/photo authored from the dashboard.
 function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
 
@@ -552,6 +576,14 @@ async function bookingCreate(req, res, db, auth, body) {
     booking_id: bRow.id, business_id: biz.id, technician_id: technician_id || null,
     status, note: `Created by ${auth.role} (dashboard)`,
   });
+
+  // Send booking confirmation SMS to customer
+  if (c.phone && scheduled_at) {
+    const dateStr = new Date(scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const msg = `Your appointment is booked for ${dateStr}. We'll send you a message when your tech is on the way!`;
+    sendSMS(c.phone, msg).catch(console.error);
+  }
+
   return res.status(200).json({ ok: true, id: bRow.id });
 }
 
@@ -564,7 +596,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Confirm the booking belongs to this business before touching it.
   const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id, status, technician_id').eq('id', id).eq('business_id', biz.id).single();
+    .select('id, status, technician_id, review_token, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
@@ -605,6 +637,13 @@ async function bookingUpdate(req, res, db, auth, body) {
       booking_id: id, business_id: biz.id, technician_id: patch.technician_id ?? existing.technician_id,
       status: newStatus, note: `Set by ${auth.role} (dashboard)`,
     });
+
+    // Send SMS when job is completed
+    if (newStatus === 'completed' && existing.customer?.phone && existing.review_token) {
+      const reviewLink = `${process.env.VERCEL_URL || 'http://localhost:3000'}/review.html?token=${encodeURIComponent(existing.review_token)}`;
+      const msg = `Your job is complete! How did we do? ${reviewLink}`;
+      sendSMS(existing.customer.phone, msg).catch(console.error);
+    }
   }
   return res.status(200).json({ ok: true });
 }

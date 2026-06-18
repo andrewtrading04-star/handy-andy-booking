@@ -189,6 +189,19 @@
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
+<!-- ETA Modal (shown when tech marks job as "on the way") -->
+<div id="etaModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#222a35;">ETA to arrive?</h2>
+    <p style="color:#7a8694;font-size:14px;margin-bottom:24px;">Let the customer know when you'll get there.</p>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <button class="btn" data-eta="30" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">30 minutes</button>
+      <button class="btn" data-eta="45" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">45 minutes</button>
+      <button class="btn" data-eta="60" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">60 minutes</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API='/api/tech';
 let token=localStorage.getItem('ha_tech_token')||'';
@@ -396,8 +409,23 @@ async function showDetail(id){
     const adv=document.getElementById('advance');
     if(adv && !adv.disabled) adv.addEventListener('click',async()=>{
       adv.disabled=true;
-      try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
-      catch(e){ toast(e.message); adv.disabled=false; }
+      // If going "on the way", show ETA modal first
+      if(next.to==='on_the_way'){
+        document.getElementById('etaModal').classList.remove('hidden');
+        // ETA button handler will call the actual status change
+        const etaHandler=async(eta)=>{
+          document.getElementById('etaModal').classList.add('hidden');
+          try{ await api('status',{method:'POST',body:{id,status:next.to,eta_minutes:eta}}); toast(next.label+' ✓'); showDetail(id); }
+          catch(e){ toast(e.message); }
+          document.querySelectorAll('#etaModal [data-eta]').forEach(b=>b.removeEventListener('click',etaHandler));
+        };
+        document.querySelectorAll('#etaModal [data-eta]').forEach(btn=>{
+          btn.addEventListener('click',()=>etaHandler(parseInt(btn.dataset.eta)));
+        });
+      } else {
+        try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
+        catch(e){ toast(e.message); adv.disabled=false; }
+      }
     });
 
     // Photo handlers
