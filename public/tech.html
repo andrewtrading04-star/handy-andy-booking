@@ -34,10 +34,14 @@
   .err{color:var(--red);font-size:14px;margin-top:10px;text-align:center;min-height:20px;}
 
   /* Header */
-  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;z-index:10;}
+  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
   .hdr .name{font-weight:800;font-size:17px;}
   .hdr .sub{font-size:12px;color:var(--mute);}
   .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
+  .hdr button:hover{border-color:var(--ink);color:var(--ink);}
+  .hdr-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+  #scheduleDate{min-width:130px;}
+  #prevBtn,#nextBtn{padding:6px 8px;font-size:16px;font-weight:600;}
 
   /* Job list */
   .list{padding:14px;}
@@ -121,6 +125,9 @@
     <div class="hdr">
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
       <div class="hdr-actions">
+        <button id="prevBtn" title="Previous day">‹</button>
+        <input type="date" id="scheduleDate" style="width:140px;background:transparent;border:none;color:var(--ink);text-align:center;font-size:14px;font-weight:600;cursor:pointer;">
+        <button id="nextBtn" title="Next day">›</button>
         <button id="availBtn">My Availability</button>
         <button id="logout">Log out</button>
       </div>
@@ -176,20 +183,29 @@ function show(which){
   for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
-async function showJobs(){
+let scheduleDate=new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+async function showJobs(date){
+  if(date) scheduleDate=date;
   show('jobsView');
   document.getElementById('techName').textContent=tech?tech.name:'';
+  document.getElementById('scheduleDate').value=scheduleDate;
+
+  const dateObj=new Date(scheduleDate+'T00:00:00');
+  const dateLabel=dateObj.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  const isToday=scheduleDate===new Date().toISOString().split('T')[0];
+
   const list=document.getElementById('jobsList'); list.innerHTML='<div class="empty">Loading…</div>';
   try{
-    const d=await api('jobs');
-    document.getElementById('jobsSub').textContent=`${d.jobs.length} job${d.jobs.length===1?'':'s'} today`;
+    const d=await api('jobs',{params:{date:scheduleDate}});
+    document.getElementById('jobsSub').textContent=`${d.jobs.length} job${d.jobs.length===1?'':'s'} — ${isToday?'Today':dateLabel}`;
     list.innerHTML = d.jobs.length ? d.jobs.map(j=>`
       <div class="jobc" data-id="${j.id}">
         <div class="t">${fmtTime(j.scheduled_at)}</div>
         <div class="n">${esc(j.customer_name)}</div>
         <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
         <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
-      </div>`).join('') : '<div class="empty">No jobs scheduled today.<br>Enjoy your day! 🎉</div>';
+      </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dateLabel}.<br>Enjoy your day! 🎉</div>`;
     list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
   }catch(e){ list.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -379,6 +395,19 @@ async function paymentAction(jobId,action){
 function close(){ showJobs(); }
 
 // ── Weekly availability ─────────────────────────────────────────────────────
+// ── Schedule navigation ────────────────────────────────────────────────────
+document.getElementById('prevBtn').addEventListener('click',()=>{
+  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()-1);
+  showJobs(d.toISOString().split('T')[0]);
+});
+document.getElementById('nextBtn').addEventListener('click',()=>{
+  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()+1);
+  showJobs(d.toISOString().split('T')[0]);
+});
+document.getElementById('scheduleDate').addEventListener('change',e=>{
+  if(e.target.value) showJobs(e.target.value);
+});
+
 let availDefs=null;                 // { slots, days } from the server
 let availState=new Set();           // selected "day:slot_key" keys (recurring)
 let availExceptions=[];             // [{date, slot_key, is_available}] one-time overrides

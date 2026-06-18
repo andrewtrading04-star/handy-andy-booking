@@ -122,9 +122,12 @@ async function devLogin(req, res, body) {
 }
 
 async function jobs(req, res, db, auth) {
-  // Today's jobs for this tech, in their business timezone.
   const { data: biz } = await db.from('businesses').select('timezone').eq('id', auth.business_id).single();
   const tz = biz?.timezone || 'America/Denver';
+  // Optional date param: 'YYYY-MM-DD' to fetch that date (default: today)
+  const dateStr = (req.query.date || '').toString().match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.date : null;
+  const daysOffset = dateStr ? new Date(dateStr + 'T00:00:00').getTime() - new Date().getTime() : 0;
+  const daysAhead = Math.floor(daysOffset / 86400000);
 
   const { data, error } = await db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
@@ -133,8 +136,8 @@ async function jobs(req, res, db, auth) {
              service:services ( name )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
-    .gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
-    .lt('scheduled_at', localDayStartUTC(tz, 1).toISOString())
+    .gte('scheduled_at', localDayStartUTC(tz, daysAhead).toISOString())
+    .lt('scheduled_at', localDayStartUTC(tz, daysAhead + 1).toISOString())
     .order('scheduled_at', { ascending: true });
   if (error) throw error;
 
