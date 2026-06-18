@@ -1377,21 +1377,22 @@ document.getElementById('nbSlots').addEventListener('click',e=>{
 // Groups where the user can pick MULTIPLE items (quantity steppers). Everything
 // else (lifting, dismount) is single-choice.
 const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','extras']);
-// Groups capped by the number of TVs: one bracket / fireplace / wire / surface
-// choice per TV. Picking 3 TVs allows up to 3 of each of these.
-const NB_TV_BOUND = new Set(['bracket','fireplace','wires','surface']);
+// Groups capped by the number of TVs: one size / bracket / fireplace / wire /
+// surface choice per TV. Picking 3 TVs allows up to 3 of each of these.
+const NB_TV_BOUND = new Set(['size','bracket','fireplace','wires','surface']);
 let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
-// TV Type — tracked separately with quantities for 'regular' and 'frame' TVs
+// TV Type — tracked separately with quantities for 'regular' and 'frame' TVs.
+// Frame/Gallery TVs carry a flat surcharge (covers the in-box bracket install).
+const FRAME_TV_PRICE = 30;
 let nbFrameTvQty={ regular: 0, frame: 0 };
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
 function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; document.getElementById('nbSteps').innerHTML=''; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
-  // Total from TV Type question if it has quantities, otherwise from size group
-  const typTotal = nbFrameTvQty.regular + nbFrameTvQty.frame;
-  if(typTotal > 0) return typTotal;
-  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return 0;
-  return Object.values(nbQty[g.id]).reduce((s,c)=>s+(c>0?c:0),0);
+  // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
+  // of truth for how many TVs the job covers. Every per-TV question below
+  // (size, bracket, fireplace, wires, surface) is capped to this number.
+  return nbFrameTvQty.regular + nbFrameTvQty.frame;
 }
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
 // Trim TV-bound groups down when the TV count drops below what's selected.
@@ -1447,6 +1448,7 @@ function renderNbSteps(){
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
           `<span class="nb-optlabel">Customer has a regular TV</span>`+
+          `<span class="nb-price">$0</span>`+
           `<span class="nb-stepper">`+
             `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
             `<span class="nb-qty">${regCt}</span>`+
@@ -1454,6 +1456,7 @@ function renderNbSteps(){
           `</span></div>`+
         `<div class="nb-optq${frameCt>0?' on':''}">`+
           `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
+          `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
           `<span class="nb-stepper">`+
             `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
             `<span class="nb-qty">${frameCt}</span>`+
@@ -1476,7 +1479,7 @@ function renderNbSteps(){
     const atCap=tvBound && tvCount>0 && gCount>=tvCount;
     const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${tvCount} selected</span>` : '';
     html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}${capLbl}</div>`;
-    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
+    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Choose the TV type above first</div></div>`; return; }
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
     html+='<div class="nb-opts">';
     nbVisibleOptions(g).forEach(o=>{
@@ -1536,7 +1539,7 @@ function nbCollectSelections(){
   // Record the TV type ($0) so it's visible on the job — important for
   // Frame/Gallery jobs where the bracket question is hidden.
   if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
-  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:0, quantity:nbFrameTvQty.frame});
+  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
     Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
   });
@@ -1550,7 +1553,7 @@ function updateNbTotal(){
   const subtotal=optionsTotal+travelFee;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
-  document.getElementById('nbTotalDisplay').textContent=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | Total: $${total.toFixed(2)}`;
+  document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
 }
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
