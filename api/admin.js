@@ -62,6 +62,27 @@ async function sendSMS(phoneNumber, message) {
 // Display label for an internal note/photo authored from the dashboard.
 function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
 
+// Notify a technician by SMS that they've been assigned a job. Fire-and-forget;
+// safe to call even if the tech has no phone (sendSMS no-ops). `scheduledAtISO`
+// may be null (unscheduled job) — we fall back to a generic line.
+async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO) {
+  if (!technicianId) return;
+  const { data: tech } = await db.from('technicians')
+    .select('phone').eq('id', technicianId).eq('business_id', biz.id).maybeSingle();
+  if (!tech?.phone) return;
+  const tz = biz.timezone || 'America/Denver';
+  let whenTxt = 'a new job';
+  if (scheduledAtISO) {
+    try {
+      whenTxt = new Date(scheduledAtISO).toLocaleString('en-US', {
+        timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      });
+    } catch { /* keep generic */ }
+  }
+  const msg = `You just got a job for ${whenTxt}. Please check your schedule for more information.`;
+  sendSMS(tech.phone, msg).catch(console.error);
+}
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -106,6 +127,8 @@ export default async function handler(req, res) {
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
       case 'reviews':           return await reviews(req, res, db, auth);
+      case 'estimates':         return await estimates(req, res, db, auth);
+      case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -693,6 +716,9 @@ async function bookingCreate(req, res, db, auth, body) {
     sendSMS(c.phone, msg).catch(console.error);
   }
 
+  // Notify the technician if one was assigned at creation time.
+  if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at).catch(console.error);
+
   return res.status(200).json({ ok: true, id: bRow.id });
 }
 
@@ -771,6 +797,12 @@ async function bookingUpdate(req, res, db, auth, body) {
       const msg = `Your job is complete! How did we do? ${reviewLink}`;
       sendSMS(existing.customer.phone, msg).catch(console.error);
     }
+  }
+
+  // Notify the technician when they are newly assigned to this job (only when the
+  // tech actually changed, so re-saving the same assignment doesn't re-text them).
+  if (body.action === 'assign' && patch.technician_id && patch.technician_id !== existing.technician_id) {
+    notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at).catch(console.error);
   }
   return res.status(200).json({ ok: true });
 }
@@ -1316,4 +1348,49 @@ async function reviews(req, res, db, auth) {
   }));
 
   return res.status(200).json({ reviews: formatted });
+}
+
+// ── Estimates (customer quote requests from the public estimate page) ────────
+async function estimates(req, res, db, auth) {
+  const biz = await resolveBusiness(db, auth, req.query.business || '');
+  const status = (req.query.status || '').toString();
+  let q = db.from('estimates')
+    .select('id, service_label, customer_name, customer_phone, customer_email, description, photo_url, preferred_slots, status, sms_consent, notes, created_at')
+    .eq('business_id', biz.id)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (status && status !== 'all') q = q.eq('status', status);
+  const { data, error } = await q;
+  if (error) throw error;
+  return res.status(200).json({ estimates: data || [] });
+}
+
+async function estimateUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  // Confirm the estimate belongs to this business before touching it.
+  const { data: existing } = await db.from('estimates')
+    .select('id, photo_path').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Estimate not found' });
+
+  if (body.op === 'delete') {
+    await db.from('estimates').delete().eq('id', body.id).eq('business_id', biz.id);
+    if (existing.photo_path) deleteImage(existing.photo_path).catch(() => {});
+    return res.status(200).json({ ok: true, deleted: true });
+  }
+
+  const patch = {};
+  if (body.status) {
+    const VALID = ['new', 'contacted', 'scheduled', 'closed'];
+    if (!VALID.includes(body.status)) return res.status(400).json({ error: 'Invalid status' });
+    patch.status = body.status;
+  }
+  if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
