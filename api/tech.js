@@ -85,6 +85,7 @@ export default async function handler(req, res) {
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
+      case 'debug_identity':   return await debugIdentity(req, res, db, auth);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -189,6 +190,50 @@ async function jobs(req, res, db, auth) {
   if (error) throw error;
 
   return res.status(200).json({ jobs: (data || []).map(shapeJob) });
+}
+
+// Diagnostic: surfaces who the token says we are vs. what bookings actually
+// exist, so a tech who sees no jobs can tell us whether it's an ID/business
+// mismatch, a date problem, or a status filter. Read-only, scoped to the
+// logged-in tech's own business.
+async function debugIdentity(req, res, db, auth) {
+  const { data: biz } = await db.from('businesses')
+    .select('slug, name').eq('id', auth.business_id).single();
+  const { data: me } = await db.from('technicians')
+    .select('id, name, business_id, status').eq('id', auth.tech_id).single();
+
+  // Bookings whose technician_id equals my login id — across ALL dates/statuses.
+  const { data: mine } = await db.from('bookings')
+    .select('id, status, scheduled_at, business_id')
+    .eq('technician_id', auth.tech_id)
+    .order('scheduled_at', { ascending: false }).limit(20);
+
+  // Every recent booking in my business (any tech) so we can see what the
+  // dashboard sees and compare technician_id / business_id.
+  const { data: bizBookings } = await db.from('bookings')
+    .select('id, status, scheduled_at, business_id, technician_id, technician:technicians ( name )')
+    .eq('business_id', auth.business_id)
+    .order('scheduled_at', { ascending: false }).limit(20);
+
+  return res.status(200).json({
+    you: {
+      tech_id: auth.tech_id,
+      tech_name: me?.name || null,
+      token_business_id: auth.business_id,
+      tech_record_business_id: me?.business_id || null,
+      business_slug: biz?.slug || null,
+      business_name: biz?.name || null,
+    },
+    assigned_to_you_count: (mine || []).length,
+    assigned_to_you: mine || [],
+    business_bookings_count: (bizBookings || []).length,
+    business_bookings: (bizBookings || []).map(b => ({
+      id: b.id, status: b.status, scheduled_at: b.scheduled_at,
+      business_id: b.business_id, technician_id: b.technician_id,
+      assigned_tech_name: b.technician?.name || null,
+      assigned_to_you: b.technician_id === auth.tech_id,
+    })),
+  });
 }
 
 async function job(req, res, db, auth) {
