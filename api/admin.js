@@ -15,7 +15,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
-import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
@@ -337,32 +337,83 @@ async function availableSlots(req, res, db, auth) {
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
-  const keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow);
+  const tz = biz.timezone || 'America/Denver';
+  const keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow, tz);
   const available = SLOTS.filter(s => keys.has(s.key))
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
   return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
 }
 
+// ── Slot occupancy (existing bookings) ───────────────────────────────────────
+// Local wall-clock HH:MM (business tz) for an instant.
+function localHHMM(tz, instantISO) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' })
+    .formatToParts(new Date(instantISO)).reduce((a, x) => (a[x.type] = x.value, a), {});
+  let hh = p.hour === '24' ? '00' : p.hour;            // some envs emit 24 for midnight
+  return `${hh}:${p.minute}`;
+}
+// Local calendar date 'YYYY-MM-DD' (business tz) for an instant.
+function localDateStr(tz, instantISO) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(instantISO));
+}
+// Which fixed slot (if any) a local wall-clock time falls inside: [start,end).
+function slotKeyForLocalTime(hhmm) {
+  const toMin = s => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+  const t = toMin(hhmm);
+  for (const s of SLOTS) if (t >= toMin(s.start) && t < toMin(s.end)) return s.key;
+  for (const s of SLOTS) if (toMin(s.start) === t) return s.key;   // exact-start fallback
+  return null;
+}
+// Slot keys already occupied by a non-cancelled booking for ONE tech on a date.
+// `excludeId` skips one booking (used when editing it, so it never conflicts
+// with itself).
+async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId = null) {
+  if (!techId || !dateStr) return new Set();
+  const dayStart = localDateStartUTC(tz, dateStr);
+  const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1));
+  let q = db.from('bookings')
+    .select('id, scheduled_at')
+    .eq('business_id', bizId).eq('technician_id', techId)
+    .neq('status', 'cancelled')
+    .not('scheduled_at', 'is', null)
+    .gte('scheduled_at', dayStart.toISOString())
+    .lt('scheduled_at', dayEnd.toISOString());
+  if (excludeId) q = q.neq('id', excludeId);
+  const { data } = await q;
+  const taken = new Set();
+  for (const b of (data || [])) {
+    const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+    if (key) taken.add(key);
+  }
+  return taken;
+}
+
 // Set of slot keys a tech (or ANY tech) is available for on an exact date,
-// honouring recurring availability and one-time exceptions.
-async function availableSlotKeys(db, bizId, techId, dateStr, dow) {
+// honouring recurring availability, one-time exceptions, AND existing bookings
+// (a slot a tech is already booked for is no longer offered — no double-booking).
+async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz) {
   if (!techId || techId === 'any') {
     const { data: techs } = await db.from('technicians')
       .select('id').eq('business_id', bizId).eq('active', true);
     const union = new Set();
     for (const t of (techs || [])) {
       const ks = await singleTechSlotKeys(db, t.id, dateStr, dow);
-      ks.forEach(k => union.add(k));
+      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
+      ks.forEach(k => { if (!booked.has(k)) union.add(k); });
     }
     return union;
   }
-  return singleTechSlotKeys(db, techId, dateStr, dow);
+  const ks = await singleTechSlotKeys(db, techId, dateStr, dow);
+  const booked = await bookedSlotKeysForTech(db, bizId, techId, dateStr, tz);
+  booked.forEach(k => ks.delete(k));
+  return ks;
 }
 
 // Pick the first active tech available for an exact date+slot (recurring OR a
-// one-time exception). Falls back to any active tech so the job is never left
-// unassigned when the date was offered as bookable.
-async function pickAvailableTech(db, bizId, dateStr, slotKey) {
+// one-time exception) who is NOT already booked for that slot. Falls back to any
+// active tech who is free in that slot so we never auto-create a double-booking.
+async function pickAvailableTech(db, bizId, dateStr, slotKey, tz) {
   const { data: techs } = await db.from('technicians')
     .select('id').eq('business_id', bizId).eq('active', true)
     .order('created_at', { ascending: true });
@@ -370,13 +421,23 @@ async function pickAvailableTech(db, bizId, dateStr, slotKey) {
   if (!list.length) return null;
   if (dateStr && slotKey) {
     const dow = dayOfWeekFor(dateStr);
+    // First choice: scheduled-available AND free in this slot.
     for (const t of list) {
       const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
-      if (keys.has(slotKey)) return t.id;
+      if (!keys.has(slotKey)) continue;
+      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
+      if (!booked.has(slotKey)) return t.id;
     }
+    // Second choice: any active tech who is at least free in this slot, even if
+    // not on their normal schedule — still never returns an already-booked tech.
+    for (const t of list) {
+      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
+      if (!booked.has(slotKey)) return t.id;
+    }
+    // Everyone is booked for this slot — leave unassigned rather than stack a
+    // second job on a tech. bookingCreate will create it as 'confirmed'/unassigned.
+    return null;
   }
-  // No one is explicitly available — default to the first active tech so the
-  // job still has an owner who can see it.
   return list[0].id;
 }
 
@@ -429,6 +490,24 @@ async function availableDates(req, res, db, auth) {
   const excByDate = {};   // `${date}` -> [{tech,slot,is_available}]
   for (const e of (exc || [])) (excByDate[e.exception_date] = excByDate[e.exception_date] || []).push(e);
 
+  // Existing bookings this month so fully-booked days don't show as available.
+  const tz = biz.timezone || 'America/Denver';
+  const winStart = localDateStartUTC(tz, monthStart);
+  const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
+  const { data: bk } = await db.from('bookings')
+    .select('technician_id, scheduled_at')
+    .eq('business_id', biz.id).in('technician_id', techIds)
+    .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+    .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString());
+  const occ = {};   // `${techId}:${date}` -> Set(slot_key)
+  for (const b of (bk || [])) {
+    const date = localDateStr(tz, b.scheduled_at);
+    const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+    if (!key) continue;
+    const k = `${b.technician_id}:${date}`;
+    (occ[k] = occ[k] || new Set()).add(key);
+  }
+
   const dates = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2, '0')}`;
@@ -441,6 +520,7 @@ async function availableDates(req, res, db, auth) {
         if (e.technician_id !== tid) continue;
         if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key);
       }
+      for (const k of (occ[`${tid}:${dateStr}`] || [])) set.delete(k);   // drop booked slots
       if (set.size) { anySlot = true; break; }
     }
     if (anySlot) dates.push(dateStr);
@@ -520,7 +600,21 @@ async function bookingCreate(req, res, db, auth, body) {
   // the technician can't see.
   let technician_id = body.technician_id;
   if (technician_id === 'any') {
-    technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot);
+    technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot, tz);
+  }
+
+  // Guard against double-booking: if a specific tech ends up assigned to a slot
+  // they already have a non-cancelled booking in, reject the create. This backs
+  // up the UI (which no longer offers booked slots) against stale forms / races.
+  if (technician_id && scheduled_at) {
+    const conflictDate = body.scheduled_date || localDateStr(tz, scheduled_at);
+    const conflictSlot = body.scheduled_slot || slotKeyForLocalTime(localHHMM(tz, scheduled_at));
+    if (conflictSlot) {
+      const taken = await bookedSlotKeysForTech(db, biz.id, technician_id, conflictDate, tz);
+      if (taken.has(conflictSlot)) {
+        return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+      }
+    }
   }
 
   const paymentMethod = body.payment_method || null;        // card | cash | quote | null
@@ -610,7 +704,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Confirm the booking belongs to this business before touching it.
   const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id, status, technician_id, review_token, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
+    .select('id, status, technician_id, scheduled_at, review_token, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
@@ -641,6 +735,23 @@ async function bookingUpdate(req, res, db, auth, body) {
       patch.status = newStatus = body.status; break;
     default:
       return res.status(400).json({ error: `Unknown booking action "${body.action}"` });
+  }
+
+  // Double-booking guard for reschedule / reassign: don't let an edit drop a tech
+  // onto a slot they already have another non-cancelled booking in.
+  if (body.action === 'reschedule' || body.action === 'assign') {
+    const tz = biz.timezone || 'America/Denver';
+    const effTech = ('technician_id' in patch) ? patch.technician_id : existing.technician_id;
+    const effAt = patch.scheduled_at || existing.scheduled_at;
+    if (effTech && effAt) {
+      const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
+      if (slotKey) {
+        const taken = await bookedSlotKeysForTech(db, biz.id, effTech, localDateStr(tz, effAt), tz, id);
+        if (taken.has(slotKey)) {
+          return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+        }
+      }
+    }
   }
 
   const { error: e1 } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
