@@ -288,6 +288,7 @@
       <button data-nav="bookings"><span class="ic">📋</span> Bookings</button>
       <button data-nav="customers"><span class="ic">👥</span> Customers</button>
       <button data-nav="technicians"><span class="ic">🔧</span> Technicians</button>
+      <button data-nav="reviews"><span class="ic">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic">📷</span> Photos</button>
     </nav>
 
@@ -537,7 +538,7 @@ function navTo(s){
   document.getElementById('modeSeg').classList.toggle('hidden',!sched);
   document.getElementById('calHead').classList.toggle('hidden',!sched);
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',customers:'Customers',technicians:'Technicians',gallery:'Photos'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -545,6 +546,7 @@ function navTo(s){
     if(s==='bookings') renderBookings();
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
+    else if(s==='reviews') renderReviews();
     else if(s==='gallery') renderGallery();
   }
 }
@@ -553,6 +555,7 @@ function refreshCurrent(){
   else if(section==='bookings') renderBookings();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
+  else if(section==='reviews') renderReviews();
   else if(section==='gallery') renderGallery();
 }
 
@@ -965,6 +968,29 @@ async function renderTechnicians(){
     });
   }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
+
+// ── Reviews ─────────────────────────────────────────────────────────────────
+async function renderReviews(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('reviews',{ params:{ business:current.slug }});
+    const reviews=d.reviews||[];
+    const revHtml=reviews.map(r=>`
+      <div class="job">
+        <div class="row">
+          <div style="flex:1;">
+            <div class="name">${'⭐'.repeat(r.rating)}</div>
+            <div class="meta">${esc(r.customer_name)} · ${esc(r.technician_name)} · ${esc(r.service_area)}</div>
+            <div class="meta" style="margin-top:8px;font-size:13px;line-height:1.5;">${esc(r.feedback)||'<em style="color:var(--mute);">No feedback provided</em>'}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap;color:var(--mute);font-size:12px;">${new Date(r.reviewed_at).toLocaleDateString()}</div>
+        </div>
+      </div>`).join('');
+    document.getElementById('revWrap').innerHTML=revHtml||'<div class="empty">No reviews yet.</div>';
+  }catch(err){ const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
 async function saveTech(payload){
   try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
   catch(err){ toast(err.message); }

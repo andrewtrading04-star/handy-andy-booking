@@ -67,6 +67,7 @@ export default async function handler(req, res) {
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
+      case 'reviews':           return await reviews(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -1062,4 +1063,36 @@ async function sendFeedbackEmail(params) {
     const err = await res.text();
     throw new Error(`Resend API error: ${res.status} ${err}`);
   }
+}
+
+// ── Reviews list (admin dashboard reviews tab) ──────────────────────────────
+async function reviews(req, res, db, auth) {
+  const biz = await resolveBusiness(db, auth, req.query.business || '');
+
+  const { data: revs, error } = await db.from('bookings')
+    .select(`
+      id, status, scheduled_at, review_rating, review_text, reviewed_at,
+      customer:customers(name, phone),
+      technician:technicians(id, name, color),
+      service_area:service_areas(name)
+    `)
+    .eq('business_id', biz.id)
+    .not('review_rating', 'is', null)
+    .order('reviewed_at', { ascending: false })
+    .limit(100);
+
+  if (error) throw error;
+
+  const formatted = (revs || []).map(r => ({
+    id: r.id,
+    customer_name: r.customer?.name || '—',
+    technician_name: r.technician?.name || '—',
+    technician_id: r.technician?.id || null,
+    rating: r.review_rating,
+    feedback: r.review_text || '',
+    reviewed_at: r.reviewed_at,
+    service_area: r.service_area?.name || '—',
+  }));
+
+  return res.status(200).json({ reviews: formatted });
 }
