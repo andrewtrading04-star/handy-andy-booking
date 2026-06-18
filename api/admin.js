@@ -961,7 +961,7 @@ async function reviewCheck(req, res, body) {
 
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
-    .select('id, reviewed_at')
+    .select('id, reviewed_at, service_area:service_areas(review_url)')
     .eq('id', reviewToken.booking_id)
     .single();
 
@@ -970,6 +970,7 @@ async function reviewCheck(req, res, body) {
   return res.status(200).json({
     booking_id: booking.id,
     already_reviewed: !!booking.reviewed_at,
+    review_url: booking.service_area?.review_url || null,
   });
 }
 

@@ -188,6 +188,11 @@ async function checkAlreadyReviewed() {
     });
     const data = await res.json();
 
+    // Set review_url from API if not already set from URL params
+    if (data.review_url && !reviewUrl) {
+      reviewUrl = data.review_url;
+    }
+
     if (data.already_reviewed) {
       document.getElementById('content').innerHTML = `
         <div class="message success show">
