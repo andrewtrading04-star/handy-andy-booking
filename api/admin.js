@@ -18,8 +18,12 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/
 import { localDayStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
+import { uploadImage, deleteImage } from './_lib/storage.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
+
+// Display label for an internal note/photo authored from the dashboard.
+function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
 
 export default async function handler(req, res) {
   applyCors(req, res);
@@ -46,6 +50,13 @@ export default async function handler(req, res) {
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
+      case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
+      case 'booking_photo_add':    return await bookingPhotoAdd(req, res, db, auth, body);
+      case 'booking_photo_delete': return await bookingPhotoDelete(req, res, db, auth, body);
+      case 'booking_notes':        return await bookingNotes(req, res, db, auth);
+      case 'booking_note_add':     return await bookingNoteAdd(req, res, db, auth, body);
+      case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
+      case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'customers':         return await customers(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
@@ -422,6 +433,110 @@ async function bookingPayment(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, payment_intent_id: pi.id });
 }
 
+// ── Booking photos (view the tech's job photos; add/delete from the office) ──
+async function assertBooking(db, biz, id) {
+  if (!id) { const e = new Error('id required'); e.status = 400; throw e; }
+  const { data } = await db.from('bookings').select('id').eq('id', id).eq('business_id', biz.id).single();
+  if (!data) { const e = new Error('Booking not found'); e.status = 404; throw e; }
+}
+
+async function bookingPhotos(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || '').toString();
+  try { await assertBooking(db, biz, id); } catch (e) { return bail(res, e); }
+  const { data, error } = await db.from('booking_photos')
+    .select('id, url, caption, uploader_name, uploaded_by_kind, created_at')
+    .eq('booking_id', id).eq('business_id', biz.id).order('created_at', { ascending: true });
+  if (error) throw error;
+  return res.status(200).json({ photos: data || [] });
+}
+
+async function bookingPhotoAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  try { await assertBooking(db, biz, body.id); } catch (e) { return bail(res, e); }
+  let up;
+  try { up = await uploadImage(body.image, `${biz.id}/${body.id}`); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const { data, error } = await db.from('booking_photos').insert({
+    business_id: biz.id, booking_id: body.id, technician_id: null,
+    uploaded_by_kind: auth.role === 'owner' ? 'owner' : 'secretary', uploader_name: adminAuthorName(auth),
+    storage_path: up.path, url: up.url, caption: (body.caption || '').toString().trim() || null,
+  }).select('id, url, caption, uploader_name, uploaded_by_kind, created_at').single();
+  if (error) { await deleteImage(up.path); throw error; }
+  return res.status(200).json({ photo: data });
+}
+
+async function bookingPhotoDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.photo_id) return res.status(400).json({ error: 'photo_id required' });
+  const { data: ph } = await db.from('booking_photos')
+    .select('id, storage_path').eq('id', body.photo_id).eq('business_id', biz.id).single();
+  if (!ph) return res.status(404).json({ error: 'Photo not found' });
+  await db.from('booking_photos').delete().eq('id', body.photo_id);
+  await deleteImage(ph.storage_path);
+  return res.status(200).json({ ok: true });
+}
+
+// ── Booking notes (internal; owner/secretary author; permanent delete) ───────
+async function bookingNotes(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || '').toString();
+  try { await assertBooking(db, biz, id); } catch (e) { return bail(res, e); }
+  const { data, error } = await db.from('booking_notes')
+    .select('id, body, author_kind, author_name, created_at')
+    .eq('booking_id', id).eq('business_id', biz.id).order('created_at', { ascending: false });
+  if (error) throw error;
+  return res.status(200).json({ notes: data || [] });
+}
+
+async function bookingNoteAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  try { await assertBooking(db, biz, body.id); } catch (e) { return bail(res, e); }
+  const text = (body.body || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Note text required' });
+  const { data, error } = await db.from('booking_notes').insert({
+    business_id: biz.id, booking_id: body.id,
+    author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
+    body: text,
+  }).select('id, body, author_kind, author_name, created_at').single();
+  if (error) throw error;
+  return res.status(200).json({ note: data });
+}
+
+async function bookingNoteDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.note_id) return res.status(400).json({ error: 'note_id required' });
+  await db.from('booking_notes').delete().eq('id', body.note_id).eq('business_id', biz.id);
+  return res.status(200).json({ ok: true });
+}
+
+// ── Photo gallery (every job photo for the business, newest first) ───────────
+async function photoGallery(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const limit = Math.min(Number(req.query.limit) || 60, 200);
+  const offset = Number(req.query.offset) || 0;
+  const { data, error } = await db.from('booking_photos')
+    .select(`id, url, caption, uploader_name, created_at, booking_id,
+             booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians ( name ) )`)
+    .eq('business_id', biz.id)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (error) throw error;
+  const photos = (data || []).map(p => ({
+    id: p.id, url: p.url, caption: p.caption, uploader_name: p.uploader_name, created_at: p.created_at,
+    booking_id: p.booking_id,
+    customer_name: p.booking?.customer?.name || 'Customer',
+    technician_name: p.booking?.technician?.name || null,
+    scheduled_at: p.booking?.scheduled_at || null,
+    status: p.booking?.status || null,
+  }));
+  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit });
+}
+
 // ── Customers (search) ───────────────────────────────────────────────────────
 async function customers(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
@@ -570,7 +685,9 @@ function bookingSelect() {
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
           technician:technicians ( id, name, status, color ),
-          service:services ( id, name )`;
+          service:services ( id, name ),
+          photos:booking_photos ( count ),
+          notes_list:booking_notes ( count )`;
 }
 
 function shapeBooking(b) {
@@ -594,5 +711,7 @@ function shapeBooking(b) {
     customer: b.customer || null,
     technician: b.technician || null,
     service: b.service || null,
+    photo_count: Array.isArray(b.photos) ? (b.photos[0]?.count || 0) : 0,
+    note_count: Array.isArray(b.notes_list) ? (b.notes_list[0]?.count || 0) : 0,
   };
 }

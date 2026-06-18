@@ -15,6 +15,10 @@ import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { localDayStartUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
+import { uploadImage, deleteImage } from './_lib/storage.js';
+
+// A job is not "complete" until the tech has documented it with photos.
+const MIN_PHOTOS_TO_COMPLETE = 2;
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
@@ -48,6 +52,12 @@ export default async function handler(req, res) {
       case 'job':              return await job(req, res, db, auth);
       case 'status':           return await status(req, res, db, auth, body);
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
+      case 'job_photos':       return await jobPhotos(req, res, db, auth);
+      case 'job_photo_add':    return await jobPhotoAdd(req, res, db, auth, body);
+      case 'job_photo_delete': return await jobPhotoDelete(req, res, db, auth, body);
+      case 'job_notes':        return await jobNotes(req, res, db, auth);
+      case 'job_note_add':     return await jobNoteAdd(req, res, db, auth, body);
+      case 'job_note_delete':  return await jobNoteDelete(req, res, db, auth, body);
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
@@ -162,6 +172,16 @@ async function status(req, res, db, auth, body) {
     .select('id').eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
   if (!existing) return res.status(404).json({ error: 'Job not found' });
 
+  // Gate completion on photo documentation (also enforced in the UI).
+  if (next === 'completed') {
+    const { count } = await db.from('booking_photos')
+      .select('id', { count: 'exact', head: true })
+      .eq('booking_id', id).eq('business_id', auth.business_id);
+    if ((count || 0) < MIN_PHOTOS_TO_COMPLETE) {
+      return res.status(400).json({ error: `Add at least ${MIN_PHOTOS_TO_COMPLETE} photos before marking this job complete (${count || 0} so far).` });
+    }
+  }
+
   const patch = { status: next };
   if (map.stamp) patch[map.stamp] = new Date().toISOString();
 
@@ -249,6 +269,105 @@ async function jobPayment(req, res, db, auth, body) {
   }
 
   return res.status(400).json({ error: `Unknown payment action "${act}"` });
+}
+
+// ── Job photos (tech documents the job; 2 required before completing) ─────────
+// Confirm a booking belongs to the logged-in tech before touching its photos/notes.
+async function assertOwnedJob(db, auth, id) {
+  if (!id) { const e = new Error('id required'); e.status = 400; throw e; }
+  const { data } = await db.from('bookings')
+    .select('id').eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+  if (!data) { const e = new Error('Job not found'); e.status = 404; throw e; }
+}
+
+async function jobPhotos(req, res, db, auth) {
+  const id = (req.query.id || '').toString();
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const { data, error } = await db.from('booking_photos')
+    .select('id, url, caption, uploader_name, created_at')
+    .eq('booking_id', id).eq('business_id', auth.business_id)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return res.status(200).json({ photos: data || [], min_required: MIN_PHOTOS_TO_COMPLETE });
+}
+
+async function jobPhotoAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  const { data: tech } = await db.from('technicians').select('name').eq('id', auth.tech_id).single();
+  let up;
+  try { up = await uploadImage(body.image, `${auth.business_id}/${id}`); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+
+  const { data, error } = await db.from('booking_photos').insert({
+    business_id: auth.business_id, booking_id: id, technician_id: auth.tech_id,
+    uploaded_by_kind: 'technician', uploader_name: tech?.name || 'Technician',
+    storage_path: up.path, url: up.url, caption: (body.caption || '').toString().trim() || null,
+  }).select('id, url, caption, uploader_name, created_at').single();
+  if (error) { await deleteImage(up.path); throw error; }
+
+  const { count } = await db.from('booking_photos')
+    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', auth.business_id);
+  return res.status(200).json({ photo: data, count: count || 0, min_required: MIN_PHOTOS_TO_COMPLETE });
+}
+
+async function jobPhotoDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id, photoId = body.photo_id;
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (!photoId) return res.status(400).json({ error: 'photo_id required' });
+
+  const { data: ph } = await db.from('booking_photos')
+    .select('id, storage_path').eq('id', photoId).eq('booking_id', id).eq('business_id', auth.business_id).single();
+  if (!ph) return res.status(404).json({ error: 'Photo not found' });
+  await db.from('booking_photos').delete().eq('id', photoId);
+  await deleteImage(ph.storage_path);
+
+  const { count } = await db.from('booking_photos')
+    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', auth.business_id);
+  return res.status(200).json({ ok: true, count: count || 0, min_required: MIN_PHOTOS_TO_COMPLETE });
+}
+
+// ── Job notes (internal; tech can add/delete on their own jobs) ──────────────
+async function jobNotes(req, res, db, auth) {
+  const id = (req.query.id || '').toString();
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const { data, error } = await db.from('booking_notes')
+    .select('id, body, author_kind, author_name, created_at')
+    .eq('booking_id', id).eq('business_id', auth.business_id)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return res.status(200).json({ notes: data || [] });
+}
+
+async function jobNoteAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const text = (body.body || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Note text required' });
+
+  const { data: tech } = await db.from('technicians').select('name').eq('id', auth.tech_id).single();
+  const { data, error } = await db.from('booking_notes').insert({
+    business_id: auth.business_id, booking_id: id,
+    author_kind: 'technician', author_id: auth.tech_id, author_name: tech?.name || 'Technician',
+    body: text,
+  }).select('id, body, author_kind, author_name, created_at').single();
+  if (error) throw error;
+  return res.status(200).json({ note: data });
+}
+
+async function jobNoteDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id, noteId = body.note_id;
+  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (!noteId) return res.status(400).json({ error: 'note_id required' });
+  // Permanent delete (no soft-delete), scoped to this tech's job.
+  await db.from('booking_notes').delete()
+    .eq('id', noteId).eq('booking_id', id).eq('business_id', auth.business_id);
+  return res.status(200).json({ ok: true });
 }
 
 // ── Weekly availability (the tech edits their OWN) ──────────────────────────

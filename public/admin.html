@@ -159,6 +159,32 @@
   .bk-assign{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);}
   .bk-assign select{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;}
 
+  /* photos + notes (modal sections) */
+  .bk-sec{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
+  .bk-sec-h{font-size:12px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--mute);margin-bottom:9px;}
+  .photogrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;}
+  .thumb{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--line2);}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .thumbdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  .note{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px;}
+  .note-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;}
+  .note-a{font-weight:700;font-size:13px;color:var(--ink);}
+  .note-t{font-size:11px;color:var(--mute);}
+  .note-b{font-size:13.5px;line-height:1.45;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;}
+  .note-del{background:transparent;border:none;color:#b91c1c;font-size:11px;font-weight:700;padding:5px 0 0;cursor:pointer;}
+  .bk-note-input{width:100%;background:#fff;border:1px solid var(--line);border-radius:9px;color:var(--ink);padding:9px 11px;font-size:13.5px;min-height:54px;margin-top:8px;resize:vertical;font-family:inherit;}
+  .evt-photo{font-size:10px;font-weight:800;color:var(--mute);margin-left:6px;}
+  /* photo gallery page */
+  .gal-head{font-size:13px;color:var(--mute);font-weight:700;margin-bottom:12px;}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
+  .gal-item{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer;}
+  .gal-item figcaption{padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--ink-2);}
+  /* lightbox */
+  .lightbox{position:fixed;inset:0;background:rgba(10,15,25,.92);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.16);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;cursor:pointer;}
+
   /* availability editor (reused) */
   .avail-day{margin-bottom:12px;}
   .avail-day .dl{font-size:13px;font-weight:700;margin-bottom:6px;}
@@ -209,6 +235,7 @@
       <button data-nav="bookings"><span class="ic">📋</span> Bookings</button>
       <button data-nav="customers"><span class="ic">👥</span> Customers</button>
       <button data-nav="technicians"><span class="ic">🔧</span> Technicians</button>
+      <button data-nav="gallery"><span class="ic">📷</span> Photos</button>
     </nav>
 
     <div id="schedSidebar">
@@ -294,6 +321,9 @@
     <div class="err" id="availErr"></div>
   </div>
 </div>
+
+<!-- Photo lightbox -->
+<div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
 <script>
 const API = '/api/admin';
@@ -424,7 +454,7 @@ function navTo(s){
   document.getElementById('modeSeg').classList.toggle('hidden',!sched);
   document.getElementById('calHead').classList.toggle('hidden',!sched);
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',customers:'Customers',technicians:'Technicians'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',customers:'Customers',technicians:'Technicians',gallery:'Photos'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -432,6 +462,7 @@ function navTo(s){
     if(s==='bookings') renderBookings();
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
+    else if(s==='gallery') renderGallery();
   }
 }
 function refreshCurrent(){
@@ -439,6 +470,7 @@ function refreshCurrent(){
   else if(section==='bookings') renderBookings();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
+  else if(section==='gallery') renderGallery();
 }
 
 // mobile sidebar
@@ -523,7 +555,7 @@ function evtCard(b){
   return `<div class="evt s-${b.status}" data-id="${b.id}">
     <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
-    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
   </div>`;
 }
 function dayColumn(ds){
@@ -627,6 +659,14 @@ function openBooking(b){
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
       ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
       ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
+    </div>
+    <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
+      <input type="file" id="bkPhotoInput" accept="image/*" multiple style="display:none">
+      <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">📷 Add photo</button>
+    </div>
+    <div class="bk-sec"><div class="bk-sec-h">Internal notes</div><div id="bkNotes"><div class="sub" style="font-size:13px;">Loading…</div></div>
+      <textarea id="bkNoteInput" class="bk-note-input" placeholder="Add an internal note (never shown to the customer)…"></textarea>
+      <button class="btn ghost sm" id="bkAddNote" style="margin-top:8px;">Add note</button>
     </div>`;
   m.classList.remove('hidden');
   const close=()=>m.classList.add('hidden');
@@ -639,7 +679,83 @@ function openBooking(b){
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
+  // Photos + notes (loaded async; they don't refresh the whole list on change).
+  loadBookingPhotos(b.id);
+  loadBookingNotes(b.id);
+  document.getElementById('bkAddPhoto').onclick=()=>document.getElementById('bkPhotoInput').click();
+  document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
+  document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
 }
+
+// ── Booking photos (in the detail modal) ────────────────────────────────────
+async function loadBookingPhotos(id){
+  const el=document.getElementById('bkPhotos'); if(!el) return;
+  try{
+    const d=await api('booking_photos',{ params:{ business:current.slug, id }});
+    const photos=d.photos||[];
+    el.innerHTML = photos.length
+      ? `<div class="photogrid">${photos.map(p=>`<div class="thumb"><img src="${esc(p.url)}" data-full="${esc(p.url)}" alt="photo"><button class="thumbdel" data-pid="${p.id}" title="Delete">×</button></div>`).join('')}</div>`
+      : '<div class="sub" style="font-size:13px;">No photos yet.</div>';
+    el.querySelectorAll('img[data-full]').forEach(im=>im.onclick=()=>openLightbox(im.dataset.full));
+    el.querySelectorAll('.thumbdel').forEach(btn=>btn.onclick=async()=>{
+      if(!confirm('Delete this photo?')) return; btn.disabled=true;
+      try{ await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id, photo_id:btn.dataset.pid }}); toast('Photo deleted'); loadBookingPhotos(id); }
+      catch(e){ toast(e.message); btn.disabled=false; }
+    });
+  }catch(e){ el.innerHTML=`<div class="sub" style="font-size:13px;">${esc(e.message)}</div>`; }
+}
+async function uploadBookingPhotos(id, files){
+  const list=[...(files||[])].filter(f=>f.type.startsWith('image/'));
+  if(!list.length) return;
+  toast(`Uploading ${list.length} photo${list.length===1?'':'s'}…`);
+  let ok=0;
+  for(const f of list){
+    try{ const dataUrl=await compressImage(f); await api('booking_photo_add',{ method:'POST', body:{ business:current.slug, id, image:dataUrl }}); ok++; }
+    catch(e){ toast(e.message); }
+  }
+  if(ok) toast(`${ok} photo${ok===1?'':'s'} added ✓`);
+  loadBookingPhotos(id);
+}
+function compressImage(file,maxDim=1600,quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('Could not read that image.')); img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.')); reader.readAsDataURL(file);
+  });
+}
+
+// ── Booking notes (in the detail modal) ─────────────────────────────────────
+async function loadBookingNotes(id){
+  const el=document.getElementById('bkNotes'); if(!el) return;
+  try{
+    const d=await api('booking_notes',{ params:{ business:current.slug, id }});
+    const notes=d.notes||[];
+    el.innerHTML = notes.length
+      ? notes.map(n=>`<div class="note"><div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')}</span><span class="note-t">${esc(fmtDateTime(n.created_at))}</span></div><div class="note-b">${esc(n.body)}</div><button class="note-del" data-nid="${n.id}">Delete</button></div>`).join('')
+      : '<div class="sub" style="font-size:13px;">No notes yet.</div>';
+    el.querySelectorAll('.note-del').forEach(btn=>btn.onclick=async()=>{
+      if(!confirm('Permanently delete this note?')) return; btn.disabled=true;
+      try{ await api('booking_note_delete',{ method:'POST', body:{ business:current.slug, id, note_id:btn.dataset.nid }}); toast('Note deleted'); loadBookingNotes(id); }
+      catch(e){ toast(e.message); btn.disabled=false; }
+    });
+  }catch(e){ el.innerHTML=`<div class="sub" style="font-size:13px;">${esc(e.message)}</div>`; }
+}
+async function addBookingNote(id){
+  const ta=document.getElementById('bkNoteInput'); const text=(ta.value||'').trim();
+  if(!text){ toast('Type a note first'); return; }
+  const btn=document.getElementById('bkAddNote'); btn.disabled=true;
+  try{ await api('booking_note_add',{ method:'POST', body:{ business:current.slug, id, body:text }}); ta.value=''; toast('Note added ✓'); loadBookingNotes(id); }
+  catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+function openLightbox(url){ document.getElementById('lightboxImg').src=url; document.getElementById('lightbox').classList.remove('hidden'); }
 
 async function updateBooking(payload){
   try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
@@ -705,6 +821,24 @@ async function renderCustomers(){
   };
   let t; document.getElementById('custSearch').addEventListener('input',e=>{ clearTimeout(t); t=setTimeout(()=>load(e.target.value),300); });
   load('');
+}
+
+// ── Photo gallery (every job photo for this business) ───────────────────────
+async function renderGallery(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('photo_gallery',{ params:{ business:current.slug, limit:120 }});
+    const photos=d.photos||[];
+    if(!photos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
+    view.innerHTML=`<div class="wrap"><div class="gal-head">${photos.length} photo${photos.length===1?'':'s'}</div>
+      <div class="gallery">${photos.map(p=>`
+        <figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}">
+          <img src="${esc(p.url)}" loading="lazy" alt="job photo">
+          <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br><span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span></figcaption>
+        </figure>`).join('')}</div></div>`;
+    view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
+  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────
@@ -918,6 +1052,10 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     toast('Booking created'); refreshCurrent();
   }catch(e2){ err.textContent=e2.message; }
 });
+
+// ── Lightbox ────────────────────────────────────────────────────────────────
+document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
+document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 async function tryAutoLogin(){

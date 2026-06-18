@@ -65,6 +65,25 @@
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
 
+  /* Photos */
+  .phreq{float:right;font-size:11px;font-weight:800;letter-spacing:.3px;color:var(--amber);background:rgba(255,176,32,.12);padding:2px 9px;border-radius:12px;text-transform:none;}
+  .phreq.ok{color:var(--green);background:rgba(39,192,147,.14);}
+  .photogrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .thumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--navy);}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .thumbdel{position:absolute;top:4px;right:4px;width:24px;height:24px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;}
+  /* Notes */
+  .note{background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;}
+  .note-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+  .note-a{font-weight:700;font-size:13px;color:var(--ink);}
+  .note-t{font-size:12px;color:var(--mute);}
+  .note-b{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+  .note-del{background:transparent;border:none;color:var(--red);font-size:12px;padding:6px 0 0;font-weight:600;}
+  /* Lightbox */
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;}
+  .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;}
+
   /* Availability */
   .avail{padding:16px;}
   .hdr-actions{display:flex;gap:8px;}
@@ -116,6 +135,9 @@
   <div id="availabilityView" class="hidden"></div>
 
 </div>
+
+<!-- Photo lightbox -->
+<div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
 <script>
 const API='/api/tech';
@@ -178,12 +200,23 @@ const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
   arrived:{to:'in_progress',label:'Start Job',cls:''},
   in_progress:{to:'completed',label:'Job Complete',cls:'green'} };
 
+const MIN_PHOTOS=2;
+let curJob=null, curPhotos=[], curNotes=[];
+
 async function showDetail(id){
   show('detailView');
   const v=document.getElementById('detailView'); v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
   try{
-    const {job:j}=await api('job',{params:{id}});
+    const [{job:j}, ph, nt] = await Promise.all([
+      api('job',{params:{id}}),
+      api('job_photos',{params:{id}}).catch(()=>({photos:[]})),
+      api('job_notes',{params:{id}}).catch(()=>({notes:[]})),
+    ]);
+    curJob=j; curPhotos=ph.photos||[]; curNotes=nt.notes||[];
     const next=NEXT[j.status];
+    const photoOK=curPhotos.length>=MIN_PHOTOS;
+    const needsPhotos=next && next.to==='completed' && !photoOK;
+
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
       <div class="card">
@@ -196,6 +229,22 @@ async function showDetail(id){
       </div>
       ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
       ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(li.name)}${li.line_total?' — $'+li.line_total:''}</div>`).join('')}</div>`:''}
+
+      <div class="card">
+        <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
+        <div class="photogrid" id="photoGrid">${photoThumbs(curPhotos)}</div>
+        <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+        <button class="btn ghost" id="addPhoto" style="margin-top:10px;">📷 Add Photo</button>
+        <div class="sub" style="font-size:12px;margin-top:8px;color:var(--mute);">At least ${MIN_PHOTOS} photos are required before you can complete the job.</div>
+      </div>
+
+      <div class="card">
+        <h3>Notes</h3>
+        <div id="noteList">${noteListHtml(curNotes)}</div>
+        <textarea id="noteInput" placeholder="Add an internal note…" style="width:100%;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:10px;font-size:15px;min-height:60px;margin-top:6px;resize:vertical;"></textarea>
+        <button class="btn ghost" id="addNote" style="margin-top:8px;">Add note</button>
+      </div>
+
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -209,29 +258,122 @@ async function showDetail(id){
         ${j.payment_status==='paid'?`<button class="btn ghost sm" id="jobRefund">Refund</button>`:''}
       </div>`:''}
     </div>
-    ${ next ? `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>` :
-      (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
+    ${ next ? (needsPhotos
+        ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📷 Add ${MIN_PHOTOS-curPhotos.length} more photo${MIN_PHOTOS-curPhotos.length===1?'':'s'} to complete</button></div>`
+        : `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>`)
+      : (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
 
     document.getElementById('back').addEventListener('click',showJobs);
     const adv=document.getElementById('advance');
-    if(adv) adv.addEventListener('click',async()=>{
+    if(adv && !adv.disabled) adv.addEventListener('click',async()=>{
       adv.disabled=true;
       try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
       catch(e){ toast(e.message); adv.disabled=false; }
     });
+
+    // Photo handlers
+    document.getElementById('addPhoto').addEventListener('click',()=>document.getElementById('photoInput').click());
+    document.getElementById('photoInput').addEventListener('change',e=>uploadPhotos(id, e.target.files));
+    bindPhotoGrid(id);
+
+    // Note handlers
+    document.getElementById('addNote').addEventListener('click',()=>addNote(id));
+    bindNoteList(id);
+
     // Payment handlers
-    const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=async()=>{ if(confirm('Charge the card on file for $'+j.price+'?')){ await paymentAction(j.id,'charge'); close(); } };
-    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); close(); } };
-    const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); close(); } };
+    const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=async()=>{ if(confirm('Charge the card on file for $'+j.price+'?')){ await paymentAction(j.id,'charge'); } };
+    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
+    const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Photos ──────────────────────────────────────────────────────────────────
+function photoThumbs(photos){
+  if(!photos.length) return '<div class="sub" style="color:var(--mute);font-size:13px;padding:6px 0;">No photos yet.</div>';
+  return photos.map(p=>`<div class="thumb"><img src="${esc(p.url)}" data-full="${esc(p.url)}" alt="job photo"><button class="thumbdel" data-pid="${p.id}" title="Delete">×</button></div>`).join('');
+}
+function bindPhotoGrid(id){
+  const grid=document.getElementById('photoGrid'); if(!grid) return;
+  grid.querySelectorAll('img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
+  grid.querySelectorAll('.thumbdel').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Delete this photo?')) return;
+    b.disabled=true;
+    try{ await api('job_photo_delete',{method:'POST',body:{id,photo_id:b.dataset.pid}}); toast('Photo deleted'); showDetail(id); }
+    catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+// Resize/compress on-device so uploads stay small & fast.
+function compressImage(file,maxDim=1600,quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('Could not read that image.')); img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.')); reader.readAsDataURL(file);
+  });
+}
+async function uploadPhotos(id, files){
+  const list=[...(files||[])].filter(f=>f.type.startsWith('image/'));
+  if(!list.length) return;
+  toast(`Uploading ${list.length} photo${list.length===1?'':'s'}…`);
+  let ok=0;
+  for(const f of list){
+    try{ const dataUrl=await compressImage(f); await api('job_photo_add',{method:'POST',body:{id,image:dataUrl}}); ok++; }
+    catch(e){ toast(e.message); }
+  }
+  if(ok) toast(`${ok} photo${ok===1?'':'s'} added ✓`);
+  showDetail(id);
+}
+
+// ── Notes ───────────────────────────────────────────────────────────────────
+function noteListHtml(notes){
+  if(!notes.length) return '<div class="sub" style="color:var(--mute);font-size:13px;padding:4px 0 8px;">No notes yet.</div>';
+  return notes.map(n=>`<div class="note">
+      <div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')}</span><span class="note-t">${esc(relTime(n.created_at))}</span></div>
+      <div class="note-b">${esc(n.body)}</div>
+      <button class="note-del" data-nid="${n.id}">Delete</button>
+    </div>`).join('');
+}
+function bindNoteList(id){
+  const el=document.getElementById('noteList'); if(!el) return;
+  el.querySelectorAll('.note-del').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Permanently delete this note?')) return;
+    b.disabled=true;
+    try{ await api('job_note_delete',{method:'POST',body:{id,note_id:b.dataset.nid}}); toast('Note deleted'); showDetail(id); }
+    catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+async function addNote(id){
+  const ta=document.getElementById('noteInput'); const text=(ta.value||'').trim();
+  if(!text){ toast('Type a note first'); return; }
+  const btn=document.getElementById('addNote'); btn.disabled=true;
+  try{ await api('job_note_add',{method:'POST',body:{id,body:text}}); ta.value=''; toast('Note added ✓'); showDetail(id); }
+  catch(e){ toast(e.message); btn.disabled=false; }
+}
+
+// ── Shared bits ─────────────────────────────────────────────────────────────
+function relTime(iso){
+  try{ const d=new Date(iso), s=(Date.now()-d.getTime())/1000;
+    if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago';
+    if(s<86400) return Math.floor(s/3600)+'h ago';
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+  catch{ return ''; }
+}
+function openLightbox(url){
+  const lb=document.getElementById('lightbox'); document.getElementById('lightboxImg').src=url; lb.classList.remove('hidden');
 }
 
 async function paymentAction(jobId,action){
   try{
     await api('job_payment',{method:'POST',body:{id:jobId,action}});
     toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
-    setTimeout(()=>showDetail(jobId),500);
+    setTimeout(()=>showDetail(jobId),400);
   }catch(e){ toast(e.message); }
 }
 function close(){ showJobs(); }
@@ -408,6 +550,10 @@ document.getElementById('devBtn').addEventListener('click',async()=>{
     showJobs();
   }catch(e){ document.getElementById('loginErr').textContent=e.message; }
 });
+
+// Lightbox close (tap backdrop or ×)
+document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
+document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
 
 // Boot
 if(token&&tech) showJobs(); else { show('login'); initDevPanel(); }
