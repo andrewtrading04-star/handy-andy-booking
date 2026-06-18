@@ -67,8 +67,10 @@ export default async function handler(req, res) {
     }
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-    const days = Math.max(0, parseInt(req.query.days ?? '30', 10) || 0);
-    const sinceISO = days > 0 ? new Date(Date.now() - days * 86400000).toISOString() : null;
+    // 'from' ISO param takes priority (used for Denver-midnight "Today"); else fall back to rolling 'days'.
+    const sinceISO = req.query.from
+      ? new Date(req.query.from).toISOString()
+      : (() => { const d = Math.max(0, parseInt(req.query.days ?? '30', 10) || 0); return d > 0 ? new Date(Date.now() - d * 86400000).toISOString() : null; })();
 
     // Pull all events in the range — Supabase caps responses at 1000 rows, so paginate
     const events = [];

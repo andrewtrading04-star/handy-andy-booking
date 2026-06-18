@@ -72,9 +72,9 @@
       <div class="sub" id="updated">Loading…</div>
     </div>
     <div class="ranges" id="ranges">
-      <button data-days="1">Today</button>
+      <button data-days="today" class="on">Today</button>
       <button data-days="7">7 Days</button>
-      <button data-days="30" class="on">30 Days</button>
+      <button data-days="30">30 Days</button>
       <button data-days="0">All Time</button>
       <button id="compare-btn" style="margin-left:12px;background:#f0f1f4;color:var(--mute);">Compare</button>
     </div>
@@ -108,11 +108,11 @@ const METRO_GROUPS = {
   Austin: ['austin','round rock','cedar park','georgetown','pflugerville','leander','kyle','buda','san marcos','bastrop','taylor','liberty hill','bee cave','dripping springs','lakeway','manor','hutto','del valle','rollingwood','west lake hills','jonestown','sunset valley'],
 };
 function getCityMetro(city){ const lc=(city||'').toLowerCase(); for(const [m,cs] of Object.entries(METRO_GROUPS)){ if(cs.some(c=>lc===c||lc.includes(c))) return m; } return 'Other'; }
-let currentDays = 30, compareDays = null, charts = {}, timer = null;
+let currentDays = 'today', compareDays = null, charts = {}, timer = null;
 
 document.getElementById('ranges').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.id === 'compare-btn') return;
-  currentDays = parseInt(b.dataset.days);
+  currentDays = b.dataset.days;
   compareDays = null;
   document.querySelectorAll('#ranges button:not(#compare-btn)').forEach(x => x.classList.toggle('on', x === b));
   document.getElementById('compare-btn').style.color = 'var(--mute)';
@@ -141,9 +141,20 @@ function fmtDur(s){ if(s==null)return '—'; if(s<60)return s+'s'; const m=Math.
 function esc(t){ return String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function convCell(c,b){ return b>0 ? `<span class="convgood">${c}%</span>` : `<span class="convzero">—</span>`; }
 
+function denverMidnight(){
+  const now=new Date();
+  const ymd=now.toLocaleDateString('en-CA',{timeZone:'America/Denver'});
+  const c=new Date(ymd+'T06:00:00Z');
+  const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
+  return h===0?c:new Date(ymd+'T07:00:00Z');
+}
+function buildAnalyticsUrl(mode){
+  if(mode==='today') return '/api/analytics?from='+denverMidnight().toISOString();
+  return '/api/analytics?days='+mode;
+}
 async function load(){
   try{
-    const r = await fetch('/api/analytics?days=' + currentDays);
+    const r = await fetch(buildAnalyticsUrl(currentDays));
     if(!r.ok) throw new Error('API error ' + r.status);
     const d = await r.json();
     if(d.error) throw new Error(d.error);
