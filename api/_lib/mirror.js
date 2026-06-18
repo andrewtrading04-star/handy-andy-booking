@@ -7,6 +7,7 @@
 // are read from whatever the Zenbooker response provides and reconcile later
 // via scripts/import-zenbooker.mjs.
 import { serviceClient } from './supabase.js';
+import { signToken } from './auth.js';
 
 function first(...vals) { for (const v of vals) if (v != null && v !== '') return v; return null; }
 
@@ -82,6 +83,7 @@ export async function mirrorBooking(ctx = {}) {
     const scheduled_at = first(ctx.scheduled_at, job.start_time, job.scheduled_at, job.starts_at, job.start,
                                job.appointment && job.appointment.start_time);
     const price = Number(first(ctx.price, job.total, job.price, job.amount, 0)) || 0;
+
     const bookingRow = {
       business_id: biz.id, customer_id, technician_id, service_id, service_area_id,
       status: technician_id ? 'assigned' : 'confirmed',
@@ -104,6 +106,10 @@ export async function mirrorBooking(ctx = {}) {
       booking_id = (await db.from('bookings').insert(bookingRow).select('id').single()).data?.id || null;
     }
     if (!booking_id) return;
+
+    // Generate review token with the now-known booking_id (30-day TTL: 2592000 seconds)
+    const reviewToken = signToken({ booking_id }, 2592000);
+    await db.from('bookings').update({ review_token: reviewToken }).eq('id', booking_id);
 
     // Line items (replace any prior mirror for this booking).
     const lines = Array.isArray(ctx.line_items) ? ctx.line_items.filter(Boolean) : [];
