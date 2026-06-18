@@ -1,0 +1,7 @@
+{
+  "network": {
+    "egress_allowlist": [
+      "api.supabase.com"
+    ]
+  }
+}
