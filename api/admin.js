@@ -692,6 +692,7 @@ async function technicianUpdate(req, res, db, auth, body) {
   if (body.status !== undefined) patch.status = body.status;
   if (body.phone !== undefined) patch.phone = body.phone || null;
   if (body.email !== undefined) patch.email = body.email || null;
+  if (body.color !== undefined) patch.color = body.color || null;
   if (body.active !== undefined) patch.active = !!body.active;
   if (Object.keys(patch).length) {
     const { error } = await db.from('technicians').update(patch).eq('id', id).eq('business_id', biz.id);

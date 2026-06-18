@@ -166,6 +166,14 @@
   .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
   .nb-slot:hover{border-color:var(--accent);}
   .nb-slot.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  .nb-optq{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:13px;color:var(--ink);}
+  .nb-optq.on{border-color:var(--accent);background:rgba(238,108,40,.07);}
+  .nb-optq .nb-optlabel{flex:1;}
+  .nb-optq.on .nb-optlabel{font-weight:600;}
+  .nb-stepper{display:flex;align-items:center;gap:0;flex-shrink:0;}
+  .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .nb-q-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .nb-qty{min-width:26px;text-align:center;font-weight:700;font-size:13px;}
   .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
   .bk-row span:first-child{width:18px;flex-shrink:0;}
   .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
@@ -302,14 +310,14 @@
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
+      <input class="search" style="margin:0" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
+      <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
+      <select class="search" style="margin:0" id="nbTech"></select>
       <input class="search" style="margin:0" type="date" id="nbDate" placeholder="Date">
       <div id="nbSlotsWrap" style="display:none;">
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
-      <select class="search" style="margin:0" id="nbTech"></select>
-      <input class="search" style="margin:0;max-width:120px" id="nbTravelFee" placeholder="+ Travel Fee (optional)" inputmode="decimal">
-      <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -1114,32 +1122,53 @@ document.getElementById('nbSlots').addEventListener('click',e=>{
 });
 
 // ── Option-step engine (TV Mounting walk-through) ───────────────────────────
-let nbOptionGroups=[]; const nbSel={};   // group_id -> Set(option_id)
-function resetNbSteps(){ for(const k in nbSel) delete nbSel[k]; nbOptionGroups=[]; document.getElementById('nbSteps').innerHTML=''; }
-function nbSizeTier(){
-  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbSel[g.id]) return null;
-  const oid=[...nbSel[g.id]][0]; const o=g.options.find(x=>x.id===oid);
-  return o ? ((o.metadata&&o.metadata.bracket_tier)||'standard') : null;
+// Groups where the user can pick MULTIPLE items (quantity steppers). Everything
+// else (lifting, dismount) is single-choice.
+const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','extras']);
+let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; document.getElementById('nbSteps').innerHTML=''; }
+function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
+function nbSelectedSizeTiers(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); const tiers=new Set(); if(!g||!nbQty[g.id]) return tiers;
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add((o.metadata&&o.metadata.bracket_tier)||'standard'); } });
+  return tiers;
 }
 function nbVisibleOptions(g){
   if(g.key!=='bracket') return g.options;
-  const tier=nbSizeTier();
-  return g.options.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||fs===tier; });
+  const tiers=nbSelectedSizeTiers();
+  return g.options.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||tiers.has(fs); });
 }
-function nbIsMulti(g){ return g.max_select===0 || g.max_select>1; }
+function nbPruneBrackets(){
+  const bg=nbOptionGroups.find(g=>g.key==='bracket'); if(!bg||!nbQty[bg.id]) return;
+  const visible=new Set(nbVisibleOptions(bg).map(o=>o.id));
+  Object.keys(nbQty[bg.id]).forEach(oid=>{ if(!visible.has(oid)) delete nbQty[bg.id][oid]; });
+}
 function renderNbSteps(){
   const wrap=document.getElementById('nbSteps');
   if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
   let html='';
   nbOptionGroups.forEach(g=>{
+    const qtyMode=NB_QTY_KEYS.has(g.key);
     html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}</div>`;
-    if(g.key==='bracket' && !nbSizeTier()){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
-    const multi=nbIsMulti(g);
+    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
     html+='<div class="nb-opts">';
     nbVisibleOptions(g).forEach(o=>{
-      const on=nbSel[g.id]&&nbSel[g.id].has(o.id); const price=Number(o.price)||0;
-      html+=`<button type="button" class="nb-opt${on?' on':''}" data-g="${g.id}" data-o="${o.id}" data-multi="${multi?1:0}">`+
-            `<span>${esc(o.label)}</span><span class="nb-price">${price?'+$'+price:'$0'}</span></button>`;
+      const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
+      if(qtyMode){
+        const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
+        html+=`<div class="nb-optq${ct>0?' on':''}">`+
+              `<span class="nb-optlabel">${esc(o.label)}</span>`+
+              `<span class="nb-price">${priceLbl}</span>`+
+              `<span class="nb-stepper">`+
+                `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
+                `<span class="nb-qty">${ct}</span>`+
+                `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
+              `</span></div>`;
+      } else {
+        const on=nbPickGet(g.id)===o.id;
+        html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
+              `<span>${esc(o.label)}</span><span class="nb-price">${priceLbl}</span></button>`;
+      }
     });
     html+='</div></div>';
   });
@@ -1147,20 +1176,26 @@ function renderNbSteps(){
   updateNbTotal();
 }
 document.getElementById('nbSteps').addEventListener('click',e=>{
-  const btn=e.target.closest('.nb-opt'); if(!btn) return;
-  const gid=btn.dataset.g, oid=btn.dataset.o, multi=btn.dataset.multi==='1';
-  if(!nbSel[gid]) nbSel[gid]=new Set();
-  const set=nbSel[gid];
-  if(multi){ set.has(oid)?set.delete(oid):set.add(oid); }
-  else { const was=set.has(oid); set.clear(); if(!was) set.add(oid); }
-  const grp=nbOptionGroups.find(g=>g.id===gid);
-  if(grp&&grp.key==='size'){ const bg=nbOptionGroups.find(g=>g.key==='bracket'); if(bg&&nbSel[bg.id]) nbSel[bg.id].clear(); }
-  renderNbSteps();
+  const qBtn=e.target.closest('.nb-q-btn');
+  const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
+  if(qBtn){
+    const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
+    if(!nbQty[gid]) nbQty[gid]={};
+    nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
+    if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
+    const grp=nbOptionGroups.find(g=>g.id===gid);
+    if(grp&&grp.key==='size') nbPruneBrackets();
+    renderNbSteps();
+  } else if(pickBtn){
+    const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
+    nbQty[gid] = (nbPickGet(gid)===oid) ? {} : {[oid]:1};
+    renderNbSteps();
+  }
 });
 function nbCollectSelections(){
   const out=[];
-  nbOptionGroups.forEach(g=>{ const set=nbSel[g.id]; if(!set) return;
-    set.forEach(oid=>{ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`, price:Number(o.price)||0, quantity:1}); });
+  nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
+    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
   });
   return out;
 }
@@ -1172,19 +1207,17 @@ function updateNbTotal(){
   const subtotal=optionsTotal+travelFee;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
-  const display=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | Total: $${total.toFixed(2)}`;
-  document.getElementById('nbTotalDisplay').textContent=display;
+  document.getElementById('nbTotalDisplay').textContent=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | Total: $${total.toFixed(2)}`;
 }
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
   const sid=e.target.value;
-  const p=e.target.selectedOptions[0]?.dataset.price; document.getElementById('nbPrice').value = p||'';
-  if(!sid) return;
+  if(!sid){ updateNbTotal(); return; }
   try{
     const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
     nbOptionGroups=r.groups||[];
     renderNbSteps();
-  }catch(err){ /* no option groups — fall back to manual price */ }
+  }catch(err){ /* no option groups — manual quote */ }
 });
 document.getElementById('nbForm').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -1215,6 +1248,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       scheduled_date: date,
       scheduled_slot: nbSelectedSlot.key,
       selections,
+      subtotal,
       tax,
       price: totalPrice,
       notes: document.getElementById('nbNotes').value.trim()||null,
