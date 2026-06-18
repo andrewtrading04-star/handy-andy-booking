@@ -22,8 +22,9 @@ set search_path = app, public, extensions;
 update services
 set name                 = 'Dom''s TV Mounting',
     description          = 'Professional TV mounting and installation',
-    base_price           = null,
+    base_price           = 0,
     duration_minutes     = 120,
+    category             = 'TV Mounting',
     zenbooker_service_id = '1764781543375x970898546217713700',
     settings             = jsonb_build_object('booking_flow','bookable','credit_card_capture',true)
 where business_id = (select id from businesses where slug = 'doms')
@@ -37,25 +38,25 @@ from businesses b
 cross join (values
   ('Handyman Services',
    'Book a handyman for home repairs and small projects. We handle drywall, leaky fixtures, furniture assembly, and more.',
-   null::numeric, 90,  'Handyman',     '1772707009158x823589363475393000', 'quote_request', 170.00::numeric),
+   0, 90,  'Handyman', '1772707009158x823589363475393000', 'quote_request', 170.00::numeric),
   ('Art Mounting & Installation',
    'Professional art mounting for residential and commercial spaces. Homes, galleries, offices, hotels, and more.',
-   null,          120, 'Art',          '1772707400150x343043981157018050', 'quote_request', null::numeric),
+   0, 120, 'Handyman', '1772707400150x343043981157018050', 'quote_request', null::numeric),
   ('Furniture Assembly',
    'On-site furniture assembly for flat-pack and boxed items from IKEA, Wayfair, Amazon, and more.',
-   null,          120, 'Handyman',     '1772708206210x382142538367018940', 'quote_request', null),
+   0, 120, 'Handyman', '1772708206210x382142538367018940', 'quote_request', null),
   ('Ring Doorbell Installation',
    'Installation and setup of your Ring doorbell including mounting, wiring, Wi-Fi, and app configuration.',
-   119.00,        60,  'Smart Home',   '1772710220269x639356084965264000', 'bookable',      119.00),
+   119.00, 60,  'Handyman', '1772710220269x639356084965264000', 'bookable', 119.00),
   ('Drywall Repair',
    'Drywall repair for holes, dents, popped screws, stress cracks, and seam repairs. Patch, tape, mud, sand, and prime.',
-   null,          120, 'Handyman',     '1772712131170x151769163563091100', 'quote_request', null),
+   0, 120, 'Handyman', '1772712131170x151769163563091100', 'quote_request', null),
   ('Gutter Cleaning',
    'Professional gutter cleaning — removes leaves and debris, clears downspouts, bags waste.',
-   null,          120, 'Outdoor',      '1772712555965x204944881710067400', 'quote_request', 250.00),
+   0, 120, 'Handyman', '1772712555965x204944881710067400', 'quote_request', 250.00),
   ('Home Theater Quote',
    'Custom home theater installation. Projectors, screens, surround sound, and more.',
-   null,          60,  'Home Theater', '1779489954923x916667929316261400', 'quote_request', null)
+   0, 60,  'Handyman', '1779489954923x916667929316261400', 'quote_request', null)
 ) as v(name, descr, base_price, dur, cat, zbk, flow, min_price)
 where b.slug = 'doms'
 on conflict (business_id, name) do nothing;

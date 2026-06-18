@@ -284,6 +284,7 @@
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email"></div>
       <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
+      <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0" id="nbService"></select>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" type="datetime-local" id="nbWhen"><input class="search" style="margin:0;max-width:120px" id="nbPrice" placeholder="$ Price" inputmode="decimal"></div>
@@ -1016,13 +1017,26 @@ async function openNewBooking(){
       api('services',{ params:{ business:current.slug }}),
       techCache.length ? Promise.resolve({technicians:techCache}) : api('technicians',{ params:{ business:current.slug }}),
     ]);
-    document.getElementById('nbService').innerHTML='<option value="">— Service —</option>'+
-      svc.services.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
+    nbServices = svc.services || [];
+    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort();
+    document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
+      cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    renderNbServices('');
     document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option>'+
       tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
+let nbServices=[];
+function renderNbServices(category){
+  const list = category ? nbServices.filter(s=>s.category===category) : nbServices;
+  document.getElementById('nbService').innerHTML='<option value="">— Service —</option>'+
+    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
+}
+document.getElementById('nbCategory').addEventListener('change',e=>{
+  renderNbServices(e.target.value);
+  document.getElementById('nbPrice').value='';
+});
 document.getElementById('nbService').addEventListener('change',e=>{
   const p=e.target.selectedOptions[0]?.dataset.price; if(p && !document.getElementById('nbPrice').value) document.getElementById('nbPrice').value=p;
 });

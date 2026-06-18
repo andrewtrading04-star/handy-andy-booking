@@ -254,7 +254,7 @@ async function bookings(req, res, db, auth) {
 async function services(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const { data, error } = await db.from('services')
-    .select('id, name, base_price, duration_minutes')
+    .select('id, name, base_price, duration_minutes, category')
     .eq('business_id', biz.id).eq('active', true).order('sort_order').order('name');
   if (error) throw error;
   return res.status(200).json({ services: data || [] });
