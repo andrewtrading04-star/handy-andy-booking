@@ -34,6 +34,7 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'login') return await login(req, res, body);
+    if (action === 'review') return await review(req, res, body);
 
     // Everything below requires a valid admin token.
     const auth = verifyToken(getBearer(req));
@@ -940,4 +941,125 @@ function shapeBooking(b) {
     photo_count: Array.isArray(b.photos) ? (b.photos[0]?.count || 0) : 0,
     note_count: Array.isArray(b.notes_list) ? (b.notes_list[0]?.count || 0) : 0,
   };
+}
+
+// ── Review submission (customer review link) ────────────────────────────────
+// Public endpoint: no auth required (token validates the booking).
+async function review(req, res, body) {
+  if (req.method === 'GET') return reviewCheck(req, res, body);
+  if (req.method === 'POST') return reviewSubmit(req, res, body);
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+
+async function reviewCheck(req, res, body) {
+  const token = req.query.token || '';
+  if (!token) return res.status(400).json({ error: 'token required' });
+
+  const reviewToken = verifyToken(token);
+  if (!reviewToken || !reviewToken.booking_id) return res.status(401).json({ error: 'Invalid token' });
+
+  const db = serviceClient();
+  const { data: booking, error } = await db.from('bookings')
+    .select('id, reviewed_at')
+    .eq('id', reviewToken.booking_id)
+    .single();
+
+  if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
+
+  return res.status(200).json({
+    booking_id: booking.id,
+    already_reviewed: !!booking.reviewed_at,
+  });
+}
+
+async function reviewSubmit(req, res, body) {
+  const token = body.token || '';
+  const rating = parseInt(body.rating) || 0;
+  const feedback = (body.feedback || '').trim();
+
+  if (!token) return res.status(400).json({ error: 'token required' });
+  if (rating < 1 || rating > 5) return res.status(400).json({ error: 'rating must be 1-5' });
+
+  const reviewToken = verifyToken(token);
+  if (!reviewToken || !reviewToken.booking_id) return res.status(401).json({ error: 'Invalid token' });
+
+  const db = serviceClient();
+
+  // Fetch booking + business + customer info
+  const { data: booking, error: bErr } = await db.from('bookings')
+    .select(`
+      id, reviewed_at, customer_id, business_id, status, service_area_id,
+      customer:customers(name, phone, email),
+      technician:technicians(name),
+      service_area:service_areas(name),
+      business:businesses(id, slug, name, feedback_email)
+    `)
+    .eq('id', reviewToken.booking_id)
+    .single();
+
+  if (bErr || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.reviewed_at) return res.status(409).json({ error: 'Already reviewed' });
+
+  // Update booking with review
+  const now = new Date().toISOString();
+  const { error: uErr } = await db.from('bookings').update({
+    review_rating: rating,
+    review_text: feedback || null,
+    reviewed_at: now,
+  }).eq('id', booking.id);
+
+  if (uErr) throw uErr;
+
+  // Send email if rating ≤ 4 and feedback exists
+  if (rating <= 4 && feedback && booking.business?.feedback_email) {
+    await sendFeedbackEmail({
+      to: booking.business.feedback_email,
+      businessName: booking.business.name,
+      customerName: booking.customer?.name || 'Customer',
+      rating,
+      feedback,
+      technicianName: booking.technician?.name || 'Technician',
+      serviceAreaName: booking.service_area?.name || 'Service Area',
+    }).catch(err => console.warn('[review] email send failed:', err));
+  }
+
+  return res.status(200).json({ ok: true, review_rating: rating });
+}
+
+async function sendFeedbackEmail(params) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.log('[review] RESEND_API_KEY not set, logging feedback:', params);
+    return;
+  }
+
+  const html = `
+<div style="font-family:sans-serif;max-width:600px;">
+  <h2>Customer Feedback: ${params.rating} Star${params.rating === 1 ? '' : 's'}</h2>
+  <p><strong>Customer:</strong> ${params.customerName}</p>
+  <p><strong>Business:</strong> ${params.businessName}</p>
+  <p><strong>Technician:</strong> ${params.technicianName}</p>
+  <p><strong>Service Area:</strong> ${params.serviceAreaName}</p>
+  <p><strong>Rating:</strong> ${'⭐'.repeat(params.rating)}</p>
+  <hr>
+  <p><strong>Feedback:</strong></p>
+  <p style="background:#f5f5f5;padding:16px;border-radius:8px;white-space:pre-wrap;">${params.feedback}</p>
+</div>
+  `;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'bookings@handyandy.com',
+      to: params.to,
+      subject: `Customer Feedback: ${params.rating}⭐ from ${params.customerName}`,
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Resend API error: ${res.status} ${err}`);
+  }
 }

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Share Your Feedback — Handy Andy</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694; --accent:#2563eb;
+    --green:#22c55e; --red:#ef4444; --orange:#ff6b35;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:40px;max-width:500px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
+  h1{font-size:24px;margin-bottom:8px;font-weight:800;}
+  .sub{color:var(--mute);font-size:14px;margin-bottom:24px;line-height:1.5;}
+  .stars{display:flex;justify-content:center;gap:16px;margin:32px 0;font-size:48px;}
+  .star{cursor:pointer;opacity:.3;transition:all .2s;user-select:none;}
+  .star:hover{opacity:.6;transform:scale(1.1);}
+  .star.active{opacity:1;transform:scale(1.2);}
+  .feedback-section{display:none;margin:24px 0;text-align:left;}
+  .feedback-section.show{display:block;}
+  textarea{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:12px;font-size:14px;font-family:inherit;min-height:100px;resize:vertical;margin-bottom:12px;}
+  textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer;width:100%;}
+  .btn:hover{filter:brightness(.96);}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
+  .message{display:none;text-align:center;margin:24px 0;font-size:16px;line-height:1.6;}
+  .message.show{display:block;}
+  .message.success{color:var(--green);}
+  .message.error{color:var(--red);}
+  .loading{display:none;}
+  .loading.show{display:inline;}
+  .google-btn{background:#4285f4;color:#fff;margin-top:16px;}
+  .google-btn:hover{filter:brightness(.96);}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div id="content">
+    <h1>How did we do? ⭐</h1>
+    <div class="sub">Your feedback helps us serve you better.</div>
+
+    <div class="stars">
+      <span class="star" data-rating="1">⭐</span>
+      <span class="star" data-rating="2">⭐</span>
+      <span class="star" data-rating="3">⭐</span>
+      <span class="star" data-rating="4">⭐</span>
+      <span class="star" data-rating="5">⭐</span>
+    </div>
+
+    <div class="feedback-section" id="sorrySection">
+      <h2 style="font-size:18px;margin-bottom:12px;color:var(--ink);">We're sorry we missed the mark 😞</h2>
+      <div class="sub" style="margin-bottom:16px;text-align:center;">Your feedback helps us improve. Tell us what happened (optional):</div>
+      <textarea id="feedbackText" placeholder="What could we have done better?"></textarea>
+      <button class="btn" id="submitFeedback">Submit Feedback</button>
+    </div>
+
+    <div class="feedback-section" id="thankYouSection">
+      <h2 style="font-size:20px;margin-bottom:16px;color:var(--green);">Thank you! ⭐⭐⭐⭐⭐</h2>
+      <div class="sub" style="text-align:center;margin-bottom:20px;">We're so glad we got it right. Would you mind sharing your experience on Google?</div>
+      <button class="btn google-btn" id="googleReviewBtn">Leave us a Google Review</button>
+    </div>
+
+    <div class="message" id="successMessage">
+      <div style="font-size:48px;margin-bottom:12px;">✓</div>
+      <div style="font-size:16px;font-weight:700;color:var(--green);">Thank you for your feedback!</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--mute);">We'll use this to improve our service.</div>
+    </div>
+
+    <div class="message" id="alreadyReviewedMessage">
+      <div style="font-size:48px;margin-bottom:12px;">✓</div>
+      <div style="font-size:16px;font-weight:700;">You've already reviewed this booking</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--mute);">Thank you for your feedback!</div>
+    </div>
+
+    <div class="message error" id="errorMessage"></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/admin';
+let selectedRating = 0;
+let bookingToken = new URLSearchParams(location.search).get('token');
+let reviewUrl = new URLSearchParams(location.search).get('review_url');
+
+if (!bookingToken) {
+  document.getElementById('errorMessage').textContent = 'Invalid review link. Please check your email.';
+  document.getElementById('errorMessage').classList.add('show');
+  document.getElementById('content').style.display = 'none';
+}
+
+// Star selection
+document.querySelectorAll('.star').forEach(star => {
+  star.addEventListener('click', () => {
+    selectedRating = parseInt(star.dataset.rating);
+    updateStars();
+    showFeedbackSection();
+  });
+  star.addEventListener('mouseover', () => {
+    const rating = parseInt(star.dataset.rating);
+    document.querySelectorAll('.star').forEach((s, i) => {
+      s.classList.toggle('active', i < rating);
+    });
+  });
+});
+
+document.addEventListener('mouseout', () => {
+  updateStars();
+});
+
+function updateStars() {
+  document.querySelectorAll('.star').forEach((s, i) => {
+    s.classList.toggle('active', i < selectedRating);
+  });
+}
+
+function showFeedbackSection() {
+  document.getElementById('sorrySection').classList.remove('show');
+  document.getElementById('thankYouSection').classList.remove('show');
+
+  if (selectedRating <= 4) {
+    document.getElementById('sorrySection').classList.add('show');
+  } else if (selectedRating === 5) {
+    document.getElementById('thankYouSection').classList.add('show');
+  }
+}
+
+document.getElementById('submitFeedback').addEventListener('click', submitReview);
+document.getElementById('googleReviewBtn').addEventListener('click', () => {
+  if (reviewUrl) {
+    // Save the review first, then redirect
+    submitReview(true);
+  }
+});
+
+async function submitReview(redirectToGoogle = false) {
+  if (!selectedRating) return alert('Please select a rating');
+
+  const feedbackText = document.getElementById('feedbackText').value.trim();
+
+  try {
+    const res = await fetch(API + '?action=review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: bookingToken,
+        rating: selectedRating,
+        feedback: feedbackText || null,
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save review');
+    }
+
+    // Show success message
+    document.getElementById('sorrySection').classList.remove('show');
+    document.getElementById('thankYouSection').classList.remove('show');
+    document.getElementById('stars').style.display = 'none';
+    document.querySelector('.sub').style.display = 'none';
+
+    if (selectedRating === 5 && redirectToGoogle && reviewUrl) {
+      // Show success then redirect
+      document.getElementById('successMessage').classList.add('show');
+      setTimeout(() => {
+        window.location.href = reviewUrl;
+      }, 1000);
+    } else {
+      document.getElementById('successMessage').classList.add('show');
+    }
+  } catch (err) {
+    document.getElementById('errorMessage').textContent = err.message;
+    document.getElementById('errorMessage').classList.add('show');
+  }
+}
+
+// Check if already reviewed on load
+async function checkAlreadyReviewed() {
+  try {
+    const res = await fetch(API + '?action=review&token=' + encodeURIComponent(bookingToken), {
+      method: 'GET',
+    });
+    const data = await res.json();
+
+    if (data.already_reviewed) {
+      document.getElementById('content').innerHTML = `
+        <div class="message success show">
+          <div style="font-size:48px;margin-bottom:12px;">✓</div>
+          <div style="font-size:16px;font-weight:700;">You've already reviewed this booking</div>
+          <div style="font-size:13px;margin-top:8px;color:var(--mute);">Thank you for your feedback!</div>
+        </div>
+      `;
+    }
+  } catch (err) {
+    // Silently continue if check fails
+  }
+}
+
+checkAlreadyReviewed();
+</script>
+
+</body>
+</html>
