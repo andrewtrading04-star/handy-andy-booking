@@ -24,6 +24,22 @@ export function localDayStartUTC(tz, offsetDays = 0, base = new Date()) {
   return new Date(ms - tzOffsetMs(tz, new Date(ms)));
 }
 
+// UTC Date for local midnight of an EXPLICIT calendar date 'YYYY-MM-DD' in tz.
+// Unlike localDayStartUTC this is anchored to the given date, not "today", so it
+// never drifts when the server's UTC day and the business's local day differ.
+export function localDateStartUTC(tz, dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const ms = Date.UTC(y, m - 1, d, 0, 0, 0);
+  return new Date(ms - tzOffsetMs(tz, new Date(ms)));
+}
+
+// Calendar date string 'YYYY-MM-DD' that is `days` after the given one (UTC math).
+export function addDaysStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
 // Local day-of-week 0..6 (Sun..Sat) in tz.
 function localDow(tz, base = new Date()) {
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(base);

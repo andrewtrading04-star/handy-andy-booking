@@ -12,7 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { localDayStartUTC } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
@@ -125,8 +125,6 @@ async function jobs(req, res, db, auth) {
   const { data: biz } = await db.from('businesses').select('timezone').eq('id', auth.business_id).single();
   const tz = biz?.timezone || 'America/Denver';
   const reDate = /^\d{4}-\d{2}-\d{2}$/;
-  const daysFromToday = (dateStr) =>
-    Math.round((new Date(dateStr + 'T00:00:00').getTime() - new Date(new Date().toISOString().split('T')[0] + 'T00:00:00').getTime()) / 86400000);
 
   // Range mode: from/to (inclusive) span multiple days for the week view.
   const from = reDate.test((req.query.from || '').toString()) ? req.query.from : null;
@@ -134,14 +132,18 @@ async function jobs(req, res, db, auth) {
   // Single-date mode: date (default today).
   const dateStr = reDate.test((req.query.date || '').toString()) ? req.query.date : null;
 
+  // Window is computed from explicit calendar dates so it never drifts when the
+  // server's UTC day differs from the business's local day.
   let lo, hi;
   if (from && to) {
-    lo = localDayStartUTC(tz, daysFromToday(from));
-    hi = localDayStartUTC(tz, daysFromToday(to) + 1);
+    lo = localDateStartUTC(tz, from);
+    hi = localDateStartUTC(tz, addDaysStr(to, 1));
+  } else if (dateStr) {
+    lo = localDateStartUTC(tz, dateStr);
+    hi = localDateStartUTC(tz, addDaysStr(dateStr, 1));
   } else {
-    const daysAhead = dateStr ? daysFromToday(dateStr) : 0;
-    lo = localDayStartUTC(tz, daysAhead);
-    hi = localDayStartUTC(tz, daysAhead + 1);
+    lo = localDayStartUTC(tz, 0);
+    hi = localDayStartUTC(tz, 1);
   }
 
   const { data, error } = await db.from('bookings')

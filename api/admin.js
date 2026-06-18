@@ -15,7 +15,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
-import { localDayStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
@@ -349,13 +349,17 @@ async function bookingCreate(req, res, db, auth, body) {
     customer_id = data.id;
   }
 
-  // Convert scheduled_date + scheduled_slot to scheduled_at timestamp
+  // Convert scheduled_date + scheduled_slot to scheduled_at timestamp. The slot
+  // start is a LOCAL wall-clock time in the business timezone, so anchor it to
+  // local midnight (as UTC) and add the slot offset — never store it as raw UTC.
+  const tz = biz.timezone || 'America/Denver';
   let scheduled_at = body.scheduled_at || null;
   if (body.scheduled_date && body.scheduled_slot) {
     const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
     if (slotDef) {
-      const [hh, mm] = slotDef.start.split(':');
-      scheduled_at = new Date(`${body.scheduled_date}T${hh}:${mm}:00Z`).toISOString();
+      const [hh, mm] = slotDef.start.split(':').map(Number);
+      const midnight = localDateStartUTC(tz, body.scheduled_date);
+      scheduled_at = new Date(midnight.getTime() + (hh * 60 + mm) * 60000).toISOString();
     }
   }
 
