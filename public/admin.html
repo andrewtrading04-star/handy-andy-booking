@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -69,6 +71,11 @@
   .sl:hover{background:var(--line2);}
   .sl.on{color:var(--accent);font-weight:700;}
   .sl .ic{width:16px;text-align:center;color:var(--mute);flex-shrink:0;}
+  /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
+  body.doms .side-nav button .ic i{color:var(--accent);font-size:14px;}
+  body.doms .sl .ic i{color:inherit;font-size:13px;}
+  body.doms .bk-row span:first-child i{color:var(--accent);font-size:13px;}
+  body.doms .logo .dot i{color:#fff;font-size:13px;}
   .side-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
   .who{font-size:12px;color:var(--mute);flex:1;}
 
@@ -283,7 +290,7 @@
 <div id="app" class="app-shell hidden">
   <aside class="sidebar" id="sidebar">
     <div class="side-head">
-      <div class="logo"><span class="dot">🛠️</span><span class="ttl" id="bizName">Schedule</span></div>
+      <div class="logo"><span class="dot" data-ico="tools">🛠️</span><span class="ttl" id="bizName">Schedule</span></div>
       <button class="plus" id="newBookingBtn" title="New booking">＋</button>
     </div>
     <div class="switcher" id="switcher"></div>
@@ -294,12 +301,12 @@
     </div>
 
     <nav class="side-nav" id="sideNav">
-      <button data-nav="schedule" class="on"><span class="ic">📅</span> Schedule</button>
-      <button data-nav="bookings"><span class="ic">📋</span> Bookings</button>
-      <button data-nav="customers"><span class="ic">👥</span> Customers</button>
-      <button data-nav="technicians"><span class="ic">🔧</span> Technicians</button>
-      <button data-nav="reviews"><span class="ic">⭐</span> Reviews</button>
-      <button data-nav="gallery"><span class="ic">📷</span> Photos</button>
+      <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
+      <button data-nav="bookings"><span class="ic" data-ico="bookings">📋</span> Bookings</button>
+      <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
+      <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
+      <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
+      <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
     </nav>
 
     <div id="schedSidebar">
@@ -461,6 +468,37 @@ async function api(action, { method='GET', params={}, body=null } = {}) {
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// ── Iconography ────────────────────────────────────────────────────────────
+// Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
+// ic('name') is used in dynamic markup; static nav icons carry data-ico and are
+// themed by applyIconTheme() whenever the active business changes.
+const ICONS = {
+  tools:    {e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
+  schedule: {e:'📅', f:'fa-regular fa-calendar'},
+  bookings: {e:'📋', f:'fa-solid fa-clipboard-list'},
+  customers:{e:'👥', f:'fa-solid fa-users'},
+  wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
+  star:     {e:'⭐', f:'fa-solid fa-star'},
+  camera:   {e:'📷', f:'fa-solid fa-camera'},
+  location: {e:'📍', f:'fa-solid fa-location-dot'},
+  ban:      {e:'🚫', f:'fa-solid fa-ban'},
+  phone:    {e:'📞', f:'fa-solid fa-phone'},
+  clock:    {e:'🕑', f:'fa-regular fa-clock'},
+  card:     {e:'💳', f:'fa-solid fa-credit-card'},
+  note:     {e:'📝', f:'fa-solid fa-pen-to-square'},
+  link:     {e:'🔗', f:'fa-solid fa-link'},
+};
+function isDoms(){ return !!(current && current.slug==='doms'); }
+function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
+function applyIconTheme(){
+  const doms=isDoms();
+  document.body.classList.toggle('doms', doms);
+  document.querySelectorAll('[data-ico]').forEach(el=>{
+    const m=ICONS[el.dataset.ico]; if(!m) return;
+    el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
+  });
+}
+
 // ── Date / format helpers (business-timezone aware) ────────────────────────
 function tz(){ return (current && current.timezone) || 'America/Denver'; }
 function todayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: tz() }); }
@@ -521,6 +559,7 @@ function enterApp(){
   document.getElementById('who').textContent = role==='owner' ? 'Owner' : 'Secretary';
   current = businesses[0] || null;
   anchorDate = todayStr();
+  applyIconTheme();
   renderSwitcher();
   navTo('schedule');
 }
@@ -532,7 +571,7 @@ function renderSwitcher(){
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
-    availData=null; renderSwitcher(); navTo(section);
+    availData=null; applyIconTheme(); renderSwitcher(); navTo(section);
   }));
 }
 
@@ -613,14 +652,14 @@ function renderSidebarFilters(){
   else {
     terr.style.display='';
     const tl=document.getElementById('territoryList');
-    tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">📍</span> All Territories</button>`+
-      areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">📍</span> ${esc(a.name)}</button>`).join('');
+    tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">${ic('location')}</span> All Territories</button>`+
+      areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">${ic('location')}</span> ${esc(a.name)}</button>`).join('');
     tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
   }
 
   const al=document.getElementById('assignList');
-  al.innerHTML=`<button class="sl ${filterTech==='all'?'on':''}" data-tech="all"><span class="ic">👥</span> All Jobs</button>
-    <button class="sl ${filterTech==='unassigned'?'on':''}" data-tech="unassigned"><span class="ic">🚫</span> Unassigned</button>`+
+  al.innerHTML=`<button class="sl ${filterTech==='all'?'on':''}" data-tech="all"><span class="ic">${ic('customers')}</span> All Jobs</button>
+    <button class="sl ${filterTech==='unassigned'?'on':''}" data-tech="unassigned"><span class="ic">${ic('ban')}</span> Unassigned</button>`+
     techCache.map(t=>`<button class="sl ${filterTech===t.id?'on':''}" data-tech="${t.id}">${avatar(t,true)} ${esc(t.name)}</button>`).join('');
   al.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterTech=b.dataset.tech; renderSidebarFilters(); renderCalBody(); }));
 }
@@ -743,14 +782,14 @@ function openBooking(b){
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>`;
   document.getElementById('bkBody').innerHTML=`
-    <div class="bk-row"><span>🕑</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
-    <div class="bk-row"><span>🔧</span><div>${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
-    <div class="bk-row"><span>💳</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
-    ${b.address?`<div class="bk-row"><span>📍</span><div>${esc(b.address)}</div></div>`:''}
-    ${b.customer?.phone?`<div class="bk-row"><span>📞</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
-    ${b.customer_notes?`<div class="bk-row"><span>📝</span><div>${esc(b.customer_notes)}</div></div>`:''}
-    ${b.review_rating?`<div class="bk-row"><span>⭐</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
-    ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>🔗</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
+    <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
+    <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
+    <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
+    ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
+    ${b.customer?.phone?`<div class="bk-row"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
+    ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
+    ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
       ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
@@ -765,7 +804,7 @@ function openBooking(b){
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
       <input type="file" id="bkPhotoInput" accept="image/*" multiple style="display:none">
-      <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">📷 Add photo</button>
+      <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">${ic('camera')} Add photo</button>
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Internal notes</div><div id="bkNotes"><div class="sub" style="font-size:13px;">Loading…</div></div>
       <textarea id="bkNoteInput" class="bk-note-input" placeholder="Add an internal note (never shown to the customer)…"></textarea>

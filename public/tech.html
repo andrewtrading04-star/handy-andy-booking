@@ -10,6 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <style>
   :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
     --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--amber:#ffb020;--blue:#4aa3ff;
@@ -94,6 +96,9 @@
   .card .big-name{font-size:20px;font-weight:800;}
   .kv{font-size:15px;margin:7px 0;line-height:1.5;}
   .kv a{color:var(--blue);text-decoration:none;}
+  /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
+  body.doms .kv > i{color:var(--orange);width:18px;text-align:center;margin-right:2px;}
+  body.doms .btn.ghost > i{margin-right:4px;}
   .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
@@ -202,6 +207,27 @@ function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;',
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
 function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}catch{return iso;} }
 
+// ── Iconography ────────────────────────────────────────────────────────────
+// Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
+const ICONS = {
+  tools:    {e:'🛠', f:'fa-solid fa-screwdriver-wrench'},
+  wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
+  phone:    {e:'📞', f:'fa-solid fa-phone'},
+  location: {e:'📍', f:'fa-solid fa-location-dot'},
+  navigate: {e:'🧭', f:'fa-solid fa-diamond-turn-right'},
+  camera:   {e:'📷', f:'fa-solid fa-camera'},
+};
+function isDoms(){ return !!(tech && tech.slug==='doms'); }
+function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
+function applyIconTheme(){
+  const doms=isDoms();
+  document.body.classList.toggle('doms', doms);
+  document.querySelectorAll('[data-ico]').forEach(el=>{
+    const m=ICONS[el.dataset.ico]; if(!m) return;
+    el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
+  });
+}
+
 // Login
 document.getElementById('loginForm').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -234,6 +260,7 @@ function weekStart(dateStr){
 async function showJobs(date){
   if(date) scheduleDate=date;
   show('jobsView');
+  applyIconTheme();
   document.getElementById('techName').textContent=tech?tech.name:'';
   await loadWeek();
 }
@@ -323,11 +350,11 @@ async function showDetail(id){
       <div class="card">
         <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
         <div class="big-name">${esc(j.customer_name)}</div>
-        <div class="kv">🔧 ${esc(j.service||'Service')}</div>
-        ${j.customer_phone?`<div class="kv">📞 <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
-        <div class="kv">📍 ${esc(j.address||'No address')}</div>
-        ${j.lat&&j.lng?`<img class="streetview" src="https://maps.googleapis.com/maps/api/streetview?size=600x450&location=${j.lat},${j.lng}&fov=90&pitch=0" alt="Street View of job location">`:'<div class="sub" style="color:var(--mute);font-size:13px;padding:12px 0;">📍 Address details not available for Street View</div>'}
-        ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">🧭 Get Directions</a>`:''}
+        <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
+        ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
+        <div class="kv">${ic('location')} ${esc(j.address||'No address')}</div>
+        ${j.lat&&j.lng?`<img class="streetview" src="https://maps.googleapis.com/maps/api/streetview?size=600x450&location=${j.lat},${j.lng}&fov=90&pitch=0" alt="Street View of job location">`:`<div class="sub" style="color:var(--mute);font-size:13px;padding:12px 0;">${ic('location')} Address details not available for Street View</div>`}
+        ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">${ic('navigate')} Get Directions</a>`:''}
       </div>
       ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
       ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(li.name)}${li.line_total?' — $'+li.line_total:''}</div>`).join('')}</div>`:''}
@@ -336,7 +363,7 @@ async function showDetail(id){
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
         <div class="photogrid" id="photoGrid">${photoThumbs(curPhotos)}</div>
         <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
-        <button class="btn ghost" id="addPhoto" style="margin-top:10px;">📷 Add Photo</button>
+        <button class="btn ghost" id="addPhoto" style="margin-top:10px;">${ic('camera')} Add Photo</button>
         <div class="sub" style="font-size:12px;margin-top:8px;color:var(--mute);">At least ${MIN_PHOTOS} photos are required before you can complete the job.</div>
       </div>
 

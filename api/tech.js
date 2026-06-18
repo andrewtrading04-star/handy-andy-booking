@@ -83,9 +83,14 @@ async function login(req, res, body) {
   if (!tech) return res.status(401).json({ error: 'Incorrect phone or PIN' });
 
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
+  let slug = '';
+  try {
+    const { data: biz } = await db.from('businesses').select('slug').eq('id', tech.business_id).single();
+    slug = biz?.slug || '';
+  } catch { /* slug is cosmetic (theming) — ignore lookup failures */ }
   return res.status(200).json({
     token,
-    technician: { id: tech.id, name: tech.name, status: tech.status },
+    technician: { id: tech.id, name: tech.name, status: tech.status, slug },
   });
 }
 
@@ -115,10 +120,10 @@ async function devLogin(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const db = serviceClient();
   const { data: tech, error } = await db.from('technicians')
-    .select('id, name, status, business_id').eq('id', body.tech_id).single();
+    .select('id, name, status, business_id, businesses ( slug )').eq('id', body.tech_id).single();
   if (error || !tech) return res.status(404).json({ error: 'Technician not found' });
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
-  return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status } });
+  return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status, slug: tech.businesses?.slug || '' } });
 }
 
 async function jobs(req, res, db, auth) {
