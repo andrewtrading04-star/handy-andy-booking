@@ -740,6 +740,7 @@ function openBooking(b){
     ${b.customer?.phone?`<div class="bk-row"><span>📞</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
     ${b.customer_notes?`<div class="bk-row"><span>📝</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>⭐</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
+    ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>🔗</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
       ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
@@ -764,6 +765,7 @@ function openBooking(b){
   const close=()=>m.classList.add('hidden');
   document.getElementById('bkClose').onclick=close;
   m.onclick=e=>{ if(e.target===m) close(); };
+  const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
   const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };

@@ -487,6 +487,8 @@ async function bookingCreate(req, res, db, auth, body) {
 
   const paymentMethod = body.payment_method || null;        // card | cash | quote | null
   const status = technician_id ? 'assigned' : 'confirmed';
+  // Signed review-link token (30-day TTL) so the completion follow-up can point
+  // the customer at the review widget. booking_id is patched in after insert.
   const { data: bRow, error: bErr } = await db.from('bookings').insert({
     business_id: biz.id, customer_id,
     technician_id: technician_id || null,
@@ -502,6 +504,10 @@ async function bookingCreate(req, res, db, auth, body) {
     payment_method: paymentMethod,
   }).select('id').single();
   if (bErr) throw bErr;
+
+  // Generate the review-link token now that we have the booking id.
+  const reviewToken = signToken({ kind: 'review', booking_id: bRow.id }, 2592000);
+  await db.from('bookings').update({ review_token: reviewToken }).eq('id', bRow.id);
 
   // Save a tokenized card on file in Stripe so it can be charged at service time.
   if (paymentMethod === 'card' && body.payment_method_id) {
@@ -929,7 +935,7 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 // ── Shared shaping ───────────────────────────────────────────────────────────
 function bookingSelect() {
   return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
+          notes, customer_notes, review_rating, review_text, review_token, technician_id, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
           technician:technicians ( id, name, status, color ),
@@ -953,6 +959,7 @@ function shapeBooking(b) {
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,
     review_text: b.review_text,
+    review_token: b.review_token,
     technician_id: b.technician_id,
     service_area_id: b.service_area_id,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),

@@ -1,42 +1,45 @@
 -- ============================================================================
--- Migration 0012: Populate review URLs for service areas
--- ============================================================================
--- Adds Google review URLs for each location. Users provided:
--- Houston #1: https://g.page/r/CdizxHwpwcE0EBM/review
--- Houston #2: https://g.page/r/CeA7fWzbLgO8EBM/review
--- Denver #2: https://g.page/r/Ccj-ZjdeLtzfEBM/review
--- Denver #1: https://g.page/r/CLh9vwRdHQDZUt4s5?g_st=ac (maps shortlink)
--- Austin: https://g.page/r/CYE7aX6tVMnkEBM/review
--- Doms Denver: https://g.page/r/Cffr7Tp2DSNOEBM/review
--- Run after 0011. Idempotent.
+-- Migration 0012: Populate Google review URLs for service areas
+-- ----------------------------------------------------------------------------
+-- The 5-star path on /review.html redirects the customer to their location's
+-- Google review page (service_areas.review_url).
+--
+-- The seeded service_areas are ONE area per metro:
+--   Handy Andy -> Denver, Austin, Houston
+--   Doms       -> Denver
+-- The owner provided 6 Google listings (some metros have multiple physical
+-- locations). We map each EXISTING area to its primary listing below. If more
+-- areas are added later (e.g. Houston #2, Denver #2), set their review_url
+-- individually.
+--
+-- Run after 0011. Idempotent (only fills when review_url is null).
 -- ============================================================================
 set search_path = app, public, extensions;
 
-UPDATE service_areas
-SET review_url = 'https://g.page/r/CdizxHwpwcE0EBM/review'
-WHERE LOWER(name) LIKE '%houston%' AND LOWER(name) LIKE '%1%' AND business_id = (SELECT id FROM businesses WHERE slug = 'handy-andy')
-AND review_url IS NULL;
+-- Handy Andy — Houston (primary listing: Houston #1)
+update service_areas sa set review_url = 'https://g.page/r/CdizxHwpwcE0EBM/review'
+from businesses b
+where sa.business_id = b.id and b.slug = 'handy-andy'
+  and lower(sa.name) = 'houston' and sa.review_url is null;
 
-UPDATE service_areas
-SET review_url = 'https://g.page/r/CeA7fWzbLgO8EBM/review'
-WHERE LOWER(name) LIKE '%houston%' AND LOWER(name) LIKE '%2%' AND business_id = (SELECT id FROM businesses WHERE slug = 'handy-andy')
-AND review_url IS NULL;
+-- Handy Andy — Denver (primary listing: Denver #1)
+update service_areas sa set review_url = 'https://g.page/r/CLh9vwRdHQDZUt4s5?g_st=ac'
+from businesses b
+where sa.business_id = b.id and b.slug = 'handy-andy'
+  and lower(sa.name) = 'denver' and sa.review_url is null;
 
-UPDATE service_areas
-SET review_url = 'https://g.page/r/Ccj-ZjdeLtzfEBM/review'
-WHERE LOWER(name) LIKE '%denver%' AND LOWER(name) LIKE '%2%' AND business_id = (SELECT id FROM businesses WHERE slug = 'handy-andy')
-AND review_url IS NULL;
+-- Handy Andy — Austin
+update service_areas sa set review_url = 'https://g.page/r/CYE7aX6tVMnkEBM/review'
+from businesses b
+where sa.business_id = b.id and b.slug = 'handy-andy'
+  and lower(sa.name) = 'austin' and sa.review_url is null;
 
-UPDATE service_areas
-SET review_url = 'https://g.page/r/CLh9vwRdHQDZUt4s5?g_st=ac'
-WHERE LOWER(name) LIKE '%denver%' AND LOWER(name) LIKE '%1%' AND business_id = (SELECT id FROM businesses WHERE slug = 'handy-andy')
-AND review_url IS NULL;
+-- Doms — Denver
+update service_areas sa set review_url = 'https://g.page/r/Cffr7Tp2DSNOEBM/review'
+from businesses b
+where sa.business_id = b.id and b.slug = 'doms'
+  and lower(sa.name) = 'denver' and sa.review_url is null;
 
-UPDATE service_areas
-SET review_url = 'https://g.page/r/CYE7aX6tVMnkEBM/review'
-WHERE LOWER(name) LIKE '%austin%' AND business_id = (SELECT id FROM businesses WHERE slug = 'handy-andy')
-AND review_url IS NULL;
-
-UPDATE service_areas
-SET review_url = 'https://g.page/r/Cffr7Tp2DSNOEBM/review'
-WHERE business_id = (SELECT id FROM businesses WHERE slug = 'doms') AND review_url IS NULL;
+-- Spare listings for additional locations, recorded here for reference:
+--   Houston #2 -> https://g.page/r/CeA7fWzbLgO8EBM/review
+--   Denver  #2 -> https://g.page/r/Ccj-ZjdeLtzfEBM/review
