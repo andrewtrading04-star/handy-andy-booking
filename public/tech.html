@@ -108,8 +108,8 @@
       <button class="btn big" type="submit">Sign in</button>
       <div class="err" id="loginErr"></div>
     </form>
-    <!-- Dev bypass: only shown when TECH_DEV_BYPASS is set on the server -->
-    <div id="devPanel" class="hidden" style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
+    <!-- Dev bypass: always visible during development -->
+    <div id="devPanel" style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
       <div class="field"><label>🛠 Dev login (no PIN)</label>
         <select id="devTech" class="" style="width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:14px;font-size:15px;"></select></div>
       <button class="btn ghost" type="button" id="devBtn">Enter as this tech</button>

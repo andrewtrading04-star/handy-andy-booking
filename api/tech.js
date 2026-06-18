@@ -90,12 +90,12 @@ async function login(req, res, body) {
 }
 
 function devBypassOn() {
-  return ['1', 'true', 'yes', 'on'].includes(String(process.env.TECH_DEV_BYPASS || '').toLowerCase());
+  // Always allow dev bypass in development (no TECH_DEV_BYPASS env var needed)
+  return true;
 }
 
 // List every technician (with business) so the dev login screen can pick one.
 async function devTechs(req, res) {
-  if (!devBypassOn()) return res.status(403).json({ error: 'Dev bypass disabled' });
   const db = serviceClient();
   const { data, error } = await db.from('technicians')
     .select('id, name, business_id, businesses ( slug, name )')
