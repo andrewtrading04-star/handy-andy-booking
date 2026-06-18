@@ -46,7 +46,7 @@
   .err{color:var(--red);font-size:14px;margin-top:10px;text-align:center;min-height:20px;}
 
   /* Header */
-  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
+  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:14px 18px;padding-top:calc(22px + env(safe-area-inset-top, 0px));display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
   .hdr .name{font-weight:800;font-size:17px;}
   .hdr .sub{font-size:12px;color:var(--mute);}
   .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
