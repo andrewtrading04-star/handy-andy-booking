@@ -1272,7 +1272,12 @@ const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','ext
 // choice per TV. Picking 3 TVs allows up to 3 of each of these.
 const NB_TV_BOUND = new Set(['bracket','fireplace','wires','surface']);
 let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; document.getElementById('nbSteps').innerHTML=''; }
+// TV Type (frame_tv) — a UI-only first question in the admin form. Mirrors the
+// public widget: Samsung Frame / LG Gallery TVs use the in-box bracket, so the
+// bracket question is hidden when ONLY Frame/Gallery TVs are selected.
+let nbFrameType=new Set();                // 'regular' and/or 'frame'
+function nbOnlyFrame(){ return nbFrameType.has('frame') && !nbFrameType.has('regular'); }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameType.clear(); document.getElementById('nbSteps').innerHTML=''; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
   const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return 0;
@@ -1322,11 +1327,26 @@ function renderNbSteps(){
   const wrap=document.getElementById('nbSteps');
   if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
   let html='';
+  // TV Type — first question, only for TV-mounting services (those with a
+  // size/bracket group). Frame/Gallery use the in-box bracket.
+  const isTvService=nbOptionGroups.some(g=>g.key==='bracket'||g.key==='size');
+  if(isTvService){
+    html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
+      `<div class="nb-hint">Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</div>`+
+      `<div class="nb-opts">`+
+        `<button type="button" class="nb-opt${nbFrameType.has('regular')?' on':''}" data-frame="regular"><span>Customer has a regular TV</span></button>`+
+        `<button type="button" class="nb-opt${nbFrameType.has('frame')?' on':''}" data-frame="frame"><span>Customer has a Samsung Frame TV or LG Gallery TV</span></button>`+
+      `</div></div>`;
+  }
   const tvCount=nbTotalTvs();
   const showLifting=nbShowLifting();
+  const onlyFrame=nbOnlyFrame();
   nbOptionGroups.forEach(g=>{
     // Lifting help is only relevant for TVs 70" and up — hide it otherwise.
     if(g.key==='lifting'){ if(!showLifting){ if(nbQty[g.id]) delete nbQty[g.id]; return; } }
+    // Frame/Gallery TVs use the in-box bracket — hide the bracket question when
+    // ONLY Frame/Gallery is selected (matches the public widget).
+    if(g.key==='bracket' && onlyFrame){ if(nbQty[g.id]) delete nbQty[g.id]; return; }
     const qtyMode=NB_QTY_KEYS.has(g.key);
     const tvBound=NB_TV_BOUND.has(g.key);
     const gCount=nbGroupCount(g.id);
@@ -1363,6 +1383,13 @@ function renderNbSteps(){
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const qBtn=e.target.closest('.nb-q-btn');
   const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
+  const frameBtn=e.target.closest('.nb-opt[data-frame]');
+  if(frameBtn){
+    const t=frameBtn.dataset.frame;
+    if(nbFrameType.has(t)) nbFrameType.delete(t); else nbFrameType.add(t);
+    renderNbSteps();
+    return;
+  }
   if(qBtn){
     if(qBtn.disabled) return;
     const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
@@ -1382,6 +1409,10 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 function nbCollectSelections(){
   const out=[];
+  // Record the TV type ($0) so it's visible on the job — important for
+  // Frame/Gallery jobs where the bracket question is hidden.
+  if(nbFrameType.has('regular')) out.push({option_id:null, label:'TV Type: Regular TV', price:0, quantity:1});
+  if(nbFrameType.has('frame'))   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)', price:0, quantity:1});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
     Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
   });
