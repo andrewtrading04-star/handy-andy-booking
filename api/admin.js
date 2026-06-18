@@ -45,6 +45,7 @@ export default async function handler(req, res) {
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
+      case 'available_slots':   return await availableSlots(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
       case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
@@ -287,6 +288,41 @@ async function serviceOptions(req, res, db, auth) {
   return res.status(200).json({ groups: result });
 }
 
+// ── Available time slots for a date (filtered by technician if provided) ─────
+async function availableSlots(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const dateStr = (req.query.date || '').toString();
+  const techId = (req.query.technician_id || '').toString();
+  if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
+
+  const dow = dayOfWeekFor(dateStr);
+  let available = [];
+
+  if (!techId || techId === 'any') {
+    // "Any Technician" — return all 5 slots
+    available = SLOTS.map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
+  } else {
+    // Specific technician — check their availability for this day + exceptions
+    const { data: av } = await db.from('technician_availability')
+      .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
+    const slots = new Set((av || []).map(x => x.slot_key));
+
+    // Check for exception on this date
+    const { data: exc } = await db.from('technician_availability_exceptions')
+      .select('slot_key, is_available').eq('technician_id', techId).eq('exception_date', dateStr).single();
+    if (exc) {
+      if (exc.is_available) {
+        available = SLOTS.filter(s => s.key === exc.slot_key).map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
+      }
+      // else: no slots if is_available=false (entire day off)
+    } else {
+      available = SLOTS.filter(s => slots.has(s.key)).map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
+    }
+  }
+
+  return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
+}
+
 // ── Create a manual / phone booking ──────────────────────────────────────────
 async function bookingCreate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -313,13 +349,34 @@ async function bookingCreate(req, res, db, auth, body) {
     customer_id = data.id;
   }
 
-  const status = body.technician_id ? 'assigned' : 'confirmed';
+  // Convert scheduled_date + scheduled_slot to scheduled_at timestamp
+  let scheduled_at = body.scheduled_at || null;
+  if (body.scheduled_date && body.scheduled_slot) {
+    const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
+    if (slotDef) {
+      const [hh, mm] = slotDef.start.split(':');
+      scheduled_at = new Date(`${body.scheduled_date}T${hh}:${mm}:00Z`).toISOString();
+    }
+  }
+
+  // If technician_id='any', pick a first available tech for this slot/date
+  let technician_id = body.technician_id;
+  if (technician_id === 'any') {
+    const { data: avail } = await db.from('technician_availability')
+      .select('technician_id').eq('business_id', biz.id)
+      .eq('day_of_week', new Date(body.scheduled_date + 'T00:00:00Z').getUTCDay())
+      .eq('slot_key', body.scheduled_slot).limit(1);
+    technician_id = (avail && avail[0]) ? avail[0].technician_id : null;
+  }
+
+  const status = technician_id ? 'assigned' : 'confirmed';
   const { data: bRow, error: bErr } = await db.from('bookings').insert({
     business_id: biz.id, customer_id,
-    technician_id: body.technician_id || null,
+    technician_id: technician_id || null,
     service_id: body.service_id || null,
     status, source: 'manual',
-    scheduled_at: body.scheduled_at || null,
+    scheduled_at,
+    subtotal: Number(body.subtotal) || 0,
     price: Number(body.price) || 0,
     notes: body.notes || null,
     customer_notes: body.customer_notes || null,
@@ -333,15 +390,27 @@ async function bookingCreate(req, res, db, auth, body) {
     const rows = selections.map(s => {
       const qty = Number(s.quantity) || 1;
       const unit = Number(s.price) || 0;
+      const kind = s.label === 'Travel Fee' ? 'addon' : 'option';
       return {
         booking_id: bRow.id, business_id: biz.id,
-        kind: 'option', name: s.label || 'Option',
+        kind, name: s.label || 'Option',
         quantity: qty, unit_price: unit, line_total: unit * qty,
         service_id: body.service_id || null, option_id: s.option_id || null,
       };
     });
     const { error: liErr } = await db.from('booking_line_items').insert(rows);
     if (liErr) throw liErr;
+  }
+
+  // Add tax as a line item
+  if (Number(body.tax) > 0) {
+    const { error: taxErr } = await db.from('booking_line_items').insert({
+      booking_id: bRow.id, business_id: biz.id,
+      kind: 'fee', name: 'Tax (8.25%)',
+      quantity: 1, unit_price: Number(body.tax), line_total: Number(body.tax),
+      service_id: null, option_id: null, taxable: false,
+    });
+    if (taxErr) throw taxErr;
   }
 
   await db.from('booking_status_events').insert({

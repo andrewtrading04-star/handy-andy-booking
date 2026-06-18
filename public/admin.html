@@ -163,6 +163,9 @@
   .nb-opt.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
   .nb-opt .nb-price{color:var(--ink-2);font-weight:600;flex-shrink:0;}
   .nb-opt.on .nb-price{color:var(--accent);}
+  .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
+  .nb-slot:hover{border-color:var(--accent);}
+  .nb-slot.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
   .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
   .bk-row span:first-child{width:18px;flex-shrink:0;}
   .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
@@ -249,8 +252,10 @@
     </nav>
 
     <div id="schedSidebar">
-      <div class="side-section">Territories</div>
-      <div class="side-list" id="territoryList"></div>
+      <div id="territoriesSection">
+        <div class="side-section">Territories</div>
+        <div class="side-list" id="territoryList"></div>
+      </div>
       <div class="side-section">Jobs Assigned To</div>
       <div class="side-list" id="assignList"></div>
     </div>
@@ -295,10 +300,16 @@
       <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
-      <select class="search" style="margin:0" id="nbService"></select>
+      <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
+      <input class="search" style="margin:0" type="date" id="nbDate" placeholder="Date">
+      <div id="nbSlotsWrap" style="display:none;">
+        <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
+        <div id="nbSlots" style="display:grid;gap:6px;"></div>
+      </div>
       <select class="search" style="margin:0" id="nbTech"></select>
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" type="datetime-local" id="nbWhen"><input class="search" style="margin:0;max-width:120px" id="nbPrice" placeholder="$ Price" inputmode="decimal"></div>
+      <input class="search" style="margin:0;max-width:120px" id="nbTravelFee" placeholder="+ Travel Fee (optional)" inputmode="decimal">
+      <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -523,10 +534,16 @@ async function renderSchedule(silent){
 }
 
 function renderSidebarFilters(){
-  const tl=document.getElementById('territoryList');
-  tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">📍</span> All Territories</button>`+
-    areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">📍</span> ${esc(a.name)}</button>`).join('');
-  tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
+  // Hide territories section for Doms (single-territory business)
+  const terr=document.getElementById('territoriesSection');
+  if(current && current.slug==='doms') { terr.style.display='none'; }
+  else {
+    terr.style.display='';
+    const tl=document.getElementById('territoryList');
+    tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">📍</span> All Territories</button>`+
+      areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">📍</span> ${esc(a.name)}</button>`).join('');
+    tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
+  }
 
   const al=document.getElementById('assignList');
   al.innerHTML=`<button class="sl ${filterTech==='all'?'on':''}" data-tech="all"><span class="ic">👥</span> All Jobs</button>
@@ -1030,25 +1047,70 @@ async function openNewBooking(){
       techCache.length ? Promise.resolve({technicians:techCache}) : api('technicians',{ params:{ business:current.slug }}),
     ]);
     nbServices = svc.services || [];
+    nbSelectedSlot = null;
     const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort();
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
-    document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option>'+
+    document.getElementById('nbTech').innerHTML='<option value="">— Unassigned —</option><option value="any">Any Technician</option>'+
       tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
-let nbServices=[];
+let nbServices=[], nbSelectedSlot=null;
 function renderNbServices(category){
   const list = category ? nbServices.filter(s=>s.category===category) : nbServices;
-  document.getElementById('nbService').innerHTML='<option value="">— Service —</option>'+
-    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
+  const svcDiv=document.getElementById('nbService');
+  if(category==='TV Mounting'){ svcDiv.style.display='none'; }
+  else { svcDiv.style.display=''; svcDiv.innerHTML='<option value="">— Service —</option>'+
+    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join(''); }
 }
-document.getElementById('nbCategory').addEventListener('change',e=>{
-  renderNbServices(e.target.value);
+document.getElementById('nbCategory').addEventListener('change',async e=>{
+  const cat=e.target.value;
+  renderNbServices(cat);
   resetNbSteps();
-  document.getElementById('nbPrice').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbDate').value='';
+  document.getElementById('nbSlotsWrap').style.display='none';
+  document.getElementById('nbTravelFee').value='';
+  updateNbTotal();
+
+  if(cat==='TV Mounting'){
+    const tvMountService = nbServices.find(s=>s.category===cat);
+    if(tvMountService){
+      document.getElementById('nbService').value=tvMountService.id;
+      try{
+        const r=await api('service_options',{ params:{ business:current.slug, service_id:tvMountService.id }});
+        nbOptionGroups=r.groups||[];
+        renderNbSteps();
+      }catch(err){}
+    }
+  }
+});
+
+// ── Date + slot picker ──────────────────────────────────────────────────────
+document.getElementById('nbDate').addEventListener('change',async e=>{
+  const date=e.target.value; nbSelectedSlot=null;
+  if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
+  const techId=document.getElementById('nbTech').value;
+  try{
+    const r=await api('available_slots',{ params:{ business:current.slug, date, technician_id:techId||'any' }});
+    const html=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
+    document.getElementById('nbSlots').innerHTML=html;
+    document.getElementById('nbSlotsWrap').style.display='';
+  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+});
+document.getElementById('nbTech').addEventListener('change',e=>{
+  const date=document.getElementById('nbDate').value;
+  if(date) document.getElementById('nbDate').dispatchEvent(new Event('change'));
+});
+document.getElementById('nbTravelFee').addEventListener('change',updateNbTotal);
+document.getElementById('nbSlots').addEventListener('click',e=>{
+  const btn=e.target.closest('.nb-slot'); if(!btn) return;
+  [...document.getElementById('nbSlots').querySelectorAll('.nb-slot')].forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  nbSelectedSlot={key:btn.dataset.key,label:btn.dataset.label};
+  updateNbTotal();
 });
 
 // ── Option-step engine (TV Mounting walk-through) ───────────────────────────
@@ -1102,10 +1164,16 @@ function nbCollectSelections(){
   });
   return out;
 }
+const TAX_RATE = 0.0825;
 function updateNbTotal(){
-  if(!nbOptionGroups.length) return;
-  const total=nbCollectSelections().reduce((s,x)=>s+x.price*x.quantity,0);
-  document.getElementById('nbPrice').value=total.toFixed(2);
+  const selections=nbCollectSelections();
+  const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  const subtotal=optionsTotal+travelFee;
+  const tax=Math.round(subtotal*TAX_RATE*100)/100;
+  const total=subtotal+tax;
+  const display=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | Total: $${total.toFixed(2)}`;
+  document.getElementById('nbTotalDisplay').textContent=display;
 }
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
@@ -1124,8 +1192,16 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const name=document.getElementById('nbName').value.trim();
   const phone=document.getElementById('nbPhone').value.trim();
   if(!name && !phone){ err.textContent='Name or phone required'; return; }
-  const whenVal=document.getElementById('nbWhen').value;
-  const scheduled_at = whenVal ? new Date(whenVal).toISOString() : null;
+  const date=document.getElementById('nbDate').value;
+  if(!date){ err.textContent='Date required'; return; }
+  if(!nbSelectedSlot){ err.textContent='Time slot required'; return; }
+  const selections=nbCollectSelections();
+  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
+  const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const tax=Math.round(subtotal*TAX_RATE*100)/100;
+  const totalPrice=subtotal+tax;
+  const techId=document.getElementById('nbTech').value;
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
@@ -1135,10 +1211,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
         state:document.getElementById('nbState').value.trim(),
         postal_code:document.getElementById('nbZip').value.trim() },
       service_id: document.getElementById('nbService').value || null,
-      technician_id: document.getElementById('nbTech').value || null,
-      scheduled_at,
-      price: parseFloat(document.getElementById('nbPrice').value)||0,
-      selections: nbCollectSelections(),
+      technician_id: techId==='any'?'any':techId||null,
+      scheduled_date: date,
+      scheduled_slot: nbSelectedSlot.key,
+      selections,
+      tax,
+      price: totalPrice,
       notes: document.getElementById('nbNotes').value.trim()||null,
     }});
     document.getElementById('modal').classList.add('hidden');
