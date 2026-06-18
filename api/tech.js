@@ -108,14 +108,15 @@ async function login(req, res, body) {
   if (!tech) return res.status(401).json({ error: 'Incorrect phone or PIN' });
 
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
-  let slug = '';
+  let slug = '', tz = 'America/Denver';
   try {
-    const { data: biz } = await db.from('businesses').select('slug').eq('id', tech.business_id).single();
+    const { data: biz } = await db.from('businesses').select('slug, timezone').eq('id', tech.business_id).single();
     slug = biz?.slug || '';
-  } catch { /* slug is cosmetic (theming) — ignore lookup failures */ }
+    tz = biz?.timezone || 'America/Denver';
+  } catch { /* slug/tz are cosmetic — ignore lookup failures */ }
   return res.status(200).json({
     token,
-    technician: { id: tech.id, name: tech.name, status: tech.status, slug },
+    technician: { id: tech.id, name: tech.name, status: tech.status, slug, tz },
   });
 }
 
@@ -145,10 +146,10 @@ async function devLogin(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const db = serviceClient();
   const { data: tech, error } = await db.from('technicians')
-    .select('id, name, status, business_id, businesses ( slug )').eq('id', body.tech_id).single();
+    .select('id, name, status, business_id, businesses ( slug, timezone )').eq('id', body.tech_id).single();
   if (error || !tech) return res.status(404).json({ error: 'Technician not found' });
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
-  return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status, slug: tech.businesses?.slug || '' } });
+  return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status, slug: tech.businesses?.slug || '', tz: tech.businesses?.timezone || 'America/Denver' } });
 }
 
 async function jobs(req, res, db, auth) {
@@ -189,7 +190,18 @@ async function jobs(req, res, db, auth) {
     .order('scheduled_at', { ascending: true });
   if (error) throw error;
 
-  return res.status(200).json({ jobs: (data || []).map(shapeJob) });
+  // Attach the business-timezone calendar date so the app groups jobs by the
+  // SAME day the dashboard does — regardless of the technician's device tz.
+  const jobs = (data || []).map(shapeJob).map(j => ({ ...j, local_date: localDateInTz(tz, j.scheduled_at) }));
+  return res.status(200).json({ jobs, tz });
+}
+
+// Business-timezone calendar date ('YYYY-MM-DD') for an instant.
+function localDateInTz(tz, iso) {
+  if (!iso) return null;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(iso));
 }
 
 // Diagnostic: surfaces who the token says we are vs. what bookings actually
@@ -198,7 +210,8 @@ async function jobs(req, res, db, auth) {
 // logged-in tech's own business.
 async function debugIdentity(req, res, db, auth) {
   const { data: biz } = await db.from('businesses')
-    .select('slug, name').eq('id', auth.business_id).single();
+    .select('slug, name, timezone').eq('id', auth.business_id).single();
+  const tz = biz?.timezone || 'America/Denver';
   const { data: me } = await db.from('technicians')
     .select('id, name, business_id, status').eq('id', auth.tech_id).single();
 
@@ -223,12 +236,14 @@ async function debugIdentity(req, res, db, auth) {
       tech_record_business_id: me?.business_id || null,
       business_slug: biz?.slug || null,
       business_name: biz?.name || null,
+      business_tz: tz,
     },
     assigned_to_you_count: (mine || []).length,
     assigned_to_you: mine || [],
     business_bookings_count: (bizBookings || []).length,
     business_bookings: (bizBookings || []).map(b => ({
       id: b.id, status: b.status, scheduled_at: b.scheduled_at,
+      local_date: localDateInTz(tz, b.scheduled_at),
       business_id: b.business_id, technician_id: b.technician_id,
       assigned_tech_name: b.technician?.name || null,
       assigned_to_you: b.technician_id === auth.tech_id,

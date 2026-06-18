@@ -221,7 +221,7 @@ async function api(action,{method='GET',params={},body=null}={}){
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
-function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}catch{return iso;} }
+function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:bizTz});}catch{return iso;} }
 
 // ── Iconography ────────────────────────────────────────────────────────────
 // Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
@@ -263,15 +263,23 @@ function show(which){
   for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
-const todayStr=()=>new Date().toISOString().split('T')[0];
-let scheduleDate=todayStr();           // selected day (YYYY-MM-DD)
+// All day math runs in the BUSINESS timezone so the tech app's calendar lines
+// up with the dashboard and the booking times — never the device's timezone.
+let bizTz = (tech && tech.tz) || 'America/Denver';
+function todayStr(){ return new Intl.DateTimeFormat('en-CA',{timeZone:bizTz,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+let scheduleDate=todayStr();           // selected day (YYYY-MM-DD, business tz)
 let weekJobs=[];                       // all jobs in the visible week
 
-function ymd(d){ return d.toISOString().split('T')[0]; }
-// Sunday that starts the week containing dateStr.
-function weekStart(dateStr){
-  const d=new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()-d.getDay()); return d;
-}
+// Calendar-date math on 'YYYY-MM-DD' strings via a noon-UTC anchor. A calendar
+// date's weekday/number are timezone-independent, so this never drifts.
+function dateAnchor(ds){ return new Date(ds+'T12:00:00Z'); }
+function dowOf(ds){ return dateAnchor(ds).getUTCDay(); }            // 0..6 Sun..Sat
+function addDaysStr(ds,n){ const d=dateAnchor(ds); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().split('T')[0]; }
+function weekStartStr(ds){ return addDaysStr(ds, -dowOf(ds)); }     // Sunday of ds's week
+function dayNum(ds){ return Number(ds.split('-')[2]); }
+function fmtDs(ds,opts){ return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',...opts}).format(dateAnchor(ds)); }
+// Business-tz calendar date for a job (server sends local_date; fall back if not).
+function jobLocalDate(j){ return j.local_date || new Intl.DateTimeFormat('en-CA',{timeZone:bizTz,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(j.scheduled_at)); }
 
 async function showJobs(date){
   if(date) scheduleDate=date;
@@ -282,33 +290,34 @@ async function showJobs(date){
 }
 
 async function loadWeek(){
-  const start=weekStart(scheduleDate);
-  const days=[...Array(7)].map((_,i)=>{ const d=new Date(start); d.setDate(d.getDate()+i); return ymd(d); });
+  const start=weekStartStr(scheduleDate);
+  const days=[...Array(7)].map((_,i)=>addDaysStr(start,i));
   const end=days[6];
-  // Week title (e.g. "Jan 12 – 18" or spanning months).
-  const sd=new Date(days[0]+'T00:00:00'), ed=new Date(end+'T00:00:00');
-  const sameMonth=sd.getMonth()===ed.getMonth();
+  // Week title (e.g. "June 14–20" or spanning months).
+  const sameMonth=days[0].slice(0,7)===end.slice(0,7);
   document.getElementById('weekTitle').textContent = sameMonth
-    ? `${sd.toLocaleDateString('en-US',{month:'long'})} ${sd.getDate()}–${ed.getDate()}`
-    : `${sd.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${ed.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+    ? `${fmtDs(days[0],{month:'long'})} ${dayNum(days[0])}–${dayNum(end)}`
+    : `${fmtDs(days[0],{month:'short',day:'numeric'})} – ${fmtDs(end,{month:'short',day:'numeric'})}`;
 
   const grid=document.getElementById('weekGrid');
   const list=document.getElementById('jobsList');
-  grid.innerHTML=days.map(ds=>{ const d=new Date(ds+'T00:00:00'); return `
-    <div class="daycell${ds===scheduleDate?' sel':''}${ds===todayStr()?' today':''}" data-date="${ds}">
-      <span class="dc-dow">${d.toLocaleDateString('en-US',{weekday:'short'}).slice(0,2)}</span>
-      <span class="dc-num">${d.getDate()}</span>
+  const today=todayStr();
+  grid.innerHTML=days.map(ds=>`
+    <div class="daycell${ds===scheduleDate?' sel':''}${ds===today?' today':''}" data-date="${ds}">
+      <span class="dc-dow">${fmtDs(ds,{weekday:'short'}).slice(0,2)}</span>
+      <span class="dc-num">${dayNum(ds)}</span>
       <span class="dc-count empty" data-count="${ds}">0</span>
-    </div>`; }).join('');
+    </div>`).join('');
   grid.querySelectorAll('.daycell').forEach(c=>c.addEventListener('click',()=>{ scheduleDate=c.dataset.date; renderDay(); markSelected(); }));
 
   list.innerHTML='<div class="empty">Loading…</div>';
   try{
     const d=await api('jobs',{params:{from:days[0],to:end}});
     weekJobs=d.jobs||[];
-    // Per-day counts on the calendar.
+    if(d.tz) bizTz=d.tz;   // keep device in sync with the business timezone
+    // Per-day counts on the calendar (grouped by business-tz date).
     const counts={};
-    weekJobs.forEach(j=>{ const ds=ymd(new Date(j.scheduled_at)); counts[ds]=(counts[ds]||0)+1; });
+    weekJobs.forEach(j=>{ const ds=jobLocalDate(j); counts[ds]=(counts[ds]||0)+1; });
     grid.querySelectorAll('[data-count]').forEach(el=>{
       const n=counts[el.dataset.count]||0; el.textContent=n;
       el.classList.toggle('empty',n===0);
@@ -323,9 +332,8 @@ function markSelected(){
 
 function renderDay(){
   const isToday=scheduleDate===todayStr();
-  const dObj=new Date(scheduleDate+'T00:00:00');
-  const dLabel=dObj.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-  const jobs=weekJobs.filter(j=>ymd(new Date(j.scheduled_at))===scheduleDate);
+  const dLabel=fmtDs(scheduleDate,{weekday:'short',month:'short',day:'numeric'});
+  const jobs=weekJobs.filter(j=>jobLocalDate(j)===scheduleDate);
   document.getElementById('jobsSub').textContent=`${jobs.length} job${jobs.length===1?'':'s'} — ${isToday?'Today':dLabel}`;
   const list=document.getElementById('jobsList');
   list.innerHTML = jobs.length ? jobs.map(j=>`
@@ -350,10 +358,11 @@ async function runDiagnostic(){
   try{
     const d=await api('debug_identity');
     const you=d.you||{};
+    const tz=you.business_tz||bizTz;
     const tokenBiz=you.token_business_id, recBiz=you.tech_record_business_id;
     const bizMatch = tokenBiz===recBiz;
     const rows=(d.business_bookings||[]).map(b=>{
-      const dt=b.scheduled_at?new Date(b.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'(no date)';
+      const dt=b.scheduled_at?new Date(b.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:tz}):'(no date)';
       const mine=b.assigned_to_you;
       return `<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;">
         <b>${esc(b.assigned_tech_name||'Unassigned')}</b> · ${esc(b.status)} · ${esc(dt)}
@@ -576,8 +585,7 @@ function close(){ showJobs(); }
 // ── Weekly availability ─────────────────────────────────────────────────────
 // ── Week navigation ─────────────────────────────────────────────────────────
 function shiftWeek(delta){
-  const d=new Date(scheduleDate+'T00:00:00'); d.setDate(d.getDate()+delta*7);
-  scheduleDate=ymd(d); loadWeek();
+  scheduleDate=addDaysStr(scheduleDate, delta*7); loadWeek();
 }
 document.getElementById('weekPrev').addEventListener('click',()=>shiftWeek(-1));
 document.getElementById('weekNext').addEventListener('click',()=>shiftWeek(1));
