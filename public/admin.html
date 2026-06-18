@@ -172,7 +172,9 @@
   .nb-optq.on .nb-optlabel{font-weight:600;}
   .nb-stepper{display:flex;align-items:center;gap:0;flex-shrink:0;}
   .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;}
-  .nb-q-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .nb-q-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+  .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
+  .nb-cap{font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0;margin-left:6px;}
   .nb-qty{min-width:26px;text-align:center;font-weight:700;font-size:13px;}
   .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
   .bk-row span:first-child{width:18px;flex-shrink:0;}
@@ -1132,9 +1134,28 @@ document.getElementById('nbSlots').addEventListener('click',e=>{
 // Groups where the user can pick MULTIPLE items (quantity steppers). Everything
 // else (lifting, dismount) is single-choice.
 const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','extras']);
+// Groups capped by the number of TVs: one bracket / fireplace / wire / surface
+// choice per TV. Picking 3 TVs allows up to 3 of each of these.
+const NB_TV_BOUND = new Set(['bracket','fireplace','wires','surface']);
 let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
 function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; document.getElementById('nbSteps').innerHTML=''; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
+function nbTotalTvs(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return 0;
+  return Object.values(nbQty[g.id]).reduce((s,c)=>s+(c>0?c:0),0);
+}
+function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
+// Trim TV-bound groups down when the TV count drops below what's selected.
+function nbClampTvBound(){
+  const cap=nbTotalTvs();
+  nbOptionGroups.forEach(g=>{
+    if(!NB_TV_BOUND.has(g.key) || !nbQty[g.id]) return;
+    while(nbGroupCount(g.id)>cap){
+      const oid=Object.keys(nbQty[g.id]).find(k=>nbQty[g.id][k]>0); if(!oid) break;
+      nbQty[g.id][oid]--; if(nbQty[g.id][oid]<=0) delete nbQty[g.id][oid];
+    }
+  });
+}
 function nbSelectedSizeTiers(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const tiers=new Set(); if(!g||!nbQty[g.id]) return tiers;
   Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add((o.metadata&&o.metadata.bracket_tier)||'standard'); } });
@@ -1154,22 +1175,29 @@ function renderNbSteps(){
   const wrap=document.getElementById('nbSteps');
   if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
   let html='';
+  const tvCount=nbTotalTvs();
   nbOptionGroups.forEach(g=>{
     const qtyMode=NB_QTY_KEYS.has(g.key);
-    html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}</div>`;
+    const tvBound=NB_TV_BOUND.has(g.key);
+    const gCount=nbGroupCount(g.id);
+    const atCap=tvBound && tvCount>0 && gCount>=tvCount;
+    const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${tvCount} selected</span>` : '';
+    html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}${capLbl}</div>`;
+    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
     html+='<div class="nb-opts">';
     nbVisibleOptions(g).forEach(o=>{
       const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
       if(qtyMode){
         const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
+        const plusDis=atCap?' disabled':'';
         html+=`<div class="nb-optq${ct>0?' on':''}">`+
               `<span class="nb-optlabel">${esc(o.label)}</span>`+
               `<span class="nb-price">${priceLbl}</span>`+
               `<span class="nb-stepper">`+
                 `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
                 `<span class="nb-qty">${ct}</span>`+
-                `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
+                `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
       } else {
         const on=nbPickGet(g.id)===o.id;
@@ -1186,12 +1214,15 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
   const qBtn=e.target.closest('.nb-q-btn');
   const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
   if(qBtn){
+    if(qBtn.disabled) return;
     const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
+    const grp=nbOptionGroups.find(g=>g.id===gid);
+    // Cap TV-bound groups at the number of TVs selected.
+    if(d>0 && grp && NB_TV_BOUND.has(grp.key) && nbGroupCount(gid)>=nbTotalTvs()) return;
     if(!nbQty[gid]) nbQty[gid]={};
     nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
     if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
-    const grp=nbOptionGroups.find(g=>g.id===gid);
-    if(grp&&grp.key==='size') nbPruneBrackets();
+    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); }
     renderNbSteps();
   } else if(pickBtn){
     const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
