@@ -86,6 +86,7 @@ export default async function handler(req, res) {
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'customers':         return await customers(req, res, db, auth);
+      case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
@@ -845,6 +846,34 @@ async function customers(req, res, db, auth) {
   const { data, error } = await q.order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
   return res.status(200).json({ customers: data || [] });
+}
+
+async function customerUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const { data: existing } = await db.from('customers').select('id').eq('id', id).eq('business_id', biz.id).single();
+  if (!existing) return res.status(404).json({ error: 'Customer not found' });
+
+  const patch = {};
+  if (body.name !== undefined) {
+    if (!String(body.name).trim()) return res.status(400).json({ error: 'Name is required' });
+    patch.name = String(body.name).trim();
+  }
+  if (body.phone !== undefined) patch.phone = body.phone ? String(body.phone).trim() : null;
+  if (body.email !== undefined) patch.email = body.email ? String(body.email).trim() : null;
+  if (body.address_line1 !== undefined) patch.address_line1 = body.address_line1 ? String(body.address_line1).trim() : null;
+  if (body.city !== undefined) patch.city = body.city ? String(body.city).trim() : null;
+  if (body.state !== undefined) patch.state = body.state ? String(body.state).trim() : null;
+  if (body.postal_code !== undefined) patch.postal_code = body.postal_code ? String(body.postal_code).trim() : null;
+
+  if (Object.keys(patch).length) {
+    const { error } = await db.from('customers').update(patch).eq('id', id).eq('business_id', biz.id);
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true });
 }
 
 // ── Technicians ──────────────────────────────────────────────────────────────

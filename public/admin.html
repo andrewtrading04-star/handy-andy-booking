@@ -423,6 +423,25 @@
   </div>
 </div>
 
+<!-- Customer edit modal -->
+<div id="custModal" class="modal hidden">
+  <div class="sheet">
+    <h2>Edit Customer</h2>
+    <form id="custForm" style="display:grid;gap:10px;">
+      <input type="hidden" id="cuId">
+      <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
+      <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP"></div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" type="submit">Save changes</button>
+        <button class="btn ghost" type="button" id="cuCancel">Cancel</button>
+      </div>
+      <div class="err" id="cuErr"></div>
+    </form>
+  </div>
+</div>
+
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
@@ -957,14 +976,51 @@ async function renderCustomers(){
     const list=document.getElementById('clist');
     try{
       const d=await api('customers',{ params:{ business:current.slug, q }});
-      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th></tr></thead><tbody>${
-        d.customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td></tr>`).join('')
+      custCache={}; d.customers.forEach(c=>custCache[c.id]=c);
+      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th><th></th></tr></thead><tbody>${
+        d.customers.map(c=>`<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td style="text-align:right;"><button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`).join('')
       }</tbody></table>` : '<div class="empty">No customers found.</div>';
+      list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openCustomerEdit(b.dataset.edit); }));
+      list.querySelectorAll('tr[data-cid]').forEach(r=>r.addEventListener('click',()=>openCustomerEdit(r.dataset.cid)));
     }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
   };
+  custReload=()=>load(document.getElementById('custSearch')?.value||'');
   let t; document.getElementById('custSearch').addEventListener('input',e=>{ clearTimeout(t); t=setTimeout(()=>load(e.target.value),300); });
   load('');
 }
+
+let custCache={}, custReload=null;
+function openCustomerEdit(id){
+  const c=custCache[id]; if(!c) return;
+  document.getElementById('cuId').value=c.id;
+  document.getElementById('cuName').value=c.name||'';
+  document.getElementById('cuPhone').value=c.phone||'';
+  document.getElementById('cuEmail').value=c.email||'';
+  document.getElementById('cuAddr').value=c.address_line1||'';
+  document.getElementById('cuCity').value=c.city||'';
+  document.getElementById('cuState').value=c.state||'';
+  document.getElementById('cuZip').value=c.postal_code||'';
+  document.getElementById('cuErr').textContent='';
+  document.getElementById('custModal').classList.remove('hidden');
+}
+document.getElementById('cuCancel').addEventListener('click',()=>document.getElementById('custModal').classList.add('hidden'));
+document.getElementById('custModal').addEventListener('click',e=>{ if(e.target.id==='custModal') document.getElementById('custModal').classList.add('hidden'); });
+document.getElementById('custForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const name=document.getElementById('cuName').value.trim();
+  if(!name){ document.getElementById('cuErr').textContent='Name is required'; return; }
+  try{
+    await api('customer_update',{ method:'POST', body:{
+      business:current.slug, id:document.getElementById('cuId').value,
+      name, phone:document.getElementById('cuPhone').value, email:document.getElementById('cuEmail').value,
+      address_line1:document.getElementById('cuAddr').value, city:document.getElementById('cuCity').value,
+      state:document.getElementById('cuState').value, postal_code:document.getElementById('cuZip').value,
+    }});
+    document.getElementById('custModal').classList.add('hidden');
+    toast('Customer saved');
+    if(custReload) custReload();
+  }catch(err){ document.getElementById('cuErr').textContent=err.message; }
+});
 
 // ── Photo gallery (every job photo for this business) ───────────────────────
 async function renderGallery(){
