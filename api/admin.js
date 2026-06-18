@@ -640,7 +640,8 @@ async function bookingUpdate(req, res, db, auth, body) {
 
     // Send SMS when job is completed
     if (newStatus === 'completed' && existing.customer?.phone && existing.review_token) {
-      const reviewLink = `${process.env.VERCEL_URL || 'http://localhost:3000'}/review.html?token=${encodeURIComponent(existing.review_token)}`;
+      const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+      const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
       const msg = `Your job is complete! How did we do? ${reviewLink}`;
       sendSMS(existing.customer.phone, msg).catch(console.error);
     }
