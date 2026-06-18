@@ -1049,6 +1049,12 @@ async function openNewBooking(){
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
   resetNbSteps();
+  nbSelectedSlot=null;
+  document.getElementById('nbSlots').innerHTML='';
+  document.getElementById('nbSlotsWrap').style.display='none';
+  document.getElementById('nbService').style.display='none';
+  document.getElementById('nbTravelFee').value='';
+  document.getElementById('nbTotalDisplay').textContent='';
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
@@ -1067,11 +1073,12 @@ async function openNewBooking(){
 }
 let nbServices=[], nbSelectedSlot=null;
 function renderNbServices(category){
-  const list = category ? nbServices.filter(s=>s.category===category) : nbServices;
   const svcDiv=document.getElementById('nbService');
-  if(category==='TV Mounting'){ svcDiv.style.display='none'; }
-  else { svcDiv.style.display=''; svcDiv.innerHTML='<option value="">— Service —</option>'+
-    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join(''); }
+  if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  const list = nbServices.filter(s=>s.category===category);
+  svcDiv.style.display='';
+  svcDiv.innerHTML='<option value="">— Service —</option>'+
+    list.map(s=>`<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)} ($${s.base_price})</option>`).join('');
 }
 document.getElementById('nbCategory').addEventListener('change',async e=>{
   const cat=e.target.value;
