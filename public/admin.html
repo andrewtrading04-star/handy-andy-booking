@@ -5,23 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
 <title>Schedule — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
     --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694; --accent:#2563eb; --accent-soft:#eaf1ff;
     --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --orange:#ff6b35; --purple:#9333ea;
+    /* Type system — Plus Jakarta Sans, weights 400–900 */
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-hero:clamp(40px,7vw,76px); --fs-h1:34px; --fs-h2:24px; --fs-h3:18px;
+    --fs-body:15px; --fs-sm:14px;
+    /* Gradient keyword highlight */
+    --grad:linear-gradient(120deg,#ff8a3d 0%,#ff5e3a 50%,#ff2d6f 100%);
   }
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
   button{font-family:inherit;cursor:pointer;}
   input,select,textarea{font-family:inherit;}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
   a{color:var(--accent);}
   .hidden{display:none !important;}
 
   /* ───────── Login ───────── */
   .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
   .login{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 18px 50px rgba(20,30,50,.10);}
-  .login h1{font-size:20px;margin-bottom:4px;}
+  .login h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:6px;}
   .login .sub{color:var(--mute);font-size:13px;margin-bottom:22px;}
   .login input{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:12px;}
   .login input:focus{outline:none;border-color:var(--accent);}
@@ -261,7 +271,7 @@
 <!-- ───────── Login ───────── -->
 <div id="login" class="login-wrap">
   <form class="login" id="loginForm">
-    <h1>Schedule Admin</h1>
+    <h1>Schedule <span class="hl">Admin</span></h1>
     <div class="sub">Enter your password to continue</div>
     <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
     <button class="btn" type="submit">Sign in</button>

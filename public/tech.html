@@ -7,18 +7,28 @@
 <meta name="theme-color" content="#0A1628">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Tech App</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
-    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--amber:#ffb020;--blue:#4aa3ff;}
+    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--amber:#ffb020;--blue:#4aa3ff;
+    /* Type system — Plus Jakarta Sans, weights 400–900 */
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-hero:clamp(32px,9vw,44px); --fs-h1:clamp(24px,6vw,30px); --fs-h2:20px;
+    --fs-h3:18px; --fs-body:15px; --fs-sm:14px;
+    /* Gradient keyword highlight (bright for dark navy bg) */
+    --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  body{font-family:var(--font-sans);background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
   button{font-family:inherit;cursor:pointer;}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
   .hidden{display:none !important;}
   .wrap{max-width:520px;margin:0 auto;min-height:100vh;}
 
   /* Login */
   .login{padding:40px 24px;display:flex;flex-direction:column;min-height:100vh;justify-content:center;}
-  .login h1{font-size:22px;margin-bottom:4px;display:flex;align-items:center;gap:8px;}
+  .login h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
   .login .dot{width:12px;height:12px;border-radius:50%;background:var(--orange);}
   .login .sub{color:var(--mute);font-size:14px;margin-bottom:26px;}
   .field{margin-bottom:14px;}
@@ -122,7 +132,7 @@
 
   <!-- Login -->
   <div id="login" class="login">
-    <h1><span class="dot"></span>Technician Login</h1>
+    <h1><span class="dot"></span>Technician <span class="hl">Login</span></h1>
     <div class="sub">Sign in to see today's jobs</div>
     <form id="loginForm">
       <div class="field"><label>Phone number</label>
