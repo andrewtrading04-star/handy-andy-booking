@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMS Consent Proof - Handy Andy Booking</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#f4f5f7; color:#1a1a1a; padding:24px; }
+  .container { max-width:600px; margin:0 auto; }
+  .card { background:#fff; border:1px solid #e8e8ec; border-radius:12px; padding:32px; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+  h1 { font-size:22px; margin-bottom:8px; }
+  .subtitle { font-size:13px; color:#8a8a93; margin-bottom:24px; }
+  .form-section { background:#f9f9f9; border:1px solid #e8e8ec; border-radius:8px; padding:20px; margin:24px 0; }
+  .form-label { font-size:12px; font-weight:700; color:#8a8a93; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:16px; }
+  .checkbox-row { display:flex; align-items:center; gap:12px; padding:16px; background:#fff; border-radius:8px; border:1px solid #e8e8ec; }
+  .checkbox { width:20px; height:20px; accent-color:#ff6600; cursor:pointer; }
+  .checkbox-label { cursor:pointer; font-size:14px; color:#1a1a1a; margin:0; flex:1; }
+  .info-box { background:#f0f1f4; border-left:4px solid #ff6600; padding:16px; border-radius:6px; margin-top:24px; font-size:12px; line-height:1.6; color:#555; }
+  .timestamp { font-size:11px; color:#8a8a93; margin-top:24px; padding-top:24px; border-top:1px solid #e8e8ec; text-align:center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>SMS Consent Proof</h1>
+    <div class="subtitle">Handy Andy Booking System — Customer SMS Opt-in Form</div>
+
+    <div class="form-section">
+      <div class="form-label">SMS Notifications</div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="smsConsent" class="checkbox" checked>
+        <label for="smsConsent" class="checkbox-label">Send SMS updates about this appointment (confirmations, ETA, completion)</label>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <strong>Proof of Customer Consent:</strong><br>
+      This form is presented to all customers during the booking process. Customers explicitly opt in to receive SMS notifications for their appointments, including:
+      <ul style="margin-top:8px;margin-left:16px;">
+        <li>Booking confirmation with appointment details</li>
+        <li>Technician en route notification with ETA</li>
+        <li>Job completion message with review link</li>
+      </ul>
+      The checkbox is enabled by default, and customers must actively uncheck it to opt out. All SMS sends are logged and can be audited per booking.
+    </div>
+
+    <div class="timestamp">
+      Generated: <script>document.write(new Date().toLocaleString('en-US', {timeZone:'America/Denver'}))</script> (Mountain Time)
+    </div>
+  </div>
+</div>
+</body>
+</html>
