@@ -361,6 +361,7 @@ async function runDiagnostic(){
     const tz=you.business_tz||bizTz;
     const tokenBiz=you.token_business_id, recBiz=you.tech_record_business_id;
     const bizMatch = tokenBiz===recBiz;
+    const wt=d.week_test||{};
     const rows=(d.business_bookings||[]).map(b=>{
       const dt=b.scheduled_at?new Date(b.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:tz}):'(no date)';
       const mine=b.assigned_to_you;
@@ -368,14 +369,19 @@ async function runDiagnostic(){
         <b>${esc(b.assigned_tech_name||'Unassigned')}</b> · ${esc(b.status)} · ${esc(dt)}
         ${mine?'<span style="color:var(--green);"> ← assigned to YOU</span>':'<span style="color:var(--mute);"> (not you)</span>'}
         ${b.business_id!==tokenBiz?'<span style="color:var(--red);"> ⚠ different business</span>':''}
+        <div style="color:var(--mute);font-size:11px;">raw: ${esc(b.scheduled_at||'null')} → ${esc(b.local_date||'—')}</div>
       </div>`;
     }).join('');
     out.innerHTML=`<div style="background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:left;font-size:13px;line-height:1.5;">
       <div style="font-weight:800;margin-bottom:8px;">Diagnostics</div>
       <div>You are logged in as: <b>${esc(you.tech_name||'?')}</b></div>
-      <div>Your business: <b>${esc(you.business_name||you.business_slug||'?')}</b></div>
+      <div>Your business: <b>${esc(you.business_name||you.business_slug||'?')}</b> · tz <b>${esc(you.business_tz||'?')}</b></div>
       <div>Jobs assigned to you (all dates): <b>${d.assigned_to_you_count}</b></div>
       ${!bizMatch?`<div style="color:var(--red);margin-top:6px;">⚠ Your login business id doesn't match your technician record's business id.</div>`:''}
+      <div style="font-weight:800;margin:12px 0 4px;">This week's job query:</div>
+      <div>Week ${esc(wt.week_from||'?')} → ${esc(wt.week_to||'?')}</div>
+      <div>Window ${esc(wt.window_lo||'?')} → ${esc(wt.window_hi||'?')}</div>
+      <div>Jobs the app query returns: <b style="color:${wt.jobs_found?'var(--green)':'var(--red)'};">${wt.jobs_found}</b>${wt.error?` <span style="color:var(--red);">(${esc(wt.error)})</span>`:''}</div>
       <div style="font-weight:800;margin:12px 0 4px;">Recent jobs in your business (${d.business_bookings_count}):</div>
       ${rows||'<div class="empty">None found.</div>'}
     </div>`;

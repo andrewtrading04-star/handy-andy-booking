@@ -228,6 +228,22 @@ async function debugIdentity(req, res, db, auth) {
     .eq('business_id', auth.business_id)
     .order('scheduled_at', { ascending: false }).limit(20);
 
+  // Run the EXACT same window + query that jobs() uses for the current week,
+  // so we can see whether the date filter is what hides assigned jobs.
+  const todayLocal = localDateInTz(tz, new Date().toISOString());
+  const dow = new Date(todayLocal + 'T12:00:00Z').getUTCDay();
+  const weekFrom = addDaysStr(todayLocal, -dow);
+  const weekTo = addDaysStr(weekFrom, 6);
+  const lo = localDateStartUTC(tz, weekFrom);
+  const hi = localDateStartUTC(tz, addDaysStr(weekTo, 1));
+  const { data: weekData, error: weekErr } = await db.from('bookings')
+    .select('id, scheduled_at, status')
+    .eq('business_id', auth.business_id)
+    .eq('technician_id', auth.tech_id)
+    .neq('status', 'canceled')
+    .gte('scheduled_at', lo.toISOString())
+    .lt('scheduled_at', hi.toISOString());
+
   return res.status(200).json({
     you: {
       tech_id: auth.tech_id,
@@ -238,8 +254,17 @@ async function debugIdentity(req, res, db, auth) {
       business_name: biz?.name || null,
       business_tz: tz,
     },
+    week_test: {
+      week_from: weekFrom, week_to: weekTo,
+      window_lo: lo.toISOString(), window_hi: hi.toISOString(),
+      jobs_found: (weekData || []).length,
+      error: weekErr?.message || null,
+    },
     assigned_to_you_count: (mine || []).length,
-    assigned_to_you: mine || [],
+    assigned_to_you: (mine || []).map(b => ({
+      id: b.id, status: b.status, scheduled_at: b.scheduled_at,
+      local_date: localDateInTz(tz, b.scheduled_at),
+    })),
     business_bookings_count: (bizBookings || []).length,
     business_bookings: (bizBookings || []).map(b => ({
       id: b.id, status: b.status, scheduled_at: b.scheduled_at,
