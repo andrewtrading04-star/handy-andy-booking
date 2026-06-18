@@ -14,6 +14,26 @@ export default async function handler(req, res) {
   const zip = (req.body && (req.body.zip || req.body.postal_code)) || '';
   if (!zip) return res.status(400).json({ error: 'zip is required' });
 
+  // Hard-code overrides for zips that should always be accepted in specific territories
+  const ZIP_OVERRIDES = {
+    '80223': { territory_id: '1685582903241x973573877706522600', territory_name: 'Denver #1', timezone: 'America/Denver', city: 'Denver', state: 'CO' },
+  };
+
+  if (ZIP_OVERRIDES[zip]) {
+    const ov = ZIP_OVERRIDES[zip];
+    return res.status(200).json({
+      in_service_area: true,
+      territory_id:    ov.territory_id,
+      territory_name:  ov.territory_name,
+      timezone:        ov.timezone,
+      service_ids:     [], // Service IDs not needed for override
+      city:            ov.city,
+      state:           ov.state,
+      lat:             null,
+      lng:             null,
+    });
+  }
+
   try {
     const url = new URL('https://api.zenbooker.com/v1/scheduling/service_area_check');
     url.searchParams.set('postal_code', String(zip));
