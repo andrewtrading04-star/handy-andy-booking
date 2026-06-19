@@ -1153,6 +1153,7 @@ function estCard(e){
   const phone=esc(e.customer_phone||'');
   const tel=phone?`<a href="tel:${phone}" style="color:var(--accent);text-decoration:none;">${phone}</a>`:'';
   const email=e.customer_email?` · ${esc(e.customer_email)}`:'';
+  const zip=e.customer_zip?` · ZIP ${esc(e.customer_zip)}`:'';
   const slots=Array.isArray(e.preferred_slots)?e.preferred_slots:[];
   const slotChips=slots.length?`<div class="est-slots">${slots.map(s=>
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
@@ -1163,7 +1164,7 @@ function estCard(e){
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
         <div class="name">${esc(e.service_label||'Estimate request')}</div>
-        <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}</div>
+        <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
         <div class="est-desc">${esc(e.description||'')}</div>
         ${slotChips}
       </div>

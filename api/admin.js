@@ -1355,7 +1355,7 @@ async function estimates(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const status = (req.query.status || '').toString();
   let q = db.from('estimates')
-    .select('id, service_label, customer_name, customer_phone, customer_email, description, photo_url, preferred_slots, status, sms_consent, notes, created_at')
+    .select('id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, created_at')
     .eq('business_id', biz.id)
     .order('created_at', { ascending: false })
     .limit(200);

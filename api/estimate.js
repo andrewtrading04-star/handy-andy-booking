@@ -99,6 +99,7 @@ async function submit(req, res, db) {
   const customer = body.customer || {};
   const name = (customer.name || '').toString().trim();
   const phone = (customer.phone || '').toString().trim();
+  const zip = (customer.zip || '').toString().trim() || null;
   if (!name)  return res.status(400).json({ error: 'Your name is required.' });
   if (!phone) return res.status(400).json({ error: 'A phone number is required.' });
 
@@ -137,6 +138,7 @@ async function submit(req, res, db) {
     service_id, service_label,
     customer_name: name, customer_phone: phone,
     customer_email: (customer.email || '').toString().trim() || null,
+    customer_zip: zip,
     description, photo_url, photo_path,
     preferred_slots,
     sms_consent: body.sms_consent !== false,
@@ -152,7 +154,8 @@ async function submit(req, res, db) {
       : '';
     const svcTxt = service_label ? `${service_label} — ` : '';
     const snippet = description.length > 90 ? description.slice(0, 90) + '…' : description;
-    const msg = `New ${biz.name} estimate request from ${name} (${phone}): ${svcTxt}${snippet}.${when} Check the dashboard.`;
+    const zipTxt = zip ? ` ZIP: ${zip}.` : '';
+    const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
     for (const p of phones) sendSMS(p, msg).catch(console.error);
   }
 
