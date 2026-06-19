@@ -623,6 +623,10 @@ function shapeJob(b, full = false, forTech = false) {
     out.customer_email = b.customer?.email || null;
     out.notes = b.notes || null;
     out.price = b.price;
+    // Google Maps Street View Static API key (client-side, referrer-restricted).
+    // Sent so the tech portal can render a Street View of the job location even
+    // when lat/lng aren't stored (it can geocode the address string instead).
+    out.maps_key = process.env.GOOGLE_MAPS_API_KEY || null;
     // For techs, hide tax and dismount line items
     out.line_items = (b.line_items || []).filter(li =>
       forTech ? li.kind !== 'fee' && li.name !== 'Guaranteed Dismount Service' : true
