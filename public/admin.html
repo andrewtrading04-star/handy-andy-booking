@@ -1343,6 +1343,7 @@ async function openNewBooking(){
   document.getElementById('nbForm').reset();
   resetNbSteps();
   nbSelectedSlot=null;
+  nbServiceId=null;
   document.getElementById('nbSlots').innerHTML='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
@@ -1379,7 +1380,7 @@ async function openNewBooking(){
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
-let nbServices=[], nbSelectedSlot=null;
+let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
   if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
@@ -1393,6 +1394,7 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   renderNbServices(cat);
   resetNbSteps();
   nbSelectedSlot=null;
+  nbServiceId=null;
   document.getElementById('nbDate').value='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbTravelFee').value='';
@@ -1401,7 +1403,8 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
     if(tvMountService){
-      document.getElementById('nbService').value=tvMountService.id;
+      // Hidden select is emptied for TV Mounting, so track the id directly.
+      nbServiceId=tvMountService.id;
       try{
         const r=await api('service_options',{ params:{ business:current.slug, service_id:tvMountService.id }});
         nbOptionGroups=r.groups||[];
@@ -1740,6 +1743,7 @@ function updateNbTotal(){
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
   const sid=e.target.value;
+  nbServiceId=sid||null;
   if(!sid){ updateNbTotal(); return; }
   // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
   const svc=nbServices.find(s=>s.id===sid);
@@ -1823,7 +1827,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
         city:document.getElementById('nbCity').value.trim(),
         state:document.getElementById('nbState').value.trim(),
         postal_code:document.getElementById('nbZip').value.trim() },
-      service_id: document.getElementById('nbService').value || null,
+      service_id: nbServiceId || document.getElementById('nbService').value || null,
       technician_id: techId==='any'?'any':techId||null,
       scheduled_date: date,
       scheduled_slot: nbSelectedSlot.key,
