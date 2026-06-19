@@ -469,8 +469,12 @@ function runSelfTests() {
   return fails;
 }
 
-// ESM "run if main".
-import { fileURLToPath } from 'node:url';
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Self-tests run ONLY when explicitly requested:  PAYROLL_SELFTEST=1 node api/_lib/payroll.js
+// They must NEVER auto-run on import. This module is imported by api/tech.js, which
+// Vercel bundles into a serverless function; in that runtime an "if (process.argv[1]
+// === import.meta.url) process.exit()" guard can evaluate TRUE at cold start and kill
+// the lambda before the request handler runs (every /api/tech call -> hard 500). The
+// env flag makes execution impossible in production while keeping the CLI ergonomic.
+if (process.env.PAYROLL_SELFTEST === '1') {
   process.exit(runSelfTests() ? 1 : 0);
 }
