@@ -330,7 +330,6 @@
 
     <nav class="side-nav" id="sideNav">
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
-      <button data-nav="bookings"><span class="ic" data-ico="bookings">📋</span> Bookings</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
@@ -491,7 +490,7 @@ let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
 let current = null;            // current business object
 
 // view state
-let section = 'schedule';      // schedule | bookings | customers | technicians
+let section = 'schedule';      // schedule | customers | technicians | reviews | gallery | estimates
 let calMode = 'jobs';          // jobs | availability
 let calView = 'week';          // week | day | list
 let anchorDate = '';           // 'YYYY-MM-DD' anchor for the displayed week/day
@@ -532,7 +531,6 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp
 const ICONS = {
   tools:    {e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
   schedule: {e:'📅', f:'fa-regular fa-calendar'},
-  bookings: {e:'📋', f:'fa-solid fa-clipboard-list'},
   customers:{e:'👥', f:'fa-solid fa-users'},
   wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
   star:     {e:'⭐', f:'fa-solid fa-star'},
@@ -648,13 +646,12 @@ function navTo(s){
   document.getElementById('modeSeg').classList.toggle('hidden',!sched);
   document.getElementById('calHead').classList.toggle('hidden',!sched);
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
-    if(s==='bookings') renderBookings();
-    else if(s==='estimates') renderEstimates();
+    if(s==='estimates') renderEstimates();
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
@@ -663,7 +660,6 @@ function navTo(s){
 }
 function refreshCurrent(){
   if(section==='schedule') renderSchedule();
-  else if(section==='bookings') renderBookings();
   else if(section==='estimates') renderEstimates();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
@@ -1000,42 +996,6 @@ async function paymentAction(id, action, amount){
     toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
     refreshCurrent();
   }catch(err){ toast(err.message); }
-}
-
-// ── Bookings list ─────────────────────────────────────────────────────────
-async function renderBookings(){
-  const view=document.getElementById('view');
-  view.innerHTML = `<div class="wrap">
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-      <select class="filter" id="rangeF">
-        <option value="today">Today</option><option value="week">This Week</option>
-        <option value="upcoming" selected>Upcoming</option><option value="all">All</option>
-      </select>
-      <select class="filter" id="statusF">
-        <option value="">All statuses</option>
-        <option>pending</option><option>confirmed</option><option>assigned</option>
-        <option>on_the_way</option><option>arrived</option><option>in_progress</option>
-        <option>completed</option><option>cancelled</option><option>no_show</option>
-      </select>
-    </div><div id="blist"><div class="empty">Loading…</div></div></div>`;
-  const load=async()=>{
-    const list=document.getElementById('blist');
-    try{
-      const d=await api('bookings',{ params:{ business:current.slug, range:document.getElementById('rangeF').value, status:document.getElementById('statusF').value }});
-      list.innerHTML = d.bookings.length ? d.bookings.map(b=>`
-        <div class="job evt-row" data-id="${b.id}"><div class="row">
-          <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
-          <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} · ${esc(b.technician?.name||'Unassigned')}<br>${esc(b.address||'')}</div></div>
-          <div class="time">${fmtTime(b.scheduled_at)}<br>${money(b.price)}</div>
-        </div></div>`).join('') : '<div class="empty">No bookings.</div>';
-      list.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
-        const b=d.bookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
-      }));
-    }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
-  };
-  document.getElementById('rangeF').addEventListener('change',load);
-  document.getElementById('statusF').addEventListener('change',load);
-  load();
 }
 
 // ── Customers ──────────────────────────────────────────────────────────────
