@@ -229,6 +229,9 @@ async function api(action,{method='GET',params={},body=null}={}){
   return data;
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// Strip the category prefix ("TV Size: ", "Bracket: ", "Fireplace: ", "Wall Surface: ", …)
+// so payment line items read as the bare option (e.g. "33-59 inch").
+function liName(name){ const s=String(name||''); const i=s.indexOf(':'); return (i>-1?s.slice(i+1):s).trim()||s; }
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
 function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:bizTz});}catch{return iso;} }
 
@@ -409,7 +412,7 @@ async function showDetail(id){
 
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
-        ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>`<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(li.name)}</span><span>$${li.line_total}</span></div>`).join('')}</div>`:''}
+        ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>`<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}</span><span>$${li.line_total}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
           <div><div class="sub" style="color:var(--mute);font-size:13px;">Total</div><div style="font-weight:700;font-size:18px;">$${j.price}</div></div>
           <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${j.payment_status}</div></div>
