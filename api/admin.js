@@ -139,6 +139,14 @@ export default async function handler(req, res) {
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
+// Friendly first name shown in the dashboard greeting. Configurable per role via
+// env vars; sensible defaults match the people running each business today.
+function displayNameFor(scope) {
+  if (scope === 'handy-andy') return process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather';
+  if (scope === 'doms')       return process.env.DOMS_SECRETARY_NAME || 'Joey';
+  return process.env.ADMIN_NAME || 'Owner';
+}
+
 async function login(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const password = (body.password || '').toString();
@@ -171,8 +179,9 @@ async function login(req, res, body) {
   const { data: businesses, error } = await q;
   if (error) throw error;
 
-  const token = signToken({ kind: 'admin', role, scope });
-  return res.status(200).json({ token, role, scope, businesses: businesses || [] });
+  const name = displayNameFor(scope);
+  const token = signToken({ kind: 'admin', role, scope, name });
+  return res.status(200).json({ token, role, scope, name, businesses: businesses || [] });
 }
 
 // Resolve the requested business and enforce the token's scope.
