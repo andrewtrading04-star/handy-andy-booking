@@ -1518,7 +1518,11 @@ const HANDYMAN_HOURLY = 85;
 let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
 function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
+// Free-text notes the admin can attach to an "Other" option, keyed by option id.
+const nbOptionNotes={};
+// The "Other" extras option lets the admin describe a custom add-on.
+function nbIsOtherOption(o){ return /^other$/i.test((o.label||'').trim()) || !!(o.metadata && o.metadata.allow_text); }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
   // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
@@ -1670,6 +1674,12 @@ function renderNbSteps(){
                 `<span class="nb-qty">${ct}</span>`+
                 `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
+        // "Other" add-on: when selected, let the admin describe it.
+        if(nbIsOtherOption(o) && ct>0){
+          html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
+                `data-o="${o.id}" placeholder="Describe this (e.g. mount over brick, run extra HDMI)" `+
+                `value="${esc(nbOptionNotes[o.id]||'')}">`;
+        }
       } else {
         const on=nbPickGet(g.id)===o.id;
         html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
@@ -1681,6 +1691,11 @@ function renderNbSteps(){
   wrap.innerHTML=html;
   updateNbTotal();
 }
+// Keep "Other" note text in sync without re-rendering (so the field keeps focus).
+document.getElementById('nbSteps').addEventListener('input',e=>{
+  const note=e.target.closest('.nb-other-note');
+  if(note){ nbOptionNotes[note.dataset.o]=note.value; }
+});
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
   if(hmBtn){ nbHandymanHours=Math.max(2,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
@@ -1726,7 +1741,13 @@ function nbCollectSelections(){
   if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
   if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
-    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
+    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o){
+      // For the "Other" add-on, append the admin's note to the label so it
+      // carries onto the booking (e.g. "Other: run extra HDMI").
+      const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
+      const baseLabel=note?`${o.label}: ${note}`:o.label;
+      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct});
+    } } });
   });
   return out;
 }
