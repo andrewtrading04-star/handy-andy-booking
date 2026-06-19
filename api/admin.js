@@ -657,7 +657,10 @@ async function bookingCreate(req, res, db, auth, body) {
   const status = technician_id ? 'assigned' : 'confirmed';
   // Signed review-link token (30-day TTL) so the completion follow-up can point
   // the customer at the review widget. booking_id is patched in after insert.
-  const { data: bRow, error: bErr } = await db.from('bookings').insert({
+  // Try to insert with sms_consent; if the column doesn't exist yet (migration not applied),
+  // retry without it. This ensures bookings can be created even if 0014_sms_consent migration
+  // hasn't been applied to the database yet.
+  const bookingInsert = {
     business_id: biz.id, customer_id,
     technician_id: technician_id || null,
     service_id: body.service_id || null,
@@ -670,8 +673,19 @@ async function bookingCreate(req, res, db, auth, body) {
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
     payment_required: !!paymentMethod && paymentMethod !== 'quote',
     payment_method: paymentMethod,
+  };
+
+  let { data: bRow, error: bErr } = await db.from('bookings').insert({
+    ...bookingInsert,
     sms_consent: !!body.sms_consent,
   }).select('id').single();
+
+  // If sms_consent column doesn't exist in schema cache, retry without it
+  if (bErr && bErr.message?.includes('sms_consent')) {
+    console.warn('[admin] sms_consent column not found, retrying without it');
+    ({ data: bRow, error: bErr } = await db.from('bookings').insert(bookingInsert).select('id').single());
+  }
+
   if (bErr) throw bErr;
 
   // Generate the review-link token now that we have the booking id.
@@ -744,7 +758,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Confirm the booking belongs to this business before touching it.
   const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id, status, technician_id, scheduled_at, review_token, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
+    .select('id, status, technician_id, scheduled_at, review_token, sms_consent, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
