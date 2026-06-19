@@ -169,6 +169,7 @@
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
       <div class="hdr-actions">
         <button id="availBtn">My Availability</button>
+        <button id="payrollBtn">💵 Payroll</button>
         <button id="logout">Log out</button>
       </div>
     </div>
@@ -191,6 +192,9 @@
 
   <!-- Weekly availability -->
   <div id="availabilityView" class="hidden"></div>
+
+  <!-- Payroll -->
+  <div id="payrollView" class="hidden"></div>
 
 </div>
 
@@ -265,7 +269,7 @@ function logout(){ token='';tech=null; localStorage.removeItem('ha_tech_token');
 document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
-  for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+  for(const id of ['login','jobsView','detailView','availabilityView','payrollView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
 // All day math runs in the BUSINESS timezone so the tech app's calendar lines
@@ -565,6 +569,9 @@ let availState=new Set();           // selected "day:slot_key" keys (recurring)
 let availExceptions=[];             // [{date, slot_key, is_available}] one-time overrides
 let exEditState=new Set();          // slot keys selected in the open date editor
 document.getElementById('availBtn').addEventListener('click',showAvailability);
+document.getElementById('payrollBtn').addEventListener('click',showPayroll);
+
+let payrollWeekStart='';            // 'YYYY-MM-DD' for Sunday of current week
 
 async function showAvailability(){
   show('availabilityView');
@@ -710,6 +717,98 @@ function renderExceptionList(){
       renderExceptionList();
     }catch(e){ toast(e.message); b.disabled=false; }
   }));
+}
+
+// ── Payroll ────────────────────────────────────────────────────────────────
+async function showPayroll(){
+  show('payrollView');
+  const v=document.getElementById('payrollView');
+  if(!payrollWeekStart) payrollWeekStart=weekStartStr(todayStr());
+
+  v.innerHTML=`<div class="detail"><div class="empty">Loading…</div></div>`;
+  try{
+    const d=await api('tech_payroll',{params:{week_start:payrollWeekStart}});
+    renderPayroll(d);
+  }catch(e){
+    v.innerHTML=`<div class="detail"><button class="back" id="payrollBack">‹ Back</button><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
+    document.getElementById('payrollBack').addEventListener('click',showJobs);
+  }
+}
+
+function renderPayroll(data){
+  const v=document.getElementById('payrollView');
+  const weekEnd=addDaysStr(payrollWeekStart,6);
+  const payDate=addDaysStr(weekEnd,15);
+
+  const paidJobs=data.jobs||[];
+  const deferredJobs=data.deferred||[];
+
+  const jobRows=paidJobs.map(j=>`
+    <div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;">${esc(j.customer_name)}</div>
+          <div style="color:var(--mute);font-size:12px;">${esc(j.service||'Service')} · ${esc(j.time)}</div>
+        </div>
+        <div style="text-align:right;font-weight:700;">$${j.tech_pay}</div>
+      </div>
+    </div>`).join('');
+
+  const deferredRows=deferredJobs.length ? `
+    <div class="card">
+      <h3 style="color:var(--amber);">⏳ Awaiting Payment (${deferredJobs.length})</h3>
+      <div style="color:var(--mute);font-size:13px;">These jobs are completed but not yet fully paid. Once paid, they'll be added to payroll.</div>
+      ${deferredJobs.map(j=>`
+        <div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
+          <div style="font-weight:600;">${esc(j.customer_name)}</div>
+          <div style="color:var(--mute);font-size:12px;">${esc(j.time)} — Due: $${j.customer_due}</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  v.innerHTML=`<div class="detail">
+    <button class="back" id="payrollBack">‹ Today's jobs</button>
+
+    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">Payroll</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Weekly earnings</div></div>
+
+    <div class="card">
+      <h3>Week of ${fmtDs(payrollWeekStart,{month:'short',day:'numeric'})} – ${fmtDs(weekEnd,{month:'short',day:'numeric'})}</h3>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:12px;">
+        <div style="font-size:13px;color:var(--mute);">Pay Date</div>
+        <div style="font-weight:700;">${fmtDs(payDate,{month:'short',day:'numeric'})}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Paid Jobs (${paidJobs.length})</h3>
+      ${paidJobs.length ? jobRows : '<div class="sub" style="color:var(--mute);">No completed, paid jobs this week.</div>'}
+    </div>
+
+    ${deferredRows}
+
+    <div class="card">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+        <div style="color:var(--mute);font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;">Weekly Total</div>
+        <div style="font-size:24px;font-weight:800;color:var(--green);">$${data.total}</div>
+      </div>
+    </div>
+
+    <div style="height:60px;"></div>
+  </div>
+  <div class="statusbar">
+    <button class="btn ghost" id="payrollPrev">‹ Previous week</button>
+    <button class="btn ghost" id="payrollNext">Next week ›</button>
+  </div>`;
+
+  document.getElementById('payrollBack').addEventListener('click',showJobs);
+  document.getElementById('payrollPrev').addEventListener('click',()=>{
+    payrollWeekStart=addDaysStr(payrollWeekStart,-7);
+    showPayroll();
+  });
+  document.getElementById('payrollNext').addEventListener('click',()=>{
+    payrollWeekStart=addDaysStr(payrollWeekStart,7);
+    showPayroll();
+  });
 }
 
 // Dev bypass: probe the server; if enabled, reveal a no-PIN tech picker.

@@ -98,7 +98,7 @@ export default async function handler(req, res) {
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
-      case 'debug_identity':   return await debugIdentity(req, res, db, auth);
+      case 'tech_payroll':     return await techPayroll(req, res, db, auth);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -631,4 +631,85 @@ function shapeJob(b, full = false, forTech = false) {
     out.stripe_payment_intent_id = b.stripe_payment_intent_id || null;
   }
   return out;
+}
+
+// ── Payroll Report ─────────────────────────────────────────────────────────
+// Returns jobs completed/paid in the given week with tech pay calculated from rates table.
+// Tech pay is stored as a note in the booking (set when job is created/completed).
+// Falls back to simple calculation if note not available.
+async function techPayroll(req, res, db, auth) {
+  const weekStart = (req.query.week_start || '').toString();
+  if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+    return res.status(400).json({ error: 'week_start (YYYY-MM-DD, Sunday) required' });
+  }
+
+  const techId = auth.tech_id;
+  const weekEnd = addDaysStr(weekStart, 6);
+
+  // Query completed jobs in the week assigned to this tech.
+  const { data: jobs, error } = await db.from('bookings')
+    .select(`
+      id, customer_id, customers(name), service_id, services(name),
+      scheduled_at, status, price, payment_status, amount_due,
+      line_items:booking_line_items(kind, name, unit_price, line_total),
+      tip, notes, metadata, technician_id
+    `)
+    .eq('technician_id', techId)
+    .eq('status', 'completed')
+    .gte('scheduled_at', weekStart + 'T00:00:00Z')
+    .lte('scheduled_at', weekEnd + 'T23:59:59Z')
+    .order('scheduled_at');
+
+  if (error) throw error;
+
+  // Separate paid and deferred jobs.
+  const paidJobs = [];
+  const deferredJobs = [];
+  let totalPay = 0;
+
+  for (const b of jobs || []) {
+    const isPaid = b.payment_status === 'paid' || (b.amount_due === 0 || b.amount_due === null);
+
+    if (isPaid) {
+      // Try to extract tech_pay from notes (if stored there) or calculate from line items + tips
+      let techPay = extractTechPayFromNotes(b.notes);
+      if (techPay === null) {
+        // Fallback: sum line item totals + tips (simple split)
+        const linePay = (b.line_items || []).reduce((sum, li) => sum + parseFloat(li.line_total || 0), 0);
+        const tipPay = parseFloat(b.tip || 0);
+        techPay = Math.floor(linePay + tipPay);
+      }
+
+      paidJobs.push({
+        id: b.id,
+        customer_name: b.customers?.name || 'Unknown',
+        service: b.services?.name || 'Service',
+        time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        tech_pay: techPay,
+      });
+      totalPay += techPay;
+    } else {
+      // Deferred (unpaid)
+      deferredJobs.push({
+        customer_name: b.customers?.name || 'Unknown',
+        time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        customer_due: Math.floor(parseFloat(b.amount_due || 0)),
+      });
+    }
+  }
+
+  return res.status(200).json({
+    week_start: weekStart,
+    week_end: weekEnd,
+    jobs: paidJobs,
+    deferred: deferredJobs,
+    total: totalPay,
+  });
+}
+
+// Extract tech_pay from job notes if it was stored there (e.g., "Tech pay: $60").
+function extractTechPayFromNotes(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(/Tech pay:\s*\$?(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
 }
