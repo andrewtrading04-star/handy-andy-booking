@@ -350,6 +350,8 @@ async function serviceOptions(req, res, db, auth) {
     .eq('business_id', biz.id).eq('service_id', serviceId).order('sort_order');
   if (gErr) throw gErr;
 
+  console.log('[DEBUG] serviceOptions: found', groups?.length || 0, 'groups:', groups?.map(g => ({ key: g.key, id: g.id })));
+
   const ids = (groups || []).map(g => g.id);
   let options = [];
   if (ids.length) {
@@ -359,9 +361,11 @@ async function serviceOptions(req, res, db, auth) {
     if (oErr) throw oErr;
     options = opts || [];
   }
+  console.log('[DEBUG] serviceOptions: found', options?.length || 0, 'options across', ids.length, 'groups');
   const byGroup = {};
   for (const o of options) (byGroup[o.group_id] = byGroup[o.group_id] || []).push(o);
   const result = (groups || []).map(g => ({ ...g, options: byGroup[g.id] || [] }));
+  console.log('[DEBUG] serviceOptions result:', result.map(g => ({ key: g.key, optionCount: g.options?.length })));
   return res.status(200).json({ groups: result });
 }
 
