@@ -606,10 +606,18 @@ async function setAvailabilityException(req, res, db, auth, body) {
 
 function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
-  // Service name: prefer the linked service; otherwise fall back to the
-  // service-kind line item (manual/imported bookings often have no service_id).
-  const serviceLine = (b.line_items || []).find(li => li.kind === 'service');
-  const serviceName = b.service?.name || serviceLine?.name || null;
+  // Line items the tech should never see as "work" (fees, tips, coupons, and the
+  // dismount up-sell which is a payment concern, not a task).
+  const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
+  const isHiddenLi = (li) => {
+    const kind = li.kind || 'service';
+    if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
+    return HIDDEN_LI.has((li.name || '').trim());
+  };
+  // Service name: prefer the linked service; otherwise fall back to the first
+  // real work line item (manual/imported bookings often have no service_id).
+  const workLines = (b.line_items || []).filter(li => !isHiddenLi(li));
+  const serviceName = b.service?.name || workLines[0]?.name || null;
   const out = {
     id: b.id,
     status: b.status,
@@ -632,13 +640,8 @@ function shapeJob(b, full = false, forTech = false) {
     // Sent so the tech portal can render a Street View of the job location even
     // when lat/lng aren't stored (it can geocode the address string instead).
     out.maps_key = process.env.GOOGLE_MAPS_API_KEY || null;
-    // For techs, only show work items (service + options); hide fees, tips, coupons, dismount.
-    out.line_items = (b.line_items || []).filter(li => {
-      if (!forTech) return true;
-      const name = (li.name || '').trim();
-      // Only show what the tech needs to do
-      return li.kind === 'service' || li.kind === 'option' || li.kind === 'addon';
-    });
+    // For techs, only show work items; hide fees, tips, coupons, and dismount.
+    out.line_items = (b.line_items || []).filter(li => forTech ? !isHiddenLi(li) : true);
     out.payment_status = b.payment_status || 'unpaid';
     out.paid_at = b.paid_at || null;
     out.stripe_customer_id = b.stripe_customer_id || null;
