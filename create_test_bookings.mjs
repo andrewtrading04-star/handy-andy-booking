@@ -25,6 +25,11 @@ async function createBooking(businessSlug, bizName) {
     if (techsErr || !techs || !techs.length) throw new Error('No active techs');
     const tech = techs[Math.floor(Math.random() * techs.length)];
 
+    // Get the TV Mounting service for this business
+    const { data: tvService, error: svcErr } = await db.from('services')
+      .select('id').eq('business_id', biz.id).eq('name', 'TV Mounting').single();
+    if (svcErr || !tvService) throw new Error('TV Mounting service not found');
+
     // Create customer
     const email = `test-${Date.now()}-${Math.random().toString(36).slice(7)}@example.com`;
     const name = `Test Customer ${Math.floor(Math.random() * 10000)}`;
@@ -51,6 +56,7 @@ async function createBooking(businessSlug, bizName) {
       business_id: biz.id,
       customer_id: cust.id,
       technician_id: tech.id,
+      service_id: tvService.id,
       scheduled_at: scheduledAt,
       scheduled_end: scheduledEnd,
       status: 'confirmed',

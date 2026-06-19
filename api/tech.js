@@ -614,10 +614,9 @@ function shapeJob(b, full = false, forTech = false) {
     if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
     return HIDDEN_LI.has((li.name || '').trim());
   };
-  // Service name: prefer the linked service; otherwise fall back to the first
-  // real work line item (manual/imported bookings often have no service_id).
-  const workLines = (b.line_items || []).filter(li => !isHiddenLi(li));
-  const serviceName = b.service?.name || workLines[0]?.name || null;
+  // Service name: use the linked service only (TV Mounting, Handyman, etc).
+  // Don't fall back to line item names—they're internal detail, not service categories.
+  const serviceName = b.service?.name || null;
   const out = {
     id: b.id,
     status: b.status,
