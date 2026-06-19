@@ -16,6 +16,7 @@ import { localDayStartUTC, localDateStartUTC, addDaysStr } from './_lib/time.js'
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
+import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
@@ -98,7 +99,7 @@ export default async function handler(req, res) {
       case 'availability':     return await getAvailability(req, res, db, auth);
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
-      case 'debug_identity':   return await debugIdentity(req, res, db, auth);
+      case 'tech_payroll':     return await techPayroll(req, res, db, auth);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -194,7 +195,8 @@ async function jobs(req, res, db, auth) {
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              customer:customers ( name, phone ),
-             service:services ( name )`)
+             service:services ( name ),
+             line_items:booking_line_items ( name, kind )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
     .neq('status', 'cancelled')
@@ -604,6 +606,17 @@ async function setAvailabilityException(req, res, db, auth, body) {
 
 function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
+  // Line items the tech should never see as "work" (fees, tips, coupons, and the
+  // dismount up-sell which is a payment concern, not a task).
+  const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
+  const isHiddenLi = (li) => {
+    const kind = li.kind || 'service';
+    if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
+    return HIDDEN_LI.has((li.name || '').trim());
+  };
+  // Service name: use the linked service only (TV Mounting, Handyman, etc).
+  // Don't fall back to line item names—they're internal detail, not service categories.
+  const serviceName = b.service?.name || null;
   const out = {
     id: b.id,
     status: b.status,
@@ -611,19 +624,23 @@ function shapeJob(b, full = false, forTech = false) {
     scheduled_end: b.scheduled_end,
     customer_name: b.customer?.name || 'Customer',
     customer_phone: b.customer?.phone || null,
-    service: b.service?.name || null,
+    service: serviceName,
     address,
     customer_notes: b.customer_notes || null,
     maps_url: address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null,
+    lat: b.lat || null,
+    lng: b.lng || null,
   };
   if (full) {
     out.customer_email = b.customer?.email || null;
     out.notes = b.notes || null;
     out.price = b.price;
-    // For techs, hide tax and dismount line items
-    out.line_items = (b.line_items || []).filter(li =>
-      forTech ? li.kind !== 'fee' && li.name !== 'Guaranteed Dismount Service' : true
-    );
+    // Google Maps Street View Static API key (client-side, referrer-restricted).
+    // Sent so the tech portal can render a Street View of the job location even
+    // when lat/lng aren't stored (it can geocode the address string instead).
+    out.maps_key = process.env.GOOGLE_MAPS_API_KEY || null;
+    // For techs, only show work items; hide fees, tips, coupons, and dismount.
+    out.line_items = (b.line_items || []).filter(li => forTech ? !isHiddenLi(li) : true);
     out.payment_status = b.payment_status || 'unpaid';
     out.paid_at = b.paid_at || null;
     out.stripe_customer_id = b.stripe_customer_id || null;
@@ -631,4 +648,93 @@ function shapeJob(b, full = false, forTech = false) {
     out.stripe_payment_intent_id = b.stripe_payment_intent_id || null;
   }
   return out;
+}
+
+// ── Payroll Report ─────────────────────────────────────────────────────────
+// Tech pay for one Sun–Sat week, computed from the rate sheet (api/_lib/payroll.js).
+// Jobs are bucketed: paid (counted this week), deferred (unpaid — future week),
+// or flagged (computed but needs owner review). Pay date = period-end Sat + 15d.
+async function techPayroll(req, res, db, auth) {
+  const weekStart = (req.query.week_start || '').toString();
+  if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+    return res.status(400).json({ error: 'week_start (YYYY-MM-DD, Sunday) required' });
+  }
+
+  const techId = auth.tech_id;
+  const weekEnd = addDaysStr(weekStart, 6);
+
+  // The tech's business slug drives Dom's-vs-HA handling inside the engine.
+  const { data: techRow } = await db.from('technicians')
+    .select('name, businesses(slug)').eq('id', techId).single();
+  const techName = techRow?.name || '';
+  const businessSlug = techRow?.businesses?.slug || '';
+
+  // Completed jobs for this tech in the week, with everything the engine needs.
+  const { data: jobs, error } = await db.from('bookings')
+    .select(`
+      id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
+      tip, notes, customer_notes, zenbooker_job_number,
+      customers(name), services(name),
+      line_items:booking_line_items(kind, name, unit_price, line_total)
+    `)
+    .eq('technician_id', techId)
+    .eq('status', 'completed')
+    .gte('scheduled_at', weekStart + 'T00:00:00Z')
+    .lte('scheduled_at', weekEnd + 'T23:59:59Z')
+    .order('scheduled_at');
+
+  if (error) throw error;
+
+  const paidJobs = [];
+  const deferredJobs = [];
+  let totalPay = 0;
+
+  for (const b of jobs || []) {
+    const result = computeJobPay({
+      status: b.status,
+      payment_status: b.payment_status,
+      price: b.price,
+      subtotal: b.subtotal,
+      amount_paid: b.amount_paid,
+      tip: b.tip,
+      notes: b.notes,
+      customer_notes: b.customer_notes,
+      zenbooker_job_number: b.zenbooker_job_number,
+      service_name: b.services?.name || '',
+      business_slug: businessSlug,
+      line_items: b.line_items || [],
+    }, techName);
+
+    const base = {
+      id: b.id,
+      customer_name: b.customers?.name || 'Unknown',
+      service: b.services?.name || 'Service',
+      time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    };
+
+    if (result.state === 'deferred') {
+      deferredJobs.push({ ...base, customer_due: Math.floor((Number(b.price) || 0) - (Number(b.amount_paid) || 0)) });
+    } else if (result.state === 'excluded') {
+      // not paid, not shown
+    } else {
+      paidJobs.push({
+        ...base,
+        tech_pay: result.pay,
+        breakdown: result.breakdown,
+        flags: result.flags,
+        needs_review: result.flags.length > 0 || result.state === 'partial',
+      });
+      totalPay += result.pay;
+    }
+  }
+
+  return res.status(200).json({
+    week_start: weekStart,
+    week_end: weekEnd,
+    pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
+    tech_name: techName,
+    jobs: paidJobs,
+    deferred: deferredJobs,
+    total: totalPay,
+  });
 }

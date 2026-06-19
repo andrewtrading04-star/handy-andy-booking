@@ -330,7 +330,6 @@
 
     <nav class="side-nav" id="sideNav">
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
-      <button data-nav="bookings"><span class="ic" data-ico="bookings">📋</span> Bookings</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
@@ -412,7 +411,7 @@
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
-      <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
+      <textarea class="search" style="margin:12px 0 0 0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
       <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
         <option value="">Select payment method</option>
         <option value="card">Credit Card</option>
@@ -491,7 +490,7 @@ let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
 let current = null;            // current business object
 
 // view state
-let section = 'schedule';      // schedule | bookings | customers | technicians
+let section = 'schedule';      // schedule | customers | technicians | reviews | gallery | estimates
 let calMode = 'jobs';          // jobs | availability
 let calView = 'week';          // week | day | list
 let anchorDate = '';           // 'YYYY-MM-DD' anchor for the displayed week/day
@@ -532,7 +531,6 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp
 const ICONS = {
   tools:    {e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
   schedule: {e:'📅', f:'fa-regular fa-calendar'},
-  bookings: {e:'📋', f:'fa-solid fa-clipboard-list'},
   customers:{e:'👥', f:'fa-solid fa-users'},
   wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
   star:     {e:'⭐', f:'fa-solid fa-star'},
@@ -648,13 +646,12 @@ function navTo(s){
   document.getElementById('modeSeg').classList.toggle('hidden',!sched);
   document.getElementById('calHead').classList.toggle('hidden',!sched);
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
-    if(s==='bookings') renderBookings();
-    else if(s==='estimates') renderEstimates();
+    if(s==='estimates') renderEstimates();
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
@@ -663,7 +660,6 @@ function navTo(s){
 }
 function refreshCurrent(){
   if(section==='schedule') renderSchedule();
-  else if(section==='bookings') renderBookings();
   else if(section==='estimates') renderEstimates();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
@@ -1000,42 +996,6 @@ async function paymentAction(id, action, amount){
     toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
     refreshCurrent();
   }catch(err){ toast(err.message); }
-}
-
-// ── Bookings list ─────────────────────────────────────────────────────────
-async function renderBookings(){
-  const view=document.getElementById('view');
-  view.innerHTML = `<div class="wrap">
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-      <select class="filter" id="rangeF">
-        <option value="today">Today</option><option value="week">This Week</option>
-        <option value="upcoming" selected>Upcoming</option><option value="all">All</option>
-      </select>
-      <select class="filter" id="statusF">
-        <option value="">All statuses</option>
-        <option>pending</option><option>confirmed</option><option>assigned</option>
-        <option>on_the_way</option><option>arrived</option><option>in_progress</option>
-        <option>completed</option><option>cancelled</option><option>no_show</option>
-      </select>
-    </div><div id="blist"><div class="empty">Loading…</div></div></div>`;
-  const load=async()=>{
-    const list=document.getElementById('blist');
-    try{
-      const d=await api('bookings',{ params:{ business:current.slug, range:document.getElementById('rangeF').value, status:document.getElementById('statusF').value }});
-      list.innerHTML = d.bookings.length ? d.bookings.map(b=>`
-        <div class="job evt-row" data-id="${b.id}"><div class="row">
-          <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
-          <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} · ${esc(b.technician?.name||'Unassigned')}<br>${esc(b.address||'')}</div></div>
-          <div class="time">${fmtTime(b.scheduled_at)}<br>${money(b.price)}</div>
-        </div></div>`).join('') : '<div class="empty">No bookings.</div>';
-      list.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
-        const b=d.bookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
-      }));
-    }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
-  };
-  document.getElementById('rangeF').addEventListener('change',load);
-  document.getElementById('statusF').addEventListener('change',load);
-  load();
 }
 
 // ── Customers ──────────────────────────────────────────────────────────────
@@ -1383,6 +1343,7 @@ async function openNewBooking(){
   document.getElementById('nbForm').reset();
   resetNbSteps();
   nbSelectedSlot=null;
+  nbServiceId=null;
   document.getElementById('nbSlots').innerHTML='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
@@ -1401,7 +1362,16 @@ async function openNewBooking(){
     ]);
     nbServices = svc.services || [];
     nbSelectedSlot = null;
-    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort((a,b)=>{
+    // Assurion is a Handy-Andy-only channel handled by Steve. Surface it as its
+    // own category (built in JS, not from the DB service rows) and stash Steve's
+    // id + the existing Asurion service row to link the booking to.
+    const isHandyAndy = current.slug==='handy-andy';
+    nbSteveTechId = isHandyAndy ? ((tech.technicians.find(t=>/steve/i.test(t.name))||{}).id || null) : null;
+    nbAssurionServiceId = isHandyAndy ? ((nbServices.find(s=>/asurion|assurion/i.test(s.category||'')||/asurion|assurion/i.test(s.name||''))||{}).id || null) : null;
+    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))]
+      // Drop the raw DB 'Asurion' category — we present a curated 'Assurion' one.
+      .filter(c=>!/^asurion$|^assurion$/i.test(c))
+      .sort((a,b)=>{
       const order={TV: 'TV Mounting', Handyman: 'Handyman'};
       const aIdx = Object.values(order).indexOf(a);
       const bIdx = Object.values(order).indexOf(b);
@@ -1410,6 +1380,7 @@ async function openNewBooking(){
       if(bIdx>=0) return 1;
       return a.localeCompare(b);
     });
+    if(isHandyAndy) cats.push('Assurion');
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
@@ -1419,10 +1390,11 @@ async function openNewBooking(){
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
-let nbServices=[], nbSelectedSlot=null;
+let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
-  if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  // TV Mounting auto-picks its service; Assurion uses its own multi-select UI.
+  if(!category || category==='TV Mounting' || category==='Assurion'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
   svcDiv.innerHTML='<option value="">— Task —</option>'+
@@ -1433,23 +1405,55 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   renderNbServices(cat);
   resetNbSteps();
   nbSelectedSlot=null;
+  nbServiceId=null;
+  document.getElementById('nbTech').disabled=false;   // unlock (Assurion locks it)
   document.getElementById('nbDate').value='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbTravelFee').value='';
   updateNbTotal();
 
+  if(cat==='Assurion'){
+    nbAssurionActive=true;
+    nbServiceId=nbAssurionServiceId;            // link to the Asurion service row
+    // Auto-assign Steve and lock the picker (Assurion is Steve-only).
+    if(nbSteveTechId){
+      const techSel=document.getElementById('nbTech');
+      techSel.value=nbSteveTechId; techSel.disabled=true;
+    }
+    renderAssurionSteps();
+    return;
+  }
+
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
     if(tvMountService){
-      document.getElementById('nbService').value=tvMountService.id;
-      try{
-        const r=await api('service_options',{ params:{ business:current.slug, service_id:tvMountService.id }});
-        nbOptionGroups=r.groups||[];
-        renderNbSteps();
-      }catch(err){}
+      // Hidden select is emptied for TV Mounting, so track the id directly.
+      nbServiceId=tvMountService.id;
+      nbOptionGroups=await nbLoadTvOptions(tvMountService.id);
+      renderNbSteps();
     }
   }
 });
+// Fetch a TV-mounting service's option groups. If the DB only has the size group
+// (Handy Andy DBs that never received migrations 0003/0015 — the public widget
+// hardcodes these so it was never noticed), seed the full set once and re-fetch
+// so every step (Bracket, Fireplace, Wires, etc.) shows in New Booking.
+async function nbLoadTvOptions(serviceId){
+  let groups=[];
+  try{
+    const r=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
+    groups=r.groups||[];
+  }catch(err){ return []; }
+  const hasFullSet=groups.some(g=>g.key==='bracket');
+  if(!hasFullSet && current.slug==='handy-andy'){
+    try{
+      await api('seed_tv_options',{ method:'POST', params:{ business:current.slug }});
+      const r2=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
+      groups=r2.groups||[];
+    }catch(err){ /* keep whatever loaded */ }
+  }
+  return groups;
+}
 
 // ── Calendar date + slot picker ─────────────────────────────────────────────
 // Only dates with an available technician are clickable; only that date's
@@ -1554,8 +1558,35 @@ let nbFrameTvQty={ regular: 0, frame: 0 };
 const HANDYMAN_HOURLY = 85;
 let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
 function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
+
+// ── Assurion (Handy Andy only) ──────────────────────────────────────────────
+// Assurion jobs go to Steve. The customer pays $0; the amounts below are Steve's
+// payout (mirrors api/assurion-book.js PAYOUTS). The office multi-selects the
+// services performed; the total becomes Steve's pay (recorded in the job notes
+// so the payroll engine matches it) and the customer is charged nothing.
+const ASSURION_GROUPS = [
+  { label:'TV & Audio', items:[
+    ['Television',60],['Sound Bar',51],['Frame TV (Art Style)',15],['Special Mount (Articulating or Motion)',0],
+  ]},
+  { label:'Security Devices', items:[
+    ['Alarm Keypad',75],['Alarm Range Extender',75],['Alarm Panic Button',75],['Flood Sensor',60],
+    ['Glass Break Sensor',60],['Contact Sensor',60],['Security Camera',75],
+  ]},
+  { label:'Smart Home', items:[
+    ['Door Locks',75],['Door Bell',75],['Smart Hub',90],['Thermostat',75],['Light Dimmer',60],
+  ]},
+  { label:'Add-ons', items:[
+    ['Extra Man (TV over 50")',50],["Truck Roll Fee (if job can't be completed)",60],
+  ]},
+];
+const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
+let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); document.getElementById('nbSteps').innerHTML=''; }
+// Free-text notes the admin can attach to an "Other" option, keyed by option id.
+const nbOptionNotes={};
+// The "Other" extras option lets the admin describe a custom add-on.
+function nbIsOtherOption(o){ return /^other$/i.test((o.label||'').trim()) || !!(o.metadata && o.metadata.allow_text); }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
   // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
@@ -1600,6 +1631,30 @@ function nbShowLifting(){
 function nbIsFrameOnlyOption(o){
   return !!(o.metadata && o.metadata.frame_only===true) || /oneconnect/i.test(o.label||'');
 }
+// ── Assurion multi-select (Steve, $0 to customer) ───────────────────────────
+function renderAssurionSteps(){
+  const wrap=document.getElementById('nbSteps');
+  let html='<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>'+
+    '<div class="nb-hint">Select everything that applies — amounts are Steve’s payout (customer pays $0).</div>';
+  ASSURION_GROUPS.forEach(g=>{
+    html+=`<div class="nb-hint" style="margin-top:12px;font-weight:700;color:var(--ink);">${esc(g.label)}</div><div class="nb-opts">`;
+    g.items.forEach(([name,price])=>{
+      const on=nbAssurionSel.has(name); const priceLbl=price?'$'+price:'$0';
+      html+=`<button type="button" class="nb-opt${on?' on':''}" data-asrv="${esc(name)}">`+
+            `<span>${esc(name)}</span><span class="nb-price">${priceLbl}</span></button>`;
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  wrap.innerHTML=html;
+  updateNbTotal();
+}
+document.getElementById('nbSteps').addEventListener('click',e=>{
+  const a=e.target.closest('[data-asrv]'); if(!a) return;
+  const name=a.dataset.asrv;
+  if(nbAssurionSel.has(name)) nbAssurionSel.delete(name); else nbAssurionSel.add(name);
+  renderAssurionSteps();
+});
 // Display label for an option-group section header (lets us relabel a group
 // without a DB change). The "Dismount" section reads "Guaranteed Dismount Service".
 function nbGroupLabel(g){ return g.key==='dismount' ? 'Guaranteed Dismount Service' : g.label; }
@@ -1707,6 +1762,12 @@ function renderNbSteps(){
                 `<span class="nb-qty">${ct}</span>`+
                 `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
+        // "Other" add-on: when selected, let the admin describe it.
+        if(nbIsOtherOption(o) && ct>0){
+          html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
+                `data-o="${o.id}" placeholder="Describe this (e.g. mount over brick, run extra HDMI)" `+
+                `value="${esc(nbOptionNotes[o.id]||'')}">`;
+        }
       } else {
         const on=nbPickGet(g.id)===o.id;
         html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
@@ -1718,6 +1779,11 @@ function renderNbSteps(){
   wrap.innerHTML=html;
   updateNbTotal();
 }
+// Keep "Other" note text in sync without re-rendering (so the field keeps focus).
+document.getElementById('nbSteps').addEventListener('input',e=>{
+  const note=e.target.closest('.nb-other-note');
+  if(note){ nbOptionNotes[note.dataset.o]=note.value; }
+});
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
   if(hmBtn){ nbHandymanHours=Math.max(2,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
@@ -1751,6 +1817,14 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 function nbCollectSelections(){
   const out=[];
+  // Assurion: one line per selected service, priced at Steve's payout. The
+  // customer is charged $0 (handled at submit); these amounts feed his pay.
+  if(nbAssurionActive){
+    ASSURION_GROUPS.forEach(g=>g.items.forEach(([name])=>{
+      if(nbAssurionSel.has(name)) out.push({option_id:null, label:`Assurion: ${name}`, price:ASSURION_PRICE[name]||0, quantity:1});
+    }));
+    return out;
+  }
   // Custom line item first, so it shows on every job type (TV or Handyman).
   const ci=nbCustomItem(); if(ci) out.push({option_id:null, label:ci.label, price:ci.price, quantity:1});
   // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
@@ -1763,7 +1837,13 @@ function nbCollectSelections(){
   if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
   if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
-    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
+    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o){
+      // For the "Other" add-on, append the admin's note to the label so it
+      // carries onto the booking (e.g. "Other: run extra HDMI").
+      const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
+      const baseLabel=note?`${o.label}: ${note}`:o.label;
+      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct});
+    } } });
   });
   return out;
 }
@@ -1771,15 +1851,31 @@ const TAX_RATE = 0.0825;
 function updateNbTotal(){
   const selections=nbCollectSelections();
   const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  // Assurion: customer pays $0; the total shown is Steve's payout.
+  if(nbAssurionActive){
+    document.getElementById('nbTotalDisplay').innerHTML=`Customer pays: $0.00 | <span style="font-size:130%;font-weight:800;">Steve’s payout: $${optionsTotal.toFixed(2)}</span>`;
+    return;
+  }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
   const subtotal=optionsTotal+travelFee;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
   document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
 }
+// Build the booking notes. For Assurion, embed the payout breakdown in the
+// format the payroll engine reads ("Assurion … Tech pay: $X").
+function nbBuildNotes(assurion, selections, payout){
+  const userNotes=document.getElementById('nbNotes').value.trim();
+  if(!assurion) return userNotes||null;
+  const lines=selections.map(s=>`${s.label.replace(/^Assurion:\s*/,'')} — $${s.price}`).join('\n');
+  let note=`Assurion job\n${lines}\n\nTech pay: $${payout}`;
+  if(userNotes) note=`${userNotes}\n\n${note}`;
+  return note;
+}
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
   const sid=e.target.value;
+  nbServiceId=sid||null;
   if(!sid){ updateNbTotal(); return; }
   // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
   const svc=nbServices.find(s=>s.id===sid);
@@ -1830,13 +1926,18 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(!date){ err.textContent='Date required'; return; }
   if(!nbSelectedSlot){ err.textContent='Time slot required'; return; }
   const selections=nbCollectSelections();
-  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  // Assurion jobs: customer charged $0, Steve auto-assigned, payout recorded in
+  // the notes so the payroll engine matches it ("Assurion … Tech pay: $X").
+  const assurion=nbAssurionActive;
+  const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
+  if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
+  const travelFee=assurion?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
-  const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
-  const tax=Math.round(subtotal*TAX_RATE*100)/100;
-  const totalPrice=subtotal+tax;
-  const techId=document.getElementById('nbTech').value;
-  const paymentMethod=document.getElementById('nbPaymentMethod').value;
+  const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const tax=assurion?0:Math.round(subtotal*TAX_RATE*100)/100;
+  const totalPrice=assurion?0:subtotal+tax;
+  const techId=assurion?(nbSteveTechId||document.getElementById('nbTech').value):document.getElementById('nbTech').value;
+  const paymentMethod=assurion?'':document.getElementById('nbPaymentMethod').value;
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
@@ -1863,7 +1964,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
         city:document.getElementById('nbCity').value.trim(),
         state:document.getElementById('nbState').value.trim(),
         postal_code:document.getElementById('nbZip').value.trim() },
-      service_id: document.getElementById('nbService').value || null,
+      service_id: nbServiceId || document.getElementById('nbService').value || null,
       technician_id: techId==='any'?'any':techId||null,
       scheduled_date: date,
       scheduled_slot: nbSelectedSlot.key,
@@ -1871,7 +1972,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       subtotal,
       tax,
       price: totalPrice,
-      notes: document.getElementById('nbNotes').value.trim()||null,
+      notes: nbBuildNotes(assurion, selections, assurionPayout),
       payment_method: paymentMethod || null,
       payment_method_id: paymentMethodId,
       sms_consent: document.getElementById('nbSmsConsent').checked,

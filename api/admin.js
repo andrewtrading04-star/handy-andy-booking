@@ -104,6 +104,7 @@ export default async function handler(req, res) {
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
+      case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
       case 'available_dates':   return await availableDates(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
@@ -363,6 +364,123 @@ async function serviceOptions(req, res, db, auth) {
   for (const o of options) (byGroup[o.group_id] = byGroup[o.group_id] || []).push(o);
   const result = (groups || []).map(g => ({ ...g, options: byGroup[g.id] || [] }));
   return res.status(200).json({ groups: result });
+}
+
+// ── Seed / repair the Handy Andy "TV Installation" option groups ─────────────
+// The public widget (widget.js) hardcodes every TV-mounting option, so a DB that
+// never received migrations 0003/0015 still books fine publicly — but the admin
+// New Booking form reads the option groups from the DB and would only show the
+// one group that 0001 seeds (TV Size). This action idempotently inserts every
+// missing group + option so the full New Booking flow works. Matches 0003/0015.
+const TV_OPTION_GROUPS = [
+  { key: 'size',      label: 'TV Size',                       min: 1, max: 1, sort: 1, options: [
+    { label: '32" or Less', price: 99,  zbk: '1685657519214x408615950244710660', sort: 1 },
+    { label: '33"–59"',     price: 109, zbk: '1685657519214x406129807645840830', sort: 2 },
+    { label: '60"–69"',     price: 119, zbk: '1685657519214x241977595988204900', sort: 3 },
+    { label: '70"–84"',     price: 149, zbk: '1685657519214x168809705059288930', sort: 4 },
+    { label: '85"–97"',     price: 179, zbk: '1693451324278x246099356920840200', sort: 5 },
+    { label: '98"+',        price: 229, zbk: '1729566606709x280549383678984200', sort: 6 },
+  ]},
+  { key: 'bracket',   label: 'Bracket',                       min: 0, max: 1, sort: 2, options: [
+    { label: 'I have my own bracket',                 price: 0,   zbk: '1685657519638x296785870103780400', sort: 1 },
+    { label: 'Flat',                                  price: 45,  zbk: '1685657519638x151782031594280160', sort: 2 },
+    { label: 'Tilting (recommended)',                 price: 60,  zbk: '1685657519638x293251872070913660', sort: 3 },
+    { label: 'Full Motion',                           price: 110, zbk: '1685657519638x327788739524076600', sort: 4 },
+    { label: '85"-100" TV Flat Bracket',              price: 90,  zbk: '1776229587207x710284994703786000', sort: 5 },
+    { label: '85"-100" TV Tilting Bracket',           price: 110, zbk: '1776229598255x578976769128267800', sort: 6 },
+    { label: '85"-100" TV Full Motion Bracket',       price: 190, zbk: '1776229610718x521138691917742100', sort: 7 },
+    { label: 'Samsung Frame TV bracket (box included)', price: 25, zbk: '1736123941131x483930420018151400', sort: 8 },
+  ]},
+  { key: 'fireplace', label: 'Fireplace',                     min: 0, max: 1, sort: 3, options: [
+    { label: 'TV NOT above a fireplace', price: 0,  zbk: '1690749164365x391343451869544450', sort: 1 },
+    { label: 'TV above a fireplace',     price: 30, zbk: '1690749240392x103535038030413820', sort: 2 },
+  ]},
+  { key: 'surface',   label: 'Wall Surface',                  min: 0, max: 1, sort: 4, options: [
+    { label: 'Drywall',             price: 0,  zbk: '1685657520672x628368921210809000', sort: 1 },
+    { label: 'Brick',               price: 35, zbk: '1685657520672x962594124305617300', sort: 2 },
+    { label: 'Uneven Stone or Tile', price: 50, zbk: '1685658012495x711713122836807700', sort: 3 },
+    { label: 'Outdoor/Stucco',      price: 45, zbk: '1692765788131x467716510198005800', sort: 4 },
+  ]},
+  { key: 'wires',     label: 'Wire Hiding',                   min: 0, max: 1, sort: 5, options: [
+    { label: 'Hide wires BEHIND the wall',  price: 75, zbk: '1685657520215x679178310990983400', sort: 1 },
+    { label: 'Hide wires OUTSIDE the wall', price: 25, zbk: '1685657520215x860675929308834800', sort: 2 },
+    { label: 'Wall already has plug behind TV', price: 0, zbk: '1685657520215x846697647726538900', sort: 3 },
+    { label: 'Wires hang under the TV',     price: 0,  zbk: '1696472636219x934279187941818400', sort: 4 },
+  ]},
+  { key: 'lifting',   label: 'Second Technician (Large TVs)', min: 0, max: 1, sort: 6, options: [
+    { label: 'TV under 70" (no lifting fee)',        price: 0,  zbk: '1685657521270x971699776821509000', sort: 1 },
+    { label: '70–85" — customer can help lift',      price: 0,  zbk: '1685657521270x242389337506608420', sort: 2 },
+    { label: '70–85" — customer cannot help lift',   price: 70, zbk: '1685657521270x264421370121691100', sort: 3 },
+    { label: '85"+ (second technician required)',    price: 70, zbk: '1747842781494x315473919196528640', sort: 4 },
+  ]},
+  { key: 'dismount',  label: 'Dismount',                      min: 0, max: 1, sort: 7, options: [
+    { label: 'Guaranteed Dismount Service (when upgrading later)', price: 35, zbk: '1685657521717x559414519649398460', sort: 1 },
+    { label: "No — I'll handle removal myself",      price: 0,  zbk: '1751646796269x538012740525228000', sort: 2 },
+  ]},
+  { key: 'extras',    label: 'Add-ons',                       min: 0, max: 0, sort: 8, options: [
+    { label: 'Install Samsung Frame OneConnect box behind TV', price: 350, zbk: '1736124404151x401859929508413400', sort: 1 },
+    { label: 'Apple TV installation (mounting bracket included)', price: 25, zbk: '1711776157524x348981049297469440', sort: 2 },
+    { label: 'Soundbar Installation', price: 50, zbk: '1698905037955x771952325080383500', sort: 3 },
+    { label: 'Install shelf under TV', price: 45, zbk: '1698905090848x173584167038615550', sort: 4 },
+    { label: 'LED Lights',            price: 50, zbk: '1698905111338x528324964985864200', sort: 5 },
+    { label: '1 hour of Handyman Labor', price: 85, zbk: '1715820772054x920882061736149000', sort: 6 },
+    { label: 'Other',                 price: 0,  zbk: '1698905159794x117137493532868600', sort: 7 },
+  ]},
+];
+
+async function seedTvOptions(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+
+  // Find the TV-mounting service (named "TV Installation"; fall back to category).
+  let { data: svc } = await db.from('services')
+    .select('id, name, category').eq('business_id', biz.id).eq('name', 'TV Installation').maybeSingle();
+  if (!svc) {
+    const { data: byCat } = await db.from('services')
+      .select('id, name, category').eq('business_id', biz.id).eq('category', 'TV Mounting').limit(1);
+    svc = (byCat && byCat[0]) || null;
+  }
+  if (!svc) { const e = new Error('TV Installation service not found for this business'); e.status = 404; throw e; }
+
+  const report = { service: svc.name, groups_created: [], groups_existing: [], options_created: 0, options_existing: 0 };
+
+  // Existing groups for this service, keyed by `key`.
+  const { data: existingGroups } = await db.from('service_option_groups')
+    .select('id, key').eq('business_id', biz.id).eq('service_id', svc.id);
+  const groupByKey = {};
+  for (const g of (existingGroups || [])) groupByKey[g.key] = g.id;
+
+  for (const g of TV_OPTION_GROUPS) {
+    let groupId = groupByKey[g.key];
+    if (groupId) {
+      report.groups_existing.push(g.key);
+    } else {
+      const { data: inserted, error: gErr } = await db.from('service_option_groups')
+        .insert({ business_id: biz.id, service_id: svc.id, key: g.key, label: g.label,
+                  min_select: g.min, max_select: g.max, sort_order: g.sort })
+        .select('id').single();
+      if (gErr) throw gErr;
+      groupId = inserted.id;
+      report.groups_created.push(g.key);
+    }
+
+    // Options already present in this group, keyed by zenbooker_option_id.
+    const { data: existingOpts } = await db.from('service_options')
+      .select('id, zenbooker_option_id').eq('business_id', biz.id).eq('group_id', groupId);
+    const haveZbk = new Set((existingOpts || []).map(o => o.zenbooker_option_id));
+
+    const toInsert = g.options.filter(o => !haveZbk.has(o.zbk)).map(o => ({
+      business_id: biz.id, group_id: groupId, label: o.label, price: o.price,
+      zenbooker_option_id: o.zbk, sort_order: o.sort, active: true,
+    }));
+    report.options_existing += g.options.length - toInsert.length;
+    if (toInsert.length) {
+      const { error: oErr } = await db.from('service_options').insert(toInsert);
+      if (oErr) throw oErr;
+      report.options_created += toInsert.length;
+    }
+  }
+
+  return res.status(200).json({ ok: true, ...report });
 }
 
 // ── Available time slots for a date (filtered by technician if provided) ─────
@@ -657,7 +775,10 @@ async function bookingCreate(req, res, db, auth, body) {
   const status = technician_id ? 'assigned' : 'confirmed';
   // Signed review-link token (30-day TTL) so the completion follow-up can point
   // the customer at the review widget. booking_id is patched in after insert.
-  const { data: bRow, error: bErr } = await db.from('bookings').insert({
+  // Try to insert with sms_consent; if the column doesn't exist yet (migration not applied),
+  // retry without it. This ensures bookings can be created even if 0014_sms_consent migration
+  // hasn't been applied to the database yet.
+  const bookingInsert = {
     business_id: biz.id, customer_id,
     technician_id: technician_id || null,
     service_id: body.service_id || null,
@@ -670,8 +791,19 @@ async function bookingCreate(req, res, db, auth, body) {
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
     payment_required: !!paymentMethod && paymentMethod !== 'quote',
     payment_method: paymentMethod,
+  };
+
+  let { data: bRow, error: bErr } = await db.from('bookings').insert({
+    ...bookingInsert,
     sms_consent: !!body.sms_consent,
   }).select('id').single();
+
+  // If sms_consent column doesn't exist in schema cache, retry without it
+  if (bErr && bErr.message?.includes('sms_consent')) {
+    console.warn('[admin] sms_consent column not found, retrying without it');
+    ({ data: bRow, error: bErr } = await db.from('bookings').insert(bookingInsert).select('id').single());
+  }
+
   if (bErr) throw bErr;
 
   // Generate the review-link token now that we have the booking id.
@@ -744,7 +876,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Confirm the booking belongs to this business before touching it.
   const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id, status, technician_id, scheduled_at, review_token, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
+    .select('id, status, technician_id, scheduled_at, review_token, sms_consent, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
