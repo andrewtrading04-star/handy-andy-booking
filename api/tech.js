@@ -16,6 +16,7 @@ import { localDayStartUTC, localDateStartUTC, addDaysStr } from './_lib/time.js'
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
+import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
@@ -634,9 +635,9 @@ function shapeJob(b, full = false, forTech = false) {
 }
 
 // ── Payroll Report ─────────────────────────────────────────────────────────
-// Returns jobs completed/paid in the given week with tech pay calculated from rates table.
-// Tech pay is stored as a note in the booking (set when job is created/completed).
-// Falls back to simple calculation if note not available.
+// Tech pay for one Sun–Sat week, computed from the rate sheet (api/_lib/payroll.js).
+// Jobs are bucketed: paid (counted this week), deferred (unpaid — future week),
+// or flagged (computed but needs owner review). Pay date = period-end Sat + 15d.
 async function techPayroll(req, res, db, auth) {
   const weekStart = (req.query.week_start || '').toString();
   if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
@@ -646,13 +647,19 @@ async function techPayroll(req, res, db, auth) {
   const techId = auth.tech_id;
   const weekEnd = addDaysStr(weekStart, 6);
 
-  // Query completed jobs in the week assigned to this tech.
+  // The tech's business slug drives Dom's-vs-HA handling inside the engine.
+  const { data: techRow } = await db.from('technicians')
+    .select('name, businesses(slug)').eq('id', techId).single();
+  const techName = techRow?.name || '';
+  const businessSlug = techRow?.businesses?.slug || '';
+
+  // Completed jobs for this tech in the week, with everything the engine needs.
   const { data: jobs, error } = await db.from('bookings')
     .select(`
-      id, customer_id, customers(name), service_id, services(name),
-      scheduled_at, status, price, payment_status, amount_due,
-      line_items:booking_line_items(kind, name, unit_price, line_total),
-      tip, notes, metadata, technician_id
+      id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
+      tip, notes, customer_notes, zenbooker_job_number,
+      customers(name), services(name),
+      line_items:booking_line_items(kind, name, unit_price, line_total)
     `)
     .eq('technician_id', techId)
     .eq('status', 'completed')
@@ -662,54 +669,56 @@ async function techPayroll(req, res, db, auth) {
 
   if (error) throw error;
 
-  // Separate paid and deferred jobs.
   const paidJobs = [];
   const deferredJobs = [];
   let totalPay = 0;
 
   for (const b of jobs || []) {
-    const isPaid = b.payment_status === 'paid' || (b.amount_due === 0 || b.amount_due === null);
+    const result = computeJobPay({
+      status: b.status,
+      payment_status: b.payment_status,
+      price: b.price,
+      subtotal: b.subtotal,
+      amount_paid: b.amount_paid,
+      tip: b.tip,
+      notes: b.notes,
+      customer_notes: b.customer_notes,
+      zenbooker_job_number: b.zenbooker_job_number,
+      service_name: b.services?.name || '',
+      business_slug: businessSlug,
+      line_items: b.line_items || [],
+    }, techName);
 
-    if (isPaid) {
-      // Try to extract tech_pay from notes (if stored there) or calculate from line items + tips
-      let techPay = extractTechPayFromNotes(b.notes);
-      if (techPay === null) {
-        // Fallback: sum line item totals + tips (simple split)
-        const linePay = (b.line_items || []).reduce((sum, li) => sum + parseFloat(li.line_total || 0), 0);
-        const tipPay = parseFloat(b.tip || 0);
-        techPay = Math.floor(linePay + tipPay);
-      }
+    const base = {
+      id: b.id,
+      customer_name: b.customers?.name || 'Unknown',
+      service: b.services?.name || 'Service',
+      time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    };
 
-      paidJobs.push({
-        id: b.id,
-        customer_name: b.customers?.name || 'Unknown',
-        service: b.services?.name || 'Service',
-        time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-        tech_pay: techPay,
-      });
-      totalPay += techPay;
+    if (result.state === 'deferred') {
+      deferredJobs.push({ ...base, customer_due: Math.floor((Number(b.price) || 0) - (Number(b.amount_paid) || 0)) });
+    } else if (result.state === 'excluded') {
+      // not paid, not shown
     } else {
-      // Deferred (unpaid)
-      deferredJobs.push({
-        customer_name: b.customers?.name || 'Unknown',
-        time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-        customer_due: Math.floor(parseFloat(b.amount_due || 0)),
+      paidJobs.push({
+        ...base,
+        tech_pay: result.pay,
+        breakdown: result.breakdown,
+        flags: result.flags,
+        needs_review: result.flags.length > 0 || result.state === 'partial',
       });
+      totalPay += result.pay;
     }
   }
 
   return res.status(200).json({
     week_start: weekStart,
     week_end: weekEnd,
+    pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
+    tech_name: techName,
     jobs: paidJobs,
     deferred: deferredJobs,
     total: totalPay,
   });
-}
-
-// Extract tech_pay from job notes if it was stored there (e.g., "Tech pay: $60").
-function extractTechPayFromNotes(notes) {
-  if (!notes) return null;
-  const m = String(notes).match(/Tech pay:\s*\$?(\d+)/i);
-  return m ? parseInt(m[1], 10) : null;
 }

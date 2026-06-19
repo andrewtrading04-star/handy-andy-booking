@@ -738,21 +738,27 @@ async function showPayroll(){
 function renderPayroll(data){
   const v=document.getElementById('payrollView');
   const weekEnd=addDaysStr(payrollWeekStart,6);
-  const payDate=addDaysStr(weekEnd,15);
+  const payDate=data.pay_date||addDaysStr(weekEnd,9);
 
   const paidJobs=data.jobs||[];
   const deferredJobs=data.deferred||[];
+  const reviewCount=paidJobs.filter(j=>j.needs_review).length;
 
-  const jobRows=paidJobs.map(j=>`
-    <div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-weight:700;">${esc(j.customer_name)}</div>
-          <div style="color:var(--mute);font-size:12px;">${esc(j.service||'Service')} · ${esc(j.time)}</div>
+  const jobRows=paidJobs.map(j=>{
+    const bd=(j.breakdown||[]).map(b=>`<div style="display:flex;justify-content:space-between;color:var(--mute);font-size:12px;padding:1px 0;"><span>${esc(b.label)}</span><span>$${b.amount}</span></div>`).join('');
+    const fl=(j.flags||[]).map(f=>`<div style="color:var(--amber);font-size:12px;margin-top:3px;">⚠ ${esc(f)}</div>`).join('');
+    return `
+    <div style="padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;">
+          <div style="font-weight:700;">${esc(j.customer_name)}${j.needs_review?' <span style="color:var(--amber);font-size:11px;font-weight:700;">· REVIEW</span>':''}</div>
+          <div style="color:var(--mute);font-size:12px;margin-bottom:4px;">${esc(j.service||'Service')} · ${esc(j.time)}</div>
+          ${bd}
+          ${fl}
         </div>
-        <div style="text-align:right;font-weight:700;">$${j.tech_pay}</div>
+        <div style="text-align:right;font-weight:800;font-size:15px;">$${j.tech_pay}</div>
       </div>
-    </div>`).join('');
+    </div>`;}).join('');
 
   const deferredRows=deferredJobs.length ? `
     <div class="card">
@@ -780,7 +786,7 @@ function renderPayroll(data){
     </div>
 
     <div class="card">
-      <h3>Paid Jobs (${paidJobs.length})</h3>
+      <h3>Paid Jobs (${paidJobs.length})${reviewCount?` <span style="color:var(--amber);font-size:11px;">· ${reviewCount} need review</span>`:''}</h3>
       ${paidJobs.length ? jobRows : '<div class="sub" style="color:var(--mute);">No completed, paid jobs this week.</div>'}
     </div>
 
