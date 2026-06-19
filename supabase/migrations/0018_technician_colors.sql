@@ -1,3 +1,7 @@
+-- Rename businesses in the dashboard (drop "TV Mounting")
+update app.businesses set name = 'Handy Andy' where slug = 'handy-andy';
+update app.businesses set name = 'Dom''s'      where slug = 'doms';
+
 -- Set technician colors for Handy Andy dashboard
 update app.technicians
 set color = case
