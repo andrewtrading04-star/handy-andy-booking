@@ -182,14 +182,15 @@ function tipFor(job) {
 
 // ── Multi-tech detection (when "Second Technician" or "Lifting Help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.
-// Bonus is $60 if customer paid for it (line_total >= 70), else $0.
+// Bonus is $30 per tech if customer paid for it (line_total >= 70), else $0.
+// (Customer pays $70; business splits ~$60 between two techs at $30 each = $10 margin)
 function detectMultiTech(job) {
   for (const li of job.line_items || []) {
     const name = String(li.name || '').toLowerCase();
     if (/second\s*technician|cannot\s*lift\s*86|lifting\s*help/i.test(name)) {
       const lt = Number(li.line_total) || 0;
-      // If customer paid >= $70 for the add-on, tech gets +$60 bonus per the rate sheet.
-      const bonus = lt >= 70 ? 60 : 0;
+      // If customer paid >= $70 for the add-on, each tech gets +$30 bonus per the rate sheet.
+      const bonus = lt >= 70 ? 30 : 0;
       return { hasSecondTech: true, secondTechBonus: bonus };
     }
   }
@@ -440,29 +441,29 @@ function runSelfTests() {
   // Job-number override.
   eq(computeJobPay(job({ zenbooker_job_number: '020989', line_items: [] }), 'Kregg').pay, 60, 'CUSTOM_PAY 020989 = 60');
 
-  // Multi-tech: base split 50/50 + tips split 50/50 + $60 bonus.
+  // Multi-tech: base split 50/50 + tips split 50/50 + $30 bonus.
   eq(computeJobPay(job({ tip: 20, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70 }
-  ] }), 'Kregg').pay, 105, 'multi-tech (70/2 + 20/2 + 60 = 35 + 10 + 60)');
+  ] }), 'Kregg').pay, 75, 'multi-tech (70/2 + 20/2 + 30 = 35 + 10 + 30)');
 
   // Multi-tech with "Lifting Help" variation (same logic).
   eq(computeJobPay(job({ line_items: [
     { name: '70"–84"', line_total: 169 },
     { name: 'Lifting Help', line_total: 70 }
-  ] }), 'Kregg').pay, 100, 'multi-tech lifting help (80/2 + 60 = 40 + 60)');
+  ] }), 'Kregg').pay, 70, 'multi-tech lifting help (80/2 + 30 = 40 + 30)');
 
   // Multi-tech without sufficient payment (< $70, no bonus).
   eq(computeJobPay(job({ line_items: [
     { name: '33"–59"', line_total: 109 },
     { name: 'Second Technician', line_total: 50 }
-  ] }), 'Zach').pay, 30, 'multi-tech no bonus (60/2 = 30, no $60 bonus for <70)');
+  ] }), 'Zach').pay, 30, 'multi-tech no bonus (60/2 = 30, no $30 bonus for <70)');
 
   // Multi-tech with tip and bonus.
   eq(computeJobPay(job({ tip: 40, line_items: [
     { name: '98"+', line_total: 229 },
     { name: 'Second Technician', line_total: 70 }
-  ] }), 'Juan').pay, 145, 'multi-tech Juan (130/2 + 40/2 + 60 = 65 + 20 + 60)');
+  ] }), 'Juan').pay, 115, 'multi-tech Juan (130/2 + 40/2 + 30 = 65 + 20 + 30)');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
