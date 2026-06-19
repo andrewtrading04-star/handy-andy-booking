@@ -1,0 +1,1803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Schedule — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<style>
+  :root{
+    --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694; --accent:#2563eb; --accent-soft:#eaf1ff;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --orange:#ff6b35; --purple:#9333ea;
+    /* Type system — Plus Jakarta Sans, weights 400–900 */
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-hero:clamp(40px,7vw,76px); --fs-h1:34px; --fs-h2:24px; --fs-h3:18px;
+    --fs-body:15px; --fs-sm:14px;
+    /* Gradient keyword highlight */
+    --grad:linear-gradient(120deg,#ff8a3d 0%,#ff5e3a 50%,#ff2d6f 100%);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
+  a{color:var(--accent);}
+  .hidden{display:none !important;}
+
+  /* ───────── Login ───────── */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .login{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 18px 50px rgba(20,30,50,.10);}
+  .login h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:6px;}
+  .login .sub{color:var(--mute);font-size:13px;margin-bottom:22px;}
+  .login input{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:12px;}
+  .login input:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:700;width:100%;}
+  .btn:hover{filter:brightness(.96);}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
+  .btn.sm{width:auto;padding:7px 12px;font-size:13px;border-radius:8px;}
+  .err{color:var(--red);font-size:13px;margin-top:6px;min-height:18px;}
+
+  /* ───────── App shell ───────── */
+  .app-shell{display:flex;min-height:100vh;}
+  .sidebar{width:248px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;position:sticky;top:0;overflow-y:auto;}
+  .side-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;flex:1;min-width:0;}
+  .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+  .logo .ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .plus{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:18px;line-height:1;flex-shrink:0;}
+  .switcher{display:flex;gap:5px;padding:0 14px 8px;flex-wrap:wrap;}
+  .switcher button{background:#fff;border:1px solid var(--line);color:var(--mute);padding:5px 11px;border-radius:16px;font-size:12px;font-weight:600;}
+  .switcher button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+
+  .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
+  .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
+  .seg button.on{background:#fff;color:var(--accent);box-shadow:0 1px 3px rgba(20,30,50,.10);}
+
+  .side-nav{display:flex;flex-direction:column;gap:1px;padding:0 8px 6px;}
+  .side-nav button{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font-size:14px;font-weight:600;text-align:left;width:100%;}
+  .side-nav button .ic{width:18px;text-align:center;}
+  .side-nav button:hover{background:var(--line2);}
+  .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
+  .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
+
+  .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
+  .side-list{display:flex;flex-direction:column;gap:1px;padding:0 8px;}
+  .sl{display:flex;align-items:center;gap:8px;background:transparent;border:none;color:var(--ink-2);padding:8px 10px;border-radius:8px;font-size:13.5px;font-weight:600;text-align:left;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sl:hover{background:var(--line2);}
+  .sl.on{color:var(--accent);font-weight:700;}
+  .sl .ic{width:16px;text-align:center;color:var(--mute);flex-shrink:0;}
+  /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
+  body.doms .side-nav button .ic i{color:var(--accent);font-size:14px;}
+  body.doms .sl .ic i{color:inherit;font-size:13px;}
+  body.doms .bk-row span:first-child i{color:var(--accent);font-size:13px;}
+  body.doms .logo .dot i{color:#fff;font-size:13px;}
+  .side-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+  .who{font-size:12px;color:var(--mute);flex:1;}
+
+  /* avatars */
+  .av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:800;flex-shrink:0;letter-spacing:.3px;}
+  .av.sm{width:20px;height:20px;font-size:9px;}
+  .av.av-un{background:#c4ccd6;color:#fff;}
+
+  /* ───────── Main / calendar ───────── */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .mobilebar{display:none;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;}
+  .mobilebar .ham{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:16px;}
+  .cal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:#fff;flex-wrap:wrap;position:sticky;top:0;z-index:20;}
+  .cal-nav{display:flex;align-items:center;gap:8px;}
+  .cal-nav .arrow{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:16px;}
+  .range-pill{border:1px solid var(--line);border-radius:20px;padding:8px 18px;font-weight:700;font-size:15px;min-width:170px;text-align:center;}
+  .view-toggle{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+  .view-toggle button{background:#fff;border:none;border-left:1px solid var(--line);color:var(--mute);padding:8px 14px;font-size:13px;font-weight:700;}
+  .view-toggle button:first-child{border-left:none;}
+  .view-toggle button.on{background:var(--accent-soft);color:var(--accent);}
+  .view-scroll{flex:1;overflow:auto;}
+  #view{padding:0;}
+
+  .week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-height:calc(100vh - 64px);}
+  .week.one{grid-template-columns:minmax(0,520px);}
+  .daycol{border-right:1px solid var(--line);min-width:0;}
+  .daycol:last-child{border-right:none;}
+  .dayhead{padding:11px 12px 4px;font-size:12.5px;font-weight:800;letter-spacing:.4px;color:var(--ink-2);display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line2);}
+  .dayhead.today{color:var(--accent);}
+  .todot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;}
+  .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
+  .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
+  .evt{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
+  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);}
+  .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
+  .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .evt-b{display:flex;align-items:center;gap:6px;}
+  .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
+  .evt.s-pending{border-left-color:var(--amber);}
+  .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
+  .evt.s-cancelled,.evt.s-no_show{border-left-color:#c4ccd6;opacity:.6;}
+  .evt.s-cancelled .evt-n{text-decoration:line-through;}
+  .dayempty{height:6px;}
+
+  /* availability grid */
+  .availgrid{display:grid;grid-template-columns:130px repeat(7,minmax(0,1fr));}
+  .agcell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px;min-height:54px;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;}
+  .agcell:nth-child(8n){border-right:none;}
+  .aghead{font-size:12px;font-weight:800;color:var(--ink-2);position:sticky;top:0;background:#fff;letter-spacing:.4px;}
+  .aghead.today{color:var(--accent);}
+  .agmd{font-weight:600;color:var(--mute);font-size:11px;}
+  .agslot{font-size:12px;font-weight:700;color:var(--ink-2);align-items:center;}
+  .agnone{color:#c4ccd6;font-size:13px;}
+  .agcorner{background:#fff;}
+
+  /* generic content (bookings / customers / technicians render here) */
+  .wrap{padding:16px 18px;max-width:1100px;}
+  .section-title{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;font-weight:700;}
+  .job{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:9px;}
+  .job .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
+  .job .name{font-weight:700;font-size:15px;}
+  .job .meta{color:var(--mute);font-size:13px;margin-top:4px;line-height:1.6;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .job .time{font-weight:700;font-size:13px;text-align:right;white-space:nowrap;color:var(--ink-2);}
+  .job.evt-row{cursor:pointer;}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;}
+  select.assign,select.filter{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:13px;}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:capitalize;}
+  .b-pending{background:#fef3c7;color:#b45309;}
+  .b-confirmed,.b-assigned{background:#dbeafe;color:#1d4ed8;}
+  .b-on_the_way,.b-arrived,.b-in_progress{background:#ffedd5;color:#c2410c;}
+  .b-completed{background:#dcfce7;color:#15803d;}
+  .b-cancelled,.b-no_show{background:#fee2e2;color:#b91c1c;}
+  .t-status{font-size:12px;font-weight:600;}
+  .dot-s{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;}
+  .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:#c4ccd6;}
+  .search{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:11px 13px;font-size:14px;margin-bottom:12px;}
+  .search:focus{outline:none;border-color:var(--accent);}
+  table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
+  td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
+  .empty{color:var(--mute);text-align:center;padding:48px 0;}
+  .stars{color:var(--amber);}
+  /* Estimates */
+  .est-filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .seg-btn{background:#fff;border:1px solid var(--line);color:var(--ink-2);padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;}
+  .seg-btn.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
+  .est-card .est-desc{margin-top:8px;font-size:14px;line-height:1.55;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+  .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
+  .est-thumb{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;}
+  .est-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);align-items:center;}
+  .est-status-sel{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 9px;font-size:13px;font-weight:600;}
+  .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
+  .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
+  .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
+  .pay-refunded{background:#fee2e2;color:#b91c1c;} .pay-void{background:#f1f3f6;color:var(--mute);}
+  .evt-paid{font-size:10px;font-weight:800;color:#15803d;margin-left:auto;}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.25);z-index:80;}
+
+  /* modals */
+  .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:calc(100vh - 68px);overflow-y:auto;box-shadow:0 24px 60px rgba(20,30,50,.22);}
+  .sheet h2{font-size:17px;margin-bottom:14px;}
+  #nbForm{width:100%;min-width:0;}
+  #nbSteps{display:grid;gap:12px;}
+  #nbSteps:empty{display:none;}
+  .nb-step-t{font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
+  .nb-hint{font-size:13px;color:var(--ink-2);font-style:italic;}
+  .nb-opts{display:grid;gap:6px;}
+  .nb-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;text-align:left;width:100%;}
+  .nb-opt:hover{border-color:var(--accent);}
+  .nb-opt.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  .nb-opt .nb-price{color:var(--ink-2);font-weight:600;flex-shrink:0;}
+  .nb-opt.on .nb-price{color:var(--accent);}
+  .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
+  .nb-slot:hover{border-color:var(--accent);}
+  .nb-slot.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  /* New-booking calendar */
+  .nb-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;width:100%;}
+  .nb-cal-title{font-size:14px;font-weight:700;color:var(--ink);}
+  .nb-cal-nav{background:#fff;border:1px solid var(--line);color:var(--ink-2);width:30px;height:30px;border-radius:8px;font-size:16px;cursor:pointer;}
+  .nb-cal-nav:hover{border-color:var(--accent);color:var(--accent);}
+  .nb-cal-nav:disabled{opacity:.35;cursor:not-allowed;}
+  #nbCalWrap{width:100%;min-width:0;}
+  #nbSlotsWrap{width:100%;min-width:0;}
+  #nbCardWrap{width:100%;min-width:0;}
+  .nb-cal-dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:4px;width:100%;}
+  .nb-cal-dow span{text-align:center;font-size:11px;font-weight:700;color:var(--ink-2);}
+  .nb-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;width:100%;}
+  .nb-cal-day{aspect-ratio:1;min-width:0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:13px;border:1px solid transparent;}
+  .nb-cal-day.empty{visibility:hidden;}
+  .nb-cal-day.avail{background:#fff;border-color:var(--line);color:var(--ink);cursor:pointer;font-weight:600;}
+  .nb-cal-day.avail:hover{border-color:var(--accent);}
+  .nb-cal-day.off{color:#c9c9c9;cursor:not-allowed;text-decoration:line-through;}
+  .nb-cal-day.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;}
+  .nb-cal-hint{font-size:11px;color:var(--ink-2);margin-top:8px;font-style:italic;}
+  .nb-optq{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:13px;color:var(--ink);}
+  .nb-optq.on{border-color:var(--accent);background:rgba(238,108,40,.07);}
+  .nb-optq .nb-optlabel{flex:1;}
+  .nb-optq.on .nb-optlabel{font-weight:600;}
+  .nb-stepper{display:flex;align-items:center;gap:0;flex-shrink:0;}
+  .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .nb-q-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+  .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
+  .nb-cap{font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0;margin-left:6px;}
+  .nb-qty{min-width:26px;text-align:center;font-weight:700;font-size:13px;}
+  .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
+  .bk-row span:first-child{width:18px;flex-shrink:0;}
+  .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
+  .bk-assign{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);}
+  .bk-assign select{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;}
+
+  /* photos + notes (modal sections) */
+  .bk-sec{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
+  .bk-sec-h{font-size:12px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--mute);margin-bottom:9px;}
+  .photogrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;}
+  .thumb{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--line2);}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .thumbdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  .note{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px;}
+  .note-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;}
+  .note-a{font-weight:700;font-size:13px;color:var(--ink);}
+  .note-t{font-size:11px;color:var(--mute);}
+  .note-b{font-size:13.5px;line-height:1.45;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;}
+  .note-del{background:transparent;border:none;color:#b91c1c;font-size:11px;font-weight:700;padding:5px 0 0;cursor:pointer;}
+  .bk-note-input{width:100%;background:#fff;border:1px solid var(--line);border-radius:9px;color:var(--ink);padding:9px 11px;font-size:13.5px;min-height:54px;margin-top:8px;resize:vertical;font-family:inherit;}
+  .evt-photo{font-size:10px;font-weight:800;color:var(--mute);margin-left:6px;}
+  /* photo gallery page */
+  .gal-head{font-size:13px;color:var(--mute);font-weight:700;margin-bottom:12px;}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
+  .gal-item{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer;}
+  .gal-item figcaption{padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--ink-2);}
+  /* lightbox */
+  .lightbox{position:fixed;inset:0;background:rgba(10,15,25,.92);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.16);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;cursor:pointer;}
+
+  /* availability editor (reused) */
+  .avail-day{margin-bottom:12px;}
+  .avail-day .dl{font-size:13px;font-weight:700;margin-bottom:6px;}
+  .avail-chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .slotchip{background:#fff;border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12px;font-weight:600;}
+  .slotchip.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .slotchip.on::after{content:' ✓';font-weight:800;}
+  .sub{color:var(--mute);}
+
+  @media(max-width:880px){
+    .sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:50;box-shadow:0 0 40px rgba(0,0,0,.2);}
+    .sidebar.open{transform:none;}
+    .mobilebar{display:flex;}
+    .week,.availgrid{min-width:880px;}
+    .view-scroll{overflow:auto;}
+  }
+
+  /* Mobile: New Booking calendar responsiveness */
+  @media(max-width:480px){
+    .nb-cal-dow{gap:2px;margin-bottom:2px;}
+    .nb-cal-dow span{font-size:10px;}
+    .nb-cal-grid{gap:2px;}
+    .nb-cal-day{font-size:11px;padding:4px;}
+    .nb-cal-nav{width:28px;height:28px;font-size:14px;}
+    .nb-cal-title{font-size:12px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ───────── Login ───────── -->
+<div id="login" class="login-wrap">
+  <form class="login" id="loginForm">
+    <h1>Schedule <span class="hl">Admin</span></h1>
+    <div class="sub">Enter your password to continue</div>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
+    <button class="btn" type="submit">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<!-- ───────── App ───────── -->
+<div id="app" class="app-shell hidden">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-head">
+      <div class="logo"><span class="dot" data-ico="tools">🛠️</span><span class="ttl" id="bizName">Schedule</span></div>
+      <button class="plus" id="newBookingBtn" title="New booking">＋</button>
+    </div>
+    <div class="switcher" id="switcher"></div>
+
+    <div class="seg" id="modeSeg">
+      <button data-mode="jobs" class="on">Jobs</button>
+      <button data-mode="availability">Availability</button>
+    </div>
+
+    <nav class="side-nav" id="sideNav">
+      <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
+      <button data-nav="bookings"><span class="ic" data-ico="bookings">📋</span> Bookings</button>
+      <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
+      <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
+      <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
+      <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
+      <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
+    </nav>
+
+    <div id="schedSidebar">
+      <div id="territoriesSection">
+        <div class="side-section">Territories</div>
+        <div class="side-list" id="territoryList"></div>
+      </div>
+      <div class="side-section">Jobs Assigned To</div>
+      <div class="side-list" id="assignList"></div>
+    </div>
+
+    <div class="side-foot">
+      <span class="who" id="who"></span>
+      <button class="btn ghost sm" id="logout">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="mobilebar">
+      <button class="ham" id="ham">☰</button>
+      <strong id="mobTitle">Schedule</strong>
+    </div>
+
+    <div class="cal-head" id="calHead">
+      <div class="cal-nav">
+        <button class="arrow" id="prevWk">‹</button>
+        <div class="range-pill" id="rangeLabel">…</div>
+        <button class="arrow" id="nextWk">›</button>
+        <button class="btn ghost sm" id="todayBtn">Today</button>
+      </div>
+      <div class="view-toggle" id="viewToggle">
+        <button data-view="list">List</button>
+        <button data-view="week" class="on">Week</button>
+        <button data-view="day">Day</button>
+      </div>
+    </div>
+
+    <div class="view-scroll"><div id="view"></div></div>
+  </main>
+</div>
+
+<!-- New booking modal -->
+<div id="modal" class="modal hidden">
+  <div class="sheet">
+    <h2>New Booking</h2>
+    <form id="nbForm" style="display:grid;gap:10px;">
+      <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email"></div>
+      <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
+      <select class="search" style="margin:0" id="nbCategory"></select>
+      <select class="search" style="margin:0;display:none" id="nbService"></select>
+      <div id="nbSteps"></div>
+      <input class="search" style="margin:0" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
+      <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
+      <select class="search" style="margin:0" id="nbTech"></select>
+      <input type="hidden" id="nbDate">
+      <div id="nbCalWrap" style="display:none;">
+        <div class="nb-cal-head">
+          <button type="button" id="nbCalPrev" class="nb-cal-nav">‹</button>
+          <div id="nbCalTitle" class="nb-cal-title">—</div>
+          <button type="button" id="nbCalNext" class="nb-cal-nav">›</button>
+        </div>
+        <div class="nb-cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div id="nbCalGrid" class="nb-cal-grid"></div>
+        <div class="nb-cal-hint">Only dates with an available technician can be selected.</div>
+      </div>
+      <div id="nbSlotsWrap" style="display:none;">
+        <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
+        <div id="nbSlots" style="display:grid;gap:6px;"></div>
+      </div>
+      <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
+        <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
+        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment (confirmations, ETA, completion)</label>
+      </div>
+      <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
+        <option value="">Select payment method</option>
+        <option value="card">Credit Card</option>
+        <option value="cash">Cash</option>
+        <option value="quote">Quote (no charge)</option>
+      </select>
+      <div id="nbCardWrap" style="display:none;">
+        <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
+        <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">🔒 Secured by Stripe. The card is saved on file and charged at time of service.</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" type="submit">Create booking</button>
+        <button class="btn ghost" type="button" id="nbCancel">Cancel</button>
+      </div>
+      <div class="err" id="nbErr"></div>
+    </form>
+  </div>
+</div>
+
+<!-- Booking detail modal -->
+<div id="bkModal" class="modal hidden">
+  <div class="sheet">
+    <h2 id="bkTitle">Booking</h2>
+    <div id="bkBody"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn ghost" type="button" id="bkClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Technician availability modal -->
+<div id="availModal" class="modal hidden">
+  <div class="sheet" style="max-width:520px;">
+    <h2 id="availTitle">Availability</h2>
+    <div class="sub" style="font-size:13px;margin:-8px 0 16px;">Set the normal weekly schedule, plus any one-time changes for specific dates.</div>
+    <div id="availBody"><div class="empty">Loading…</div></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn" type="button" id="availSaveBtn">Save</button>
+      <button class="btn ghost" type="button" id="availCloseBtn">Cancel</button>
+    </div>
+    <div class="err" id="availErr"></div>
+  </div>
+</div>
+
+<!-- Customer edit modal -->
+<div id="custModal" class="modal hidden">
+  <div class="sheet">
+    <h2>Edit Customer</h2>
+    <form id="custForm" style="display:grid;gap:10px;">
+      <input type="hidden" id="cuId">
+      <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
+      <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP"></div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" type="submit">Save changes</button>
+        <button class="btn ghost" type="button" id="cuCancel">Cancel</button>
+      </div>
+      <div class="err" id="cuErr"></div>
+    </form>
+  </div>
+</div>
+
+<!-- Photo lightbox -->
+<div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
+
+<script>
+const API = '/api/admin';
+let token = localStorage.getItem('ha_admin_token') || '';
+let role = localStorage.getItem('ha_admin_role') || '';
+let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
+let current = null;            // current business object
+
+// view state
+let section = 'schedule';      // schedule | bookings | customers | technicians
+let calMode = 'jobs';          // jobs | availability
+let calView = 'week';          // week | day | list
+let anchorDate = '';           // 'YYYY-MM-DD' anchor for the displayed week/day
+let filterArea = '';           // '' = all territories, else service_area id
+let filterTech = 'all';        // all | unassigned | tech id
+let pollTimer = null;
+
+// caches
+let techCache = [];
+let areaCache = [];
+let calBookings = [];
+let availData = null;          // { slug, slots, days, technicians, recurringSet, exMap }
+
+const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
+
+// ── API helper ───────────────────────────────────────────────────────────
+async function api(action, { method='GET', params={}, body=null } = {}) {
+  const url = new URL(API, location.origin);
+  url.searchParams.set('action', action);
+  for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) { logout(); throw new Error('Session expired — please sign in again'); }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ── Iconography ────────────────────────────────────────────────────────────
+// Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
+// ic('name') is used in dynamic markup; static nav icons carry data-ico and are
+// themed by applyIconTheme() whenever the active business changes.
+const ICONS = {
+  tools:    {e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
+  schedule: {e:'📅', f:'fa-regular fa-calendar'},
+  bookings: {e:'📋', f:'fa-solid fa-clipboard-list'},
+  customers:{e:'👥', f:'fa-solid fa-users'},
+  wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
+  star:     {e:'⭐', f:'fa-solid fa-star'},
+  camera:   {e:'📷', f:'fa-solid fa-camera'},
+  location: {e:'📍', f:'fa-solid fa-location-dot'},
+  ban:      {e:'🚫', f:'fa-solid fa-ban'},
+  phone:    {e:'📞', f:'fa-solid fa-phone'},
+  clock:    {e:'🕑', f:'fa-regular fa-clock'},
+  card:     {e:'💳', f:'fa-solid fa-credit-card'},
+  note:     {e:'📝', f:'fa-solid fa-pen-to-square'},
+  link:     {e:'🔗', f:'fa-solid fa-link'},
+  estimate: {e:'🧾', f:'fa-solid fa-file-invoice-dollar'},
+};
+function isDoms(){ return !!(current && current.slug==='doms'); }
+function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
+function applyIconTheme(){
+  const doms=isDoms();
+  document.body.classList.toggle('doms', doms);
+  document.querySelectorAll('[data-ico]').forEach(el=>{
+    const m=ICONS[el.dataset.ico]; if(!m) return;
+    el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
+  });
+}
+
+// ── Date / format helpers (business-timezone aware) ────────────────────────
+function tz(){ return (current && current.timezone) || 'America/Denver'; }
+function todayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: tz() }); }
+function addDays(ds, n){ const d=new Date(ds+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+function dowOf(ds){ return new Date(ds+'T12:00:00Z').getUTCDay(); }
+function sundayOf(ds){ return addDays(ds, -dowOf(ds)); }
+function weekDates(start){ const out=[]; for(let i=0;i<7;i++) out.push(addDays(start,i)); return out; }
+function currentWeekDates(){ return weekDates(sundayOf(anchorDate)); }
+function localDateOf(iso){ try{ return new Date(iso).toLocaleDateString('en-CA',{ timeZone: tz() }); }catch{ return ''; } }
+function colHeadLabel(ds){
+  const d=new Date(ds+'T12:00:00Z');
+  return { dow:d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'}).toUpperCase(),
+           md:d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'}).toUpperCase() };
+}
+function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString('en-US',{timeZone:tz(),hour:'numeric',minute:'2-digit'}).replace(':00',''); }catch{ return ''; } }
+function fmtTimeRange(b){ const s=fmtClock(b.scheduled_at); const e=b.scheduled_end?fmtClock(b.scheduled_end):''; return e?`${s} - ${e}`:s; }
+function fmtDuration(b){
+  let mins=b.duration_minutes;
+  if(!mins && b.scheduled_end && b.scheduled_at) mins=Math.round((new Date(b.scheduled_end)-new Date(b.scheduled_at))/60000);
+  if(!mins||mins<=0) return '';
+  const h=Math.floor(mins/60), m=mins%60;
+  return (h?h+'h':'')+(m?(h?' ':'')+m+'m':'');
+}
+function fmtDateTime(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString('en-US',{timeZone:tz(),weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch{ return iso; } }
+function fmtTime(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString('en-US',{timeZone:tz(),weekday:'short',hour:'numeric',minute:'2-digit'}); }catch{ return iso; } }
+function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function stars(n){ return n ? '<span class="stars">'+'★'.repeat(n)+'</span>' : ''; }
+function hashCode(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h; }
+function initials(name){ const p=String(name||'').trim().split(/\s+/).filter(Boolean); if(!p.length) return '?'; if(p.length===1) return p[0].slice(0,2).toUpperCase(); return (p[0][0]+p[p.length-1][0]).toUpperCase(); }
+function techColor(t){ return (t&&t.color)||PALETTE[hashCode(String((t&&t.id)||''))%PALETTE.length]; }
+function avatar(t, sm){ return t ? `<span class="av${sm?' sm':''}" style="background:${techColor(t)}" title="${esc(t.name)}">${esc(initials(t.name))}</span>` : `<span class="av${sm?' sm':''} av-un">?</span>`; }
+
+// ── Auth ─────────────────────────────────────────────────────────────────
+document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('loginErr'); errEl.textContent='';
+  try {
+    const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
+    token=d.token; role=d.role; businesses=d.businesses;
+    localStorage.setItem('ha_admin_token',token);
+    localStorage.setItem('ha_admin_role',role);
+    localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
+    enterApp();
+  } catch(err){ errEl.textContent = err.message; }
+});
+function logout(){
+  token=''; role=''; businesses=[]; current=null;
+  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_biz');
+  if(pollTimer) clearInterval(pollTimer);
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+}
+document.getElementById('logout').addEventListener('click', logout);
+
+function enterApp(){
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('who').textContent = role==='owner' ? 'Owner' : 'Secretary';
+  current = businesses[0] || null;
+  anchorDate = todayStr();
+  applyIconTheme();
+  renderSwitcher();
+  navTo('schedule');
+  refreshEstimateBadge();
+}
+
+function renderSwitcher(){
+  const el = document.getElementById('switcher');
+  if(businesses.length<2){ el.innerHTML=''; return; }
+  el.innerHTML = businesses.map(b =>
+    `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
+  el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
+    current = businesses.find(b=>b.slug===btn.dataset.slug);
+    availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge();
+  }));
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
+  b.addEventListener('click',()=>{ navTo(b.dataset.nav); closeSidebar(); }));
+
+function navTo(s){
+  section=s;
+  document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
+  const sched = s==='schedule';
+  document.getElementById('schedSidebar').classList.toggle('hidden',!sched);
+  document.getElementById('modeSeg').classList.toggle('hidden',!sched);
+  document.getElementById('calHead').classList.toggle('hidden',!sched);
+  document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',bookings:'Bookings',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  const view=document.getElementById('view');
+  if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
+  else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+    if(s==='bookings') renderBookings();
+    else if(s==='estimates') renderEstimates();
+    else if(s==='customers') renderCustomers();
+    else if(s==='technicians') renderTechnicians();
+    else if(s==='reviews') renderReviews();
+    else if(s==='gallery') renderGallery();
+  }
+}
+function refreshCurrent(){
+  if(section==='schedule') renderSchedule();
+  else if(section==='bookings') renderBookings();
+  else if(section==='estimates') renderEstimates();
+  else if(section==='customers') renderCustomers();
+  else if(section==='technicians') renderTechnicians();
+  else if(section==='reviews') renderReviews();
+  else if(section==='gallery') renderGallery();
+}
+
+// mobile sidebar
+document.getElementById('ham').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); }
+
+// ── Calendar: mode + view + nav ──────────────────────────────────────────
+document.getElementById('modeSeg').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  calMode=b.dataset.mode;
+  document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.toggle('on',x.dataset.mode===calMode));
+  renderCalBody();
+}));
+document.getElementById('viewToggle').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  calView=b.dataset.view;
+  document.querySelectorAll('#viewToggle button').forEach(x=>x.classList.toggle('on',x.dataset.view===calView));
+  renderCalBody();
+}));
+document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); });
+document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); });
+document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); });
+
+function rangeBounds(dates){
+  return [ addDays(dates[0],-1)+'T00:00:00.000Z', addDays(dates[6],2)+'T00:00:00.000Z' ];
+}
+
+async function renderSchedule(silent){
+  const dates = currentWeekDates();
+  const [from,to] = rangeBounds(dates);
+  const view=document.getElementById('view');
+  if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const d = await api('calendar', { params:{ business: current.slug, from, to } });
+    techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
+    if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
+    renderSidebarFilters();
+    renderCalBody();
+  }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+function renderSidebarFilters(){
+  // Hide territories section for Doms (single-territory business)
+  const terr=document.getElementById('territoriesSection');
+  if(current && current.slug==='doms') { terr.style.display='none'; }
+  else {
+    terr.style.display='';
+    const tl=document.getElementById('territoryList');
+    tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">${ic('location')}</span> All Territories</button>`+
+      areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">${ic('location')}</span> ${esc(a.name)}</button>`).join('');
+    tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
+  }
+
+  const al=document.getElementById('assignList');
+  al.innerHTML=`<button class="sl ${filterTech==='all'?'on':''}" data-tech="all"><span class="ic">${ic('customers')}</span> All Jobs</button>
+    <button class="sl ${filterTech==='unassigned'?'on':''}" data-tech="unassigned"><span class="ic">${ic('ban')}</span> Unassigned</button>`+
+    techCache.map(t=>`<button class="sl ${filterTech===t.id?'on':''}" data-tech="${t.id}">${avatar(t,true)} ${esc(t.name)}</button>`).join('');
+  al.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterTech=b.dataset.tech; renderSidebarFilters(); renderCalBody(); }));
+}
+
+function passFilters(b){
+  if(filterArea && b.service_area_id!==filterArea) return false;
+  if(filterTech==='unassigned'){ if(b.technician_id) return false; }
+  else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
+  return true;
+}
+
+function updateRangeLabel(dates){
+  const o={timeZone:'UTC',month:'short',day:'numeric'};
+  if(calView==='day'){
+    const d=new Date(anchorDate+'T12:00:00Z');
+    document.getElementById('rangeLabel').textContent=d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'});
+  } else {
+    const a=new Date(dates[0]+'T12:00:00Z'), b=new Date(dates[6]+'T12:00:00Z');
+    const yr=b.toLocaleDateString('en-US',{timeZone:'UTC',year:'numeric'});
+    document.getElementById('rangeLabel').textContent=`${a.toLocaleDateString('en-US',o)} - ${b.toLocaleDateString('en-US',o)}, ${yr}`;
+  }
+}
+
+function renderCalBody(){
+  if(section!=='schedule') return;
+  const dates=currentWeekDates();
+  updateRangeLabel(dates);
+  if(calMode==='availability') renderAvailabilityGrid(dates);
+  else renderJobsView(dates);
+}
+
+// ── Jobs view ──────────────────────────────────────────────────────────────
+function evtCard(b){
+  return `<div class="evt s-${b.status}" data-id="${b.id}">
+    <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
+  </div>`;
+}
+function dayColumn(ds){
+  const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b))
+                         .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  const h=colHeadLabel(ds);
+  const isToday=ds===todayStr();
+  return `<div class="daycol">
+    <div class="dayhead ${isToday?'today':''}">${isToday?'<span class="todot"></span>':''}${h.dow}, ${h.md}</div>
+    <div class="daycount">${items.length} JOB${items.length===1?'':'S'}</div>
+    <div class="daybody">${items.map(evtCard).join('')||'<div class="dayempty"></div>'}</div>
+  </div>`;
+}
+function renderJobsView(dates){
+  const view=document.getElementById('view');
+  if(calView==='list'){ renderListView(dates); return; }
+  if(calView==='day'){ view.innerHTML=`<div class="week one">${dayColumn(anchorDate)}</div>`; }
+  else { view.innerHTML=`<div class="week">${dates.map(dayColumn).join('')}</div>`; }
+  document.querySelectorAll('.evt[data-id]').forEach(el=>el.addEventListener('click',()=>{
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+  }));
+}
+function renderListView(dates){
+  const view=document.getElementById('view');
+  let html='<div class="wrap">';
+  let any=false;
+  dates.forEach(ds=>{
+    const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b)).sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+    if(!items.length) return; any=true;
+    const h=colHeadLabel(ds);
+    html+=`<div class="section-title">${h.dow}, ${h.md} · ${items.length} job${items.length===1?'':'s'}</div>`;
+    html+=items.map(b=>`<div class="job evt-row" data-id="${b.id}"><div class="row">
+        <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
+        <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
+        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div></div>`).join('');
+  });
+  html+='</div>';
+  view.innerHTML = any ? html : '<div class="empty">No jobs this week.</div>';
+  document.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+  }));
+}
+
+// ── Availability view (all techs, who's free per day/slot) ─────────────────
+async function renderAvailabilityGrid(dates){
+  const view=document.getElementById('view');
+  if(!availData || availData.slug!==current.slug){
+    view.innerHTML='<div class="empty">Loading…</div>';
+    try{
+      const d=await api('availability_overview',{ params:{ business: current.slug }});
+      availData={ slug:current.slug, slots:d.slots, days:d.days, technicians:d.technicians||[],
+        recurringSet:new Set((d.availability||[]).map(a=>`${a.technician_id}:${a.day_of_week}:${a.slot_key}`)),
+        exMap:Object.fromEntries((d.exceptions||[]).map(e=>[`${e.technician_id}:${e.date}:${e.slot_key}`, e.is_available])) };
+    }catch(err){ view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
+  }
+  const availTechFor=(ds,slot)=>{
+    const dow=dowOf(ds);
+    return availData.technicians.filter(t=>{
+      let on=availData.recurringSet.has(`${t.id}:${dow}:${slot}`);
+      const k=`${t.id}:${ds}:${slot}`;
+      if(k in availData.exMap) on=availData.exMap[k];
+      return on;
+    });
+  };
+  let html='<div class="availgrid"><div class="agcell aghead agcorner"></div>';
+  dates.forEach(ds=>{ const h=colHeadLabel(ds); html+=`<div class="agcell aghead ${ds===todayStr()?'today':''}">${h.dow}<br><span class="agmd">${h.md}</span></div>`; });
+  availData.slots.forEach(s=>{
+    html+=`<div class="agcell agslot">${esc(s.label)}</div>`;
+    dates.forEach(ds=>{
+      const techs=availTechFor(ds,s.key);
+      html+=`<div class="agcell">${techs.map(t=>avatar(t,true)).join('')||'<span class="agnone">—</span>'}</div>`;
+    });
+  });
+  html+='</div>';
+  view.innerHTML=html;
+}
+
+// ── Booking detail modal ───────────────────────────────────────────────────
+function openBooking(b){
+  const m=document.getElementById('bkModal');
+  const canAssign=!['cancelled','completed','no_show'].includes(b.status);
+  const techOpts=['<option value="">— Unassigned —</option>',
+    ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>`;
+  document.getElementById('bkBody').innerHTML=`
+    <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
+    <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
+    <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
+    ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
+    ${b.customer?.phone?`<div class="bk-row"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
+    ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
+    ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
+    <div class="bk-actions">
+      ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
+      ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
+      ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
+      ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
+    </div>
+    <div class="bk-actions" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
+      ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
+      ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
+      ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
+      ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
+    </div>
+    <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
+      <input type="file" id="bkPhotoInput" accept="image/*" multiple style="display:none">
+      <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">${ic('camera')} Add photo</button>
+    </div>
+    <div class="bk-sec"><div class="bk-sec-h">Internal notes</div><div id="bkNotes"><div class="sub" style="font-size:13px;">Loading…</div></div>
+      <textarea id="bkNoteInput" class="bk-note-input" placeholder="Add an internal note (never shown to the customer)…"></textarea>
+      <button class="btn ghost sm" id="bkAddNote" style="margin-top:8px;">Add note</button>
+    </div>`;
+  m.classList.remove('hidden');
+  const close=()=>m.classList.add('hidden');
+  document.getElementById('bkClose').onclick=close;
+  m.onclick=e=>{ if(e.target===m) close(); };
+  const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
+  const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
+  const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
+  const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
+  const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? This permanently deletes it.')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
+  const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
+  const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
+  const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
+  // Photos + notes (loaded async; they don't refresh the whole list on change).
+  loadBookingPhotos(b.id);
+  loadBookingNotes(b.id);
+  document.getElementById('bkAddPhoto').onclick=()=>document.getElementById('bkPhotoInput').click();
+  document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
+  document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
+}
+
+// ── Booking photos (in the detail modal) ────────────────────────────────────
+async function loadBookingPhotos(id){
+  const el=document.getElementById('bkPhotos'); if(!el) return;
+  try{
+    const d=await api('booking_photos',{ params:{ business:current.slug, id }});
+    const photos=d.photos||[];
+    el.innerHTML = photos.length
+      ? `<div class="photogrid">${photos.map(p=>`<div class="thumb"><img src="${esc(p.url)}" data-full="${esc(p.url)}" alt="photo"><button class="thumbdel" data-pid="${p.id}" title="Delete">×</button></div>`).join('')}</div>`
+      : '<div class="sub" style="font-size:13px;">No photos yet.</div>';
+    el.querySelectorAll('img[data-full]').forEach(im=>im.onclick=()=>openLightbox(im.dataset.full));
+    el.querySelectorAll('.thumbdel').forEach(btn=>btn.onclick=async()=>{
+      if(!confirm('Delete this photo?')) return; btn.disabled=true;
+      try{ await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id, photo_id:btn.dataset.pid }}); toast('Photo deleted'); loadBookingPhotos(id); }
+      catch(e){ toast(e.message); btn.disabled=false; }
+    });
+  }catch(e){ el.innerHTML=`<div class="sub" style="font-size:13px;">${esc(e.message)}</div>`; }
+}
+async function uploadBookingPhotos(id, files){
+  const list=[...(files||[])].filter(f=>f.type.startsWith('image/'));
+  if(!list.length) return;
+  toast(`Uploading ${list.length} photo${list.length===1?'':'s'}…`);
+  let ok=0;
+  for(const f of list){
+    try{ const dataUrl=await compressImage(f); await api('booking_photo_add',{ method:'POST', body:{ business:current.slug, id, image:dataUrl }}); ok++; }
+    catch(e){ toast(e.message); }
+  }
+  if(ok) toast(`${ok} photo${ok===1?'':'s'} added ✓`);
+  loadBookingPhotos(id);
+}
+function compressImage(file,maxDim=1600,quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('Could not read that image.')); img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.')); reader.readAsDataURL(file);
+  });
+}
+
+// ── Booking notes (in the detail modal) ─────────────────────────────────────
+async function loadBookingNotes(id){
+  const el=document.getElementById('bkNotes'); if(!el) return;
+  try{
+    const d=await api('booking_notes',{ params:{ business:current.slug, id }});
+    const notes=d.notes||[];
+    el.innerHTML = notes.length
+      ? notes.map(n=>`<div class="note"><div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')}</span><span class="note-t">${esc(fmtDateTime(n.created_at))}</span></div><div class="note-b">${esc(n.body)}</div><button class="note-del" data-nid="${n.id}">Delete</button></div>`).join('')
+      : '<div class="sub" style="font-size:13px;">No notes yet.</div>';
+    el.querySelectorAll('.note-del').forEach(btn=>btn.onclick=async()=>{
+      if(!confirm('Permanently delete this note?')) return; btn.disabled=true;
+      try{ await api('booking_note_delete',{ method:'POST', body:{ business:current.slug, id, note_id:btn.dataset.nid }}); toast('Note deleted'); loadBookingNotes(id); }
+      catch(e){ toast(e.message); btn.disabled=false; }
+    });
+  }catch(e){ el.innerHTML=`<div class="sub" style="font-size:13px;">${esc(e.message)}</div>`; }
+}
+async function addBookingNote(id){
+  const ta=document.getElementById('bkNoteInput'); const text=(ta.value||'').trim();
+  if(!text){ toast('Type a note first'); return; }
+  const btn=document.getElementById('bkAddNote'); btn.disabled=true;
+  try{ await api('booking_note_add',{ method:'POST', body:{ business:current.slug, id, body:text }}); ta.value=''; toast('Note added ✓'); loadBookingNotes(id); }
+  catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+function openLightbox(url){ document.getElementById('lightboxImg').src=url; document.getElementById('lightbox').classList.remove('hidden'); }
+
+async function updateBooking(payload){
+  try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
+  catch(err){ toast(err.message); }
+}
+async function paymentAction(id, action, amount){
+  try{
+    await api('booking_payment',{ method:'POST', body:{ business:current.slug, id, action, amount }});
+    toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
+    refreshCurrent();
+  }catch(err){ toast(err.message); }
+}
+
+// ── Bookings list ─────────────────────────────────────────────────────────
+async function renderBookings(){
+  const view=document.getElementById('view');
+  view.innerHTML = `<div class="wrap">
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+      <select class="filter" id="rangeF">
+        <option value="today">Today</option><option value="week">This Week</option>
+        <option value="upcoming" selected>Upcoming</option><option value="all">All</option>
+      </select>
+      <select class="filter" id="statusF">
+        <option value="">All statuses</option>
+        <option>pending</option><option>confirmed</option><option>assigned</option>
+        <option>on_the_way</option><option>arrived</option><option>in_progress</option>
+        <option>completed</option><option>cancelled</option><option>no_show</option>
+      </select>
+    </div><div id="blist"><div class="empty">Loading…</div></div></div>`;
+  const load=async()=>{
+    const list=document.getElementById('blist');
+    try{
+      const d=await api('bookings',{ params:{ business:current.slug, range:document.getElementById('rangeF').value, status:document.getElementById('statusF').value }});
+      list.innerHTML = d.bookings.length ? d.bookings.map(b=>`
+        <div class="job evt-row" data-id="${b.id}"><div class="row">
+          <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
+          <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} · ${esc(b.technician?.name||'Unassigned')}<br>${esc(b.address||'')}</div></div>
+          <div class="time">${fmtTime(b.scheduled_at)}<br>${money(b.price)}</div>
+        </div></div>`).join('') : '<div class="empty">No bookings.</div>';
+      list.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
+        const b=d.bookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+      }));
+    }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+  };
+  document.getElementById('rangeF').addEventListener('change',load);
+  document.getElementById('statusF').addEventListener('change',load);
+  load();
+}
+
+// ── Customers ──────────────────────────────────────────────────────────────
+async function renderCustomers(){
+  const view=document.getElementById('view');
+  view.innerHTML = `<div class="wrap"><input class="search" id="custSearch" placeholder="Search name, phone, email, address…">
+    <div id="clist"><div class="empty">Loading…</div></div></div>`;
+  const load=async(q)=>{
+    const list=document.getElementById('clist');
+    try{
+      const d=await api('customers',{ params:{ business:current.slug, q }});
+      custCache={}; d.customers.forEach(c=>custCache[c.id]=c);
+      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th><th></th></tr></thead><tbody>${
+        d.customers.map(c=>`<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td style="text-align:right;"><button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`).join('')
+      }</tbody></table>` : '<div class="empty">No customers found.</div>';
+      list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openCustomerEdit(b.dataset.edit); }));
+      list.querySelectorAll('tr[data-cid]').forEach(r=>r.addEventListener('click',()=>openCustomerEdit(r.dataset.cid)));
+    }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+  };
+  custReload=()=>load(document.getElementById('custSearch')?.value||'');
+  let t; document.getElementById('custSearch').addEventListener('input',e=>{ clearTimeout(t); t=setTimeout(()=>load(e.target.value),300); });
+  load('');
+}
+
+let custCache={}, custReload=null;
+function openCustomerEdit(id){
+  const c=custCache[id]; if(!c) return;
+  document.getElementById('cuId').value=c.id;
+  document.getElementById('cuName').value=c.name||'';
+  document.getElementById('cuPhone').value=c.phone||'';
+  document.getElementById('cuEmail').value=c.email||'';
+  document.getElementById('cuAddr').value=c.address_line1||'';
+  document.getElementById('cuCity').value=c.city||'';
+  document.getElementById('cuState').value=c.state||'';
+  document.getElementById('cuZip').value=c.postal_code||'';
+  document.getElementById('cuErr').textContent='';
+  document.getElementById('custModal').classList.remove('hidden');
+}
+document.getElementById('cuCancel').addEventListener('click',()=>document.getElementById('custModal').classList.add('hidden'));
+document.getElementById('custModal').addEventListener('click',e=>{ if(e.target.id==='custModal') document.getElementById('custModal').classList.add('hidden'); });
+document.getElementById('custForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const name=document.getElementById('cuName').value.trim();
+  if(!name){ document.getElementById('cuErr').textContent='Name is required'; return; }
+  try{
+    await api('customer_update',{ method:'POST', body:{
+      business:current.slug, id:document.getElementById('cuId').value,
+      name, phone:document.getElementById('cuPhone').value, email:document.getElementById('cuEmail').value,
+      address_line1:document.getElementById('cuAddr').value, city:document.getElementById('cuCity').value,
+      state:document.getElementById('cuState').value, postal_code:document.getElementById('cuZip').value,
+    }});
+    document.getElementById('custModal').classList.add('hidden');
+    toast('Customer saved');
+    if(custReload) custReload();
+  }catch(err){ document.getElementById('cuErr').textContent=err.message; }
+});
+
+// ── Photo gallery (every job photo for this business) ───────────────────────
+async function renderGallery(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('photo_gallery',{ params:{ business:current.slug, limit:120 }});
+    const photos=d.photos||[];
+    if(!photos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
+    view.innerHTML=`<div class="wrap"><div class="gal-head">${photos.length} photo${photos.length===1?'':'s'}</div>
+      <div class="gallery">${photos.map(p=>`
+        <figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}">
+          <img src="${esc(p.url)}" loading="lazy" alt="job photo">
+          <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br><span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span></figcaption>
+        </figure>`).join('')}</div></div>`;
+    view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
+  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+
+// ── Technicians ────────────────────────────────────────────────────────────
+async function renderTechnicians(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('technicians',{ params:{ business:current.slug }});
+    document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
+      <div class="job" data-id="${t.id}">
+        <div class="row">
+          <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}</div>
+            <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div></div>
+          <select class="assign tstatus"><option value="available" ${t.status==='available'?'selected':''}>available</option>
+            <option value="on_job" ${t.status==='on_job'?'selected':''}>on job</option>
+            <option value="off" ${t.status==='off'?'selected':''}>off</option></select>
+        </div>
+        <div class="actions">
+          <button class="btn ghost sm" data-act="availability">Availability</button>
+          <button class="btn ghost sm" data-act="phone">Set phone</button>
+          <button class="btn ghost sm" data-act="pin">Set PIN</button>
+          <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
+        </div>
+      </div>`).join('') || '<div class="empty">No technicians.</div>';
+
+    document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
+      const id=card.dataset.id;
+      card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
+      card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
+        if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim()); }
+        if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }
+        if(btn.dataset.act==='pin'){ const p=prompt('New 4-digit PIN:'); if(p){ if(!/^\d{4}$/.test(p)) return toast('PIN must be 4 digits'); saveTech({ id, pin:p }); } }
+        if(btn.dataset.act==='toggle'){ saveTech({ id, active: btn.textContent==='Activate' }); }
+      }));
+    });
+  }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+// ── Reviews ─────────────────────────────────────────────────────────────────
+async function renderReviews(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('reviews',{ params:{ business:current.slug }});
+    const reviews=d.reviews||[];
+    const revHtml=reviews.map(r=>`
+      <div class="job">
+        <div class="row">
+          <div style="flex:1;">
+            <div class="name">${'⭐'.repeat(r.rating)}</div>
+            <div class="meta">${esc(r.customer_name)} · ${esc(r.technician_name)} · ${esc(r.service_area)}</div>
+            <div class="meta" style="margin-top:8px;font-size:13px;line-height:1.5;">${esc(r.feedback)||'<em style="color:var(--mute);">No feedback provided</em>'}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap;color:var(--mute);font-size:12px;">${new Date(r.reviewed_at).toLocaleDateString()}</div>
+        </div>
+      </div>`).join('');
+    document.getElementById('revWrap').innerHTML=revHtml||'<div class="empty">No reviews yet.</div>';
+  }catch(err){ const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+// ── Estimates (customer quote requests) ─────────────────────────────────────
+const EST_STATUS = { new:'New', contacted:'Contacted', scheduled:'Scheduled', closed:'Closed' };
+let estFilter = 'all';
+function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
+
+async function renderEstimates(){
+  const view=document.getElementById('view');
+  const filters=Object.entries({all:'All',...EST_STATUS}).map(([k,v])=>
+    `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
+  view.innerHTML=`<div class="wrap">
+    <div class="est-filters" id="estFilters">${filters}</div>
+    <div id="estWrap"><div class="empty">Loading…</div></div>
+  </div>`;
+  document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
+  try{
+    const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
+    const items=d.estimates||[];
+    refreshEstimateBadge();
+    if(!items.length){ document.getElementById('estWrap').innerHTML='<div class="empty">No estimate requests yet.</div>'; return; }
+    document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
+    // wire controls
+    document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
+      setEstimate(sel.dataset.estStatus,{ status:e.target.value });
+    }));
+    document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
+      if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
+    }));
+    document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
+  }catch(err){ const w=document.getElementById('estWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+function estCard(e){
+  const phone=esc(e.customer_phone||'');
+  const tel=phone?`<a href="tel:${phone}" style="color:var(--accent);text-decoration:none;">${phone}</a>`:'';
+  const email=e.customer_email?` · ${esc(e.customer_email)}`:'';
+  const slots=Array.isArray(e.preferred_slots)?e.preferred_slots:[];
+  const slotChips=slots.length?`<div class="est-slots">${slots.map(s=>
+    `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
+  const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
+  const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''}>${v}</option>`).join('');
+  const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  return `<div class="job est-card" data-status="${esc(e.status)}">
+    <div class="row" style="align-items:flex-start;gap:12px;">
+      <div style="flex:1;min-width:0;">
+        <div class="name">${esc(e.service_label||'Estimate request')}</div>
+        <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}</div>
+        <div class="est-desc">${esc(e.description||'')}</div>
+        ${slotChips}
+      </div>
+      ${photo}
+    </div>
+    <div class="row est-foot">
+      <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+        <select class="est-status-sel" data-est-status="${e.id}">${opts}</select>
+        <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
+      </span>
+    </div>
+  </div>`;
+}
+
+async function setEstimate(id, payload){
+  try{ await api('estimate_update',{ method:'POST', body:{ business:current.slug, id, ...payload }}); toast('Saved'); renderEstimates(); }
+  catch(err){ toast(err.message); }
+}
+
+// Lightweight unread-count badge for the sidebar (status = new).
+async function refreshEstimateBadge(){
+  try{
+    const d=await api('estimates',{ params:{ business:current.slug, status:'new' }});
+    const n=(d.estimates||[]).length;
+    const badge=document.getElementById('estBadge');
+    if(badge){ badge.textContent=n; badge.style.display=n?'inline-block':'none'; }
+  }catch{ /* non-fatal */ }
+}
+
+async function saveTech(payload){
+  try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
+  catch(err){ toast(err.message); }
+}
+
+// ── Technician availability editor (weekly + one-time exceptions) ───────────
+let availTechId=null, availDefs=null, availState=new Set();
+let availExceptions=[], exEditState=new Set();
+document.getElementById('availCloseBtn').addEventListener('click',()=>document.getElementById('availModal').classList.add('hidden'));
+
+async function openAvailability(techId, techName){
+  availTechId=techId;
+  document.getElementById('availTitle').textContent=`Availability — ${techName}`;
+  document.getElementById('availErr').textContent='';
+  const body=document.getElementById('availBody'); body.innerHTML='<div class="empty">Loading…</div>';
+  document.getElementById('availModal').classList.remove('hidden');
+  try{
+    const d=await api('tech_availability',{ params:{ business:current.slug, tech_id:techId }});
+    availDefs={ slots:d.slots, days:d.days };
+    availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
+    availExceptions=d.exceptions||[];
+    const weekly=availDefs.days.map((dn,di)=>`
+      <div class="avail-day"><div class="dl">${esc(dn)}</div><div class="avail-chips">${
+        availDefs.slots.map(s=>`<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`).join('')
+      }</div></div>`).join('');
+    body.innerHTML=`<div id="availWeekly">${weekly}</div>
+      <div style="border-top:1px solid var(--line);margin:16px 0 12px;"></div>
+      <div class="dl" style="margin-bottom:4px;font-weight:700;">One-time changes</div>
+      <div class="sub" style="font-size:12px;margin-bottom:10px;">Give this tech a specific day off (or an extra slot) without changing their weekly schedule.</div>
+      <input type="date" id="exDate" style="width:100%;background:#fff;border:1px solid var(--line);color:var(--ink);padding:9px;border-radius:8px;font-size:14px;">
+      <div id="exEditor" class="hidden" style="margin-top:10px;">
+        <div class="sub" id="exEditorLabel" style="font-size:12px;margin-bottom:6px;"></div>
+        <div class="avail-chips" id="exSlots"></div>
+        <button type="button" class="btn ghost sm" id="exSave" style="margin-top:10px;">Save this date</button>
+      </div>
+      <div id="exList" style="margin-top:12px;"></div>`;
+    body.querySelectorAll('#availWeekly .slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+      const k=ch.dataset.day+':'+ch.dataset.key;
+      if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
+      else { availState.add(k); ch.classList.add('on'); }
+    }));
+    document.getElementById('exDate').addEventListener('change',e=>openExceptionEditor(e.target.value));
+    document.getElementById('exSave').addEventListener('click',saveException);
+    renderExceptionList();
+  }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+function recurringKeysFor(dow){ return availDefs.slots.filter(s=>availState.has(dow+':'+s.key)).map(s=>s.key); }
+function effectiveKeysForDate(dateStr){
+  const dow=new Date(dateStr+'T00:00:00').getDay();
+  const set=new Set(recurringKeysFor(dow));
+  for(const ex of availExceptions){ if(ex.date===dateStr){ ex.is_available?set.add(ex.slot_key):set.delete(ex.slot_key); } }
+  return set;
+}
+function dateLabel(dateStr){
+  try{ return new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }
+  catch{ return dateStr; }
+}
+function openExceptionEditor(dateStr){
+  if(!dateStr){ document.getElementById('exEditor').classList.add('hidden'); return; }
+  exEditState=effectiveKeysForDate(dateStr);
+  document.getElementById('exEditorLabel').textContent=`Availability for ${dateLabel(dateStr)}:`;
+  const box=document.getElementById('exSlots');
+  box.innerHTML=availDefs.slots.map(s=>`<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`).join('');
+  box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.key;
+    if(exEditState.has(k)){ exEditState.delete(k); ch.classList.remove('on'); }
+    else { exEditState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('exEditor').classList.remove('hidden');
+}
+async function saveException(){
+  const date=document.getElementById('exDate').value;
+  if(!date){ toast('Pick a date first'); return; }
+  const btn=document.getElementById('exSave'); btn.disabled=true;
+  try{
+    await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:[...exEditState]}});
+    toast('Saved for '+dateLabel(date)); availData=null;
+    const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+    renderExceptionList();
+  }catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+function renderExceptionList(){
+  const el=document.getElementById('exList'); if(!el) return;
+  const labelOf=k=>{ const s=availDefs.slots.find(x=>x.key===k); return s?s.label:k; };
+  const byDate={};
+  for(const ex of availExceptions){ (byDate[ex.date]=byDate[ex.date]||[]).push(ex); }
+  const dates=Object.keys(byDate).sort();
+  if(!dates.length){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="sub" style="font-size:12px;margin-bottom:6px;">Upcoming changes:</div>`+
+    dates.map(date=>{
+      const offs=byDate[date].filter(e=>!e.is_available).map(e=>labelOf(e.slot_key));
+      const ons =byDate[date].filter(e=> e.is_available).map(e=>labelOf(e.slot_key));
+      const parts=[];
+      if(offs.length) parts.push(`Off: ${offs.join(', ')}`);
+      if(ons.length)  parts.push(`Working: ${ons.join(', ')}`);
+      return `<div style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+        <div style="font-weight:700;font-size:13px;">${esc(dateLabel(date))}</div>
+        <div class="sub" style="font-size:12px;margin:2px 0 7px;">${esc(parts.join(' · '))}</div>
+        <button type="button" class="btn ghost sm" data-revert="${esc(date)}">Revert to normal</button>
+      </div>`;
+    }).join('');
+  el.querySelectorAll('[data-revert]').forEach(b=>b.addEventListener('click',async()=>{
+    const date=b.dataset.revert; b.disabled=true;
+    const dow=new Date(date+'T00:00:00').getDay();
+    try{
+      await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:recurringKeysFor(dow)}});
+      toast('Reverted '+dateLabel(date)); availData=null;
+      const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+      if(document.getElementById('exDate').value===date) openExceptionEditor(date);
+      renderExceptionList();
+    }catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+document.getElementById('availSaveBtn').addEventListener('click',async()=>{
+  const btn=document.getElementById('availSaveBtn'); btn.disabled=true;
+  document.getElementById('availErr').textContent='';
+  const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
+  try{
+    await api('tech_availability_set',{ method:'POST', body:{ business:current.slug, tech_id:availTechId, slots }});
+    toast('Availability saved'); availData=null; document.getElementById('availModal').classList.add('hidden');
+  }catch(err){ document.getElementById('availErr').textContent=err.message; }
+  btn.disabled=false;
+});
+
+// ── New booking modal ──────────────────────────────────────────────────────
+document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
+document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
+async function openNewBooking(){
+  if(!current) return;
+  closeSidebar();
+  const modal=document.getElementById('modal');
+  document.getElementById('nbErr').textContent='';
+  document.getElementById('nbForm').reset();
+  resetNbSteps();
+  nbSelectedSlot=null;
+  document.getElementById('nbSlots').innerHTML='';
+  document.getElementById('nbSlotsWrap').style.display='none';
+  document.getElementById('nbService').style.display='none';
+  document.getElementById('nbTravelFee').value='';
+  document.getElementById('nbTotalDisplay').textContent='';
+  document.getElementById('nbPaymentMethod').value='';
+  document.getElementById('nbCardWrap').style.display='none';
+  document.getElementById('nbDate').value='';
+  document.getElementById('nbCalWrap').style.display='none';
+  nbCalMonth=new Date(); nbCalMonth.setDate(1);
+  try{
+    const [svc, tech] = await Promise.all([
+      api('services',{ params:{ business:current.slug }}),
+      techCache.length ? Promise.resolve({technicians:techCache}) : api('technicians',{ params:{ business:current.slug }}),
+    ]);
+    nbServices = svc.services || [];
+    nbSelectedSlot = null;
+    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort();
+    document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
+      cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    renderNbServices('');
+    document.getElementById('nbTech').innerHTML='<option value="any">Any Technician</option>'+
+      tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    loadNbCalendar();
+  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+  modal.classList.remove('hidden');
+}
+let nbServices=[], nbSelectedSlot=null;
+function renderNbServices(category){
+  const svcDiv=document.getElementById('nbService');
+  if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  const list = nbServices.filter(s=>s.category===category);
+  svcDiv.style.display='';
+  svcDiv.innerHTML='<option value="">— Task —</option>'+
+    list.map(s=>{ const showPrice=Number(s.base_price)>0; return `<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)}${showPrice?` ($${s.base_price})`:''}</option>`; }).join('');
+}
+document.getElementById('nbCategory').addEventListener('change',async e=>{
+  const cat=e.target.value;
+  renderNbServices(cat);
+  resetNbSteps();
+  nbSelectedSlot=null;
+  document.getElementById('nbDate').value='';
+  document.getElementById('nbSlotsWrap').style.display='none';
+  document.getElementById('nbTravelFee').value='';
+  updateNbTotal();
+
+  if(cat==='TV Mounting'){
+    const tvMountService = nbServices.find(s=>s.category===cat);
+    if(tvMountService){
+      document.getElementById('nbService').value=tvMountService.id;
+      try{
+        const r=await api('service_options',{ params:{ business:current.slug, service_id:tvMountService.id }});
+        nbOptionGroups=r.groups||[];
+        renderNbSteps();
+      }catch(err){}
+    }
+  }
+});
+
+// ── Calendar date + slot picker ─────────────────────────────────────────────
+// Only dates with an available technician are clickable; only that date's
+// available slots are shown.
+let nbCalMonth=new Date(); nbCalMonth.setDate(1);
+let nbAvailDates=new Set();
+function nbMonthKey(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function nbTodayStr(){ return new Date().toISOString().split('T')[0]; }
+
+async function loadNbCalendar(){
+  const wrap=document.getElementById('nbCalWrap'); wrap.style.display='';
+  const techId=document.getElementById('nbTech').value||'any';
+  document.getElementById('nbCalTitle').textContent=nbCalMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  // Disable going before the current month.
+  const cur=new Date(); cur.setDate(1);
+  document.getElementById('nbCalPrev').disabled=(nbCalMonth.getFullYear()===cur.getFullYear()&&nbCalMonth.getMonth()===cur.getMonth());
+  document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
+  try{
+    const r=await api('available_dates',{ params:{ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:techId }});
+    nbAvailDates=new Set(r.dates||[]);
+  }catch(err){ nbAvailDates=new Set(); }
+  renderNbCalendar();
+}
+function renderNbCalendar(){
+  const grid=document.getElementById('nbCalGrid');
+  const y=nbCalMonth.getFullYear(), m=nbCalMonth.getMonth();
+  const firstDow=new Date(y,m,1).getDay();
+  const days=new Date(y,m+1,0).getDate();
+  const selected=document.getElementById('nbDate').value;
+  let html='';
+  for(let i=0;i<firstDow;i++) html+='<div class="nb-cal-day empty"></div>';
+  for(let d=1;d<=days;d++){
+    const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const avail=nbAvailDates.has(ds);
+    const cls=avail?(ds===selected?'avail sel':'avail'):'off';
+    html+=`<div class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:''}>${d}</div>`;
+  }
+  grid.innerHTML=html;
+}
+document.getElementById('nbCalPrev').addEventListener('click',()=>{ nbCalMonth.setMonth(nbCalMonth.getMonth()-1); loadNbCalendar(); });
+document.getElementById('nbCalNext').addEventListener('click',()=>{ nbCalMonth.setMonth(nbCalMonth.getMonth()+1); loadNbCalendar(); });
+document.getElementById('nbCalGrid').addEventListener('click',async e=>{
+  const cell=e.target.closest('.nb-cal-day.avail'); if(!cell) return;
+  const date=cell.dataset.date;
+  document.getElementById('nbDate').value=date;
+  renderNbCalendar();
+  await loadNbSlots(date);
+});
+async function loadNbSlots(date){
+  nbSelectedSlot=null;
+  if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
+  const techId=document.getElementById('nbTech').value;
+  try{
+    const r=await api('available_slots',{ params:{ business:current.slug, date, technician_id:techId||'any' }});
+    if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
+    else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
+    document.getElementById('nbSlotsWrap').style.display='';
+    updateNbTotal();
+  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+}
+document.getElementById('nbTech').addEventListener('change',()=>{
+  // Tech changed — recompute the calendar and clear any prior date/slot pick.
+  document.getElementById('nbDate').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbSlotsWrap').style.display='none';
+  loadNbCalendar();
+});
+document.getElementById('nbTravelFee').addEventListener('change',updateNbTotal);
+document.getElementById('nbSlots').addEventListener('click',e=>{
+  const btn=e.target.closest('.nb-slot'); if(!btn) return;
+  [...document.getElementById('nbSlots').querySelectorAll('.nb-slot')].forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  nbSelectedSlot={key:btn.dataset.key,label:btn.dataset.label};
+  updateNbTotal();
+});
+
+// ── Option-step engine (TV Mounting walk-through) ───────────────────────────
+// Groups where the user can pick MULTIPLE items (quantity steppers). Everything
+// else (lifting, dismount) is single-choice.
+const NB_QTY_KEYS = new Set(['size','bracket','fireplace','wires','surface','extras']);
+// Groups capped by the number of TVs: one size / bracket / fireplace / wire /
+// surface choice per TV. Picking 3 TVs allows up to 3 of each of these.
+const NB_TV_BOUND = new Set(['size','bracket','fireplace','wires','surface']);
+let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
+// TV Type — tracked separately with quantities for 'regular' and 'frame' TVs.
+// Frame/Gallery TVs carry a flat surcharge (covers the in-box bracket install).
+const FRAME_TV_PRICE = 30;
+let nbFrameTvQty={ regular: 0, frame: 0 };
+// Handyman labor — billed by the hour at a flat rate (no TV option groups).
+const HANDYMAN_HOURLY = 85;
+let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
+function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
+function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
+function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
+function nbTotalTvs(){
+  // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
+  // of truth for how many TVs the job covers. Every per-TV question below
+  // (size, bracket, fireplace, wires, surface) is capped to this number.
+  return nbFrameTvQty.regular + nbFrameTvQty.frame;
+}
+function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
+// Trim TV-bound groups down when the TV count drops below what's selected.
+function nbClampTvBound(){
+  const cap=nbTotalTvs();
+  nbOptionGroups.forEach(g=>{
+    if(!NB_TV_BOUND.has(g.key) || !nbQty[g.id]) return;
+    while(nbGroupCount(g.id)>cap){
+      const oid=Object.keys(nbQty[g.id]).find(k=>nbQty[g.id][k]>0); if(!oid) break;
+      nbQty[g.id][oid]--; if(nbQty[g.id][oid]<=0) delete nbQty[g.id][oid];
+    }
+  });
+}
+function nbSelectedSizeTiers(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); const tiers=new Set(); if(!g||!nbQty[g.id]) return tiers;
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add((o.metadata&&o.metadata.bracket_tier)||'standard'); } });
+  return tiers;
+}
+// Largest inch value mentioned in a size label (e.g. "70-84 inch" -> 84).
+function nbSizeMaxInches(label){
+  const nums=(label||'').match(/\d+/g); if(!nums) return 0;
+  return Math.max(...nums.map(Number));
+}
+// Lifting help only matters for TVs 70" and up.
+function nbShowLifting(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); if(!g||!nbQty[g.id]) return false;
+  return Object.entries(nbQty[g.id]).some(([oid,ct])=>{
+    if(ct<=0) return false; const o=g.options.find(x=>x.id===oid);
+    return o && nbSizeMaxInches(o.label)>=70;
+  });
+}
+function nbVisibleOptions(g){
+  if(g.key!=='bracket') return g.options;
+  const tiers=nbSelectedSizeTiers();
+  return g.options.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||tiers.has(fs); });
+}
+function nbPruneBrackets(){
+  const bg=nbOptionGroups.find(g=>g.key==='bracket'); if(!bg||!nbQty[bg.id]) return;
+  const visible=new Set(nbVisibleOptions(bg).map(o=>o.id));
+  Object.keys(nbQty[bg.id]).forEach(oid=>{ if(!visible.has(oid)) delete nbQty[bg.id][oid]; });
+}
+function renderNbSteps(){
+  const wrap=document.getElementById('nbSteps');
+  // Handyman labor — a single hours stepper at $85/hour.
+  if(nbHandymanActive){
+    const hrs=nbHandymanHours, lineTotal=hrs*HANDYMAN_HOURLY;
+    wrap.innerHTML=`<div class="nb-step">`+
+      `<div class="nb-step-t">Handyman Labor — ${esc(nbHandymanLabel)}</div>`+
+      `<div class="nb-hint">Billed at $${HANDYMAN_HOURLY} per hour.</div>`+
+      `<div class="nb-opts"><div class="nb-optq${hrs>0?' on':''}">`+
+        `<span class="nb-optlabel">Hours of labor</span>`+
+        `<span class="nb-price">$${HANDYMAN_HOURLY}/hr</span>`+
+        `<span class="nb-stepper">`+
+          `<button type="button" class="nb-hm-btn" data-d="-1">−</button>`+
+          `<span class="nb-qty">${hrs}</span>`+
+          `<button type="button" class="nb-hm-btn" data-d="1">+</button>`+
+        `</span></div></div>`+
+      `<div class="nb-hint" style="margin-top:8px;font-weight:700;color:var(--ink);">${hrs} hour${hrs===1?'':'s'} × $${HANDYMAN_HOURLY} = $${lineTotal}</div>`+
+    `</div>`;
+    updateNbTotal();
+    return;
+  }
+  if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
+  let html='';
+  // TV Type — first question, only for TV-mounting services (those with a
+  // size/bracket group). Frame/Gallery use the in-box bracket.
+  const isTvService=nbOptionGroups.some(g=>g.key==='bracket'||g.key==='size');
+  if(isTvService){
+    const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
+    html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
+      `<div class="nb-hint">Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</div>`+
+      `<div class="nb-opts">`+
+        `<div class="nb-optq${regCt>0?' on':''}">`+
+          `<span class="nb-optlabel">Customer has a regular TV</span>`+
+          `<span class="nb-price">$0</span>`+
+          `<span class="nb-stepper">`+
+            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
+            `<span class="nb-qty">${regCt}</span>`+
+            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`+
+          `</span></div>`+
+        `<div class="nb-optq${frameCt>0?' on':''}">`+
+          `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
+          `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
+          `<span class="nb-stepper">`+
+            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
+            `<span class="nb-qty">${frameCt}</span>`+
+            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`+
+          `</span></div>`+
+      `</div></div>`;
+  }
+  const tvCount=nbTotalTvs();
+  const showLifting=nbShowLifting();
+  const onlyFrame=nbOnlyFrame();
+  nbOptionGroups.forEach(g=>{
+    // Lifting help is only relevant for TVs 70" and up — hide it otherwise.
+    if(g.key==='lifting'){ if(!showLifting){ if(nbQty[g.id]) delete nbQty[g.id]; return; } }
+    // Frame/Gallery TVs use the in-box bracket — hide the bracket question when
+    // ONLY Frame/Gallery is selected (matches the public widget).
+    if(g.key==='bracket' && onlyFrame){ if(nbQty[g.id]) delete nbQty[g.id]; return; }
+    const qtyMode=NB_QTY_KEYS.has(g.key);
+    const tvBound=NB_TV_BOUND.has(g.key);
+    const gCount=nbGroupCount(g.id);
+    const atCap=tvBound && tvCount>0 && gCount>=tvCount;
+    const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${tvCount} selected</span>` : '';
+    html+=`<div class="nb-step"><div class="nb-step-t">${esc(g.label)}${capLbl}</div>`;
+    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Choose the TV type above first</div></div>`; return; }
+    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
+    html+='<div class="nb-opts">';
+    nbVisibleOptions(g).forEach(o=>{
+      const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
+      if(qtyMode){
+        const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
+        const plusDis=atCap?' disabled':'';
+        html+=`<div class="nb-optq${ct>0?' on':''}">`+
+              `<span class="nb-optlabel">${esc(o.label)}</span>`+
+              `<span class="nb-price">${priceLbl}</span>`+
+              `<span class="nb-stepper">`+
+                `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
+                `<span class="nb-qty">${ct}</span>`+
+                `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
+              `</span></div>`;
+      } else {
+        const on=nbPickGet(g.id)===o.id;
+        html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
+              `<span>${esc(o.label)}</span><span class="nb-price">${priceLbl}</span></button>`;
+      }
+    });
+    html+='</div></div>';
+  });
+  wrap.innerHTML=html;
+  updateNbTotal();
+}
+document.getElementById('nbSteps').addEventListener('click',e=>{
+  const hmBtn=e.target.closest('.nb-hm-btn');
+  if(hmBtn){ nbHandymanHours=Math.max(0,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
+  const tvQBtn=e.target.closest('.nb-tv-q-btn');
+  const qBtn=e.target.closest('.nb-q-btn');
+  const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
+  if(tvQBtn){
+    const t=tvQBtn.dataset.t, d=Number(tvQBtn.dataset.d);
+    nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
+    nbClampTvBound();
+    renderNbSteps();
+    return;
+  }
+  if(qBtn){
+    if(qBtn.disabled) return;
+    const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
+    const grp=nbOptionGroups.find(g=>g.id===gid);
+    // Cap TV-bound groups at the number of TVs selected.
+    if(d>0 && grp && NB_TV_BOUND.has(grp.key) && nbGroupCount(gid)>=nbTotalTvs()) return;
+    if(!nbQty[gid]) nbQty[gid]={};
+    nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
+    if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
+    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); }
+    renderNbSteps();
+  } else if(pickBtn){
+    const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
+    nbQty[gid] = (nbPickGet(gid)===oid) ? {} : {[oid]:1};
+    renderNbSteps();
+  }
+});
+function nbCollectSelections(){
+  const out=[];
+  // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
+  if(nbHandymanActive){
+    if(nbHandymanHours>0) out.push({option_id:null, label:`Handyman Labor: ${nbHandymanLabel} — ${nbHandymanHours} hour${nbHandymanHours===1?'':'s'}`, price:HANDYMAN_HOURLY, quantity:nbHandymanHours});
+    return out;
+  }
+  // Record the TV type ($0) so it's visible on the job — important for
+  // Frame/Gallery jobs where the bracket question is hidden.
+  if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
+  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
+  nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
+    Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push({option_id:o.id, label:`${g.label}: ${o.label}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct}); } });
+  });
+  return out;
+}
+const TAX_RATE = 0.0825;
+function updateNbTotal(){
+  const selections=nbCollectSelections();
+  const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  const subtotal=optionsTotal+travelFee;
+  const tax=Math.round(subtotal*TAX_RATE*100)/100;
+  const total=subtotal+tax;
+  document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+}
+document.getElementById('nbService').addEventListener('change',async e=>{
+  resetNbSteps();
+  const sid=e.target.value;
+  if(!sid){ updateNbTotal(); return; }
+  // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
+  const svc=nbServices.find(s=>s.id===sid);
+  if(isHandymanService(svc)){
+    nbHandymanActive=true; nbHandymanHours=1; nbHandymanLabel=svc.name; nbOptionGroups=[];
+    renderNbSteps();
+    return;
+  }
+  try{
+    const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
+    nbOptionGroups=r.groups||[];
+    renderNbSteps();
+  }catch(err){ /* no option groups — manual quote */ }
+});
+// ── Payment method + Stripe card entry ──────────────────────────────────────
+const NB_STRIPE_KEY='pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
+let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
+function ensureNbStripe(){
+  return new Promise((resolve,reject)=>{
+    if(nbStripeCard){ resolve(); return; }
+    const init=()=>{
+      try{
+        nbStripe=window.Stripe(NB_STRIPE_KEY);
+        nbStripeElements=nbStripe.elements();
+        nbStripeCard=nbStripeElements.create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
+        nbStripeCard.mount('#nbStripeCard');
+        resolve();
+      }catch(err){ reject(err); }
+    };
+    if(window.Stripe){ init(); return; }
+    const s=document.createElement('script'); s.src='https://js.stripe.com/v3/';
+    s.onload=init; s.onerror=()=>reject(new Error('Could not load Stripe.')); document.head.appendChild(s);
+  });
+}
+document.getElementById('nbPaymentMethod').addEventListener('change',async e=>{
+  const isCard=e.target.value==='card';
+  document.getElementById('nbCardWrap').style.display=isCard?'':'none';
+  if(isCard){ try{ await ensureNbStripe(); }catch(err){ document.getElementById('nbErr').textContent=err.message; } }
+});
+
+document.getElementById('nbForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=document.getElementById('nbErr'); err.textContent='';
+  const name=document.getElementById('nbName').value.trim();
+  const phone=document.getElementById('nbPhone').value.trim();
+  if(!name && !phone){ err.textContent='Name or phone required'; return; }
+  const date=document.getElementById('nbDate').value;
+  if(!date){ err.textContent='Date required'; return; }
+  if(!nbSelectedSlot){ err.textContent='Time slot required'; return; }
+  const selections=nbCollectSelections();
+  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
+  const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const tax=Math.round(subtotal*TAX_RATE*100)/100;
+  const totalPrice=subtotal+tax;
+  const techId=document.getElementById('nbTech').value;
+  const paymentMethod=document.getElementById('nbPaymentMethod').value;
+  const email=document.getElementById('nbEmail').value.trim();
+  const submitBtn=e.target.querySelector('button[type="submit"]');
+
+  // For card payments, tokenize the card with Stripe before creating the booking.
+  let paymentMethodId=null;
+  if(paymentMethod==='card'){
+    if(!email){ err.textContent='Email is required to save a card on file'; return; }
+    try{
+      await ensureNbStripe();
+      if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
+      const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
+        type:'card', card:nbStripeCard,
+        billing_details:{ name, email, phone },
+      });
+      if(error){ err.textContent=error.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
+      paymentMethodId=pm.id;
+    }catch(e3){ err.textContent=e3.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
+  }
+  try{
+    await api('booking_create',{ method:'POST', body:{
+      business: current.slug,
+      customer:{ name, phone, email,
+        address_line1:document.getElementById('nbAddr').value.trim(),
+        city:document.getElementById('nbCity').value.trim(),
+        state:document.getElementById('nbState').value.trim(),
+        postal_code:document.getElementById('nbZip').value.trim() },
+      service_id: document.getElementById('nbService').value || null,
+      technician_id: techId==='any'?'any':techId||null,
+      scheduled_date: date,
+      scheduled_slot: nbSelectedSlot.key,
+      selections,
+      subtotal,
+      tax,
+      price: totalPrice,
+      notes: document.getElementById('nbNotes').value.trim()||null,
+      payment_method: paymentMethod || null,
+      payment_method_id: paymentMethodId,
+      sms_consent: document.getElementById('nbSmsConsent').checked,
+    }});
+    document.getElementById('modal').classList.add('hidden');
+    toast('Booking created'); refreshCurrent();
+  }catch(e2){ err.textContent=e2.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } }
+});
+
+// ── Lightbox ────────────────────────────────────────────────────────────────
+document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
+document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+async function tryAutoLogin(){
+  try{
+    const d = await api('login', { method:'POST', body:{ password:'' } });
+    token=d.token; role=d.role; businesses=d.businesses;
+    localStorage.setItem('ha_admin_token',token);
+    localStorage.setItem('ha_admin_role',role);
+    localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
+    enterApp();
+  }catch{ /* password required — leave the login screen visible */ }
+}
+if(token && businesses.length) enterApp();
+else tryAutoLogin();
+</script>
+</body>
+</html>

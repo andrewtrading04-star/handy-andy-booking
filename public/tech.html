@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0A1628">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tech App</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<style>
+  :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
+    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--amber:#ffb020;--blue:#4aa3ff;
+    /* Type system — Plus Jakarta Sans, weights 400–900 */
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-hero:clamp(32px,9vw,44px); --fs-h1:clamp(24px,6vw,30px); --fs-h2:20px;
+    --fs-h3:18px; --fs-body:15px; --fs-sm:14px;
+    /* Gradient keyword highlight (bright for dark navy bg) */
+    --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
+  button{font-family:inherit;cursor:pointer;}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
+  .hidden{display:none !important;}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;}
+
+  /* Login */
+  .login{padding:40px 24px;display:flex;flex-direction:column;min-height:100vh;justify-content:center;}
+  .login h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+  .login .dot{width:12px;height:12px;border-radius:50%;background:var(--orange);}
+  .login .sub{color:var(--mute);font-size:14px;margin-bottom:26px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  input{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:15px 16px;font-size:17px;}
+  input:focus{outline:none;border-color:var(--orange);}
+  #pin{letter-spacing:10px;text-align:center;font-size:24px;}
+  .btn{background:var(--orange);color:#fff;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:700;width:100%;}
+  .btn:hover{background:var(--orange-d);} .btn:disabled{opacity:.5;}
+  .btn.big{padding:18px;font-size:18px;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:600;}
+  .btn.green{background:var(--green);} .btn.blue{background:var(--blue);}
+  .err{color:var(--red);font-size:14px;margin-top:10px;text-align:center;min-height:20px;}
+
+  /* Header */
+  /* A gap ABOVE the header box (page background shows through) so it isn't
+     jammed against the top edge / status bar. */
+  #jobsView{padding-top:calc(18px + env(safe-area-inset-top, 0px));}
+  .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:16px 18px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
+  .hdr .name{font-weight:800;font-size:17px;}
+  .hdr .sub{font-size:12px;color:var(--mute);}
+  .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
+  .hdr button:hover{border-color:var(--ink);color:var(--ink);}
+  .hdr-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+
+  /* Week calendar strip */
+  .weekbar{background:var(--navy-2);border-bottom:1px solid var(--line);padding:10px 8px;}
+  .weekbar-top{display:flex;justify-content:space-between;align-items:center;padding:0 6px 8px;}
+  .weekbar-title{font-size:13px;font-weight:700;color:var(--ink);}
+  .weekbar-nav{display:flex;gap:6px;}
+  .weekbar-nav button{background:transparent;border:1px solid var(--line);color:var(--mute);width:30px;height:30px;border-radius:8px;font-size:15px;display:flex;align-items:center;justify-content:center;}
+  .weekbar-nav button:hover{border-color:var(--ink);color:var(--ink);}
+  .weekbar-today{font-size:12px;padding:0 10px !important;width:auto !important;}
+  .weekgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .daycell{background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:7px 2px 8px;text-align:center;cursor:pointer;position:relative;min-height:58px;display:flex;flex-direction:column;align-items:center;gap:3px;}
+  .daycell:hover{border-color:var(--mute);}
+  .daycell.sel{background:var(--orange);border-color:var(--orange);}
+  .daycell.sel .dc-dow,.daycell.sel .dc-num{color:#fff;}
+  .daycell.today .dc-num{color:var(--orange);font-weight:800;}
+  .daycell.sel.today .dc-num{color:#fff;}
+  .dc-dow{font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;font-weight:700;}
+  .dc-num{font-size:16px;font-weight:700;color:var(--ink);line-height:1;}
+  .dc-count{font-size:10px;font-weight:700;background:var(--blue);color:#fff;border-radius:10px;padding:1px 6px;min-width:18px;}
+  .daycell.sel .dc-count{background:rgba(255,255,255,.3);}
+  .dc-count.empty{visibility:hidden;}
+
+  /* Job list */
+  .list{padding:14px;}
+  .jobc{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;}
+  .jobc:active{border-color:var(--orange);}
+  .jobc .t{font-weight:800;font-size:16px;color:var(--orange);}
+  .jobc .n{font-weight:700;font-size:16px;margin-top:4px;}
+  .jobc .m{color:var(--mute);font-size:14px;margin-top:4px;line-height:1.5;}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:capitalize;margin-top:8px;}
+  .b-assigned{background:rgba(74,163,255,.16);color:var(--blue);}
+  .b-on_the_way,.b-arrived,.b-in_progress{background:rgba(255,107,53,.18);color:var(--orange);}
+  .b-completed{background:rgba(39,192,147,.16);color:var(--green);}
+  .b-confirmed,.b-pending{background:rgba(255,176,32,.16);color:var(--amber);}
+  .empty{color:var(--mute);text-align:center;padding:60px 20px;}
+
+  /* Detail */
+  .detail{padding:16px;}
+  .back{background:transparent;border:none;color:var(--orange);font-size:15px;font-weight:600;padding:6px 0;margin-bottom:10px;}
+  .card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;}
+  .card h3{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
+  .card .big-name{font-size:20px;font-weight:800;}
+  .kv{font-size:15px;margin:7px 0;line-height:1.5;}
+  .kv a{color:var(--blue);text-decoration:none;}
+  /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
+  body.doms .kv > i{color:var(--orange);width:18px;text-align:center;margin-right:2px;}
+  body.doms .btn.ghost > i{margin-right:4px;}
+  .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
+  .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
+
+  /* Photos */
+  .phreq{float:right;font-size:11px;font-weight:800;letter-spacing:.3px;color:var(--amber);background:rgba(255,176,32,.12);padding:2px 9px;border-radius:12px;text-transform:none;}
+  .phreq.ok{color:var(--green);background:rgba(39,192,147,.14);}
+  .photogrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .thumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--navy);}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .thumbdel{position:absolute;top:4px;right:4px;width:24px;height:24px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;}
+  /* Notes */
+  .note{background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;}
+  .note-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+  .note-a{font-weight:700;font-size:13px;color:var(--ink);}
+  .note-t{font-size:12px;color:var(--mute);}
+  .note-b{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+  .note-del{background:transparent;border:none;color:var(--red);font-size:12px;padding:6px 0 0;font-weight:600;}
+  /* Lightbox */
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;}
+  .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;}
+  .streetview{width:100%;height:auto;border-radius:10px;display:block;margin:12px 0;background:var(--navy);aspect-ratio:4/3;}
+
+  /* Availability */
+  .avail{padding:16px;}
+  .hdr-actions{display:flex;gap:8px;}
+  .chips{display:flex;flex-direction:column;gap:8px;}
+  .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;}
+  .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip.on::after{content:'✓';float:right;font-weight:800;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login -->
+  <div id="login" class="login">
+    <h1><span class="dot"></span>Technician <span class="hl">Login</span></h1>
+    <div class="sub">Sign in to see today's jobs</div>
+    <form id="loginForm">
+      <div class="field"><label>Phone number</label>
+        <input type="tel" id="phone" placeholder="(555) 123-4567" autocomplete="username"></div>
+      <div class="field"><label>4-digit PIN</label>
+        <input type="tel" id="pin" maxlength="4" inputmode="numeric" placeholder="••••" autocomplete="current-password"></div>
+      <button class="btn big" type="submit">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </form>
+    <!-- Dev bypass: always visible during development -->
+    <div id="devPanel" style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
+      <div class="field"><label>🛠 Dev login (no PIN)</label>
+        <select id="devTech" class="" style="width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:14px;font-size:15px;"></select></div>
+      <button class="btn ghost" type="button" id="devBtn">Enter as this tech</button>
+    </div>
+  </div>
+
+  <!-- Jobs list -->
+  <div id="jobsView" class="hidden">
+    <div class="hdr">
+      <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
+      <div class="hdr-actions">
+        <button id="availBtn">My Availability</button>
+        <button id="logout">Log out</button>
+      </div>
+    </div>
+    <div class="weekbar">
+      <div class="weekbar-top">
+        <div class="weekbar-title" id="weekTitle">—</div>
+        <div class="weekbar-nav">
+          <button id="weekToday" class="weekbar-today">Today</button>
+          <button id="weekPrev" title="Previous week">‹</button>
+          <button id="weekNext" title="Next week">›</button>
+        </div>
+      </div>
+      <div class="weekgrid" id="weekGrid"></div>
+    </div>
+    <div class="list" id="jobsList"></div>
+  </div>
+
+  <!-- Job detail -->
+  <div id="detailView" class="hidden"></div>
+
+  <!-- Weekly availability -->
+  <div id="availabilityView" class="hidden"></div>
+
+</div>
+
+<!-- Photo lightbox -->
+<div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
+
+<!-- ETA Modal (shown when tech marks job as "on the way") -->
+<div id="etaModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#222a35;">ETA to arrive?</h2>
+    <p style="color:#7a8694;font-size:14px;margin-bottom:24px;">Let the customer know when you'll get there.</p>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <button class="btn" data-eta="30" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">30 minutes</button>
+      <button class="btn" data-eta="45" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">45 minutes</button>
+      <button class="btn" data-eta="60" style="background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">60 minutes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API='/api/tech';
+let token=localStorage.getItem('ha_tech_token')||'';
+let tech=JSON.parse(localStorage.getItem('ha_tech_info')||'null');
+
+async function api(action,{method='GET',params={},body=null}={}){
+  const url=new URL(API,location.origin); url.searchParams.set('action',action);
+  for(const[k,v]of Object.entries(params)) if(v!=null&&v!=='') url.searchParams.set(k,v);
+  const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
+  if(res.status===401){ logout(); throw new Error('Session expired'); }
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||'Request failed');
+  return data;
+}
+function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
+function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:bizTz});}catch{return iso;} }
+
+// ── Iconography ────────────────────────────────────────────────────────────
+// Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
+const ICONS = {
+  tools:    {e:'🛠', f:'fa-solid fa-screwdriver-wrench'},
+  wrench:   {e:'🔧', f:'fa-solid fa-wrench'},
+  phone:    {e:'📞', f:'fa-solid fa-phone'},
+  location: {e:'📍', f:'fa-solid fa-location-dot'},
+  navigate: {e:'🧭', f:'fa-solid fa-diamond-turn-right'},
+  camera:   {e:'📷', f:'fa-solid fa-camera'},
+};
+function isDoms(){ return !!(tech && tech.slug==='doms'); }
+function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
+function applyIconTheme(){
+  const doms=isDoms();
+  document.body.classList.toggle('doms', doms);
+  document.querySelectorAll('[data-ico]').forEach(el=>{
+    const m=ICONS[el.dataset.ico]; if(!m) return;
+    el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
+  });
+}
+
+// Login
+document.getElementById('loginForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=document.getElementById('loginErr'); err.textContent='';
+  try{
+    const d=await api('login',{method:'POST',body:{phone:document.getElementById('phone').value.trim(),pin:document.getElementById('pin').value.trim()}});
+    token=d.token; tech=d.technician;
+    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    showJobs();
+  }catch(e2){ err.textContent=e2.message; }
+});
+function logout(){ token='';tech=null; localStorage.removeItem('ha_tech_token');localStorage.removeItem('ha_tech_info');
+  show('login'); }
+document.getElementById('logout').addEventListener('click',logout);
+
+function show(which){
+  for(const id of ['login','jobsView','detailView','availabilityView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+}
+
+// All day math runs in the BUSINESS timezone so the tech app's calendar lines
+// up with the dashboard and the booking times — never the device's timezone.
+let bizTz = (tech && tech.tz) || 'America/Denver';
+function todayStr(){ return new Intl.DateTimeFormat('en-CA',{timeZone:bizTz,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+let scheduleDate=todayStr();           // selected day (YYYY-MM-DD, business tz)
+let weekJobs=[];                       // all jobs in the visible week
+
+// Calendar-date math on 'YYYY-MM-DD' strings via a noon-UTC anchor. A calendar
+// date's weekday/number are timezone-independent, so this never drifts.
+function dateAnchor(ds){ return new Date(ds+'T12:00:00Z'); }
+function dowOf(ds){ return dateAnchor(ds).getUTCDay(); }            // 0..6 Sun..Sat
+function addDaysStr(ds,n){ const d=dateAnchor(ds); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().split('T')[0]; }
+function weekStartStr(ds){ return addDaysStr(ds, -dowOf(ds)); }     // Sunday of ds's week
+function dayNum(ds){ return Number(ds.split('-')[2]); }
+function fmtDs(ds,opts){ return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',...opts}).format(dateAnchor(ds)); }
+// Business-tz calendar date for a job (server sends local_date; fall back if not).
+function jobLocalDate(j){ return j.local_date || new Intl.DateTimeFormat('en-CA',{timeZone:bizTz,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(j.scheduled_at)); }
+
+async function showJobs(date){
+  if(date) scheduleDate=date;
+  show('jobsView');
+  applyIconTheme();
+  document.getElementById('techName').textContent=tech?tech.name:'';
+  await loadWeek();
+}
+
+async function loadWeek(){
+  const start=weekStartStr(scheduleDate);
+  const days=[...Array(7)].map((_,i)=>addDaysStr(start,i));
+  const end=days[6];
+  // Week title (e.g. "June 14–20" or spanning months).
+  const sameMonth=days[0].slice(0,7)===end.slice(0,7);
+  document.getElementById('weekTitle').textContent = sameMonth
+    ? `${fmtDs(days[0],{month:'long'})} ${dayNum(days[0])}–${dayNum(end)}`
+    : `${fmtDs(days[0],{month:'short',day:'numeric'})} – ${fmtDs(end,{month:'short',day:'numeric'})}`;
+
+  const grid=document.getElementById('weekGrid');
+  const list=document.getElementById('jobsList');
+  const today=todayStr();
+  grid.innerHTML=days.map(ds=>`
+    <div class="daycell${ds===scheduleDate?' sel':''}${ds===today?' today':''}" data-date="${ds}">
+      <span class="dc-dow">${fmtDs(ds,{weekday:'short'}).slice(0,2)}</span>
+      <span class="dc-num">${dayNum(ds)}</span>
+      <span class="dc-count empty" data-count="${ds}">0</span>
+    </div>`).join('');
+  grid.querySelectorAll('.daycell').forEach(c=>c.addEventListener('click',()=>{ scheduleDate=c.dataset.date; renderDay(); markSelected(); }));
+
+  list.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const d=await api('jobs',{params:{from:days[0],to:end}});
+    weekJobs=d.jobs||[];
+    if(d.tz) bizTz=d.tz;   // keep device in sync with the business timezone
+    // Per-day counts on the calendar (grouped by business-tz date).
+    const counts={};
+    weekJobs.forEach(j=>{ const ds=jobLocalDate(j); counts[ds]=(counts[ds]||0)+1; });
+    grid.querySelectorAll('[data-count]').forEach(el=>{
+      const n=counts[el.dataset.count]||0; el.textContent=n;
+      el.classList.toggle('empty',n===0);
+    });
+    renderDay();
+  }catch(e){ list.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function markSelected(){
+  document.querySelectorAll('#weekGrid .daycell').forEach(c=>c.classList.toggle('sel',c.dataset.date===scheduleDate));
+}
+
+function renderDay(){
+  const isToday=scheduleDate===todayStr();
+  const dLabel=fmtDs(scheduleDate,{weekday:'short',month:'short',day:'numeric'});
+  const jobs=weekJobs.filter(j=>jobLocalDate(j)===scheduleDate);
+  document.getElementById('jobsSub').textContent=`${jobs.length} job${jobs.length===1?'':'s'} — ${isToday?'Today':dLabel}`;
+  const list=document.getElementById('jobsList');
+  list.innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="jobc" data-id="${j.id}">
+      <div class="t">${fmtTime(j.scheduled_at)}</div>
+      <div class="n">${esc(j.customer_name)}</div>
+      <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
+      <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
+    </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dLabel}.<br>Enjoy your day! 🎉</div>
+    <button id="diagBtn" class="btn ghost" style="margin:18px auto 0;max-width:280px;display:block;">🔧 Why don't I see my jobs?</button>
+    <div id="diagOut" style="margin-top:14px;"></div>`;
+  list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
+  const diagBtn=document.getElementById('diagBtn');
+  if(diagBtn) diagBtn.addEventListener('click',runDiagnostic);
+}
+
+// Pulls the diagnostic and renders it as plain-English findings so we can see
+// exactly why a tech's jobs aren't showing (ID mismatch, date, status, etc.).
+async function runDiagnostic(){
+  const out=document.getElementById('diagOut');
+  out.innerHTML='<div class="empty">Checking…</div>';
+  try{
+    const d=await api('debug_identity');
+    const you=d.you||{};
+    const tz=you.business_tz||bizTz;
+    const tokenBiz=you.token_business_id, recBiz=you.tech_record_business_id;
+    const bizMatch = tokenBiz===recBiz;
+    const wt=d.week_test||{};
+    const rows=(d.business_bookings||[]).map(b=>{
+      const dt=b.scheduled_at?new Date(b.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:tz}):'(no date)';
+      const mine=b.assigned_to_you;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;">
+        <b>${esc(b.assigned_tech_name||'Unassigned')}</b> · ${esc(b.status)} · ${esc(dt)}
+        ${mine?'<span style="color:var(--green);"> ← assigned to YOU</span>':'<span style="color:var(--mute);"> (not you)</span>'}
+        ${b.business_id!==tokenBiz?'<span style="color:var(--red);"> ⚠ different business</span>':''}
+        <div style="color:var(--mute);font-size:11px;">raw: ${esc(b.scheduled_at||'null')} → ${esc(b.local_date||'—')}</div>
+      </div>`;
+    }).join('');
+    out.innerHTML=`<div style="background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:left;font-size:13px;line-height:1.5;">
+      <div style="font-weight:800;margin-bottom:8px;">Diagnostics</div>
+      <div>You are logged in as: <b>${esc(you.tech_name||'?')}</b></div>
+      <div>Your business: <b>${esc(you.business_name||you.business_slug||'?')}</b> · tz <b>${esc(you.business_tz||'?')}</b></div>
+      <div>Jobs assigned to you (all dates): <b>${d.assigned_to_you_count}</b></div>
+      ${!bizMatch?`<div style="color:var(--red);margin-top:6px;">⚠ Your login business id doesn't match your technician record's business id.</div>`:''}
+      <div style="font-weight:800;margin:12px 0 4px;">This week's job query:</div>
+      <div>Week ${esc(wt.week_from||'?')} → ${esc(wt.week_to||'?')}</div>
+      <div>Window ${esc(wt.window_lo||'?')} → ${esc(wt.window_hi||'?')}</div>
+      <div>Jobs the app query returns: <b style="color:${wt.jobs_found?'var(--green)':'var(--red)'};">${wt.jobs_found}</b>${wt.error?` <span style="color:var(--red);">(${esc(wt.error)})</span>`:''}</div>
+      <div style="font-weight:800;margin:12px 0 4px;">Recent jobs in your business (${d.business_bookings_count}):</div>
+      ${rows||'<div class="empty">None found.</div>'}
+    </div>`;
+  }catch(e){ out.innerHTML=`<div class="empty" style="color:var(--red);">${esc(e.message)}</div>`; }
+}
+
+const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
+  confirmed:{to:'on_the_way',label:'On My Way',cls:'blue'},
+  on_the_way:{to:'arrived',label:'Arrived',cls:''},
+  arrived:{to:'in_progress',label:'Start Job',cls:''},
+  in_progress:{to:'completed',label:'Job Complete',cls:'green'} };
+
+const MIN_PHOTOS=2;
+let curJob=null, curPhotos=[], curNotes=[];
+
+async function showDetail(id){
+  show('detailView');
+  const v=document.getElementById('detailView'); v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
+  try{
+    const [{job:j}, ph, nt] = await Promise.all([
+      api('job',{params:{id}}),
+      api('job_photos',{params:{id}}).catch(()=>({photos:[]})),
+      api('job_notes',{params:{id}}).catch(()=>({notes:[]})),
+    ]);
+    curJob=j; curPhotos=ph.photos||[]; curNotes=nt.notes||[];
+    const next=NEXT[j.status];
+    const photoOK=curPhotos.length>=MIN_PHOTOS;
+    const needsPhotos=next && next.to==='completed' && !photoOK;
+
+    v.innerHTML=`<div class="detail">
+      <button class="back" id="back">‹ Today's jobs</button>
+      <div class="card">
+        <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
+        <div class="big-name">${esc(j.customer_name)}</div>
+        <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
+        ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
+        <div class="kv">${ic('location')} ${esc(j.address||'No address')}</div>
+        ${j.lat&&j.lng?`<img class="streetview" src="https://maps.googleapis.com/maps/api/streetview?size=600x450&location=${j.lat},${j.lng}&fov=90&pitch=0" alt="Street View of job location">`:`<div class="sub" style="color:var(--mute);font-size:13px;padding:12px 0;">${ic('location')} Address details not available for Street View</div>`}
+        ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">${ic('navigate')} Get Directions</a>`:''}
+      </div>
+      ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
+      ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(li.name)}${li.line_total?' — $'+li.line_total:''}</div>`).join('')}</div>`:''}
+
+      <div class="card">
+        <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
+        <div class="photogrid" id="photoGrid">${photoThumbs(curPhotos)}</div>
+        <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+        <button class="btn ghost" id="addPhoto" style="margin-top:10px;">${ic('camera')} Add Photo</button>
+        <div class="sub" style="font-size:12px;margin-top:8px;color:var(--mute);">At least ${MIN_PHOTOS} photos are required before you can complete the job.</div>
+      </div>
+
+      <div class="card">
+        <h3>Notes</h3>
+        <div id="noteList">${noteListHtml(curNotes)}</div>
+        <textarea id="noteInput" placeholder="Add an internal note…" style="width:100%;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:10px;font-size:15px;min-height:60px;margin-top:6px;resize:vertical;"></textarea>
+        <button class="btn ghost" id="addNote" style="margin-top:8px;">Add note</button>
+      </div>
+
+      ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
+      ${j.price?`<div class="card"><h3>Payment</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div><div class="sub" style="color:var(--mute);font-size:13px;">Amount</div><div style="font-weight:700;font-size:18px;">$${j.price}</div></div>
+          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${j.payment_status}</div></div>
+        </div>
+        ${j.payment_status!=='paid'&&j.payment_status!=='refunded'?`<div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn sm" id="jobCharge">Charge card</button>
+          <button class="btn ghost sm" id="jobMarkPaid">Mark paid (cash)</button>
+        </div>`:''}
+        ${j.payment_status==='paid'?`<button class="btn ghost sm" id="jobRefund">Refund</button>`:''}
+      </div>`:''}
+    </div>
+    ${ next ? (needsPhotos
+        ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📷 Add ${MIN_PHOTOS-curPhotos.length} more photo${MIN_PHOTOS-curPhotos.length===1?'':'s'} to complete</button></div>`
+        : `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>`)
+      : (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
+
+    document.getElementById('back').addEventListener('click',showJobs);
+    const adv=document.getElementById('advance');
+    if(adv && !adv.disabled) adv.addEventListener('click',async()=>{
+      adv.disabled=true;
+      // If going "on the way", show ETA modal first
+      if(next.to==='on_the_way'){
+        document.getElementById('etaModal').classList.remove('hidden');
+        // ETA button handler will call the actual status change
+        const etaHandler=async(eta)=>{
+          document.getElementById('etaModal').classList.add('hidden');
+          try{ await api('status',{method:'POST',body:{id,status:next.to,eta_minutes:eta}}); toast(next.label+' ✓'); showDetail(id); }
+          catch(e){ toast(e.message); }
+          document.querySelectorAll('#etaModal [data-eta]').forEach(b=>b.removeEventListener('click',etaHandler));
+        };
+        document.querySelectorAll('#etaModal [data-eta]').forEach(btn=>{
+          btn.addEventListener('click',()=>etaHandler(parseInt(btn.dataset.eta)));
+        });
+      } else {
+        try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
+        catch(e){ toast(e.message); adv.disabled=false; }
+      }
+    });
+
+    // Photo handlers
+    document.getElementById('addPhoto').addEventListener('click',()=>document.getElementById('photoInput').click());
+    document.getElementById('photoInput').addEventListener('change',e=>uploadPhotos(id, e.target.files));
+    bindPhotoGrid(id);
+
+    // Note handlers
+    document.getElementById('addNote').addEventListener('click',()=>addNote(id));
+    bindNoteList(id);
+
+    // Payment handlers
+    const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=async()=>{ if(confirm('Charge the card on file for $'+j.price+'?')){ await paymentAction(j.id,'charge'); } };
+    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
+    const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
+  }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
+    document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Photos ──────────────────────────────────────────────────────────────────
+function photoThumbs(photos){
+  if(!photos.length) return '<div class="sub" style="color:var(--mute);font-size:13px;padding:6px 0;">No photos yet.</div>';
+  return photos.map(p=>`<div class="thumb"><img src="${esc(p.url)}" data-full="${esc(p.url)}" alt="job photo"><button class="thumbdel" data-pid="${p.id}" title="Delete">×</button></div>`).join('');
+}
+function bindPhotoGrid(id){
+  const grid=document.getElementById('photoGrid'); if(!grid) return;
+  grid.querySelectorAll('img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
+  grid.querySelectorAll('.thumbdel').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Delete this photo?')) return;
+    b.disabled=true;
+    try{ await api('job_photo_delete',{method:'POST',body:{id,photo_id:b.dataset.pid}}); toast('Photo deleted'); showDetail(id); }
+    catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+// Resize/compress on-device so uploads stay small & fast.
+function compressImage(file,maxDim=1600,quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('Could not read that image.')); img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.')); reader.readAsDataURL(file);
+  });
+}
+async function uploadPhotos(id, files){
+  const list=[...(files||[])].filter(f=>f.type.startsWith('image/'));
+  if(!list.length) return;
+  toast(`Uploading ${list.length} photo${list.length===1?'':'s'}…`);
+  let ok=0;
+  for(const f of list){
+    try{ const dataUrl=await compressImage(f); await api('job_photo_add',{method:'POST',body:{id,image:dataUrl}}); ok++; }
+    catch(e){ toast(e.message); }
+  }
+  if(ok) toast(`${ok} photo${ok===1?'':'s'} added ✓`);
+  showDetail(id);
+}
+
+// ── Notes ───────────────────────────────────────────────────────────────────
+function noteListHtml(notes){
+  if(!notes.length) return '<div class="sub" style="color:var(--mute);font-size:13px;padding:4px 0 8px;">No notes yet.</div>';
+  return notes.map(n=>`<div class="note">
+      <div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')}</span><span class="note-t">${esc(relTime(n.created_at))}</span></div>
+      <div class="note-b">${esc(n.body)}</div>
+      <button class="note-del" data-nid="${n.id}">Delete</button>
+    </div>`).join('');
+}
+function bindNoteList(id){
+  const el=document.getElementById('noteList'); if(!el) return;
+  el.querySelectorAll('.note-del').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Permanently delete this note?')) return;
+    b.disabled=true;
+    try{ await api('job_note_delete',{method:'POST',body:{id,note_id:b.dataset.nid}}); toast('Note deleted'); showDetail(id); }
+    catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+async function addNote(id){
+  const ta=document.getElementById('noteInput'); const text=(ta.value||'').trim();
+  if(!text){ toast('Type a note first'); return; }
+  const btn=document.getElementById('addNote'); btn.disabled=true;
+  try{ await api('job_note_add',{method:'POST',body:{id,body:text}}); ta.value=''; toast('Note added ✓'); showDetail(id); }
+  catch(e){ toast(e.message); btn.disabled=false; }
+}
+
+// ── Shared bits ─────────────────────────────────────────────────────────────
+function relTime(iso){
+  try{ const d=new Date(iso), s=(Date.now()-d.getTime())/1000;
+    if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago';
+    if(s<86400) return Math.floor(s/3600)+'h ago';
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+  catch{ return ''; }
+}
+function openLightbox(url){
+  const lb=document.getElementById('lightbox'); document.getElementById('lightboxImg').src=url; lb.classList.remove('hidden');
+}
+
+async function paymentAction(jobId,action){
+  try{
+    await api('job_payment',{method:'POST',body:{id:jobId,action}});
+    toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
+    setTimeout(()=>showDetail(jobId),400);
+  }catch(e){ toast(e.message); }
+}
+function close(){ showJobs(); }
+
+// ── Weekly availability ─────────────────────────────────────────────────────
+// ── Week navigation ─────────────────────────────────────────────────────────
+function shiftWeek(delta){
+  scheduleDate=addDaysStr(scheduleDate, delta*7); loadWeek();
+}
+document.getElementById('weekPrev').addEventListener('click',()=>shiftWeek(-1));
+document.getElementById('weekNext').addEventListener('click',()=>shiftWeek(1));
+document.getElementById('weekToday').addEventListener('click',()=>{ scheduleDate=todayStr(); loadWeek(); });
+
+let availDefs=null;                 // { slots, days } from the server
+let availState=new Set();           // selected "day:slot_key" keys (recurring)
+let availExceptions=[];             // [{date, slot_key, is_available}] one-time overrides
+let exEditState=new Set();          // slot keys selected in the open date editor
+document.getElementById('availBtn').addEventListener('click',showAvailability);
+
+async function showAvailability(){
+  show('availabilityView');
+  const v=document.getElementById('availabilityView');
+  v.innerHTML='<div class="avail"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('availability');
+    availDefs={ slots:d.slots, days:d.days };
+    availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
+    availExceptions=d.exceptions||[];
+    renderAvailability();
+  }catch(e){
+    v.innerHTML=`<div class="avail"><button class="back" id="availBack">‹ Today's jobs</button><div class="empty">${esc(e.message)}</div></div>`;
+    document.getElementById('availBack').addEventListener('click',showJobs);
+  }
+}
+
+function renderAvailability(){
+  const v=document.getElementById('availabilityView');
+  const rows=availDefs.days.map((dn,di)=>`
+    <div class="card"><h3>${esc(dn)}</h3>
+      <div class="chips">${availDefs.slots.map(s=>
+        `<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`
+      ).join('')}</div>
+    </div>`).join('');
+  v.innerHTML=`<div class="avail">
+      <button class="back" id="availBack">‹ Today's jobs</button>
+      <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Availability</div>
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Your normal weekly schedule — set it once. Tap a slot to add or remove it.</div></div>
+      <div id="weeklyCards">${rows}</div>
+
+      <div class="card" id="exceptionCard">
+        <h3>One-time changes</h3>
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:10px;">Need a specific day off, or to pick up a slot you don't normally work? Pick the date and adjust just that day — your weekly schedule stays the same.</div>
+        <input type="date" id="exDate" style="width:100%;background:var(--navy);border:1px solid var(--line);color:#fff;padding:12px;border-radius:10px;font-size:15px;">
+        <div id="exEditor" class="hidden" style="margin-top:12px;">
+          <div class="sub" id="exEditorLabel" style="color:var(--mute);font-size:13px;margin-bottom:8px;"></div>
+          <div class="chips" id="exSlots"></div>
+          <button type="button" class="btn ghost" id="exSave" style="margin-top:12px;">Save this date</button>
+        </div>
+        <div id="exList" style="margin-top:14px;"></div>
+      </div>
+
+      <div style="height:80px;"></div>
+    </div>
+    <div class="statusbar"><button class="btn big" id="availSave">Save Weekly Schedule</button></div>`;
+
+  document.getElementById('availBack').addEventListener('click',showJobs);
+  // Weekly toggles (scoped so the one-time editor's chips aren't affected).
+  v.querySelectorAll('#weeklyCards .slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.day+':'+ch.dataset.key;
+    if(availState.has(k)){ availState.delete(k); ch.classList.remove('on'); }
+    else { availState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('availSave').addEventListener('click',async()=>{
+    const btn=document.getElementById('availSave'); btn.disabled=true;
+    const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
+    try{ await api('availability_set',{method:'POST',body:{slots}}); toast('Weekly schedule saved ✓'); }
+    catch(e){ toast(e.message); }
+    btn.disabled=false;
+  });
+
+  // One-time changes wiring.
+  document.getElementById('exDate').addEventListener('change',e=>openExceptionEditor(e.target.value));
+  document.getElementById('exSave').addEventListener('click',saveException);
+  renderExceptionList();
+}
+
+// Slot keys the tech normally works on a given weekday (0=Sun..6=Sat).
+function recurringKeysFor(dow){
+  return availDefs.slots.filter(s=>availState.has(dow+':'+s.key)).map(s=>s.key);
+}
+// What the tech is actually available for on an exact date = recurring +/- exceptions.
+function effectiveKeysForDate(dateStr){
+  const dow=new Date(dateStr+'T00:00:00').getDay();
+  const set=new Set(recurringKeysFor(dow));
+  for(const ex of availExceptions){ if(ex.date===dateStr){ ex.is_available?set.add(ex.slot_key):set.delete(ex.slot_key); } }
+  return set;
+}
+function dateLabel(dateStr){
+  try{ return new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }
+  catch{ return dateStr; }
+}
+
+function openExceptionEditor(dateStr){
+  if(!dateStr){ document.getElementById('exEditor').classList.add('hidden'); return; }
+  exEditState=effectiveKeysForDate(dateStr);
+  document.getElementById('exEditorLabel').textContent=`Your availability for ${dateLabel(dateStr)}:`;
+  const box=document.getElementById('exSlots');
+  box.innerHTML=availDefs.slots.map(s=>
+    `<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`
+  ).join('');
+  box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
+    const k=ch.dataset.key;
+    if(exEditState.has(k)){ exEditState.delete(k); ch.classList.remove('on'); }
+    else { exEditState.add(k); ch.classList.add('on'); }
+  }));
+  document.getElementById('exEditor').classList.remove('hidden');
+}
+
+async function saveException(){
+  const date=document.getElementById('exDate').value;
+  if(!date){ toast('Pick a date first'); return; }
+  const btn=document.getElementById('exSave'); btn.disabled=true;
+  try{
+    await api('availability_exception_set',{method:'POST',body:{date,selected:[...exEditState]}});
+    toast('Saved for '+dateLabel(date)+' ✓');
+    const d=await api('availability'); availExceptions=d.exceptions||[];
+    renderExceptionList();
+  }catch(e){ toast(e.message); }
+  btn.disabled=false;
+}
+
+function renderExceptionList(){
+  const el=document.getElementById('exList'); if(!el) return;
+  const labelOf=k=>{ const s=availDefs.slots.find(x=>x.key===k); return s?s.label:k; };
+  // Group exceptions by date.
+  const byDate={};
+  for(const ex of availExceptions){ (byDate[ex.date]=byDate[ex.date]||[]).push(ex); }
+  const dates=Object.keys(byDate).sort();
+  if(!dates.length){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:6px;">Upcoming changes:</div>`+
+    dates.map(date=>{
+      const offs=byDate[date].filter(e=>!e.is_available).map(e=>labelOf(e.slot_key));
+      const ons =byDate[date].filter(e=> e.is_available).map(e=>labelOf(e.slot_key));
+      const parts=[];
+      if(offs.length) parts.push(`Off: ${offs.join(', ')}`);
+      if(ons.length)  parts.push(`Working: ${ons.join(', ')}`);
+      return `<div style="background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;">
+        <div style="font-weight:700;font-size:14px;">${esc(dateLabel(date))}</div>
+        <div style="color:var(--mute);font-size:13px;margin:3px 0 8px;">${esc(parts.join(' · '))}</div>
+        <button type="button" class="btn ghost sm" data-revert="${esc(date)}">Revert to normal</button>
+      </div>`;
+    }).join('');
+  el.querySelectorAll('[data-revert]').forEach(b=>b.addEventListener('click',async()=>{
+    const date=b.dataset.revert; b.disabled=true;
+    const dow=new Date(date+'T00:00:00').getDay();
+    try{
+      await api('availability_exception_set',{method:'POST',body:{date,selected:recurringKeysFor(dow)}});
+      toast('Reverted '+dateLabel(date));
+      const d=await api('availability'); availExceptions=d.exceptions||[];
+      if(document.getElementById('exDate').value===date) openExceptionEditor(date);
+      renderExceptionList();
+    }catch(e){ toast(e.message); b.disabled=false; }
+  }));
+}
+
+// Dev bypass: probe the server; if enabled, reveal a no-PIN tech picker.
+async function initDevPanel(){
+  try{
+    const res=await fetch(new URL(API+'?action=dev_techs',location.origin));
+    if(!res.ok) return; // 403 = disabled, hide panel
+    const d=await res.json();
+    if(!d.technicians||!d.technicians.length) return;
+    document.getElementById('devTech').innerHTML=d.technicians.map(t=>`<option value="${t.id}">${esc(t.name)} — ${esc(t.business)}</option>`).join('');
+    document.getElementById('devPanel').classList.remove('hidden');
+  }catch{}
+}
+document.getElementById('devBtn').addEventListener('click',async()=>{
+  try{
+    const d=await api('dev_login',{method:'POST',body:{tech_id:document.getElementById('devTech').value}});
+    token=d.token; tech=d.technician;
+    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    showJobs();
+  }catch(e){ document.getElementById('loginErr').textContent=e.message; }
+});
+
+// Lightbox close (tap backdrop or ×)
+document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
+document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
+
+// Boot
+if(token&&tech) showJobs(); else { show('login'); initDevPanel(); }
+</script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+import { mirrorBooking } from './_lib/mirror.js';
+
 // Valid coupon codes → discount in dollars (owner-provided, June 2026).
 // Zenbooker has no native coupon support, so a valid code is applied to the
 // job as a negative-price custom service line item.
@@ -221,6 +223,19 @@ export default async function handler(req, res) {
         console.warn('[book] Failed to add note:', noteErr.message);
       }
     }
+
+    // ---- Mirror into Supabase for the admin dashboard (best-effort, never fails the booking) ----
+    const mirrorLines = [{ kind: 'service', name: 'TV Installation', quantity: 1 }];
+    if (couponDiscount > 0) mirrorLines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, unit_price: -couponDiscount, line_total: -couponDiscount });
+    if (tip && Number(tip) > 0) mirrorLines.push({ kind: 'tip', name: 'Tip for technician', unit_price: Number(tip), line_total: Number(tip) });
+    await mirrorBooking({
+      businessSlug: 'handy-andy', source: 'widget', territory_id,
+      zbkJob: data, zenbooker_job_id: jobId, zenbooker_customer_id: zbkCustomerId,
+      customer: { first_name: customer.first_name, last_name: customer.last_name, name: fullName, email: customer.email, phone: customer.phone },
+      address: { line1: customer.address, city: resolvedCity, state: resolvedState, postal_code: zipForLookup },
+      tip: Number(tip) || 0, service_name: 'TV Installation', line_items: mirrorLines,
+      stripe_customer_id: null,
+    });
 
     return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card is on file/.test(cardNote), auto_assign_failed: autoAssignFailed });
   } catch (err) {
