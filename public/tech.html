@@ -21,6 +21,11 @@
     --fs-h3:18px; --fs-body:15px; --fs-sm:14px;
     /* Gradient keyword highlight (bright for dark navy bg) */
     --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
+  /* Doms brand palette — applied via body.doms for Doms technicians (e.g. George, TK).
+     Remaps the accent away from Handy Andy orange to Doms primary blue (#0047AB)
+     with Doms accent colors (orange #FF5733, yellow #FFC300). */
+  body.doms{--orange:#0047AB;--orange-d:#003580;
+    --grad:linear-gradient(120deg,#4d8dff 0%,#FF5733 55%,#FFC300 100%);}
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:var(--font-sans);background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
   button{font-family:inherit;cursor:pointer;}
