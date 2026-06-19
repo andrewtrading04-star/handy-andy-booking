@@ -73,9 +73,9 @@
     </div>
     <div class="ranges" id="ranges">
       <button data-days="today" class="on">Today</button>
+      <button data-days="yesterday">Yesterday</button>
       <button data-days="7">7 Days</button>
       <button data-days="30">30 Days</button>
-      <button data-days="0">All Time</button>
       <button id="compare-btn" style="margin-left:12px;background:#f0f1f4;color:var(--mute);">Compare</button>
     </div>
     <div id="compare-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
@@ -141,25 +141,29 @@ function fmtDur(s){ if(s==null)return '—'; if(s<60)return s+'s'; const m=Math.
 function esc(t){ return String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function convCell(c,b){ return b>0 ? `<span class="convgood">${c}%</span>` : `<span class="convzero">—</span>`; }
 
-function denverMidnight(){
-  const now=new Date();
-  const ymd=now.toLocaleDateString('en-CA',{timeZone:'America/Denver'});
-  const c=new Date(ymd+'T06:00:00Z');
+// UTC Date for 12:00 AM Denver on a given Denver calendar date "YYYY-MM-DD".
+function denverMidnightOf(ymd){
+  const c=new Date(ymd+'T06:00:00Z'); // try MDT (UTC-6)
   const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
-  return h===0?c:new Date(ymd+'T07:00:00Z');
+  return h===0?c:new Date(ymd+'T07:00:00Z'); // else MST (UTC-7)
 }
-function denverEndOfDay(){
-  const now=new Date();
-  const ymd=now.toLocaleDateString('en-CA',{timeZone:'America/Denver'});
-  const [y,m,d]=ymd.split('-').map(Number);
-  const tymd=new Date(Date.UTC(y,m-1,d+1)).toLocaleDateString('en-CA',{timeZone:'UTC'});
-  const c=new Date(tymd+'T06:00:00Z');
-  const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
-  const tm=h===0?c:new Date(tymd+'T07:00:00Z');
-  return new Date(tm.getTime()-1000);
+// Denver calendar date "YYYY-MM-DD" offset days from today (0=today, -1=yesterday).
+function denverYmd(offset){
+  const t=new Date().toLocaleDateString('en-CA',{timeZone:'America/Denver'});
+  const [y,m,d]=t.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d+offset)).toLocaleDateString('en-CA',{timeZone:'UTC'});
+}
+// {from,to} ISO range covering the full Denver calendar day at the given offset.
+function denverDayRange(offset){
+  const from=denverMidnightOf(denverYmd(offset));
+  const to=new Date(denverMidnightOf(denverYmd(offset+1)).getTime()-1000); // 11:59:59 PM
+  return {from:from.toISOString(),to:to.toISOString()};
 }
 function buildAnalyticsUrl(mode){
-  if(mode==='today') return '/api/analytics?from='+denverMidnight().toISOString()+'&to='+denverEndOfDay().toISOString();
+  if(mode==='today'||mode==='yesterday'){
+    const r=denverDayRange(mode==='today'?0:-1);
+    return '/api/analytics?from='+r.from+'&to='+r.to;
+  }
   return '/api/analytics?days='+mode;
 }
 async function load(){
