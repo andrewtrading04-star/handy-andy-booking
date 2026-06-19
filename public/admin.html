@@ -299,6 +299,23 @@
     .nb-cal-nav{width:28px;height:28px;font-size:14px;}
     .nb-cal-title{font-size:12px;}
   }
+
+  /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
+  .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
+    background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.14), transparent 60%), var(--gnavy,#0b1f3a);
+    box-shadow:0 10px 28px rgba(11,31,58,.22);position:relative;overflow:hidden;}
+  .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
+    background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
+  .greet-hi{font-size:21px;font-weight:800;letter-spacing:.2px;margin-bottom:5px;}
+  .greet-line{font-size:13.5px;line-height:1.6;opacity:.94;}
+  .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
+  .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
+  .greet-link:hover{opacity:.85;}
+  @media (max-width:760px){
+    .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
+    .greet-hi{font-size:18px;}
+    .greet-line{font-size:12.5px;}
+  }
 </style>
 </head>
 <body>
@@ -358,6 +375,8 @@
       <button class="ham" id="ham">☰</button>
       <strong id="mobTitle">Schedule</strong>
     </div>
+
+    <div id="greeting" class="greeting hidden"></div>
 
     <div class="cal-head" id="calHead">
       <div class="cal-nav">
@@ -486,8 +505,11 @@
 const API = '/api/admin';
 let token = localStorage.getItem('ha_admin_token') || '';
 let role = localStorage.getItem('ha_admin_role') || '';
+let userName = localStorage.getItem('ha_admin_name') || '';
 let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
 let current = null;            // current business object
+let greetingData = null;       // { jobs, estimates, tz } for the schedule greeting
+let greetingClock = null;      // interval handle for the live greeting clock
 
 // view state
 let section = 'schedule';      // schedule | customers | technicians | reviews | gallery | estimates
@@ -595,17 +617,19 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   const errEl = document.getElementById('loginErr'); errEl.textContent='';
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
-    token=d.token; role=d.role; businesses=d.businesses;
+    token=d.token; role=d.role; userName=d.name||''; businesses=d.businesses;
     localStorage.setItem('ha_admin_token',token);
     localStorage.setItem('ha_admin_role',role);
+    localStorage.setItem('ha_admin_name',userName);
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
   } catch(err){ errEl.textContent = err.message; }
 });
 function logout(){
-  token=''; role=''; businesses=[]; current=null;
-  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_biz');
+  token=''; role=''; userName=''; businesses=[]; current=null;
+  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_name'); localStorage.removeItem('ha_admin_biz');
   if(pollTimer) clearInterval(pollTimer);
+  if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
 }
@@ -614,7 +638,7 @@ document.getElementById('logout').addEventListener('click', logout);
 function enterApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
-  document.getElementById('who').textContent = role==='owner' ? 'Owner' : 'Secretary';
+  document.getElementById('who').textContent = userName || (role==='owner' ? 'Owner' : 'Secretary');
   current = businesses[0] || null;
   anchorDate = todayStr();
   applyIconTheme();
@@ -645,11 +669,13 @@ function navTo(s){
   document.getElementById('schedSidebar').classList.toggle('hidden',!sched);
   document.getElementById('modeSeg').classList.toggle('hidden',!sched);
   document.getElementById('calHead').classList.toggle('hidden',!sched);
+  const greetEl=document.getElementById('greeting');
+  if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
   document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
-  if(sched){ renderSchedule(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
+  if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
     if(s==='estimates') renderEstimates();
     else if(s==='customers') renderCustomers();
@@ -659,7 +685,7 @@ function navTo(s){
   }
 }
 function refreshCurrent(){
-  if(section==='schedule') renderSchedule();
+  if(section==='schedule'){ renderSchedule(); renderGreeting(); }
   else if(section==='estimates') renderEstimates();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
@@ -1203,7 +1229,60 @@ async function refreshEstimateBadge(){
     const n=(d.estimates||[]).length;
     const badge=document.getElementById('estBadge');
     if(badge){ badge.textContent=n; badge.style.display=n?'inline-block':'none'; }
-  }catch{ /* non-fatal */ }
+    return n;
+  }catch{ return 0; }
+}
+
+// ── Schedule greeting ("Jarvis" intro) ──────────────────────────────────────
+// Fetches today's job count + open estimates for the active business, then keeps
+// a live clock ticking. Data refreshes on navigation/switch; the clock re-paints
+// the time every 15s without re-fetching.
+async function renderGreeting(){
+  const el=document.getElementById('greeting');
+  if(!el || !current){ if(el) el.classList.add('hidden'); return; }
+  try{
+    const [s,newEst]=await Promise.all([
+      api('summary',{ params:{ business:current.slug }}),
+      refreshEstimateBadge(),
+    ]);
+    if(s.business && s.business.timezone) current.timezone=s.business.timezone;
+    greetingData={
+      jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
+      estimates: newEst,
+      tz: (s.business && s.business.timezone) || tz(),
+    };
+    paintGreeting();
+    if(section==='schedule') el.classList.remove('hidden');
+    startGreetingClock();
+  }catch{ /* non-fatal: leave whatever is shown */ }
+}
+function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
+function paintGreeting(){
+  const el=document.getElementById('greeting');
+  if(!el || !greetingData) return;
+  el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
+  el.style.setProperty('--gaccent', (current&&current.brand_orange)||'#FF6B35');
+  const z=greetingData.tz||tz(), now=new Date();
+  const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
+  const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
+  const jobs=greetingData.jobs||0, est=greetingData.estimates||0;
+  const hi = (userName && userName!=='Owner') ? `Hello ${esc(userName)}.` : 'Welcome back.';
+  const jobsTxt = jobs===0
+    ? 'You have <b>no jobs</b> scheduled today'
+    : `There ${jobs===1?'is':'are'} <b>${jobs}</b> job${jobs===1?'':'s'} on the schedule today`;
+  const estTxt = est===0
+    ? 'no estimates are waiting on a response'
+    : `you have <b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} a response`;
+  el.innerHTML=
+    `<div class="greet-hi">${hi}</div>`+
+    `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
+    `<div class="greet-line">${jobsTxt}, and ${estTxt}.</div>`;
+  const link=el.querySelector('[data-goest]');
+  if(link) link.addEventListener('click',()=>navTo('estimates'));
+}
+function startGreetingClock(){
+  if(greetingClock) clearInterval(greetingClock);
+  greetingClock=setInterval(()=>{ if(section==='schedule') paintGreeting(); }, 15000);
 }
 
 async function saveTech(payload){
@@ -1990,13 +2069,42 @@ document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id
 async function tryAutoLogin(){
   try{
     const d = await api('login', { method:'POST', body:{ password:'' } });
-    token=d.token; role=d.role; businesses=d.businesses;
+    token=d.token; role=d.role; userName=d.name||''; businesses=d.businesses;
     localStorage.setItem('ha_admin_token',token);
     localStorage.setItem('ha_admin_role',role);
+    localStorage.setItem('ha_admin_name',userName);
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
   }catch{ /* password required — leave the login screen visible */ }
 }
+// Brand the login screen per dedicated entry link (/handy-andy, /heather,
+// /doms, /joey, or ?team=). Purely cosmetic — the password is what grants
+// scope server-side, so isolation never depends on which link is used.
+const TEAM_BRAND={
+  'handy-andy':{ label:'Handy Andy', accent:'#FF6B35', navy:'#0A1628' },
+  'doms':{ label:'Doms', accent:'#C8102E', navy:'#111827' },
+};
+function teamFromUrl(){
+  const q=new URLSearchParams(location.search).get('team');
+  if(q && TEAM_BRAND[q]) return q;
+  const p=(location.pathname+' '+location.search).toLowerCase();
+  if(/handy|heather/.test(p)) return 'handy-andy';
+  if(/doms|joey/.test(p))     return 'doms';
+  return '';
+}
+function brandLogin(){
+  const t=teamFromUrl(); if(!t) return;
+  const b=TEAM_BRAND[t];
+  const h=document.querySelector('#login h1'); const sub=document.querySelector('#login .sub');
+  if(h) h.innerHTML=`${esc(b.label)} <span class="hl">Schedule</span>`;
+  if(sub) sub.textContent='Sign in to your dashboard';
+  document.title=`${b.label} · Schedule`;
+  const root=document.documentElement;
+  root.style.setProperty('--accent', b.accent);
+  if(t==='doms') document.body.classList.add('doms');
+}
+brandLogin();
+
 if(token && businesses.length) enterApp();
 else tryAutoLogin();
 </script>

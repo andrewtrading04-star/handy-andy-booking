@@ -1,6 +1,12 @@
 {
   "buildCommand": "",
   "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/handy-andy", "destination": "/admin.html" },
+    { "source": "/heather", "destination": "/admin.html" },
+    { "source": "/doms", "destination": "/admin.html" },
+    { "source": "/joey", "destination": "/admin.html" }
+  ],
   "headers": [
     {
       "source": "/(.*).html",
