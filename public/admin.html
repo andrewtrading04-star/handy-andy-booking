@@ -1661,7 +1661,7 @@ function renderNbSteps(){
 }
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
-  if(hmBtn){ nbHandymanHours=Math.max(0,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
+  if(hmBtn){ nbHandymanHours=Math.max(2,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
   const tvQBtn=e.target.closest('.nb-tv-q-btn');
   const qBtn=e.target.closest('.nb-q-btn');
   const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
@@ -1724,7 +1724,7 @@ document.getElementById('nbService').addEventListener('change',async e=>{
   // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
   const svc=nbServices.find(s=>s.id===sid);
   if(isHandymanService(svc)){
-    nbHandymanActive=true; nbHandymanHours=1; nbHandymanLabel=svc.name; nbOptionGroups=[];
+    nbHandymanActive=true; nbHandymanHours=2; nbHandymanLabel=svc.name; nbOptionGroups=[];
     renderNbSteps();
     return;
   }
