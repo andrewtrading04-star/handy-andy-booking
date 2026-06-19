@@ -1356,7 +1356,15 @@ async function openNewBooking(){
     ]);
     nbServices = svc.services || [];
     nbSelectedSlot = null;
-    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort();
+    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort((a,b)=>{
+      const order={TV: 'TV Mounting', Handyman: 'Handyman'};
+      const aIdx = Object.values(order).indexOf(a);
+      const bIdx = Object.values(order).indexOf(b);
+      if(aIdx>=0 && bIdx>=0) return aIdx-bIdx;
+      if(aIdx>=0) return -1;
+      if(bIdx>=0) return 1;
+      return a.localeCompare(b);
+    });
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
