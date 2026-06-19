@@ -10,6 +10,30 @@ const COUPONS = {
   TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
 };
 
+// Hard-coded after-hours fee: every job whose arrival window starts at 8 PM or
+// later (territory-local time) is charged a flat $75, no matter what. Enforced
+// here on the server so it applies even if a stale/cached widget doesn't send it.
+const AFTER_HOURS_FEE = 75;
+const TERRITORY_TZ = {
+  '1707514546803x280800015001583600': 'America/Chicago',     // Houston #1
+  '1685582903241x973573877706522600': 'America/Denver',      // Denver #1
+  '1707513178246x806633139915194400': 'America/Denver',      // Denver #2
+  '1687393551618x123774611115737090': 'America/Denver',      // Denver #3
+  '1723559782141x609094402068185100': 'America/Denver',      // Denver #4 Boulder/CS
+  '1724797832896x339501352491155460': 'America/Chicago',     // Austin
+  '1760944311332x492178768310304800': 'America/Los_Angeles', // Los Angeles
+};
+// Slot ids are "slot_<startEpochSec>_<endEpochSec>"; derive the local start hour.
+function afterHoursFeeFor(slotId, territoryId) {
+  const m = /^slot_(\d+)_/.exec(String(slotId || ''));
+  if (!m) return 0;
+  const startMs = Number(m[1]) * 1000;
+  if (!startMs) return 0;
+  const tz = TERRITORY_TZ[territoryId] || 'America/Denver';
+  const hour = Number(new Date(startMs).toLocaleString('en-US', { timeZone: tz, hour: '2-digit', hour12: false })) % 24;
+  return hour >= 20 ? AFTER_HOURS_FEE : 0;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -81,6 +105,11 @@ export default async function handler(req, res) {
   }
 
   const services = [{ service_id, selections: zbk_selections || [] }];
+  // After-hours fee — flat $75 for any 8 PM-or-later arrival window (hard rule).
+  const afterHoursFee = afterHoursFeeFor(selectedSlot, territory_id);
+  if (afterHoursFee > 0) {
+    services.push({ custom_service: { name: 'After-Hours Service Fee (8 PM)', price: afterHoursFee, duration: 0, taxable: true } });
+  }
   if (couponDiscount > 0) {
     services.push({ custom_service: { name: `Coupon ${couponCode} (-$${couponDiscount})`, price: -couponDiscount, duration: 0, taxable: false } });
   }

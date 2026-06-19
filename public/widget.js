@@ -545,6 +545,14 @@
     if(m[2].toUpperCase()==='AM'&&h===12)h=0;
     return h>=20?75:0;
   }
+  // After-hours fee for the currently selected slot. $75 for any job starting at
+  // 8 PM or later. The server (api/book.js) independently recomputes & enforces
+  // this so it is charged even if a stale cached widget doesn't send it.
+  function selectedSlotSurcharge(){
+    if(!selectedSlot||!selectedDate)return 0;
+    const sl=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot);
+    return sl?slotSurcharge(sl):0;
+  }
 
   // ─── Styles ───────────────────────────────────────────────────────────────
   const S={
@@ -1017,7 +1025,8 @@
   function bCustomer(){
     const adj=territoryAdjustment();
     const zipDisc=zipDiscount();
-    const base=calcTotal()+adj-zipDisc;
+    const ah=selectedSlotSurcharge();
+    const base=calcTotal()+adj-zipDisc+ah;
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
@@ -1064,6 +1073,10 @@
           ${adj>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Service area surcharge</span>
             <span style="color:#fff!important;">+$${adj}</span>
+          </div>`:''}
+          ${ah>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>After-hours fee (8 PM)</span>
+            <span style="color:#fff!important;">+$${ah}</span>
           </div>`:''}
           ${zipDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Location</span>
@@ -1276,6 +1289,8 @@
           const df=selectedDate?fmtDate(selectedDate):null;
           const lines=buildLineItems();
           if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
+          const ahFee=selectedSlotSurcharge();
+          if(ahFee>0)lines.push({label:'After-hours fee (8 PM)',qty:1,amount:ahFee});
           if(zipDiscount()>0)lines.push({label:'Location',qty:1,amount:-zipDiscount()});
           const couponDisc=COUPONS[couponCode]||0;
           if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
@@ -1287,14 +1302,14 @@
             address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
             dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
             timeWindow:slot.arrival_window||'',
-            lines, total:calcTotal()+territoryAdjustment()-zipDiscount()-couponDisc, tip:tipAmount||0,
+            lines, total:calcTotal()+territoryAdjustment()+ahFee-zipDiscount()-couponDisc, tip:tipAmount||0,
             twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
             jobId:(res&&(res.job_id||res.id))||'',
             rescheduleUrl:(res&&res.reschedule_url)||'',
             ts:Date.now()
           }));
         }catch(e){}
-        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()-(COUPONS[couponCode]||0));
+        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0));
         window.location.href=THANKYOU_URL;
       }else{
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
