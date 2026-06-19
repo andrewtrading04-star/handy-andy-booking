@@ -133,7 +133,9 @@ async function submit(req, res, db) {
     }
   }
 
-  const { data: row, error } = await db.from('estimates').insert({
+  // Try to insert with sms_consent; if the column doesn't exist yet (migration not applied),
+  // retry without it. This ensures estimates can be created even if migration hasn't been applied.
+  const estimateInsert = {
     business_id: biz.id,
     service_id, service_label,
     customer_name: name, customer_phone: phone,
@@ -141,9 +143,20 @@ async function submit(req, res, db) {
     customer_zip: zip,
     description, photo_url, photo_path,
     preferred_slots,
-    sms_consent: body.sms_consent !== false,
     source: 'widget',
+  };
+
+  let { data: row, error } = await db.from('estimates').insert({
+    ...estimateInsert,
+    sms_consent: body.sms_consent !== false,
   }).select('id').single();
+
+  // If sms_consent column doesn't exist in schema cache, retry without it
+  if (error && error.message?.includes('sms_consent')) {
+    console.warn('[estimate] sms_consent column not found, retrying without it');
+    ({ data: row, error } = await db.from('estimates').insert(estimateInsert).select('id').single());
+  }
+
   if (error) throw error;
 
   // Notify staff (owner + secretary) per business settings.
