@@ -1426,14 +1426,17 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
 
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
+    console.log('[DEBUG] TV Mounting category selected. tvMountService:', tvMountService);
+    console.log('[DEBUG] All services:', nbServices.map(s=>({name:s.name, category:s.category})));
     if(tvMountService){
       // Hidden select is emptied for TV Mounting, so track the id directly.
       nbServiceId=tvMountService.id;
       try{
         const r=await api('service_options',{ params:{ business:current.slug, service_id:tvMountService.id }});
         nbOptionGroups=r.groups||[];
+        console.log('[DEBUG] TV Mounting service_options returned', nbOptionGroups.length, 'groups:', nbOptionGroups.map(g=>({key:g.key, optionCount:g.options?.length})));
         renderNbSteps();
-      }catch(err){}
+      }catch(err){console.error('[DEBUG] TV Mounting service_options error:', err);}
     }
   }
 });
@@ -1666,6 +1669,7 @@ function nbPruneInvisibleOptions(){
   });
 }
 function renderNbSteps(){
+  console.log('[DEBUG] renderNbSteps called with', nbOptionGroups.length, 'groups');
   const wrap=document.getElementById('nbSteps');
   // Handyman labor — a single hours stepper at $85/hour.
   if(nbHandymanActive){
