@@ -1362,7 +1362,16 @@ async function openNewBooking(){
     ]);
     nbServices = svc.services || [];
     nbSelectedSlot = null;
-    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))].sort((a,b)=>{
+    // Assurion is a Handy-Andy-only channel handled by Steve. Surface it as its
+    // own category (built in JS, not from the DB service rows) and stash Steve's
+    // id + the existing Asurion service row to link the booking to.
+    const isHandyAndy = current.slug==='handy-andy';
+    nbSteveTechId = isHandyAndy ? ((tech.technicians.find(t=>/steve/i.test(t.name))||{}).id || null) : null;
+    nbAssurionServiceId = isHandyAndy ? ((nbServices.find(s=>/asurion|assurion/i.test(s.category||'')||/asurion|assurion/i.test(s.name||''))||{}).id || null) : null;
+    const cats = [...new Set(nbServices.map(s=>s.category).filter(Boolean))]
+      // Drop the raw DB 'Asurion' category — we present a curated 'Assurion' one.
+      .filter(c=>!/^asurion$|^assurion$/i.test(c))
+      .sort((a,b)=>{
       const order={TV: 'TV Mounting', Handyman: 'Handyman'};
       const aIdx = Object.values(order).indexOf(a);
       const bIdx = Object.values(order).indexOf(b);
@@ -1371,6 +1380,7 @@ async function openNewBooking(){
       if(bIdx>=0) return 1;
       return a.localeCompare(b);
     });
+    if(isHandyAndy) cats.push('Assurion');
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
@@ -1383,7 +1393,8 @@ async function openNewBooking(){
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
-  if(!category || category==='TV Mounting'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  // TV Mounting auto-picks its service; Assurion uses its own multi-select UI.
+  if(!category || category==='TV Mounting' || category==='Assurion'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
   svcDiv.innerHTML='<option value="">— Task —</option>'+
@@ -1395,10 +1406,23 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   resetNbSteps();
   nbSelectedSlot=null;
   nbServiceId=null;
+  document.getElementById('nbTech').disabled=false;   // unlock (Assurion locks it)
   document.getElementById('nbDate').value='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbTravelFee').value='';
   updateNbTotal();
+
+  if(cat==='Assurion'){
+    nbAssurionActive=true;
+    nbServiceId=nbAssurionServiceId;            // link to the Asurion service row
+    // Auto-assign Steve and lock the picker (Assurion is Steve-only).
+    if(nbSteveTechId){
+      const techSel=document.getElementById('nbTech');
+      techSel.value=nbSteveTechId; techSel.disabled=true;
+    }
+    renderAssurionSteps();
+    return;
+  }
 
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
@@ -1517,8 +1541,31 @@ let nbFrameTvQty={ regular: 0, frame: 0 };
 const HANDYMAN_HOURLY = 85;
 let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
 function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
+
+// ── Assurion (Handy Andy only) ──────────────────────────────────────────────
+// Assurion jobs go to Steve. The customer pays $0; the amounts below are Steve's
+// payout (mirrors api/assurion-book.js PAYOUTS). The office multi-selects the
+// services performed; the total becomes Steve's pay (recorded in the job notes
+// so the payroll engine matches it) and the customer is charged nothing.
+const ASSURION_GROUPS = [
+  { label:'TV & Audio', items:[
+    ['Television',60],['Sound Bar',51],['Frame TV (Art Style)',15],['Special Mount (Articulating or Motion)',0],
+  ]},
+  { label:'Security Devices', items:[
+    ['Alarm Keypad',75],['Alarm Range Extender',75],['Alarm Panic Button',75],['Flood Sensor',60],
+    ['Glass Break Sensor',60],['Contact Sensor',60],['Security Camera',75],
+  ]},
+  { label:'Smart Home', items:[
+    ['Door Locks',75],['Door Bell',75],['Smart Hub',90],['Thermostat',75],['Light Dimmer',60],
+  ]},
+  { label:'Add-ons', items:[
+    ['Extra Man (TV over 50")',50],["Truck Roll Fee (if job can't be completed)",60],
+  ]},
+];
+const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
+let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; document.getElementById('nbSteps').innerHTML=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); document.getElementById('nbSteps').innerHTML=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -1567,6 +1614,30 @@ function nbShowLifting(){
 function nbIsFrameOnlyOption(o){
   return !!(o.metadata && o.metadata.frame_only===true) || /oneconnect/i.test(o.label||'');
 }
+// ── Assurion multi-select (Steve, $0 to customer) ───────────────────────────
+function renderAssurionSteps(){
+  const wrap=document.getElementById('nbSteps');
+  let html='<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>'+
+    '<div class="nb-hint">Select everything that applies — amounts are Steve’s payout (customer pays $0).</div>';
+  ASSURION_GROUPS.forEach(g=>{
+    html+=`<div class="nb-hint" style="margin-top:12px;font-weight:700;color:var(--ink);">${esc(g.label)}</div><div class="nb-opts">`;
+    g.items.forEach(([name,price])=>{
+      const on=nbAssurionSel.has(name); const priceLbl=price?'$'+price:'$0';
+      html+=`<button type="button" class="nb-opt${on?' on':''}" data-asrv="${esc(name)}">`+
+            `<span>${esc(name)}</span><span class="nb-price">${priceLbl}</span></button>`;
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  wrap.innerHTML=html;
+  updateNbTotal();
+}
+document.getElementById('nbSteps').addEventListener('click',e=>{
+  const a=e.target.closest('[data-asrv]'); if(!a) return;
+  const name=a.dataset.asrv;
+  if(nbAssurionSel.has(name)) nbAssurionSel.delete(name); else nbAssurionSel.add(name);
+  renderAssurionSteps();
+});
 // Display label for an option-group section header (lets us relabel a group
 // without a DB change). The "Dismount" section reads "Guaranteed Dismount Service".
 function nbGroupLabel(g){ return g.key==='dismount' ? 'Guaranteed Dismount Service' : g.label; }
@@ -1729,6 +1800,14 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 function nbCollectSelections(){
   const out=[];
+  // Assurion: one line per selected service, priced at Steve's payout. The
+  // customer is charged $0 (handled at submit); these amounts feed his pay.
+  if(nbAssurionActive){
+    ASSURION_GROUPS.forEach(g=>g.items.forEach(([name])=>{
+      if(nbAssurionSel.has(name)) out.push({option_id:null, label:`Assurion: ${name}`, price:ASSURION_PRICE[name]||0, quantity:1});
+    }));
+    return out;
+  }
   // Custom line item first, so it shows on every job type (TV or Handyman).
   const ci=nbCustomItem(); if(ci) out.push({option_id:null, label:ci.label, price:ci.price, quantity:1});
   // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
@@ -1755,11 +1834,26 @@ const TAX_RATE = 0.0825;
 function updateNbTotal(){
   const selections=nbCollectSelections();
   const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  // Assurion: customer pays $0; the total shown is Steve's payout.
+  if(nbAssurionActive){
+    document.getElementById('nbTotalDisplay').innerHTML=`Customer pays: $0.00 | <span style="font-size:130%;font-weight:800;">Steve’s payout: $${optionsTotal.toFixed(2)}</span>`;
+    return;
+  }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
   const subtotal=optionsTotal+travelFee;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
   document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+}
+// Build the booking notes. For Assurion, embed the payout breakdown in the
+// format the payroll engine reads ("Assurion … Tech pay: $X").
+function nbBuildNotes(assurion, selections, payout){
+  const userNotes=document.getElementById('nbNotes').value.trim();
+  if(!assurion) return userNotes||null;
+  const lines=selections.map(s=>`${s.label.replace(/^Assurion:\s*/,'')} — $${s.price}`).join('\n');
+  let note=`Assurion job\n${lines}\n\nTech pay: $${payout}`;
+  if(userNotes) note=`${userNotes}\n\n${note}`;
+  return note;
 }
 document.getElementById('nbService').addEventListener('change',async e=>{
   resetNbSteps();
@@ -1815,13 +1909,18 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(!date){ err.textContent='Date required'; return; }
   if(!nbSelectedSlot){ err.textContent='Time slot required'; return; }
   const selections=nbCollectSelections();
-  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  // Assurion jobs: customer charged $0, Steve auto-assigned, payout recorded in
+  // the notes so the payroll engine matches it ("Assurion … Tech pay: $X").
+  const assurion=nbAssurionActive;
+  const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
+  if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
+  const travelFee=assurion?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
-  const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
-  const tax=Math.round(subtotal*TAX_RATE*100)/100;
-  const totalPrice=subtotal+tax;
-  const techId=document.getElementById('nbTech').value;
-  const paymentMethod=document.getElementById('nbPaymentMethod').value;
+  const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
+  const tax=assurion?0:Math.round(subtotal*TAX_RATE*100)/100;
+  const totalPrice=assurion?0:subtotal+tax;
+  const techId=assurion?(nbSteveTechId||document.getElementById('nbTech').value):document.getElementById('nbTech').value;
+  const paymentMethod=assurion?'':document.getElementById('nbPaymentMethod').value;
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
@@ -1856,7 +1955,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       subtotal,
       tax,
       price: totalPrice,
-      notes: document.getElementById('nbNotes').value.trim()||null,
+      notes: nbBuildNotes(assurion, selections, assurionPayout),
       payment_method: paymentMethod || null,
       payment_method_id: paymentMethodId,
       sms_consent: document.getElementById('nbSmsConsent').checked,
