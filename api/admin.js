@@ -275,7 +275,8 @@ async function availabilityOverview(req, res, db, auth) {
     .select('id, name, color').eq('business_id', biz.id).eq('active', true).order('name');
   const ids = (techs || []).map(t => t.id);
 
-  let availability = [], exceptions = [];
+  const tz = biz.timezone || 'America/Denver';
+  let availability = [], exceptions = [], bookings = [];
   if (ids.length) {
     const { data: av } = await db.from('technician_availability')
       .select('technician_id, day_of_week, slot_key').in('technician_id', ids);
@@ -287,8 +288,20 @@ async function availabilityOverview(req, res, db, auth) {
     exceptions = (ex || []).map(r => ({
       technician_id: r.technician_id, date: r.exception_date, slot_key: r.slot_key, is_available: r.is_available,
     }));
+    // Existing (non-cancelled) bookings occupy slots: a tech with a job in a slot
+    // is NOT available for it, so the overview must subtract them (same rule the
+    // New Booking calendar already uses). Mapped to { technician_id, date, slot_key }.
+    const { data: bk } = await db.from('bookings')
+      .select('technician_id, scheduled_at')
+      .eq('business_id', biz.id).in('technician_id', ids)
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .order('scheduled_at', { ascending: true }).limit(2000);
+    bookings = (bk || []).map(b => {
+      const slot_key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+      return slot_key ? { technician_id: b.technician_id, date: localDateStr(tz, b.scheduled_at), slot_key } : null;
+    }).filter(Boolean);
   }
-  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions });
+  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions, bookings });
 }
 
 // ── Bookings list ────────────────────────────────────────────────────────────
