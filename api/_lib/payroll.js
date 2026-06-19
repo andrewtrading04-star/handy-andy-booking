@@ -180,6 +180,22 @@ function tipFor(job) {
   return tip;
 }
 
+// ── Multi-tech detection (when "Second Technician" or "Lifting Help" line item exists) ──
+// Returns { hasSecondTech: boolean, secondTechBonus: number }.
+// Bonus is $60 if customer paid for it (line_total >= 70), else $0.
+function detectMultiTech(job) {
+  for (const li of job.line_items || []) {
+    const name = String(li.name || '').toLowerCase();
+    if (/second\s*technician|cannot\s*lift\s*86|lifting\s*help/i.test(name)) {
+      const lt = Number(li.line_total) || 0;
+      // If customer paid >= $70 for the add-on, tech gets +$60 bonus per the rate sheet.
+      const bonus = lt >= 70 ? 60 : 0;
+      return { hasSecondTech: true, secondTechBonus: bonus };
+    }
+  }
+  return { hasSecondTech: false, secondTechBonus: 0 };
+}
+
 // ── Special-service detection ────────────────────────────────────────────────
 function detectSpecial(job) {
   const svc = String(job.service_name || '').toLowerCase();
@@ -270,6 +286,9 @@ export function computeJobPay(job, techName) {
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 
+  // ── Detect multi-tech: when "Second Technician" or "Lifting Help" line item is present.
+  const multiTech = detectMultiTech(job);
+
   // ── Standard TV-mounting walk: base (by size) + each add-on line item.
   let pay = 0;
   let sawSize = false;
@@ -281,6 +300,10 @@ export function computeJobPay(job, techName) {
 
     // Skip non-labor bookkeeping lines.
     if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /travel fee/i.test(name)) continue;
+
+    // Skip "Second Technician" / "Lifting Help" markers — they're not labor to calculate.
+    // The $60 bonus is added separately if present.
+    if (/second\s*technician|cannot\s*lift\s*86|lifting\s*help/i.test(name)) continue;
 
     // Dismount (threshold) — standalone or line item.
     if (/guaranteed dismount/i.test(name)) {
@@ -306,9 +329,10 @@ export function computeJobPay(job, techName) {
       pay += amt;
       continue;
     }
-    // Dom's size buckets don't map to the 6-bracket sheet — flag, don't guess.
-    if (/my tv is|under 70 inches|70-85 inches|86 inches/i.test(name)) {
-      flags.push(`Dom's size "${name}" has no rate-sheet bracket — owner review`);
+    // For both Handy Andy and Dom's, TV size detection is the same.
+    // If we encounter a size name we don't match, flag for owner review.
+    if (/my tv is|under 70|70.?85|86\s*\+?/i.test(name) && !matchSize(name)) {
+      flags.push(`Size descriptor "${name}" — verify rate bracket for pay calculation`);
       continue;
     }
 
@@ -333,9 +357,34 @@ export function computeJobPay(job, techName) {
     flags.push('No TV size base detected — owner review');
   }
 
-  if (tip) { breakdown.push({ label: 'Tip (100%)', amount: tip }); pay += tip; }
-
-  return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
+  // ── Multi-tech handling: split base pay and tips 50/50, add $60 bonus if applicable.
+  if (multiTech.hasSecondTech) {
+    // Split the base pay (everything before tips) 50/50.
+    const newBreakdown = breakdown.map(item => ({
+      ...item,
+      amount: round0(item.amount / 2)
+    }));
+    // Re-sum to get the halved base.
+    let basePay = 0;
+    for (const item of newBreakdown) {
+      basePay += item.amount;
+    }
+    // Split tips 50/50.
+    const tippay = tip ? round0(tip / 2) : 0;
+    if (tippay) newBreakdown.push({ label: 'Tip (50%)', amount: tippay });
+    // Add the second-tech bonus.
+    if (multiTech.secondTechBonus) {
+      newBreakdown.push({ label: 'Second Technician bonus', amount: multiTech.secondTechBonus });
+    }
+    const finalPay = basePay + tippay + multiTech.secondTechBonus;
+    flags.push(`Multi-tech job (split 50/50) — verify second tech assignment`);
+    return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
+  } else {
+    // Single tech: full tips.
+    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
+    pay += tip;
+    return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
+  }
 }
 
 // ── Self-tests ───────────────────────────────────────────────────────────────
@@ -390,6 +439,30 @@ function runSelfTests() {
 
   // Job-number override.
   eq(computeJobPay(job({ zenbooker_job_number: '020989', line_items: [] }), 'Kregg').pay, 60, 'CUSTOM_PAY 020989 = 60');
+
+  // Multi-tech: base split 50/50 + tips split 50/50 + $60 bonus.
+  eq(computeJobPay(job({ tip: 20, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Second Technician', line_total: 70 }
+  ] }), 'Kregg').pay, 105, 'multi-tech (70/2 + 20/2 + 60 = 35 + 10 + 60)');
+
+  // Multi-tech with "Lifting Help" variation (same logic).
+  eq(computeJobPay(job({ line_items: [
+    { name: '70"–84"', line_total: 169 },
+    { name: 'Lifting Help', line_total: 70 }
+  ] }), 'Kregg').pay, 100, 'multi-tech lifting help (80/2 + 60 = 40 + 60)');
+
+  // Multi-tech without sufficient payment (< $70, no bonus).
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Second Technician', line_total: 50 }
+  ] }), 'Zach').pay, 30, 'multi-tech no bonus (60/2 = 30, no $60 bonus for <70)');
+
+  // Multi-tech with tip and bonus.
+  eq(computeJobPay(job({ tip: 40, line_items: [
+    { name: '98"+', line_total: 229 },
+    { name: 'Second Technician', line_total: 70 }
+  ] }), 'Juan').pay, 145, 'multi-tech Juan (130/2 + 40/2 + 60 = 65 + 20 + 60)');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
