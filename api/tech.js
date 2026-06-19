@@ -195,7 +195,8 @@ async function jobs(req, res, db, auth) {
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              customer:customers ( name, phone ),
-             service:services ( name )`)
+             service:services ( name ),
+             line_items:booking_line_items ( name, kind )`)
     .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
     .neq('status', 'cancelled')
@@ -605,6 +606,10 @@ async function setAvailabilityException(req, res, db, auth, body) {
 
 function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
+  // Service name: prefer the linked service; otherwise fall back to the
+  // service-kind line item (manual/imported bookings often have no service_id).
+  const serviceLine = (b.line_items || []).find(li => li.kind === 'service');
+  const serviceName = b.service?.name || serviceLine?.name || null;
   const out = {
     id: b.id,
     status: b.status,
@@ -612,7 +617,7 @@ function shapeJob(b, full = false, forTech = false) {
     scheduled_end: b.scheduled_end,
     customer_name: b.customer?.name || 'Customer',
     customer_phone: b.customer?.phone || null,
-    service: b.service?.name || null,
+    service: serviceName,
     address,
     customer_notes: b.customer_notes || null,
     maps_url: address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null,
