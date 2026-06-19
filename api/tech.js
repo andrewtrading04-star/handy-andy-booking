@@ -616,6 +616,8 @@ function shapeJob(b, full = false, forTech = false) {
     address,
     customer_notes: b.customer_notes || null,
     maps_url: address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null,
+    lat: b.lat || null,
+    lng: b.lng || null,
   };
   if (full) {
     out.customer_email = b.customer?.email || null;
