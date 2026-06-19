@@ -89,6 +89,7 @@
   .main{flex:1;min-width:0;display:flex;flex-direction:column;}
   .mobilebar{display:none;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;}
   .mobilebar .ham{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:16px;}
+  .nav-scrim{display:none;}
   .cal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:#fff;flex-wrap:wrap;position:sticky;top:0;z-index:20;}
   .cal-nav{display:flex;align-items:center;gap:8px;}
   .cal-nav .arrow{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:16px;}
@@ -283,6 +284,7 @@
   @media(max-width:880px){
     .sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:50;box-shadow:0 0 40px rgba(0,0,0,.2);}
     .sidebar.open{transform:none;}
+    .nav-scrim.show{display:block;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:40;}
     .mobilebar{display:flex;}
     .week{min-width:880px;}
     .view-scroll{overflow:auto;}
@@ -350,6 +352,7 @@
       <button class="btn ghost sm" id="logout">Log out</button>
     </div>
   </aside>
+  <div id="navScrim" class="nav-scrim"></div>
 
   <main class="main">
     <div class="mobilebar">
@@ -668,9 +671,14 @@ function refreshCurrent(){
   else if(section==='gallery') renderGallery();
 }
 
-// mobile sidebar
-document.getElementById('ham').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));
-function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); }
+// Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
+// OR selecting any item inside it closes it — so it never gets stuck open over
+// the content. closeSidebar is a no-op on desktop (the sidebar isn't .open there).
+function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('navScrim').classList.add('show'); }
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('navScrim').classList.remove('show'); }
+document.getElementById('ham').addEventListener('click',()=>{ document.getElementById('sidebar').classList.contains('open') ? closeSidebar() : openSidebar(); });
+document.getElementById('navScrim').addEventListener('click',closeSidebar);
+document.getElementById('sidebar').addEventListener('click',e=>{ if(e.target.closest('button')) closeSidebar(); });
 
 // ── Calendar: mode + view + nav ──────────────────────────────────────────
 document.getElementById('modeSeg').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
