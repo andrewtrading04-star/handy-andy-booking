@@ -1525,13 +1525,26 @@ async function reviews(req, res, db, auth) {
 async function estimates(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const status = (req.query.status || '').toString();
-  let q = db.from('estimates')
-    .select('id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, created_at')
-    .eq('business_id', biz.id)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (status && status !== 'all') q = q.eq('status', status);
-  const { data, error } = await q;
+  // Select with the full column set; if an optional column (e.g. customer_zip
+  // from a not-yet-applied migration) is missing from the schema cache, drop it
+  // and retry so the Estimates list still loads instead of erroring outright.
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, created_at';
+  const runQuery = () => {
+    let q = db.from('estimates').select(cols)
+      .eq('business_id', biz.id)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (status && status !== 'all') q = q.eq('status', status);
+    return q;
+  };
+  let { data, error } = await runQuery();
+  for (let i = 0; error && i < 4; i++) {
+    const m = /Could not find the '([^']+)' column/.exec(error.message || '');
+    if (!m || !cols.includes(m[1])) break;
+    console.warn(`[admin] estimates: '${m[1]}' column not in schema cache, retrying without it`);
+    cols = cols.split(',').map(s => s.trim()).filter(c => c !== m[1]).join(', ');
+    ({ data, error } = await runQuery());
+  }
   if (error) throw error;
   return res.status(200).json({ estimates: data || [] });
 }
