@@ -2035,8 +2035,17 @@ function nbIsAboveFireplace(label){
   return /above a fireplace/.test(l) && !/\bnot\b/.test(l);
 }
 function nbIsBehindWall(o){ return /behind the wall/i.test((o&&o.label)||''); }
-// How many behind-the-wall concealments are allowed = TVs not over a fireplace.
-function nbBehindWallMax(){ return Math.max(0, nbTotalTvs() - nbAboveFireplaceCount()); }
+// Behind-the-wall routing needs drywall. Brick, stone, tile and outdoor/stucco
+// walls can't be opened up, so those TVs can't get behind-wall concealment.
+function nbHardSurfaceCount(){
+  const g=nbOptionGroups.find(x=>x.key==='surface'); if(!g||!nbQty[g.id]) return 0;
+  let n=0;
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o && !/drywall/i.test(o.label)) n+=ct; } });
+  return n;
+}
+// How many behind-the-wall concealments are allowed = TVs that are neither over
+// a fireplace nor on a non-drywall (brick/stone/tile/outdoor) surface.
+function nbBehindWallMax(){ return Math.max(0, nbTotalTvs() - nbAboveFireplaceCount() - nbHardSurfaceCount()); }
 // Trim any behind-the-wall selections that now exceed the fireplace-driven cap
 // (e.g. after marking another TV as over a fireplace).
 function nbPruneBehindWall(){
@@ -2171,9 +2180,13 @@ function renderNbSteps(){
                 `<span class="nb-qty">${ct}</span>`+
                 `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
-        // Explain why behind-the-wall is blocked when every TV is over a fireplace.
+        // Explain why behind-the-wall is blocked (fireplace and/or hard surface).
         if(bw && bwMax===0){
-          html+=`<div class="nb-hint" style="margin:-2px 0 4px">Not available — can't run wires behind the wall over a fireplace.</div>`;
+          const reasons=[];
+          if(nbAboveFireplaceCount()>0) reasons.push('over a fireplace');
+          if(nbHardSurfaceCount()>0) reasons.push('on a brick, stone, tile or outdoor wall');
+          const why=reasons.length?` — can't run wires behind the wall ${reasons.join(' or ')}`:'';
+          html+=`<div class="nb-hint" style="margin:-2px 0 4px">Not available${why}.</div>`;
         }
         // "Other" add-on: when selected, let the admin describe it.
         if(nbIsOtherOption(o) && ct>0){
@@ -2228,8 +2241,9 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
     if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
     if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); nbPruneInvisibleOptions(); }
-    // Marking a TV over a fireplace can invalidate existing behind-wall picks.
-    if(grp&&(grp.key==='fireplace'||grp.key==='size')) nbPruneBehindWall();
+    // Marking a TV over a fireplace or on a hard surface can invalidate existing
+    // behind-wall picks (both block behind-the-wall routing).
+    if(grp&&(grp.key==='fireplace'||grp.key==='surface'||grp.key==='size')) nbPruneBehindWall();
     renderNbSteps();
   } else if(pickBtn){
     const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
