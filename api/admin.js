@@ -1458,6 +1458,7 @@ async function reviewSubmit(req, res, body) {
   if (rating <= 4 && feedback && booking.business?.feedback_email) {
     await sendFeedbackEmail({
       to: booking.business.feedback_email,
+      businessSlug: booking.business.slug,
       businessName: booking.business.name,
       customerName: booking.customer?.name || 'Customer',
       rating,
@@ -1492,10 +1493,29 @@ async function reviewSubmit(req, res, body) {
   return res.status(200).json({ ok: true, review_rating: rating });
 }
 
+// Per-business transactional email config (Resend).
+// Each business may use its own Resend account — the free tier allows one
+// verified domain per account, so Doms gets its own key + domain without
+// forcing the shared account onto a paid plan. When DOMS_RESEND_API_KEY is
+// unset (e.g. both domains live on one paid account) Doms transparently falls
+// back to the shared RESEND_API_KEY. Handy Andy's behavior is unchanged.
+function emailConfig(slug) {
+  if (slug === 'doms') {
+    return {
+      apiKey: process.env.DOMS_RESEND_API_KEY || process.env.RESEND_API_KEY,
+      from:   process.env.DOMS_EMAIL_FROM || 'contact@domstvmounting.com',
+    };
+  }
+  return {
+    apiKey: process.env.RESEND_API_KEY,
+    from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
+  };
+}
+
 async function sendFeedbackEmail(params) {
-  const apiKey = process.env.RESEND_API_KEY;
+  const { apiKey, from } = emailConfig(params.businessSlug);
   if (!apiKey) {
-    console.log('[review] RESEND_API_KEY not set, logging feedback:', params);
+    console.log('[review] Resend key not set, logging feedback:', params);
     return;
   }
 
@@ -1517,7 +1537,7 @@ async function sendFeedbackEmail(params) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'contact@ihandyandy.com',
+      from,
       to: params.to,
       subject: `Customer Feedback: ${params.rating}⭐ from ${params.customerName}`,
       html,
@@ -1652,9 +1672,9 @@ async function estimateSendEmail(req, res, db, auth, body) {
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available' });
 
-  const apiKey = process.env.RESEND_API_KEY;
+  const { apiKey, from } = emailConfig(biz.slug);
   if (!apiKey) {
-    console.warn('[estimate] RESEND_API_KEY not set, cannot send email');
+    console.warn('[estimate] Resend key not set, cannot send email');
     return res.status(500).json({ error: 'Email service not configured' });
   }
 
@@ -1677,7 +1697,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'contact@ihandyandy.com',
+      from,
       to: est.customer_email,
       subject: `Your ${biz.name} Estimate`,
       html,
