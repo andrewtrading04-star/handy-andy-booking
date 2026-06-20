@@ -1946,9 +1946,9 @@ function nbDisplayLabel(groupKey, optionLabel){
 }
 // ── Assurion multi-select (Steve, $0 to customer) ───────────────────────────
 function renderAssurionSteps(){
-  const wrap=document.getElementById(‘nbSteps’);
-  let html=’<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>’+
-    ‘<div class="nb-hint">Select all that apply.</div>’;
+  const wrap=document.getElementById('nbSteps');
+  let html='<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>'+
+    '<div class="nb-hint">Select all that apply.</div>';
   ASSURION_GROUPS.forEach(g=>{
     html+=`<div class="nb-hint" style="margin-top:12px;font-weight:700;color:var(--ink);">${esc(g.label)}</div><div class="nb-opts">`;
     g.items.forEach(([name,price])=>{
