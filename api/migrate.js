@@ -5,9 +5,13 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
+import { runDomsImport } from './_lib/doms-import.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Allow the long-running Doms import to use the full Hobby-plan budget.
+export const config = { maxDuration: 60 };
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dir, '../supabase/migrations');
@@ -70,6 +74,26 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const action = (req.query.action || '').toString();
+
+  // One-time Doms Zenbooker import. Secured by IMPORT_SECRET (so it can be
+  // triggered from a browser URL), NOT the admin bearer token. Optional
+  // &phase=customers|jobs lets the work be split across two requests if needed.
+  if (action === 'import_doms') {
+    const secret = process.env.IMPORT_SECRET;
+    if (!secret) return res.status(400).json({ error: 'IMPORT_SECRET env var not set. Add it in Vercel first.' });
+    if (req.query.secret !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=YOUR_IMPORT_SECRET' });
+    const zbk = process.env.ZENBOOKER_API_KEY;
+    if (!zbk) return res.status(400).json({ error: 'ZENBOOKER_API_KEY env var not set' });
+    try {
+      const phase = (req.query.phase || 'all').toString();
+      const out = await runDomsImport(serviceClient(), zbk, { phase });
+      return res.status(200).json(out);
+    } catch (e) {
+      console.error('[import_doms]', e);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   const auth = verifyToken(getBearer(req));
 
   // Require admin auth for any migration action
