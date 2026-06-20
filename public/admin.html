@@ -1269,6 +1269,16 @@ async function renderGreeting(){
   }catch{ /* non-fatal: leave whatever is shown */ }
 }
 function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
+function getTimeGreeting(name, tz) {
+  const now = new Date();
+  const timeStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+  const [hour, minute] = timeStr.split(':').map(Number);
+  let timeOfDay = 'evening';
+  if (hour < 12) timeOfDay = 'morning';
+  else if (hour < 17 || (hour === 17 && minute === 0)) timeOfDay = 'afternoon';
+  if (name && name !== 'Owner') return `Good ${timeOfDay} ${esc(name)}.`;
+  return `Good ${timeOfDay}.`;
+}
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
@@ -1278,7 +1288,7 @@ function paintGreeting(){
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
   const jobs=greetingData.jobs||0, est=greetingData.estimates||0;
-  const hi = (userName && userName!=='Owner') ? `Hello ${esc(userName)}.` : 'Welcome back.';
+  const hi = getTimeGreeting(userName, z);
   const jobsTxt = jobs===0
     ? 'You have <b>no jobs</b> scheduled today'
     : `There ${jobs===1?'is':'are'} <b>${jobs}</b> job${jobs===1?'':'s'} on the schedule today`;
