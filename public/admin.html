@@ -517,6 +517,7 @@ const API = '/api/admin';
 let token = localStorage.getItem('ha_admin_token') || '';
 let role = localStorage.getItem('ha_admin_role') || '';
 let userName = localStorage.getItem('ha_admin_name') || '';
+let appConfig = JSON.parse(localStorage.getItem('ha_admin_config') || '{}'); // { email, sms } outbound channels
 let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
 let current = null;            // current business object
 let greetingData = null;       // { jobs, estimates, tz } for the schedule greeting
@@ -628,17 +629,18 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   const errEl = document.getElementById('loginErr'); errEl.textContent='';
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
-    token=d.token; role=d.role; userName=d.name||''; businesses=d.businesses;
+    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
     localStorage.setItem('ha_admin_token',token);
     localStorage.setItem('ha_admin_role',role);
     localStorage.setItem('ha_admin_name',userName);
+    localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
   } catch(err){ errEl.textContent = err.message; }
 });
 function logout(){
-  token=''; role=''; userName=''; businesses=[]; current=null;
-  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_name'); localStorage.removeItem('ha_admin_biz');
+  token=''; role=''; userName=''; appConfig={}; businesses=[]; current=null;
+  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_name'); localStorage.removeItem('ha_admin_config'); localStorage.removeItem('ha_admin_biz');
   if(pollTimer) clearInterval(pollTimer);
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
   document.getElementById('app').classList.add('hidden');
@@ -1228,8 +1230,8 @@ function estCard(e){
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
         <select class="est-status-sel" data-est-status="${e.id}">${opts}</select>
-        ${e.customer_phone?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
-        ${e.customer_email?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
+        ${(e.customer_phone&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
+        ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
     </div>
@@ -2128,10 +2130,11 @@ document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id
 async function tryAutoLogin(){
   try{
     const d = await api('login', { method:'POST', body:{ password:'' } });
-    token=d.token; role=d.role; userName=d.name||''; businesses=d.businesses;
+    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
     localStorage.setItem('ha_admin_token',token);
     localStorage.setItem('ha_admin_role',role);
     localStorage.setItem('ha_admin_name',userName);
+    localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
   }catch{ /* password required — leave the login screen visible */ }

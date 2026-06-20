@@ -183,7 +183,13 @@ async function login(req, res, body) {
 
   const name = displayNameFor(scope);
   const token = signToken({ kind: 'admin', role, scope, name });
-  return res.status(200).json({ token, role, scope, name, businesses: businesses || [] });
+  // Tell the dashboard which outbound channels are wired up so it can show or
+  // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
+  const config = {
+    email: !!process.env.RESEND_API_KEY,
+    sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+  };
+  return res.status(200).json({ token, role, scope, name, config, businesses: businesses || [] });
 }
 
 // Resolve the requested business and enforce the token's scope.
