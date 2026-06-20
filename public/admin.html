@@ -311,10 +311,21 @@
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
+  .greet-stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}
+  .gstat{flex:1 1 150px;min-width:130px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
+    border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;}
+  .gstat-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.78;font-weight:700;}
+  .gstat-v{font-size:20px;font-weight:800;line-height:1.1;}
+  .gstat-s{font-size:11px;opacity:.82;}
+  .gstat-s.up{color:#5ef0a0;opacity:1;}
+  .gstat-s.down{color:#ff9b9b;opacity:1;}
+  .gstat-link{cursor:pointer;transition:background .15s;}
+  .gstat-link:hover{background:rgba(255,255,255,.18);}
   @media (max-width:760px){
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
     .greet-hi{font-size:18px;}
     .greet-line{font-size:12.5px;}
+    .gstat-v{font-size:18px;}
   }
 </style>
 </head>
@@ -1250,6 +1261,8 @@ async function renderGreeting(){
       jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
       estimates: newEst,
       tz: (s.business && s.business.timezone) || tz(),
+      revenue: s.revenue || null,
+      newReviews: (s.counts && s.counts.newReviews) || 0,
     };
     paintGreeting();
     if(section==='schedule') el.classList.remove('hidden');
@@ -1276,9 +1289,31 @@ function paintGreeting(){
   el.innerHTML=
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
-    `<div class="greet-line">${jobsTxt}, and ${estTxt}.</div>`;
+    `<div class="greet-line">${jobsTxt}, and ${estTxt}.</div>`+
+    greetStatsHtml();
   const link=el.querySelector('[data-goest]');
   if(link) link.addEventListener('click',()=>navTo('estimates'));
+  const rev=el.querySelector('[data-gorev]');
+  if(rev) rev.addEventListener('click',()=>navTo('reviews'));
+}
+// Owner-only metrics strip: revenue today, monthly pace vs last month, new reviews.
+function greetPace(r){
+  const last=Number(r.lastMonth||0), proj=Number(r.projectedMonth||0);
+  if(!last) return { txt:'no prior month', cls:'flat' };
+  const pct=Math.round((proj-last)/last*100);
+  if(pct>=5)  return { txt:`▲ ${pct}% vs last mo`, cls:'up' };
+  if(pct<=-5) return { txt:`▼ ${Math.abs(pct)}% vs last mo`, cls:'down' };
+  return { txt:'on track vs last mo', cls:'flat' };
+}
+function greetStatsHtml(){
+  if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
+  const r=greetingData.revenue, p=greetPace(r);
+  return `<div class="greet-stats">`+
+    `<div class="gstat"><span class="gstat-l">Revenue today</span><span class="gstat-v">${money(r.today||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">This month</span><span class="gstat-v">${money(r.month||0)}</span>`+
+      `<span class="gstat-s ${p.cls}">proj ${money(r.projectedMonth||0)} · ${p.txt}</span></div>`+
+    `<div class="gstat gstat-link" data-gorev="1"><span class="gstat-l">New reviews</span><span class="gstat-v">${greetingData.newReviews||0}</span><span class="gstat-s">last 7 days</span></div>`+
+  `</div>`;
 }
 function startGreetingClock(){
   if(greetingClock) clearInterval(greetingClock);
