@@ -1262,7 +1262,6 @@ async function renderGreeting(){
       estimates: newEst,
       tz: (s.business && s.business.timezone) || tz(),
       revenue: s.revenue || null,
-      newReviews: (s.counts && s.counts.newReviews) || 0,
     };
     paintGreeting();
     if(section==='schedule') el.classList.remove('hidden');
@@ -1293,10 +1292,8 @@ function paintGreeting(){
     greetStatsHtml();
   const link=el.querySelector('[data-goest]');
   if(link) link.addEventListener('click',()=>navTo('estimates'));
-  const rev=el.querySelector('[data-gorev]');
-  if(rev) rev.addEventListener('click',()=>navTo('reviews'));
 }
-// Owner-only metrics strip: revenue today, monthly pace vs last month, new reviews.
+// Owner-only metrics strip: revenue today, monthly pace vs last month.
 function greetPace(r){
   const last=Number(r.lastMonth||0), proj=Number(r.projectedMonth||0);
   if(!last) return { txt:'no prior month', cls:'flat' };
@@ -1312,7 +1309,6 @@ function greetStatsHtml(){
     `<div class="gstat"><span class="gstat-l">Revenue today</span><span class="gstat-v">${money(r.today||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">This month</span><span class="gstat-v">${money(r.month||0)}</span>`+
       `<span class="gstat-s ${p.cls}">proj ${money(r.projectedMonth||0)} · ${p.txt}</span></div>`+
-    `<div class="gstat gstat-link" data-gorev="1"><span class="gstat-l">New reviews</span><span class="gstat-v">${greetingData.newReviews||0}</span><span class="gstat-s">last 7 days</span></div>`+
   `</div>`;
 }
 function startGreetingClock(){
