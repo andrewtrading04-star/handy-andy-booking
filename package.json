@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "import:zenbooker": "node --env-file=.env scripts/import-zenbooker.mjs",
-    "import:zenbooker:dry": "node --env-file=.env scripts/import-zenbooker.mjs --dry-run"
+    "import:zenbooker:dry": "node --env-file=.env scripts/import-zenbooker.mjs --dry-run",
+    "import:doms": "node --env-file=.env scripts/import-zenbooker.mjs --business=doms --until=2026-06-19",
+    "import:doms:dry": "node --env-file=.env scripts/import-zenbooker.mjs --business=doms --until=2026-06-19 --dry-run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0"
