@@ -1927,9 +1927,24 @@ function nbClampTvBound(){
     }
   });
 }
+// Bracket tier a TV size needs: 85"+ uses the XL brackets, everything else the
+// standard ones. Prefer the DB metadata (Doms), fall back to the size label so
+// businesses without the metadata (Handy Andy) still filter correctly.
+function nbSizeTier(o){
+  if(o && o.metadata && o.metadata.bracket_tier) return o.metadata.bracket_tier;
+  return nbSizeMaxInches(o && o.label) >= 85 ? 'xl' : 'standard';
+}
+// Which size tier a bracket belongs to: 'any' (own/mantel/frame — fits all
+// sizes), 'xl' (an 85"+ bracket), or 'standard'. Prefer metadata, else label.
+function nbBracketForSize(o){
+  if(o && o.metadata && o.metadata.for_size) return o.metadata.for_size;
+  const l=(o && o.label || '').toLowerCase();
+  if(/own|mantel|frame|in-box/.test(l)) return 'any';
+  return nbSizeMaxInches(l) >= 85 ? 'xl' : 'standard';
+}
 function nbSelectedSizeTiers(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const tiers=new Set(); if(!g||!nbQty[g.id]) return tiers;
-  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add((o.metadata&&o.metadata.bracket_tier)||'standard'); } });
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) tiers.add(nbSizeTier(o)); } });
   return tiers;
 }
 // Largest inch value mentioned in a size label (e.g. "70-84 inch" -> 84).
@@ -2030,7 +2045,7 @@ function nbVisibleOptions(g){
   let opts=g.options;
   if(g.key==='bracket'){
     const tiers=nbSelectedSizeTiers();
-    opts=opts.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||tiers.has(fs); });
+    opts=opts.filter(o=>{ const fs=nbBracketForSize(o); return fs==='any'||tiers.has(fs); });
     // Remove Samsung Frame bracket option
     opts=opts.filter(o=>!/samsung|frame|in-box/i.test(o.label));
   }
