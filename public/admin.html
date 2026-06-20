@@ -35,8 +35,14 @@
   .login{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 18px 50px rgba(20,30,50,.10);}
   .login h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:6px;}
   .login .sub{color:var(--mute);font-size:13px;margin-bottom:22px;}
-  .login input{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:12px;}
+  .login input{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:13px 14px;font-size:16px;margin-bottom:12px;}
   .login input:focus{outline:none;border-color:var(--accent);}
+  .pw-wrap{position:relative;}
+  .pw-wrap input{padding-right:46px;}
+  /* center in the input, compensating for its 12px bottom margin */
+  .pw-eye{position:absolute;top:calc(50% - 6px);right:6px;transform:translateY(-50%);width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--mute);border-radius:8px;padding:0;}
+  .pw-eye:hover{color:var(--ink-2);}
+  .pw-eye:active{color:var(--accent);}
   .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:700;width:100%;}
   .btn:hover{filter:brightness(.96);}
   .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
@@ -336,7 +342,12 @@
   <form class="login" id="loginForm">
     <h1>Schedule <span class="hl">Admin</span></h1>
     <div class="sub">Enter your password to continue</div>
-    <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
+    <div class="pw-wrap">
+      <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus>
+      <button type="button" id="pwToggle" class="pw-eye" aria-label="Show password" aria-pressed="false">
+        <svg id="pwEyeIcon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
     <button class="btn" type="submit">Sign in</button>
     <div class="err" id="loginErr"></div>
   </form>
@@ -629,9 +640,28 @@ function avatar(t, sm){ return t ? `<span class="av${sm?' sm':''}" style="backgr
 function shortSlot(s){ const m=/^(\d{1,2}):/.exec(s.start||''); if(!m) return esc(s.label||''); let h=+m[1]; const ap=h>=12?'p':'a'; if(h>12)h-=12; if(h===0)h=12; return h+ap; }
 
 // ── Auth ─────────────────────────────────────────────────────────────────
+// Password show/hide toggle on the login screen.
+(function(){
+  const btn=document.getElementById('pwToggle');
+  const pw=document.getElementById('pw');
+  const icon=document.getElementById('pwEyeIcon');
+  if(!btn||!pw||!icon) return;
+  const eyeOpen='<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const eyeOff='<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+  btn.addEventListener('click',()=>{
+    const show=pw.type==='password';
+    pw.type=show?'text':'password';
+    icon.innerHTML=show?eyeOff:eyeOpen;
+    btn.setAttribute('aria-pressed',String(show));
+    btn.setAttribute('aria-label',show?'Hide password':'Show password');
+    pw.focus();
+  });
+})();
 document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const errEl = document.getElementById('loginErr'); errEl.textContent='';
+  const btn = e.target.querySelector('button[type=submit]');
+  if(btn){ btn.disabled=true; }
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
     token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
@@ -641,7 +671,16 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
-  } catch(err){ errEl.textContent = err.message; }
+  } catch(err){
+    // Network failures on mobile Safari surface as "Load failed" / "Failed to
+    // fetch" — translate those into something a human can act on.
+    const m = err && err.message || '';
+    errEl.textContent = /load failed|failed to fetch|networkerror/i.test(m)
+      ? 'Network error — check your connection and try again.'
+      : (m || 'Sign in failed. Please try again.');
+  } finally {
+    if(btn){ btn.disabled=false; }
+  }
 });
 function logout(){
   token=''; role=''; userName=''; appConfig={}; businesses=[]; current=null;
