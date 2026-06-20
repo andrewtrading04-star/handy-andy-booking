@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Doms TV Mounting — Request a Free Estimate</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  :root{
+    /* Doms brand — blue (#2563eb), matching the Doms dashboard. */
+    --accent:#2563eb; --accent-deep:#1d4ed8; --accent-soft:#eaf1ff;
+    --ink:#16181d; --ink-2:#3f4654; --mute:#8a909c;
+    --line:#e7e9ee; --line2:#f1f2f5; --bg:#f4f7fb; --card:#fff;
+    --radius:14px; --ok:#15803d; --ok-soft:#dcfce7;
+  }
+  html,body{background:transparent;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);line-height:1.5;padding:18px;}
+  .wrap{max-width:540px;margin:0 auto;}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:14px;justify-content:center;}
+  .brand .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-deep));display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(37,99,235,.28);}
+  .brand .logo svg{width:21px;height:21px;display:block;}
+  .brand .name{font-size:17px;font-weight:800;letter-spacing:-.2px;}
+  .brand .name small{display:block;font-size:11px;font-weight:600;color:var(--mute);letter-spacing:.3px;text-transform:uppercase;margin-top:1px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 6px 26px rgba(20,30,50,.08);overflow:hidden;}
+  .progress{height:5px;background:var(--line2);}
+  .progress .bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-deep));width:20%;transition:width .25s ease;}
+  .pad{padding:22px 20px 20px;}
+  .step-tag{font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.7px;}
+  h1{font-size:21px;font-weight:800;margin:6px 0 4px;line-height:1.25;letter-spacing:-.3px;}
+  .sub{color:var(--ink-2);font-size:14px;margin-bottom:16px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .opt{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:14px 12px;text-align:left;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink);transition:.12s;display:flex;flex-direction:column;gap:3px;}
+  .opt small{font-weight:500;color:var(--mute);font-size:12px;line-height:1.4;}
+  .opt:hover{border-color:var(--accent);}
+  .opt.on{border-color:var(--accent);background:var(--accent-soft);}
+  textarea,input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:13px 14px;font-size:16px;font-family:inherit;}
+  textarea{min-height:130px;resize:vertical;}
+  textarea:focus,input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  label.fld{display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin:12px 0 6px;}
+  label.fld .req{color:var(--accent);}
+  .photo-drop{border:1.5px dashed var(--line);border-radius:12px;padding:26px 16px;text-align:center;color:var(--mute);font-size:14px;cursor:pointer;}
+  .photo-drop:hover{border-color:var(--accent);color:var(--ink-2);}
+  .photo-prev{position:relative;margin-top:6px;}
+  .photo-prev img{width:100%;border-radius:12px;border:1px solid var(--line);display:block;}
+  .photo-prev .rm{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:30px;height:30px;font-size:16px;cursor:pointer;}
+  .dates{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;}
+  .date-pill{flex:0 0 auto;background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:9px 12px;text-align:center;cursor:pointer;min-width:58px;}
+  .date-pill .dow{font-size:11px;font-weight:700;color:var(--mute);text-transform:uppercase;}
+  .date-pill .d{font-size:17px;font-weight:800;}
+  .date-pill.on{border-color:var(--accent);background:var(--accent-soft);}
+  .windows{display:grid;gap:8px;margin-top:12px;}
+  .win{background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;}
+  .win:hover{border-color:var(--accent);}
+  .win.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+  .win.disabled{opacity:.45;cursor:not-allowed;}
+  .sel-list{margin-top:14px;display:flex;flex-direction:column;gap:7px;}
+  .sel-row{display:flex;align-items:center;gap:8px;background:var(--line2);border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;}
+  .sel-row .x{margin-left:auto;background:none;border:none;color:var(--mute);font-size:17px;cursor:pointer;line-height:1;}
+  .count{font-size:12px;font-weight:700;color:var(--mute);margin-top:10px;}
+  .consent{display:flex;align-items:flex-start;gap:10px;background:var(--line2);border-radius:11px;padding:12px 14px;margin-top:14px;}
+  .consent input{width:20px;height:20px;accent-color:var(--accent);margin-top:1px;flex-shrink:0;cursor:pointer;}
+  .consent label{font-size:13px;color:var(--ink-2);cursor:pointer;}
+  .nav{display:flex;gap:10px;margin-top:20px;}
+  .btn{flex:1;border:none;border-radius:11px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-deep));color:#fff;}
+  .btn.primary:disabled{background:#d8dbe1;color:#fff;cursor:not-allowed;}
+  .btn.ghost{flex:0 0 auto;background:var(--line2);color:var(--ink-2);padding:14px 18px;}
+  .err{background:#fee2e2;color:#b91c1c;border-radius:10px;padding:11px 13px;font-size:13px;margin-top:14px;display:none;}
+  .done{text-align:center;padding:18px 6px;}
+  .done .check{width:66px;height:66px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center;font-size:34px;margin:6px auto 16px;}
+  .done h1{font-size:22px;}
+  .foot{text-align:center;color:var(--mute);font-size:12px;margin-top:16px;}
+  .loading{text-align:center;color:var(--mute);padding:40px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <!-- TV + mount mark -->
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2.5" y="3.5" width="19" height="13" rx="2.2" stroke="#fff" stroke-width="1.8"/>
+        <path d="M8 20h8M12 16.5V20" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="name" id="brandName">Doms TV Mounting<small>Free Estimate</small></div>
+  </div>
+  <div class="card">
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div class="pad" id="pad">
+      <div class="loading" id="boot">Loading…</div>
+    </div>
+  </div>
+  <div class="foot">Free, no-obligation estimate — we'll review your request and reach out to schedule.</div>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────────────────────
+// Self-contained Doms estimate widget. Hardcoded to the "doms" business and the
+// production API so it can be embedded on ANY site (iframe or inline) without a
+// query string. Submits straight into the Doms estimates tab of the CRM.
+const SLUG = 'doms';
+const API_BASE = 'https://handy-andy-booking.vercel.app/api';
+
+const WINDOWS = [
+  { key:'s1', label:'8:00 AM – 10:00 AM' },
+  { key:'s2', label:'11:00 AM – 1:00 PM' },
+  { key:'s3', label:'2:00 PM – 4:00 PM' },
+  { key:'s4', label:'5:00 PM – 8:00 PM' },
+  { key:'s5', label:'8:00 PM – 10:30 PM' },
+];
+const TOTAL_STEPS = 5;
+const MAX_SLOTS = 5;
+
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  step: 0,
+  services: [],
+  serviceId: null, serviceLabel: null,
+  description: '',
+  image: null,            // compressed data URL
+  activeDate: null,       // 'YYYY-MM-DD' currently expanded in the picker
+  slots: [],              // [{date, slot_key, label}]
+  name: '', phone: '', email: '', zip: '',
+  consent: true,
+};
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(async function boot(){
+  try{
+    const r = await fetch(`${API_BASE}/estimate?action=services&business=${encodeURIComponent(SLUG)}`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Could not load services');
+    state.services = d.services || [];
+    render();
+  }catch(e){
+    document.getElementById('pad').innerHTML = `<div class="err" style="display:block;">${esc(e.message)}</div>`;
+    postHeight();
+  }
+})();
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function render(){
+  document.getElementById('bar').style.width = ((state.step+1)/TOTAL_STEPS*100)+'%';
+  const pad = document.getElementById('pad');
+  if(state.step===0)      pad.innerHTML = stepService();
+  else if(state.step===1) pad.innerHTML = stepDescribe();
+  else if(state.step===2) pad.innerHTML = stepPhoto();
+  else if(state.step===3) pad.innerHTML = stepTimes();
+  else if(state.step===4) pad.innerHTML = stepContact();
+  wire();
+  postHeight();
+}
+
+// Report our height to a parent page so an embedding <iframe> can auto-resize.
+function postHeight(){
+  try{ const h=document.body.scrollHeight; parent.postMessage({ type:'doms-estimate-height', height:h }, '*'); }catch(e){}
+}
+window.addEventListener('resize', postHeight);
+
+function shell(tag, title, sub, inner, opts={}){
+  const back = state.step>0 ? `<button class="btn ghost" id="back">Back</button>` : '';
+  const nextLabel = opts.nextLabel || (state.step===TOTAL_STEPS-1 ? 'Submit request' : 'Continue');
+  const next = `<button class="btn primary" id="next" ${opts.nextDisabled?'disabled':''}>${nextLabel}</button>`;
+  const nav = opts.hideNav ? '' : `<div class="nav">${back}${next}</div>`;
+  return `<div class="step-tag">Step ${state.step+1} of ${TOTAL_STEPS} · ${tag}</div>
+    <h1>${title}</h1>${sub?`<div class="sub">${sub}</div>`:''}
+    ${inner}<div class="err" id="err"></div>${nav}`;
+}
+
+function stepService(){
+  const opts = state.services.map(s =>
+    `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
+      <span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}
+    </button>`).join('');
+  const inner = state.services.length
+    ? `<div class="grid">${opts}</div>`
+    : `<div class="sub">No services available right now. Please call us instead.</div>`;
+  return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
+    { nextDisabled: !state.serviceId });
+}
+
+function stepDescribe(){
+  const inner = `<textarea id="desc" placeholder="Describe what you need done — the more detail, the better the estimate. (e.g. 'Mount a 65&quot; TV above the fireplace and hide the wires.')">${esc(state.description)}</textarea>`;
+  return shell('Details', 'What can we help you with?', 'Describe the job in your own words — the more detail, the better the estimate.', inner,
+    { nextDisabled: state.description.trim().length===0 });
+}
+
+function stepPhoto(){
+  const prev = state.image
+    ? `<div class="photo-prev"><img src="${state.image}" alt="preview"><button type="button" class="rm" id="rmPhoto">×</button></div>`
+    : `<div class="photo-drop" id="drop">📷 Tap to add a photo<br><small>Helps us understand the job (optional)</small></div>`;
+  return shell('Photo', 'Add a photo', 'Optional — a picture of the spot or item helps a lot.',
+    `${prev}<input type="file" id="file" accept="image/*" style="display:none">`,
+    { nextLabel:'Continue' });
+}
+
+function stepTimes(){
+  const dates = upcomingDates(14);
+  const datePills = dates.map(d =>
+    `<div class="date-pill ${state.activeDate===d.iso?'on':''}" data-date="${d.iso}">
+       <div class="dow">${d.dow}</div><div class="d">${d.day}</div>
+     </div>`).join('');
+  let windows = '';
+  if(state.activeDate){
+    windows = `<div class="windows">` + WINDOWS.map(w=>{
+      const on = state.slots.some(s=>s.date===state.activeDate && s.slot_key===w.key);
+      const full = !on && state.slots.length>=MAX_SLOTS;
+      return `<div class="win ${on?'on':''} ${full?'disabled':''}" data-win="${w.key}" data-label="${esc(w.label)}">
+        <span>${w.label}</span><span>${on?'✓':'+'}</span></div>`;
+    }).join('') + `</div>`;
+  }
+  const list = state.slots.length
+    ? `<div class="sel-list">` + state.slots.map((s,i)=>
+        `<div class="sel-row"><span>${esc(slotDateLabel(s.date))} · ${esc(s.label)}</span>
+         <button type="button" class="x" data-rm="${i}">×</button></div>`).join('') + `</div>`
+    : '';
+  const inner = `<div class="dates">${datePills}</div>${windows}${list}
+    <div class="count">${state.slots.length} of ${MAX_SLOTS} selected${state.activeDate?'':' · pick a day above'}</div>`;
+  return shell('Timing', 'When works for you?', 'Pick up to 5 time windows you’d prefer. We’ll confirm one.', inner,
+    { nextLabel:'Continue' });
+}
+
+function stepContact(){
+  const inner = `
+    <label class="fld">Your name <span class="req">*</span></label>
+    <input type="text" id="cname" value="${esc(state.name)}" placeholder="Full name" autocomplete="name">
+    <label class="fld">Phone <span class="req">*</span></label>
+    <input type="tel" id="cphone" value="${esc(state.phone)}" placeholder="(555) 555-5555" autocomplete="tel">
+    <label class="fld">Email</label>
+    <input type="email" id="cemail" value="${esc(state.email)}" placeholder="you@email.com (optional)" autocomplete="email">
+    <label class="fld">Zip code <span class="req">*</span></label>
+    <input type="text" id="czip" value="${esc(state.zip)}" placeholder="e.g. 80203" inputmode="numeric" maxlength="10" autocomplete="postal-code">
+    <div class="consent">
+      <input type="checkbox" id="consent" ${state.consent?'checked':''}>
+      <label for="consent">Text me updates about this estimate (scheduling, confirmations). Msg &amp; data rates may apply. Reply STOP to opt out.</label>
+    </div>`;
+  return shell('Contact', 'Where should we reach you?', '', inner,
+    { nextLabel:'Submit request', nextDisabled: !(state.name.trim() && state.phone.trim() && state.zip.trim()) });
+}
+
+// ── Wiring ───────────────────────────────────────────────────────────────────
+function wire(){
+  const back = document.getElementById('back');
+  const next = document.getElementById('next');
+  if(back) back.onclick = ()=>{ state.step=Math.max(0,state.step-1); render(); };
+  if(next) next.onclick = onNext;
+
+  if(state.step===0){
+    document.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>{
+      state.serviceId=b.dataset.svc; state.serviceLabel=b.dataset.label; render();
+    });
+  }
+  if(state.step===1){
+    const t=document.getElementById('desc');
+    t.oninput=()=>{ state.description=t.value; document.getElementById('next').disabled=t.value.trim().length===0; };
+  }
+  if(state.step===2){
+    const drop=document.getElementById('drop'), file=document.getElementById('file'), rm=document.getElementById('rmPhoto');
+    if(drop) drop.onclick=()=>file.click();
+    if(rm) rm.onclick=()=>{ state.image=null; render(); };
+    if(file) file.onchange=async()=>{
+      const f=file.files&&file.files[0]; if(!f) return;
+      try{ showErr(''); state.image=await compressImage(f); render(); }
+      catch(e){ showErr(e.message||'Could not read that image.'); }
+    };
+  }
+  if(state.step===3){
+    document.querySelectorAll('[data-date]').forEach(p=>p.onclick=()=>{ state.activeDate=p.dataset.date; render(); });
+    document.querySelectorAll('[data-win]').forEach(w=>w.onclick=()=>{
+      if(w.classList.contains('disabled')) return;
+      toggleSlot(state.activeDate, w.dataset.win, w.dataset.label); render();
+    });
+    document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ state.slots.splice(Number(x.dataset.rm),1); render(); });
+  }
+  if(state.step===4){
+    const n=document.getElementById('cname'), p=document.getElementById('cphone'), e=document.getElementById('cemail'), z=document.getElementById('czip'), c=document.getElementById('consent');
+    const upd=()=>{ state.name=n.value; state.phone=p.value; state.email=e.value; state.zip=z.value; state.consent=c.checked;
+      document.getElementById('next').disabled=!(n.value.trim()&&p.value.trim()&&z.value.trim()); };
+    n.oninput=upd; p.oninput=upd; e.oninput=upd; z.oninput=upd; c.onchange=upd;
+  }
+}
+
+function onNext(){
+  showErr('');
+  if(state.step===0 && !state.serviceId) return showErr('Please pick a service.');
+  if(state.step===1 && !state.description.trim()) return showErr('Please describe the job.');
+  if(state.step===4) return submit();
+  state.step++; render();
+}
+
+function toggleSlot(date, key, label){
+  const i=state.slots.findIndex(s=>s.date===date && s.slot_key===key);
+  if(i>=0){ state.slots.splice(i,1); return; }
+  if(state.slots.length>=MAX_SLOTS) return;
+  state.slots.push({ date, slot_key:key, label });
+}
+
+// ── Submit ───────────────────────────────────────────────────────────────────
+async function submit(){
+  const next=document.getElementById('next');
+  next.disabled=true; next.textContent='Sending…';
+  try{
+    const r=await fetch(`${API_BASE}/estimate?action=submit`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        business:SLUG,
+        service_id:state.serviceId, service_label:state.serviceLabel,
+        description:state.description.trim(),
+        image:state.image||undefined,
+        preferred_slots:state.slots,
+        customer:{ name:state.name.trim(), phone:state.phone.trim(), email:state.email.trim()||undefined, zip:state.zip.trim()||undefined },
+        sms_consent:state.consent,
+      }),
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Something went wrong. Please try again.');
+    success();
+  }catch(e){
+    next.disabled=false; next.textContent='Submit request';
+    showErr(e.message);
+  }
+}
+
+function success(){
+  document.getElementById('bar').style.width='100%';
+  document.getElementById('pad').innerHTML=`
+    <div class="done">
+      <div class="check">✓</div>
+      <h1>Request received!</h1>
+      <div class="sub" style="margin-top:8px;">Thanks, ${esc(state.name.trim().split(' ')[0]||'')}! We got your estimate request and will reach out shortly to confirm a time.</div>
+      <button class="btn primary" style="margin-top:18px;" onclick="location.reload()">Submit another</button>
+    </div>`;
+  postHeight();
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function showErr(msg){ const e=document.getElementById('err'); if(!e) return; e.textContent=msg; e.style.display=msg?'block':'none'; }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function upcomingDates(n){
+  const out=[]; const today=new Date(); today.setHours(0,0,0,0);
+  for(let i=0;i<n;i++){
+    const d=new Date(today); d.setDate(today.getDate()+i);
+    out.push({ iso:d.toLocaleDateString('en-CA'),
+      dow:d.toLocaleDateString('en-US',{weekday:'short'}),
+      day:d.getDate() });
+  }
+  return out;
+}
+function slotDateLabel(iso){ try{ return new Date(iso+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }catch{ return iso; } }
+
+// Resize/compress on-device so uploads stay small & fast (mirrors the tech app).
+function compressImage(file, maxDim=1600, quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('That file is not a valid image.'));
+      img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.'));
+    reader.readAsDataURL(file);
+  });
+}
+</script>
+</body>
+</html>
