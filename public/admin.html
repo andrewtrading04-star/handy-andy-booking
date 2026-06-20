@@ -1190,6 +1190,12 @@ async function renderEstimates(){
     document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
       setEstimate(sel.dataset.estStatus,{ status:e.target.value });
     }));
+    document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
+      sendEstimateMessage(b.dataset.estSms,'sms');
+    }));
+    document.querySelectorAll('#estWrap [data-est-email]').forEach(b=>b.addEventListener('click',()=>{
+      sendEstimateMessage(b.dataset.estEmail,'email');
+    }));
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
@@ -1222,6 +1228,8 @@ function estCard(e){
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
         <select class="est-status-sel" data-est-status="${e.id}">${opts}</select>
+        ${e.customer_phone?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
+        ${e.customer_email?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
     </div>
@@ -1231,6 +1239,16 @@ function estCard(e){
 async function setEstimate(id, payload){
   try{ await api('estimate_update',{ method:'POST', body:{ business:current.slug, id, ...payload }}); toast('Saved'); renderEstimates(); }
   catch(err){ toast(err.message); }
+}
+
+async function sendEstimateMessage(estimateId, type){
+  try{
+    const action = type === 'sms' ? 'estimate_send_sms' : 'estimate_send_email';
+    await api(action,{ method:'POST', body:{ business:current.slug, id:estimateId }});
+    const msg = type === 'sms' ? 'Quote sent via SMS!' : 'Quote sent via email!';
+    toast(msg);
+    renderEstimates();
+  }catch(err){ toast(err.message); }
 }
 
 // Lightweight unread-count badge for the sidebar (status = new).
