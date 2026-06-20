@@ -15,6 +15,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
+import { notificationsOn } from './_lib/notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -35,6 +36,7 @@ function toE164(raw) {
 }
 
 async function sendSMS(phoneNumber, message) {
+  if (!notificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
     console.warn('[SMS] Twilio not configured; message not sent:', message);
     return;
@@ -1513,6 +1515,7 @@ function emailConfig(slug) {
 }
 
 async function sendFeedbackEmail(params) {
+  if (!notificationsOn()) { console.log('[review] notifications disabled; feedback email not sent'); return; }
   const { apiKey, from } = emailConfig(params.businessSlug);
   if (!apiKey) {
     console.log('[review] Resend key not set, logging feedback:', params);
@@ -1671,6 +1674,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
     .select('customer_name, customer_email, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available' });
+  if (!notificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
 
   const { apiKey, from } = emailConfig(biz.slug);
   if (!apiKey) {

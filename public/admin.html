@@ -1169,7 +1169,9 @@ async function renderReviews(){
 }
 
 // ── Estimates (customer quote requests) ─────────────────────────────────────
-const EST_STATUS = { new:'New', contacted:'Contacted', scheduled:'Scheduled', closed:'Closed' };
+const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:'Estimate approved' };
+// Status colors: Needs Response = red, Estimate sent = black, Estimate approved = blue.
+const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
 let estFilter = 'all';
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
 
@@ -1190,6 +1192,7 @@ async function renderEstimates(){
     document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
     // wire controls
     document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
+      sel.style.color = EST_COLOR[e.target.value] || '#16181d';
       setEstimate(sel.dataset.estStatus,{ status:e.target.value });
     }));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
@@ -1214,7 +1217,7 @@ function estCard(e){
   const slotChips=slots.length?`<div class="est-slots">${slots.map(s=>
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
   const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
-  const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''}>${v}</option>`).join('');
+  const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   return `<div class="job est-card" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
@@ -1229,7 +1232,7 @@ function estCard(e){
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-        <select class="est-status-sel" data-est-status="${e.id}">${opts}</select>
+        <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
         ${(e.customer_phone&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
