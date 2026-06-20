@@ -34,6 +34,15 @@
   .opt small{font-weight:500;color:var(--mute);font-size:12px;line-height:1.4;}
   .opt:hover{border-color:var(--accent);}
   .opt.on{border-color:var(--accent);background:var(--accent-soft);}
+  .tvm-card{display:flex;align-items:center;gap:13px;text-decoration:none;background:linear-gradient(135deg,var(--accent),var(--accent-deep));color:#fff;border-radius:12px;padding:15px 16px;box-shadow:0 6px 18px rgba(37,99,235,.28);transition:filter .12s;}
+  .tvm-card:hover{filter:brightness(1.06);}
+  .tvm-card .tvm-ic{font-size:24px;line-height:1;}
+  .tvm-card .tvm-txt{display:flex;flex-direction:column;gap:2px;}
+  .tvm-card .tvm-txt strong{font-size:16px;font-weight:800;}
+  .tvm-card .tvm-txt small{font-size:12.5px;opacity:.92;font-weight:500;}
+  .tvm-card .tvm-arrow{margin-left:auto;font-size:20px;font-weight:800;}
+  .or-div{display:flex;align-items:center;gap:10px;color:var(--mute);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 12px;}
+  .or-div::before,.or-div::after{content:"";flex:1;height:1px;background:var(--line);}
   textarea,input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:13px 14px;font-size:16px;font-family:inherit;}
   textarea{min-height:130px;resize:vertical;}
   textarea:focus,input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
@@ -102,6 +111,9 @@
 // query string. Submits straight into the Doms estimates tab of the CRM.
 const SLUG = 'doms';
 const API_BASE = 'https://handy-andy-booking.vercel.app/api';
+// Direct "book now" destination for the TV Mounting section. target="_top" so an
+// embedding iframe navigates the whole page (same site as the widget host).
+const BOOK_URL = 'https://www.domstvmounting.com/book';
 
 const WINDOWS = [
   { key:'s1', label:'8:00 AM – 10:00 AM' },
@@ -170,14 +182,21 @@ function shell(tag, title, sub, inner, opts={}){
 }
 
 function stepService(){
+  // TV Mounting is a "book now" shortcut — it skips the estimate flow and sends
+  // the customer straight to the Doms booking page.
+  const tvm = `<a class="tvm-card" href="${BOOK_URL}" target="_top" rel="noopener">
+      <span class="tvm-ic">📺</span>
+      <span class="tvm-txt"><strong>TV Mounting</strong><small>Ready to book? Schedule your install now.</small></span>
+      <span class="tvm-arrow">→</span>
+    </a>`;
   const opts = state.services.map(s =>
     `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
       <span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}
     </button>`).join('');
-  const inner = state.services.length
-    ? `<div class="grid">${opts}</div>`
-    : `<div class="sub">No services available right now. Please call us instead.</div>`;
-  return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
+  const rest = state.services.length
+    ? `<div class="or-div">Or request an estimate</div><div class="grid">${opts}</div>`
+    : `<div class="or-div">Need something else?</div><div class="sub">No other services available right now — please call us.</div>`;
+  return shell('Service', 'What do you need help with?', 'Choose the type of work.', tvm + rest,
     { nextDisabled: !state.serviceId });
 }
 
