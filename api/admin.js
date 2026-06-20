@@ -230,6 +230,31 @@ async function summary(req, res, db, auth) {
     month: sum(monthJobs),
   };
 
+  // Last month's revenue (same active statuses) — baseline for the "pace" chip.
+  const lastMonthStart = startOfMonthUTC(tz, new Date(monthStart.getTime() - 24 * 60 * 60 * 1000));
+  const { data: lastMonthJobs } = await db.from('bookings')
+    .select('price')
+    .eq('business_id', biz.id)
+    .gte('scheduled_at', lastMonthStart.toISOString())
+    .lt('scheduled_at', monthStart.toISOString())
+    .in('status', ACTIVE_STATUSES);
+  revenue.lastMonth = sum(lastMonthJobs || []);
+
+  // Run-rate projection for the current month (local calendar): month-to-date
+  // revenue scaled by how much of the month has elapsed.
+  const [ly, lm, ld] = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date()).split('-').map(Number);
+  const daysInMonth = new Date(ly, lm, 0).getDate();
+  revenue.projectedMonth = ld > 0 ? Math.round(revenue.month / ld * daysInMonth) : revenue.month;
+
+  // New reviews in the last 7 days (bookings rated recently — no read/unread flag).
+  const sevenAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { count: newReviews } = await db.from('bookings')
+    .select('id', { count: 'exact', head: true })
+    .eq('business_id', biz.id)
+    .not('review_rating', 'is', null)
+    .gte('reviewed_at', sevenAgo);
+
   // Technicians + live status.
   const { data: techs, error: e3 } = await db.from('technicians')
     .select('id, name, phone, status, active')
@@ -244,6 +269,7 @@ async function summary(req, res, db, auth) {
     counts: {
       todayTotal: (today || []).length,
       unassigned: (today || []).filter(b => !b.technician_id && b.status !== 'cancelled').length,
+      newReviews: newReviews || 0,
     },
   });
 }
