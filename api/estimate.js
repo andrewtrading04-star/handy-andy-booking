@@ -14,6 +14,26 @@ import { uploadImage } from './_lib/storage.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
 
+// PostgREST rejects an insert that references a column missing from its schema
+// cache (e.g. a migration not yet applied to this database). Rather than lose
+// the customer's request, strip the offending column and retry. Handles
+// sms_consent, customer_zip, and any future column drift the same way.
+async function insertResilient(db, table, row, returning = 'id') {
+  const payload = { ...row };
+  for (let i = 0; i < 8; i++) {
+    const { data, error } = await db.from(table).insert(payload).select(returning).single();
+    if (!error) return { data, error: null };
+    const m = /Could not find the '([^']+)' column/.exec(error.message || '');
+    if (m && Object.prototype.hasOwnProperty.call(payload, m[1])) {
+      console.warn(`[estimate] '${m[1]}' column not in schema cache, retrying without it`);
+      delete payload[m[1]];
+      continue;
+    }
+    return { data: null, error };
+  }
+  return { data: null, error: new Error(`insert into ${table} failed after stripping unknown columns`) };
+}
+
 // ── Twilio SMS (same shape as admin.js / tech.js) ────────────────────────────
 function toE164(raw) {
   if (!raw) return null;
@@ -133,8 +153,9 @@ async function submit(req, res, db) {
     }
   }
 
-  // Try to insert with sms_consent; if the column doesn't exist yet (migration not applied),
-  // retry without it. This ensures estimates can be created even if migration hasn't been applied.
+  // Insert the estimate. insertResilient() tolerates columns that a not-yet-applied
+  // migration hasn't added to this database (e.g. sms_consent, customer_zip) by
+  // stripping them and retrying, so a request is never lost to schema drift.
   const estimateInsert = {
     business_id: biz.id,
     service_id, service_label,
@@ -144,19 +165,10 @@ async function submit(req, res, db) {
     description, photo_url, photo_path,
     preferred_slots,
     source: 'widget',
+    sms_consent: body.sms_consent !== false,
   };
 
-  let { data: row, error } = await db.from('estimates').insert({
-    ...estimateInsert,
-    sms_consent: body.sms_consent !== false,
-  }).select('id').single();
-
-  // If sms_consent column doesn't exist in schema cache, retry without it
-  if (error && error.message?.includes('sms_consent')) {
-    console.warn('[estimate] sms_consent column not found, retrying without it');
-    ({ data: row, error } = await db.from('estimates').insert(estimateInsert).select('id').single());
-  }
-
+  const { data: row, error } = await insertResilient(db, 'estimates', estimateInsert);
   if (error) throw error;
 
   // Notify staff (owner + secretary) per business settings.
