@@ -2079,6 +2079,13 @@ function nbVisibleOptions(g){
       return true;
     });
   }
+  // Wire Hiding — behind-the-wall needs drywall and a TV not over a fireplace.
+  // When NO eligible TV remains (every TV is on brick/stone/tile/outdoor or over
+  // a fireplace), hide the behind-the-wall option entirely rather than showing a
+  // disabled one. In a mixed job it stays visible (capped) for the drywall TVs.
+  if(g.key==='wires' && nbBehindWallMax()===0){
+    opts=opts.filter(o=>!nbIsBehindWall(o));
+  }
   // Frame-only add-ons show only when a Samsung Frame / LG Gallery TV is on the order.
   if(nbFrameTvQty.frame===0) opts=opts.filter(o=>!nbIsFrameOnlyOption(o));
   return opts;
@@ -2180,14 +2187,6 @@ function renderNbSteps(){
                 `<span class="nb-qty">${ct}</span>`+
                 `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
-        // Explain why behind-the-wall is blocked (fireplace and/or hard surface).
-        if(bw && bwMax===0){
-          const reasons=[];
-          if(nbAboveFireplaceCount()>0) reasons.push('over a fireplace');
-          if(nbHardSurfaceCount()>0) reasons.push('on a brick, stone, tile or outdoor wall');
-          const why=reasons.length?` — can't run wires behind the wall ${reasons.join(' or ')}`:'';
-          html+=`<div class="nb-hint" style="margin:-2px 0 4px">Not available${why}.</div>`;
-        }
         // "Other" add-on: when selected, let the admin describe it.
         if(nbIsOtherOption(o) && ct>0){
           html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
