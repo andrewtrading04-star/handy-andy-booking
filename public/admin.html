@@ -1644,16 +1644,14 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   }
 });
 
-// ── Second technician (driven by the native "Lifting Help" option group) ─────
-// The TV flow already has a single-select "Lifting Help" group whose options are
-// filtered by the chosen TV size (see nbVisibleOptions). The selected lifting
-// option decides whether a 2nd technician is needed:
-//   • "70-85 … cannot help lift"  → second tech REQUIRED
-//   • "86 inches or larger"/"85"+" → second tech REQUIRED (label says so)
-//   • "70-85 … can help lift"      → second tech OPTIONAL (office may add a helper)
-//   • "under 70" / none            → no second tech
-// When a concrete second tech is chosen, the calendar only offers dates/slots
-// where BOTH technicians are free.
+// ── Second technician (driven by the selected TV size) ───────────────────────
+// Whether a 2nd technician is needed is decided by the chosen TV size:
+//   • 98" and up   → second tech REQUIRED
+//   • 70"–97"      → second tech OPTIONAL (office may add a helper)
+//   • under 70"    → no second tech
+// The "Lifting Help" question is still shown (filtered by size) as a helper-lift
+// preference, but no longer forces the requirement. When a concrete second tech
+// is chosen, the calendar only offers dates/slots where BOTH techs are free.
 function nbLiftingKind(label){
   const l=(label||'').toLowerCase();
   if(/under\s*70/.test(l)) return 'under70';
@@ -1668,10 +1666,12 @@ function nbSelectedLiftingKind(){
   return nbLiftingKind(o.label);
 }
 // 'mandatory' (2 techs required) | 'optional' (helper allowed) | 'none'.
+// Driven by TV size: 98" and up requires two techs; 70"–97" makes a second tech
+// optional (office may add a helper); under 70" needs none.
 function nbSecondTechMode(){
-  const k=nbSelectedLiftingKind();
-  if(k==='cannot' || k==='big') return 'mandatory';
-  if(k==='can') return 'optional';
+  const sizes=nbSelectedSizeMaxList();
+  if(sizes.some(n=>n>=98)) return 'mandatory';
+  if(sizes.some(n=>n>=70)) return 'optional';
   return 'none';
 }
 // The concrete 2nd tech that should constrain availability (or null). A pair can
