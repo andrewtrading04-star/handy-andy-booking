@@ -419,6 +419,29 @@
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
+      <!-- Lifting question and 2nd technician selection -->
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
+        <input type="checkbox" id="nbNeedsLifting" style="cursor:pointer;width:18px;height:18px;">
+        <label for="nbNeedsLifting" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Does customer need help lifting?</label>
+      </div>
+      <div id="nbLiftingSizeWrap" style="display:none;">
+        <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">TV Size</div>
+        <div style="display:grid;gap:6px;">
+          <button type="button" class="nb-size-btn" data-size="under_70" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
+            <span>Under 70"</span><span class="size-check" style="display:none;">✓</span>
+          </button>
+          <button type="button" class="nb-size-btn" data-size="70_to_85" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
+            <span>70" – 85" & can help lift</span><span class="size-check" style="display:none;">✓</span>
+          </button>
+          <button type="button" class="nb-size-btn" data-size="can_help_lift" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
+            <span>Customer can help lift</span><span class="size-check" style="display:none;">✓</span>
+          </button>
+        </div>
+      </div>
+      <div id="nbSecondTechWrap" style="display:none;">
+        <label style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:6px;">Second Technician</label>
+        <select class="search" style="margin:0" id="nbSecondTech"></select>
+      </div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item (e.g. Custom bracket)">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
@@ -915,8 +938,10 @@ function openBooking(b){
     ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
+    ${b.needs_lifting?`<div class="bk-row"><span>🔧</span><div><strong>Lifting needed</strong> (${b.tv_size_category||'unknown size'})</div></div>`:''}
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
+      ${canAssign&&b.needs_lifting?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign"><option value="">— None —</option>${techCache.map(t=>\`<option value="\${t.id}" \${t.id===b.secondary_technician_id?'selected':''}\>\${esc(t.name)}</option>\`).join('')}</select></label>`:''}
       ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
@@ -941,6 +966,7 @@ function openBooking(b){
   m.onclick=e=>{ if(e.target===m) close(); };
   const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
+  const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', secondary_technician_id: sa.value||null }); close(); };
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
   const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
   const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? This permanently deletes it.')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
@@ -1526,6 +1552,8 @@ async function openNewBooking(){
     renderNbServices('');
     document.getElementById('nbTech').innerHTML='<option value="any">Any Technician</option>'+
       tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    document.getElementById('nbSecondTech').innerHTML='<option value="">— Select —</option>'+
+      tech.technicians.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
@@ -1551,6 +1579,11 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbTravelFee').value='';
   updateNbTotal();
+  // Reset lifting state when category changes
+  document.getElementById('nbNeedsLifting').checked=false;
+  document.getElementById('nbLiftingSizeWrap').style.display='none';
+  document.getElementById('nbSecondTechWrap').style.display='none';
+  resetNbLiftingState();
 
   if(cat==='Assurion'){
     nbAssurionActive=true;
@@ -1573,6 +1606,43 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
       renderNbSteps();
     }
   }
+});
+
+// ── Lifting question and 2nd technician ────────────────────────────────────
+let nbLiftingSelected=null;
+function resetNbLiftingState(){
+  nbLiftingSelected=null;
+  document.querySelectorAll('.nb-size-btn').forEach(b=>{
+    b.style.borderColor='var(--line)';
+    b.style.background='var(--card)';
+    b.querySelector('.size-check').style.display='none';
+  });
+}
+document.getElementById('nbNeedsLifting').addEventListener('change',e=>{
+  const wrap=document.getElementById('nbLiftingSizeWrap');
+  const secondWrap=document.getElementById('nbSecondTechWrap');
+  if(e.target.checked){
+    wrap.style.display='block';
+  }else{
+    wrap.style.display='none';
+    secondWrap.style.display='none';
+    resetNbLiftingState();
+    nbLiftingSelected=null;
+  }
+});
+document.querySelectorAll('.nb-size-btn').forEach(btn=>{
+  btn.addEventListener('click',e=>{
+    e.preventDefault();
+    const size=btn.dataset.size;
+    // Only show 2nd tech picker for under_70 and 70_to_85 sizes (can_help_lift is just info)
+    const needsSecond=(size==='under_70' || size==='70_to_85');
+    resetNbLiftingState();
+    nbLiftingSelected=size;
+    btn.style.borderColor='var(--accent)';
+    btn.style.background='var(--accent-soft)';
+    btn.querySelector('.size-check').style.display='inline';
+    document.getElementById('nbSecondTechWrap').style.display=needsSecond?'block':'none';
+  });
 });
 // Fetch a TV-mounting service's option groups. If the DB only has the size group
 // (Handy Andy DBs that never received migrations 0003/0015 — the public widget
@@ -2096,6 +2166,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       paymentMethodId=pm.id;
     }catch(e3){ err.textContent=e3.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
   }
+  const secondTechId=document.getElementById('nbNeedsLifting').checked?document.getElementById('nbSecondTech').value:null;
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
@@ -2106,6 +2177,9 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
         postal_code:document.getElementById('nbZip').value.trim() },
       service_id: nbServiceId || document.getElementById('nbService').value || null,
       technician_id: techId==='any'?'any':techId||null,
+      secondary_technician_id: secondTechId||null,
+      needs_lifting: document.getElementById('nbNeedsLifting').checked,
+      tv_size_category: nbLiftingSelected||null,
       scheduled_date: date,
       scheduled_slot: nbSelectedSlot.key,
       selections,

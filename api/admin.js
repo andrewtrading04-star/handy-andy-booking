@@ -802,6 +802,9 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot, tz);
   }
 
+  // Secondary technician (for jobs requiring 2 techs, e.g. TV lift assistance)
+  let secondary_technician_id = body.secondary_technician_id || null;
+
   // Guard against double-booking: if a specific tech ends up assigned to a slot
   // they already have a non-cancelled booking in, reject the create. This backs
   // up the UI (which no longer offers booked slots) against stale forms / races.
@@ -826,6 +829,7 @@ async function bookingCreate(req, res, db, auth, body) {
   const bookingInsert = {
     business_id: biz.id, customer_id,
     technician_id: technician_id || null,
+    secondary_technician_id: secondary_technician_id || null,
     service_id: body.service_id || null,
     status, source: 'manual',
     scheduled_at,
@@ -836,6 +840,8 @@ async function bookingCreate(req, res, db, auth, body) {
     address_line1: c.address_line1 || null, city: c.city || null, state: c.state || null, postal_code: c.postal_code || null,
     payment_required: !!paymentMethod && paymentMethod !== 'quote',
     payment_method: paymentMethod,
+    needs_lifting: !!body.needs_lifting,
+    tv_size_category: body.tv_size_category || null,
   };
 
   let { data: bRow, error: bErr } = await db.from('bookings').insert({
@@ -908,6 +914,7 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // Notify the technician if one was assigned at creation time.
   if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at).catch(console.error);
+  if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at).catch(console.error);
 
   return res.status(200).json({ ok: true, id: bRow.id });
 }
@@ -945,6 +952,7 @@ async function bookingUpdate(req, res, db, auth, body) {
       if (body.scheduled_end) patch.scheduled_end = body.scheduled_end; break;
     case 'assign':
       patch.technician_id = body.technician_id || null;
+      if (body.secondary_technician_id !== undefined) patch.secondary_technician_id = body.secondary_technician_id || null;
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
       break;
     case 'status':
@@ -959,6 +967,7 @@ async function bookingUpdate(req, res, db, auth, body) {
   if (body.action === 'reschedule' || body.action === 'assign') {
     const tz = biz.timezone || 'America/Denver';
     const effTech = ('technician_id' in patch) ? patch.technician_id : existing.technician_id;
+    const effSecondTech = ('secondary_technician_id' in patch) ? patch.secondary_technician_id : existing.secondary_technician_id;
     const effAt = patch.scheduled_at || existing.scheduled_at;
     if (effTech && effAt) {
       const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
@@ -966,6 +975,16 @@ async function bookingUpdate(req, res, db, auth, body) {
         const taken = await bookedSlotKeysForTech(db, biz.id, effTech, localDateStr(tz, effAt), tz, id);
         if (taken.has(slotKey)) {
           return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+        }
+      }
+    }
+    // Also check secondary technician if one is assigned
+    if (effSecondTech && effAt) {
+      const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
+      if (slotKey) {
+        const taken = await bookedSlotKeysForTech(db, biz.id, effSecondTech, localDateStr(tz, effAt), tz, id);
+        if (taken.has(slotKey)) {
+          return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
         }
       }
     }
@@ -993,6 +1012,10 @@ async function bookingUpdate(req, res, db, auth, body) {
   // tech actually changed, so re-saving the same assignment doesn't re-text them).
   if (body.action === 'assign' && patch.technician_id && patch.technician_id !== existing.technician_id) {
     notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at).catch(console.error);
+  }
+  // Also notify secondary technician if assigned
+  if (body.action === 'assign' && 'secondary_technician_id' in patch && patch.secondary_technician_id && patch.secondary_technician_id !== existing.secondary_technician_id) {
+    notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at).catch(console.error);
   }
   return res.status(200).json({ ok: true });
 }
@@ -1351,7 +1374,8 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 // ── Shared shaping ───────────────────────────────────────────────────────────
 function bookingSelect() {
   return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
+          notes, customer_notes, review_rating, review_text, technician_id, secondary_technician_id,
+          needs_lifting, tv_size_category, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
           technician:technicians ( id, name, status, color ),
@@ -1376,6 +1400,9 @@ function shapeBooking(b) {
     review_rating: b.review_rating,
     review_text: b.review_text,
     technician_id: b.technician_id,
+    secondary_technician_id: b.secondary_technician_id,
+    needs_lifting: b.needs_lifting,
+    tv_size_category: b.tv_size_category,
     service_area_id: b.service_area_id,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
     customer: b.customer || null,
