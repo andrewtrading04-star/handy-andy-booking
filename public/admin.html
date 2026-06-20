@@ -77,6 +77,11 @@
   body.doms .sl .ic i{color:inherit;font-size:13px;}
   body.doms .bk-row span:first-child i{color:var(--accent);font-size:13px;}
   body.doms .logo .dot i{color:#fff;font-size:13px;}
+  /* Doms theme: blue + black only. Remap the brand orange to blue and darken
+     body text to black. Handy Andy (no .doms class) keeps its orange. */
+  body.doms{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
+  body.doms .logo .dot{ background:var(--accent); }
+  body.doms .nb-opt.on, body.doms .nb-slot.on, body.doms .nb-optq.on{ background:var(--accent-soft); }
   .side-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
   .who{font-size:12px;color:var(--mute);flex:1;}
 
@@ -1306,7 +1311,7 @@ function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
   el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
-  el.style.setProperty('--gaccent', (current&&current.brand_orange)||'#FF6B35');
+  el.style.setProperty('--gaccent', isDoms() ? '#2563EB' : ((current&&current.brand_orange)||'#FF6B35'));
   const z=greetingData.tz||tz(), now=new Date();
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
