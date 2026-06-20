@@ -420,7 +420,7 @@
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-        <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item (e.g. Custom bracket)">
+        <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
       </div>
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
@@ -429,7 +429,7 @@
       <div id="nbSecondTechWrap" style="display:none;">
         <label id="nbSecondTechLabel" style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin:8px 0 6px;">Second technician</label>
         <select class="search" style="margin:0" id="nbSecondTech"></select>
-        <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Only times when both technicians are free will be shown.</div>
+        <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Times shown only when both technicians are available.</div>
       </div>
       <input type="hidden" id="nbDate">
       <div id="nbCalWrap" style="display:none;">
@@ -440,13 +440,13 @@
         </div>
         <div class="nb-cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
         <div id="nbCalGrid" class="nb-cal-grid"></div>
-        <div class="nb-cal-hint">Only dates with an available technician can be selected.</div>
+        <div class="nb-cal-hint">Only dates with available technician can be selected.</div>
       </div>
       <div id="nbSlotsWrap" style="display:none;">
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
-      <textarea class="search" style="margin:12px 0 0 0;min-height:60px" id="nbNotes" placeholder="Notes / special instructions"></textarea>
+      <textarea class="search" style="margin:12px 0 0 0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
       <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
         <option value="">Select payment method</option>
         <option value="card">Credit Card</option>
@@ -455,11 +455,11 @@
       </select>
       <div id="nbCardWrap" style="display:none;">
         <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
-        <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">🔒 Secured by Stripe. The card is saved on file and charged at time of service.</div>
+        <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">Card is saved and charged at time of service.</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
         <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
-        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment (confirmations, ETA, completion)</label>
+        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -1885,11 +1885,26 @@ function nbShowLifting(){
 function nbIsFrameOnlyOption(o){
   return !!(o.metadata && o.metadata.frame_only===true) || /oneconnect/i.test(o.label||'');
 }
+// Transform option labels for display. This handles renames without DB changes.
+function nbDisplayLabel(groupKey, optionLabel){
+  if(!optionLabel) return optionLabel;
+  if(groupKey==='bracket'){
+    if(/i have my own/.test(optionLabel.toLowerCase())) return 'Customer supplied bracket';
+  }
+  if(groupKey==='dismount'){
+    if(/guaranteed|yes/i.test(optionLabel)) return 'Yes';
+    if(/no|handle.*removal/i.test(optionLabel)) return 'NO';
+  }
+  if(groupKey==='wires'){
+    return optionLabel.replace(/hide wires\s*/i, '').trim();
+  }
+  return optionLabel;
+}
 // ── Assurion multi-select (Steve, $0 to customer) ───────────────────────────
 function renderAssurionSteps(){
-  const wrap=document.getElementById('nbSteps');
-  let html='<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>'+
-    '<div class="nb-hint">Select everything that applies — amounts are Steve’s payout (customer pays $0).</div>';
+  const wrap=document.getElementById(‘nbSteps’);
+  let html=’<div class="nb-step"><div class="nb-step-t">What services does the customer need?</div>’+
+    ‘<div class="nb-hint">Select all that apply.</div>’;
   ASSURION_GROUPS.forEach(g=>{
     html+=`<div class="nb-hint" style="margin-top:12px;font-weight:700;color:var(--ink);">${esc(g.label)}</div><div class="nb-opts">`;
     g.items.forEach(([name,price])=>{
@@ -1910,8 +1925,8 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
   renderAssurionSteps();
 });
 // Display label for an option-group section header (lets us relabel a group
-// without a DB change). The "Dismount" section reads "Guaranteed Dismount Service".
-function nbGroupLabel(g){ return g.key==='dismount' ? 'Guaranteed Dismount Service' : g.label; }
+// without a DB change).
+function nbGroupLabel(g){ return g.key==='dismount' ? 'Dismount' : g.label; }
 // Max-inch value for each selected TV size (e.g. "70"-84"" -> 84).
 function nbSelectedSizeMaxList(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const out=[]; if(!g||!nbQty[g.id]) return out;
@@ -1923,6 +1938,8 @@ function nbVisibleOptions(g){
   if(g.key==='bracket'){
     const tiers=nbSelectedSizeTiers();
     opts=opts.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||tiers.has(fs); });
+    // Remove Samsung Frame bracket option
+    opts=opts.filter(o=>!/samsung|frame|in-box/i.test(o.label));
   }
   // Lifting Help — show only the options that match the chosen TV size, so the
   // office never sees a contradictory choice (e.g. "under 70" for a 75" TV, or
@@ -1964,7 +1981,7 @@ function renderNbSteps(){
     const hrs=nbHandymanHours, lineTotal=hrs*HANDYMAN_HOURLY;
     wrap.innerHTML=`<div class="nb-step">`+
       `<div class="nb-step-t">Handyman Labor — ${esc(nbHandymanLabel)}</div>`+
-      `<div class="nb-hint">Billed at $${HANDYMAN_HOURLY} per hour.</div>`+
+      `<div class="nb-hint">$${HANDYMAN_HOURLY} per hour.</div>`+
       `<div class="nb-opts"><div class="nb-optq${hrs>0?' on':''}">`+
         `<span class="nb-optlabel">Hours of labor</span>`+
         `<span class="nb-price">$${HANDYMAN_HOURLY}/hr</span>`+
@@ -1987,7 +2004,7 @@ function renderNbSteps(){
   if(isTvService){
     const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
-      `<div class="nb-hint">Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</div>`+
+      `<div class="nb-hint">Samsung Frame and LG Gallery TVs include bracket.</div>`+
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
           `<span class="nb-optlabel">Customer has a regular TV</span>`+
@@ -2022,8 +2039,8 @@ function renderNbSteps(){
     const atCap=tvBound && tvCount>0 && gCount>=tvCount;
     const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${tvCount} selected</span>` : '';
     html+=`<div class="nb-step"><div class="nb-step-t">${esc(nbGroupLabel(g))}${capLbl}</div>`;
-    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Choose the TV type above first</div></div>`; return; }
-    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Pick a TV size first</div></div>`; return; }
+    if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Select TV type first</div></div>`; return; }
+    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Select a TV size first</div></div>`; return; }
     html+='<div class="nb-opts">';
     nbVisibleOptions(g).forEach(o=>{
       const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
@@ -2031,7 +2048,7 @@ function renderNbSteps(){
         const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
         const plusDis=atCap?' disabled':'';
         html+=`<div class="nb-optq${ct>0?' on':''}">`+
-              `<span class="nb-optlabel">${esc(o.label)}</span>`+
+              `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
               `<span class="nb-price">${priceLbl}</span>`+
               `<span class="nb-stepper">`+
                 `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
@@ -2041,13 +2058,13 @@ function renderNbSteps(){
         // "Other" add-on: when selected, let the admin describe it.
         if(nbIsOtherOption(o) && ct>0){
           html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
-                `data-o="${o.id}" placeholder="Describe this (e.g. mount over brick, run extra HDMI)" `+
+                `data-o="${o.id}" placeholder="Describe this" `+
                 `value="${esc(nbOptionNotes[o.id]||'')}">`;
         }
       } else {
         const on=nbPickGet(g.id)===o.id;
         html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
-              `<span>${esc(o.label)}</span><span class="nb-price">${priceLbl}</span></button>`;
+              `<span>${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
       }
     });
     html+='</div></div>';
