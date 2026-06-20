@@ -3,12 +3,13 @@
 // against the Hobby-plan 12-function limit). Triggered from api/migrate.js via
 // ?action=import_doms&secret=IMPORT_SECRET[&phase=customers|jobs].
 //
-// Uses BATCHED upserts (chunks of 500) so the whole account imports in a handful
-// of round-trips and finishes inside the function time limit. Idempotent: keyed
-// on zenbooker_customer_id / zenbooker_job_id, so re-running is safe.
+// STREAMING + BATCHED: each Zenbooker page (100 records) is mapped, written, and
+// then discarded before the next page is fetched, so memory stays flat (the
+// previous load-everything-then-write approach OOM'd on Hobby's 1 GB limit,
+// crashing with FUNCTION_INVOCATION_FAILED). Idempotent: keyed on
+// zenbooker_customer_id / zenbooker_job_id, so re-running is safe.
 
 const PAGE = 100;
-const CHUNK = 500;
 const DEFAULT_CUTOFF = new Date('2026-06-19T23:59:59.999Z').getTime();
 
 function pick(obj, ...keys) {
@@ -16,7 +17,6 @@ function pick(obj, ...keys) {
   return null;
 }
 function digits(s) { return s == null ? null : String(s).replace(/[^\d]/g, '') || null; }
-function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 
 async function zbkGet(path, key) {
   const r = await fetch('https://api.zenbooker.com' + path, { headers: { Authorization: `Bearer ${key}` } });
@@ -27,26 +27,25 @@ async function zbkGet(path, key) {
   return r.json();
 }
 
-async function fetchAll(basePath, key) {
+// Yield Zenbooker results ONE PAGE AT A TIME (array of up to PAGE rows).
+async function* pages(basePath, key) {
   const sep = basePath.includes('?') ? '&' : '?';
-  const all = [];
   let starting_after = null, numericCursor = 0;
-  for (let page = 0; page < 5000; page++) {
+  for (let p = 0; p < 5000; p++) {
     let url = `${basePath}${sep}limit=${PAGE}`;
     if (starting_after) url += `&starting_after=${encodeURIComponent(starting_after)}`;
     else if (numericCursor) url += `&cursor=${numericCursor}`;
     const j = await zbkGet(url, key);
     const rows = Array.isArray(j) ? j : (j.data || j.results || []);
-    if (!rows.length) break;
-    all.push(...rows);
+    if (!rows.length) return;
+    yield rows;
     const hasMore = Array.isArray(j) ? rows.length === PAGE
                   : (j.has_more === true || (j.has_more === undefined && rows.length === PAGE));
-    if (!hasMore) break;
+    if (!hasMore) return;
     const last = rows[rows.length - 1];
     if (last?.id != null) starting_after = String(last.id);
     else numericCursor = (j.cursor || 0) + rows.length;
   }
-  return all;
 }
 
 function mapCustomer(raw, business_id) {
@@ -158,24 +157,21 @@ function mapBooking(job, business_id, customer_id, techByProvider, techByName, s
   };
 }
 
-// Batch-upsert customer rows (keyed on zbk id) and return a Map zbkId -> row id.
-async function upsertCustomers(db, business_id, rows, cache) {
-  let imported = 0, failed = 0;
+// Upsert a page of customer rows (keyed on zbk id); update cache with ids.
+async function upsertCustomerPage(db, business_id, rows, cache) {
   const withId = rows.filter(r => r.zenbooker_customer_id);
-  for (const part of chunk(withId, CHUNK)) {
-    try {
-      const { data, error } = await db.from('customers')
-        .upsert(part, { onConflict: 'business_id,zenbooker_customer_id', ignoreDuplicates: false })
-        .select('id, zenbooker_customer_id');
-      if (error) throw error;
-      for (const r of data) cache.set(`${business_id}:${r.zenbooker_customer_id}`, r.id);
-      imported += data.length;
-    } catch (e) {
-      console.warn('[import] customer chunk failed:', e.message);
-      failed += part.length;
-    }
+  if (!withId.length) return { imported: 0, failed: 0 };
+  try {
+    const { data, error } = await db.from('customers')
+      .upsert(withId, { onConflict: 'business_id,zenbooker_customer_id', ignoreDuplicates: false })
+      .select('id, zenbooker_customer_id');
+    if (error) throw error;
+    for (const r of data) cache.set(`${business_id}:${r.zenbooker_customer_id}`, r.id);
+    return { imported: data.length, failed: 0 };
+  } catch (e) {
+    console.warn('[import] customer page failed:', e.message);
+    return { imported: 0, failed: withId.length };
   }
-  return { imported, failed };
 }
 
 export async function runDomsImport(db, zbkKey, opts = {}) {
@@ -206,95 +202,96 @@ export async function runDomsImport(db, zbkKey, opts = {}) {
   const cache = new Map();   // `${business_id}:${zbkCustId}` -> customer row id
   const result = { business: biz.name, customers: { imported: 0, failed: 0 }, jobs: { imported: 0, skipped: 0, failed: 0 } };
 
-  // ── Customers ──────────────────────────────────────────────────────────────
+  // ── Customers (stream page-by-page) ──────────────────────────────────────────
   if (phase === 'all' || phase === 'customers') {
-    const raw = await fetchAll('/v1/customers', zbkKey);
-    const rows = raw.map(r => mapCustomer(r, business_id));
-    const r = await upsertCustomers(db, business_id, rows, cache);
-    result.customers = r;
-  }
-
-  // ── Jobs ───────────────────────────────────────────────────────────────────
-  if (phase === 'all' || phase === 'jobs') {
-    // If jobs run standalone, prime the cache from already-imported customers.
-    if (phase === 'jobs') {
-      const { data: existing } = await db.from('customers')
-        .select('id, zenbooker_customer_id')
-        .eq('business_id', business_id)
-        .not('zenbooker_customer_id', 'is', null);
-      for (const c of existing || []) cache.set(`${business_id}:${c.zenbooker_customer_id}`, c.id);
-    }
-
-    const rawJobs = await fetchAll('/v1/jobs?start_date_before=2026-06-19', zbkKey);
-    const jobs = rawJobs.filter(j => {
-      const ms = scheduledMs(j);
-      if (ms != null && ms > cutoffMs) { result.jobs.skipped++; return false; }
-      return true;
-    });
-
-    // Ensure every job's customer exists. Batch-upsert embedded customers we
-    // haven't seen yet (covers customers that aren't in /v1/customers).
-    const missing = [];
-    const seenMissing = new Set();
-    for (const job of jobs) {
-      const emb = job.customer || {};
-      const id = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
-      if (id && !cache.has(`${business_id}:${id}`) && !seenMissing.has(id)) {
-        seenMissing.add(id);
-        missing.push(mapCustomer(emb, business_id));
-      }
-    }
-    if (missing.length) {
-      const r = await upsertCustomers(db, business_id, missing, cache);
+    for await (const page of pages('/v1/customers', zbkKey)) {
+      const rows = page.map(r => mapCustomer(r, business_id));
+      const r = await upsertCustomerPage(db, business_id, rows, cache);
       result.customers.imported += r.imported;
       result.customers.failed += r.failed;
     }
+  }
 
-    // Map jobs -> booking rows + remember their raw line items.
-    const bookingRows = [];
-    const linesByJobId = new Map();
-    for (const job of jobs) {
-      const emb = job.customer || {};
-      const custId = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
-      let customer_id = custId ? cache.get(`${business_id}:${custId}`) : null;
-      if (!customer_id) { result.jobs.failed++; continue; }
-      const { booking, rawLines } = mapBooking(job, business_id, customer_id, techByProvider, techByName, service_area_id, service_id);
-      if (!booking.zenbooker_job_id) { result.jobs.skipped++; continue; }
-      bookingRows.push(booking);
-      linesByJobId.set(booking.zenbooker_job_id, rawLines);
-    }
+  // ── Jobs (stream page-by-page) ───────────────────────────────────────────────
+  if (phase === 'all' || phase === 'jobs') {
+    // Prime the cache with already-imported customer ids (small: id + zbk id).
+    const { data: existing } = await db.from('customers')
+      .select('id, zenbooker_customer_id')
+      .eq('business_id', business_id)
+      .not('zenbooker_customer_id', 'is', null);
+    for (const c of existing || []) cache.set(`${business_id}:${c.zenbooker_customer_id}`, c.id);
 
-    // Batch-upsert bookings, collecting their new ids.
-    const jobIdToBookingId = new Map();
-    for (const part of chunk(bookingRows, CHUNK)) {
+    for await (const page of pages('/v1/jobs?start_date_before=2026-06-19', zbkKey)) {
+      // Cutoff filter.
+      const jobs = [];
+      for (const j of page) {
+        const ms = scheduledMs(j);
+        if (ms != null && ms > cutoffMs) { result.jobs.skipped++; continue; }
+        jobs.push(j);
+      }
+      if (!jobs.length) continue;
+
+      // Ensure each job's customer exists (upsert embedded ones we haven't seen).
+      const missing = [];
+      const seen = new Set();
+      for (const job of jobs) {
+        const emb = job.customer || {};
+        const id = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
+        if (id && !cache.has(`${business_id}:${id}`) && !seen.has(id)) {
+          seen.add(id);
+          missing.push(mapCustomer(emb, business_id));
+        }
+      }
+      if (missing.length) {
+        const r = await upsertCustomerPage(db, business_id, missing, cache);
+        result.customers.imported += r.imported;
+        result.customers.failed += r.failed;
+      }
+
+      // Map this page's jobs -> booking rows + remember line items.
+      const bookingRows = [];
+      const linesByJobId = new Map();
+      for (const job of jobs) {
+        const emb = job.customer || {};
+        const custId = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
+        const customer_id = custId ? cache.get(`${business_id}:${custId}`) : null;
+        if (!customer_id) { result.jobs.failed++; continue; }
+        const { booking, rawLines } = mapBooking(job, business_id, customer_id, techByProvider, techByName, service_area_id, service_id);
+        if (!booking.zenbooker_job_id) { result.jobs.skipped++; continue; }
+        bookingRows.push(booking);
+        linesByJobId.set(booking.zenbooker_job_id, rawLines);
+      }
+      if (!bookingRows.length) continue;
+
+      // Upsert this page's bookings, collect ids.
+      let pageBookings = [];
       try {
         const { data, error } = await db.from('bookings')
-          .upsert(part, { onConflict: 'business_id,zenbooker_job_id', ignoreDuplicates: false })
+          .upsert(bookingRows, { onConflict: 'business_id,zenbooker_job_id', ignoreDuplicates: false })
           .select('id, zenbooker_job_id');
         if (error) throw error;
-        for (const b of data) jobIdToBookingId.set(b.zenbooker_job_id, b.id);
+        pageBookings = data;
         result.jobs.imported += data.length;
       } catch (e) {
-        console.warn('[import] booking chunk failed:', e.message);
-        result.jobs.failed += part.length;
+        console.warn('[import] booking page failed:', e.message);
+        result.jobs.failed += bookingRows.length;
+        continue;
       }
-    }
 
-    // Replace line items for the imported bookings (batch delete + batch insert).
-    const bookingIds = [...jobIdToBookingId.values()];
-    for (const part of chunk(bookingIds, CHUNK)) {
-      try { await db.from('booking_line_items').delete().in('booking_id', part); }
+      // Replace line items for this page's bookings.
+      const ids = pageBookings.map(b => b.id);
+      try { if (ids.length) await db.from('booking_line_items').delete().in('booking_id', ids); }
       catch (e) { console.warn('[import] line delete failed:', e.message); }
-    }
-    const allLines = [];
-    for (const [jobId, lines] of linesByJobId) {
-      const bId = jobIdToBookingId.get(jobId);
-      if (!bId) continue;
-      for (const l of lines) allLines.push({ ...l, booking_id: bId, business_id });
-    }
-    for (const part of chunk(allLines, CHUNK)) {
-      try { await db.from('booking_line_items').insert(part); }
-      catch (e) { console.warn('[import] line insert failed:', e.message); }
+
+      const lineRows = [];
+      for (const b of pageBookings) {
+        const lines = linesByJobId.get(b.zenbooker_job_id) || [];
+        for (const l of lines) lineRows.push({ ...l, booking_id: b.id, business_id });
+      }
+      if (lineRows.length) {
+        try { await db.from('booking_line_items').insert(lineRows); }
+        catch (e) { console.warn('[import] line insert failed:', e.message); }
+      }
     }
   }
 
