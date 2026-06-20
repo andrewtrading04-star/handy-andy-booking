@@ -56,6 +56,17 @@ function toE164(raw) {
   return d ? `+${d}` : null;
 }
 
+// Format a US phone number as "(222) 222-2222" for storage/display. Strips a
+// leading country code; leaves anything that isn't a 10-digit US number as-is
+// (e.g. international numbers) so we never mangle an unusual but valid input.
+function formatPhoneUS(raw) {
+  if (!raw) return raw;
+  let d = String(raw).replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('1')) d = d.slice(1);
+  if (d.length !== 10) return String(raw).trim();
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
 async function sendSMS(phoneNumber, message) {
   if (!notificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
@@ -130,7 +141,7 @@ async function submit(req, res, db) {
 
   const customer = body.customer || {};
   const name = (customer.name || '').toString().trim();
-  const phone = (customer.phone || '').toString().trim();
+  const phone = formatPhoneUS((customer.phone || '').toString().trim());
   const zip = (customer.zip || '').toString().trim() || null;
   if (!name)  return res.status(400).json({ error: 'Your name is required.' });
   if (!phone) return res.status(400).json({ error: 'A phone number is required.' });
