@@ -34,6 +34,7 @@
   .opt small{font-weight:500;color:var(--mute);font-size:12px;line-height:1.4;}
   .opt:hover{border-color:var(--accent);}
   .opt.on{border-color:var(--accent);background:var(--accent-soft);}
+  a.opt{text-decoration:none;}
   textarea,input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:13px 14px;font-size:16px;font-family:inherit;}
   textarea{min-height:130px;resize:vertical;}
   textarea:focus,input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
@@ -102,6 +103,9 @@
 // query string. Submits straight into the Doms estimates tab of the CRM.
 const SLUG = 'doms';
 const API_BASE = 'https://handy-andy-booking.vercel.app/api';
+// Direct "book now" destination for the TV Mounting section. target="_top" so an
+// embedding iframe navigates the whole page (same site as the widget host).
+const BOOK_URL = 'https://www.domstvmounting.com/book';
 
 const WINDOWS = [
   { key:'s1', label:'8:00 AM – 10:00 AM' },
@@ -174,9 +178,12 @@ function stepService(){
     `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
       <span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}
     </button>`).join('');
-  const inner = state.services.length
-    ? `<div class="grid">${opts}</div>`
-    : `<div class="sub">No services available right now. Please call us instead.</div>`;
+  // TV Mounting is an extra option styled like the others, but instead of
+  // continuing the estimate flow it links straight to the Doms booking page.
+  const tvm = `<a class="opt" href="${BOOK_URL}" target="_top" rel="noopener">
+      <span>TV Mounting</span><small>Book your TV mount install instantly.</small>
+    </a>`;
+  const inner = `<div class="grid">${opts}${tvm}</div>`;
   return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
     { nextDisabled: !state.serviceId });
 }

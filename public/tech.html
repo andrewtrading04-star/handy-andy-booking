@@ -22,10 +22,10 @@
     /* Gradient keyword highlight (bright for dark navy bg) */
     --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
   /* Doms brand palette — applied via body.doms for Doms technicians (e.g. George, TK).
-     Remaps the accent away from Handy Andy orange to Doms primary blue (#0047AB)
-     with Doms accent colors (orange #FF5733, yellow #FFC300). */
+     Remaps the accent away from Handy Andy orange to Doms primary blue (#0047AB),
+     all in blue tones — no orange. */
   body.doms{--orange:#0047AB;--orange-d:#003580;
-    --grad:linear-gradient(120deg,#4d8dff 0%,#FF5733 55%,#FFC300 100%);}
+    --grad:linear-gradient(120deg,#4d8dff 0%,#2563eb 55%,#0047AB 100%);}
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:var(--font-sans);background:var(--navy);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
   button{font-family:inherit;cursor:pointer;}
@@ -107,6 +107,8 @@
   /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
   body.doms .kv > i{color:var(--orange);width:18px;text-align:center;margin-right:2px;}
   body.doms .btn.ghost > i{margin-right:4px;}
+  /* Doms: blue badge tint instead of the orange one. */
+  body.doms .b-on_the_way, body.doms .b-arrived, body.doms .b-in_progress{background:rgba(0,71,171,.16);}
   .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}

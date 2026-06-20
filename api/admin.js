@@ -15,6 +15,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
+import { notificationsOn } from './_lib/notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -35,6 +36,7 @@ function toE164(raw) {
 }
 
 async function sendSMS(phoneNumber, message) {
+  if (!notificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
     console.warn('[SMS] Twilio not configured; message not sent:', message);
     return;
@@ -1560,6 +1562,7 @@ async function reviewSubmit(req, res, body) {
   if (rating <= 4 && feedback && booking.business?.feedback_email) {
     await sendFeedbackEmail({
       to: booking.business.feedback_email,
+      businessSlug: booking.business.slug,
       businessName: booking.business.name,
       customerName: booking.customer?.name || 'Customer',
       rating,
@@ -1569,16 +1572,12 @@ async function reviewSubmit(req, res, body) {
     }).catch(err => console.warn('[review] email send failed:', err));
   }
 
-  // Send SMS to technician based on rating
-  if (booking.technician?.phone) {
+  // Send SMS to technician on a poor review only. (5-star "great review" texts
+  // were removed for both businesses — no notification on a perfect rating.)
+  if (booking.technician?.phone && rating <= 4) {
     const techName = booking.technician.name || 'Technician';
-    if (rating === 5) {
-      const msg = `${techName} you just received a GREAT review! check it out on your profile.`;
-      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
-    } else if (rating <= 4) {
-      const msg = `${techName} you just received a bad review... Please check your profile to view.`;
-      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
-    }
+    const msg = `${techName} you just received a bad review... Please check your profile to view.`;
+    await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
   }
 
   // Send SMS to owner if rating ≤ 4
@@ -1594,10 +1593,30 @@ async function reviewSubmit(req, res, body) {
   return res.status(200).json({ ok: true, review_rating: rating });
 }
 
+// Per-business transactional email config (Resend).
+// Each business may use its own Resend account — the free tier allows one
+// verified domain per account, so Doms gets its own key + domain without
+// forcing the shared account onto a paid plan. When DOMS_RESEND_API_KEY is
+// unset (e.g. both domains live on one paid account) Doms transparently falls
+// back to the shared RESEND_API_KEY. Handy Andy's behavior is unchanged.
+function emailConfig(slug) {
+  if (slug === 'doms') {
+    return {
+      apiKey: process.env.DOMS_RESEND_API_KEY || process.env.RESEND_API_KEY,
+      from:   process.env.DOMS_EMAIL_FROM || 'contact@domstvmounting.com',
+    };
+  }
+  return {
+    apiKey: process.env.RESEND_API_KEY,
+    from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
+  };
+}
+
 async function sendFeedbackEmail(params) {
-  const apiKey = process.env.RESEND_API_KEY;
+  if (!notificationsOn()) { console.log('[review] notifications disabled; feedback email not sent'); return; }
+  const { apiKey, from } = emailConfig(params.businessSlug);
   if (!apiKey) {
-    console.log('[review] RESEND_API_KEY not set, logging feedback:', params);
+    console.log('[review] Resend key not set, logging feedback:', params);
     return;
   }
 
@@ -1619,7 +1638,7 @@ async function sendFeedbackEmail(params) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'contact@ihandyandy.com',
+      from,
       to: params.to,
       subject: `Customer Feedback: ${params.rating}⭐ from ${params.customerName}`,
       html,
@@ -1753,10 +1772,11 @@ async function estimateSendEmail(req, res, db, auth, body) {
     .select('customer_name, customer_email, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available' });
+  if (!notificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
 
-  const apiKey = process.env.RESEND_API_KEY;
+  const { apiKey, from } = emailConfig(biz.slug);
   if (!apiKey) {
-    console.warn('[estimate] RESEND_API_KEY not set, cannot send email');
+    console.warn('[estimate] Resend key not set, cannot send email');
     return res.status(500).json({ error: 'Email service not configured' });
   }
 
@@ -1779,7 +1799,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'contact@ihandyandy.com',
+      from,
       to: est.customer_email,
       subject: `Your ${biz.name} Estimate`,
       html,
