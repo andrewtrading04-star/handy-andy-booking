@@ -12,7 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { localDayStartUTC, localDateStartUTC, addDaysStr } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
@@ -100,6 +100,7 @@ export default async function handler(req, res) {
       case 'availability_set': return await setAvailability(req, res, db, auth, body);
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
       case 'tech_payroll':     return await techPayroll(req, res, db, auth);
+      case 'tech_reviews':     return await techReviews(req, res, db, auth);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -296,6 +297,7 @@ async function job(req, res, db, auth) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const { data, error } = await db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
+             review_rating, review_text, reviewed_at,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
@@ -646,6 +648,10 @@ function shapeJob(b, full = false, forTech = false) {
     out.stripe_customer_id = b.stripe_customer_id || null;
     out.stripe_payment_method_id = b.stripe_payment_method_id || null;
     out.stripe_payment_intent_id = b.stripe_payment_intent_id || null;
+    // Customer review for this job (so the tech sees the rating + comment in context).
+    out.review_rating = b.review_rating || null;
+    out.review_text = b.review_text || null;
+    out.reviewed_at = b.reviewed_at || null;
   }
   return out;
 }
@@ -737,4 +743,52 @@ async function techPayroll(req, res, db, auth) {
     deferred: deferredJobs,
     total: totalPay,
   });
+}
+
+// ── Reviews Report ───────────────────────────────────────────────────────────
+// The customer reviews this tech has earned: all-time average + count, how many
+// landed this week (business-tz Sun–Sat), and a recent list. Each review carries
+// the star rating, the customer's comment, and which job/service it was for.
+// Reviews live on bookings (review_rating 1-5, review_text, reviewed_at).
+async function techReviews(req, res, db, auth) {
+  const { data: biz } = await db.from('businesses').select('timezone').eq('id', auth.business_id).single();
+  const tz = biz?.timezone || 'America/Denver';
+  const weekStartMs = startOfWeekUTC(tz).getTime();
+
+  const { data, error } = await db.from('bookings')
+    .select(`id, scheduled_at, reviewed_at, review_rating, review_text,
+             customer:customers ( name ),
+             service:services ( name )`)
+    .eq('business_id', auth.business_id)
+    .eq('technician_id', auth.tech_id)
+    .not('review_rating', 'is', null)
+    .order('reviewed_at', { ascending: false, nullsFirst: false })
+    .limit(100);
+  if (error) throw error;
+
+  const all = data || [];
+  const total = all.length;
+  const sum = all.reduce((a, r) => a + (Number(r.review_rating) || 0), 0);
+  const average = total ? Math.round((sum / total) * 10) / 10 : 0;
+
+  let weekCount = 0;
+  const reviews = all.map(r => {
+    // reviewed_at can be null for reviews imported without a timestamp; those
+    // simply don't count toward "this week".
+    const ts = r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
+    const this_week = ts >= weekStartMs;
+    if (this_week) weekCount++;
+    return {
+      id: r.id,
+      rating: r.review_rating,
+      text: r.review_text || '',
+      service: r.service?.name || null,
+      customer_name: r.customer?.name || 'Customer',
+      reviewed_at: r.reviewed_at,
+      scheduled_at: r.scheduled_at,
+      this_week,
+    };
+  });
+
+  return res.status(200).json({ average, total, week_count: weekCount, reviews });
 }
