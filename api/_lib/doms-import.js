@@ -1,16 +1,27 @@
 // Doms Zenbooker import — shared library (NOT a serverless function; files under
 // /api/_lib are ignored by Vercel's function builder, so this does not count
 // against the Hobby-plan 12-function limit). Triggered from api/migrate.js via
-// ?action=import_doms&secret=IMPORT_SECRET[&phase=customers|jobs].
+// ?action=import_doms&secret=IMPORT_SECRET&phase=customers|jobs[&cursor=...].
 //
-// STREAMING + BATCHED: each Zenbooker page (100 records) is mapped, written, and
-// then discarded before the next page is fetched, so memory stays flat (the
-// previous load-everything-then-write approach OOM'd on Hobby's 1 GB limit,
-// crashing with FUNCTION_INVOCATION_FAILED). Idempotent: keyed on
-// zenbooker_customer_id / zenbooker_job_id, so re-running is safe.
+// RESUMABLE + STREAMING + BATCHED. Two earlier failure modes are handled here:
+//   1. OOM (FUNCTION_INVOCATION_FAILED): a load-everything-then-write approach
+//      blew past Hobby's 1 GB limit. Fixed by streaming one 100-record page at a
+//      time — each page is mapped, written, and discarded before the next fetch,
+//      so memory stays flat.
+//   2. TIMEOUT (FUNCTION_INVOCATION_FAILED): 420+ customers + 1000+ jobs across
+//      ~20 paginated fetches (each with several DB writes) cannot finish inside
+//      the 60s Hobby budget. Fixed by `runDomsImportChunk`, which processes only
+//      a handful of pages per HTTP request and returns a cursor. The driver page
+//      (public/import-doms.html) calls it in a loop until done.
+//
+// Idempotent: upserts keyed on zenbooker_customer_id / zenbooker_job_id, so
+// re-running any chunk (e.g. after a retry) is safe.
 
 const PAGE = 100;
 const DEFAULT_CUTOFF = new Date('2026-06-19T23:59:59.999Z').getTime();
+// Pages handled per HTTP request. Small enough that one request stays well under
+// the 60s Hobby limit even when Zenbooker / Supabase are slow.
+const DEFAULT_MAX_PAGES = 3;
 
 function pick(obj, ...keys) {
   for (const k of keys) if (obj && obj[k] != null && obj[k] !== '') return obj[k];
@@ -27,24 +38,47 @@ async function zbkGet(path, key) {
   return r.json();
 }
 
-// Yield Zenbooker results ONE PAGE AT A TIME (array of up to PAGE rows).
-async function* pages(basePath, key) {
+// Fetch ONE page given an opaque cursor token, and return the token for the next
+// page. Token encodes the pagination strategy so resumption survives across HTTP
+// requests:  "a:<id>" = id-based starting_after,  "n:<n>" = numeric cursor.
+async function fetchPage(basePath, key, cursorToken) {
   const sep = basePath.includes('?') ? '&' : '?';
-  let starting_after = null, numericCursor = 0;
+  let url = `${basePath}${sep}limit=${PAGE}`;
+  let mode = null, val = null;
+  if (cursorToken) {
+    const i = cursorToken.indexOf(':');
+    mode = cursorToken.slice(0, i);
+    val = cursorToken.slice(i + 1);
+    if (mode === 'a') url += `&starting_after=${encodeURIComponent(val)}`;
+    else if (mode === 'n') url += `&cursor=${encodeURIComponent(val)}`;
+  }
+  const j = await zbkGet(url, key);
+  const rows = Array.isArray(j) ? j : (j.data || j.results || []);
+  if (!rows.length) return { rows: [], nextCursor: null, hasMore: false };
+
+  const last = rows[rows.length - 1];
+  const hasMore = Array.isArray(j)
+    ? rows.length === PAGE
+    : (j.has_more === true || (j.has_more === undefined && rows.length === PAGE));
+
+  let nextCursor = null;
+  if (last && last.id != null) nextCursor = `a:${String(last.id)}`;
+  else {
+    const base = (mode === 'n' && val != null) ? Number(val) : (j.cursor || 0);
+    nextCursor = `n:${base + rows.length}`;
+  }
+  return { rows, nextCursor, hasMore };
+}
+
+// Yield Zenbooker results ONE PAGE AT A TIME (used by the full, non-chunked run).
+async function* pages(basePath, key) {
+  let cursor = null;
   for (let p = 0; p < 5000; p++) {
-    let url = `${basePath}${sep}limit=${PAGE}`;
-    if (starting_after) url += `&starting_after=${encodeURIComponent(starting_after)}`;
-    else if (numericCursor) url += `&cursor=${numericCursor}`;
-    const j = await zbkGet(url, key);
-    const rows = Array.isArray(j) ? j : (j.data || j.results || []);
+    const { rows, nextCursor, hasMore } = await fetchPage(basePath, key, cursor);
     if (!rows.length) return;
     yield rows;
-    const hasMore = Array.isArray(j) ? rows.length === PAGE
-                  : (j.has_more === true || (j.has_more === undefined && rows.length === PAGE));
     if (!hasMore) return;
-    const last = rows[rows.length - 1];
-    if (last?.id != null) starting_after = String(last.id);
-    else numericCursor = (j.cursor || 0) + rows.length;
+    cursor = nextCursor;
   }
 }
 
@@ -174,11 +208,8 @@ async function upsertCustomerPage(db, business_id, rows, cache) {
   }
 }
 
-export async function runDomsImport(db, zbkKey, opts = {}) {
-  const phase = opts.phase || 'all';            // 'all' | 'customers' | 'jobs'
-  const cutoffMs = opts.cutoffMs || DEFAULT_CUTOFF;
-
-  // Resolve Doms business + lookups.
+// Resolve the Doms business id + the lookup tables a booking import needs.
+async function resolveContext(db) {
   const { data: biz } = await db.from('businesses').select('id, name').eq('slug', 'doms').single();
   if (!biz) throw new Error('Doms business not found');
   const business_id = biz.id;
@@ -198,100 +229,175 @@ export async function runDomsImport(db, zbkKey, opts = {}) {
     if (t.zenbooker_provider_id) techByProvider[t.zenbooker_provider_id] = t;
     techByName[`${business_id}:${(t.name || '').toLowerCase()}`] = t;
   }
+  return { businessName: biz.name, business_id, service_area_id, service_id, techByProvider, techByName };
+}
 
-  const cache = new Map();   // `${business_id}:${zbkCustId}` -> customer row id
-  const result = { business: biz.name, customers: { imported: 0, failed: 0 }, jobs: { imported: 0, skipped: 0, failed: 0 } };
+// Process ONE page of jobs: cutoff filter, ensure embedded customers exist, upsert
+// bookings, then replace their line items. Mutates `result` counters and `cache`.
+async function processJobsPage(db, ctx, page, cache, cutoffMs, result) {
+  const { business_id, techByProvider, techByName, service_area_id, service_id } = ctx;
 
-  // ── Customers (stream page-by-page) ──────────────────────────────────────────
+  // Cutoff filter (June 19 and earlier).
+  const jobs = [];
+  for (const j of page) {
+    const ms = scheduledMs(j);
+    if (ms != null && ms > cutoffMs) { result.jobs.skipped++; continue; }
+    jobs.push(j);
+  }
+  if (!jobs.length) return;
+
+  // Ensure each job's customer exists (upsert embedded ones we haven't seen).
+  const missing = [];
+  const seen = new Set();
+  for (const job of jobs) {
+    const emb = job.customer || {};
+    const id = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
+    if (id && !cache.has(`${business_id}:${id}`) && !seen.has(id)) {
+      seen.add(id);
+      missing.push(mapCustomer(emb, business_id));
+    }
+  }
+  if (missing.length) {
+    const r = await upsertCustomerPage(db, business_id, missing, cache);
+    result.customers.imported += r.imported;
+    result.customers.failed += r.failed;
+  }
+
+  // Map jobs -> booking rows + remember line items.
+  const bookingRows = [];
+  const linesByJobId = new Map();
+  for (const job of jobs) {
+    const emb = job.customer || {};
+    const custId = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
+    const customer_id = custId ? cache.get(`${business_id}:${custId}`) : null;
+    if (!customer_id) { result.jobs.failed++; continue; }
+    const { booking, rawLines } = mapBooking(job, business_id, customer_id, techByProvider, techByName, service_area_id, service_id);
+    if (!booking.zenbooker_job_id) { result.jobs.skipped++; continue; }
+    bookingRows.push(booking);
+    linesByJobId.set(booking.zenbooker_job_id, rawLines);
+  }
+  if (!bookingRows.length) return;
+
+  // Upsert this page's bookings, collect ids.
+  let pageBookings = [];
+  try {
+    const { data, error } = await db.from('bookings')
+      .upsert(bookingRows, { onConflict: 'business_id,zenbooker_job_id', ignoreDuplicates: false })
+      .select('id, zenbooker_job_id');
+    if (error) throw error;
+    pageBookings = data;
+    result.jobs.imported += data.length;
+  } catch (e) {
+    console.warn('[import] booking page failed:', e.message);
+    result.jobs.failed += bookingRows.length;
+    return;
+  }
+
+  // Replace line items for this page's bookings.
+  const ids = pageBookings.map(b => b.id);
+  try { if (ids.length) await db.from('booking_line_items').delete().in('booking_id', ids); }
+  catch (e) { console.warn('[import] line delete failed:', e.message); }
+
+  const lineRows = [];
+  for (const b of pageBookings) {
+    const lines = linesByJobId.get(b.zenbooker_job_id) || [];
+    for (const l of lines) lineRows.push({ ...l, booking_id: b.id, business_id });
+  }
+  if (lineRows.length) {
+    try { await db.from('booking_line_items').insert(lineRows); }
+    catch (e) { console.warn('[import] line insert failed:', e.message); }
+  }
+}
+
+// Prime the customer-id cache from the DB (needed before importing jobs).
+async function primeCustomerCache(db, business_id, cache) {
+  const { data: existing } = await db.from('customers')
+    .select('id, zenbooker_customer_id')
+    .eq('business_id', business_id)
+    .not('zenbooker_customer_id', 'is', null);
+  for (const c of existing || []) cache.set(`${business_id}:${c.zenbooker_customer_id}`, c.id);
+}
+
+// ── RESUMABLE chunk: process up to `maxPages` pages of one phase, then return a
+// cursor so the caller can continue. This is what the driver page loops on. ──────
+export async function runDomsImportChunk(db, zbkKey, opts = {}) {
+  const phase = opts.phase === 'jobs' ? 'jobs' : 'customers';
+  const cursor = opts.cursor || null;
+  const maxPages = Math.max(1, Math.min(Number(opts.maxPages) || DEFAULT_MAX_PAGES, 20));
+  const cutoffMs = opts.cutoffMs || DEFAULT_CUTOFF;
+
+  const ctx = await resolveContext(db);
+  const cache = new Map();
+  if (phase === 'jobs') await primeCustomerCache(db, ctx.business_id, cache);
+
+  const result = {
+    business: ctx.businessName,
+    customers: { imported: 0, failed: 0 },
+    jobs: { imported: 0, skipped: 0, failed: 0 },
+  };
+
+  const basePath = phase === 'customers' ? '/v1/customers' : '/v1/jobs?start_date_before=2026-06-19';
+  let nextCursor = cursor;
+  let pagesProcessed = 0;
+  let done = false;
+
+  while (pagesProcessed < maxPages) {
+    const { rows, nextCursor: nc, hasMore } = await fetchPage(basePath, zbkKey, nextCursor);
+    if (!rows.length) { done = true; nextCursor = null; break; }
+    if (phase === 'customers') {
+      const mapped = rows.map(r => mapCustomer(r, ctx.business_id));
+      const r = await upsertCustomerPage(db, ctx.business_id, mapped, cache);
+      result.customers.imported += r.imported;
+      result.customers.failed += r.failed;
+    } else {
+      await processJobsPage(db, ctx, rows, cache, cutoffMs, result);
+    }
+    pagesProcessed++;
+    nextCursor = nc;
+    if (!hasMore) { done = true; nextCursor = null; break; }
+  }
+
+  return {
+    ok: true,
+    phase,
+    done,
+    nextCursor: done ? null : nextCursor,
+    pagesProcessed,
+    counts: result,
+    message: done
+      ? `Phase "${phase}" complete.`
+      : `Phase "${phase}" in progress — processed ${pagesProcessed} page(s), more remain.`,
+  };
+}
+
+// ── FULL run (single request): streams everything in one go. Fine for local/CLI
+// use or small datasets, but can exceed the 60s serverless budget on large
+// accounts — prefer runDomsImportChunk + the driver page for the server import. ──
+export async function runDomsImport(db, zbkKey, opts = {}) {
+  const phase = opts.phase || 'all';            // 'all' | 'customers' | 'jobs'
+  const cutoffMs = opts.cutoffMs || DEFAULT_CUTOFF;
+
+  const ctx = await resolveContext(db);
+  const cache = new Map();
+  const result = {
+    business: ctx.businessName,
+    customers: { imported: 0, failed: 0 },
+    jobs: { imported: 0, skipped: 0, failed: 0 },
+  };
+
   if (phase === 'all' || phase === 'customers') {
     for await (const page of pages('/v1/customers', zbkKey)) {
-      const rows = page.map(r => mapCustomer(r, business_id));
-      const r = await upsertCustomerPage(db, business_id, rows, cache);
+      const rows = page.map(r => mapCustomer(r, ctx.business_id));
+      const r = await upsertCustomerPage(db, ctx.business_id, rows, cache);
       result.customers.imported += r.imported;
       result.customers.failed += r.failed;
     }
   }
 
-  // ── Jobs (stream page-by-page) ───────────────────────────────────────────────
   if (phase === 'all' || phase === 'jobs') {
-    // Prime the cache with already-imported customer ids (small: id + zbk id).
-    const { data: existing } = await db.from('customers')
-      .select('id, zenbooker_customer_id')
-      .eq('business_id', business_id)
-      .not('zenbooker_customer_id', 'is', null);
-    for (const c of existing || []) cache.set(`${business_id}:${c.zenbooker_customer_id}`, c.id);
-
+    await primeCustomerCache(db, ctx.business_id, cache);
     for await (const page of pages('/v1/jobs?start_date_before=2026-06-19', zbkKey)) {
-      // Cutoff filter.
-      const jobs = [];
-      for (const j of page) {
-        const ms = scheduledMs(j);
-        if (ms != null && ms > cutoffMs) { result.jobs.skipped++; continue; }
-        jobs.push(j);
-      }
-      if (!jobs.length) continue;
-
-      // Ensure each job's customer exists (upsert embedded ones we haven't seen).
-      const missing = [];
-      const seen = new Set();
-      for (const job of jobs) {
-        const emb = job.customer || {};
-        const id = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
-        if (id && !cache.has(`${business_id}:${id}`) && !seen.has(id)) {
-          seen.add(id);
-          missing.push(mapCustomer(emb, business_id));
-        }
-      }
-      if (missing.length) {
-        const r = await upsertCustomerPage(db, business_id, missing, cache);
-        result.customers.imported += r.imported;
-        result.customers.failed += r.failed;
-      }
-
-      // Map this page's jobs -> booking rows + remember line items.
-      const bookingRows = [];
-      const linesByJobId = new Map();
-      for (const job of jobs) {
-        const emb = job.customer || {};
-        const custId = String(pick(emb, 'id', 'customer_id') || pick(job, 'customer_id') || '');
-        const customer_id = custId ? cache.get(`${business_id}:${custId}`) : null;
-        if (!customer_id) { result.jobs.failed++; continue; }
-        const { booking, rawLines } = mapBooking(job, business_id, customer_id, techByProvider, techByName, service_area_id, service_id);
-        if (!booking.zenbooker_job_id) { result.jobs.skipped++; continue; }
-        bookingRows.push(booking);
-        linesByJobId.set(booking.zenbooker_job_id, rawLines);
-      }
-      if (!bookingRows.length) continue;
-
-      // Upsert this page's bookings, collect ids.
-      let pageBookings = [];
-      try {
-        const { data, error } = await db.from('bookings')
-          .upsert(bookingRows, { onConflict: 'business_id,zenbooker_job_id', ignoreDuplicates: false })
-          .select('id, zenbooker_job_id');
-        if (error) throw error;
-        pageBookings = data;
-        result.jobs.imported += data.length;
-      } catch (e) {
-        console.warn('[import] booking page failed:', e.message);
-        result.jobs.failed += bookingRows.length;
-        continue;
-      }
-
-      // Replace line items for this page's bookings.
-      const ids = pageBookings.map(b => b.id);
-      try { if (ids.length) await db.from('booking_line_items').delete().in('booking_id', ids); }
-      catch (e) { console.warn('[import] line delete failed:', e.message); }
-
-      const lineRows = [];
-      for (const b of pageBookings) {
-        const lines = linesByJobId.get(b.zenbooker_job_id) || [];
-        for (const l of lines) lineRows.push({ ...l, booking_id: b.id, business_id });
-      }
-      if (lineRows.length) {
-        try { await db.from('booking_line_items').insert(lineRows); }
-        catch (e) { console.warn('[import] line insert failed:', e.message); }
-      }
+      await processJobsPage(db, ctx, page, cache, cutoffMs, result);
     }
   }
 

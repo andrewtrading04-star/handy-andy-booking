@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Doms Zenbooker Import</title>
+<style>
+  :root { --bg:#0b1220; --card:#121b2e; --line:#1f2c45; --text:#e7edf7; --muted:#9fb0cc; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --accent:#3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .stats { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }
+  .stat { background:#0e1727; border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .stat .n { font-size:28px; font-weight:700; letter-spacing:-0.5px; }
+  .stat .l { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:2px; }
+  .phase { display:flex; align-items:center; gap:10px; font-size:14px; margin-bottom:12px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+  .dot.run { background:var(--accent); animation: pulse 1s infinite; }
+  .dot.ok { background:var(--ok); }
+  .dot.err { background:var(--err); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .bar { height:8px; background:#0e1727; border-radius:6px; overflow:hidden; border:1px solid var(--line); }
+  .bar > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#60a5fa); transition: width .3s; }
+  button { appearance:none; border:0; border-radius:10px; padding:14px 18px; font-size:16px; font-weight:600; cursor:pointer; }
+  .primary { background:var(--accent); color:#fff; width:100%; }
+  .primary:disabled { opacity:.5; cursor:default; }
+  .ghost { background:#0e1727; color:var(--text); border:1px solid var(--line); }
+  .row { display:flex; gap:10px; }
+  .log { background:#0a1120; border:1px solid var(--line); border-radius:10px; padding:12px; height:200px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; line-height:1.6; color:var(--muted); white-space:pre-wrap; }
+  .log .e { color:var(--err); }
+  .log .s { color:var(--ok); }
+  input { background:#0a1120; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:12px; font-size:15px; width:100%; }
+  label { display:block; font-size:13px; color:var(--muted); margin:0 0 6px; }
+  .done-banner { display:none; background:rgba(34,197,94,.12); border:1px solid var(--ok); color:#bbf7d0; border-radius:10px; padding:14px; margin-bottom:16px; font-weight:600; }
+  .err-banner { display:none; background:rgba(239,68,68,.12); border:1px solid var(--err); color:#fecaca; border-radius:10px; padding:14px; margin-bottom:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Doms Zenbooker Import</h1>
+  <p class="sub">Imports every customer and job (June 19 and earlier) into the new CRM. Leave this tab open until it finishes — it runs itself.</p>
+
+  <div id="doneBanner" class="done-banner">✅ Import complete. You can close this tab.</div>
+  <div id="errBanner" class="err-banner"></div>
+
+  <div id="secretCard" class="card" style="display:none;">
+    <label for="secretInput">Import secret</label>
+    <input id="secretInput" type="password" placeholder="Enter import secret" autocomplete="off" />
+    <p class="sub" style="margin:10px 0 0;">Tip: add <code>?secret=YOUR_SECRET</code> to the URL to skip this.</p>
+  </div>
+
+  <div class="card">
+    <div class="phase">
+      <span id="custDot" class="dot"></span>
+      <strong>Customers</strong>
+      <span id="custStatus" style="color:var(--muted);">waiting</span>
+    </div>
+    <div class="bar"><i id="custBar"></i></div>
+
+    <div class="phase" style="margin-top:18px;">
+      <span id="jobDot" class="dot"></span>
+      <strong>Jobs &amp; invoices</strong>
+      <span id="jobStatus" style="color:var(--muted);">waiting</span>
+    </div>
+    <div class="bar"><i id="jobBar"></i></div>
+  </div>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><div class="n" id="custImported">0</div><div class="l">Customers imported</div></div>
+      <div class="stat"><div class="n" id="jobImported">0</div><div class="l">Jobs imported</div></div>
+      <div class="stat"><div class="n" id="jobSkipped">0</div><div class="l">Jobs skipped (after cutoff)</div></div>
+      <div class="stat"><div class="n" id="failed">0</div><div class="l">Failed rows</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:14px;">
+      <button id="startBtn" class="primary">Start import</button>
+    </div>
+    <div id="log" class="log"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+  let secret = qs.get('secret') || '';
+
+  // Totals accumulate across all chunk requests of a phase.
+  const totals = { custImported: 0, jobImported: 0, jobSkipped: 0, failed: 0 };
+  let stopped = false;
+
+  function log(msg, cls) {
+    const el = $('log');
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    const t = new Date().toLocaleTimeString();
+    line.textContent = `[${t}] ${msg}`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setStat() {
+    $('custImported').textContent = totals.custImported.toLocaleString();
+    $('jobImported').textContent = totals.jobImported.toLocaleString();
+    $('jobSkipped').textContent = totals.jobSkipped.toLocaleString();
+    $('failed').textContent = totals.failed.toLocaleString();
+  }
+
+  function phaseUI(phase, state) { // state: 'run' | 'ok' | 'err' | 'wait'
+    const dot = $(phase === 'customers' ? 'custDot' : 'jobDot');
+    const st  = $(phase === 'customers' ? 'custStatus' : 'jobStatus');
+    dot.className = 'dot' + (state === 'wait' ? '' : ' ' + state);
+    st.textContent = state === 'run' ? 'importing…' : state === 'ok' ? 'done' : state === 'err' ? 'error' : 'waiting';
+  }
+
+  // Indeterminate progress: we don't know the total page count up front, so the
+  // bar eases toward 90% as pages complete and snaps to 100% when the phase ends.
+  function bumpBar(phase, done) {
+    const bar = $(phase === 'customers' ? 'custBar' : 'jobBar');
+    if (done) { bar.style.width = '100%'; return; }
+    const cur = parseFloat(bar.style.width) || 0;
+    bar.style.width = Math.min(90, cur + (90 - cur) * 0.25) + '%';
+  }
+
+  async function callChunk(phase, cursor) {
+    const url = `/api/migrate?action=import_doms&secret=${encodeURIComponent(secret)}`
+      + `&phase=${phase}` + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    let body;
+    try { body = await res.json(); } catch { body = { error: `HTTP ${res.status}` }; }
+    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+
+  // Run one phase to completion, retrying a failed chunk a few times before giving up.
+  async function runPhase(phase) {
+    phaseUI(phase, 'run');
+    log(`Starting ${phase}…`);
+    let cursor = null, pageNo = 0;
+    for (;;) {
+      if (stopped) return false;
+      let body, attempt = 0;
+      for (;;) {
+        try { body = await callChunk(phase, cursor); break; }
+        catch (e) {
+          attempt++;
+          log(`  ${phase} chunk failed (try ${attempt}/4): ${e.message}`, 'e');
+          if (attempt >= 4) { phaseUI(phase, 'err'); throw e; }
+          await new Promise(r => setTimeout(r, attempt * 2000));
+        }
+      }
+      const c = body.counts || {};
+      totals.custImported += (c.customers?.imported || 0);
+      totals.jobImported  += (c.jobs?.imported || 0);
+      totals.jobSkipped   += (c.jobs?.skipped || 0);
+      totals.failed       += (c.customers?.failed || 0) + (c.jobs?.failed || 0);
+      setStat();
+      pageNo += (body.pagesProcessed || 0);
+      log(`  ${phase}: ${pageNo} pages so far` +
+          (phase === 'customers' ? ` · ${totals.custImported} customers` : ` · ${totals.jobImported} jobs`));
+      bumpBar(phase, body.done);
+      if (body.done) { phaseUI(phase, 'ok'); log(`${phase} complete.`, 's'); return true; }
+      cursor = body.nextCursor;
+      if (!cursor) { phaseUI(phase, 'ok'); log(`${phase} complete.`, 's'); return true; }
+    }
+  }
+
+  async function start() {
+    if (!secret) {
+      $('secretCard').style.display = 'block';
+      secret = ($('secretInput').value || '').trim();
+      if (!secret) { $('secretInput').focus(); return; }
+    }
+    $('startBtn').disabled = true;
+    $('startBtn').textContent = 'Importing…';
+    $('errBanner').style.display = 'none';
+    stopped = false;
+    try {
+      await runPhase('customers');
+      await runPhase('jobs');
+      $('doneBanner').style.display = 'block';
+      $('startBtn').textContent = 'Done';
+      log(`ALL DONE — ${totals.custImported} customers, ${totals.jobImported} jobs imported.`, 's');
+    } catch (e) {
+      const b = $('errBanner');
+      b.style.display = 'block';
+      b.textContent = `⚠️ Import stopped: ${e.message}. Press "Resume" to continue where it left off.`;
+      $('startBtn').disabled = false;
+      $('startBtn').textContent = 'Resume';
+      log(`Stopped: ${e.message}`, 'e');
+    }
+  }
+
+  $('startBtn').addEventListener('click', start);
+  if (!secret) $('secretCard').style.display = 'block';
+})();
+</script>
+</body>
+</html>

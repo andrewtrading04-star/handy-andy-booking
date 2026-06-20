@@ -5,7 +5,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { runDomsImport } from './_lib/doms-import.js';
+import { runDomsImport, runDomsImportChunk } from './_lib/doms-import.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -76,8 +76,15 @@ export default async function handler(req, res) {
   const action = (req.query.action || '').toString();
 
   // One-time Doms Zenbooker import. Secured by IMPORT_SECRET (so it can be
-  // triggered from a browser URL), NOT the admin bearer token. Optional
-  // &phase=customers|jobs lets the work be split across two requests if needed.
+  // triggered from a browser URL), NOT the admin bearer token.
+  //
+  // RESUMABLE by default: each call processes a few pages of one phase and
+  // returns { done, nextCursor }. The driver page (/import-doms.html) loops
+  // until done so the work never exceeds the 60s serverless budget. Params:
+  //   &phase=customers|jobs   which list to page through (default customers)
+  //   &cursor=<token>         continue from a previous call's nextCursor
+  //   &maxPages=N             pages per request (default 3)
+  //   &mode=all               legacy single-shot run (may time out on big data)
   if (action === 'import_doms') {
     const secret = process.env.IMPORT_SECRET;
     if (!secret) return res.status(400).json({ error: 'IMPORT_SECRET env var not set. Add it in Vercel first.' });
@@ -85,8 +92,15 @@ export default async function handler(req, res) {
     const zbk = process.env.ZENBOOKER_API_KEY;
     if (!zbk) return res.status(400).json({ error: 'ZENBOOKER_API_KEY env var not set' });
     try {
-      const phase = (req.query.phase || 'all').toString();
-      const out = await runDomsImport(serviceClient(), zbk, { phase });
+      if ((req.query.mode || '').toString() === 'all') {
+        const phase = (req.query.phase || 'all').toString();
+        const out = await runDomsImport(serviceClient(), zbk, { phase });
+        return res.status(200).json(out);
+      }
+      const phase = (req.query.phase || 'customers').toString();
+      const cursor = req.query.cursor ? req.query.cursor.toString() : null;
+      const maxPages = req.query.maxPages ? Number(req.query.maxPages) : undefined;
+      const out = await runDomsImportChunk(serviceClient(), zbk, { phase, cursor, maxPages });
       return res.status(200).json(out);
     } catch (e) {
       console.error('[import_doms]', e);
