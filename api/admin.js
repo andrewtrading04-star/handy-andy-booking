@@ -130,6 +130,8 @@ export default async function handler(req, res) {
       case 'reviews':           return await reviews(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
+      case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
+      case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -1587,5 +1589,80 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   const { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
   if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// Send quote SMS to customer
+async function estimateSendSms(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const { data: est } = await db.from('estimates')
+    .select('customer_name, customer_phone, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available' });
+
+  const svcTxt = est.service_label ? `${est.service_label} — ` : '';
+  const msg = `Here is your quote for ${biz.name}. ${svcTxt}${est.description || 'Your estimate request'}. Check your email for more details.`;
+  await sendSMS(est.customer_phone, msg);
+
+  // Mark as contacted
+  await db.from('estimates').update({ status: 'contacted' }).eq('id', body.id).eq('business_id', biz.id).catch(() => {});
+
+  return res.status(200).json({ ok: true });
+}
+
+// Send quote email to customer
+async function estimateSendEmail(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const { data: est } = await db.from('estimates')
+    .select('customer_name, customer_email, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available' });
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[estimate] RESEND_API_KEY not set, cannot send email');
+    return res.status(500).json({ error: 'Email service not configured' });
+  }
+
+  const svcTxt = est.service_label ? `<strong>${est.service_label}</strong><br>` : '';
+  const html = `
+<div style="font-family:sans-serif;max-width:600px;">
+  <h2>Your ${biz.name} Quote</h2>
+  <p>Hi ${est.customer_name},</p>
+  <p>Here is your estimate:</p>
+  <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin:16px 0;">
+    ${svcTxt}
+    <p style="margin:0;white-space:pre-wrap;">${est.description || 'Estimate request'}</p>
+  </div>
+  <p>A member of our team will reach out to discuss this quote further.</p>
+  <p>Thank you!</p>
+</div>
+  `;
+
+  const resendRes = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'bookings@handyandy.com',
+      to: est.customer_email,
+      subject: `Your ${biz.name} Estimate`,
+      html,
+    }),
+  });
+
+  if (!resendRes.ok) {
+    const err = await resendRes.text();
+    throw new Error(`Email API error: ${resendRes.status} ${err}`);
+  }
+
+  // Mark as contacted
+  await db.from('estimates').update({ status: 'contacted' }).eq('id', body.id).eq('business_id', biz.id).catch(() => {});
+
   return res.status(200).json({ ok: true });
 }
