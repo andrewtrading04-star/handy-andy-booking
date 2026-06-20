@@ -1946,7 +1946,11 @@ function nbDisplayLabel(groupKey, optionLabel){
   }
   if(groupKey==='dismount'){
     if(/guaranteed|yes/i.test(optionLabel)) return 'Yes';
-    if(/no|handle.*removal/i.test(optionLabel)) return 'NO';
+    if(/no|handle.*removal/i.test(optionLabel)) return 'No';
+  }
+  if(groupKey==='lifting'){
+    if(/70-85.*can\s*help|can\s*help.*70-85/i.test(optionLabel)) return '70-85 Inches - Customer can help lift -$0';
+    if(/70-85.*cannot|cannot.*70-85/i.test(optionLabel)) return '70-85 Inches - Customer will not help lift -$70';
   }
   if(groupKey==='wires'){
     return optionLabel.replace(/hide wires\s*/i, '').trim();
@@ -1979,7 +1983,7 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 // Display label for an option-group section header (lets us relabel a group
 // without a DB change).
-function nbGroupLabel(g){ return g.key==='dismount' ? 'Dismount' : g.label; }
+function nbGroupLabel(g){ return g.key==='dismount' ? 'Guaranteed Dismount Service' : g.label; }
 // Max-inch value for each selected TV size (e.g. "70"-84"" -> 84).
 function nbSelectedSizeMaxList(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const out=[]; if(!g||!nbQty[g.id]) return out;
@@ -2078,7 +2082,6 @@ function renderNbSteps(){
   if(isTvService){
     const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
-      `<div class="nb-hint">Samsung Frame and LG Gallery TVs include bracket.</div>`+
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
           `<span class="nb-optlabel">Customer has a regular TV</span>`+
