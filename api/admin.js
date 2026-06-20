@@ -1470,16 +1470,12 @@ async function reviewSubmit(req, res, body) {
     }).catch(err => console.warn('[review] email send failed:', err));
   }
 
-  // Send SMS to technician based on rating
-  if (booking.technician?.phone) {
+  // Send SMS to technician on a poor review only. (5-star "great review" texts
+  // were removed for both businesses — no notification on a perfect rating.)
+  if (booking.technician?.phone && rating <= 4) {
     const techName = booking.technician.name || 'Technician';
-    if (rating === 5) {
-      const msg = `${techName} you just received a GREAT review! check it out on your profile.`;
-      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
-    } else if (rating <= 4) {
-      const msg = `${techName} you just received a bad review... Please check your profile to view.`;
-      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
-    }
+    const msg = `${techName} you just received a bad review... Please check your profile to view.`;
+    await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
   }
 
   // Send SMS to owner if rating ≤ 4
