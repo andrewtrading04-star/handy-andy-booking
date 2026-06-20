@@ -225,12 +225,12 @@ async function summary(req, res, db, auth) {
   const monthStart = startOfMonthUTC(tz);
 
   // Today's jobs (joined).
-  const { data: today, error: e1 } = await db.from('bookings')
-    .select(bookingSelect())
+  const { data: today, error: e1 } = await fetchBookingRows(sel => db.from('bookings')
+    .select(sel)
     .eq('business_id', biz.id)
     .gte('scheduled_at', todayStart.toISOString())
     .lt('scheduled_at', tomorrow.toISOString())
-    .order('scheduled_at', { ascending: true });
+    .order('scheduled_at', { ascending: true }));
   if (e1) throw e1;
 
   // Revenue: pull this month's non-cancelled jobs once, bucket client-side.
@@ -294,10 +294,10 @@ async function calendar(req, res, db, auth) {
   const to = (req.query.to || '').toString();
   if (!from || !to) return res.status(400).json({ error: 'from and to required' });
 
-  const { data: bk, error } = await db.from('bookings').select(bookingSelect())
+  const { data: bk, error } = await fetchBookingRows(sel => db.from('bookings').select(sel)
     .eq('business_id', biz.id)
     .gte('scheduled_at', from).lt('scheduled_at', to)
-    .order('scheduled_at', { ascending: true }).limit(2000);
+    .order('scheduled_at', { ascending: true }).limit(2000));
   if (error) throw error;
 
   const { data: techs } = await db.from('technicians')
@@ -357,20 +357,21 @@ async function bookings(req, res, db, auth) {
   const range = (req.query.range || 'upcoming').toString();
   const status = (req.query.status || '').toString();
 
-  let q = db.from('bookings').select(bookingSelect()).eq('business_id', biz.id);
+  const makeQ = (sel) => {
+    let q = db.from('bookings').select(sel).eq('business_id', biz.id);
+    if (range === 'today') {
+      q = q.gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
+           .lt('scheduled_at', localDayStartUTC(tz, 1).toISOString());
+    } else if (range === 'week') {
+      q = q.gte('scheduled_at', startOfWeekUTC(tz).toISOString());
+    } else if (range === 'upcoming') {
+      q = q.gte('scheduled_at', localDayStartUTC(tz, 0).toISOString());
+    } // 'all' = no date filter
+    if (status) q = q.eq('status', status);
+    return q.order('scheduled_at', { ascending: true }).limit(500);
+  };
 
-  if (range === 'today') {
-    q = q.gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
-         .lt('scheduled_at', localDayStartUTC(tz, 1).toISOString());
-  } else if (range === 'week') {
-    q = q.gte('scheduled_at', startOfWeekUTC(tz).toISOString());
-  } else if (range === 'upcoming') {
-    q = q.gte('scheduled_at', localDayStartUTC(tz, 0).toISOString());
-  } // 'all' = no date filter
-
-  if (status) q = q.eq('status', status);
-
-  const { data, error } = await q.order('scheduled_at', { ascending: true }).limit(500);
+  const { data, error } = await fetchBookingRows(makeQ);
   if (error) throw error;
   return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
 }
@@ -533,11 +534,18 @@ async function availableSlots(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const dateStr = (req.query.date || '').toString();
   const techId = (req.query.technician_id || '').toString();
+  const techId2 = (req.query.secondary_technician_id || '').toString();
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
   const tz = biz.timezone || 'America/Denver';
-  const keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow, tz);
+  let keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow, tz);
+  // Two-technician job (e.g. a large-TV lift): only offer slots where BOTH techs
+  // are free — intersect the primary's open slots with the second tech's.
+  if (techId2 && techId2 !== 'any' && techId2 !== techId) {
+    const keys2 = await availableSlotKeys(db, biz.id, techId2, dateStr, dow, tz);
+    keys = new Set([...keys].filter(k => keys2.has(k)));
+  }
   const available = SLOTS.filter(s => keys.has(s.key))
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
   return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
@@ -657,16 +665,23 @@ async function availableDates(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const month = (req.query.month || '').toString();        // 'YYYY-MM'
   const techId = (req.query.technician_id || '').toString();
+  const techId2 = (req.query.secondary_technician_id || '').toString();
   if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month required (YYYY-MM)' });
 
   const [y, m] = month.split('-').map(Number);
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // A two-technician job needs a concrete pair: a date counts as available only
+  // if there's at least one slot where BOTH techs are free (computed per-day below).
+  const isPair = !!techId2 && techId2 !== 'any' && techId && techId !== 'any' && techId2 !== techId;
+
   // Pull recurring availability + this month's exceptions once, compute in memory.
   let techFilter = (q) => q;
   let techIds = null;
-  if (!techId || techId === 'any') {
+  if (isPair) {
+    techIds = [techId, techId2];
+  } else if (!techId || techId === 'any') {
     const { data: techs } = await db.from('technicians').select('id').eq('business_id', biz.id).eq('active', true);
     techIds = (techs || []).map(t => t.id);
   } else {
@@ -707,22 +722,34 @@ async function availableDates(req, res, db, auth) {
     (occ[k] = occ[k] || new Set()).add(key);
   }
 
+  // Compute one tech's free slot set for a given date (recurring ± exceptions − booked).
+  const daySetFor = (tid, dow, dateStr) => {
+    const set = new Set(recurring[`${tid}:${dow}`] || []);
+    for (const e of (excByDate[dateStr] || [])) {
+      if (e.technician_id !== tid) continue;
+      if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key);
+    }
+    for (const k of (occ[`${tid}:${dateStr}`] || [])) set.delete(k);   // drop booked slots
+    return set;
+  };
+
   const dates = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2, '0')}`;
     if (dateStr < todayStr) continue;                       // no past dates
     const dow = dayOfWeekFor(dateStr);
-    let anySlot = false;
-    for (const tid of techIds) {
-      const set = new Set(recurring[`${tid}:${dow}`] || []);
-      for (const e of (excByDate[dateStr] || [])) {
-        if (e.technician_id !== tid) continue;
-        if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key);
+    if (isPair) {
+      // Both techs must share at least one open slot that day.
+      const a = daySetFor(techId, dow, dateStr);
+      const b = daySetFor(techId2, dow, dateStr);
+      if ([...a].some(k => b.has(k))) dates.push(dateStr);
+    } else {
+      let anySlot = false;
+      for (const tid of techIds) {
+        if (daySetFor(tid, dow, dateStr).size) { anySlot = true; break; }
       }
-      for (const k of (occ[`${tid}:${dateStr}`] || [])) set.delete(k);   // drop booked slots
-      if (set.size) { anySlot = true; break; }
+      if (anySlot) dates.push(dateStr);
     }
-    if (anySlot) dates.push(dateStr);
   }
   return res.status(200).json({ dates, month });
 }
@@ -802,19 +829,35 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot, tz);
   }
 
-  // Secondary technician (for jobs requiring 2 techs, e.g. TV lift assistance)
+  // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift).
   let secondary_technician_id = body.secondary_technician_id || null;
+  // A mandatory two-person job (large TV, customer can't help lift) must name a
+  // second technician, and the two must differ.
+  if (body.needs_lifting && !secondary_technician_id) {
+    return res.status(400).json({ error: 'This job requires a second technician.' });
+  }
+  if (secondary_technician_id && secondary_technician_id === technician_id) {
+    return res.status(400).json({ error: 'The two technicians must be different.' });
+  }
 
   // Guard against double-booking: if a specific tech ends up assigned to a slot
   // they already have a non-cancelled booking in, reject the create. This backs
   // up the UI (which no longer offers booked slots) against stale forms / races.
-  if (technician_id && scheduled_at) {
+  if (scheduled_at) {
     const conflictDate = body.scheduled_date || localDateStr(tz, scheduled_at);
     const conflictSlot = body.scheduled_slot || slotKeyForLocalTime(localHHMM(tz, scheduled_at));
     if (conflictSlot) {
-      const taken = await bookedSlotKeysForTech(db, biz.id, technician_id, conflictDate, tz);
-      if (taken.has(conflictSlot)) {
-        return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+      if (technician_id) {
+        const taken = await bookedSlotKeysForTech(db, biz.id, technician_id, conflictDate, tz);
+        if (taken.has(conflictSlot)) {
+          return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+        }
+      }
+      if (secondary_technician_id) {
+        const taken2 = await bookedSlotKeysForTech(db, biz.id, secondary_technician_id, conflictDate, tz);
+        if (taken2.has(conflictSlot)) {
+          return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
+        }
       }
     }
   }
@@ -823,9 +866,6 @@ async function bookingCreate(req, res, db, auth, body) {
   const status = technician_id ? 'assigned' : 'confirmed';
   // Signed review-link token (30-day TTL) so the completion follow-up can point
   // the customer at the review widget. booking_id is patched in after insert.
-  // Try to insert with sms_consent; if the column doesn't exist yet (migration not applied),
-  // retry without it. This ensures bookings can be created even if 0014_sms_consent migration
-  // hasn't been applied to the database yet.
   const bookingInsert = {
     business_id: biz.id, customer_id,
     technician_id: technician_id || null,
@@ -842,17 +882,23 @@ async function bookingCreate(req, res, db, auth, body) {
     payment_method: paymentMethod,
     needs_lifting: !!body.needs_lifting,
     tv_size_category: body.tv_size_category || null,
+    sms_consent: !!body.sms_consent,
   };
 
-  let { data: bRow, error: bErr } = await db.from('bookings').insert({
-    ...bookingInsert,
-    sms_consent: !!body.sms_consent,
-  }).select('id').single();
-
-  // If sms_consent column doesn't exist in schema cache, retry without it
-  if (bErr && bErr.message?.includes('sms_consent')) {
-    console.warn('[admin] sms_consent column not found, retrying without it');
-    ({ data: bRow, error: bErr } = await db.from('bookings').insert(bookingInsert).select('id').single());
+  // Some columns depend on later migrations (0014 sms_consent, 0019 lift cols).
+  // If a DB hasn't been migrated yet, the insert reports the missing column —
+  // drop it and retry so a booking can still be created. Loop in case more than
+  // one optional column is missing.
+  const OPTIONAL_INSERT_COLS = ['sms_consent', 'secondary_technician_id', 'needs_lifting', 'tv_size_category'];
+  let insertObj = { ...bookingInsert };
+  let bRow, bErr;
+  for (let attempt = 0; attempt < OPTIONAL_INSERT_COLS.length + 1; attempt++) {
+    ({ data: bRow, error: bErr } = await db.from('bookings').insert(insertObj).select('id').single());
+    if (!bErr) break;
+    const missing = OPTIONAL_INSERT_COLS.find(c => (bErr.message || '').includes(c) && c in insertObj);
+    if (!missing) break;                       // not an optional-column problem — give up
+    console.warn(`[admin] bookings.${missing} not found, retrying without it`);
+    delete insertObj[missing];
   }
 
   if (bErr) throw bErr;
@@ -926,9 +972,16 @@ async function bookingUpdate(req, res, db, auth, body) {
   const id = body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
 
-  // Confirm the booking belongs to this business before touching it.
-  const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id, status, technician_id, scheduled_at, review_token, sms_consent, customer:customers ( phone )').eq('id', id).eq('business_id', biz.id).single();
+  // Confirm the booking belongs to this business before touching it. The 0019
+  // column (secondary_technician_id) may not exist yet — fall back without it so
+  // confirm/cancel/status/assign keep working until the migration is applied.
+  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, review_token, sms_consent, customer:customers ( phone )`;
+  let { data: existing, error: e0 } = await db.from('bookings')
+    .select(existingSel()).eq('id', id).eq('business_id', biz.id).single();
+  if (e0 && /secondary_technician_id/.test(e0.message || '')) {
+    bookingLiftCols = false;
+    ({ data: existing, error: e0 } = await db.from('bookings').select(existingSel()).eq('id', id).eq('business_id', biz.id).single());
+  }
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
@@ -951,8 +1004,11 @@ async function bookingUpdate(req, res, db, auth, body) {
       patch.scheduled_at = body.scheduled_at;
       if (body.scheduled_end) patch.scheduled_end = body.scheduled_end; break;
     case 'assign':
-      patch.technician_id = body.technician_id || null;
-      if (body.secondary_technician_id !== undefined) patch.secondary_technician_id = body.secondary_technician_id || null;
+      // Only touch the field that was actually sent, so changing the second tech
+      // doesn't wipe the primary (and vice-versa). Skip the secondary if the DB
+      // hasn't been migrated for it yet.
+      if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
+      if (body.secondary_technician_id !== undefined && bookingLiftCols) patch.secondary_technician_id = body.secondary_technician_id || null;
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
       break;
     case 'status':
@@ -968,6 +1024,10 @@ async function bookingUpdate(req, res, db, auth, body) {
     const tz = biz.timezone || 'America/Denver';
     const effTech = ('technician_id' in patch) ? patch.technician_id : existing.technician_id;
     const effSecondTech = ('secondary_technician_id' in patch) ? patch.secondary_technician_id : existing.secondary_technician_id;
+    // The same person can't be both technicians on one job.
+    if (effTech && effSecondTech && effTech === effSecondTech) {
+      return res.status(400).json({ error: 'The two technicians must be different.' });
+    }
     const effAt = patch.scheduled_at || existing.scheduled_at;
     if (effTech && effAt) {
       const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
@@ -1372,16 +1432,31 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 }
 
 // ── Shared shaping ───────────────────────────────────────────────────────────
+// The 0019 migration (secondary_technician_id / needs_lifting / tv_size_category)
+// may not be applied yet on every DB. Select those columns optimistically; if the
+// DB doesn't have them, flip this flag off and the reads fall back gracefully so
+// the dashboard never goes down waiting on a migration.
+let bookingLiftCols = true;
 function bookingSelect() {
-  return `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, secondary_technician_id,
-          needs_lifting, tv_size_category, service_area_id,
+  const base = `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
           technician:technicians ( id, name, status, color ),
           service:services ( id, name ),
           photos:booking_photos ( count ),
           notes_list:booking_notes ( count )`;
+  return bookingLiftCols ? `${base}, secondary_technician_id, needs_lifting, tv_size_category` : base;
+}
+// Run a bookings read, retrying once without the 0019 columns if they're missing.
+// makeQuery receives the select string and returns a fresh (awaitable) query.
+async function fetchBookingRows(makeQuery) {
+  let { data, error } = await makeQuery(bookingSelect());
+  if (error && /secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) {
+    bookingLiftCols = false;
+    ({ data, error } = await makeQuery(bookingSelect()));
+  }
+  return { data, error };
 }
 
 function shapeBooking(b) {

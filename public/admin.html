@@ -419,29 +419,6 @@
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
-      <!-- Lifting question and 2nd technician selection -->
-      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
-        <input type="checkbox" id="nbNeedsLifting" style="cursor:pointer;width:18px;height:18px;">
-        <label for="nbNeedsLifting" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Does customer need help lifting?</label>
-      </div>
-      <div id="nbLiftingSizeWrap" style="display:none;">
-        <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">TV Size</div>
-        <div style="display:grid;gap:6px;">
-          <button type="button" class="nb-size-btn" data-size="under_70" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
-            <span>Under 70"</span><span class="size-check" style="display:none;">✓</span>
-          </button>
-          <button type="button" class="nb-size-btn" data-size="70_to_85" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
-            <span>70" – 85" & can help lift</span><span class="size-check" style="display:none;">✓</span>
-          </button>
-          <button type="button" class="nb-size-btn" data-size="can_help_lift" style="background:var(--card);border:1.5px solid var(--line);border-radius:11px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
-            <span>Customer can help lift</span><span class="size-check" style="display:none;">✓</span>
-          </button>
-        </div>
-      </div>
-      <div id="nbSecondTechWrap" style="display:none;">
-        <label style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:6px;">Second Technician</label>
-        <select class="search" style="margin:0" id="nbSecondTech"></select>
-      </div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item (e.g. Custom bracket)">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
@@ -449,6 +426,11 @@
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
       <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
+      <div id="nbSecondTechWrap" style="display:none;">
+        <label id="nbSecondTechLabel" style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin:8px 0 6px;">Second technician</label>
+        <select class="search" style="margin:0" id="nbSecondTech"></select>
+        <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Only times when both technicians are free will be shown.</div>
+      </div>
       <input type="hidden" id="nbDate">
       <div id="nbCalWrap" style="display:none;">
         <div class="nb-cal-head">
@@ -928,6 +910,10 @@ function openBooking(b){
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
   const techOpts=['<option value="">— Unassigned —</option>',
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+  const secondTechOpts=['<option value="">— None —</option>',
+    ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+  const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
+  const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);
   document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>`;
   document.getElementById('bkBody').innerHTML=`
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
@@ -938,10 +924,10 @@ function openBooking(b){
     ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
-    ${b.needs_lifting?`<div class="bk-row"><span>🔧</span><div><strong>Lifting needed</strong> (${b.tv_size_category||'unknown size'})</div></div>`:''}
+    ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-row"><span>🔧</span><div><strong>Two-person lift</strong>${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</div></div>`:''}
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
-      ${canAssign&&b.needs_lifting?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign"><option value="">— None —</option>${techCache.map(t=>\`<option value="\${t.id}" \${t.id===b.secondary_technician_id?'selected':''}\>\${esc(t.name)}</option>\`).join('')}</select></label>`:''}
+      ${showSecond?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}
       ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
@@ -1579,11 +1565,9 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbTravelFee').value='';
   updateNbTotal();
-  // Reset lifting state when category changes
-  document.getElementById('nbNeedsLifting').checked=false;
-  document.getElementById('nbLiftingSizeWrap').style.display='none';
+  // Reset the 2nd-technician picker when category changes.
+  document.getElementById('nbSecondTech').value='';
   document.getElementById('nbSecondTechWrap').style.display='none';
-  resetNbLiftingState();
 
   if(cat==='Assurion'){
     nbAssurionActive=true;
@@ -1608,42 +1592,91 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   }
 });
 
-// ── Lifting question and 2nd technician ────────────────────────────────────
-let nbLiftingSelected=null;
-function resetNbLiftingState(){
-  nbLiftingSelected=null;
-  document.querySelectorAll('.nb-size-btn').forEach(b=>{
-    b.style.borderColor='var(--line)';
-    b.style.background='var(--card)';
-    b.querySelector('.size-check').style.display='none';
-  });
+// ── Second technician (driven by the native "Lifting Help" option group) ─────
+// The TV flow already has a single-select "Lifting Help" group whose options are
+// filtered by the chosen TV size (see nbVisibleOptions). The selected lifting
+// option decides whether a 2nd technician is needed:
+//   • "70-85 … cannot help lift"  → second tech REQUIRED
+//   • "86 inches or larger"/"85"+" → second tech REQUIRED (label says so)
+//   • "70-85 … can help lift"      → second tech OPTIONAL (office may add a helper)
+//   • "under 70" / none            → no second tech
+// When a concrete second tech is chosen, the calendar only offers dates/slots
+// where BOTH technicians are free.
+function nbLiftingKind(label){
+  const l=(label||'').toLowerCase();
+  if(/under\s*70/.test(l)) return 'under70';
+  if(/can\s*not|cannot|can'?t/.test(l)) return 'cannot';
+  if(/can\s*help|help\s*lift|can\s*lift/.test(l)) return 'can';
+  return 'big';   // "86 inches or larger" / "85"+ (second technician required)"
 }
-document.getElementById('nbNeedsLifting').addEventListener('change',e=>{
-  const wrap=document.getElementById('nbLiftingSizeWrap');
-  const secondWrap=document.getElementById('nbSecondTechWrap');
-  if(e.target.checked){
-    wrap.style.display='block';
-  }else{
-    wrap.style.display='none';
-    secondWrap.style.display='none';
-    resetNbLiftingState();
-    nbLiftingSelected=null;
+function nbSelectedLiftingKind(){
+  const g=nbOptionGroups.find(x=>x.key==='lifting'); if(!g) return null;
+  const oid=nbPickGet(g.id); if(!oid) return null;
+  const o=g.options.find(x=>x.id===oid); if(!o) return null;
+  return nbLiftingKind(o.label);
+}
+// 'mandatory' (2 techs required) | 'optional' (helper allowed) | 'none'.
+function nbSecondTechMode(){
+  const k=nbSelectedLiftingKind();
+  if(k==='cannot' || k==='big') return 'mandatory';
+  if(k==='can') return 'optional';
+  return 'none';
+}
+// The concrete 2nd tech that should constrain availability (or null). A pair can
+// only be intersected against a CONCRETE primary, so "Any" primary yields null.
+function nbEffectiveSecondTech(){
+  if(nbSecondTechMode()==='none') return null;
+  const v=document.getElementById('nbSecondTech').value;
+  if(!v) return null;
+  const p=document.getElementById('nbTech').value;
+  if(!p || p==='any' || v===p) return null;
+  return v;
+}
+// Why the calendar can't be computed yet. A two-tech job (mandatory, or optional
+// once a helper is chosen) needs a concrete, distinct pair to find shared slots.
+function nbAvailabilityBlockedReason(){
+  const mode=nbSecondTechMode();
+  const p=document.getElementById('nbTech').value;
+  const s=document.getElementById('nbSecondTech').value;
+  if(mode==='mandatory'){
+    if(!p || p==='any') return 'Select the primary technician — this job needs two.';
+    if(!s) return 'Select the second technician — this job needs two.';
+    if(s===p) return 'The two technicians must be different.';
+  } else if(mode==='optional' && s){       // a helper was chosen for a 1-person-OK job
+    if(!p || p==='any') return 'Select the primary technician to pair with the second.';
+    if(s===p) return 'The two technicians must be different.';
   }
-});
-document.querySelectorAll('.nb-size-btn').forEach(btn=>{
-  btn.addEventListener('click',e=>{
-    e.preventDefault();
-    const size=btn.dataset.size;
-    // Only show 2nd tech picker for under_70 and 70_to_85 sizes (can_help_lift is just info)
-    const needsSecond=(size==='under_70' || size==='70_to_85');
-    resetNbLiftingState();
-    nbLiftingSelected=size;
-    btn.style.borderColor='var(--accent)';
-    btn.style.background='var(--accent-soft)';
-    btn.querySelector('.size-check').style.display='inline';
-    document.getElementById('nbSecondTechWrap').style.display=needsSecond?'block':'none';
-  });
-});
+  return '';
+}
+// Show/hide the 2nd-tech picker to match the current lifting selection. When the
+// requirement changes (e.g. switching to "cannot help lift"), clear any chosen
+// date/slot and reload the calendar so it reflects the new both-free constraint.
+let nbPrevSecondMode='none';
+function syncSecondTech(){
+  const mode=nbSecondTechMode();
+  const wrap=document.getElementById('nbSecondTechWrap');
+  const sel=document.getElementById('nbSecondTech');
+  if(mode==='none'){
+    wrap.style.display='none';
+    if(sel.value) sel.value='';                 // drop any stale secondary
+  }else{
+    wrap.style.display='';
+    document.getElementById('nbSecondTechLabel').textContent =
+      mode==='mandatory' ? 'Second technician — required (both must be free)' : 'Second technician — optional (helper)';
+  }
+  if(mode!==nbPrevSecondMode){
+    nbPrevSecondMode=mode;
+    onSecondTechChanged();                       // requirement changed → re-pick date/slot
+  }
+}
+// A primary/secondary change invalidates the chosen date/slot — clear and reload.
+function onSecondTechChanged(){
+  document.getElementById('nbDate').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbSlotsWrap').style.display='none';
+  loadNbCalendar();
+}
+document.getElementById('nbSecondTech').addEventListener('change',onSecondTechChanged);
 // Fetch a TV-mounting service's option groups. If the DB only has the size group
 // (Handy Andy DBs that never received migrations 0003/0015 — the public widget
 // hardcodes these so it was never noticed), seed the full set once and re-fetch
@@ -1680,9 +1713,18 @@ async function loadNbCalendar(){
   // Disable going before the current month.
   const cur=new Date(); cur.setDate(1);
   document.getElementById('nbCalPrev').disabled=(nbCalMonth.getFullYear()===cur.getFullYear()&&nbCalMonth.getMonth()===cur.getMonth());
+  // Mandatory 2-tech job: can't show dates until both technicians are picked.
+  const blocked=nbAvailabilityBlockedReason();
+  if(blocked){
+    nbAvailDates=new Set();
+    document.getElementById('nbCalGrid').innerHTML=`<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">${esc(blocked)}</div>`;
+    return;
+  }
   document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
+  const params={ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:techId };
+  const second=nbEffectiveSecondTech(); if(second) params.secondary_technician_id=second;
   try{
-    const r=await api('available_dates',{ params:{ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:techId }});
+    const r=await api('available_dates',{ params });
     nbAvailDates=new Set(r.dates||[]);
   }catch(err){ nbAvailDates=new Set(); }
   renderNbCalendar();
@@ -1716,8 +1758,10 @@ async function loadNbSlots(date){
   nbSelectedSlot=null;
   if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
   const techId=document.getElementById('nbTech').value;
+  const params={ business:current.slug, date, technician_id:techId||'any' };
+  const second=nbEffectiveSecondTech(); if(second) params.secondary_technician_id=second;
   try{
-    const r=await api('available_slots',{ params:{ business:current.slug, date, technician_id:techId||'any' }});
+    const r=await api('available_slots',{ params });
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
     else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
     document.getElementById('nbSlotsWrap').style.display='';
@@ -1792,7 +1836,7 @@ const ASSURION_GROUPS = [
 const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); document.getElementById('nbSteps').innerHTML=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -1868,11 +1912,32 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 // Display label for an option-group section header (lets us relabel a group
 // without a DB change). The "Dismount" section reads "Guaranteed Dismount Service".
 function nbGroupLabel(g){ return g.key==='dismount' ? 'Guaranteed Dismount Service' : g.label; }
+// Max-inch value for each selected TV size (e.g. "70"-84"" -> 84).
+function nbSelectedSizeMaxList(){
+  const g=nbOptionGroups.find(x=>x.key==='size'); const out=[]; if(!g||!nbQty[g.id]) return out;
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push(nbSizeMaxInches(o.label)); } });
+  return out;
+}
 function nbVisibleOptions(g){
   let opts=g.options;
   if(g.key==='bracket'){
     const tiers=nbSelectedSizeTiers();
     opts=opts.filter(o=>{ const fs=(o.metadata&&o.metadata.for_size)||'any'; return fs==='any'||tiers.has(fs); });
+  }
+  // Lifting Help — show only the options that match the chosen TV size, so the
+  // office never sees a contradictory choice (e.g. "under 70" for a 75" TV, or
+  // "86"+" for a 70-85" TV). The group itself only renders for 70"+ TVs.
+  if(g.key==='lifting'){
+    const sizes=nbSelectedSizeMaxList();
+    const has7085=sizes.some(n=>n>=70 && n<=85);   // 70"-84" tier
+    const hasBig =sizes.some(n=>n>=86);            // 85"-97" / 98"+ tiers
+    opts=opts.filter(o=>{
+      const k=nbLiftingKind(o.label);
+      if(k==='under70') return false;              // never relevant once a 70"+ TV is chosen
+      if(k==='can'||k==='cannot') return has7085;  // 70-85 help options
+      if(k==='big') return hasBig;                 // 86"+ option
+      return true;
+    });
   }
   // Frame-only add-ons show only when a Samsung Frame / LG Gallery TV is on the order.
   if(nbFrameTvQty.frame===0) opts=opts.filter(o=>!nbIsFrameOnlyOption(o));
@@ -1911,9 +1976,10 @@ function renderNbSteps(){
       `<div class="nb-hint" style="margin-top:8px;font-weight:700;color:var(--ink);">${hrs} hour${hrs===1?'':'s'} × $${HANDYMAN_HOURLY} = $${lineTotal}</div>`+
     `</div>`;
     updateNbTotal();
+    syncSecondTech();
     return;
   }
-  if(!nbOptionGroups.length){ wrap.innerHTML=''; return; }
+  if(!nbOptionGroups.length){ wrap.innerHTML=''; syncSecondTech(); return; }
   let html='';
   // TV Type — first question, only for TV-mounting services (those with a
   // size/bracket group). Frame/Gallery use the in-box bracket.
@@ -1988,6 +2054,7 @@ function renderNbSteps(){
   });
   wrap.innerHTML=html;
   updateNbTotal();
+  syncSecondTech();
 }
 // Keep "Other" note text in sync without re-rendering (so the field keeps focus).
 document.getElementById('nbSteps').addEventListener('input',e=>{
@@ -2017,7 +2084,7 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     if(!nbQty[gid]) nbQty[gid]={};
     nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
     if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
-    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); }
+    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); nbPruneInvisibleOptions(); }
     renderNbSteps();
   } else if(pickBtn){
     const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
@@ -2151,6 +2218,21 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
+  // Second-technician requirement, driven by the "Lifting Help" selection.
+  // "cannot help lift" / "86"+" make a 2nd tech mandatory; "can help lift" makes
+  // it optional. Validate BEFORE tokenizing a card so we never charge then fail.
+  const secondMode=assurion?'none':nbSecondTechMode();
+  const secondTechId=(secondMode!=='none') ? (document.getElementById('nbSecondTech').value||'') : '';
+  if(secondMode==='mandatory'){
+    if(!techId || techId==='any'){ err.textContent='This job needs two technicians — pick the primary technician.'; return; }
+    if(!secondTechId){ err.textContent='This job requires a second technician. Please select one.'; return; }
+    if(secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
+  }
+  if(secondMode==='optional' && secondTechId){
+    if(!techId || techId==='any'){ err.textContent='Pick the primary technician to pair with the second.'; return; }
+    if(secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
+  }
+
   // For card payments, tokenize the card with Stripe before creating the booking.
   let paymentMethodId=null;
   if(paymentMethod==='card'){
@@ -2166,7 +2248,6 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       paymentMethodId=pm.id;
     }catch(e3){ err.textContent=e3.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
   }
-  const secondTechId=document.getElementById('nbNeedsLifting').checked?document.getElementById('nbSecondTech').value:null;
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
@@ -2178,8 +2259,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       service_id: nbServiceId || document.getElementById('nbService').value || null,
       technician_id: techId==='any'?'any':techId||null,
       secondary_technician_id: secondTechId||null,
-      needs_lifting: document.getElementById('nbNeedsLifting').checked,
-      tv_size_category: nbLiftingSelected||null,
+      needs_lifting: secondMode==='mandatory',
+      tv_size_category: nbSelectedLiftingKind()||null,
       scheduled_date: date,
       scheduled_slot: nbSelectedSlot.key,
       selections,
