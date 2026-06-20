@@ -370,6 +370,40 @@ export async function runDomsImportChunk(db, zbkKey, opts = {}) {
   };
 }
 
+// ── DIAGNOSTIC: isolate which dependency is failing, returning readable JSON
+// (never throwing) so a runtime 500 can't hide the real cause. ───────────────────
+export async function domsDiag(db, zbkKey, which) {
+  if (which === 'db') {
+    try {
+      const ctx = await resolveContext(db);
+      const { count } = await db.from('customers')
+        .select('id', { count: 'exact', head: true })
+        .eq('business_id', ctx.business_id);
+      return {
+        ok: true, step: 'db',
+        business: ctx.businessName, business_id: ctx.business_id,
+        service_area_id: ctx.service_area_id, service_id: ctx.service_id,
+        existing_customers: count ?? null,
+      };
+    } catch (e) {
+      return { ok: false, step: 'db', error: String((e && e.message) || e), stack: String((e && e.stack) || '') };
+    }
+  }
+  if (which === 'zbk') {
+    try {
+      const { rows, nextCursor, hasMore } = await fetchPage('/v1/customers', zbkKey, null);
+      return {
+        ok: true, step: 'zbk',
+        got: rows.length, hasMore, nextCursor,
+        sampleKeys: rows[0] ? Object.keys(rows[0]) : [],
+      };
+    } catch (e) {
+      return { ok: false, step: 'zbk', error: String((e && e.message) || e), stack: String((e && e.stack) || '') };
+    }
+  }
+  return { ok: false, error: `unknown diag step: ${which}` };
+}
+
 // ── FULL run (single request): streams everything in one go. Fine for local/CLI
 // use or small datasets, but can exceed the 60s serverless budget on large
 // accounts — prefer runDomsImportChunk + the driver page for the server import. ──

@@ -5,7 +5,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { runDomsImport, runDomsImportChunk } from './_lib/doms-import.js';
+import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -86,12 +86,36 @@ export default async function handler(req, res) {
   //   &maxPages=N             pages per request (default 3)
   //   &mode=all               legacy single-shot run (may time out on big data)
   if (action === 'import_doms') {
-    const secret = process.env.IMPORT_SECRET;
-    if (!secret) return res.status(400).json({ error: 'IMPORT_SECRET env var not set. Add it in Vercel first.' });
-    if (req.query.secret !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=YOUR_IMPORT_SECRET' });
-    const zbk = process.env.ZENBOOKER_API_KEY;
-    if (!zbk) return res.status(400).json({ error: 'ZENBOOKER_API_KEY env var not set' });
+    const debug = req.query.debug === '1';
     try {
+      const secret = process.env.IMPORT_SECRET;
+      if (!secret) return res.status(400).json({ error: 'IMPORT_SECRET env var not set. Add it in Vercel first.' });
+      if (req.query.secret !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=YOUR_IMPORT_SECRET' });
+
+      const step = (req.query.step || '').toString();
+
+      // Diagnostic ladder — each rung adds one dependency so we can see exactly
+      // which layer fails. ping touches nothing; db touches Supabase; zbk touches
+      // Zenbooker. All return readable JSON (domsDiag never throws).
+      if (step === 'ping') {
+        return res.status(200).json({
+          ok: true, step: 'ping', node: process.version,
+          env: {
+            SUPABASE_URL: !!process.env.SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+            ZENBOOKER_API_KEY: !!process.env.ZENBOOKER_API_KEY,
+            IMPORT_SECRET: !!process.env.IMPORT_SECRET,
+          },
+        });
+      }
+
+      const zbk = process.env.ZENBOOKER_API_KEY;
+      if (!zbk) return res.status(400).json({ error: 'ZENBOOKER_API_KEY env var not set' });
+
+      if (step === 'db' || step === 'zbk') {
+        return res.status(200).json(await domsDiag(serviceClient(), zbk, step));
+      }
+
       if ((req.query.mode || '').toString() === 'all') {
         const phase = (req.query.phase || 'all').toString();
         const out = await runDomsImport(serviceClient(), zbk, { phase });
@@ -103,8 +127,8 @@ export default async function handler(req, res) {
       const out = await runDomsImportChunk(serviceClient(), zbk, { phase, cursor, maxPages });
       return res.status(200).json(out);
     } catch (e) {
-      console.error('[import_doms]', e);
-      return res.status(500).json({ error: e.message });
+      console.error('[import_doms]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e), stack: debug ? String((e && e.stack) || '') : undefined });
     }
   }
 

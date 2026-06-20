@@ -129,14 +129,39 @@
     bar.style.width = Math.min(90, cur + (90 - cur) * 0.25) + '%';
   }
 
-  async function callChunk(phase, cursor) {
-    const url = `/api/migrate?action=import_doms&secret=${encodeURIComponent(secret)}`
-      + `&phase=${phase}` + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+  const API = `/api/migrate?action=import_doms&debug=1&secret=`;
+
+  // Always read the body as text first, so an opaque runtime 500 (HTML, not our
+  // JSON) surfaces its real content instead of a bare "HTTP 500".
+  async function getJSON(url) {
     const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    const text = await res.text();
     let body;
-    try { body = await res.json(); } catch { body = { error: `HTTP ${res.status}` }; }
-    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    try { body = JSON.parse(text); }
+    catch { throw new Error(`Server returned ${res.status} (not JSON): ${text.slice(0, 300)}`); }
+    if (!res.ok || body.error) throw new Error((body.error || `HTTP ${res.status}`) + (body.stack ? `\n${body.stack}` : ''));
     return body;
+  }
+
+  // Run the diagnostic ladder once before importing so any broken dependency is
+  // named explicitly (env / Supabase / Zenbooker) rather than failing silently.
+  async function diagnostics() {
+    const base = API + encodeURIComponent(secret);
+    log('Running diagnostics…');
+    const ping = await getJSON(base + '&step=ping');
+    log(`  ✓ function alive (node ${ping.node}) · env ${JSON.stringify(ping.env)}`, 's');
+    const db = await getJSON(base + '&step=db');
+    if (!db.ok) throw new Error(`Supabase check failed: ${db.error}`);
+    log(`  ✓ database OK · business "${db.business}" · ${db.existing_customers} existing customers`, 's');
+    const zbk = await getJSON(base + '&step=zbk');
+    if (!zbk.ok) throw new Error(`Zenbooker check failed: ${zbk.error}`);
+    log(`  ✓ Zenbooker OK · pulled ${zbk.got} sample records`, 's');
+  }
+
+  async function callChunk(phase, cursor) {
+    const url = API + encodeURIComponent(secret)
+      + `&phase=${phase}` + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    return getJSON(url);
   }
 
   // Run one phase to completion, retrying a failed chunk a few times before giving up.
@@ -183,6 +208,7 @@
     $('errBanner').style.display = 'none';
     stopped = false;
     try {
+      await diagnostics();
       await runPhase('customers');
       await runPhase('jobs');
       $('doneBanner').style.display = 'block';
