@@ -1434,7 +1434,7 @@ async function reviewSubmit(req, res, body) {
     .select(`
       id, reviewed_at, customer_id, business_id, status, service_area_id,
       customer:customers(name, phone, email),
-      technician:technicians(name),
+      technician:technicians(id, name, phone),
       service_area:service_areas(name),
       business:businesses(id, slug, name, feedback_email)
     `)
@@ -1465,6 +1465,28 @@ async function reviewSubmit(req, res, body) {
       technicianName: booking.technician?.name || 'Technician',
       serviceAreaName: booking.service_area?.name || 'Service Area',
     }).catch(err => console.warn('[review] email send failed:', err));
+  }
+
+  // Send SMS to technician based on rating
+  if (booking.technician?.phone) {
+    const techName = booking.technician.name || 'Technician';
+    if (rating === 5) {
+      const msg = `${techName} you just received a GREAT review! check it out on your profile.`;
+      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
+    } else if (rating <= 4) {
+      const msg = `${techName} you just received a bad review... Please check your profile to view.`;
+      await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
+    }
+  }
+
+  // Send SMS to owner if rating ≤ 4
+  if (rating <= 4) {
+    const ownerPhone = process.env.OWNER_PHONE_NUMBER;
+    if (ownerPhone) {
+      const techName = booking.technician?.name || 'Technician';
+      const msg = `${techName} received a ${rating}-star review on ${booking.business?.name || 'a booking'}. Customer: ${booking.customer?.name || 'Unknown'}`;
+      await sendSMS(ownerPhone, msg).catch(err => console.warn('[review] owner SMS send failed:', err));
+    }
   }
 
   return res.status(200).json({ ok: true, review_rating: rating });
