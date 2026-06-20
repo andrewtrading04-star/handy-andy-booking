@@ -14,19 +14,29 @@ import { uploadImage } from './_lib/storage.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
 
-// PostgREST rejects an insert that references a column missing from its schema
-// cache (e.g. a migration not yet applied to this database). Rather than lose
-// the customer's request, strip the offending column and retry. Handles
+// Pull a missing-column name out of either error wording Supabase can surface:
+//   PostgREST schema cache: Could not find the 'customer_zip' column of 'estimates' …
+//   Raw Postgres (42703):   column estimates.customer_zip does not exist
+function missingColumn(msg) {
+  let m = /Could not find the '([^']+)' column/.exec(msg || '');
+  if (m) return m[1];
+  m = /column\s+(?:\w+\.)?["']?(\w+)["']?\s+does not exist/i.exec(msg || '');
+  return m ? m[1] : null;
+}
+
+// PostgREST/Postgres rejects an insert that references a column missing from
+// this database (e.g. a migration not yet applied). Rather than lose the
+// customer's request, strip the offending column and retry. Handles
 // sms_consent, customer_zip, and any future column drift the same way.
 async function insertResilient(db, table, row, returning = 'id') {
   const payload = { ...row };
   for (let i = 0; i < 8; i++) {
     const { data, error } = await db.from(table).insert(payload).select(returning).single();
     if (!error) return { data, error: null };
-    const m = /Could not find the '([^']+)' column/.exec(error.message || '');
-    if (m && Object.prototype.hasOwnProperty.call(payload, m[1])) {
-      console.warn(`[estimate] '${m[1]}' column not in schema cache, retrying without it`);
-      delete payload[m[1]];
+    const col = missingColumn(error.message);
+    if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
+      console.warn(`[estimate] '${col}' column missing, retrying without it`);
+      delete payload[col];
       continue;
     }
     return { data: null, error };

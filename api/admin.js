@@ -195,6 +195,17 @@ async function resolveBusiness(db, auth, slug) {
 
 function bail(res, err) { return res.status(err.status || 500).json({ error: err.message }); }
 
+// Pull a missing-column name out of either error wording Supabase can surface:
+//   PostgREST schema cache: Could not find the 'customer_zip' column of 'estimates' …
+//   Raw Postgres (42703):   column estimates.customer_zip does not exist
+// Used to gracefully degrade selects/inserts when a migration hasn't been applied.
+function missingColumn(msg) {
+  let m = /Could not find the '([^']+)' column/.exec(msg || '');
+  if (m) return m[1];
+  m = /column\s+(?:\w+\.)?["']?(\w+)["']?\s+does not exist/i.exec(msg || '');
+  return m ? m[1] : null;
+}
+
 // ── Dashboard summary (one call bootstraps the home view) ────────────────────
 async function summary(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
@@ -1539,10 +1550,10 @@ async function estimates(req, res, db, auth) {
   };
   let { data, error } = await runQuery();
   for (let i = 0; error && i < 4; i++) {
-    const m = /Could not find the '([^']+)' column/.exec(error.message || '');
-    if (!m || !cols.includes(m[1])) break;
-    console.warn(`[admin] estimates: '${m[1]}' column not in schema cache, retrying without it`);
-    cols = cols.split(',').map(s => s.trim()).filter(c => c !== m[1]).join(', ');
+    const col = missingColumn(error.message);
+    if (!col || !cols.includes(col)) break;
+    console.warn(`[admin] estimates: '${col}' column missing, retrying without it`);
+    cols = cols.split(',').map(s => s.trim()).filter(c => c !== col).join(', ');
     ({ data, error } = await runQuery());
   }
   if (error) throw error;
