@@ -1942,6 +1942,7 @@ function nbDisplayLabel(groupKey, optionLabel){
   if(!optionLabel) return optionLabel;
   if(groupKey==='bracket'){
     if(/i have my own/.test(optionLabel.toLowerCase())) return 'Customer supplied bracket';
+    if(/mantel\s*mount/i.test(optionLabel)) return 'Install Mantel Mount';
   }
   if(groupKey==='dismount'){
     if(/guaranteed|yes/i.test(optionLabel)) return 'Yes';
@@ -1984,6 +1985,27 @@ function nbSelectedSizeMaxList(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const out=[]; if(!g||!nbQty[g.id]) return out;
   Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o) out.push(nbSizeMaxInches(o.label)); } });
   return out;
+}
+// Wires "behind the wall" is impossible when a TV sits over a fireplace. With
+// multiple TVs, only the ones NOT over a fireplace can get behind-wall routing.
+function nbAboveFireplaceCount(){
+  const g=nbOptionGroups.find(x=>x.key==='fireplace'); if(!g||!nbQty[g.id]) return 0;
+  let n=0;
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o && /above a fireplace/i.test(o.label)) n+=ct; } });
+  return n;
+}
+function nbIsBehindWall(o){ return /behind the wall/i.test((o&&o.label)||''); }
+// How many behind-the-wall concealments are allowed = TVs not over a fireplace.
+function nbBehindWallMax(){ return Math.max(0, nbTotalTvs() - nbAboveFireplaceCount()); }
+// Trim any behind-the-wall selections that now exceed the fireplace-driven cap
+// (e.g. after marking another TV as over a fireplace).
+function nbPruneBehindWall(){
+  const wg=nbOptionGroups.find(g=>g.key==='wires'); if(!wg||!nbQty[wg.id]) return;
+  const max=nbBehindWallMax();
+  wg.options.forEach(o=>{ if(nbIsBehindWall(o)){
+    const cur=nbQty[wg.id][o.id]||0;
+    if(cur>max){ if(max>0) nbQty[wg.id][o.id]=max; else delete nbQty[wg.id][o.id]; }
+  }});
 }
 function nbVisibleOptions(g){
   let opts=g.options;
@@ -2098,7 +2120,10 @@ function renderNbSteps(){
       const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
       if(qtyMode){
         const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
-        const plusDis=atCap?' disabled':'';
+        // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
+        const bw=(g.key==='wires' && nbIsBehindWall(o));
+        const bwMax=bw?nbBehindWallMax():Infinity;
+        const plusDis=(atCap || ct>=bwMax)?' disabled':'';
         html+=`<div class="nb-optq${ct>0?' on':''}">`+
               `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
               `<span class="nb-price">${priceLbl}</span>`+
@@ -2107,6 +2132,10 @@ function renderNbSteps(){
                 `<span class="nb-qty">${ct}</span>`+
                 `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
               `</span></div>`;
+        // Explain why behind-the-wall is blocked when every TV is over a fireplace.
+        if(bw && bwMax===0){
+          html+=`<div class="nb-hint" style="margin:-2px 0 4px">Not available — can't run wires behind the wall over a fireplace.</div>`;
+        }
         // "Other" add-on: when selected, let the admin describe it.
         if(nbIsOtherOption(o) && ct>0){
           html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
@@ -2141,6 +2170,7 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
     nbClampTvBound();
     nbPruneInvisibleOptions();
+    nbPruneBehindWall();
     renderNbSteps();
     return;
   }
@@ -2150,10 +2180,17 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     const grp=nbOptionGroups.find(g=>g.id===gid);
     // Cap TV-bound groups at the number of TVs selected.
     if(d>0 && grp && NB_TV_BOUND.has(grp.key) && nbGroupCount(gid)>=nbTotalTvs()) return;
+    // Behind-the-wall wires are capped at the number of TVs not over a fireplace.
+    if(d>0 && grp && grp.key==='wires'){
+      const o=grp.options.find(x=>x.id===oid);
+      if(o && nbIsBehindWall(o) && ((nbQty[gid]&&nbQty[gid][oid])||0)>=nbBehindWallMax()) return;
+    }
     if(!nbQty[gid]) nbQty[gid]={};
     nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
     if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
     if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); nbPruneInvisibleOptions(); }
+    // Marking a TV over a fireplace can invalidate existing behind-wall picks.
+    if(grp&&(grp.key==='fireplace'||grp.key==='size')) nbPruneBehindWall();
     renderNbSteps();
   } else if(pickBtn){
     const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
