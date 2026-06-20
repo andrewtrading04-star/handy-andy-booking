@@ -2025,8 +2025,14 @@ function nbSelectedSizeMaxList(){
 function nbAboveFireplaceCount(){
   const g=nbOptionGroups.find(x=>x.key==='fireplace'); if(!g||!nbQty[g.id]) return 0;
   let n=0;
-  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o && /above a fireplace/i.test(o.label)) n+=ct; } });
+  Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o && nbIsAboveFireplace(o.label)) n+=ct; } });
   return n;
+}
+// True only for the "above a fireplace" choice — NOT "TV NOT above a fireplace",
+// which also contains the phrase "above a fireplace" and must not be counted.
+function nbIsAboveFireplace(label){
+  const l=(label||'').toLowerCase();
+  return /above a fireplace/.test(l) && !/\bnot\b/.test(l);
 }
 function nbIsBehindWall(o){ return /behind the wall/i.test((o&&o.label)||''); }
 // How many behind-the-wall concealments are allowed = TVs not over a fireplace.
