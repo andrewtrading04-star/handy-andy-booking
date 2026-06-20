@@ -1489,7 +1489,7 @@ async function sendFeedbackEmail(params) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'bookings@handyandy.com',
+      from: 'contact@ihandyandy.com',
       to: params.to,
       subject: `Customer Feedback: ${params.rating}⭐ from ${params.customerName}`,
       html,
@@ -1649,7 +1649,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'bookings@handyandy.com',
+      from: 'contact@ihandyandy.com',
       to: est.customer_email,
       subject: `Your ${biz.name} Estimate`,
       html,
