@@ -1747,6 +1747,21 @@ async function nbLoadTvOptions(serviceId){
       groups=r2.groups||[];
     }catch(err){ /* keep whatever loaded */ }
   }
+  return nbRelocateOneConnect(groups);
+}
+// The Samsung Frame OneConnect-box install belongs with Wire Hiding, not Add-ons:
+// for a Frame TV the office chooses ONE wire route — behind the wall, or hide the
+// OneConnect box behind the TV ($350). Move it out of "extras" and into "wires" so
+// it renders there and is TV-bound (it competes for that TV's single wire pick).
+// The frame-only filter (nbIsFrameOnlyOption) still hides it on regular-TV jobs.
+function nbRelocateOneConnect(groups){
+  const wires=groups.find(g=>g.key==='wires');
+  const extras=groups.find(g=>g.key==='extras');
+  if(!wires||!extras||!Array.isArray(extras.options)) return groups;
+  const moved=extras.options.filter(o=>/oneconnect/i.test(o.label||'') || (o.metadata&&o.metadata.frame_only===true));
+  if(!moved.length) return groups;
+  extras.options=extras.options.filter(o=>!moved.includes(o));
+  wires.options=(wires.options||[]).concat(moved);
   return groups;
 }
 
@@ -2272,7 +2287,7 @@ document.getElementById('nbService').addEventListener('change',async e=>{
   }
   try{
     const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
-    nbOptionGroups=r.groups||[];
+    nbOptionGroups=nbRelocateOneConnect(r.groups||[]);
     renderNbSteps();
   }catch(err){ /* no option groups — manual quote */ }
 });
