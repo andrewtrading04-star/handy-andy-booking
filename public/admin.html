@@ -1276,7 +1276,7 @@ function getTimeGreeting(name, tz) {
   let timeOfDay = 'evening';
   if (hour < 12) timeOfDay = 'morning';
   else if (hour < 17 || (hour === 17 && minute === 0)) timeOfDay = 'afternoon';
-  if (name && name !== 'Owner') return `Good ${timeOfDay} ${esc(name)}.`;
+  if (name) return `Good ${timeOfDay} ${esc(name)}.`;
   return `Good ${timeOfDay}.`;
 }
 function paintGreeting(){

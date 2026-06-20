@@ -144,7 +144,7 @@ export default async function handler(req, res) {
 function displayNameFor(scope) {
   if (scope === 'handy-andy') return process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather';
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_NAME || 'Joey';
-  return process.env.ADMIN_NAME || 'Owner';
+  return process.env.ADMIN_NAME || 'Andrew';
 }
 
 async function login(req, res, body) {
