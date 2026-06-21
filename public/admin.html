@@ -338,6 +338,10 @@
   .gstat-s.down{color:#ff9b9b;opacity:1;}
   .gstat-link{cursor:pointer;transition:background .15s;}
   .gstat-link:hover{background:rgba(255,255,255,.18);}
+  /* Temporary note inside the greeting banner (auto-expires) */
+  .greet-note{margin-top:14px;padding:12px 14px;border-radius:11px;font-size:13.5px;line-height:1.55;font-weight:600;
+    background:rgba(255,176,122,.16);border:1px solid rgba(255,176,122,.45);color:#fff;display:flex;gap:9px;align-items:flex-start;}
+  .greet-note .gn-ic{font-size:16px;line-height:1.4;flex-shrink:0;}
   @media (max-width:760px){
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
     .greet-hi{font-size:18px;}
@@ -2083,9 +2087,26 @@ function paintGreeting(){
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
     `<div class="greet-line">${jobsTxt}, and ${estTxt}.</div>`+
-    greetStatsHtml();
+    greetStatsHtml()+
+    greetNoteHtml();
   const link=el.querySelector('[data-goest]');
   if(link) link.addEventListener('click',()=>navTo('estimates'));
+}
+// Temporary note shown in the greeting banner. Auto-disappears once `expires`
+// passes (24h window). Targeted at one business via `for` (slug). Edit/clear
+// this object to change or remove the note.
+const GREET_NOTE = {
+  for: 'handy-andy',
+  text: 'Attention Heather. 3 jobs have not been completed. Please call all 3 customers. This message will disappear in 24 hours. 5:08pm Monday',
+  expires: '2026-06-23T17:08:00-06:00'
+};
+function greetNoteHtml(){
+  try{
+    if(!GREET_NOTE || !GREET_NOTE.text) return '';
+    if(Date.now() >= new Date(GREET_NOTE.expires).getTime()) return '';
+    if(GREET_NOTE.for && !(current && current.slug===GREET_NOTE.for)) return '';
+    return `<div class="greet-note"><span class="gn-ic">⚠️</span><span>${esc(GREET_NOTE.text)}</span></div>`;
+  }catch(e){ return ''; }
 }
 // Owner-only metrics strip: revenue today, monthly pace vs last month.
 function greetPace(r){
