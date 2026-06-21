@@ -439,6 +439,7 @@
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
+      <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
     </nav>
 
     <div id="schedSidebar">
@@ -659,6 +660,7 @@ const ICONS = {
   link:     {e:'🔗', f:'fa-solid fa-link'},
   estimate: {e:'🧾', f:'fa-solid fa-file-invoice-dollar'},
   analytics:{e:'📊', f:'fa-solid fa-chart-column'},
+  webanalytics:{e:'🌐', f:'fa-solid fa-globe'},
 };
 function isDoms(){ return !!(current && current.slug==='doms'); }
 function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
@@ -768,6 +770,8 @@ function enterApp(){
   // Booking Analytics is owner-only (Andrew); secretaries don't see it.
   const navAna=document.getElementById('navAnalytics');
   if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
+  const navWeb=document.getElementById('navWebAnalytics');
+  if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
@@ -798,7 +802,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',webanalytics:'Website Analytics'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -809,6 +813,7 @@ function navTo(s){
     else if(s==='reviews') renderReviews();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
+    else if(s==='webanalytics') renderWebAnalytics();
   }
 }
 function refreshCurrent(){
@@ -819,6 +824,7 @@ function refreshCurrent(){
   else if(section==='reviews') renderReviews();
   else if(section==='gallery') renderGallery();
   else if(section==='analytics') renderAnalytics();
+  else if(section==='webanalytics') renderWebAnalytics();
 }
 
 // Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
@@ -1567,8 +1573,10 @@ function anaSessionsTbl(rows){
       <td>${s.isRepeat?'<span class="pill blue">repeat visitor</span>':''}</td>
     </tr>`).join('')+`</table></div>`;
 }
-// Sessions bars/line use each business's brand color: --orange resolves to the
-// Handy Andy orange, and the Doms theme (body.doms) remaps --orange to its blue.
+// Each business's brand color: blue for Doms, orange for Handy Andy. Matches the
+// per-business accent logic used elsewhere (greeting --gaccent), so it's correct
+// regardless of which login link set --accent.
+function anaBrand(){ return isDoms() ? '#2563EB' : ((current&&current.brand_orange)||'#FF6B35'); }
 function anaHexRgb(hex){
   const h=(hex||'').replace('#','').trim();
   if(h.length===6){ const n=parseInt(h,16); return (n>>16&255)+','+(n>>8&255)+','+(n&255); }
@@ -1578,7 +1586,7 @@ function anaHexRgb(hex){
 function anaDrawCharts(d){
   if(typeof Chart==='undefined') return;
   Object.values(anaCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); anaCharts={};
-  const brand=(getComputedStyle(document.documentElement).getPropertyValue('--orange').trim())||'#ff6b35';
+  const brand=anaBrand();
   const sessionsBg='rgba('+anaHexRgb(brand)+',0.35)';
   const tl=document.getElementById('ana-ch-timeline');
   if(tl) anaCharts.tl=new Chart(tl,{
@@ -1609,6 +1617,254 @@ function anaDrawCharts(d){
         { label:'Bookings', data:d.byDow.map(x=>x.bookings), backgroundColor:'#10b981' },
       ]},
     options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+}
+
+// ── Website Analytics ───────────────────────────────────────────────────────
+// Each business's website-traffic analytics lives on its own backend (separate
+// Vercel deployment, public + CORS-enabled), the same source its standalone
+// dashboard reads. We fetch those endpoints live per current business — no
+// import — and render with the business's brand color (orange HA / blue Doms).
+const WEB_ANA_ORIGIN = {
+  'handy-andy': 'https://backend-beryl-seven-95.vercel.app',
+  'doms':       'https://doms-backend.vercel.app',
+};
+let webDays='today', webLoading=false, webCharts={};
+function webBackend(){ return WEB_ANA_ORIGIN[current?current.slug:''] || ''; }
+// from/to range: Denver calendar day for today/yesterday, rolling window otherwise.
+function webRange(mode){
+  if(mode==='today'||mode==='yesterday') return anaDenverDayRange(mode==='today'?0:-1);
+  const days=parseInt(mode,10)||30;
+  return { from:new Date(Date.now()-days*86400000).toISOString(), to:new Date().toISOString() };
+}
+function webNum(n){ if(n==null)return '—'; return Number(n).toLocaleString('en-US'); }
+function webShortPath(u){ try{ const p=new URL(u); return (p.pathname+(p.search||''))||'/'; }catch{ return u||'/'; } }
+function webHost(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch{ return u; } }
+
+async function renderWebAnalytics(){
+  const view=document.getElementById('view');
+  view.innerHTML=`
+    <div class="ana">
+      <div class="ana-head">
+        <div>
+          <h1>🌐 ${esc(current?current.name:'Website')} Website Analytics</h1>
+          <div class="ana-sub" id="webUpdated">Loading…</div>
+        </div>
+        <div class="ranges" id="webRanges">
+          <button data-days="today">Today</button>
+          <button data-days="yesterday">Yesterday</button>
+          <button data-days="7">7 Days</button>
+          <button data-days="30">30 Days</button>
+        </div>
+      </div>
+      <div id="webContent" class="loading">Loading website analytics…</div>
+    </div>`;
+  const ranges=document.getElementById('webRanges');
+  ranges.querySelectorAll('button[data-days]').forEach(b=>b.classList.toggle('on', b.dataset.days===String(webDays)));
+  ranges.addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    webDays=b.dataset.days;
+    ranges.querySelectorAll('button[data-days]').forEach(x=>x.classList.toggle('on',x===b));
+    loadWebAnalytics();
+  });
+  await loadWebAnalytics();
+  if(pollTimer){ clearInterval(pollTimer); }
+  pollTimer=setInterval(()=>{ if(section==='webanalytics' && !webLoading) loadWebAnalytics(); }, 30000);
+}
+
+async function loadWebAnalytics(){
+  if(webLoading) return; webLoading=true;
+  const content=document.getElementById('webContent');
+  try{
+    const base=webBackend();
+    if(!base){ if(content) content.innerHTML=`<div class="card"><div class="empty">No website-analytics backend is configured for this business yet.</div></div>`; return; }
+    const {from,to}=webRange(webDays);
+    const qs='from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to);
+    const get=async(path,fallback)=>{
+      try{ const r=await fetch(base+path+(path.includes('?')?'&':'?')+qs); return r.ok?await r.json():fallback; }
+      catch{ return fallback; }
+    };
+    const [pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit]=await Promise.all([
+      get('/api/analytics/page-views',{total:0,events:[]}),
+      get('/api/analytics/clicks',{total:0,by_button:{}}),
+      get('/api/analytics/form-interactions',{total:0,by_field:{}}),
+      get('/api/analytics/funnel',{funnel:[],total_sessions:0}),
+      get('/api/analytics/scroll-depth',{total:0,depth_distribution:{},average_depth:0}),
+      get('/api/analytics/sessions?limit=200',{total:0,sessions:[]}),
+      get('/api/analytics/top-pages',{total:0,pages:[]}),
+      get('/api/analytics/devices',{}),
+      get('/api/analytics/referrers',{referrers:[]}),
+      get('/api/analytics/pages-bounce',{pages_bounce:[]}),
+      get('/api/analytics/exit-pages',{exit_pages:[]}),
+    ]);
+    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,lastUpdated:new Date().toISOString()});
+  }catch(err){
+    if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
+  }finally{ webLoading=false; }
+}
+
+function webRender(d){
+  const content=document.getElementById('webContent'); if(!content) return;
+  const brand=anaBrand();
+  const upd=document.getElementById('webUpdated');
+  if(upd) upd.textContent='Updated '+new Date(d.lastUpdated).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+' · auto-refreshes every 30s';
+
+  const sessions=d.fun.total_sessions||d.ses.total||0;
+  const funMap={}; (d.fun.funnel||[]).forEach(f=>{ funMap[f.step]=f; });
+  const formStep=funMap['Form / Booking']||funMap['Form/Booking']||null;
+  const formSessions=formStep?formStep.sessions:0;
+  const conv=sessions?Math.round(formSessions/sessions*100):0;
+  const pagesPer=sessions?(d.pv.total/sessions).toFixed(1):'—';
+
+  const kpis=[
+    ['Sessions', webNum(sessions), 'visitor sessions tracked'],
+    ['Page Views', webNum(d.pv.total), `${pagesPer} pages / session`],
+    ['Clicks', webNum(d.clk.total), 'button & link clicks'],
+    ['Form / Booking Starts', webNum(formSessions), `${conv}% of sessions`],
+    ['Avg Scroll Depth', (d.scr.average_depth??0)+'%', 'average page scroll'],
+  ];
+  let html=`<div class="grid kpis">`+kpis.map(k=>
+    `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
+  ).join('')+`</div>`;
+
+  // Funnel — Page View → Click → Form/Booking
+  html+=`<div class="section card"><h2>Visitor Funnel — Page View → Click → Booking</h2>`;
+  const steps=d.fun.funnel||[];
+  if(!steps.length||!sessions){ html+=`<div class="empty">No sessions in this period yet.</div>`; }
+  else{
+    let prev=null;
+    steps.forEach(f=>{
+      const pct=sessions?Math.round(f.sessions/sessions*100):0;
+      const drop=prev!=null?prev-f.sessions:0;
+      html+=`<div class="fstep">
+        <div class="flbl">${esc(f.step)}</div>
+        <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:${brand};">${f.sessions} sessions</div></div>
+        <div class="fdrop">${drop>0?`<b>−${drop} left here</b>`:`<span class="fpct">—</span>`} <span class="fpct">· ${pct}% · ${webNum(f.count)} events</span></div>
+      </div>`;
+      prev=f.sessions;
+    });
+  }
+  html+=`</div>`;
+
+  // Device split + Scroll depth distribution
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Device Type</h2>${webDeviceCard(d.dev,brand)}</div>
+    <div class="card"><h2>Scroll Depth Distribution</h2><div class="chartbox"><canvas id="web-ch-scroll"></canvas></div></div>
+  </div>`;
+
+  // Top pages chart + Traffic sources chart
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Top Pages by Views</h2><div class="chartbox"><canvas id="web-ch-pages"></canvas></div></div>
+    <div class="card"><h2>Traffic Sources</h2><div class="chartbox"><canvas id="web-ch-ref"></canvas></div></div>
+  </div>`;
+
+  // Top pages table + Referrers table
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Top Pages</h2>${webPagesTbl(d.top.pages)}</div>
+    <div class="card"><h2>Referrers</h2>${webRefTbl(d.ref.referrers)}</div>
+  </div>`;
+
+  // Most clicked + bounce
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Most Clicked Buttons & Links</h2>${webClicksTbl(d.clk.by_button)}</div>
+    <div class="card"><h2>Pages by Bounce Rate</h2>${webBounceTbl(d.bounce.pages_bounce)}</div>
+  </div>`;
+
+  // Exit pages + recent sessions
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Exit Pages</h2>${webExitTbl(d.exit.exit_pages)}</div>
+    <div class="card"><h2>Recent Sessions</h2>${webSessionsTbl(d.ses.sessions)}</div>
+  </div>`;
+
+  content.innerHTML=html;
+  webDrawCharts(d,brand);
+}
+
+function webDeviceCard(dev,brand){
+  const labels=['Mobile','Desktop','Tablet'], counts=[dev.mobile||0,dev.desktop||0,dev.tablet||0];
+  const out=[],oc=[];
+  labels.forEach((l,i)=>{ if(counts[i]>0){ out.push(l); oc.push(counts[i]); } });
+  if(!oc.length) return `<div class="empty">No data yet.</div>`;
+  const pcts=anaPctSum100(oc);
+  return out.map((l,i)=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+      <div style="width:90px;font-size:14px;font-weight:600;color:var(--ink);">${l}</div>
+      <div style="flex:1;background:#f0f1f4;height:22px;border-radius:6px;overflow:hidden;"><div style="width:${pcts[i]}%;height:100%;background:${brand};border-radius:6px;"></div></div>
+      <div style="width:46px;text-align:right;font-weight:700;font-size:14px;color:var(--ink);">${pcts[i]}%</div>
+    </div>`).join('');
+}
+function webPagesTbl(pages){
+  if(!pages||!pages.length) return `<div class="empty">No page views yet.</div>`;
+  return `<table><tr><th>Page</th><th class="num">Views</th><th class="num">Sessions</th></tr>`+
+    pages.slice(0,12).map(p=>`<tr><td title="${esc(p.title||'')}">${esc(p.title||webShortPath(p.url))}<div style="color:var(--mute);font-size:11px;">${esc(webShortPath(p.url))}</div></td><td class="num">${webNum(p.views)}</td><td class="num">${webNum(p.unique_sessions)}</td></tr>`).join('')+
+    `</table>`;
+}
+function webRefTbl(refs){
+  if(!refs||!refs.length) return `<div class="empty">No referrers yet.</div>`;
+  return `<table><tr><th>Source</th><th class="num">Visits</th><th class="num">Sessions</th></tr>`+
+    refs.slice(0,12).map(r=>`<tr><td>${esc(r.name)}</td><td class="num">${webNum(r.count)}</td><td class="num">${webNum(r.unique_sessions)}</td></tr>`).join('')+
+    `</table>`;
+}
+function webClicksTbl(byButton){
+  const rows=Object.entries(byButton||{}).map(([k,v])=>({k:k.replace(/\s+/g,' ').trim()||'(unnamed)',v})).sort((a,b)=>b.v-a.v).slice(0,15);
+  if(!rows.length) return `<div class="empty">No clicks yet.</div>`;
+  return `<table><tr><th>Button / Link</th><th class="num">Clicks</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.k.slice(0,60))}</td><td class="num">${webNum(r.v)}</td></tr>`).join('')+
+    `</table>`;
+}
+function webBounceTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
+  return `<table><tr><th>Page</th><th class="num">Sessions</th><th class="num">Bounce</th></tr>`+
+    rows.slice(0,12).map(r=>{ const hi=r.bounce_rate>=70; return `<tr><td>${esc(webShortPath(r.url))}</td><td class="num">${webNum(r.sessions)}</td><td class="num"><span style="font-weight:700;color:${hi?'var(--red)':'var(--ink)'};">${r.bounce_rate}%</span></td></tr>`; }).join('')+
+    `</table>`;
+}
+function webExitTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
+  return `<table><tr><th>Page</th><th class="num">Exits</th></tr>`+
+    rows.slice(0,12).map(r=>`<tr><td>${esc(webShortPath(r.url))}</td><td class="num">${webNum(r.exits)}</td></tr>`).join('')+
+    `</table>`;
+}
+function webSessionMeta(s){
+  for(const e of (s.events||[])){ if(e.metadata) return e.metadata; }
+  return {};
+}
+function webSessionsTbl(sessions){
+  if(!sessions||!sessions.length) return `<div class="empty">No sessions yet.</div>`;
+  return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Device</th><th>Browser</th><th>Page</th><th>Source</th></tr>`+
+    sessions.slice(0,25).map(s=>{ const m=webSessionMeta(s);
+      return `<tr><td>${new Date(s.start_time).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
+        <td>${esc(m.device||'—')}</td><td>${esc(m.browser||'—')}</td>
+        <td>${esc(webShortPath(m.page_path||'/'))}</td>
+        <td>${esc(s.referrer?webHost(s.referrer):'direct')}</td></tr>`; }).join('')+
+    `</table></div>`;
+}
+function webDrawCharts(d,brand){
+  if(typeof Chart==='undefined') return;
+  Object.values(webCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); webCharts={};
+  const bg='rgba('+anaHexRgb(brand)+',0.55)';
+  // Scroll depth buckets
+  const buckets=[0,0,0,0]; // 0-25,26-50,51-75,76-100
+  Object.entries(d.scr.depth_distribution||{}).forEach(([pct,cnt])=>{
+    const p=Number(pct), c=Number(cnt)||0;
+    if(p<=25) buckets[0]+=c; else if(p<=50) buckets[1]+=c; else if(p<=75) buckets[2]+=c; else buckets[3]+=c;
+  });
+  const sc=document.getElementById('web-ch-scroll');
+  if(sc) webCharts.sc=new Chart(sc,{ type:'bar',
+    data:{ labels:['0–25%','26–50%','51–75%','76–100%'], datasets:[{ label:'Sessions', data:buckets, backgroundColor:bg }] },
+    options:{ maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+  // Top pages by views
+  const tp=(d.top.pages||[]).slice(0,8);
+  const pg=document.getElementById('web-ch-pages');
+  if(pg) webCharts.pg=new Chart(pg,{ type:'bar',
+    data:{ labels:tp.map(p=>webShortPath(p.url)), datasets:[{ label:'Views', data:tp.map(p=>p.views), backgroundColor:bg }] },
+    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+  // Traffic sources by sessions
+  const tr=(d.ref.referrers||[]).slice(0,8);
+  const rf=document.getElementById('web-ch-ref');
+  if(rf) webCharts.rf=new Chart(rf,{ type:'bar',
+    data:{ labels:tr.map(r=>r.name), datasets:[{ label:'Sessions', data:tr.map(r=>r.unique_sessions), backgroundColor:bg }] },
+    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } }
   });
 }
 
