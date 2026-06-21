@@ -1567,17 +1567,25 @@ function anaSessionsTbl(rows){
       <td>${s.isRepeat?'<span class="pill blue">repeat visitor</span>':''}</td>
     </tr>`).join('')+`</table></div>`;
 }
+// Sessions bars/line use each business's brand color: --orange resolves to the
+// Handy Andy orange, and the Doms theme (body.doms) remaps --orange to its blue.
+function anaHexRgb(hex){
+  const h=(hex||'').replace('#','').trim();
+  if(h.length===6){ const n=parseInt(h,16); return (n>>16&255)+','+(n>>8&255)+','+(n&255); }
+  if(h.length===3){ return parseInt(h[0]+h[0],16)+','+parseInt(h[1]+h[1],16)+','+parseInt(h[2]+h[2],16); }
+  return '255,107,53';
+}
 function anaDrawCharts(d){
   if(typeof Chart==='undefined') return;
   Object.values(anaCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); anaCharts={};
-  const accent=(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())||'#2563eb';
-  const accentLight=accent.startsWith('#')?(accent.length===7?parseInt(accent.slice(1),16):[]):[]; const accentRgb=accentLight?(accentLight>>16&255)+','+(accentLight>>8&255)+','+(accentLight&255):'37,99,235'; const sessionsBg='rgba('+accentRgb+',0.35)';
+  const brand=(getComputedStyle(document.documentElement).getPropertyValue('--orange').trim())||'#ff6b35';
+  const sessionsBg='rgba('+anaHexRgb(brand)+',0.35)';
   const tl=document.getElementById('ana-ch-timeline');
   if(tl) anaCharts.tl=new Chart(tl,{
     type:'line',
     data:{ labels:d.timeline.map(x=>x.date.slice(5)),
       datasets:[
-        { label:'Sessions', data:d.timeline.map(x=>x.sessions), borderColor:accent, backgroundColor:'transparent', tension:0.3 },
+        { label:'Sessions', data:d.timeline.map(x=>x.sessions), borderColor:brand, backgroundColor:'transparent', tension:0.3 },
         { label:'Bookings', data:d.timeline.map(x=>x.bookings), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.12)', fill:true, tension:0.3 },
       ]},
     options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
