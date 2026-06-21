@@ -1437,7 +1437,7 @@ function anaRender(d){
     const pct=start?Math.round(f.reached/start*100):0;
     html+=`<div class="fstep">
       <div class="flbl">${f.label}</div>
-      <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:linear-gradient(to right,${brand},#1e40af);">${f.reached}</div></div>
+      <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:${brand};">${f.reached}</div></div>
       <div class="fdrop">${f.droppedHere>0?`<b>−${f.droppedHere} left here</b>`:`<span class="fpct">no drop-off</span>`} <span class="fpct">· ${pct}%</span></div>
     </div>`;
   });
