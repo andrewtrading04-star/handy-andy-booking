@@ -1,4 +1,22 @@
 import { mirrorBooking } from './_lib/mirror.js';
+import { notificationsOn } from './_lib/notify.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
+
+// Format a slot id ("slot_<startEpochSec>_<endEpochSec>") into a friendly date +
+// arrival window in the territory's local timezone. Used as a fallback so the
+// confirmation email still has the date/time even if an older cached widget
+// doesn't send the display summary.
+function slotWhen(slotId, territoryId) {
+  const m = /^slot_(\d+)_(\d+)/.exec(String(slotId || ''));
+  if (!m) return { dateLong: '', timeWindow: '' };
+  const startMs = Number(m[1]) * 1000, endMs = Number(m[2]) * 1000;
+  if (!startMs) return { dateLong: '', timeWindow: '' };
+  const tz = TERRITORY_TZ[territoryId] || 'America/Denver';
+  const dateLong = new Date(startMs).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const t = (ms) => new Date(ms).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+  const timeWindow = endMs ? `${t(startMs)} – ${t(endMs)}` : t(startMs);
+  return { dateLong, timeWindow };
+}
 
 // Valid coupon codes → discount in dollars (owner-provided, June 2026).
 // Zenbooker has no native coupon support, so a valid code is applied to the
@@ -49,7 +67,7 @@ export default async function handler(req, res) {
   const {
     territory_id, service_id, selectedSlot,
     customer, city, state, postal_code, zbk_selections, tip, payment_method_id,
-    min_providers_needed, assignment_method, coupon,
+    min_providers_needed, assignment_method, coupon, email_summary,
   } = req.body || {};
 
   if (!territory_id)      return res.status(400).json({ error: 'territory_id required' });
@@ -117,6 +135,13 @@ export default async function handler(req, res) {
     services.push({ custom_service: { name: 'Tip for technician', price: Number(tip), duration: 0, taxable: false } });
   }
 
+  // When we will send our own branded confirmation email (notifications on +
+  // Resend key configured), suppress Zenbooker's generic confirmation email so
+  // the customer doesn't get two. If we won't send ours (kill switch off or no
+  // key), leave Zenbooker's on as a fallback so the customer still gets one.
+  const haEmail = emailConfig('handy-andy');
+  const willSendBranded = notificationsOn() && !!haEmail.apiKey && !!customer.email;
+
   const payload = {
     territory_id,
     services,
@@ -128,7 +153,7 @@ export default async function handler(req, res) {
       postal_code: zipForLookup,
       country:     'US',
     },
-    email_notifications: true,
+    email_notifications: !willSendBranded,
     sms_notifications:   true,
     // Denver 98"+ → require & auto-assign 2 technicians
     ...(min_providers_needed && { min_providers_needed: String(min_providers_needed) }),
@@ -265,6 +290,34 @@ export default async function handler(req, res) {
       tip: Number(tip) || 0, service_name: 'TV Installation', line_items: mirrorLines,
       stripe_customer_id: null,
     });
+
+    // ---- Branded booking-confirmation email (best-effort; never fails the booking) ----
+    // Awaited so it completes before the serverless function returns/freezes.
+    // The widget sends `email_summary` (date, arrival window, line items, total)
+    // so the email matches the thank-you page; we derive date/time server-side as
+    // a fallback for older cached widgets.
+    if (willSendBranded) {
+      try {
+        const sum = email_summary || {};
+        const when = slotWhen(selectedSlot, territory_id);
+        const { subject, html } = bookingConfirmationEmail({
+          firstName:   customer.first_name || sum.firstName || '',
+          dateLong:    sum.dateLong  || when.dateLong  || '',
+          timeWindow:  sum.timeWindow || when.timeWindow || '',
+          serviceName: 'TV Installation',
+          address:     { line1: customer.address, city: resolvedCity, state: resolvedState, zip: zipForLookup },
+          lines:       Array.isArray(sum.lines) ? sum.lines : null,
+          total:       sum.total != null ? sum.total : null,
+          tip:         Number(sum.tip != null ? sum.tip : tip) || 0,
+          twoTechs:    sum.twoTechs != null ? !!sum.twoTechs : !!min_providers_needed,
+          jobId,
+        }, brandFor('handy-andy'));
+        const result = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });
+        if (!result.sent) console.warn('[book] confirmation email not sent:', result.skipped || result.error);
+      } catch (e) {
+        console.error('[book] confirmation email error:', e.message);
+      }
+    }
 
     return res.status(200).json({ success: true, job_id: jobId, status: data.status, card_saved: /Card is on file/.test(cardNote), auto_assign_failed: autoAssignFailed });
   } catch (err) {

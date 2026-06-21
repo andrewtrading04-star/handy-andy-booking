@@ -1269,11 +1269,34 @@
     }).filter(Boolean);
 
     const loc=resolveLocation();
+    // Build the booking summary up-front so it can be (a) sent to the server for
+    // the branded confirmation email and (b) saved for the thank-you page — both
+    // show identical details.
+    const _slot=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot)||{};
+    const _df=selectedDate?fmtDate(selectedDate):null;
+    const _lines=buildLineItems();
+    if(territoryAdjustment()>0)_lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
+    const _ahFee=selectedSlotSurcharge();
+    if(_ahFee>0)_lines.push({label:'After-hours fee (8 PM)',qty:1,amount:_ahFee});
+    if(zipDiscount()>0)_lines.push({label:'Location',qty:1,amount:-zipDiscount()});
+    const _couponDisc=COUPONS[couponCode]||0;
+    if(_couponDisc>0)_lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-_couponDisc});
+    const bookingSummary={
+      firstName:customer.first_name||'',
+      name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
+      email:customer.email||'', phone:customer.phone||'',
+      address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
+      dateISO:selectedDate||'', dateLong:_df?`${_df.long}, ${_df.date}`:'',
+      timeWindow:_slot.arrival_window||'',
+      lines:_lines, total:calcTotal()+territoryAdjustment()+_ahFee-zipDiscount()-_couponDisc, tip:tipAmount||0,
+      twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
+    };
     const payload={
       territory_id:territoryId, service_id:serviceConfig.service_id,
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
+      email_summary:bookingSummary,
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
     };
@@ -1285,25 +1308,8 @@
         // Save a booking summary for the thank-you page (stays in the browser only — never in the URL)
         try{
           const res=await r.json().catch(()=>({}));
-          const slot=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot)||{};
-          const df=selectedDate?fmtDate(selectedDate):null;
-          const lines=buildLineItems();
-          if(territoryAdjustment()>0)lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
-          const ahFee=selectedSlotSurcharge();
-          if(ahFee>0)lines.push({label:'After-hours fee (8 PM)',qty:1,amount:ahFee});
-          if(zipDiscount()>0)lines.push({label:'Location',qty:1,amount:-zipDiscount()});
-          const couponDisc=COUPONS[couponCode]||0;
-          if(couponDisc>0)lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-couponDisc});
-          const loc=resolveLocation();
           localStorage.setItem('ha_booking',JSON.stringify({
-            firstName:customer.first_name||'',
-            name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
-            email:customer.email||'', phone:customer.phone||'',
-            address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
-            dateISO:selectedDate||'', dateLong:df?`${df.long}, ${df.date}`:'',
-            timeWindow:slot.arrival_window||'',
-            lines, total:calcTotal()+territoryAdjustment()+ahFee-zipDiscount()-couponDisc, tip:tipAmount||0,
-            twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
+            ...bookingSummary,
             jobId:(res&&(res.job_id||res.id))||'',
             rescheduleUrl:(res&&res.reschedule_url)||'',
             ts:Date.now()

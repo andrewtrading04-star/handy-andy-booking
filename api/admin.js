@@ -16,6 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { notificationsOn } from './_lib/notify.js';
+import { emailConfig } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -1593,24 +1594,9 @@ async function reviewSubmit(req, res, body) {
   return res.status(200).json({ ok: true, review_rating: rating });
 }
 
-// Per-business transactional email config (Resend).
-// Each business may use its own Resend account — the free tier allows one
-// verified domain per account, so Doms gets its own key + domain without
-// forcing the shared account onto a paid plan. When DOMS_RESEND_API_KEY is
-// unset (e.g. both domains live on one paid account) Doms transparently falls
-// back to the shared RESEND_API_KEY. Handy Andy's behavior is unchanged.
-function emailConfig(slug) {
-  if (slug === 'doms') {
-    return {
-      apiKey: process.env.DOMS_RESEND_API_KEY || process.env.RESEND_API_KEY,
-      from:   process.env.DOMS_EMAIL_FROM || 'contact@domstvmounting.com',
-    };
-  }
-  return {
-    apiKey: process.env.RESEND_API_KEY,
-    from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
-  };
-}
+// Per-business transactional email config (Resend) now lives in ./_lib/email.js
+// (imported above) so the booking, estimate and review flows share one source
+// of truth for keys and from-addresses.
 
 async function sendFeedbackEmail(params) {
   if (!notificationsOn()) { console.log('[review] notifications disabled; feedback email not sent'); return; }
