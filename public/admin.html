@@ -768,8 +768,10 @@ function enterApp(){
   anchorDate = todayStr();
   applyIconTheme();
   // Booking Analytics is owner-only (Andrew); secretaries don't see it.
+  // Booking Analytics: everyone (owner + each secretary sees only their own
+  // business). Website Analytics: owner only.
   const navAna=document.getElementById('navAnalytics');
-  if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
+  if(navAna) navAna.style.display = '';
   const navWeb=document.getElementById('navWebAnalytics');
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   renderSwitcher();
@@ -1573,10 +1575,10 @@ function anaSessionsTbl(rows){
       <td>${s.isRepeat?'<span class="pill blue">repeat visitor</span>':''}</td>
     </tr>`).join('')+`</table></div>`;
 }
-// Each business's brand color: blue for Doms, orange for Handy Andy. Matches the
-// per-business accent logic used elsewhere (greeting --gaccent), so it's correct
-// regardless of which login link set --accent.
-function anaBrand(){ return isDoms() ? '#2563EB' : ((current&&current.brand_orange)||'#FF6B35'); }
+// Each business's brand color for analytics charts: blue for Doms, orange for
+// Handy Andy. Hardcoded (not from the DB brand_orange column, which holds a
+// non-orange value for Handy Andy) so the chart colors are always correct.
+function anaBrand(){ return isDoms() ? '#2563EB' : '#FF6B35'; }
 function anaHexRgb(hex){
   const h=(hex||'').replace('#','').trim();
   if(h.length===6){ const n=parseInt(h,16); return (n>>16&255)+','+(n>>8&255)+','+(n&255); }
