@@ -3,7 +3,7 @@
 // review flows for BOTH businesses. Centralizes the per-business Resend config,
 // a low-level send wrapper (gated by the notifications master switch), and the
 // branded booking-confirmation template.
-import { notificationsOn } from './notify.js';
+import { emailNotificationsOn } from './notify.js';
 
 // ── Per-business Resend config ──────────────────────────────────────────────
 // Each business may use its own Resend account — the free tier allows one
@@ -34,10 +34,10 @@ export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['hand
 
 // ── Low-level send ──────────────────────────────────────────────────────────
 // Returns { sent, skipped?, id?, error? } and never throws unless throwOnError.
-// `notificationsOn()` is the global kill switch — while it is off, sends are
+// `emailNotificationsOn()` is the email kill switch — while it is off, sends are
 // skipped (and logged) so nothing goes out before the accounts are approved.
 export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false }) {
-  if (!notificationsOn()) {
+  if (!emailNotificationsOn()) {
     console.log(`[email] notifications off; not sending "${subject}" to ${to}`);
     return { sent: false, skipped: 'notifications_off' };
   }

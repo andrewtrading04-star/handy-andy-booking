@@ -12,7 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { notificationsOn } from './_lib/notify.js';
+import { smsNotificationsOn } from './_lib/notify.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -35,7 +35,7 @@ function toE164(raw) {
 }
 
 async function sendSMS(phoneNumber, message) {
-  if (!notificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
+  if (!smsNotificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
     console.warn('[SMS] Twilio not configured; message not sent:', message);
     return;

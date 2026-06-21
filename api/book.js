@@ -1,5 +1,5 @@
 import { mirrorBooking } from './_lib/mirror.js';
-import { notificationsOn } from './_lib/notify.js';
+import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 
 // Format a slot id ("slot_<startEpochSec>_<endEpochSec>") into a friendly date +
@@ -135,12 +135,12 @@ export default async function handler(req, res) {
     services.push({ custom_service: { name: 'Tip for technician', price: Number(tip), duration: 0, taxable: false } });
   }
 
-  // When we will send our own branded confirmation email (notifications on +
-  // Resend key configured), suppress Zenbooker's generic confirmation email so
+  // When we will send our own branded confirmation email (email notifications on
+  // + Resend key configured), suppress Zenbooker's generic confirmation email so
   // the customer doesn't get two. If we won't send ours (kill switch off or no
   // key), leave Zenbooker's on as a fallback so the customer still gets one.
   const haEmail = emailConfig('handy-andy');
-  const willSendBranded = notificationsOn() && !!haEmail.apiKey && !!customer.email;
+  const willSendBranded = emailNotificationsOn() && !!haEmail.apiKey && !!customer.email;
 
   const payload = {
     territory_id,
