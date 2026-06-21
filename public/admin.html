@@ -1274,21 +1274,26 @@ function anaDenverDayRange(offset){
   return {from:from.toISOString(),to:to.toISOString()};
 }
 function anaWidget(){ return current ? current.slug : 'doms'; }
-// Analytics events live in this deployment's Supabase, queried per-business via
-// the ?widget= param (Doms business data already lives here — imports, bookings,
-// customers — so its widget events do too). If a business's events instead live
-// on its own deployment's Supabase, set its origin here (its /api/analytics is
-// public + sends Access-Control-Allow-Origin:*, so a cross-origin GET works),
-// e.g. 'doms': 'https://doms-tv-mounting.vercel.app'.
-const ANA_ORIGIN = { 'doms': '', 'handy-andy': '' };
-function anaBase(){ return (ANA_ORIGIN[anaWidget()] ?? '') + '/api/analytics'; }
+// Where each business's booking-funnel analytics events live.
+//   ''           → this deployment's Supabase; we filter it by ?widget=<slug>.
+//   a full origin → that business's own deployment. Its /api/analytics is public
+//                   + CORS-enabled (Access-Control-Allow-Origin:*), and already
+//                   powers its own working dashboard. For a remote origin we
+//                   mirror that dashboard's request exactly — same date params,
+//                   NO widget override — so we get precisely what it shows,
+//                   whatever that deployment tags its own events as.
+// Doms' funnel data lives in the Doms widget deployment, not this CRM's DB.
+const ANA_ORIGIN = { 'doms': 'https://doms-tv-mounting.vercel.app', 'handy-andy': '' };
+function anaOrigin(){ return ANA_ORIGIN[anaWidget()] ?? ''; }
+function anaBase(){ return anaOrigin() + '/api/analytics'; }
+// Widget filter is only meaningful same-origin; a remote deployment uses its own default.
+function anaWParam(){ return anaOrigin() ? '' : 'widget='+encodeURIComponent(anaWidget())+'&'; }
 function anaUrl(mode){
-  const w='widget='+encodeURIComponent(anaWidget());
   if(mode==='today'||mode==='yesterday'){
     const r=anaDenverDayRange(mode==='today'?0:-1);
-    return anaBase()+'?'+w+'&from='+r.from+'&to='+r.to;
+    return anaBase()+'?'+anaWParam()+'from='+r.from+'&to='+r.to;
   }
-  return anaBase()+'?'+w+'&days='+mode;
+  return anaBase()+'?'+anaWParam()+'days='+mode;
 }
 
 async function renderAnalytics(){
@@ -1359,7 +1364,7 @@ async function loadAnalytics(){
     const d=await r.json();
     if(d.error) throw new Error(d.error);
     if(anaCompareDays){
-      const rc=await fetch(anaBase()+'?widget='+encodeURIComponent(anaWidget())+'&days='+anaCompareDays);
+      const rc=await fetch(anaBase()+'?'+anaWParam()+'days='+anaCompareDays);
       if(rc.ok){ const dc=await rc.json(); if(!dc.error) d.comparison=dc; }
     }
     anaRender(d);
