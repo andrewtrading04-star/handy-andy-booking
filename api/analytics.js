@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-const WIDGET = 'handy-andy';
 const TZ = 'America/Denver';
 const STEPS = [
   { key: 'zip',       label: 'ZIP Check' },
@@ -66,6 +65,11 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Missing Supabase credentials' });
     }
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+    const WIDGET = (req.query.widget || 'handy-andy').toString();
+    if (!['handy-andy', 'doms'].includes(WIDGET)) {
+      return res.status(400).json({ error: 'Invalid widget' });
+    }
 
     // 'from'/'to' ISO params take priority (used for Denver calendar-day "Today"); else rolling 'days'.
     const days = Math.max(0, parseInt(req.query.days ?? '30', 10) || 0);

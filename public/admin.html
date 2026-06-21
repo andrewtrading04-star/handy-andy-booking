@@ -10,6 +10,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<!-- Chart.js 4 — powers the Booking Analytics view (loaded lazily-ish; only used there) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -342,6 +344,58 @@
     .greet-line{font-size:12.5px;}
     .gstat-v{font-size:18px;}
   }
+
+  /* ───────── Booking Analytics view (ported from /dashboard.html, scoped to .ana) ───────── */
+  .ana{ --card:#fff; padding:18px; max-width:1280px; margin:0 auto; }
+  .ana .ana-head{ display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .ana .ana-head h1{ font-size:22px; font-weight:800; }
+  .ana .ana-sub{ font-size:12px; color:var(--mute); margin-top:3px; }
+  .ana .ranges{ display:flex; gap:6px; flex-wrap:wrap; }
+  .ana .ranges button{ border:1px solid var(--line); background:#fff; color:var(--mute); padding:7px 14px; border-radius:8px; font-size:13px; cursor:pointer; font-weight:600; }
+  .ana .ranges button.on{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ana .grid{ display:grid; gap:14px; }
+  .ana .kpis{ grid-template-columns:repeat(5,1fr); margin-bottom:18px; }
+  .ana .card{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .ana .kpi .lbl{ font-size:11px; color:var(--mute); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; }
+  .ana .kpi .val{ font-size:26px; font-weight:800; }
+  .ana .kpi .extra{ font-size:12px; color:var(--mute); margin-top:4px; }
+  .ana .kpi .good{ color:var(--green); } .ana .kpi .bad{ color:var(--red); }
+  .ana h2{ font-size:15px; margin-bottom:12px; font-weight:700; }
+  .ana .section{ margin-bottom:18px; }
+  .ana .two{ grid-template-columns:1fr 1fr; } .ana .three{ grid-template-columns:1fr 1fr 1fr; }
+  @media(max-width:900px){ .ana .two,.ana .three{ grid-template-columns:1fr; } .ana .kpis{ grid-template-columns:repeat(2,1fr); } }
+  .ana .fstep{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
+  .ana .flbl{ min-width:120px; font-size:12.5px; color:var(--mute); text-align:right; flex-shrink:0; }
+  .ana .ftrack{ flex:1; min-width:150px; background:#f0f1f4; border-radius:6px; height:34px; position:relative; overflow:hidden; }
+  .ana .fbar{ height:100%; background:linear-gradient(to right,var(--accent),#1e40af); border-radius:6px; display:flex; align-items:center; padding:0 10px; color:#fff; font-size:12.5px; font-weight:700; min-width:fit-content; white-space:nowrap; }
+  .ana .fdrop{ min-width:150px; font-size:12px; flex-shrink:0; }
+  .ana .fdrop b{ color:var(--red); }
+  .ana .fpct{ color:var(--mute); }
+  @media(max-width:768px){ .ana .fstep{ flex-direction:column; align-items:stretch; } .ana .flbl{ text-align:left; } .ana .ftrack{ min-width:100%; } .ana .fdrop{ min-width:100%; } }
+  .ana table{ width:100%; border-collapse:collapse; font-size:13px; background:transparent; border:none; border-radius:0; }
+  .ana th{ text-align:left; color:var(--mute); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding:6px 8px; border-bottom:1px solid var(--line); background:transparent; }
+  .ana th.num, .ana td.num{ text-align:right; }
+  .ana td{ padding:8px; border-bottom:1px solid #f3f3f6; vertical-align:top; }
+  .ana tr:last-child td{ border-bottom:none; }
+  .ana .convgood{ color:var(--green); font-weight:700; } .ana .convzero{ color:var(--mute); }
+  .ana .chartbox{ position:relative; height:240px; }
+  .ana .pill{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; }
+  .ana .pill.green{ background:rgba(16,185,129,0.12); color:var(--green); }
+  .ana .pill.gray{ background:#f0f1f4; color:var(--mute); }
+  .ana .pill.red{ background:rgba(239,68,68,0.1); color:var(--red); }
+  .ana .pill.blue{ background:rgba(37,99,235,0.12); color:var(--accent); }
+  .ana .qblock{ margin-bottom:16px; }
+  .ana .qtitle{ font-size:13px; font-weight:700; margin-bottom:8px; }
+  .ana .abar{ display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12.5px; }
+  .ana .alabel{ width:42%; min-width:170px; color:#444; }
+  .ana .atrack{ flex:1; background:#f0f1f4; height:18px; border-radius:4px; overflow:hidden; }
+  .ana .afill{ height:100%; background:var(--accent-soft); border-left:3px solid var(--accent); }
+  .ana .acount{ width:54px; text-align:right; font-weight:700; }
+  .ana .aconv{ width:74px; text-align:right; color:var(--mute); font-size:11.5px; }
+  .ana .empty{ color:var(--mute); font-size:13px; padding:14px 0; text-align:center; }
+  .ana .err{ background:#fff5f5; border:1px solid #ffd9d9; border-radius:12px; }
+  .ana .loading{ text-align:center; padding:60px; color:var(--mute); }
+  @media(max-width:600px){ .ana .abar{ flex-wrap:wrap; gap:3px 8px; margin-bottom:10px; } .ana .alabel{ width:100%; min-width:0; flex:0 0 100%; } .ana .atrack{ flex:1 1 auto; min-width:0; } }
 </style>
 </head>
 <body>
@@ -384,6 +438,7 @@
       <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
+      <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
     </nav>
 
     <div id="schedSidebar">
@@ -603,6 +658,7 @@ const ICONS = {
   note:     {e:'📝', f:'fa-solid fa-pen-to-square'},
   link:     {e:'🔗', f:'fa-solid fa-link'},
   estimate: {e:'🧾', f:'fa-solid fa-file-invoice-dollar'},
+  analytics:{e:'📊', f:'fa-solid fa-chart-column'},
 };
 function isDoms(){ return !!(current && current.slug==='doms'); }
 function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
@@ -709,6 +765,9 @@ function enterApp(){
   current = businesses[0] || null;
   anchorDate = todayStr();
   applyIconTheme();
+  // Booking Analytics is owner-only (Andrew); secretaries don't see it.
+  const navAna=document.getElementById('navAnalytics');
+  if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
@@ -739,7 +798,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -749,6 +808,7 @@ function navTo(s){
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
     else if(s==='gallery') renderGallery();
+    else if(s==='analytics') renderAnalytics();
   }
 }
 function refreshCurrent(){
@@ -758,6 +818,7 @@ function refreshCurrent(){
   else if(section==='technicians') renderTechnicians();
   else if(section==='reviews') renderReviews();
   else if(section==='gallery') renderGallery();
+  else if(section==='analytics') renderAnalytics();
 }
 
 // Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
@@ -1169,6 +1230,372 @@ async function renderGallery(){
         </figure>`).join('')}</div></div>`;
     view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+
+// ── Booking Analytics ───────────────────────────────────────────────────────
+// Ported from /dashboard.html. Reads the same public /api/analytics endpoint,
+// passing widget=<current business slug> so it works for Doms (and Handy Andy).
+// Owner-only (the nav button is hidden for secretaries in enterApp()).
+const ANA_QUESTION_LABELS = {
+  frame_tv:'TV Type', size:'TV Size', bracket:'Bracket Choice', fireplace:'Fireplace',
+  surface:'Wall Surface', wires:'Wire Concealment', lifting:'Lifting Help', dismount:'Guaranteed Dismount',
+  extras:'Add-ons Picked', slot:'Chosen Time Slot', slot_day:'Chosen Day of Week',
+  tip:'Tip Selected', coupon:'Coupon Used',
+};
+const ANA_QUESTION_ORDER = ['frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','slot_day','slot','tip','coupon'];
+const ANA_ANSWER_SHORT = { dismount: a => /^yes/i.test(a)?'Yes':/^no/i.test(a)?'No':a };
+const ANA_METRO_GROUPS = {
+  Houston: ['houston','bellaire','pearland','sugar land','katy','the woodlands','pasadena','friendswood','league city','baytown','humble','spring','kingwood','tomball','cypress','stafford','missouri city','rosenberg','conroe','galveston','manvel','alvin','webster','clear lake','nassau bay','texas city','deer park','la porte','seabrook','kemah','dickinson'],
+  Denver: ['denver','littleton','aurora','lakewood','arvada','westminster','thornton','englewood','centennial','highlands ranch','parker','castle rock','golden','boulder','broomfield','longmont','fort collins','colorado springs','pueblo','greeley','commerce city','northglenn','federal heights','wheat ridge','lone tree','greenwood village','cherry hills village'],
+  Austin: ['austin','round rock','cedar park','georgetown','pflugerville','leander','kyle','buda','san marcos','bastrop','taylor','liberty hill','bee cave','dripping springs','lakeway','manor','hutto','del valle','rollingwood','west lake hills','jonestown','sunset valley'],
+};
+function anaCityMetro(city){ const lc=(city||'').toLowerCase(); for(const [m,cs] of Object.entries(ANA_METRO_GROUPS)){ if(cs.some(c=>lc===c||lc.includes(c))) return m; } return 'Other'; }
+let anaDays='today', anaCompareDays=null, anaCharts={}, anaLoading=false;
+
+function anaMoney(n){ if(n==null)return '—'; return '$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}); }
+function anaDur(s){ if(s==null)return '—'; if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; }
+function anaConvCell(c,b){ return b>0 ? `<span class="convgood">${c}%</span>` : `<span class="convzero">—</span>`; }
+function anaDispAnswer(q,a){ return ANA_ANSWER_SHORT[q]?ANA_ANSWER_SHORT[q](a):a; }
+
+// UTC Date for 12:00 AM Denver on a given Denver calendar date "YYYY-MM-DD".
+function anaDenverMidnightOf(ymd){
+  const c=new Date(ymd+'T06:00:00Z'); // try MDT (UTC-6)
+  const h=Number(new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour:'numeric',hour12:false}).format(c))%24;
+  return h===0?c:new Date(ymd+'T07:00:00Z'); // else MST (UTC-7)
+}
+function anaDenverYmd(offset){
+  const t=new Date().toLocaleDateString('en-CA',{timeZone:'America/Denver'});
+  const [y,m,d]=t.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d+offset)).toLocaleDateString('en-CA',{timeZone:'UTC'});
+}
+function anaDenverDayRange(offset){
+  const from=anaDenverMidnightOf(anaDenverYmd(offset));
+  const to=new Date(anaDenverMidnightOf(anaDenverYmd(offset+1)).getTime()-1000); // 11:59:59 PM
+  return {from:from.toISOString(),to:to.toISOString()};
+}
+function anaWidget(){ return current ? current.slug : 'doms'; }
+// Analytics events live in this deployment's Supabase, queried per-business via
+// the ?widget= param (Doms business data already lives here — imports, bookings,
+// customers — so its widget events do too). If a business's events instead live
+// on its own deployment's Supabase, set its origin here (its /api/analytics is
+// public + sends Access-Control-Allow-Origin:*, so a cross-origin GET works),
+// e.g. 'doms': 'https://doms-tv-mounting.vercel.app'.
+const ANA_ORIGIN = { 'doms': '', 'handy-andy': '' };
+function anaBase(){ return (ANA_ORIGIN[anaWidget()] ?? '') + '/api/analytics'; }
+function anaUrl(mode){
+  const w='widget='+encodeURIComponent(anaWidget());
+  if(mode==='today'||mode==='yesterday'){
+    const r=anaDenverDayRange(mode==='today'?0:-1);
+    return anaBase()+'?'+w+'&from='+r.from+'&to='+r.to;
+  }
+  return anaBase()+'?'+w+'&days='+mode;
+}
+
+async function renderAnalytics(){
+  const view=document.getElementById('view');
+  const cmpBtnStyle='padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;';
+  view.innerHTML=`
+    <div class="ana">
+      <div class="ana-head">
+        <div>
+          <h1>📊 ${esc(current?current.name:'Booking')} Analytics</h1>
+          <div class="ana-sub" id="anaUpdated">Loading…</div>
+        </div>
+        <div class="ranges" id="anaRanges">
+          <button data-days="today">Today</button>
+          <button data-days="yesterday">Yesterday</button>
+          <button data-days="7">7 Days</button>
+          <button data-days="30">30 Days</button>
+          <button id="anaCompareBtn" style="margin-left:12px;background:#f0f1f4;color:var(--mute);border-color:var(--line);">Compare</button>
+        </div>
+      </div>
+      <div id="anaContent" class="loading">Loading analytics…</div>
+    </div>
+    <div id="anaCompareModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:12px;padding:24px;max-width:360px;width:calc(100% - 40px);box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:700;">Compare to</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="ana-cmp-opt" data-offset="1" style="${cmpBtnStyle}">Previous Day</button>
+          <button class="ana-cmp-opt" data-offset="7" style="${cmpBtnStyle}">Previous 7 Days</button>
+          <button class="ana-cmp-opt" data-offset="30" style="${cmpBtnStyle}">Previous 30 Days</button>
+          <button id="anaCompareClose" style="${cmpBtnStyle}text-align:center;color:var(--mute);margin-top:8px;">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+
+  const ranges=document.getElementById('anaRanges');
+  ranges.querySelectorAll('button[data-days]').forEach(b=>b.classList.toggle('on', b.dataset.days===String(anaDays)));
+  const cmpBtn=document.getElementById('anaCompareBtn');
+  cmpBtn.style.color = anaCompareDays ? 'var(--accent)' : 'var(--mute)';
+  ranges.addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b || b.id==='anaCompareBtn') return;
+    anaDays=b.dataset.days; anaCompareDays=null;
+    ranges.querySelectorAll('button[data-days]').forEach(x=>x.classList.toggle('on',x===b));
+    cmpBtn.style.color='var(--mute)';
+    loadAnalytics();
+  });
+  const modal=document.getElementById('anaCompareModal');
+  cmpBtn.addEventListener('click',()=>{ modal.style.display='flex'; });
+  document.getElementById('anaCompareClose').addEventListener('click',()=>{ modal.style.display='none'; });
+  modal.addEventListener('click',e=>{ if(e.target===modal) modal.style.display='none'; });
+  modal.querySelectorAll('.ana-cmp-opt').forEach(btn=>btn.addEventListener('click',()=>{
+    anaCompareDays=parseInt(btn.dataset.offset);
+    modal.style.display='none';
+    cmpBtn.style.color='var(--accent)';
+    loadAnalytics();
+  }));
+
+  await loadAnalytics();
+  if(pollTimer){ clearInterval(pollTimer); }
+  pollTimer=setInterval(()=>{ if(section==='analytics' && !anaLoading) loadAnalytics(); }, 30000);
+}
+
+async function loadAnalytics(){
+  if(anaLoading) return;
+  anaLoading=true;
+  try{
+    const r=await fetch(anaUrl(anaDays));
+    if(!r.ok) throw new Error('API error '+r.status);
+    const d=await r.json();
+    if(d.error) throw new Error(d.error);
+    if(anaCompareDays){
+      const rc=await fetch(anaBase()+'?widget='+encodeURIComponent(anaWidget())+'&days='+anaCompareDays);
+      if(rc.ok){ const dc=await rc.json(); if(!dc.error) d.comparison=dc; }
+    }
+    anaRender(d);
+  }catch(err){
+    const content=document.getElementById('anaContent');
+    if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading analytics: ${esc(err.message)}</div>`;
+  }finally{ anaLoading=false; }
+}
+
+function anaRender(d){
+  const content=document.getElementById('anaContent'); if(!content) return;
+  const t=d.totals;
+  const upd=document.getElementById('anaUpdated');
+  if(upd) upd.textContent='Updated '+new Date(d.lastUpdated).toLocaleTimeString('en-US',{timeZone:'America/Denver',hour:'numeric',minute:'2-digit',hour12:true})+' · times in Mountain Time · auto-refreshes';
+
+  let html='';
+  if(d.comparison){
+    const tc=d.comparison.totals;
+    const chg=(curr,prev)=>{
+      if(prev==null||curr==null||prev===0) return '';
+      const pct=Math.round((curr-prev)/prev*100);
+      const color=pct>0?'var(--green)':(pct<0?'var(--red)':'var(--mute)');
+      const sign=pct>0?'+':'';
+      return ` <span style="color:${color};font-size:12px;font-weight:700;">${sign}${pct}%</span>`;
+    };
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;"><div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">This Period</div>
+      <div style="display:grid;gap:8px;"><div><span style="font-size:13px;color:var(--mute);">Sessions</span> <span style="font-weight:700;">${t.sessions}</span></div>
+      <div><span style="font-size:13px;color:var(--mute);">Bookings</span> <span style="font-weight:700;">${t.bookings}</span> (${t.conversion}%)</div>
+      <div><span style="font-size:13px;color:var(--mute);">Revenue</span> <span style="font-weight:700;">${anaMoney(t.revenue)}</span></div></div></div>
+      <div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">Previous Period</div>
+      <div style="display:grid;gap:8px;"><div><span style="font-size:13px;color:var(--mute);">Sessions</span> <span style="font-weight:700;">${tc.sessions}</span> ${chg(t.sessions,tc.sessions)}</div>
+      <div><span style="font-size:13px;color:var(--mute);">Bookings</span> <span style="font-weight:700;">${tc.bookings}</span> (${tc.conversion}%) ${chg(t.bookings,tc.bookings)}</div>
+      <div><span style="font-size:13px;color:var(--mute);">Revenue</span> <span style="font-weight:700;">${anaMoney(tc.revenue)}</span> ${chg(t.revenue,tc.revenue)}</div></div></div></div>`;
+  }
+
+  const kpis=[
+    ['Sessions', t.sessions, `${t.visitors} unique visitors`],
+    ['Bookings', t.bookings, t.bookingFailures>0?`<span class="bad">${t.bookingFailures} failed attempts</span>`:'no failed attempts'],
+    ['Conversion', t.conversion+'%', 'of all sessions'],
+    ['Revenue (booked)', anaMoney(t.revenue), `avg ticket ${anaMoney(t.avgTicket)}`],
+    ['Saw a Price', t.priceShown, `${t.priceToBooking}% then booked`],
+    ['Abandoned Carts', t.abandonedCarts, `<span class="bad">${anaMoney(t.lostValue)} quoted, not booked</span>`],
+    ['Median Time to Book', anaDur(t.medianTimeToBookSec), `session length ${anaDur(t.medianSessionSec)}`],
+    ['Repeat Visitors', t.repeatVisitors, `${t.bookingsFromRepeat} bookings from returners`],
+    ['Bounced', t.bounces, 'left on first step'],
+    ['ZIP Checks', (t.zipServed+t.zipUnserved), `<span class="bad">${t.zipUnserved} outside area</span>`],
+  ];
+  html+=`<div class="grid kpis">`+kpis.map(k=>
+    `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
+  ).join('')+`</div>`;
+
+  // Funnel
+  const start=d.funnel[0]?.reached||0;
+  html+=`<div class="section card"><h2>Step-by-Step Funnel — where people drop off</h2>`;
+  if(!start){ html+=`<div class="empty">No sessions in this period yet.</div>`; }
+  else d.funnel.forEach(f=>{
+    const pct=start?Math.round(f.reached/start*100):0;
+    html+=`<div class="fstep">
+      <div class="flbl">${f.label}</div>
+      <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;">${f.reached}</div></div>
+      <div class="fdrop">${f.droppedHere>0?`<b>−${f.droppedHere} left here</b>`:`<span class="fpct">no drop-off</span>`} <span class="fpct">· ${pct}%</span></div>
+    </div>`;
+  });
+  html+=`</div>`;
+
+  html+=anaDeviceTypeCard(d);
+
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Sessions & Bookings by Day</h2><div class="chartbox"><canvas id="ana-ch-timeline"></canvas></div></div>
+    <div class="card"><h2>Activity by Hour of Day</h2><div class="chartbox"><canvas id="ana-ch-hour"></canvas></div></div>
+  </div>
+  <div class="grid two section">
+    <div class="card"><h2>Activity by Day of Week</h2><div class="chartbox"><canvas id="ana-ch-dow"></canvas></div></div>
+    <div class="card"><h2>Device / Source / Browser</h2>${anaSegTables(d)}</div>
+  </div>`;
+
+  html+=`<div class="grid three section">
+    <div class="card"><h2>Top Cities</h2>${anaCitiesTbl(d.byCity)}</div>
+    <div class="card"><h2>Top ZIP Codes</h2>${anaTbl(d.byZip,'ZIP')}</div>
+    <div class="card"><h2>ZIPs We Turned Away</h2>${anaUnservedTbl(d.unservedZips)}</div>
+  </div>`;
+
+  html+=`<div class="section card"><h2>What People Choose on Each Question</h2>${anaAnswersHtml(d.answers)}</div>`;
+
+  html+=`<div class="grid two section">
+    <div class="card"><h2>Errors by Step</h2>${anaErrStepTbl(d.errors.byStep)}</div>
+    <div class="card"><h2>Recent Errors</h2>${anaErrTbl(d.errors.recent)}</div>
+  </div>`;
+
+  html+=`<div class="section card"><h2>Recent Sessions</h2>${anaSessionsTbl(d.recentSessions)}</div>`;
+
+  content.innerHTML=html;
+  anaDrawCharts(d);
+}
+
+function anaPctSum100(counts){
+  const total=counts.reduce((s,c)=>s+c,0);
+  if(!total) return counts.map(()=>0);
+  const rows=counts.map((c,i)=>{ const e=c/total*100; return {i, p:Math.floor(e), frac:e-Math.floor(e)}; });
+  let rem=100-rows.reduce((s,r)=>s+r.p,0);
+  rows.sort((a,b)=>b.frac-a.frac);
+  for(let k=0;k<rows.length&&rem>0;k++,rem--) rows[k].p++;
+  const out=new Array(counts.length).fill(0);
+  rows.forEach(r=>{ out[r.i]=r.p; });
+  return out;
+}
+function anaDeviceTypeCard(d){
+  let mob=0,desk=0,oth=0;
+  (d.byDevice||[]).forEach(r=>{
+    const k=String(r.key||'').toLowerCase();
+    if(k==='mobile') mob+=r.sessions;
+    else if(k==='desktop') desk+=r.sessions;
+    else oth+=r.sessions;
+  });
+  const labels=['Mobile','Desktop'], counts=[mob,desk];
+  if(oth>0){ labels.push('Other'); counts.push(oth); }
+  if(counts.reduce((s,c)=>s+c,0)===0) return `<div class="section card"><h2>Device Type</h2><div class="empty">No data yet.</div></div>`;
+  const pcts=anaPctSum100(counts);
+  const rows=labels.map((l,i)=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+      <div style="width:90px;font-size:14px;font-weight:600;color:var(--ink);">${l}</div>
+      <div style="flex:1;background:#f0f1f4;height:22px;border-radius:6px;overflow:hidden;"><div style="width:${pcts[i]}%;height:100%;background:var(--accent);border-radius:6px;"></div></div>
+      <div style="width:46px;text-align:right;font-weight:700;font-size:14px;color:var(--ink);">${pcts[i]}%</div>
+    </div>`).join('');
+  return `<div class="section card"><h2>Device Type</h2>${rows}</div>`;
+}
+function anaSegTables(d){
+  const seg=(title,rows)=>{
+    if(!rows.length) return '';
+    return `<div style="margin-bottom:14px;"><div style="font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;margin-bottom:4px;">${title}</div>
+      <table><tr><th></th><th class="num">Sessions</th><th class="num">Bookings</th><th class="num">Conv</th></tr>`+
+      rows.map(r=>`<tr><td>${esc(r.key)}</td><td class="num">${r.sessions}</td><td class="num">${r.bookings}</td><td class="num">${anaConvCell(r.conv,r.bookings)}</td></tr>`).join('')+
+      `</table></div>`;
+  };
+  return seg('Device',d.byDevice)+seg('Traffic Source',d.bySource)+seg('Browser',d.byBrowser);
+}
+function anaTbl(rows,name){
+  if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
+  return `<table><tr><th>${name}</th><th class="num">Sessions</th><th class="num">Bookings</th><th class="num">Conv</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.key)}</td><td class="num">${r.sessions}</td><td class="num">${r.bookings}</td><td class="num">${anaConvCell(r.conv,r.bookings)}</td></tr>`).join('')+`</table>`;
+}
+function anaCitiesTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
+  const groups={Houston:[],Denver:[],Austin:[],Other:[]};
+  rows.forEach(r=>{const m=anaCityMetro(r.key);(groups[m]||groups.Other).push(r);});
+  let out=`<table><tr><th>City</th><th class="num">Sessions</th><th class="num">Bookings</th><th class="num">Conv</th></tr>`;
+  ['Houston','Denver','Austin','Other'].forEach(metro=>{
+    const cs=groups[metro]; if(!cs.length) return;
+    const ts=cs.reduce((s,r)=>s+r.sessions,0),tb=cs.reduce((s,r)=>s+r.bookings,0),tc=ts>0?Math.round(tb/ts*100):0;
+    out+=`<tr style="background:#f4f5f7;"><td style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:var(--ink);padding-top:10px;padding-bottom:4px;">${metro}</td><td class="num" style="font-weight:700;padding-top:10px;">${ts}</td><td class="num" style="font-weight:700;padding-top:10px;">${tb}</td><td class="num" style="padding-top:10px;">${anaConvCell(tc,tb)}</td></tr>`;
+    cs.forEach(r=>out+=`<tr><td style="padding-left:18px;color:#555;">↳ ${esc(r.key)}</td><td class="num">${r.sessions}</td><td class="num">${r.bookings}</td><td class="num">${anaConvCell(r.conv,r.bookings)}</td></tr>`);
+  });
+  return out+`</table>`;
+}
+function anaUnservedTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">None — every ZIP checked was in your service area.</div>`;
+  return `<table><tr><th>ZIP</th><th class="num">Times Checked</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.zip)}</td><td class="num">${r.count}</td></tr>`).join('')+
+    `</table><div style="font-size:11.5px;color:var(--mute);margin-top:8px;">Demand from outside your service area — possible expansion targets.</div>`;
+}
+function anaAnswersHtml(answers){
+  if(!answers||!answers.length) return `<div class="empty">No answers recorded yet — data starts flowing with the next visitors.</div>`;
+  const map=Object.fromEntries(answers.map(a=>[a.question,a]));
+  const ordered=ANA_QUESTION_ORDER.filter(q=>map[q]).concat(answers.map(a=>a.question).filter(q=>!ANA_QUESTION_ORDER.includes(q)));
+  return `<div class="grid two">`+ordered.map(q=>{
+    const a=map[q];
+    const max=Math.max(...a.options.map(o=>o.picked), 1);
+    return `<div class="qblock"><div class="qtitle">${ANA_QUESTION_LABELS[q]||q}</div>`+
+      a.options.map(o=>`<div class="abar">
+        <div class="alabel" title="${esc(o.answer)}">${esc((dd=>dd.length>42?dd.slice(0,40)+'…':dd)(anaDispAnswer(q,o.answer)))}</div>
+        <div class="atrack"><div class="afill" style="width:${Math.round(o.picked/max*100)}%;"></div></div>
+        <div class="acount">${o.picked}</div>
+        <div class="aconv">${o.booked>0?o.conv+'% book':''}</div>
+      </div>`).join('')+`</div>`;
+  }).join('')+`</div>`;
+}
+function anaErrStepTbl(byStep){
+  const rows=Object.entries(byStep||{}).sort((a,b)=>b[1]-a[1]);
+  if(!rows.length) return `<div class="empty">No errors recorded. 🎉</div>`;
+  return `<table><tr><th>Step</th><th class="num">Errors</th></tr>`+
+    rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')+`</table>`;
+}
+function anaErrTbl(recent){
+  if(!recent||!recent.length) return `<div class="empty">No errors recorded. 🎉</div>`;
+  return `<table><tr><th>When</th><th>Type</th><th>Message</th></tr>`+
+    recent.map(e=>`<tr><td style="white-space:nowrap;">${new Date(e.at).toLocaleString('en-US',{timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
+      <td><span class="pill ${e.type==='booking_failed'?'red':'gray'}">${esc(e.type)}</span></td>
+      <td>${esc(e.message||'—')}</td></tr>`).join('')+`</table>`;
+}
+function anaSessionsTbl(rows){
+  if(!rows||!rows.length) return `<div class="empty">No sessions yet in this period.</div>`;
+  return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Status</th><th>Got As Far As</th><th>Quoted/Paid</th><th>Device</th><th>Source</th><th>City</th><th>ZIP</th><th>Time Spent</th><th></th></tr>`+
+    rows.map(s=>`<tr>
+      <td style="white-space:nowrap;">${new Date(s.when).toLocaleString('en-US',{timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
+      <td>${s.booked?'<span class="pill green">BOOKED</span>':(s.hadError?'<span class="pill red">error</span>':'<span class="pill gray">left</span>')}</td>
+      <td>${esc(s.furthest)}</td>
+      <td class="num">${s.value?anaMoney(s.value):'—'}</td>
+      <td>${esc(s.device||'—')}</td><td>${esc(s.source||'—')}</td>
+      <td>${esc(s.city||'—')}</td><td>${esc(s.zip||'—')}</td>
+      <td>${anaDur(s.durationSec)}</td>
+      <td>${s.isRepeat?'<span class="pill blue">repeat visitor</span>':''}</td>
+    </tr>`).join('')+`</table></div>`;
+}
+function anaDrawCharts(d){
+  if(typeof Chart==='undefined') return;
+  Object.values(anaCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); anaCharts={};
+  const accent=(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())||'#2563eb';
+  const tl=document.getElementById('ana-ch-timeline');
+  if(tl) anaCharts.tl=new Chart(tl,{
+    type:'line',
+    data:{ labels:d.timeline.map(x=>x.date.slice(5)),
+      datasets:[
+        { label:'Sessions', data:d.timeline.map(x=>x.sessions), borderColor:accent, backgroundColor:'transparent', tension:0.3 },
+        { label:'Bookings', data:d.timeline.map(x=>x.bookings), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.12)', fill:true, tension:0.3 },
+      ]},
+    options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+  const hr=document.getElementById('ana-ch-hour');
+  if(hr) anaCharts.hr=new Chart(hr,{
+    type:'bar',
+    data:{ labels:d.byHour.map(x=>{const h=x.hour%12||12;return h+(x.hour<12?' AM':' PM');}),
+      datasets:[
+        { label:'Sessions', data:d.byHour.map(x=>x.sessions), backgroundColor:'rgba(37,99,235,0.35)' },
+        { label:'Bookings', data:d.byHour.map(x=>x.bookings), backgroundColor:'#10b981' },
+      ]},
+    options:{ maintainAspectRatio:false, scales:{ x:{ stacked:false }, y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+  const dw=document.getElementById('ana-ch-dow');
+  if(dw) anaCharts.dw=new Chart(dw,{
+    type:'bar',
+    data:{ labels:d.byDow.map(x=>x.day),
+      datasets:[
+        { label:'Sessions', data:d.byDow.map(x=>x.sessions), backgroundColor:'rgba(37,99,235,0.35)' },
+        { label:'Bookings', data:d.byDow.map(x=>x.bookings), backgroundColor:'#10b981' },
+      ]},
+    options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────
