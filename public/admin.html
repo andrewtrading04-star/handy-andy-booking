@@ -1795,7 +1795,7 @@ function webDeviceCard(dev,brand){
 function webPagesTbl(pages){
   if(!pages||!pages.length) return `<div class="empty">No page views yet.</div>`;
   return `<table><tr><th>Page</th><th class="num">Views</th><th class="num">Sessions</th></tr>`+
-    pages.slice(0,12).map(p=>`<tr><td title="${esc(p.title||'')}">${esc(p.title||webShortPath(p.url))}<div style="color:var(--mute);font-size:11px;">${esc(webShortPath(p.url))}</div></td><td class="num">${webNum(p.views)}</td><td class="num">${webNum(p.unique_sessions)}</td></tr>`).join('')+
+    pages.slice(0,12).map(p=>`<tr><td>${esc(webShortPath(p.url))}</td><td class="num">${webNum(p.views)}</td><td class="num">${webNum(p.unique_sessions)}</td></tr>`).join('')+
     `</table>`;
 }
 function webRefTbl(refs){
