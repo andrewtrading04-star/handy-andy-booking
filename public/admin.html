@@ -1384,6 +1384,7 @@ async function loadAnalytics(){
 
 function anaRender(d){
   const content=document.getElementById('anaContent'); if(!content) return;
+  const brand=anaBrand();
   const t=d.totals;
   const upd=document.getElementById('anaUpdated');
   if(upd) upd.textContent='Updated '+new Date(d.lastUpdated).toLocaleTimeString('en-US',{timeZone:'America/Denver',hour:'numeric',minute:'2-digit',hour12:true})+' · times in Mountain Time · auto-refreshes';
@@ -1432,13 +1433,13 @@ function anaRender(d){
     const pct=start?Math.round(f.reached/start*100):0;
     html+=`<div class="fstep">
       <div class="flbl">${f.label}</div>
-      <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;">${f.reached}</div></div>
+      <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:linear-gradient(to right,${brand},#1e40af);">${f.reached}</div></div>
       <div class="fdrop">${f.droppedHere>0?`<b>−${f.droppedHere} left here</b>`:`<span class="fpct">no drop-off</span>`} <span class="fpct">· ${pct}%</span></div>
     </div>`;
   });
   html+=`</div>`;
 
-  html+=anaDeviceTypeCard(d);
+  html+=anaDeviceTypeCard(d,brand);
 
   html+=`<div class="grid two section">
     <div class="card"><h2>Sessions & Bookings by Day</h2><div class="chartbox"><canvas id="ana-ch-timeline"></canvas></div></div>
@@ -1479,7 +1480,7 @@ function anaPctSum100(counts){
   rows.forEach(r=>{ out[r.i]=r.p; });
   return out;
 }
-function anaDeviceTypeCard(d){
+function anaDeviceTypeCard(d,brand){
   let mob=0,desk=0,oth=0;
   (d.byDevice||[]).forEach(r=>{
     const k=String(r.key||'').toLowerCase();
@@ -1493,7 +1494,7 @@ function anaDeviceTypeCard(d){
   const pcts=anaPctSum100(counts);
   const rows=labels.map((l,i)=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
       <div style="width:90px;font-size:14px;font-weight:600;color:var(--ink);">${l}</div>
-      <div style="flex:1;background:#f0f1f4;height:22px;border-radius:6px;overflow:hidden;"><div style="width:${pcts[i]}%;height:100%;background:var(--accent);border-radius:6px;"></div></div>
+      <div style="flex:1;background:#f0f1f4;height:22px;border-radius:6px;overflow:hidden;"><div style="width:${pcts[i]}%;height:100%;background:${brand||'var(--accent)'};border-radius:6px;"></div></div>
       <div style="width:46px;text-align:right;font-weight:700;font-size:14px;color:var(--ink);">${pcts[i]}%</div>
     </div>`).join('');
   return `<div class="section card"><h2>Device Type</h2>${rows}</div>`;
