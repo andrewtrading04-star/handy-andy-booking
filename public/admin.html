@@ -1571,6 +1571,7 @@ function anaDrawCharts(d){
   if(typeof Chart==='undefined') return;
   Object.values(anaCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); anaCharts={};
   const accent=(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())||'#2563eb';
+  const accentLight=accent.startsWith('#')?(accent.length===7?parseInt(accent.slice(1),16):[]):[]; const accentRgb=accentLight?(accentLight>>16&255)+','+(accentLight>>8&255)+','+(accentLight&255):'37,99,235'; const sessionsBg='rgba('+accentRgb+',0.35)';
   const tl=document.getElementById('ana-ch-timeline');
   if(tl) anaCharts.tl=new Chart(tl,{
     type:'line',
@@ -1586,7 +1587,7 @@ function anaDrawCharts(d){
     type:'bar',
     data:{ labels:d.byHour.map(x=>{const h=x.hour%12||12;return h+(x.hour<12?' AM':' PM');}),
       datasets:[
-        { label:'Sessions', data:d.byHour.map(x=>x.sessions), backgroundColor:'rgba(37,99,235,0.35)' },
+        { label:'Sessions', data:d.byHour.map(x=>x.sessions), backgroundColor:sessionsBg },
         { label:'Bookings', data:d.byHour.map(x=>x.bookings), backgroundColor:'#10b981' },
       ]},
     options:{ maintainAspectRatio:false, scales:{ x:{ stacked:false }, y:{ beginAtZero:true, ticks:{ precision:0 } } } }
@@ -1596,7 +1597,7 @@ function anaDrawCharts(d){
     type:'bar',
     data:{ labels:d.byDow.map(x=>x.day),
       datasets:[
-        { label:'Sessions', data:d.byDow.map(x=>x.sessions), backgroundColor:'rgba(37,99,235,0.35)' },
+        { label:'Sessions', data:d.byDow.map(x=>x.sessions), backgroundColor:sessionsBg },
         { label:'Bookings', data:d.byDow.map(x=>x.bookings), backgroundColor:'#10b981' },
       ]},
     options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
