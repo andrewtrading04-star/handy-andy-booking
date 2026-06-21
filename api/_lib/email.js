@@ -159,7 +159,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
 <body style="margin:0;padding:0;background:#f4f5f7;-webkit-text-size-adjust:100%;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">You're booked with ${esc(b.name)}${details.dateLong ? ' — ' + esc(details.dateLong) : ''}.</div>
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">You're booked with ${esc(b.name)}${details.dateLong ? ' - ' + esc(details.dateLong) : ''}.</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 2px 10px rgba(16,24,40,.06);">
@@ -168,7 +168,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         </td></tr>
         <tr><td style="padding:30px 28px 6px;">
           <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 7px;">You're booked! &#9989;</div>
-          <div style="font-size:15px;color:#4b5563;line-height:1.55;">Hi ${esc(firstName || 'there')}, thanks for booking with ${esc(b.name)}. Here are your appointment details — we'll see you soon.</div>
+          <div style="font-size:15px;color:#4b5563;line-height:1.55;">Hi ${esc(firstName || 'there')}, thanks for booking with ${esc(b.name)}. Here are your appointment details. We'll see you soon.</div>
         </td></tr>
         <tr><td style="padding:18px 28px 2px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #eceef1;border-radius:10px;">
