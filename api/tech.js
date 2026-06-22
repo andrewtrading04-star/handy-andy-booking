@@ -23,6 +23,29 @@ import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
 
+// ── Job ownership ────────────────────────────────────────────────────────────
+// A job "belongs" to a tech when they are the PRIMARY *or* the SECOND technician,
+// so a helper — including a cross-company one — can see and fully work the job in
+// their own app. Some deployments predate the 0019 secondary_technician_id
+// column; if a query referencing it errors, fall back to primary-only matching.
+let techHasSecondCol = true;
+function scopeMine(q, auth) {
+  return techHasSecondCol
+    ? q.or(`technician_id.eq.${auth.tech_id},secondary_technician_id.eq.${auth.tech_id}`)
+    : q.eq('technician_id', auth.tech_id);
+}
+// Run a bookings query (rebuilt fresh on each call so it can be retried) with the
+// primary-OR-second-tech scope, dropping the secondary column if the schema
+// lacks it. `build()` must return a not-yet-awaited Supabase query.
+async function fetchMine(build) {
+  let r = await build();
+  if (r.error && /secondary_technician_id/.test(r.error.message || '')) {
+    techHasSecondCol = false;
+    r = await build();
+  }
+  return r;
+}
+
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 function toE164(raw) {
@@ -195,23 +218,35 @@ async function jobs(req, res, db, auth) {
     hi = localDayStartUTC(tz, 1);
   }
 
-  const { data, error } = await db.from('bookings')
+  // Scoped to jobs this tech is on (primary OR second tech) and NOT by business,
+  // so cross-company jobs — booked by the partner company but worked by this
+  // tech — show in their own app. No question about who they're working for.
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
-             address_line1, address_line2, city, state, postal_code, lat, lng,
+             address_line1, address_line2, city, state, postal_code, lat, lng, business_id,
              customer:customers ( name, phone ),
              service:services ( name ),
-             line_items:booking_line_items ( name, kind )`)
-    .eq('business_id', auth.business_id)
-    .eq('technician_id', auth.tech_id)
+             business:businesses ( name, timezone ),
+             line_items:booking_line_items ( name, kind )`), auth)
     .neq('status', 'cancelled')
     .gte('scheduled_at', lo.toISOString())
     .lt('scheduled_at', hi.toISOString())
     .order('scheduled_at', { ascending: true });
+  const { data, error } = await fetchMine(build);
   if (error) throw error;
 
   // Attach the business-timezone calendar date so the app groups jobs by the
-  // SAME day the dashboard does — regardless of the technician's device tz.
-  const jobs = (data || []).map(shapeJob).map(j => ({ ...j, local_date: localDateInTz(tz, j.scheduled_at) }));
+  // SAME day the dashboard does — using each job's OWN business tz so a
+  // cross-company job lands on the right day. Flag cross-company jobs + the
+  // company they're for so the app can make it unmistakable.
+  const jobs = (data || []).map(b => {
+    const j = shapeJob(b);
+    const jbtz = b.business?.timezone || tz;
+    j.local_date = localDateInTz(jbtz, j.scheduled_at);
+    j.cross_company = !!(b.business_id && b.business_id !== auth.business_id);
+    j.company_name = b.business?.name || null;
+    return j;
+  });
   return res.status(200).json({ jobs, tz });
 }
 
@@ -298,20 +333,24 @@ async function debugIdentity(req, res, db, auth) {
 async function job(req, res, db, auth) {
   const id = (req.query.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
-  const { data, error } = await db.from('bookings')
+  // Primary OR second tech, any business, so a (cross-company) helper opens it.
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
-             review_rating, review_text, reviewed_at,
+             review_rating, review_text, reviewed_at, business_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
-             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`)
+             business:businesses ( name ),
+             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`), auth)
     .eq('id', id)
-    .eq('business_id', auth.business_id)
-    .eq('technician_id', auth.tech_id)
-    .single();
+    .maybeSingle();
+  const { data, error } = await fetchMine(build);
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
-  return res.status(200).json({ job: shapeJob(data, true, true) });
+  const shaped = shapeJob(data, true, true);
+  shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
+  shaped.company_name = data.business?.name || null;
+  return res.status(200).json({ job: shaped });
 }
 
 async function status(req, res, db, auth, body) {
@@ -322,16 +361,21 @@ async function status(req, res, db, auth, body) {
   const map = TECH_STATUS[next];
   if (!map) return res.status(400).json({ error: `Invalid status "${next}"` });
 
-  // The job must belong to this tech.
-  const { data: existing } = await db.from('bookings')
-    .select(`id, scheduled_at, review_token, sms_consent, metadata, customer:customers ( name, phone, email )`).eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+  // The job must belong to this tech — primary OR second tech — so a helper can
+  // advance it too. All downstream writes use the job's OWN business_id, not the
+  // tech's home business.
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
+    .eq('id', id).maybeSingle();
+  const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
+  const jobBizId = existing.business_id;
 
   // Gate completion on photo documentation (also enforced in the UI).
   if (next === 'completed') {
     const { count } = await db.from('booking_photos')
       .select('id', { count: 'exact', head: true })
-      .eq('booking_id', id).eq('business_id', auth.business_id);
+      .eq('booking_id', id).eq('business_id', jobBizId);
     if ((count || 0) < MIN_PHOTOS_TO_COMPLETE) {
       return res.status(400).json({ error: `Add at least ${MIN_PHOTOS_TO_COMPLETE} photos before marking this job complete (${count || 0} so far).` });
     }
@@ -344,7 +388,7 @@ async function status(req, res, db, auth, body) {
   if (e1) throw e1;
 
   await db.from('booking_status_events').insert({
-    booking_id: id, business_id: auth.business_id, technician_id: auth.tech_id,
+    booking_id: id, business_id: jobBizId, technician_id: auth.tech_id,
     status: next, note: body.note || 'Updated by technician',
   });
 
@@ -366,14 +410,9 @@ async function status(req, res, db, auth, body) {
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
 
-    // Look up the business slug so we can brand the email (orange vs blue).
-    let slug = '';
-    try {
-      const { data: biz } = await db.from('businesses').select('slug').eq('id', auth.business_id).single();
-      slug = biz?.slug || '';
-    } catch (e) {
-      console.warn(`[review] failed to look up business slug: ${e.message}`);
-    }
+    // Brand the email by the JOB's business (orange vs blue) — for a
+    // cross-company job that's the host company, not the tech's own.
+    const slug = existing.business?.slug || '';
 
     // Review email — sent right away, only once (tracked in metadata).
     if (existing.customer?.email) {
@@ -422,10 +461,11 @@ async function jobPayment(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const act = (body.action || 'charge').toString();
 
-  const { data: b, error } = await db.from('bookings')
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
-             customer:customers ( id, name, email, phone, stripe_customer_id )`)
-    .eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+             customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
+    .eq('id', id).maybeSingle();
+  const { data: b, error } = await fetchMine(build);
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
 
   const now = new Date().toISOString();
@@ -489,19 +529,24 @@ async function jobPayment(req, res, db, auth, body) {
 
 // ── Job photos (tech documents the job; 2 required before completing) ─────────
 // Confirm a booking belongs to the logged-in tech before touching its photos/notes.
+// Owned when this tech is the primary OR second tech (so a helper can add
+// photos/notes too). Returns the job's OWN business_id, which callers use for
+// those writes (never the tech's home business).
 async function assertOwnedJob(db, auth, id) {
   if (!id) { const e = new Error('id required'); e.status = 400; throw e; }
-  const { data } = await db.from('bookings')
-    .select('id').eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+  const build = () => scopeMine(db.from('bookings').select('id, business_id'), auth).eq('id', id).maybeSingle();
+  const { data } = await fetchMine(build);
   if (!data) { const e = new Error('Job not found'); e.status = 404; throw e; }
+  return data.business_id;
 }
 
 async function jobPhotos(req, res, db, auth) {
   const id = (req.query.id || '').toString();
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const { data, error } = await db.from('booking_photos')
     .select('id, url, caption, uploader_name, created_at')
-    .eq('booking_id', id).eq('business_id', auth.business_id)
+    .eq('booking_id', id).eq('business_id', bizId)
     .order('created_at', { ascending: true });
   if (error) throw error;
   return res.status(200).json({ photos: data || [], min_required: MIN_PHOTOS_TO_COMPLETE });
@@ -510,49 +555,52 @@ async function jobPhotos(req, res, db, auth) {
 async function jobPhotoAdd(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id;
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
 
   const { data: tech } = await db.from('technicians').select('name').eq('id', auth.tech_id).single();
   let up;
-  try { up = await uploadImage(body.image, `${auth.business_id}/${id}`); }
+  try { up = await uploadImage(body.image, `${bizId}/${id}`); }
   catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
 
   const { data, error } = await db.from('booking_photos').insert({
-    business_id: auth.business_id, booking_id: id, technician_id: auth.tech_id,
+    business_id: bizId, booking_id: id, technician_id: auth.tech_id,
     uploaded_by_kind: 'technician', uploader_name: tech?.name || 'Technician',
     storage_path: up.path, url: up.url, caption: (body.caption || '').toString().trim() || null,
   }).select('id, url, caption, uploader_name, created_at').single();
   if (error) { await deleteImage(up.path); throw error; }
 
   const { count } = await db.from('booking_photos')
-    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', auth.business_id);
+    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', bizId);
   return res.status(200).json({ photo: data, count: count || 0, min_required: MIN_PHOTOS_TO_COMPLETE });
 }
 
 async function jobPhotoDelete(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id, photoId = body.photo_id;
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!photoId) return res.status(400).json({ error: 'photo_id required' });
 
   const { data: ph } = await db.from('booking_photos')
-    .select('id, storage_path').eq('id', photoId).eq('booking_id', id).eq('business_id', auth.business_id).single();
+    .select('id, storage_path').eq('id', photoId).eq('booking_id', id).eq('business_id', bizId).single();
   if (!ph) return res.status(404).json({ error: 'Photo not found' });
   await db.from('booking_photos').delete().eq('id', photoId);
   await deleteImage(ph.storage_path);
 
   const { count } = await db.from('booking_photos')
-    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', auth.business_id);
+    .select('id', { count: 'exact', head: true }).eq('booking_id', id).eq('business_id', bizId);
   return res.status(200).json({ ok: true, count: count || 0, min_required: MIN_PHOTOS_TO_COMPLETE });
 }
 
 // ── Job notes (internal; tech can add/delete on their own jobs) ──────────────
 async function jobNotes(req, res, db, auth) {
   const id = (req.query.id || '').toString();
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const { data, error } = await db.from('booking_notes')
     .select('id, body, author_kind, author_name, created_at')
-    .eq('booking_id', id).eq('business_id', auth.business_id)
+    .eq('booking_id', id).eq('business_id', bizId)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return res.status(200).json({ notes: data || [] });
@@ -561,13 +609,14 @@ async function jobNotes(req, res, db, auth) {
 async function jobNoteAdd(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id;
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const text = (body.body || '').toString().trim();
   if (!text) return res.status(400).json({ error: 'Note text required' });
 
   const { data: tech } = await db.from('technicians').select('name').eq('id', auth.tech_id).single();
   const { data, error } = await db.from('booking_notes').insert({
-    business_id: auth.business_id, booking_id: id,
+    business_id: bizId, booking_id: id,
     author_kind: 'technician', author_id: auth.tech_id, author_name: tech?.name || 'Technician',
     body: text,
   }).select('id, body, author_kind, author_name, created_at').single();
@@ -578,11 +627,12 @@ async function jobNoteAdd(req, res, db, auth, body) {
 async function jobNoteDelete(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id, noteId = body.note_id;
-  try { await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  let bizId;
+  try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!noteId) return res.status(400).json({ error: 'note_id required' });
   // Permanent delete (no soft-delete), scoped to this tech's job.
   await db.from('booking_notes').delete()
-    .eq('id', noteId).eq('booking_id', id).eq('business_id', auth.business_id);
+    .eq('id', noteId).eq('booking_id', id).eq('business_id', bizId);
   return res.status(200).json({ ok: true });
 }
 
@@ -806,11 +856,11 @@ async function techReviews(req, res, db, auth) {
   const tz = biz?.timezone || 'America/Denver';
   const weekStartMs = startOfWeekUTC(tz).getTime();
 
+  // technician_id alone so reviews earned on cross-company jobs count too.
   const { data, error } = await db.from('bookings')
     .select(`id, scheduled_at, reviewed_at, review_rating, review_text,
              customer:customers ( name ),
              service:services ( name )`)
-    .eq('business_id', auth.business_id)
     .eq('technician_id', auth.tech_id)
     .not('review_rating', 'is', null)
     .order('reviewed_at', { ascending: false, nullsFirst: false })

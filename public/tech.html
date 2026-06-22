@@ -95,6 +95,12 @@
   .b-completed{background:rgba(39,192,147,.16);color:var(--green);}
   .b-confirmed,.b-pending{background:rgba(255,176,32,.16);color:var(--amber);}
   .empty{color:var(--mute);text-align:center;padding:60px 20px;}
+  /* Cross-company job (booked by the partner company for this tech) */
+  .jobc.xco{border-color:#ffb020;box-shadow:0 0 0 1px #ffb020 inset;}
+  .xco-tag{display:inline-block;background:#ffb020;color:#1a1205;font-weight:800;font-size:11px;letter-spacing:.04em;padding:4px 9px;border-radius:7px;margin-bottom:8px;}
+  .xco-banner{background:linear-gradient(135deg,#ffb020,#ff8a00);color:#1a1205;border-radius:14px;padding:15px 16px;margin-bottom:12px;border:2px solid #ffd47a;}
+  .xco-banner-h{font-weight:900;font-size:16px;letter-spacing:.02em;line-height:1.25;}
+  .xco-banner-s{font-weight:600;font-size:13px;margin-top:5px;opacity:.92;}
 
   /* Detail */
   .detail{padding:16px;}
@@ -367,7 +373,8 @@ function renderDay(){
   document.getElementById('jobsSub').textContent=`${jobs.length} job${jobs.length===1?'':'s'} — ${isToday?'Today':dLabel}`;
   const list=document.getElementById('jobsList');
   list.innerHTML = jobs.length ? jobs.map(j=>`
-    <div class="jobc" data-id="${j.id}">
+    <div class="jobc${j.cross_company?' xco':''}" data-id="${j.id}">
+      ${j.cross_company?`<div class="xco-tag">⚠ FOR ${esc((j.company_name||'OTHER COMPANY').toUpperCase())}</div>`:''}
       <div class="t">${fmtTime(j.scheduled_at)}</div>
       <div class="n">${esc(j.customer_name)}</div>
       <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
@@ -400,6 +407,10 @@ async function showDetail(id){
 
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
+      ${j.cross_company?`<div class="xco-banner">
+        <div class="xco-banner-h">⚠ THIS JOB IS FOR ${esc((j.company_name||'THE OTHER COMPANY').toUpperCase())}</div>
+        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}, not your own company.</div>
+      </div>`:''}
       <div class="card">
         <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
         <div class="big-name">${esc(j.customer_name)}</div>
