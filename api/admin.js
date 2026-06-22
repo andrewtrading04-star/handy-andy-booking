@@ -477,7 +477,7 @@ const TV_OPTION_GROUPS = [
     { label: '33"–59"',     price: 109, zbk: '1685657519214x406129807645840830', sort: 2 },
     { label: '60"–69"',     price: 119, zbk: '1685657519214x241977595988204900', sort: 3 },
     { label: '70"–85"',     price: 149, zbk: '1685657519214x168809705059288930', sort: 4 },
-    { label: '85"–97"',     price: 179, zbk: '1693451324278x246099356920840200', sort: 5 },
+    { label: '86"–97"',     price: 179, zbk: '1693451324278x246099356920840200', sort: 5 },
     { label: '98"+',        price: 229, zbk: '1729566606709x280549383678984200', sort: 6 },
   ]},
   { key: 'bracket',   label: 'Bracket',                       min: 0, max: 1, sort: 2, options: [
@@ -582,14 +582,22 @@ async function seedTvOptions(req, res, db, auth) {
   return res.status(200).json({ ok: true, ...report });
 }
 
-// Relabel the legacy "70"–84"" TV size tier to "70"–85"" for whichever business
-// is calling. Label-only and idempotent (an already-relabelled "70–85" row has
-// no "84", so it's skipped) — never inserts rows, so it's safe for any business
-// regardless of its option set. The admin New Booking flow calls this once when
-// it detects a stale size label, so the rename reaches the live DB on its own.
+// Normalize the three large TV size tiers to their canonical labels for
+// whichever business is calling: 70–84 → 70–85", 85–97 → 86–97" (non-overlapping
+// at 85), and "98 plus" → 98"+. Label-only, never inserts rows, so it's safe for
+// any business regardless of its option set. Each rule fires only on the LEGACY
+// form, so it's idempotent (the renamed labels no longer match). The admin New
+// Booking flow calls this once when it detects a stale label, so the rename
+// reaches the live DB on its own.
+function targetSizeLabel(label) {
+  const nums = (label.match(/\d+/g) || []).map(Number);
+  if (nums.includes(70) && nums.includes(84)) return '70"–85"';   // 70–84 → 70–85
+  if (nums.includes(85) && nums.includes(97)) return '86"–97"';   // 85–97 → 86–97
+  if (/plus/i.test(label) && nums.includes(98)) return '98"+';    // "98 plus" → 98"+
+  return null;                                                    // small tiers untouched
+}
 async function relabelTvSize(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const NEW_LABEL = '70"–85"';
   const { data: svcs } = await db.from('services')
     .select('id, name, category').eq('business_id', biz.id);
   const tvSvcIds = (svcs || [])
@@ -604,11 +612,9 @@ async function relabelTvSize(req, res, db, auth) {
     .select('id, label').eq('business_id', biz.id).in('group_id', gids);
   let updated = 0;
   for (const o of (opts || [])) {
-    const nums = (o.label.match(/\d+/g) || []).map(Number);
-    // The legacy "70-84" tier (starts at 70, ends at 84). Once renamed it no
-    // longer contains 84, so re-running this is a no-op.
-    if (nums.includes(70) && nums.includes(84)) {
-      const { error } = await db.from('service_options').update({ label: NEW_LABEL }).eq('id', o.id);
+    const t = targetSizeLabel(o.label);
+    if (t && t !== o.label) {
+      const { error } = await db.from('service_options').update({ label: t }).eq('id', o.id);
       if (!error) updated++;
     }
   }
