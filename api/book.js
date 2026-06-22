@@ -2,6 +2,14 @@ import { mirrorBooking } from './_lib/mirror.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 
+// After creating the Zenbooker job this handler does several more sequential
+// calls (auto-assign check, Stripe card-on-file, CRM mirror, confirmation email).
+// At Vercel's default ~10s timeout the function could die AFTER the job was
+// created, leaving the customer with no confirmation — so they'd click again and
+// create a duplicate. Give the post-booking work room to finish so the client
+// always gets a clean success and never needs to retry.
+export const config = { maxDuration: 60 };
+
 // Format a slot id ("slot_<startEpochSec>_<endEpochSec>") into a friendly date +
 // arrival window in the territory's local timezone. Used as a fallback so the
 // confirmation email still has the date/time even if an older cached widget
