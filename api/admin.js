@@ -16,7 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
-import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -1051,7 +1051,7 @@ async function bookingUpdate(req, res, db, auth, body) {
   // Confirm the booking belongs to this business before touching it. The 0019
   // column (secondary_technician_id) may not exist yet — fall back without it so
   // confirm/cancel/status/assign keep working until the migration is applied.
-  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, review_token, sms_consent, customer:customers ( phone )`;
+  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, review_token, sms_consent, metadata, customer:customers ( phone, email, name )`;
   let { data: existing, error: e0 } = await db.from('bookings')
     .select(existingSel()).eq('id', id).eq('business_id', biz.id).single();
   if (e0 && /secondary_technician_id/.test(e0.message || '')) {
@@ -1135,12 +1135,41 @@ async function bookingUpdate(req, res, db, auth, body) {
       status: newStatus, note: `Set by ${auth.role} (dashboard)`,
     });
 
-    // Send SMS when job is completed (if customer opted in)
-    if (newStatus === 'completed' && existing.customer?.phone && existing.review_token && existing.sms_consent) {
+    // Send review email and SMS when job is completed
+    if (newStatus === 'completed' && existing.review_token) {
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
-      const msg = `Your job is complete! How did we do? ${reviewLink}`;
-      sendSMS(existing.customer.phone, msg).catch(console.error);
+
+      // Send review email immediately
+      if (existing.customer?.email) {
+        try {
+          const brand = brandFor(biz.slug);
+          const { subject, html } = reviewEmail({
+            firstName: existing.customer.name || 'there',
+            reviewUrl: reviewLink,
+          }, brand);
+          const { from } = emailConfig(biz.slug);
+          const emailResult = await sendEmail({ slug: biz.slug, to: existing.customer.email, subject, html, replyTo: from });
+
+          // Mark review email as sent in metadata
+          if (emailResult.sent) {
+            const meta = existing.metadata || {};
+            const newMeta = { ...meta, review_email_sent_at: now };
+            await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+            console.log(`[review] email sent to ${existing.customer.email} (${biz.slug}) booking=${id}`);
+          }
+        } catch (e) {
+          console.error(`[review] email failed for booking ${id}:`, e.message);
+        }
+      }
+
+      // Send SMS after 20 minutes if customer opted in
+      if (existing.customer?.phone && existing.sms_consent) {
+        const msg = `Your job is complete! How did we do? ${reviewLink}`;
+        setTimeout(() => {
+          sendSMS(existing.customer.phone, msg).catch(console.error);
+        }, 20 * 60 * 1000);
+      }
     }
   }
 
@@ -1581,7 +1610,7 @@ async function reviewCheck(req, res, body) {
 
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
-    .select('id, reviewed_at, service_area:service_areas(review_url)')
+    .select('id, reviewed_at, service_area:service_areas(review_url), business:businesses(slug, name)')
     .eq('id', reviewToken.booking_id)
     .single();
 
@@ -1591,6 +1620,8 @@ async function reviewCheck(req, res, body) {
     booking_id: booking.id,
     already_reviewed: !!booking.reviewed_at,
     review_url: booking.service_area?.review_url || null,
+    business_slug: booking.business?.slug || 'handy-andy',
+    business_name: booking.business?.name || 'Handy Andy',
   });
 }
 

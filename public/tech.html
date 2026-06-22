@@ -378,9 +378,8 @@ function renderDay(){
 
 const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
   confirmed:{to:'on_the_way',label:'On My Way',cls:'blue'},
-  on_the_way:{to:'arrived',label:'Arrived',cls:''},
-  arrived:{to:'in_progress',label:'Start Job',cls:''},
-  in_progress:{to:'completed',label:'Job Complete',cls:'green'} };
+  on_the_way:{to:'in_progress',label:'Job Complete',cls:'green'},
+  in_progress:{to:'completed',label:'Completed',cls:'green'} };
 
 const MIN_PHOTOS=2;
 let curJob=null, curPhotos=[], curNotes=[];
