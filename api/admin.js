@@ -1114,6 +1114,14 @@ async function bookingUpdate(req, res, db, auth, body) {
       if (body.secondary_technician_id !== undefined && bookingLiftCols) patch.secondary_technician_id = body.secondary_technician_id || null;
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
       break;
+    case 'reopen':
+      // Reopen a completed job by setting it back to assigned (if tech is assigned)
+      // or confirmed (if no tech). Mark it so we never resend the review email.
+      if (existing.status !== 'completed') return res.status(400).json({ error: 'Only completed jobs can be reopened' });
+      patch.status = newStatus = existing.technician_id ? 'assigned' : 'confirmed';
+      const existMeta = existing.metadata || {};
+      patch.metadata = { ...existMeta, reopened_at: now, reopened_from: 'completed' };
+      break;
     case 'status':
       if (!body.status) return res.status(400).json({ error: 'status required' });
       patch.status = newStatus = body.status; break;

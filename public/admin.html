@@ -1098,6 +1098,7 @@ async function renderAvailabilityGrid(dates){
 function openBooking(b){
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
+  const canReopen=b.status==='completed';
   const techOpts=['<option value="">— Unassigned —</option>',
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const secondTechOpts=['<option value="">— None —</option>',
@@ -1122,6 +1123,7 @@ function openBooking(b){
       ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
       ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
+      ${canReopen?`<button class="btn ghost sm" id="bkReopen">Reopen job</button>`:''}
     </div>
     <div class="bk-actions" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
@@ -1147,6 +1149,7 @@ function openBooking(b){
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
   const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
   const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? This permanently deletes it.')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
+  const ro=document.getElementById('bkReopen'); if(ro) ro.onclick=async()=>{ if(confirm('Reopen this completed job? It will be marked as assigned or confirmed.')){  await updateBooking({ id:b.id, action:'reopen' }); close(); } };
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
