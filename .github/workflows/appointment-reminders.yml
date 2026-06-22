@@ -1,0 +1,20 @@
+name: Appointment reminders
+
+# Sends the 24-hour appointment reminder email. Runs hourly so a reminder lands
+# right around the 24-hour mark (Vercel Hobby cron only fires once/day, which is
+# why this lives in GitHub Actions). The endpoint is idempotent — a booking is
+# reminded at most once — so a duplicate or delayed run is harmless.
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour, on the hour (UTC)
+  workflow_dispatch: {}    # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger 24-hour reminder pass
+        run: |
+          curl -fsS --retry 3 --retry-delay 5 -X GET \
+            "https://handy-andy-booking.vercel.app/api/migrate?action=send_reminders" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

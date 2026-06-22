@@ -6,6 +6,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
+import { sendAppointmentReminders } from './_lib/reminders.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -129,6 +130,27 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('[import_doms]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e), stack: debug ? String((e && e.stack) || '') : undefined });
+    }
+  }
+
+  // 24-hour appointment reminders. Secured by CRON_SECRET (NOT the admin bearer)
+  // so a scheduled trigger (Vercel Cron / GitHub Actions hourly) can call it.
+  // Vercel Cron auto-sends "Authorization: Bearer <CRON_SECRET>"; GitHub Actions
+  // and manual tests can pass it as ?secret=... or the same Bearer header.
+  //   &dry=1   find + report eligible bookings without sending anything
+  if (action === 'send_reminders') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await sendAppointmentReminders({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[send_reminders]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
 

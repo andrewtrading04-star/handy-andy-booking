@@ -324,7 +324,7 @@ export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['han
             </td>
           </tr></table>
           <div style="font-size:23px;font-weight:800;color:#11181c;margin:0 0 6px;">Your appointment is almost here!</div>
-          <div style="font-size:14.5px;color:#5b6470;line-height:1.55;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')} &mdash; you're just one day away. Here's everything you need to know before your technician arrives.</div>
+          <div style="font-size:14.5px;color:#5b6470;line-height:1.55;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')}, you're just one day away. Here's everything you need to know before your technician arrives.</div>
         </td></tr>
 
         <!-- Appointment details card -->
@@ -368,7 +368,7 @@ export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['han
               <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#9888;&#65039;</td>
               <td valign="top" style="padding:15px 16px 15px 6px;">
                 <div style="font-size:14px;font-weight:800;color:#92400e;margin:0 0 4px;">Choose your TV placement carefully</div>
-                <div style="font-size:13px;color:#9a6a13;line-height:1.6;">Once the installation is complete and the technician leaves, they can't adjust the TV position or change the bracket without a new scheduled appointment, and a <strong>full charge</strong> applies. Please confirm the exact location before they leave &mdash; your technician is happy to help you choose the perfect height.</div>
+                <div style="font-size:13px;color:#9a6a13;line-height:1.6;">Once the installation is complete and the technician leaves, they can't adjust the TV position or change the bracket without a new scheduled appointment, and a <strong>full charge</strong> applies. Please confirm the exact location before they leave. Your technician is happy to help you choose the perfect height.</div>
               </td>
             </tr>
           </table>
@@ -381,7 +381,7 @@ export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['han
               <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#128222;</td>
               <td valign="top" style="padding:15px 16px 15px 6px;">
                 <div style="font-size:14px;font-weight:800;color:#991b1b;margin:0 0 4px;">Within the 24-hour window</div>
-                <div style="font-size:13px;color:#b4453f;line-height:1.6;">Your appointment is <strong>no longer cancelable online</strong>. If you still need to cancel, please call us &mdash; a <strong>$50 late cancellation fee</strong> will be applied to your card. Give us a call for any further information.</div>
+                <div style="font-size:13px;color:#b4453f;line-height:1.6;">Your appointment is <strong>no longer cancelable online</strong>. If you still need to cancel, please call us and a <strong>$50 late cancellation fee</strong> will be applied to your card. Give us a call for any further information.</div>
               </td>
             </tr>
           </table>
