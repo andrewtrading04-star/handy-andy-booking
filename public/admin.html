@@ -2600,11 +2600,17 @@ async function nbLoadTvOptions(serviceId){
       groups=r2.groups||[];
     }catch(err){ /* keep whatever loaded */ }
   }
-  // Self-heal the legacy "70–84"" size label to "70–85"" on the live DB (both
-  // companies). Fires once: after the rename the stale label is gone, so the
-  // check below is false on subsequent loads.
+  // Self-heal the legacy size labels to their canonical forms on the live DB
+  // (both companies): 70–84 → 70–85", 85–97 → 86–97", "98 plus" → 98"+. Fires
+  // once: after the rename the stale forms are gone, so this is false on later
+  // loads. Mirrors the server's targetSizeLabel() rules.
   const sizeG=groups.find(g=>g.key==='size');
-  const stale=sizeG && sizeG.options.some(o=>/70/.test(o.label) && /84/.test(o.label));
+  const stale=sizeG && sizeG.options.some(o=>{
+    const nums=(o.label.match(/\d+/g)||[]).map(Number);
+    return (nums.includes(70)&&nums.includes(84))
+        || (nums.includes(85)&&nums.includes(97))
+        || /plus/i.test(o.label);
+  });
   if(stale){
     try{
       await api('relabel_tv_size',{ method:'POST', params:{ business:current.slug }});
