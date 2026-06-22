@@ -362,6 +362,7 @@ async function status(req, res, db, auth, body) {
   // 20 minutes later (if the customer opted in). The tech app, not the dashboard,
   // is where jobs are normally completed — so this is the path that matters.
   if (next === 'completed' && existing.review_token) {
+    console.log(`[review] job ${id} marked completed, review_token=${existing.review_token}, email=${existing.customer?.email}`);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
 
@@ -370,28 +371,36 @@ async function status(req, res, db, auth, body) {
     try {
       const { data: biz } = await db.from('businesses').select('slug').eq('id', auth.business_id).single();
       slug = biz?.slug || '';
-    } catch { /* fall back to default brand */ }
+    } catch (e) {
+      console.warn(`[review] failed to look up business slug: ${e.message}`);
+    }
 
     // Review email — sent right away, only once (tracked in metadata).
-    if (existing.customer?.email && !existing.metadata?.review_email_sent_at) {
-      try {
-        const brand = brandFor(slug);
-        const { subject, html } = reviewEmail({
-          firstName: existing.customer.name || 'there',
-          reviewUrl: reviewLink,
-        }, brand);
-        const { from } = emailConfig(slug);
-        const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
-        if (emailResult.sent) {
-          const newMeta = { ...(existing.metadata || {}), review_email_sent_at: new Date().toISOString() };
-          await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
-          console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);
-        } else {
-          console.warn(`[review] email NOT sent to ${existing.customer.email} (${slug}) booking=${id}:`, emailResult.skipped || emailResult.error);
+    if (existing.customer?.email) {
+      if (existing.metadata?.review_email_sent_at) {
+        console.log(`[review] email already sent at ${existing.metadata.review_email_sent_at}, skipping`);
+      } else {
+        try {
+          const brand = brandFor(slug);
+          const { subject, html } = reviewEmail({
+            firstName: existing.customer.name || 'there',
+            reviewUrl: reviewLink,
+          }, brand);
+          const { from } = emailConfig(slug);
+          const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
+          if (emailResult.sent) {
+            const newMeta = { ...(existing.metadata || {}), review_email_sent_at: new Date().toISOString() };
+            await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+            console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);
+          } else {
+            console.warn(`[review] email NOT sent to ${existing.customer.email} (${slug}) booking=${id}:`, emailResult.skipped || emailResult.error);
+          }
+        } catch (e) {
+          console.error(`[review] email failed for booking ${id}:`, e.message);
         }
-      } catch (e) {
-        console.error(`[review] email failed for booking ${id}:`, e.message);
       }
+    } else {
+      console.warn(`[review] no customer email on booking ${id}`);
     }
 
     // SMS reminder 20 minutes after completion (if customer opted in).
@@ -399,6 +408,8 @@ async function status(req, res, db, auth, body) {
       const msg = `Your job is complete! How did we do? ${reviewLink}`;
       setTimeout(() => { sendSMS(existing.customer.phone, msg).catch(console.error); }, 20 * 60 * 1000);
     }
+  } else if (next === 'completed') {
+    console.log(`[review] job ${id} marked completed but no review_token`);
   }
 
   return res.status(200).json({ ok: true, status: next });
