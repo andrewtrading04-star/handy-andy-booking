@@ -658,6 +658,7 @@ const ICONS = {
   location: {e:'📍', f:'fa-solid fa-location-dot'},
   ban:      {e:'🚫', f:'fa-solid fa-ban'},
   phone:    {e:'📞', f:'fa-solid fa-phone'},
+  email:    {e:'✉️', f:'fa-solid fa-envelope'},
   clock:    {e:'🕑', f:'fa-regular fa-clock'},
   card:     {e:'💳', f:'fa-solid fa-credit-card'},
   note:     {e:'📝', f:'fa-solid fa-pen-to-square'},
@@ -1043,6 +1044,7 @@ function openBooking(b){
     <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
     ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
     ${b.customer?.phone?`<div class="bk-row"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    ${b.customer?.email?`<div class="bk-row"><span>${ic('email')}</span><div><a href="mailto:${esc(b.customer.email)}">${esc(b.customer.email)}</a></div></div>`:''}
     ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
