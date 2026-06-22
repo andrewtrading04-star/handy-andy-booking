@@ -1838,12 +1838,13 @@ function webSessionMeta(s){
 }
 function webSessionsTbl(sessions){
   if(!sessions||!sessions.length) return `<div class="empty">No sessions yet.</div>`;
-  return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Device</th><th>Browser</th><th>Page</th><th>Source</th></tr>`+
+  const tdClamp='style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"';
+  return `<div style="overflow-x:auto;"><table style="table-layout:fixed;width:100%;"><colgroup><col style="width:110px"><col style="width:64px"><col style="width:80px"><col style="width:auto"><col style="width:80px"></colgroup><tr><th>When</th><th>Device</th><th>Browser</th><th>Page</th><th>Source</th></tr>`+
     sessions.slice(0,25).map(s=>{ const m=webSessionMeta(s);
-      return `<tr><td>${new Date(s.start_time).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
-        <td>${esc(m.device||'—')}</td><td>${esc(m.browser||'—')}</td>
-        <td>${esc(webShortPath(m.page_path||'/'))}</td>
-        <td>${esc(s.referrer?webHost(s.referrer):'direct')}</td></tr>`; }).join('')+
+      return `<tr><td style="white-space:nowrap;">${new Date(s.start_time).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
+        <td ${tdClamp}>${esc(m.device||'—')}</td><td ${tdClamp}>${esc(m.browser||'—')}</td>
+        <td ${tdClamp}>${esc(webShortPath(m.page_path||'/'))}</td>
+        <td ${tdClamp}>${esc(s.referrer?webHost(s.referrer):'direct')}</td></tr>`; }).join('')+
     `</table></div>`;
 }
 function webDrawCharts(d,brand){
