@@ -245,3 +245,77 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 
   return { subject, html };
 }
+
+// ── 24-hour appointment reminder email ──────────────────────────────────────
+// Sent when appointment is exactly 24 hours away. `details` includes:
+//   firstName, dateLong, timeWindow, address: { line1, city, state, zip }
+// Returns { subject, html }.
+export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
+  const b = brand || EMAIL_BRANDS['handy-andy'];
+  const accent = b.accent;
+  const firstName = (details.firstName || '').trim();
+  const a = details.address || {};
+  const addressLine = [a.line1, [a.city, a.state].filter(Boolean).join(', '), a.zip]
+    .filter(Boolean).join(', ');
+
+  const sub  = 'font-size:14px;font-weight:800;color:#11181c;margin:14px 0 7px;';
+  const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:5px 0;';
+  const ul   = 'margin:5px 0 0;padding-left:18px;color:#4b5563;font-size:13.5px;line-height:1.62;';
+  const li   = 'margin:4px 0;';
+
+  const subject = `Your appointment is 24 hours away!`;
+
+  const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
+<body style="margin:0;padding:0;background:#f4f5f7;-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your appointment with ${esc(b.name)} is 24 hours away.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 2px 10px rgba(16,24,40,.06);">
+        <tr><td style="background:${accent};padding:22px 28px;">
+          <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</div>
+        </td></tr>
+        <tr><td style="padding:30px 28px 6px;">
+          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 7px;">Only 24 hours away! &#128336;</div>
+          <div style="font-size:15px;color:#4b5563;line-height:1.55;">Hi ${esc(firstName || 'there')}, your appointment is coming up soon. Here's what you need to know.</div>
+        </td></tr>
+        <tr><td style="padding:18px 28px 2px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #eceef1;border-radius:10px;">
+            <tr>
+              <td style="padding:9px 16px;font-size:13px;color:#6b7280;width:118px;vertical-align:top;">Date &amp; Time</td>
+              <td style="padding:9px 16px;font-size:14px;color:#11181c;font-weight:600;vertical-align:top;">${esc(details.dateLong || '')} ${esc(details.timeWindow || '')}</td>
+            </tr>
+            <tr>
+              <td style="padding:9px 16px;font-size:13px;color:#6b7280;vertical-align:top;">Address</td>
+              <td style="padding:9px 16px;font-size:14px;color:#11181c;font-weight:600;vertical-align:top;">${esc(addressLine)}</td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:24px 28px 0;">
+          <div style="border-top:1px solid #eef0f2;padding-top:22px;">
+            <div style="${sub}">What to expect</div>
+            <div style="${para}">Your technician should arrive within the 2-hour window. The technician will send an "on-my-way" text message when they are en route, which will include their estimated time of arrival (ETA). Please be prepared for their arrival.</div>
+
+            <div style="${sub}">Before your technician leaves</div>
+            <div style="${para}"><strong>Important:</strong> Once our technician completes the installation at your home, they won't be able to adjust the TV position or make any changes without a scheduled appointment. If you later decide that the TV needs to be moved up, down, or if you want to change the bracket, there will be a full charge for those adjustments.</div>
+            <div style="${para}">Please ensure that the TV is in the correct location before the technician leaves your place. If you need help selecting the height for your TV, the technician will be more than happy to help you decide.</div>
+
+            <div style="${sub}">Cancellation policy</div>
+            <div style="${para}"><strong>Your appointment is no longer cancelable</strong> because it's within the 24-hour period. If you would still like to cancel, you can do so by calling us. There is a <strong>$50 late cancellation fee</strong> that will be applied to your card. Please give us a call for any further information.</div>
+          </div>
+        </td></tr>
+        <tr><td style="padding:24px 28px 30px;">
+          <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
+            Questions or need to reschedule? Give us a call and our team will help.<br>
+            <span style="color:#9ca3af;">${esc(b.website)}</span>
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html };
+}
