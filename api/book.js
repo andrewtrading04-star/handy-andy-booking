@@ -8,14 +8,15 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_l
 // doesn't send the display summary.
 function slotWhen(slotId, territoryId) {
   const m = /^slot_(\d+)_(\d+)/.exec(String(slotId || ''));
-  if (!m) return { dateLong: '', timeWindow: '' };
-  const startMs = Number(m[1]) * 1000, endMs = Number(m[2]) * 1000;
-  if (!startMs) return { dateLong: '', timeWindow: '' };
+  if (!m) return { dateLong: '', timeWindow: '', startSec: 0, endSec: 0 };
+  const startSec = Number(m[1]), endSec = Number(m[2]);
+  const startMs = startSec * 1000, endMs = endSec * 1000;
+  if (!startMs) return { dateLong: '', timeWindow: '', startSec: 0, endSec: 0 };
   const tz = TERRITORY_TZ[territoryId] || 'America/Denver';
   const dateLong = new Date(startMs).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const t = (ms) => new Date(ms).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
   const timeWindow = endMs ? `${t(startMs)} – ${t(endMs)}` : t(startMs);
-  return { dateLong, timeWindow };
+  return { dateLong, timeWindow, startSec, endSec };
 }
 
 // Valid coupon codes → discount in dollars (owner-provided, June 2026).
@@ -300,6 +301,7 @@ export default async function handler(req, res) {
       try {
         const sum = email_summary || {};
         const when = slotWhen(selectedSlot, territory_id);
+        const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
         const { subject, html } = bookingConfirmationEmail({
           firstName:   customer.first_name || sum.firstName || '',
           dateLong:    sum.dateLong  || when.dateLong  || '',
@@ -310,6 +312,9 @@ export default async function handler(req, res) {
           total:       sum.total != null ? sum.total : null,
           tip:         Number(sum.tip != null ? sum.tip : tip) || 0,
           twoTechs:    sum.twoTechs != null ? !!sum.twoTechs : !!min_providers_needed,
+          startEpoch:  when.startSec || null,
+          endEpoch:    when.endSec || null,
+          baseUrl,
           jobId,
         }, brandFor('handy-andy'));
         const result = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });

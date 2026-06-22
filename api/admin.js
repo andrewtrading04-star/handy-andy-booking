@@ -1010,6 +1010,21 @@ async function bookingCreate(req, res, db, auth, body) {
       const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
       const timeWindow = slotDef ? slotDef.label : '';
 
+      // Calendar links: scheduled_at is the slot start (UTC); derive the end from
+      // the slot's duration (default 2h) so the .ics / Google event has a window.
+      let startEpoch = null, endEpoch = null;
+      if (scheduled_at) {
+        startEpoch = Math.floor(new Date(scheduled_at).getTime() / 1000);
+        let durMin = 120;
+        if (slotDef) {
+          const [sh, sm] = slotDef.start.split(':').map(Number);
+          const [eh, em] = slotDef.end.split(':').map(Number);
+          durMin = (eh * 60 + em) - (sh * 60 + sm);
+        }
+        endEpoch = startEpoch + durMin * 60;
+      }
+      const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+
       // Price block only when there's an actual charge (skip $0 insurance jobs).
       const hasPrice = (Number(body.price) || 0) > 0;
       let emailLines = null;
@@ -1031,6 +1046,7 @@ async function bookingCreate(req, res, db, auth, body) {
         total: hasPrice ? Number(body.price) : null,
         tip: 0,
         twoTechs: !!body.needs_lifting,
+        startEpoch, endEpoch, baseUrl,
         jobId: bRow.id,
       }, brandFor(biz.slug));
       const { from } = emailConfig(biz.slug);

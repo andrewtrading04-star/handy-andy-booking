@@ -111,6 +111,7 @@ function shade(hex, amt) {
 export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const b = brand || EMAIL_BRANDS['handy-andy'];
   const accent = b.accent;
+  const rgb = hexRgb(accent);                  // "r, g, b" for tinted icon chips
   const firstName = (details.firstName || '').trim();
   const a = details.address || {};
   const addressLine = [a.line1, [a.city, a.state].filter(Boolean).join(', '), a.zip]
@@ -166,56 +167,112 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         </div>
       </td></tr>` : '';
 
-  // ── "What to expect" — appointment-day guidance shown below the summary ──────
+  // ── "Add to calendar" buttons (Google + Apple) ──────────────────────────────
+  // Rendered only when the caller passes machine-readable start/end epochs (sec).
+  // Google uses its render URL (pre-fills the event); Apple downloads an .ics from
+  // our own /api/calendar endpoint so a tap opens the native add-to-calendar sheet.
+  let calendarBlock = '';
+  const startSec = Number(details.startEpoch), endSec = Number(details.endEpoch);
+  if (startSec && endSec) {
+    const stamp = (sec) => {
+      const d = new Date(sec * 1000);
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}00Z`;
+    };
+    const calTitle = `${b.name} - ${details.serviceName || 'TV Installation'}`;
+    const calLoc   = addressLine;
+    const calDesc  = `Your ${b.name} appointment${details.timeWindow ? ` (arrival window ${details.timeWindow})` : ''}. Reply to your confirmation email with any questions.`;
+    const gcal = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+      + `&text=${encodeURIComponent(calTitle)}`
+      + `&dates=${stamp(startSec)}/${stamp(endSec)}`
+      + `&details=${encodeURIComponent(calDesc)}`
+      + `&location=${encodeURIComponent(calLoc)}`;
+    const base = String(details.baseUrl || '').replace(/\/$/, '');
+    const icsUrl = `${base}/api/calendar?title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
+      + `&location=${encodeURIComponent(calLoc)}&details=${encodeURIComponent(calDesc)}`;
+    // Apple button only when we have an absolute base URL to serve the .ics from.
+    const appleBtn = base ? `
+            <td width="50%" valign="top" style="padding-left:6px;">
+              <a href="${esc(icsUrl)}" style="display:block;text-align:center;background:#11181c;border:1px solid #11181c;border-radius:11px;padding:13px 10px;text-decoration:none;font-size:13.5px;font-weight:700;color:#ffffff;">&#127822;&nbsp; Apple Calendar</a>
+            </td>` : '';
+    const gWidth = appleBtn ? '50%' : '100%';
+    const gPad   = appleBtn ? 'padding-right:6px;' : '';
+    calendarBlock = `
+      <tr><td style="padding:20px 28px 0;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af;margin:0 0 9px;">Add to your calendar</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td width="${gWidth}" valign="top" style="${gPad}">
+              <a href="${esc(gcal)}" style="display:block;text-align:center;background:#ffffff;border:1px solid #d7dbe0;border-radius:11px;padding:13px 10px;text-decoration:none;font-size:13.5px;font-weight:700;color:#11181c;">&#128197;&nbsp; Google Calendar</a>
+            </td>${appleBtn}
+        </tr></table>
+      </td></tr>`;
+  }
+
+  // ── "What to expect" — appointment-day guidance, shown as icon cards ─────────
   // Reusable inline-style snippets keep the markup email-client safe.
-  const sub  = 'font-size:14px;font-weight:800;color:#11181c;margin:18px 0 5px;';
-  const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:5px 0;';
-  const ul   = 'margin:5px 0 0;padding-left:18px;color:#4b5563;font-size:13.5px;line-height:1.62;';
-  const li   = 'margin:4px 0;';
+  const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:0;';
+  const ul   = 'margin:2px 0 0;padding-left:18px;color:#4b5563;font-size:13.5px;line-height:1.6;';
+  const li   = 'margin:5px 0;';
   // Brand-specific height-calculator button (only brands that have a page).
   const heightCalcBtn = b.heightCalc ? `
-          <a href="${esc(b.heightCalc)}" style="display:inline-block;margin:11px 0 2px;background:${accent};color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;">TV Mounting Height Calculator &rarr;</a>` : '';
+            <a href="${esc(b.heightCalc)}" style="display:inline-block;margin:12px 0 2px;background:${accent};color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;">TV Mounting Height Calculator &rarr;</a>` : '';
+
+  // One guidance topic rendered as an icon chip + content card.
+  const card = (icon, title, bodyHtml) => `
+      <tr><td style="padding:10px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eceef1;border-radius:14px;">
+          <tr>
+            <td width="54" valign="top" style="padding:16px 0 16px 16px;">
+              <div style="width:38px;height:38px;border-radius:10px;background:rgba(${rgb},0.10);text-align:center;font-size:19px;line-height:38px;">${icon}</div>
+            </td>
+            <td valign="top" style="padding:16px 16px 16px 12px;">
+              <div style="font-size:14.5px;font-weight:800;color:#11181c;margin:0 0 6px;">${title}</div>
+              ${bodyHtml}
+            </td>
+          </tr>
+        </table>
+      </td></tr>`;
 
   const expectBlock = `
-      <tr><td style="padding:24px 28px 0;">
-        <div style="border-top:1px solid #eef0f2;padding-top:22px;">
-          <div style="font-size:17px;font-weight:800;color:#11181c;margin:0 0 5px;">What to expect from your installation</div>
-          <div style="${para}">Here is some critical information you'll need for your appointment.</div>
-
-          <div style="${sub}">TV mounting height</div>
-          <div style="${para}">During the installation, our skilled technician will give input on the optimal height for mounting your TV. Once the technician leaves your home, there is a charge if they need to return to adjust the TV's position (moving it up or down) &mdash; so please make sure the TV is placed exactly where you want it, and that you're happy with the bracket choice, before the technician leaves.</div>
-          <div style="${para}">For extra guidance, we've put together a helpful tool for finding the ideal TV height. You can always talk it over with your technician for a professional opinion.</div>
-          ${heightCalcBtn}
-
-          <div style="${sub}">On-the-way notification</div>
-          <ul style="${ul}">
-            <li style="${li}">Once your technician is en route, you'll get an "on-the-way" text message.</li>
-            <li style="${li}">This typically arrives within 30 to 60 minutes of your scheduled time.</li>
-            <li style="${li}">Your technician will arrive within the 2-hour window of your appointment time.</li>
-          </ul>
-
-          <div style="${sub}">Payment</div>
-          <ul style="${ul}">
-            <li style="${li}">Payment is processed after the job is successfully completed by your technician.</li>
-            <li style="${li}">Your technician will have a card reader on hand for your convenience.</li>
-            <li style="${li}">If you'd like to show your appreciation, our technicians receive 100% of tips!</li>
-          </ul>
-
-          <div style="${sub}">Updates &amp; reminders</div>
-          <div style="${para}">Keep an eye on your email for important updates and reminders about your appointment.</div>
-
-          <div style="${sub}">Cancellation &amp; rescheduling</div>
-          <ul style="${ul}">
-            <li style="${li}">You can cancel or reschedule any time, as long as it's not within 24 hours of your scheduled time.</li>
-            <li style="${li}">To make changes, just reply to this email or give us a call and we'll take care of it.</li>
-            <li style="${li}">Cancellations or last-minute rescheduling within 24 hours incur an automatic $50 charge.</li>
-          </ul>
+      <tr><td style="padding:28px 28px 4px;">
+        <div style="border-top:1px solid #eef0f2;padding-top:26px;">
+          <div style="font-size:18px;font-weight:800;color:#11181c;margin:0 0 4px;">What to expect from your installation</div>
+          <div style="font-size:13.5px;color:#6b7280;line-height:1.6;">Here is some critical information you'll need for your appointment.</div>
         </div>
       </td></tr>
-      <tr><td style="padding:16px 28px 0;">
-        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:13px 15px;font-size:13px;color:#92400e;line-height:1.6;">
-          <strong>Important:</strong> Once our technician completes the installation and leaves your home, they can't adjust the TV position or make changes without a scheduled appointment. If you later decide the TV needs to move up or down, or you want to change the bracket, there is a charge for those adjustments. Please make sure the TV is in the correct location before the technician leaves to avoid additional charges.
-        </div>
+      ${card('&#128208;', 'TV mounting height', `
+              <div style="${para}">During the installation, our skilled technician will give input on the optimal height for mounting your TV. Once the technician leaves your home, there is a charge if they need to return to adjust the TV's position (moving it up or down) &mdash; so please make sure the TV is placed exactly where you want it, and that you're happy with the bracket choice, before the technician leaves.</div>
+              <div style="${para}margin-top:8px;">For extra guidance, we've put together a helpful tool for finding the ideal TV height. You can always talk it over with your technician for a professional opinion.</div>
+              ${heightCalcBtn}`)}
+      ${card('&#128276;', 'On-the-way notification', `
+              <ul style="${ul}">
+                <li style="${li}">Once your technician is en route, you'll get an "on-the-way" text message.</li>
+                <li style="${li}">This typically arrives within 30 to 60 minutes of your scheduled time.</li>
+                <li style="${li}">Your technician will arrive within the 2-hour window of your appointment time.</li>
+              </ul>`)}
+      ${card('&#128179;', 'Payment', `
+              <ul style="${ul}">
+                <li style="${li}">Payment is processed after the job is successfully completed by your technician.</li>
+                <li style="${li}">Your technician will have a card reader on hand for your convenience.</li>
+                <li style="${li}">If you'd like to show your appreciation, our technicians receive 100% of tips!</li>
+              </ul>`)}
+      ${card('&#9993;', 'Updates &amp; reminders', `
+              <div style="${para}">Keep an eye on your email for important updates and reminders about your appointment.</div>`)}
+      ${card('&#128197;', 'Cancellation &amp; rescheduling', `
+              <ul style="${ul}">
+                <li style="${li}">You can cancel or reschedule any time, as long as it's not within 24 hours of your scheduled time.</li>
+                <li style="${li}">To make changes, just reply to this email or give us a call and we'll take care of it.</li>
+                <li style="${li}">Cancellations or last-minute rescheduling within 24 hours incur an automatic $50 charge.</li>
+              </ul>`)}
+      <tr><td style="padding:14px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;">
+          <tr>
+            <td width="46" valign="top" style="padding:15px 0 15px 16px;font-size:20px;line-height:1.2;">&#9888;&#65039;</td>
+            <td valign="top" style="padding:15px 16px 15px 10px;font-size:13px;color:#92400e;line-height:1.6;">
+              <strong>Important:</strong> Once our technician completes the installation and leaves your home, they can't adjust the TV position or make changes without a scheduled appointment. If you later decide the TV needs to move up or down, or you want to change the bracket, there is a charge for those adjustments. Please make sure the TV is in the correct location before the technician leaves to avoid additional charges.
+            </td>
+          </tr>
+        </table>
       </td></tr>`;
 
   const subject = `Your ${b.name} booking is confirmed`;
@@ -242,6 +299,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         </td></tr>
         ${priceBlock}
         ${twoTechNote}
+        ${calendarBlock}
         ${expectBlock}
         <tr><td style="padding:24px 28px 30px;">
           <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
