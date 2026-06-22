@@ -27,7 +27,7 @@ export function emailConfig(slug) {
 // Brand presets for customer-facing emails. Colors match the booking widgets and
 // admin dashboard: Handy Andy = orange, Doms = blue.
 export const EMAIL_BRANDS = {
-  'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',          accent: '#FF6B35', website: 'ihandyandy.com' },
+  'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',          accent: '#FF6B35', website: 'ihandyandy.com', heightCalc: 'https://www.ihandyandy.com/tv-height-calculator' },
   'doms':       { slug: 'doms',       name: "Dom's TV Mounting",   accent: '#2563EB', website: 'domstvmounting.com' },
 };
 export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['handy-andy']; }
@@ -153,6 +153,58 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         <div style="font-size:12px;color:#9ca3af;">Confirmation #: <span style="color:#6b7280;font-weight:600;">${esc(details.jobId)}</span></div>
       </td></tr>` : '';
 
+  // ── "What to expect" — appointment-day guidance shown below the summary ──────
+  // Reusable inline-style snippets keep the markup email-client safe.
+  const sub  = 'font-size:14px;font-weight:800;color:#11181c;margin:18px 0 5px;';
+  const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:5px 0;';
+  const ul   = 'margin:5px 0 0;padding-left:18px;color:#4b5563;font-size:13.5px;line-height:1.62;';
+  const li   = 'margin:4px 0;';
+  // Brand-specific height-calculator button (only brands that have a page).
+  const heightCalcBtn = b.heightCalc ? `
+          <a href="${esc(b.heightCalc)}" style="display:inline-block;margin:11px 0 2px;background:${accent};color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;">TV Mounting Height Calculator &rarr;</a>` : '';
+
+  const expectBlock = `
+      <tr><td style="padding:24px 28px 0;">
+        <div style="border-top:1px solid #eef0f2;padding-top:22px;">
+          <div style="font-size:17px;font-weight:800;color:#11181c;margin:0 0 5px;">What to expect from your installation</div>
+          <div style="${para}">Here is some critical information you'll need for your appointment.</div>
+
+          <div style="${sub}">TV mounting height</div>
+          <div style="${para}">During the installation, our skilled technician will give input on the optimal height for mounting your TV. Once the technician leaves your home, there is a charge if they need to return to adjust the TV's position (moving it up or down) &mdash; so please make sure the TV is placed exactly where you want it, and that you're happy with the bracket choice, before the technician leaves.</div>
+          <div style="${para}">For extra guidance, we've put together a helpful tool for finding the ideal TV height. You can always talk it over with your technician for a professional opinion.</div>
+          ${heightCalcBtn}
+
+          <div style="${sub}">On-the-way notification</div>
+          <ul style="${ul}">
+            <li style="${li}">Once your technician is en route, you'll get an "on-the-way" text message.</li>
+            <li style="${li}">This typically arrives within 30 to 60 minutes of your scheduled time.</li>
+            <li style="${li}">Your technician will arrive within the 2-hour window of your appointment time.</li>
+          </ul>
+
+          <div style="${sub}">Payment</div>
+          <ul style="${ul}">
+            <li style="${li}">Payment is processed after the job is successfully completed by your technician.</li>
+            <li style="${li}">Your technician will have a card reader on hand for your convenience.</li>
+            <li style="${li}">If you'd like to show your appreciation, our technicians receive 100% of tips!</li>
+          </ul>
+
+          <div style="${sub}">Updates &amp; reminders</div>
+          <div style="${para}">Keep an eye on your email for important updates and reminders about your appointment.</div>
+
+          <div style="${sub}">Cancellation &amp; rescheduling</div>
+          <ul style="${ul}">
+            <li style="${li}">You can cancel or reschedule any time, as long as it's not within 24 hours of your scheduled time.</li>
+            <li style="${li}">To make changes, just reply to this email or give us a call and we'll take care of it.</li>
+            <li style="${li}">Cancellations or last-minute rescheduling within 24 hours incur an automatic $50 charge.</li>
+          </ul>
+        </div>
+      </td></tr>
+      <tr><td style="padding:16px 28px 0;">
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:13px 15px;font-size:13px;color:#92400e;line-height:1.6;">
+          <strong>Important:</strong> Once our technician completes the installation and leaves your home, they can't adjust the TV position or make changes without a scheduled appointment. If you later decide the TV needs to move up or down, or you want to change the bracket, there is a charge for those adjustments. Please make sure the TV is in the correct location before the technician leaves to avoid additional charges.
+        </div>
+      </td></tr>`;
+
   const subject = `Your ${b.name} booking is confirmed`;
 
   const html = `<!doctype html>
@@ -178,6 +230,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         ${priceBlock}
         ${twoTechNote}
         ${confNum}
+        ${expectBlock}
         <tr><td style="padding:24px 28px 30px;">
           <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
             Need to make a change or have a question? Just <strong>reply to this email</strong> and our team will help.<br>
