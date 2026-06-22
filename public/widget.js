@@ -157,7 +157,7 @@
             {id:'1685657519214x408615950244710660',label:'32" Or Less',price:99, sizecat:'small'},
             {id:'1685657519214x406129807645840830',label:'33"-59"',    price:109,sizecat:'small'},
             {id:'1685657519214x241977595988204900',label:'60"-69"',    price:119,sizecat:'small'},
-            {id:'1685657519214x168809705059288930',label:'70"-84"',    price:149,sizecat:'medium'},
+            {id:'1685657519214x168809705059288930',label:'70"-85"',    price:149,sizecat:'medium'},
             {id:'1693451324278x246099356920840200',label:'85"-97"',    price:179,sizecat:'large'},
             {id:'1729566606709x280549383678984200',label:'98+',        price:229,sizecat:'xlarge'},
           ]
