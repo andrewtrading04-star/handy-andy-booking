@@ -792,13 +792,14 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // Reuse an existing customer (by phone, then email) or create one.
   let customer_id = c.id || null;
+  let matchedExisting = !!c.id;
   if (!customer_id && c.phone) {
     const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
-    customer_id = data?.id || null;
+    if (data?.id) { customer_id = data.id; matchedExisting = true; }
   }
   if (!customer_id && c.email) {
     const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
-    customer_id = data?.id || null;
+    if (data?.id) { customer_id = data.id; matchedExisting = true; }
   }
   if (!customer_id) {
     const { data, error } = await db.from('customers').insert({
@@ -807,6 +808,22 @@ async function bookingCreate(req, res, db, auth, body) {
     }).select('id').single();
     if (error) throw error;
     customer_id = data.id;
+  } else if (matchedExisting) {
+    // Backfill/refresh contact details the form supplied so info added later
+    // (e.g. an email captured on a repeat booking) actually lands on the record
+    // instead of being silently dropped. Only non-empty fields are written.
+    const patch = {};
+    if (c.email) patch.email = c.email;
+    if (c.name) patch.name = c.name;
+    if (c.phone) patch.phone = c.phone;
+    if (c.address_line1) patch.address_line1 = c.address_line1;
+    if (c.city) patch.city = c.city;
+    if (c.state) patch.state = c.state;
+    if (c.postal_code) patch.postal_code = c.postal_code;
+    if (Object.keys(patch).length) {
+      const { error: upErr } = await db.from('customers').update(patch).eq('id', customer_id).eq('business_id', biz.id);
+      if (upErr) console.warn('[admin] customer backfill failed:', upErr.message);
+    }
   }
 
   // Convert scheduled_date + scheduled_slot to scheduled_at timestamp. The slot
