@@ -23,6 +23,29 @@ import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
 
+// ── Job ownership ────────────────────────────────────────────────────────────
+// A job "belongs" to a tech when they are the PRIMARY *or* the SECOND technician,
+// so a helper — including a cross-company one — can see and fully work the job in
+// their own app. Some deployments predate the 0019 secondary_technician_id
+// column; if a query referencing it errors, fall back to primary-only matching.
+let techHasSecondCol = true;
+function scopeMine(q, auth) {
+  return techHasSecondCol
+    ? q.or(`technician_id.eq.${auth.tech_id},secondary_technician_id.eq.${auth.tech_id}`)
+    : q.eq('technician_id', auth.tech_id);
+}
+// Run a bookings query (rebuilt fresh on each call so it can be retried) with the
+// primary-OR-second-tech scope, dropping the secondary column if the schema
+// lacks it. `build()` must return a not-yet-awaited Supabase query.
+async function fetchMine(build) {
+  let r = await build();
+  if (r.error && /secondary_technician_id/.test(r.error.message || '')) {
+    techHasSecondCol = false;
+    r = await build();
+  }
+  return r;
+}
+
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 function toE164(raw) {
@@ -195,21 +218,21 @@ async function jobs(req, res, db, auth) {
     hi = localDayStartUTC(tz, 1);
   }
 
-  // Match by technician_id ALONE (not business): this surfaces cross-company
-  // jobs — ones booked by the partner company but assigned to this tech — in the
-  // tech's own app, so there's never a question about who they're working for.
-  const { data, error } = await db.from('bookings')
+  // Scoped to jobs this tech is on (primary OR second tech) and NOT by business,
+  // so cross-company jobs — booked by the partner company but worked by this
+  // tech — show in their own app. No question about who they're working for.
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
              address_line1, address_line2, city, state, postal_code, lat, lng, business_id,
              customer:customers ( name, phone ),
              service:services ( name ),
              business:businesses ( name, timezone ),
-             line_items:booking_line_items ( name, kind )`)
-    .eq('technician_id', auth.tech_id)
+             line_items:booking_line_items ( name, kind )`), auth)
     .neq('status', 'cancelled')
     .gte('scheduled_at', lo.toISOString())
     .lt('scheduled_at', hi.toISOString())
     .order('scheduled_at', { ascending: true });
+  const { data, error } = await fetchMine(build);
   if (error) throw error;
 
   // Attach the business-timezone calendar date so the app groups jobs by the
@@ -310,8 +333,8 @@ async function debugIdentity(req, res, db, auth) {
 async function job(req, res, db, auth) {
   const id = (req.query.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
-  // technician_id alone (no business filter) so cross-company jobs open too.
-  const { data, error } = await db.from('bookings')
+  // Primary OR second tech, any business, so a (cross-company) helper opens it.
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
              review_rating, review_text, reviewed_at, business_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
@@ -319,10 +342,10 @@ async function job(req, res, db, auth) {
              customer:customers ( name, phone, email ),
              service:services ( name ),
              business:businesses ( name ),
-             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`)
+             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`), auth)
     .eq('id', id)
-    .eq('technician_id', auth.tech_id)
-    .single();
+    .maybeSingle();
+  const { data, error } = await fetchMine(build);
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
@@ -338,11 +361,13 @@ async function status(req, res, db, auth, body) {
   const map = TECH_STATUS[next];
   if (!map) return res.status(400).json({ error: `Invalid status "${next}"` });
 
-  // The job must belong to this tech (matched by technician_id alone so a
-  // cross-company job can be worked too). All downstream writes use the job's
-  // OWN business_id, not the tech's home business.
-  const { data: existing } = await db.from('bookings')
-    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, business:businesses ( slug ), customer:customers ( name, phone, email )`).eq('id', id).eq('technician_id', auth.tech_id).single();
+  // The job must belong to this tech — primary OR second tech — so a helper can
+  // advance it too. All downstream writes use the job's OWN business_id, not the
+  // tech's home business.
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
+    .eq('id', id).maybeSingle();
+  const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
   const jobBizId = existing.business_id;
 
@@ -436,10 +461,11 @@ async function jobPayment(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const act = (body.action || 'charge').toString();
 
-  const { data: b, error } = await db.from('bookings')
+  const build = () => scopeMine(db.from('bookings')
     .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
-             customer:customers ( id, name, email, phone, stripe_customer_id )`)
-    .eq('id', id).eq('technician_id', auth.tech_id).single();
+             customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
+    .eq('id', id).maybeSingle();
+  const { data: b, error } = await fetchMine(build);
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
 
   const now = new Date().toISOString();
@@ -503,13 +529,13 @@ async function jobPayment(req, res, db, auth, body) {
 
 // ── Job photos (tech documents the job; 2 required before completing) ─────────
 // Confirm a booking belongs to the logged-in tech before touching its photos/notes.
-// Matched by technician_id alone so cross-company jobs are owned too. Returns
-// the job's OWN business_id, which callers use for photo/note writes (never the
-// tech's home business).
+// Owned when this tech is the primary OR second tech (so a helper can add
+// photos/notes too). Returns the job's OWN business_id, which callers use for
+// those writes (never the tech's home business).
 async function assertOwnedJob(db, auth, id) {
   if (!id) { const e = new Error('id required'); e.status = 400; throw e; }
-  const { data } = await db.from('bookings')
-    .select('id, business_id').eq('id', id).eq('technician_id', auth.tech_id).single();
+  const build = () => scopeMine(db.from('bookings').select('id, business_id'), auth).eq('id', id).maybeSingle();
+  const { data } = await fetchMine(build);
   if (!data) { const e = new Error('Job not found'); e.status = 404; throw e; }
   return data.business_id;
 }
