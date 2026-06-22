@@ -28,7 +28,7 @@ export function emailConfig(slug) {
 // admin dashboard: Handy Andy = orange, Doms = blue.
 export const EMAIL_BRANDS = {
   'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',          accent: '#FF6B35', website: 'ihandyandy.com', heightCalc: 'https://www.ihandyandy.com/tv-height-calculator' },
-  'doms':       { slug: 'doms',       name: "Dom's TV Mounting",   accent: '#2563EB', website: 'domstvmounting.com' },
+  'doms':       { slug: 'doms',       name: "Dom's TV Mounting",   accent: '#2563EB', website: 'domstvmounting.com', heightCalc: 'https://domstvmounting.com/tv-height-calculator' },
 };
 export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['handy-andy']; }
 
