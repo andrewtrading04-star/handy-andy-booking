@@ -494,7 +494,7 @@
     <h2>New Booking</h2>
     <form id="nbForm" style="display:grid;gap:10px;">
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email"></div>
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
       <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
@@ -3098,6 +3098,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const paymentMethod=assurion?'':document.getElementById('nbPaymentMethod').value;
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
+
+  if(!email){ err.textContent='Email is required for booking confirmation'; return; }
 
   // Second-technician requirement, driven by the "Lifting Help" selection.
   // "cannot help lift" / "86"+" make a 2nd tech mandatory; "can help lift" makes
