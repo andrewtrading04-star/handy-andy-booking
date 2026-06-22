@@ -166,11 +166,6 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         </div>
       </td></tr>` : '';
 
-  const confNum = details.jobId ? `
-      <tr><td style="padding:16px 28px 0;">
-        <div style="font-size:12px;color:#9ca3af;">Confirmation #: <span style="color:#6b7280;font-weight:600;">${esc(details.jobId)}</span></div>
-      </td></tr>` : '';
-
   // ── "What to expect" — appointment-day guidance shown below the summary ──────
   // Reusable inline-style snippets keep the markup email-client safe.
   const sub  = 'font-size:14px;font-weight:800;color:#11181c;margin:18px 0 5px;';
@@ -247,7 +242,6 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         </td></tr>
         ${priceBlock}
         ${twoTechNote}
-        ${confNum}
         ${expectBlock}
         <tr><td style="padding:24px 28px 30px;">
           <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
