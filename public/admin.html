@@ -2166,13 +2166,10 @@ function paintGreeting(){
   if(link) link.addEventListener('click',()=>navTo('estimates'));
 }
 // Temporary note shown in the greeting banner. Auto-disappears once `expires`
-// passes (24h window). Targeted at one business via `for` (slug). Edit/clear
-// this object to change or remove the note.
-const GREET_NOTE = {
-  for: 'handy-andy',
-  text: 'Attention Heather. 3 jobs have not been completed. Please call all 3 customers. This message will disappear in 24 hours. 5:08pm Monday',
-  expires: '2026-06-23T17:08:00-06:00'
-};
+// passes. Set to a { for, text, expires } object to show one; null = no note.
+// NOTE: `expires` must be an exact 24h-out timestamp from when it goes live, or
+// it will linger past the "disappears in 24 hours" promise in the text.
+const GREET_NOTE = null;
 function greetNoteHtml(){
   try{
     if(!GREET_NOTE || !GREET_NOTE.text) return '';
