@@ -1737,7 +1737,6 @@ async function sendFeedbackEmail(params) {
   <p><strong>Customer:</strong> ${params.customerName}</p>
   <p><strong>Business:</strong> ${params.businessName}</p>
   <p><strong>Technician:</strong> ${params.technicianName}</p>
-  <p><strong>Service Area:</strong> ${params.serviceAreaName}</p>
   <p><strong>Rating:</strong> ${'⭐'.repeat(params.rating)}</p>
   <hr>
   <p><strong>Feedback:</strong></p>
@@ -1817,7 +1816,7 @@ async function badReviews(req, res, db, auth) {
              customer:customers ( name, phone ),
              technician:technicians ( id, name )`)
     .in('business_id', bizIds)
-    .eq('review_rating', 1)
+    .in('review_rating', [1, 2, 3])
     .gte('reviewed_at', since)
     .order('reviewed_at', { ascending: false })
     .limit(50);
@@ -1827,6 +1826,7 @@ async function badReviews(req, res, db, auth) {
     const biz = bizById.get(r.business_id) || {};
     return {
       id: r.id,
+      rating: r.review_rating,
       business_slug: biz.slug || '',
       business_name: biz.name || '',
       technician_name: r.technician?.name || 'Unassigned',

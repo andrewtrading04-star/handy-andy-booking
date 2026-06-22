@@ -823,10 +823,11 @@ function renderBadAlerts(alerts){
       : 'unscheduled';
     const phone = a.customer_phone || 'no phone on file';
     const bizTag = multiBiz && a.business_name ? ' · '+esc(a.business_name) : '';
+    const n = a.rating || 1;
     return `<div class="bad-alert" data-slug="${esc(a.business_slug)}" data-id="${esc(a.id)}">
       <div class="ba-ico">⚠️</div>
       <div class="ba-main">
-        <div class="ba-title">ATTENTION: ${esc(a.technician_name)} got a 1 star review${bizTag}</div>
+        <div class="ba-title">ATTENTION: ${esc(a.technician_name)} got a ${n} star review${bizTag}</div>
         <div class="ba-meta">${esc(a.customer_name)} · ${esc(phone)} · Appt ${esc(appt)}</div>
       </div>
       <div class="ba-arrow">›</div>
