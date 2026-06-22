@@ -82,6 +82,24 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
+// Parse a #rrggbb hex into "r, g, b" for use in rgba() tints.
+function hexRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '17, 24, 28';
+  const n = parseInt(m[1], 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+// Lighten (amt > 0) or darken (amt < 0) a hex color toward white/black.
+function shade(hex, amt) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => {
+    const t = amt < 0 ? 0 : 255;
+    return Math.round((t - v) * Math.abs(amt) + v);
+  });
+  return '#' + ch.map(v => v.toString(16).padStart(2, '0')).join('');
+}
 
 // ── Branded booking-confirmation email ──────────────────────────────────────
 // `details` mirrors the booking summary the widget shows on the thank-you page:
@@ -253,64 +271,131 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const b = brand || EMAIL_BRANDS['handy-andy'];
   const accent = b.accent;
+  const rgb = hexRgb(accent);                  // "r, g, b" for tints
+  const tintBg   = `rgba(${rgb},0.06)`;         // very light accent wash
+  const tintCard = `rgba(${rgb},0.10)`;         // badge / icon background
+  const accentDk = shade(accent, -0.22);        // darker accent for depth
   const firstName = (details.firstName || '').trim();
   const a = details.address || {};
   const addressLine = [a.line1, [a.city, a.state].filter(Boolean).join(', '), a.zip]
     .filter(Boolean).join(', ');
 
-  const sub  = 'font-size:14px;font-weight:800;color:#11181c;margin:14px 0 7px;';
-  const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:5px 0;';
-  const ul   = 'margin:5px 0 0;padding-left:18px;color:#4b5563;font-size:13.5px;line-height:1.62;';
-  const li   = 'margin:4px 0;';
+  // One step in the "What to expect" timeline: numbered accent badge + title/body.
+  const step = (n, icon, title, body) => `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;">
+          <tr>
+            <td width="48" valign="top" style="padding:6px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+                <td align="center" valign="middle" width="38" height="38" style="width:38px;height:38px;background:${tintCard};border-radius:19px;font-size:18px;line-height:38px;">${icon}</td>
+              </tr></table>
+            </td>
+            <td valign="top" style="padding:6px 0 6px 6px;">
+              <div style="font-size:14.5px;font-weight:800;color:#11181c;margin:0 0 2px;">${esc(title)}</div>
+              <div style="font-size:13px;color:#5b6470;line-height:1.55;">${body}</div>
+            </td>
+          </tr>
+        </table>`;
 
   const subject = `Your appointment is 24 hours away!`;
 
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
-<body style="margin:0;padding:0;background:#f4f5f7;-webkit-text-size-adjust:100%;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your appointment with ${esc(b.name)} is 24 hours away.</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
+<body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your appointment with ${esc(b.name)} is 24 hours away. Here's everything you need to know.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 2px 10px rgba(16,24,40,.06);">
-        <tr><td style="background:${accent};padding:22px 28px;">
-          <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</div>
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
+
+        <!-- Header -->
+        <tr><td style="background:${accent};padding:18px 28px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</td>
+            <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:rgba(255,255,255,.82);">Appointment Reminder</td>
+          </tr></table>
         </td></tr>
-        <tr><td style="padding:30px 28px 6px;">
-          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 7px;">Only 24 hours away! &#128336;</div>
-          <div style="font-size:15px;color:#4b5563;line-height:1.55;">Hi ${esc(firstName || 'there')}, your appointment is coming up soon. Here's what you need to know.</div>
+
+        <!-- Countdown hero -->
+        <tr><td style="background:${tintBg};padding:34px 28px 30px;text-align:center;">
+          <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto 16px;"><tr>
+            <td align="center" valign="middle" width="104" height="104" style="width:104px;height:104px;background:${accent};border-radius:52px;text-align:center;">
+              <div style="font-size:34px;font-weight:800;color:#ffffff;line-height:1;">24</div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:.14em;color:rgba(255,255,255,.85);margin-top:3px;">HOURS</div>
+            </td>
+          </tr></table>
+          <div style="font-size:23px;font-weight:800;color:#11181c;margin:0 0 6px;">Your appointment is almost here!</div>
+          <div style="font-size:14.5px;color:#5b6470;line-height:1.55;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')} &mdash; you're just one day away. Here's everything you need to know before your technician arrives.</div>
         </td></tr>
-        <tr><td style="padding:18px 28px 2px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #eceef1;border-radius:10px;">
+
+        <!-- Appointment details card -->
+        <tr><td style="padding:24px 28px 4px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e8ebef;border-radius:12px;">
             <tr>
-              <td style="padding:9px 16px;font-size:13px;color:#6b7280;width:118px;vertical-align:top;">Date &amp; Time</td>
-              <td style="padding:9px 16px;font-size:14px;color:#11181c;font-weight:600;vertical-align:top;">${esc(details.dateLong || '')} ${esc(details.timeWindow || '')}</td>
+              <td width="56" valign="middle" style="padding:14px 0 14px 16px;">
+                <table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" valign="middle" width="40" height="40" style="width:40px;height:40px;background:${tintCard};border-radius:20px;font-size:18px;line-height:40px;">&#128197;</td></tr></table>
+              </td>
+              <td valign="middle" style="padding:14px 16px 14px 8px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa2ad;margin:0 0 2px;">When</div>
+                <div style="font-size:15px;font-weight:700;color:#11181c;">${esc(details.dateLong || '')}</div>
+                <div style="font-size:13.5px;color:#5b6470;margin-top:1px;">${esc(details.timeWindow || '')}</div>
+              </td>
             </tr>
+            <tr><td colspan="2" style="padding:0 16px;"><div style="border-top:1px solid #eef0f2;"></div></td></tr>
             <tr>
-              <td style="padding:9px 16px;font-size:13px;color:#6b7280;vertical-align:top;">Address</td>
-              <td style="padding:9px 16px;font-size:14px;color:#11181c;font-weight:600;vertical-align:top;">${esc(addressLine)}</td>
+              <td width="56" valign="middle" style="padding:14px 0 14px 16px;">
+                <table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" valign="middle" width="40" height="40" style="width:40px;height:40px;background:${tintCard};border-radius:20px;font-size:18px;line-height:40px;">&#128205;</td></tr></table>
+              </td>
+              <td valign="middle" style="padding:14px 16px 14px 8px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa2ad;margin:0 0 2px;">Where</div>
+                <div style="font-size:14.5px;font-weight:700;color:#11181c;line-height:1.45;">${esc(addressLine)}</div>
+              </td>
             </tr>
           </table>
         </td></tr>
-        <tr><td style="padding:24px 28px 0;">
-          <div style="border-top:1px solid #eef0f2;padding-top:22px;">
-            <div style="${sub}">What to expect</div>
-            <div style="${para}">Your technician should arrive within the 2-hour window. The technician will send an "on-my-way" text message when they are en route, which will include their estimated time of arrival (ETA). Please be prepared for their arrival.</div>
 
-            <div style="${sub}">Before your technician leaves</div>
-            <div style="${para}"><strong>Important:</strong> Once our technician completes the installation at your home, they won't be able to adjust the TV position or make any changes without a scheduled appointment. If you later decide that the TV needs to be moved up, down, or if you want to change the bracket, there will be a full charge for those adjustments.</div>
-            <div style="${para}">Please ensure that the TV is in the correct location before the technician leaves your place. If you need help selecting the height for your TV, the technician will be more than happy to help you decide.</div>
+        <!-- What to expect timeline -->
+        <tr><td style="padding:26px 28px 2px;">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${accentDk};margin:0 0 10px;">On the day</div>
+          ${step('1', '&#128663;', 'Arrival window', 'Your technician will arrive within the <strong>2-hour window</strong> of your scheduled time.')}
+          ${step('2', '&#128241;', 'On-my-way text', 'When the technician is en route, they’ll send an <strong>"on-my-way" text</strong> with their estimated time of arrival (ETA).')}
+          ${step('3', '&#9989;', 'Be prepared', 'Please be ready for their arrival so the installation can start right on time.')}
+        </td></tr>
 
-            <div style="${sub}">Cancellation policy</div>
-            <div style="${para}"><strong>Your appointment is no longer cancelable</strong> because it's within the 24-hour period. If you would still like to cancel, you can do so by calling us. There is a <strong>$50 late cancellation fee</strong> that will be applied to your card. Please give us a call for any further information.</div>
+        <!-- Important notice -->
+        <tr><td style="padding:18px 28px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;">
+            <tr>
+              <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#9888;&#65039;</td>
+              <td valign="top" style="padding:15px 16px 15px 6px;">
+                <div style="font-size:14px;font-weight:800;color:#92400e;margin:0 0 4px;">Choose your TV placement carefully</div>
+                <div style="font-size:13px;color:#9a6a13;line-height:1.6;">Once the installation is complete and the technician leaves, they can't adjust the TV position or change the bracket without a new scheduled appointment, and a <strong>full charge</strong> applies. Please confirm the exact location before they leave &mdash; your technician is happy to help you choose the perfect height.</div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <!-- Cancellation policy -->
+        <tr><td style="padding:14px 28px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;">
+            <tr>
+              <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#128222;</td>
+              <td valign="top" style="padding:15px 16px 15px 6px;">
+                <div style="font-size:14px;font-weight:800;color:#991b1b;margin:0 0 4px;">Within the 24-hour window</div>
+                <div style="font-size:13px;color:#b4453f;line-height:1.6;">Your appointment is <strong>no longer cancelable online</strong>. If you still need to cancel, please call us &mdash; a <strong>$50 late cancellation fee</strong> will be applied to your card. Give us a call for any further information.</div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:26px 28px 32px;">
+          <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;">
+            <div style="font-size:14px;font-weight:700;color:#11181c;margin:0 0 3px;">Questions or need to reschedule?</div>
+            <div style="font-size:13px;color:#6b7280;line-height:1.6;">Just give us a call and our team will be glad to help.</div>
+            <div style="font-size:12px;color:#9ca3af;margin-top:10px;">${esc(b.website)}</div>
           </div>
         </td></tr>
-        <tr><td style="padding:24px 28px 30px;">
-          <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
-            Questions or need to reschedule? Give us a call and our team will help.<br>
-            <span style="color:#9ca3af;">${esc(b.website)}</span>
-          </div>
-        </td></tr>
+
       </table>
     </td></tr>
   </table>
