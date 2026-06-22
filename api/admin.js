@@ -591,13 +591,18 @@ async function availableSlots(req, res, db, auth) {
 
   const dow = dayOfWeekFor(dateStr);
   const tz = biz.timezone || 'America/Denver';
-  // pool='partner' makes "Any Technician" scan the OTHER company's roster.
-  const rid = await rosterBizId(db, biz, (req.query.pool || '').toString());
-  let keys = await availableSlotKeys(db, rid, techId, dateStr, dow, tz);
+  // Each technician can come from a different company pool: pool drives the
+  // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
+  const ridPrimary = await rosterBizId(db, biz, (req.query.pool || '').toString());
+  let keys = await availableSlotKeys(db, ridPrimary, techId, dateStr, dow, tz);
   // Two-technician job (e.g. a large-TV lift): only offer slots where BOTH techs
-  // are free — intersect the primary's open slots with the second tech's.
-  if (techId2 && techId2 !== 'any' && techId2 !== techId) {
-    const keys2 = await availableSlotKeys(db, rid, techId2, dateStr, dow, tz);
+  // are free — intersect the primary's open slots with the second tech's. The
+  // second tech may be a concrete person OR "any" of a (possibly different)
+  // company pool; exclude the concrete primary so one person can't fill both.
+  if (techId2 && techId2 !== techId) {
+    const ridSecondary = await rosterBizId(db, biz, (req.query.pool2 || '').toString());
+    const exclude = (techId && techId !== 'any') ? techId : null;
+    const keys2 = await availableSlotKeys(db, ridSecondary, techId2, dateStr, dow, tz, exclude);
     keys = new Set([...keys].filter(k => keys2.has(k)));
   }
   const available = SLOTS.filter(s => keys.has(s.key))
@@ -657,12 +662,15 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
 // Set of slot keys a tech (or ANY tech) is available for on an exact date,
 // honouring recurring availability, one-time exceptions, AND existing bookings
 // (a slot a tech is already booked for is no longer offered — no double-booking).
-async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz) {
+// excludeTechId drops one tech from the "ANY" union, so the SAME person can't be
+// counted as both the primary and the second technician on a two-tech job.
+async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTechId = null) {
   if (!techId || techId === 'any') {
     const { data: techs } = await db.from('technicians')
       .select('id').eq('business_id', bizId).eq('active', true);
     const union = new Set();
     for (const t of (techs || [])) {
+      if (excludeTechId && t.id === excludeTechId) continue;
       const ks = await singleTechSlotKeys(db, t.id, dateStr, dow);
       const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
       ks.forEach(k => { if (!booked.has(k)) union.add(k); });
@@ -678,11 +686,12 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz) {
 // Pick the first active tech available for an exact date+slot (recurring OR a
 // one-time exception) who is NOT already booked for that slot. Falls back to any
 // active tech who is free in that slot so we never auto-create a double-booking.
-async function pickAvailableTech(db, bizId, dateStr, slotKey, tz) {
+// excludeTechId skips one tech (e.g. the primary, when auto-picking the second).
+async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null) {
   const { data: techs } = await db.from('technicians')
     .select('id').eq('business_id', bizId).eq('active', true)
     .order('created_at', { ascending: true });
-  const list = techs || [];
+  const list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
   if (!list.length) return null;
   if (dateStr && slotKey) {
     const dow = dayOfWeekFor(dateStr);
@@ -730,24 +739,29 @@ async function availableDates(req, res, db, auth) {
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // A two-technician job needs a concrete pair: a date counts as available only
-  // if there's at least one slot where BOTH techs are free (computed per-day below).
-  const isPair = !!techId2 && techId2 !== 'any' && techId && techId !== 'any' && techId2 !== techId;
-
-  // Pull recurring availability + this month's exceptions once, compute in memory.
-  let techFilter = (q) => q;
-  let techIds = null;
-  if (isPair) {
-    techIds = [techId, techId2];
-  } else if (!techId || techId === 'any') {
-    // pool='partner' makes "Any Technician" scan the OTHER company's roster.
-    const rosterId = await rosterBizId(db, biz, (req.query.pool || '').toString());
-    const { data: techs } = await db.from('technicians').select('id').eq('business_id', rosterId).eq('active', true);
-    techIds = (techs || []).map(t => t.id);
-  } else {
-    techIds = [techId];
+  // Resolve each side (primary, optional second tech) to a concrete list of
+  // technician ids to consider. Each side has its own company pool: pool drives
+  // the primary, pool2 the second tech. A side that is "any" expands to that
+  // pool's whole active roster.
+  const rosterIds = async (rid) => {
+    const { data } = await db.from('technicians').select('id').eq('business_id', rid).eq('active', true);
+    return (data || []).map(t => t.id);
+  };
+  const primaryIds = (techId && techId !== 'any')
+    ? [techId]
+    : await rosterIds(await rosterBizId(db, biz, (req.query.pool || '').toString()));
+  const wantPair = !!techId2 && techId2 !== techId;
+  let secondaryIds = [];
+  if (wantPair) {
+    if (techId2 !== 'any') secondaryIds = [techId2];
+    else {
+      secondaryIds = await rosterIds(await rosterBizId(db, biz, (req.query.pool2 || '').toString()));
+      // One person can't be both techs: drop a concrete primary from the pool.
+      if (techId && techId !== 'any') secondaryIds = secondaryIds.filter(id => id !== techId);
+    }
   }
-  if (!techIds.length) return res.status(200).json({ dates: [], month });
+  if (!primaryIds.length || (wantPair && !secondaryIds.length)) return res.status(200).json({ dates: [], month });
+  const techIds = [...new Set([...primaryIds, ...secondaryIds])];
 
   const { data: av } = await db.from('technician_availability')
     .select('technician_id, day_of_week, slot_key').in('technician_id', techIds);
@@ -795,22 +809,24 @@ async function availableDates(req, res, db, auth) {
     return set;
   };
 
+  // Union of one side's free slots for a date (across that side's tech ids).
+  const sideSet = (ids, dow, dateStr) => {
+    const set = new Set();
+    for (const tid of ids) for (const k of daySetFor(tid, dow, dateStr)) set.add(k);
+    return set;
+  };
   const dates = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2, '0')}`;
     if (dateStr < todayStr) continue;                       // no past dates
     const dow = dayOfWeekFor(dateStr);
-    if (isPair) {
-      // Both techs must share at least one open slot that day.
-      const a = daySetFor(techId, dow, dateStr);
-      const b = daySetFor(techId2, dow, dateStr);
-      if ([...a].some(k => b.has(k))) dates.push(dateStr);
-    } else {
-      let anySlot = false;
-      for (const tid of techIds) {
-        if (daySetFor(tid, dow, dateStr).size) { anySlot = true; break; }
-      }
-      if (anySlot) dates.push(dateStr);
+    const primarySet = sideSet(primaryIds, dow, dateStr);
+    if (wantPair) {
+      // Need at least one slot where the primary AND a second tech are both free.
+      const secondarySet = sideSet(secondaryIds, dow, dateStr);
+      if ([...primarySet].some(k => secondarySet.has(k))) dates.push(dateStr);
+    } else if (primarySet.size) {
+      dates.push(dateStr);
     }
   }
   return res.status(200).json({ dates, month });
@@ -913,12 +929,18 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id = await pickAvailableTech(db, rid, body.scheduled_date, body.scheduled_slot, tz);
   }
 
-  // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift).
+  // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift). The
+  // second tech may come from EITHER company (pool2) and may be "any", which we
+  // auto-pick from that pool excluding the primary so it's never the same person.
   let secondary_technician_id = body.secondary_technician_id || null;
-  // A mandatory two-person job (large TV, customer can't help lift) must name a
-  // second technician, and the two must differ.
+  if (secondary_technician_id === 'any') {
+    const rid2 = await rosterBizId(db, biz, (body.pool2 || '').toString());
+    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id);
+  }
+  // A mandatory two-person job (large TV, customer can't help lift) must end up
+  // with a concrete second technician, and the two must differ.
   if (body.needs_lifting && !secondary_technician_id) {
-    return res.status(400).json({ error: 'This job requires a second technician.' });
+    return res.status(400).json({ error: 'This job requires a second technician, but no one from the chosen team is free for that time. Pick a specific second tech or another time.' });
   }
   if (secondary_technician_id && secondary_technician_id === technician_id) {
     return res.status(400).json({ error: 'The two technicians must be different.' });

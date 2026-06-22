@@ -529,6 +529,7 @@
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
         <label id="nbSecondTechLabel" style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin:8px 0 6px;">Second technician</label>
+        <select class="search" style="margin:0 0 6px;display:none" id="nbSecondTechPool"></select>
         <select class="search" style="margin:0" id="nbSecondTech"></select>
         <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Times shown only when both technicians are available.</div>
       </div>
@@ -2403,46 +2404,58 @@ async function openNewBooking(){
         nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
       }
     }catch(err){ /* no partner / not configured — single-company booking only */ }
-    const poolWrap=document.getElementById('nbTechPoolWrap');
-    const poolSel=document.getElementById('nbTechPool');
-    if(nbPartner){
-      poolSel.innerHTML=`<option value="own">${esc(current.name)} Team</option>`+
-        `<option value="partner">${esc(nbPartner.name)} Team</option>`;
-      poolSel.value='own'; poolWrap.style.display='';
-    }else{
-      poolSel.innerHTML='<option value="own">Own Team</option>'; poolSel.value='own'; poolWrap.style.display='none';
-    }
+    nbBuildPoolSelectors();
     nbPopulateTechs();
+    nbPopulateSecondTechs();
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
 // Cross-company booking: own roster, and the partner company's roster (if any).
+// The primary AND the second technician each have their own company pool, so a
+// two-tech job can pair (say) a Doms primary with an "any Handy Andy" helper.
 let nbOwnTechs=[], nbPartner=null;
 function nbCurrentPool(){ const el=document.getElementById('nbTechPool'); return (el && el.value)==='partner' ? 'partner' : 'own'; }
-// Fill the technician dropdown from whichever company pool is selected. The 2nd
-// technician picker stays own-company only (cross-company is single-tech).
+function nbCurrentSecondPool(){ const el=document.getElementById('nbSecondTechPool'); return (el && el.value)==='partner' ? 'partner' : 'own'; }
+function nbTechsForPool(pool){ return pool==='partner' && nbPartner ? nbPartner.technicians : nbOwnTechs; }
+function nbAnyLabelFor(pool){ return pool==='partner' && nbPartner ? `Any ${nbPartner.name} Technician` : 'Any Technician'; }
+// Build the two company-pool dropdowns (primary + second tech). Shown only when
+// a partner company exists; otherwise it's single-company as before.
+function nbBuildPoolSelectors(){
+  const opts = nbPartner
+    ? `<option value="own">${esc(current.name)} Team</option><option value="partner">${esc(nbPartner.name)} Team</option>`
+    : '<option value="own">Own Team</option>';
+  for(const id of ['nbTechPool','nbSecondTechPool']){
+    const sel=document.getElementById(id); sel.innerHTML=opts; sel.value='own';
+  }
+  document.getElementById('nbTechPoolWrap').style.display = nbPartner ? '' : 'none';
+  document.getElementById('nbSecondTechPool').style.display = nbPartner ? '' : 'none';
+}
+// Fill the PRIMARY technician dropdown from its selected company pool.
 function nbPopulateTechs(){
   const pool=nbCurrentPool();
-  const list = pool==='partner' && nbPartner ? nbPartner.technicians : nbOwnTechs;
-  const anyLabel = pool==='partner' && nbPartner ? `Any ${nbPartner.name} Technician` : 'Any Technician';
-  document.getElementById('nbTech').innerHTML=`<option value="any">${esc(anyLabel)}</option>`+
-    list.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  document.getElementById('nbTech').innerHTML=`<option value="any">${esc(nbAnyLabelFor(pool))}</option>`+
+    nbTechsForPool(pool).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+}
+// Fill the SECOND technician dropdown from its (independent) company pool.
+function nbPopulateSecondTechs(){
+  const pool=nbCurrentSecondPool();
   document.getElementById('nbSecondTech').innerHTML='<option value="">— Select —</option>'+
-    nbOwnTechs.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    `<option value="any">${esc(nbAnyLabelFor(pool))}</option>`+
+    nbTechsForPool(pool).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
 }
 document.getElementById('nbTechPool').addEventListener('change',()=>{
   nbPopulateTechs();
-  // Partner pool is single-tech: drop any second technician + its picker.
-  if(nbCurrentPool()==='partner'){
-    const sel=document.getElementById('nbSecondTech'); if(sel) sel.value='';
-    document.getElementById('nbSecondTechWrap').style.display='none';
-  }else{ syncSecondTech(); }
+  syncSecondTech();                 // second-tech requirement is unaffected by primary pool
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
   document.getElementById('nbSlotsWrap').style.display='none';
   loadNbCalendar();
+});
+document.getElementById('nbSecondTechPool').addEventListener('change',()=>{
+  nbPopulateSecondTechs();
+  onSecondTechChanged();            // new second-tech pool invalidates the chosen date/slot
 });
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
@@ -2531,28 +2544,28 @@ function nbSecondTechMode(){
 // The concrete 2nd tech that should constrain availability (or null). A pair can
 // only be intersected against a CONCRETE primary, so "Any" primary yields null.
 function nbEffectiveSecondTech(){
-  if(nbCurrentPool()==='partner') return null;   // cross-company is single-tech
   if(nbSecondTechMode()==='none') return null;
-  const v=document.getElementById('nbSecondTech').value;
+  const v=document.getElementById('nbSecondTech').value;   // '', 'any', or a tech id
   if(!v) return null;
   const p=document.getElementById('nbTech').value;
-  if(!p || p==='any' || v===p) return null;
+  // A pair needs a concrete primary to intersect against; "any" second tech is OK.
+  if(!p || p==='any') return null;
+  if(v!=='any' && v===p) return null;                      // same concrete person — ignore
   return v;
 }
 // Why the calendar can't be computed yet. A two-tech job (mandatory, or optional
 // once a helper is chosen) needs a concrete, distinct pair to find shared slots.
 function nbAvailabilityBlockedReason(){
-  if(nbCurrentPool()==='partner') return '';      // single-tech cross-company job
   const mode=nbSecondTechMode();
   const p=document.getElementById('nbTech').value;
   const s=document.getElementById('nbSecondTech').value;
   if(mode==='mandatory'){
     if(!p || p==='any') return 'Select the primary technician — this job needs two.';
     if(!s) return 'Select the second technician — this job needs two.';
-    if(s===p) return 'The two technicians must be different.';
+    if(s!=='any' && s===p) return 'The two technicians must be different.';
   } else if(mode==='optional' && s){       // a helper was chosen for a 1-person-OK job
     if(!p || p==='any') return 'Select the primary technician to pair with the second.';
-    if(s===p) return 'The two technicians must be different.';
+    if(s!=='any' && s===p) return 'The two technicians must be different.';
   }
   return '';
 }
@@ -2563,8 +2576,6 @@ let nbPrevSecondMode='none';
 function syncSecondTech(){
   const wrap=document.getElementById('nbSecondTechWrap');
   const sel=document.getElementById('nbSecondTech');
-  // A cross-company (partner) job is always single-tech — never show a 2nd picker.
-  if(nbCurrentPool()==='partner'){ wrap.style.display='none'; if(sel.value) sel.value=''; return; }
   const mode=nbSecondTechMode();
   if(mode==='none'){
     wrap.style.display='none';
@@ -2648,7 +2659,8 @@ async function loadNbCalendar(){
   document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
   const params={ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:techId };
   if(nbCurrentPool()==='partner') params.pool='partner';
-  const second=nbEffectiveSecondTech(); if(second) params.secondary_technician_id=second;
+  const second=nbEffectiveSecondTech();
+  if(second){ params.secondary_technician_id=second; if(nbCurrentSecondPool()==='partner') params.pool2='partner'; }
   try{
     const r=await api('available_dates',{ params });
     nbAvailDates=new Set(r.dates||[]);
@@ -2686,7 +2698,8 @@ async function loadNbSlots(date){
   const techId=document.getElementById('nbTech').value;
   const params={ business:current.slug, date, technician_id:techId||'any' };
   if(nbCurrentPool()==='partner') params.pool='partner';
-  const second=nbEffectiveSecondTech(); if(second) params.secondary_technician_id=second;
+  const second=nbEffectiveSecondTech();
+  if(second){ params.secondary_technician_id=second; if(nbCurrentSecondPool()==='partner') params.pool2='partner'; }
   try{
     const r=await api('available_slots',{ params });
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
@@ -3240,18 +3253,19 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
 
   // Second-technician requirement, driven by the "Lifting Help" selection.
   // "cannot help lift" / "86"+" make a 2nd tech mandatory; "can help lift" makes
-  // it optional. Validate BEFORE tokenizing a card so we never charge then fail.
-  const crossCompany=nbCurrentPool()==='partner';
-  const secondMode=(assurion||crossCompany)?'none':nbSecondTechMode();
+  // it optional. The second tech may be "any" (auto-picked server-side) or come
+  // from the other company. Validate BEFORE tokenizing a card so we never charge
+  // then fail.
+  const secondMode=assurion?'none':nbSecondTechMode();
   const secondTechId=(secondMode!=='none') ? (document.getElementById('nbSecondTech').value||'') : '';
   if(secondMode==='mandatory'){
     if(!techId || techId==='any'){ err.textContent='This job needs two technicians — pick the primary technician.'; return; }
     if(!secondTechId){ err.textContent='This job requires a second technician. Please select one.'; return; }
-    if(secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
+    if(secondTechId!=='any' && secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
   }
   if(secondMode==='optional' && secondTechId){
     if(!techId || techId==='any'){ err.textContent='Pick the primary technician to pair with the second.'; return; }
-    if(secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
+    if(secondTechId!=='any' && secondTechId===techId){ err.textContent='The two technicians must be different.'; return; }
   }
 
   // For card payments, tokenize the card with Stripe before creating the booking.
@@ -3279,8 +3293,9 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
         postal_code:document.getElementById('nbZip').value.trim() },
       service_id: nbServiceId || document.getElementById('nbService').value || null,
       technician_id: techId==='any'?'any':techId||null,
-      pool: crossCompany?'partner':'own',
+      pool: nbCurrentPool(),
       secondary_technician_id: secondTechId||null,
+      pool2: nbCurrentSecondPool(),
       needs_lifting: secondMode==='mandatory',
       tv_size_category: nbSelectedLiftingKind()||null,
       scheduled_date: date,
