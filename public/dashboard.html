@@ -211,6 +211,20 @@ function render(d){
       <div><span style="font-size:13px;color:var(--mute);">Revenue</span> <span style="font-weight:700;">${fmt$(tc.revenue)}</span> ${chg(t.revenue, tc.revenue)}</div></div></div></div>`;
   }
 
+  // Service-area denial warning — flags when an unusually high share of ZIP checks were turned away.
+  {
+    const _zc = (t.zipServed || 0) + (t.zipUnserved || 0);
+    const _zu = t.zipUnserved || 0;
+    const _rate = _zc > 0 ? Math.round(_zu / _zc * 100) : 0;
+    if (_zu >= 5 && _rate >= 50) {
+      const _zips = (d.unservedZips || []).map(z => z.zip).filter(Boolean).slice(0, 15).join(', ');
+      html += `<div class="card" style="background:#fff5f5;border:1px solid #ffd9d9;border-left:5px solid var(--red);padding:14px 18px;margin-bottom:18px;">
+        <div style="font-weight:800;font-size:15px;color:#b91c1c;margin-bottom:4px;">⚠️ Possible service-area problem — ${_zu} of ${_zc} area checks (${_rate}%) were turned away this period</div>
+        <div style="font-size:13px;color:#7f1d1d;line-height:1.5;">If any of these are areas you actually serve, the booking widget is rejecting real customers and you are losing bookings. Turned away${_zips ? ': ' + _zips : ' (ZIPs not recorded)'}. Double-check the widget's service area.</div>
+      </div>`;
+    }
+  }
+
   const kpis = [
     ['Sessions', t.sessions, `${t.visitors} unique visitors`],
     ['Bookings', t.bookings, t.bookingFailures>0?`<span class="bad">${t.bookingFailures} failed attempts</span>`:'no failed attempts'],
