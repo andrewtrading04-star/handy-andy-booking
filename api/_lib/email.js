@@ -188,7 +188,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       + `&details=${encodeURIComponent(calDesc)}`
       + `&location=${encodeURIComponent(calLoc)}`;
     const base = String(details.baseUrl || '').replace(/\/$/, '');
-    const icsUrl = `${base}/api/calendar?title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
+    const icsUrl = `${base}/api/book?action=ics&title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
       + `&location=${encodeURIComponent(calLoc)}&details=${encodeURIComponent(calDesc)}`;
     // Apple button only when we have an absolute base URL to serve the .ics from.
     const appleBtn = base ? `

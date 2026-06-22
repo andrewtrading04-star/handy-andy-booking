@@ -53,13 +53,66 @@ function afterHoursFeeFor(slotId, territoryId) {
   return hour >= 20 ? AFTER_HOURS_FEE : 0;
 }
 
+// ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
+// RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
+function icsEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+}
+// Epoch seconds -> UTC stamp "YYYYMMDDTHHMMSSZ".
+function icsStamp(sec) {
+  const d = new Date(Number(sec) * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+         `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+}
+// Fold long lines to <=75 octets per RFC 5545 (continuation lines start with a space).
+function icsFold(line) {
+  if (line.length <= 73) return line;
+  const out = [line.slice(0, 73)];
+  let s = line.slice(73);
+  while (s.length > 72) { out.push(' ' + s.slice(0, 72)); s = s.slice(72); }
+  if (s.length) out.push(' ' + s);
+  return out.join('\r\n');
+}
+// GET /api/book?action=ics&title=&start=<epochSec>&end=<epochSec>&location=&details=
+// Returns a downloadable single-event calendar file.
+function serveIcs(req, res) {
+  const { title, start, end, location, details } = req.query || {};
+  const startSec = Number(start), endSec = Number(end);
+  if (!startSec || !endSec) return res.status(400).json({ error: 'start and end (epoch seconds) are required' });
+  const uid = `booking-${startSec}-${Math.random().toString(36).slice(2, 10)}@handyandy`;
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Handy Andy//Booking//EN',
+    'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${icsStamp(Math.floor(Date.now() / 1000))}`,
+    `DTSTART:${icsStamp(startSec)}`,
+    `DTEND:${icsStamp(endSec)}`,
+    `SUMMARY:${icsEscape(title || 'Appointment')}`,
+    location ? `LOCATION:${icsEscape(location)}` : null,
+    details ? `DESCRIPTION:${icsEscape(details)}` : null,
+    'STATUS:CONFIRMED',
+    'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', 'DESCRIPTION:Appointment reminder', 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].filter(Boolean).map(icsFold);
+  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="appointment.ics"');
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).send(lines.join('\r\n'));
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+  // Public calendar (.ics) download for the "Add to Apple Calendar" button in
+  // booking-confirmation emails. Lives here (rather than its own api/ file) to
+  // stay under Vercel's 12-function Hobby cap.
+  if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
