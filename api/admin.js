@@ -789,6 +789,7 @@ async function bookingCreate(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const c = body.customer || {};
   if (!c.name && !c.phone) return res.status(400).json({ error: 'Customer name or phone required' });
+  console.log(`[admin] booking create: biz=${biz.slug} customer email=${c.email ? 'present' : 'ABSENT'} phone=${c.phone ? 'present' : 'absent'}`);
 
   // Reuse an existing customer (by phone, then email) or create one.
   let customer_id = c.id || null;
@@ -1023,7 +1024,8 @@ async function bookingCreate(req, res, db, auth, body) {
       }, brandFor(biz.slug));
       const { from } = emailConfig(biz.slug);
       const result = await sendEmail({ slug: biz.slug, to: c.email, subject, html, replyTo: from });
-      if (!result.sent) console.warn('[admin] confirmation email not sent:', result.skipped || result.error);
+      if (result.sent) console.log(`[admin] confirmation email SENT to ${c.email} (${biz.slug}) id=${result.id || '?'}`);
+      else console.warn(`[admin] confirmation email NOT sent to ${c.email} (${biz.slug}):`, result.skipped || result.error);
     } catch (e) {
       console.error('[admin] confirmation email error:', e.message);
     }
