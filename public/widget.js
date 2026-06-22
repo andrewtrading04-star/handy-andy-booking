@@ -375,6 +375,13 @@
   let customer={first_name:'',last_name:'',email:'',phone:'',address:''};
   let tipAmount=0, couponCode='';
   let optionComments={}; // { [optionId]: "free text" } for Handyman / Other
+  // Hard guard against double-booking: once a booking POST is in flight we never
+  // fire a second one, so repeated "Complete My Booking" clicks can't create
+  // duplicate Zenbooker jobs (especially when the server is slow to respond).
+  let isSubmitting=false;
+  // Stable per-page idempotency key, reused across retries of the same booking so
+  // the server can recognize a repeat submission instead of creating a new job.
+  const BOOKING_IDEM_KEY='ha_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
   // Stripe
   let _stripe=null, _stripeElements=null, _stripeCard=null;
 
@@ -1221,6 +1228,7 @@
 
   // ─── Submit ───────────────────────────────────────────────────────────────
   async function doSubmit(root){
+    if(isSubmitting)return; // already booking — ignore extra clicks so we don't double-book
     customer.first_name=root.querySelector('#c-fn').value.trim();
     customer.last_name=root.querySelector('#c-ln').value.trim();
     customer.email=root.querySelector('#c-em').value.trim();
@@ -1233,6 +1241,9 @@
     if(couponCode&&!(couponCode in COUPONS)){logEvent('form_error','customer',null,'invalid coupon: '+couponCode);return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');}
     if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
     if(couponCode)logEvent('answer','coupon:'+couponCode);
+
+    // Lock now — all validation passed, we're committing to a single booking attempt.
+    isSubmitting=true;
 
     // Tokenize card with Stripe
     let stripePaymentMethodId=null;
@@ -1250,6 +1261,7 @@
         },
       });
       if(error){
+        isSubmitting=false; // no job created yet — let them fix the card and retry
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
         logEvent('booking_failed','customer',null,'card: '+error.message);
         return alert(error.message);
@@ -1296,6 +1308,7 @@
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
+      idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
@@ -1318,15 +1331,22 @@
         logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0));
         window.location.href=THANKYOU_URL;
       }else{
+        // Server returned an error status — the job was not created, so it's safe
+        // to unlock and let the customer correct the issue and try again.
+        isSubmitting=false;
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
         const err=await r.json().catch(()=>({}));
         logEvent('booking_failed','customer',null,err.error||('HTTP '+r.status));
         alert(err.error||'Booking failed. Please try again.');
       }
     }catch{
-      if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
-      logEvent('booking_failed','customer',null,'connection error');
-      alert('Connection error. Please try again.');
+      // Ambiguous failure (timeout / dropped connection): the request may have
+      // reached the server and CREATED the job even though we got no response.
+      // Re-submitting here is exactly what produces duplicate bookings, so we keep
+      // the button locked and tell the customer not to click again.
+      if(submitBtn){submitBtn.textContent='Confirming your booking…';submitBtn.disabled=true;}
+      logEvent('booking_failed','customer',null,'connection error (locked to avoid duplicate booking)');
+      alert('Your booking is being confirmed and may already be received — please do NOT submit again. Check your email for a confirmation, or call us at 713-876-9032 to verify.');
     }
   }
 
