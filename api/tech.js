@@ -13,6 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { smsNotificationsOn } from './_lib/notify.js';
+import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -323,7 +324,7 @@ async function status(req, res, db, auth, body) {
 
   // The job must belong to this tech.
   const { data: existing } = await db.from('bookings')
-    .select(`id, scheduled_at, review_token, customer:customers ( name, phone )`).eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
+    .select(`id, scheduled_at, review_token, sms_consent, metadata, customer:customers ( name, phone, email )`).eq('id', id).eq('business_id', auth.business_id).eq('technician_id', auth.tech_id).single();
   if (!existing) return res.status(404).json({ error: 'Job not found' });
 
   // Gate completion on photo documentation (also enforced in the UI).
@@ -356,11 +357,48 @@ async function status(req, res, db, auth, body) {
     const msg = `Your tech is on the way! ETA ${etaMinutes} minutes.`;
     sendSMS(existing.customer.phone, msg).catch(console.error);
   }
-  if (next === 'completed' && existing.customer?.phone && existing.review_token && existing.sms_consent) {
+
+  // On completion: send the branded review-request email immediately, and an SMS
+  // 20 minutes later (if the customer opted in). The tech app, not the dashboard,
+  // is where jobs are normally completed — so this is the path that matters.
+  if (next === 'completed' && existing.review_token) {
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
-    const msg = `Your job is complete! How did we do? ${reviewLink}`;
-    sendSMS(existing.customer.phone, msg).catch(console.error);
+
+    // Look up the business slug so we can brand the email (orange vs blue).
+    let slug = '';
+    try {
+      const { data: biz } = await db.from('businesses').select('slug').eq('id', auth.business_id).single();
+      slug = biz?.slug || '';
+    } catch { /* fall back to default brand */ }
+
+    // Review email — sent right away, only once (tracked in metadata).
+    if (existing.customer?.email && !existing.metadata?.review_email_sent_at) {
+      try {
+        const brand = brandFor(slug);
+        const { subject, html } = reviewEmail({
+          firstName: existing.customer.name || 'there',
+          reviewUrl: reviewLink,
+        }, brand);
+        const { from } = emailConfig(slug);
+        const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
+        if (emailResult.sent) {
+          const newMeta = { ...(existing.metadata || {}), review_email_sent_at: new Date().toISOString() };
+          await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+          console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);
+        } else {
+          console.warn(`[review] email NOT sent to ${existing.customer.email} (${slug}) booking=${id}:`, emailResult.skipped || emailResult.error);
+        }
+      } catch (e) {
+        console.error(`[review] email failed for booking ${id}:`, e.message);
+      }
+    }
+
+    // SMS reminder 20 minutes after completion (if customer opted in).
+    if (existing.customer?.phone && existing.sms_consent) {
+      const msg = `Your job is complete! How did we do? ${reviewLink}`;
+      setTimeout(() => { sendSMS(existing.customer.phone, msg).catch(console.error); }, 20 * 60 * 1000);
+    }
   }
 
   return res.status(200).json({ ok: true, status: next });
