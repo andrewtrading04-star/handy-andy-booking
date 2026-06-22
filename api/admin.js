@@ -1023,6 +1023,13 @@ async function bookingCreate(req, res, db, auth, body) {
         jobId: bRow.id,
       }, brandFor(biz.slug));
       const { from } = emailConfig(biz.slug);
+      // TEMP diagnostic: reveal which Resend key path is in use (no secrets logged).
+      // Tells us if DOMS_RESEND_API_KEY is actually present on this project/env or
+      // if we're silently falling back to the shared Handy Andy key (which can't
+      // send from domstvmounting.com). Safe to remove once Doms email is confirmed.
+      const _domsKey = process.env.DOMS_RESEND_API_KEY || '';
+      const _haKey = process.env.RESEND_API_KEY || '';
+      console.log(`[admin] email key path (${biz.slug}): DOMS_RESEND_API_KEY set=${!!_domsKey} (len=${_domsKey.length}) RESEND_API_KEY set=${!!_haKey} (len=${_haKey.length}) usingFallback=${biz.slug === 'doms' && !_domsKey} domsKeyDiffersFromHA=${!!_domsKey && _domsKey !== _haKey} from=${from}`);
       const result = await sendEmail({ slug: biz.slug, to: c.email, subject, html, replyTo: from });
       if (result.sent) console.log(`[admin] confirmation email SENT to ${c.email} (${biz.slug}) id=${result.id || '?'}`);
       else console.warn(`[admin] confirmation email NOT sent to ${c.email} (${biz.slug}):`, result.skipped || result.error);
