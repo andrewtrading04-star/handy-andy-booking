@@ -24,6 +24,33 @@ import { uploadImage, deleteImage } from './_lib/storage.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
+// ── Cross-company booking ────────────────────────────────────────────────────
+// Each business may book the OTHER company's technicians when its own are full.
+// A booking always lives on its HOST business (the one the secretary is logged
+// into); only the assigned technician_id may belong to the partner. A job is
+// "cross-company" whenever the booking's business differs from the assigned
+// tech's home business — derived live, so no schema change is needed.
+const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy' };
+
+// The partner business row for a host slug, or null when there isn't one.
+async function partnerBusiness(db, hostSlug) {
+  const pslug = PARTNER_SLUG[hostSlug];
+  if (!pslug) return null;
+  const { data } = await db.from('businesses')
+    .select('id, slug, name, timezone').eq('slug', pslug).eq('active', true).maybeSingle();
+  return data || null;
+}
+
+// Which business's technician roster an "Any Technician" / auto-pick should scan:
+// the partner company when pool==='partner' (and one exists), else the host.
+async function rosterBizId(db, hostBiz, pool) {
+  if (pool === 'partner') {
+    const p = await partnerBusiness(db, hostBiz.slug);
+    if (p) return p.id;
+  }
+  return hostBiz.id;
+}
+
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 function toE164(raw) {
@@ -70,8 +97,10 @@ function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Offic
 // may be null (unscheduled job) — we fall back to a generic line.
 async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO) {
   if (!technicianId) return;
+  // Look up by id ALONE (not business) so a cross-company tech — whose home
+  // business differs from this booking's — is still found and texted.
   const { data: tech } = await db.from('technicians')
-    .select('phone').eq('id', technicianId).eq('business_id', biz.id).maybeSingle();
+    .select('phone, business_id').eq('id', technicianId).maybeSingle();
   if (!tech?.phone) return;
   const tz = biz.timezone || 'America/Denver';
   let whenTxt = 'a new job';
@@ -82,7 +111,12 @@ async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO) {
       });
     } catch { /* keep generic */ }
   }
-  const msg = `You just got a job for ${whenTxt}. Please check your schedule for more information.`;
+  // Cross-company: the tech works for the other company today. Make it
+  // unmistakable which business this job belongs to.
+  const crossCompany = tech.business_id && tech.business_id !== biz.id;
+  const msg = crossCompany
+    ? `NEW JOB FOR ${String(biz.name || '').toUpperCase()}: you're booked for ${whenTxt}. IMPORTANT: this job is for ${biz.name} (not your own company). Check your schedule for the details.`
+    : `You just got a job for ${whenTxt}. Please check your schedule for more information.`;
   sendSMS(tech.phone, msg).catch(console.error);
 }
 
@@ -126,6 +160,7 @@ export default async function handler(req, res) {
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'technicians':       return await technicians(req, res, db, auth);
+      case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
@@ -341,9 +376,12 @@ async function availabilityOverview(req, res, db, auth) {
     // Existing (non-cancelled) bookings occupy slots: a tech with a job in a slot
     // is NOT available for it, so the overview must subtract them (same rule the
     // New Booking calendar already uses). Mapped to { technician_id, date, slot_key }.
+    // No business filter: a tech busy on a CROSS-COMPANY job (booked by the
+    // partner company) must still show as occupied here, so the office never
+    // double-books them. (Matched by technician_id, which is globally unique.)
     const { data: bk } = await db.from('bookings')
       .select('technician_id, scheduled_at')
-      .eq('business_id', biz.id).in('technician_id', ids)
+      .in('technician_id', ids)
       .neq('status', 'cancelled').not('scheduled_at', 'is', null)
       .order('scheduled_at', { ascending: true }).limit(2000);
     bookings = (bk || []).map(b => {
@@ -553,11 +591,13 @@ async function availableSlots(req, res, db, auth) {
 
   const dow = dayOfWeekFor(dateStr);
   const tz = biz.timezone || 'America/Denver';
-  let keys = await availableSlotKeys(db, biz.id, techId, dateStr, dow, tz);
+  // pool='partner' makes "Any Technician" scan the OTHER company's roster.
+  const rid = await rosterBizId(db, biz, (req.query.pool || '').toString());
+  let keys = await availableSlotKeys(db, rid, techId, dateStr, dow, tz);
   // Two-technician job (e.g. a large-TV lift): only offer slots where BOTH techs
   // are free — intersect the primary's open slots with the second tech's.
   if (techId2 && techId2 !== 'any' && techId2 !== techId) {
-    const keys2 = await availableSlotKeys(db, biz.id, techId2, dateStr, dow, tz);
+    const keys2 = await availableSlotKeys(db, rid, techId2, dateStr, dow, tz);
     keys = new Set([...keys].filter(k => keys2.has(k)));
   }
   const available = SLOTS.filter(s => keys.has(s.key))
@@ -593,9 +633,13 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
   if (!techId || !dateStr) return new Set();
   const dayStart = localDateStartUTC(tz, dateStr);
   const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1));
+  // Match by technician_id ALONE (no business filter): a tech booked for ANY
+  // company in this slot is unavailable everywhere. This is what makes a
+  // cross-company booking remove the slot on BOTH platforms. (technician_id is a
+  // globally-unique UUID, so this never widens results for single-company jobs.)
   let q = db.from('bookings')
     .select('id, scheduled_at')
-    .eq('business_id', bizId).eq('technician_id', techId)
+    .eq('technician_id', techId)
     .neq('status', 'cancelled')
     .not('scheduled_at', 'is', null)
     .gte('scheduled_at', dayStart.toISOString())
@@ -696,7 +740,9 @@ async function availableDates(req, res, db, auth) {
   if (isPair) {
     techIds = [techId, techId2];
   } else if (!techId || techId === 'any') {
-    const { data: techs } = await db.from('technicians').select('id').eq('business_id', biz.id).eq('active', true);
+    // pool='partner' makes "Any Technician" scan the OTHER company's roster.
+    const rosterId = await rosterBizId(db, biz, (req.query.pool || '').toString());
+    const { data: techs } = await db.from('technicians').select('id').eq('business_id', rosterId).eq('active', true);
     techIds = (techs || []).map(t => t.id);
   } else {
     techIds = [techId];
@@ -722,9 +768,11 @@ async function availableDates(req, res, db, auth) {
   const tz = biz.timezone || 'America/Denver';
   const winStart = localDateStartUTC(tz, monthStart);
   const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
+  // No business filter: a partner tech's jobs in their OWN company must also
+  // count as busy, so cross-company bookings can't double-book them.
   const { data: bk } = await db.from('bookings')
     .select('technician_id, scheduled_at')
-    .eq('business_id', biz.id).in('technician_id', techIds)
+    .in('technician_id', techIds)
     .neq('status', 'cancelled').not('scheduled_at', 'is', null)
     .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString());
   const occ = {};   // `${techId}:${date}` -> Set(slot_key)
@@ -856,9 +904,13 @@ async function bookingCreate(req, res, db, auth, body) {
   // this date+slot. Honours one-time exceptions (not just recurring), and falls
   // back to any active tech so a bookable date never lands as an unassigned job
   // the technician can't see.
+  // pool='partner' books from the OTHER company's roster. A specific partner
+  // tech UUID is used as-is (technician_id is globally unique); 'any' auto-picks
+  // from whichever roster the pool points at.
   let technician_id = body.technician_id;
   if (technician_id === 'any') {
-    technician_id = await pickAvailableTech(db, biz.id, body.scheduled_date, body.scheduled_slot, tz);
+    const rid = await rosterBizId(db, biz, (body.pool || '').toString());
+    technician_id = await pickAvailableTech(db, rid, body.scheduled_date, body.scheduled_slot, tz);
   }
 
   // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift).
@@ -1458,6 +1510,23 @@ async function technicians(req, res, db, auth) {
   return res.status(200).json({ technicians: techs });
 }
 
+// ── Partner-company technicians (cross-company booking) ──────────────────────
+// The OTHER company's bookable technicians, so a secretary can fill a gap with a
+// partner tech when their own are full. Scope is enforced on the HOST business
+// (the caller's own) — only names + ids are returned for the picker.
+async function partnerTechnicians(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const partner = await partnerBusiness(db, biz.slug);
+  if (!partner) return res.status(200).json({ partner: null, technicians: [] });
+  const { data, error } = await db.from('technicians')
+    .select('id, name').eq('business_id', partner.id).eq('active', true).order('name');
+  if (error) throw error;
+  return res.status(200).json({
+    partner: { slug: partner.slug, name: partner.name },
+    technicians: data || [],
+  });
+}
+
 async function technicianUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -1579,10 +1648,10 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 let bookingLiftCols = true;
 function bookingSelect() {
   const base = `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id,
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
-          technician:technicians ( id, name, status, color ),
+          technician:technicians ( id, name, status, color, business_id, business:businesses ( name ) ),
           service:services ( id, name ),
           photos:booking_photos ( count ),
           notes_list:booking_notes ( count )`;
@@ -1619,9 +1688,13 @@ function shapeBooking(b) {
     needs_lifting: b.needs_lifting,
     tv_size_category: b.tv_size_category,
     service_area_id: b.service_area_id,
+    // Cross-company: the assigned tech's home business differs from this booking's.
+    // partner_company is that tech's company name (e.g. "Doms") for a clear tag.
+    cross_company: !!(b.technician?.business_id && b.business_id && b.technician.business_id !== b.business_id),
+    partner_company: b.technician?.business?.name || null,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
     customer: b.customer || null,
-    technician: b.technician || null,
+    technician: b.technician ? { id: b.technician.id, name: b.technician.name, status: b.technician.status, color: b.technician.color } : null,
     service: b.service || null,
     photo_count: Array.isArray(b.photos) ? (b.photos[0]?.count || 0) : 0,
     note_count: Array.isArray(b.notes_list) ? (b.notes_list[0]?.count || 0) : 0,
