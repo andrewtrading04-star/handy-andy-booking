@@ -1612,6 +1612,68 @@ async function review(req, res, body) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
+// ── Google review (GMB) routing ─────────────────────────────────────────────
+// A 5-star customer is sent to a Google listing to post their review. The goal
+// is to spread reviews across BOTH accounts in a metro so no single profile
+// gets them all. Routing is by metro; within a metro with two listings the
+// pick is stable per booking (refresh-safe) and split ~50/50 across them.
+//
+// Metro is decided by the technician first (the owner thinks of it that way:
+// "Juan -> Houston, Zach -> Austin, Steve/Kregg -> Denver"); if the tech isn't
+// mapped we fall back to the booking's service-area name, then a default.
+// Doms has a single listing, so every Doms job goes there.
+const GMB_LISTINGS = {
+  'handy-andy': {
+    houston: ['https://g.page/r/CdizxHwpwcE0EBM/review', 'https://g.page/r/CeA7fWzbLgO8EBM/review'],
+    denver:  ['https://g.page/r/Ccj-ZjdeLtzfEBM/review', 'https://g.page/r/CWcIi45TvszbEBM/review'],
+    austin:  ['https://g.page/r/CYE7aX6tVMnkEBM/review'],
+  },
+  'doms': {
+    _all: ['https://g.page/r/Cffr7Tp2DSNOEBM/review'],
+  },
+};
+// Technician first name (lowercase) -> metro. Extend as the roster grows.
+const TECH_METRO = {
+  'handy-andy': { juan: 'houston', zach: 'austin', steve: 'denver', kregg: 'denver' },
+};
+const HA_DEFAULT_METRO = 'denver';
+
+// Stable, ~even index into a list from any string key (e.g. booking id).
+function hashIndex(str, n) {
+  if (n <= 1) return 0;
+  let h = 0; const s = String(str || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % n;
+}
+
+// Resolve the Google review URL for a booking. `bookingId` keeps the choice
+// stable across page refreshes; the hash spreads bookings across the metro's
+// listings so both accounts collect reviews.
+function resolveGoogleReviewUrl({ slug, techName, areaName, bookingId }) {
+  if (slug === 'doms') return GMB_LISTINGS.doms._all[0] || null;
+
+  const metros = GMB_LISTINGS[slug];
+  if (!metros) return null;
+
+  // 1) technician → metro
+  let metro = null;
+  const first = (techName || '').trim().toLowerCase().split(/\s+/)[0];
+  if (first && TECH_METRO[slug] && TECH_METRO[slug][first]) metro = TECH_METRO[slug][first];
+  // 2) service-area name → metro
+  if (!metro && areaName) {
+    const a = areaName.toLowerCase();
+    if (a.includes('houston')) metro = 'houston';
+    else if (a.includes('denver')) metro = 'denver';
+    else if (a.includes('austin')) metro = 'austin';
+  }
+  // 3) default
+  if (!metro) metro = HA_DEFAULT_METRO;
+
+  const list = metros[metro] || metros[HA_DEFAULT_METRO] || [];
+  if (!list.length) return null;
+  return list[hashIndex(bookingId, list.length)];
+}
+
 async function reviewCheck(req, res, body) {
   const token = req.query.token || '';
   if (!token) return res.status(400).json({ error: 'token required' });
@@ -1621,21 +1683,19 @@ async function reviewCheck(req, res, body) {
 
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
-    .select('id, reviewed_at, service_area:service_areas(review_url), business:businesses(slug, name)')
+    .select('id, reviewed_at, service_area:service_areas(name), technician:technicians(name), business:businesses(slug, name)')
     .eq('id', reviewToken.booking_id)
     .single();
 
   if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
 
-  // Per-business default Google review page, used when the booking has no
-  // service area or the area has no review_url (e.g. CRM-created bookings).
-  // These are the primary Google listings (see migration 0012).
-  const GOOGLE_REVIEW_FALLBACK = {
-    'handy-andy': 'https://g.page/r/CLh9vwRdHQDZUt4s5?g_st=ac',
-    'doms':       'https://g.page/r/Cffr7Tp2DSNOEBM/review',
-  };
   const slug = booking.business?.slug || 'handy-andy';
-  const reviewUrl = booking.service_area?.review_url || GOOGLE_REVIEW_FALLBACK[slug] || null;
+  const reviewUrl = resolveGoogleReviewUrl({
+    slug,
+    techName: booking.technician?.name || '',
+    areaName: booking.service_area?.name || '',
+    bookingId: booking.id,
+  });
 
   return res.status(200).json({
     booking_id: booking.id,
