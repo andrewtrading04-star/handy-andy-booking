@@ -142,6 +142,7 @@ export default async function handler(req, res) {
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
       case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
+      case 'relabel_tv_size':   return await relabelTvSize(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
       case 'available_dates':   return await availableDates(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
@@ -475,7 +476,7 @@ const TV_OPTION_GROUPS = [
     { label: '32" or Less', price: 99,  zbk: '1685657519214x408615950244710660', sort: 1 },
     { label: '33"–59"',     price: 109, zbk: '1685657519214x406129807645840830', sort: 2 },
     { label: '60"–69"',     price: 119, zbk: '1685657519214x241977595988204900', sort: 3 },
-    { label: '70"–84"',     price: 149, zbk: '1685657519214x168809705059288930', sort: 4 },
+    { label: '70"–85"',     price: 149, zbk: '1685657519214x168809705059288930', sort: 4 },
     { label: '85"–97"',     price: 179, zbk: '1693451324278x246099356920840200', sort: 5 },
     { label: '98"+',        price: 229, zbk: '1729566606709x280549383678984200', sort: 6 },
   ]},
@@ -581,6 +582,39 @@ async function seedTvOptions(req, res, db, auth) {
   return res.status(200).json({ ok: true, ...report });
 }
 
+// Relabel the legacy "70"–84"" TV size tier to "70"–85"" for whichever business
+// is calling. Label-only and idempotent (an already-relabelled "70–85" row has
+// no "84", so it's skipped) — never inserts rows, so it's safe for any business
+// regardless of its option set. The admin New Booking flow calls this once when
+// it detects a stale size label, so the rename reaches the live DB on its own.
+async function relabelTvSize(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const NEW_LABEL = '70"–85"';
+  const { data: svcs } = await db.from('services')
+    .select('id, name, category').eq('business_id', biz.id);
+  const tvSvcIds = (svcs || [])
+    .filter(s => /tv/i.test(s.name || '') || /tv mounting/i.test(s.category || ''))
+    .map(s => s.id);
+  if (!tvSvcIds.length) return res.status(200).json({ ok: true, updated: 0 });
+  const { data: groups } = await db.from('service_option_groups')
+    .select('id').eq('business_id', biz.id).in('service_id', tvSvcIds).eq('key', 'size');
+  const gids = (groups || []).map(g => g.id);
+  if (!gids.length) return res.status(200).json({ ok: true, updated: 0 });
+  const { data: opts } = await db.from('service_options')
+    .select('id, label').eq('business_id', biz.id).in('group_id', gids);
+  let updated = 0;
+  for (const o of (opts || [])) {
+    const nums = (o.label.match(/\d+/g) || []).map(Number);
+    // The legacy "70-84" tier (starts at 70, ends at 84). Once renamed it no
+    // longer contains 84, so re-running this is a no-op.
+    if (nums.includes(70) && nums.includes(84)) {
+      const { error } = await db.from('service_options').update({ label: NEW_LABEL }).eq('id', o.id);
+      if (!error) updated++;
+    }
+  }
+  return res.status(200).json({ ok: true, updated });
+}
+
 // ── Available time slots for a date (filtered by technician if provided) ─────
 async function availableSlots(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
@@ -594,16 +628,29 @@ async function availableSlots(req, res, db, auth) {
   // Each technician can come from a different company pool: pool drives the
   // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
   const ridPrimary = await rosterBizId(db, biz, (req.query.pool || '').toString());
-  let keys = await availableSlotKeys(db, ridPrimary, techId, dateStr, dow, tz);
-  // Two-technician job (e.g. a large-TV lift): only offer slots where BOTH techs
-  // are free — intersect the primary's open slots with the second tech's. The
-  // second tech may be a concrete person OR "any" of a (possibly different)
-  // company pool; exclude the concrete primary so one person can't fill both.
-  if (techId2 && techId2 !== techId) {
+  // Want a two-tech pair whenever a second tech is requested — unless it's the
+  // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
+  // a pair: we look for two DISTINCT free techs below.
+  const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
+  let keys;
+  if (!wantPair) {
+    keys = await availableSlotKeys(db, ridPrimary, techId, dateStr, dow, tz);
+  } else {
+    // Two-technician job (e.g. a large-TV lift): only offer slots where a
+    // DISTINCT pair is free — one tech from the primary side and a different
+    // tech from the second side. Each side may be a concrete person OR "any" of
+    // a (possibly different) company pool.
     const ridSecondary = await rosterBizId(db, biz, (req.query.pool2 || '').toString());
-    const exclude = (techId && techId !== 'any') ? techId : null;
-    const keys2 = await availableSlotKeys(db, ridSecondary, techId2, dateStr, dow, tz, exclude);
-    keys = new Set([...keys].filter(k => keys2.has(k)));
+    const pMap = await freeSlotTechMap(db, ridPrimary, techId, dateStr, dow, tz);
+    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz);
+    keys = new Set();
+    for (const [k, P] of pMap) {
+      const S = sMap.get(k);
+      if (!S || !S.size) continue;
+      // Both sides have someone free here; it's a valid pair unless that
+      // "someone" is the exact same single person on both sides.
+      if (new Set([...P, ...S]).size >= 2) keys.add(k);
+    }
   }
   const available = SLOTS.filter(s => keys.has(s.key))
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
@@ -683,6 +730,32 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
   return ks;
 }
 
+// Map slot_key -> Set(techId) of techs FREE at that slot on a date, for a side
+// that is either a concrete tech or "any" of a roster (recurring ± exceptions −
+// existing bookings). Used to match a DISTINCT two-tech pair for big-TV jobs:
+// the union of the two sides' free techs in a slot must be ≥ 2 distinct people.
+async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz) {
+  let techIds;
+  if (!techId || techId === 'any') {
+    const { data: techs } = await db.from('technicians')
+      .select('id').eq('business_id', bizId).eq('active', true);
+    techIds = (techs || []).map(t => t.id);
+  } else {
+    techIds = [techId];
+  }
+  const map = new Map();
+  for (const tid of techIds) {
+    const ks = await singleTechSlotKeys(db, tid, dateStr, dow);
+    const booked = await bookedSlotKeysForTech(db, bizId, tid, dateStr, tz);
+    for (const k of ks) {
+      if (booked.has(k)) continue;
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k).add(tid);
+    }
+  }
+  return map;
+}
+
 // Pick the first active tech available for an exact date+slot (recurring OR a
 // one-time exception) who is NOT already booked for that slot. Falls back to any
 // active tech who is free in that slot so we never auto-create a double-booking.
@@ -750,15 +823,15 @@ async function availableDates(req, res, db, auth) {
   const primaryIds = (techId && techId !== 'any')
     ? [techId]
     : await rosterIds(await rosterBizId(db, biz, (req.query.pool || '').toString()));
-  const wantPair = !!techId2 && techId2 !== techId;
+  // Want a two-tech pair whenever a second tech is requested — unless it's the
+  // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
+  // a pair: distinctness is enforced per-slot below, not by filtering rosters.
+  const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
   let secondaryIds = [];
   if (wantPair) {
-    if (techId2 !== 'any') secondaryIds = [techId2];
-    else {
-      secondaryIds = await rosterIds(await rosterBizId(db, biz, (req.query.pool2 || '').toString()));
-      // One person can't be both techs: drop a concrete primary from the pool.
-      if (techId && techId !== 'any') secondaryIds = secondaryIds.filter(id => id !== techId);
-    }
+    secondaryIds = (techId2 && techId2 !== 'any')
+      ? [techId2]
+      : await rosterIds(await rosterBizId(db, biz, (req.query.pool2 || '').toString()));
   }
   if (!primaryIds.length || (wantPair && !secondaryIds.length)) return res.status(200).json({ dates: [], month });
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
@@ -815,17 +888,34 @@ async function availableDates(req, res, db, auth) {
     for (const tid of ids) for (const k of daySetFor(tid, dow, dateStr)) set.add(k);
     return set;
   };
+  // Map slot_key -> Set(techId) free for a side on a date (for pair matching).
+  const sideSlotTechs = (ids, dow, dateStr) => {
+    const map = new Map();
+    for (const tid of ids) for (const k of daySetFor(tid, dow, dateStr)) {
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k).add(tid);
+    }
+    return map;
+  };
+  // Is there a slot where a primary tech AND a DISTINCT second tech are both
+  // free? Both sides nonempty in a slot is a pair unless it's the same lone
+  // person on both sides (union of the two free sets must be ≥ 2 people).
+  const pairHasSlot = (pMap, sMap) => {
+    for (const [k, P] of pMap) {
+      const S = sMap.get(k);
+      if (!S || !S.size) continue;
+      if (new Set([...P, ...S]).size >= 2) return true;
+    }
+    return false;
+  };
   const dates = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2, '0')}`;
     if (dateStr < todayStr) continue;                       // no past dates
     const dow = dayOfWeekFor(dateStr);
-    const primarySet = sideSet(primaryIds, dow, dateStr);
     if (wantPair) {
-      // Need at least one slot where the primary AND a second tech are both free.
-      const secondarySet = sideSet(secondaryIds, dow, dateStr);
-      if ([...primarySet].some(k => secondarySet.has(k))) dates.push(dateStr);
-    } else if (primarySet.size) {
+      if (pairHasSlot(sideSlotTechs(primaryIds, dow, dateStr), sideSlotTechs(secondaryIds, dow, dateStr))) dates.push(dateStr);
+    } else if (sideSet(primaryIds, dow, dateStr).size) {
       dates.push(dateStr);
     }
   }

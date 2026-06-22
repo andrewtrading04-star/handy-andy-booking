@@ -2525,33 +2525,31 @@ function nbSecondTechMode(){
   if(sizes.some(n=>n>=70)) return 'optional';
   return 'none';
 }
-// The concrete 2nd tech that should constrain availability (or null). A pair can
-// only be intersected against a CONCRETE primary, so "Any" primary yields null.
-// The chosen second tech as { id, pool } (id may be 'any'), or null. A pair
-// needs a CONCRETE primary to intersect against; an "any" second tech is fine.
+// The chosen second tech as { id, pool } (id may be 'any'), or null. Either side
+// may be "any": the server finds a slot where two DISTINCT techs are free, so an
+// "any" primary paired with an "any" second is valid. Only a pair that is the
+// exact SAME concrete person on both sides is ignored.
 function nbEffectiveSecondTech(){
   if(nbSecondTechMode()==='none') return null;
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
   if(!sec) return null;
   const prim=nbParseTech(document.getElementById('nbTech').value);
-  if(!prim || prim.id==='any') return null;
-  if(sec.id!=='any' && sec.id===prim.id) return null;      // same concrete person — ignore
+  if(prim && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id) return null;  // same concrete person — ignore
   return sec;
 }
-// Why the calendar can't be computed yet. A two-tech job (mandatory, or optional
-// once a helper is chosen) needs a concrete, distinct pair to find shared slots.
+// Why the calendar can't be computed yet. A two-tech job just needs a second
+// tech chosen; either side may be "Any" (the server finds a distinct free pair).
+// Only a same-concrete-person pair is rejected.
 function nbAvailabilityBlockedReason(){
   const mode=nbSecondTechMode();
   const prim=nbParseTech(document.getElementById('nbTech').value);
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
-  const pAny = !prim || prim.id==='any';
+  const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
   if(mode==='mandatory'){
-    if(pAny) return 'Select the primary technician — this job needs two.';
     if(!sec) return 'Select the second technician — this job needs two.';
-    if(sec.id!=='any' && sec.id===prim.id) return 'The two technicians must be different.';
+    if(samePerson) return 'The two technicians must be different.';
   } else if(mode==='optional' && sec){       // a helper was chosen for a 1-person-OK job
-    if(pAny) return 'Select the primary technician to pair with the second.';
-    if(sec.id!=='any' && sec.id===prim.id) return 'The two technicians must be different.';
+    if(samePerson) return 'The two technicians must be different.';
   }
   return '';
 }
@@ -2600,6 +2598,18 @@ async function nbLoadTvOptions(serviceId){
       await api('seed_tv_options',{ method:'POST', params:{ business:current.slug }});
       const r2=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
       groups=r2.groups||[];
+    }catch(err){ /* keep whatever loaded */ }
+  }
+  // Self-heal the legacy "70–84"" size label to "70–85"" on the live DB (both
+  // companies). Fires once: after the rename the stale label is gone, so the
+  // check below is false on subsequent loads.
+  const sizeG=groups.find(g=>g.key==='size');
+  const stale=sizeG && sizeG.options.some(o=>/70/.test(o.label) && /84/.test(o.label));
+  if(stale){
+    try{
+      await api('relabel_tv_size',{ method:'POST', params:{ business:current.slug }});
+      const r3=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
+      groups=r3.groups||[];
     }catch(err){ /* keep whatever loaded */ }
   }
   return nbRelocateOneConnect(groups);
@@ -2786,12 +2796,14 @@ function nbClampTvBound(){
     }
   });
 }
-// Bracket tier a TV size needs: 85"+ uses the XL brackets, everything else the
-// standard ones. Prefer the DB metadata (Doms), fall back to the size label so
-// businesses without the metadata (Handy Andy) still filter correctly.
+// Bracket tier a TV size needs: the 85–97" and 98"+ tiers use the XL brackets,
+// everything else (including the 70–85" tier, whose top is 85") the standard
+// ones. Prefer the DB metadata (Doms), fall back to the size label so businesses
+// without the metadata (Handy Andy) still filter correctly. The threshold is
+// "> 85" so a "70–85"" label stays standard while "85–97"" is XL.
 function nbSizeTier(o){
   if(o && o.metadata && o.metadata.bracket_tier) return o.metadata.bracket_tier;
-  return nbSizeMaxInches(o && o.label) >= 85 ? 'xl' : 'standard';
+  return nbSizeMaxInches(o && o.label) > 85 ? 'xl' : 'standard';
 }
 // Which size tier a bracket belongs to: 'any' (own/mantel/frame — fits all
 // sizes), 'xl' (an 85"+ bracket), or 'standard'. Prefer metadata, else label.
@@ -2799,7 +2811,7 @@ function nbBracketForSize(o){
   if(o && o.metadata && o.metadata.for_size) return o.metadata.for_size;
   const l=(o && o.label || '').toLowerCase();
   if(/own|mantel|frame|in-box/.test(l)) return 'any';
-  return nbSizeMaxInches(l) >= 85 ? 'xl' : 'standard';
+  return nbSizeMaxInches(l) > 85 ? 'xl' : 'standard';
 }
 function nbSelectedSizeTiers(){
   const g=nbOptionGroups.find(x=>x.key==='size'); const tiers=new Set(); if(!g||!nbQty[g.id]) return tiers;
@@ -3247,14 +3259,15 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // then fail.
   const secondMode=assurion?'none':nbSecondTechMode();
   const sec=(secondMode!=='none') ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
+  // Either tech may be "any" — the server resolves "any + any" to two distinct
+  // people. Only reject a missing second tech, or the same concrete person twice.
+  const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
   if(secondMode==='mandatory'){
-    if(!prim || prim.id==='any'){ err.textContent='This job needs two technicians — pick the primary technician.'; return; }
     if(!sec){ err.textContent='This job requires a second technician. Please select one.'; return; }
-    if(sec.id!=='any' && sec.id===prim.id){ err.textContent='The two technicians must be different.'; return; }
+    if(samePerson){ err.textContent='The two technicians must be different.'; return; }
   }
   if(secondMode==='optional' && sec){
-    if(!prim || prim.id==='any'){ err.textContent='Pick the primary technician to pair with the second.'; return; }
-    if(sec.id!=='any' && sec.id===prim.id){ err.textContent='The two technicians must be different.'; return; }
+    if(samePerson){ err.textContent='The two technicians must be different.'; return; }
   }
 
   // For card payments, tokenize the card with Stripe before creating the booking.
