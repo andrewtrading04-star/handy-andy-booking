@@ -984,11 +984,11 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // ---- Branded booking-confirmation email (best-effort; never fails the booking) ----
   // Mirrors the public widget's confirmation so phone-in jobs the office books
-  // also get the orange "You're booked" email. Scoped to Handy Andy for now;
-  // Doms is enabled once its Resend domain is wired into this project. sendEmail
-  // itself is gated by emailNotificationsOn() + the Resend key, so this no-ops
-  // safely until those are set.
-  if (biz.slug === 'handy-andy' && c.email) {
+  // also get the branded "You're booked" email. Brand-aware: Handy Andy and Doms
+  // each get their own colors, sender, and reply-to via emailConfig/brandFor.
+  // sendEmail itself is gated by emailNotificationsOn() + the Resend key, so this
+  // no-ops safely until those are set.
+  if (c.email) {
     try {
       const firstName = (c.name || '').trim().split(/\s+/)[0] || '';
       let dateLong = '';
@@ -1020,9 +1020,9 @@ async function bookingCreate(req, res, db, auth, body) {
         tip: 0,
         twoTechs: !!body.needs_lifting,
         jobId: bRow.id,
-      }, brandFor('handy-andy'));
-      const { from } = emailConfig('handy-andy');
-      const result = await sendEmail({ slug: 'handy-andy', to: c.email, subject, html, replyTo: from });
+      }, brandFor(biz.slug));
+      const { from } = emailConfig(biz.slug);
+      const result = await sendEmail({ slug: biz.slug, to: c.email, subject, html, replyTo: from });
       if (!result.sent) console.warn('[admin] confirmation email not sent:', result.skipped || result.error);
     } catch (e) {
       console.error('[admin] confirmation email error:', e.message);
