@@ -131,6 +131,7 @@ export default async function handler(req, res) {
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
       case 'reviews':           return await reviews(req, res, db, auth);
+      case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
@@ -359,6 +360,16 @@ async function bookings(req, res, db, auth) {
   const tz = biz.timezone || 'America/Denver';
   const range = (req.query.range || 'upcoming').toString();
   const status = (req.query.status || '').toString();
+
+  // Single-booking lookup (e.g. opening a job from a bad-review alert). Still
+  // scoped to the resolved business, so a secretary can't read another's job.
+  const oneId = (req.query.id || '').toString();
+  if (oneId) {
+    const { data, error } = await fetchBookingRows((sel) =>
+      db.from('bookings').select(sel).eq('business_id', biz.id).eq('id', oneId).limit(1));
+    if (error) throw error;
+    return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
+  }
 
   const makeQ = (sel) => {
     let q = db.from('bookings').select(sel).eq('business_id', biz.id);
@@ -1781,6 +1792,52 @@ async function reviews(req, res, db, auth) {
   }));
 
   return res.status(200).json({ reviews: formatted });
+}
+
+// ── Bad-review alerts (1-star reviews in the last 24h) ──────────────────────
+// Powers the red "ATTENTION" banner at the top of the dashboard. Scope-aware:
+//   owner      -> 1-star reviews across ALL active businesses
+//   secretary  -> only their own business (Heather=Handy Andy, Joey=Doms)
+// A review auto-drops off the banner 24h after it was submitted. Each alert
+// carries enough to display (tech, customer name/phone, appointment date) and
+// the booking id so the dashboard can open the exact job on click.
+async function badReviews(req, res, db, auth) {
+  // Businesses this token may see. The list itself enforces the scoping.
+  let bizQ = db.from('businesses').select('id, slug, name').eq('active', true);
+  if (auth.scope !== 'all') bizQ = bizQ.eq('slug', auth.scope);
+  const { data: bizRows, error: bizErr } = await bizQ;
+  if (bizErr) throw bizErr;
+  const bizById = new Map((bizRows || []).map(b => [b.id, b]));
+  const bizIds = (bizRows || []).map(b => b.id);
+  if (!bizIds.length) return res.status(200).json({ alerts: [] });
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: revs, error } = await db.from('bookings')
+    .select(`id, business_id, scheduled_at, reviewed_at, review_rating, review_text,
+             customer:customers ( name, phone ),
+             technician:technicians ( id, name )`)
+    .in('business_id', bizIds)
+    .eq('review_rating', 1)
+    .gte('reviewed_at', since)
+    .order('reviewed_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  const alerts = (revs || []).map(r => {
+    const biz = bizById.get(r.business_id) || {};
+    return {
+      id: r.id,
+      business_slug: biz.slug || '',
+      business_name: biz.name || '',
+      technician_name: r.technician?.name || 'Unassigned',
+      customer_name: r.customer?.name || 'Customer',
+      customer_phone: r.customer?.phone || '',
+      scheduled_at: r.scheduled_at,
+      reviewed_at: r.reviewed_at,
+      review_text: r.review_text || '',
+    };
+  });
+  return res.status(200).json({ alerts });
 }
 
 // ── Estimates (customer quote requests from the public estimate page) ────────
