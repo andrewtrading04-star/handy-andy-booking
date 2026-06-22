@@ -419,7 +419,7 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const firstName = (details.firstName || '').trim();
   const reviewUrl = details.reviewUrl || '#';
 
-  const subject = `We'd love your feedback!`;
+  const subject = `How did we do?`;
 
   const html = `<!doctype html>
 <html>
@@ -440,7 +440,7 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 
         <!-- Main content -->
         <tr><td style="background:${tintBg};padding:34px 28px 30px;text-align:center;">
-          <div style="font-size:26px;font-weight:800;color:#11181c;margin:0 0 12px;">How did we do? ⭐</div>
+          <div style="font-size:26px;font-weight:800;color:#11181c;margin:0 0 12px;">How was your experience?</div>
           <div style="font-size:15px;color:#5b6470;line-height:1.6;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')}, your job is complete! We'd love to hear about your experience. Your feedback helps us serve you better.</div>
         </td></tr>
 

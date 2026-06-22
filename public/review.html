@@ -4,254 +4,240 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
-<title>Share Your Feedback</title>
+<title>How was your experience?</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee;
-    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694; --accent:#2563eb;
-    --green:#22c55e; --red:#ef4444; --orange:#ff6b35;
-    /* Type system — Plus Jakarta Sans, weights 400–900 */
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#2563eb;            /* set per-brand at runtime */
+    --star-off:#e3e6eb;
+    --green:#22c55e; --red:#ef4444;
     --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
-    --fs-hero:clamp(34px,9vw,44px); --fs-h1:clamp(26px,6vw,34px); --fs-h2:22px;
-    --fs-h3:18px; --fs-body:15px; --fs-sm:14px;
-    /* Gradient keyword highlight */
-    --grad:linear-gradient(120deg,#ff8a3d 0%,#ff5e3a 50%,#ff2d6f 100%);
-  }
-  body.brand-doms {
-    --accent:#ff6b35;
-    --grad:linear-gradient(120deg,#ff8a3d 0%,#ff5e3a 50%,#ff2d6f 100%);
+    --fs-h1:clamp(26px,6vw,34px); --fs-h2:22px;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;letter-spacing:-.01em;}
-  .container{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:40px;max-width:500px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
-  h1{font-size:var(--fs-h1);margin-bottom:8px;font-weight:800;letter-spacing:-.02em;line-height:1.1;}
-  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
-  .sub{color:var(--mute);font-size:14px;margin-bottom:24px;line-height:1.5;}
-  .stars{display:flex;justify-content:center;gap:16px;margin:32px 0;font-size:48px;}
-  .star{cursor:pointer;opacity:.3;transition:all .2s;user-select:none;}
-  .star:hover{opacity:.6;transform:scale(1.1);}
-  .star.active{opacity:1;transform:scale(1.2);}
-  .feedback-section{display:none;margin:24px 0;text-align:left;}
-  .feedback-section.show{display:block;}
-  textarea{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:12px;font-size:14px;font-family:inherit;min-height:100px;resize:vertical;margin-bottom:12px;}
-  textarea:focus{outline:none;border-color:var(--accent);}
-  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer;width:100%;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:40px 36px;width:100%;max-width:480px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
+  h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.12;margin-bottom:10px;}
+  .hl{color:var(--accent);}
+  .sub{color:var(--mute);font-size:15px;margin-bottom:8px;line-height:1.55;}
+
+  /* ── Stars ── */
+  .stars{display:flex;justify-content:center;gap:10px;margin:30px 0 8px;}
+  .star{background:none;border:none;padding:4px;line-height:0;cursor:pointer;transition:transform .15s ease;}
+  .star svg{width:42px;height:42px;display:block;}
+  .star svg path{fill:var(--star-off);transition:fill .15s ease;}
+  .star.on svg path{fill:var(--accent);}
+  .stars:not(.locked) .star:hover{transform:scale(1.12);}
+  .stars.locked .star{cursor:default;}
+
+  /* ── Follow-up panels ── */
+  .panel{display:none;margin-top:22px;text-align:center;animation:fade .25s ease;}
+  .panel.show{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  .panel h2{font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;margin-bottom:6px;}
+  .panel p{color:var(--mute);font-size:14px;line-height:1.55;margin-bottom:16px;}
+  textarea{width:100%;background:#fff;border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:13px 14px;font-size:15px;font-family:inherit;min-height:110px;resize:vertical;margin-bottom:14px;}
+  textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;}
   .btn:hover{filter:brightness(.96);}
-  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
-  .message{display:none;text-align:center;margin:24px 0;font-size:16px;line-height:1.6;}
-  .message.show{display:block;}
-  .message.success{color:var(--green);}
-  .message.error{color:var(--red);}
-  .loading{display:none;}
-  .loading.show{display:inline;}
-  .google-btn{background:#4285f4;color:#fff;margin-top:16px;}
-  .google-btn:hover{filter:brightness(.96);}
+  .btn:disabled{opacity:.6;cursor:default;}
+  .btn .gicon{width:18px;height:18px;}
+
+  /* ── Done / error states ── */
+  .state{display:none;}
+  .state.show{display:block;}
+  .check{width:64px;height:64px;border-radius:50%;background:color-mix(in srgb,var(--green) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:var(--green);}
+  .state h2{font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;margin-bottom:8px;}
+  .state p{color:var(--mute);font-size:14px;line-height:1.55;}
+  .error{display:none;color:var(--red);font-size:14px;margin-top:18px;font-weight:600;}
+  .error.show{display:block;}
 </style>
 </head>
 <body>
 
 <div class="container">
   <div id="content">
-    <h1>How did <span class="hl">we do?</span> ⭐</h1>
-    <div class="sub">Your feedback helps us serve you better.</div>
+    <h1 id="title">How was your <span class="hl">experience?</span></h1>
+    <p class="sub" id="subtitle">Tap a star to rate your service.</p>
 
-    <div class="stars">
-      <span class="star" data-rating="1">⭐</span>
-      <span class="star" data-rating="2">⭐</span>
-      <span class="star" data-rating="3">⭐</span>
-      <span class="star" data-rating="4">⭐</span>
-      <span class="star" data-rating="5">⭐</span>
+    <div class="stars" id="starRow">
+      <button class="star" data-rating="1" aria-label="1 star"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L21.6 9.27l-4.8 4.68 1.13 6.6L12 17.4l-5.93 3.15L7.2 13.95 2.4 9.27l6.7-1.01L12 2z"/></svg></button>
+      <button class="star" data-rating="2" aria-label="2 stars"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L21.6 9.27l-4.8 4.68 1.13 6.6L12 17.4l-5.93 3.15L7.2 13.95 2.4 9.27l6.7-1.01L12 2z"/></svg></button>
+      <button class="star" data-rating="3" aria-label="3 stars"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L21.6 9.27l-4.8 4.68 1.13 6.6L12 17.4l-5.93 3.15L7.2 13.95 2.4 9.27l6.7-1.01L12 2z"/></svg></button>
+      <button class="star" data-rating="4" aria-label="4 stars"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L21.6 9.27l-4.8 4.68 1.13 6.6L12 17.4l-5.93 3.15L7.2 13.95 2.4 9.27l6.7-1.01L12 2z"/></svg></button>
+      <button class="star" data-rating="5" aria-label="5 stars"><svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L21.6 9.27l-4.8 4.68 1.13 6.6L12 17.4l-5.93 3.15L7.2 13.95 2.4 9.27l6.7-1.01L12 2z"/></svg></button>
     </div>
 
-    <div class="feedback-section" id="sorrySection">
-      <h2 style="font-size:18px;margin-bottom:12px;color:var(--ink);">We're sorry we missed the mark 😞</h2>
-      <div class="sub" style="margin-bottom:16px;text-align:center;">Your feedback helps us improve. Tell us what happened (optional):</div>
-      <textarea id="feedbackText" placeholder="What could we have done better?"></textarea>
-      <button class="btn" id="submitFeedback">Submit Feedback</button>
+    <!-- 1–4 stars: ask what we could do better -->
+    <div class="panel" id="lowSection">
+      <h2>Thanks for your honesty</h2>
+      <p>We're sorry we missed the mark. What could we have done better?</p>
+      <textarea id="lowText" placeholder="Tell us what happened (optional)"></textarea>
+      <button class="btn" id="lowSubmit">Submit feedback</button>
     </div>
 
-    <div class="feedback-section" id="thankYouSection">
-      <h2 style="font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;margin-bottom:16px;"><span class="hl">Thank you!</span> ⭐⭐⭐⭐⭐</h2>
-      <div class="sub" style="text-align:center;margin-bottom:20px;">We're so glad we got it right. Would you mind sharing your experience on Google?</div>
-      <button class="btn google-btn" id="googleReviewBtn">Leave us a Google Review</button>
+    <!-- 5 stars: ask what they loved, then send to Google -->
+    <div class="panel" id="highSection">
+      <h2>Thank you!</h2>
+      <p>We're so glad we got it right. What did you like about our service?</p>
+      <textarea id="highText" placeholder="What did you like about our service?"></textarea>
+      <button class="btn" id="googleBtn">
+        <svg class="gicon" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.3C39.7 36.4 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+        Leave us a Google review
+      </button>
     </div>
 
-    <div class="message" id="successMessage">
-      <div style="font-size:48px;margin-bottom:12px;">✓</div>
-      <div style="font-size:16px;font-weight:700;color:var(--green);">Thank you for your feedback!</div>
-      <div style="font-size:13px;margin-top:8px;color:var(--mute);">We'll use this to improve our service.</div>
+    <!-- Success -->
+    <div class="state" id="doneSection">
+      <div class="check">&#10003;</div>
+      <h2>Thank you for your feedback!</h2>
+      <p>We use every review to keep improving our service.</p>
     </div>
 
-    <div class="message" id="alreadyReviewedMessage">
-      <div style="font-size:48px;margin-bottom:12px;">✓</div>
-      <div style="font-size:16px;font-weight:700;">You've already reviewed this booking</div>
-      <div style="font-size:13px;margin-top:8px;color:var(--mute);">Thank you for your feedback!</div>
+    <!-- Already reviewed -->
+    <div class="state" id="alreadySection">
+      <div class="check">&#10003;</div>
+      <h2>You've already reviewed this job</h2>
+      <p>Thanks again for your feedback!</p>
     </div>
 
-    <div class="message error" id="errorMessage"></div>
+    <div class="error" id="errorBox"></div>
   </div>
 </div>
 
 <script>
 const API = '/api/admin';
-let selectedRating = 0;
-let bookingToken = new URLSearchParams(location.search).get('token');
-let reviewUrl = new URLSearchParams(location.search).get('review_url');
-let businessSlug = 'handy-andy';
-let businessName = 'Handy Andy';
-
-// Brand config
 const BRANDS = {
-  'handy-andy': { name: 'Handy Andy', accent: '#FF6B35' },
-  'doms': { name: "Dom's TV Mounting", accent: '#2563EB' },
+  'handy-andy': { name: 'Handy Andy',        accent: '#FF6B35' },
+  'doms':       { name: "Dom's TV Mounting", accent: '#2563EB' },
 };
 
-if (!bookingToken) {
-  document.getElementById('errorMessage').textContent = 'Invalid review link. Please check your email.';
-  document.getElementById('errorMessage').classList.add('show');
-  document.getElementById('content').style.display = 'none';
-} else {
-  // Fetch business info to apply correct branding
-  fetch(API + '?action=review&token=' + encodeURIComponent(bookingToken))
-    .then(r => r.json())
-    .then(d => {
-      if (d.business_slug) {
-        businessSlug = d.business_slug;
-        businessName = d.business_name || BRANDS[businessSlug]?.name || 'Handy Andy';
-        applyBrand(businessSlug);
+let selectedRating = 0;
+let locked = false;
+let saving = false;
+let reviewUrl = null;
+let businessSlug = 'handy-andy';
+const bookingToken = new URLSearchParams(location.search).get('token');
 
-        // Update title
-        document.title = `Share Your Feedback — ${businessName}`;
-      }
-      if (d.review_url && !reviewUrl) reviewUrl = d.review_url;
-    })
-    .catch(err => console.log('Could not load business info:', err));
-}
+const $ = (id) => document.getElementById(id);
+const starRow = $('starRow');
+const stars = Array.from(document.querySelectorAll('.star'));
 
-function applyBrand(slug) {
+function showError(msg){ const e = $('errorBox'); e.textContent = msg; e.classList.add('show'); }
+
+function applyBrand(slug){
   const brand = BRANDS[slug] || BRANDS['handy-andy'];
-  const root = document.documentElement;
-  root.style.setProperty('--accent', brand.accent);
+  document.documentElement.style.setProperty('--accent', brand.accent);
 }
 
-// Star selection
-document.querySelectorAll('.star').forEach(star => {
+function paintStars(n){
+  stars.forEach((s, i) => s.classList.toggle('on', i < n));
+}
+
+// ── Star interaction (one-way: first click locks the rating in) ──────────────
+stars.forEach(star => {
   star.addEventListener('click', () => {
-    selectedRating = parseInt(star.dataset.rating);
-    updateStars();
-    showFeedbackSection();
+    if (locked) return;
+    selectedRating = parseInt(star.dataset.rating, 10);
+    locked = true;
+    starRow.classList.add('locked');
+    paintStars(selectedRating);
+    openFollowUp();
   });
-  star.addEventListener('mouseover', () => {
-    const rating = parseInt(star.dataset.rating);
-    document.querySelectorAll('.star').forEach((s, i) => {
-      s.classList.toggle('active', i < rating);
-    });
+  star.addEventListener('mouseenter', () => {
+    if (locked) return;
+    paintStars(parseInt(star.dataset.rating, 10));
   });
 });
+starRow.addEventListener('mouseleave', () => { if (!locked) paintStars(selectedRating); });
 
-document.addEventListener('mouseout', () => {
-  updateStars();
-});
-
-function updateStars() {
-  document.querySelectorAll('.star').forEach((s, i) => {
-    s.classList.toggle('active', i < selectedRating);
-  });
-}
-
-function showFeedbackSection() {
-  document.getElementById('sorrySection').classList.remove('show');
-  document.getElementById('thankYouSection').classList.remove('show');
-
-  if (selectedRating <= 4) {
-    document.getElementById('sorrySection').classList.add('show');
-  } else if (selectedRating === 5) {
-    document.getElementById('thankYouSection').classList.add('show');
+function openFollowUp(){
+  $('subtitle').style.display = 'none';
+  if (selectedRating === 5) {
+    $('highSection').classList.add('show');
+  } else {
+    $('lowSection').classList.add('show');
   }
 }
 
-document.getElementById('submitFeedback').addEventListener('click', submitReview);
-document.getElementById('googleReviewBtn').addEventListener('click', () => {
-  if (reviewUrl) {
-    // Save the review first, then redirect
-    submitReview(true);
-  }
+// ── Submit handlers ──────────────────────────────────────────────────────────
+$('lowSubmit').addEventListener('click', async () => {
+  await saveReview($('lowText').value.trim());
+  if (!saving) finishWithThanks();
 });
 
-async function submitReview(redirectToGoogle = false) {
-  if (!selectedRating) return alert('Please select a rating');
+$('googleBtn').addEventListener('click', async () => {
+  await saveReview($('highText').value.trim());
+  if (saving) return;                 // save failed; error already shown
+  if (reviewUrl) { window.location.href = reviewUrl; }
+  else { finishWithThanks(); }
+});
 
-  const feedbackText = document.getElementById('feedbackText').value.trim();
-
+async function saveReview(feedback){
+  if (saving) return;
+  saving = true;
+  $('errorBox').classList.remove('show');
+  // disable buttons during the request
+  $('lowSubmit').disabled = true; $('googleBtn').disabled = true;
   try {
     const res = await fetch(API + '?action=review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: bookingToken,
-        rating: selectedRating,
-        feedback: feedbackText || null,
-      })
+      body: JSON.stringify({ token: bookingToken, rating: selectedRating, feedback: feedback || null }),
     });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to save review');
-    }
-
-    // Show success message
-    document.getElementById('sorrySection').classList.remove('show');
-    document.getElementById('thankYouSection').classList.remove('show');
-    document.getElementById('stars').style.display = 'none';
-    document.querySelector('.sub').style.display = 'none';
-
-    if (selectedRating === 5 && redirectToGoogle && reviewUrl) {
-      // Show success then redirect
-      document.getElementById('successMessage').classList.add('show');
-      setTimeout(() => {
-        window.location.href = reviewUrl;
-      }, 1000);
-    } else {
-      document.getElementById('successMessage').classList.add('show');
-    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not save your review.');
+    saving = false;                   // success
   } catch (err) {
-    document.getElementById('errorMessage').textContent = err.message;
-    document.getElementById('errorMessage').classList.add('show');
+    showError(err.message);
+    $('lowSubmit').disabled = false; $('googleBtn').disabled = false;
+    // keep saving=true so callers know it failed
   }
 }
 
-// Check if already reviewed on load
-async function checkAlreadyReviewed() {
+function finishWithThanks(){
+  starRow.style.display = 'none';
+  $('lowSection').classList.remove('show');
+  $('highSection').classList.remove('show');
+  $('title').style.display = 'none';
+  $('subtitle').style.display = 'none';
+  $('doneSection').classList.add('show');
+}
+
+function showAlready(){
+  starRow.style.display = 'none';
+  $('title').style.display = 'none';
+  $('subtitle').style.display = 'none';
+  $('alreadySection').classList.add('show');
+}
+
+// ── Load: validate token, fetch brand + review url + already-reviewed state ──
+async function init(){
+  if (!bookingToken) {
+    starRow.style.display = 'none';
+    $('subtitle').style.display = 'none';
+    showError('Invalid review link. Please check your email.');
+    return;
+  }
   try {
-    const res = await fetch(API + '?action=review&token=' + encodeURIComponent(bookingToken), {
-      method: 'GET',
-    });
-    const data = await res.json();
-
-    // Set review_url from API if not already set from URL params
-    if (data.review_url && !reviewUrl) {
-      reviewUrl = data.review_url;
+    const res = await fetch(API + '?action=review&token=' + encodeURIComponent(bookingToken));
+    const d = await res.json().catch(() => ({}));
+    if (d.business_slug) {
+      businessSlug = d.business_slug;
+      applyBrand(businessSlug);
     }
-
-    if (data.already_reviewed) {
-      document.getElementById('content').innerHTML = `
-        <div class="message success show">
-          <div style="font-size:48px;margin-bottom:12px;">✓</div>
-          <div style="font-size:16px;font-weight:700;">You've already reviewed this booking</div>
-          <div style="font-size:13px;margin-top:8px;color:var(--mute);">Thank you for your feedback!</div>
-        </div>
-      `;
-    }
+    if (d.review_url) reviewUrl = d.review_url;
+    if (d.already_reviewed) showAlready();
   } catch (err) {
-    // Silently continue if check fails
+    // Non-fatal: keep default branding, let the user still rate.
+    console.log('init failed:', err);
   }
 }
-
-checkAlreadyReviewed();
+init();
 </script>
 
 </body>

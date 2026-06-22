@@ -1616,11 +1616,21 @@ async function reviewCheck(req, res, body) {
 
   if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
 
+  // Per-business default Google review page, used when the booking has no
+  // service area or the area has no review_url (e.g. CRM-created bookings).
+  // These are the primary Google listings (see migration 0012).
+  const GOOGLE_REVIEW_FALLBACK = {
+    'handy-andy': 'https://g.page/r/CLh9vwRdHQDZUt4s5?g_st=ac',
+    'doms':       'https://g.page/r/Cffr7Tp2DSNOEBM/review',
+  };
+  const slug = booking.business?.slug || 'handy-andy';
+  const reviewUrl = booking.service_area?.review_url || GOOGLE_REVIEW_FALLBACK[slug] || null;
+
   return res.status(200).json({
     booking_id: booking.id,
     already_reviewed: !!booking.reviewed_at,
-    review_url: booking.service_area?.review_url || null,
-    business_slug: booking.business?.slug || 'handy-andy',
+    review_url: reviewUrl,
+    business_slug: slug,
     business_name: booking.business?.name || 'Handy Andy',
   });
 }
