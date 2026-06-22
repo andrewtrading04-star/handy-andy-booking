@@ -2416,11 +2416,12 @@ function nbPoolList(){
   if(nbPartner) list.push({ pool:'partner', name:nbPartner.name, techs:nbPartner.technicians });
   return list;
 }
-function nbTechOptionsHtml(){
+function nbTechOptionsHtml(excludeNames = []){
   return nbPoolList().map(g=>
     `<optgroup label="${esc(g.name)} Team">`+
       `<option value="any:${g.pool}">Any ${esc(g.name)} Technician</option>`+
-      g.techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
+      g.techs.filter(t=> !excludeNames.some(n=> t.name.toLowerCase() === n.toLowerCase()))
+        .map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
     `</optgroup>`).join('');
 }
 // Which company a concrete tech id belongs to (for setting pool on submit).
@@ -2441,8 +2442,9 @@ function nbPopulateTechs(){
   sel.value='any:own';
 }
 // Fill the SECOND technician dropdown (no default pick — it's optional).
+// Juan and Zach are excluded from secondary selection but available as primary.
 function nbPopulateSecondTechs(){
-  document.getElementById('nbSecondTech').innerHTML='<option value="">— Select —</option>'+nbTechOptionsHtml();
+  document.getElementById('nbSecondTech').innerHTML='<option value="">— Select —</option>'+nbTechOptionsHtml(['juan', 'zach']);
 }
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
