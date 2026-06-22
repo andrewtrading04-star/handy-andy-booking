@@ -16,7 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
-import { emailConfig } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -964,6 +964,53 @@ async function bookingCreate(req, res, db, auth, body) {
   // Notify the technician if one was assigned at creation time.
   if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at).catch(console.error);
   if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at).catch(console.error);
+
+  // ---- Branded booking-confirmation email (best-effort; never fails the booking) ----
+  // Mirrors the public widget's confirmation so phone-in jobs the office books
+  // also get the orange "You're booked" email. Scoped to Handy Andy for now;
+  // Doms is enabled once its Resend domain is wired into this project. sendEmail
+  // itself is gated by emailNotificationsOn() + the Resend key, so this no-ops
+  // safely until those are set.
+  if (biz.slug === 'handy-andy' && c.email) {
+    try {
+      const firstName = (c.name || '').trim().split(/\s+/)[0] || '';
+      let dateLong = '';
+      if (scheduled_at) {
+        try { dateLong = new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'short', day: 'numeric' }); } catch { /* keep blank */ }
+      }
+      const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
+      const timeWindow = slotDef ? slotDef.label : '';
+
+      // Price block only when there's an actual charge (skip $0 insurance jobs).
+      const hasPrice = (Number(body.price) || 0) > 0;
+      let emailLines = null;
+      if (hasPrice) {
+        emailLines = selections.map(s => {
+          const qty = Number(s.quantity) || 1;
+          const unit = Number(s.price) || 0;
+          return { label: s.label || 'Option', qty, amount: unit * qty };
+        });
+        if (emailLines.length && Number(body.tax) > 0) emailLines.push({ label: 'Tax (8.25%)', qty: 1, amount: Number(body.tax) });
+        if (!emailLines.length) emailLines.push({ label: 'Service total', qty: 1, amount: Number(body.price) });
+      }
+
+      const { subject, html } = bookingConfirmationEmail({
+        firstName,
+        dateLong, timeWindow,
+        address: { line1: c.address_line1, city: c.city, state: c.state, zip: c.postal_code },
+        lines: emailLines,
+        total: hasPrice ? Number(body.price) : null,
+        tip: 0,
+        twoTechs: !!body.needs_lifting,
+        jobId: bRow.id,
+      }, brandFor('handy-andy'));
+      const { from } = emailConfig('handy-andy');
+      const result = await sendEmail({ slug: 'handy-andy', to: c.email, subject, html, replyTo: from });
+      if (!result.sent) console.warn('[admin] confirmation email not sent:', result.skipped || result.error);
+    } catch (e) {
+      console.error('[admin] confirmation email error:', e.message);
+    }
+  }
 
   return res.status(200).json({ ok: true, id: bRow.id });
 }
