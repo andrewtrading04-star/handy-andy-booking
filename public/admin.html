@@ -1127,7 +1127,12 @@ function openBooking(b){
     ? `<option value="${b.technician_id}" selected>${esc(b.technician.name)} (${esc(b.partner_company||'partner')})</option>` : '';
   const techOpts=['<option value="">— Unassigned —</option>', xcoOpt,
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
-  const secondTechOpts=['<option value="">— None —</option>',
+  // A cross-company second tech (e.g. a Doms helper on a Handy Andy job) isn't in
+  // our own roster, so add them explicitly — same as the primary's xcoOpt — so the
+  // dropdown shows the right person instead of falsely reading "None".
+  const xcoSecondOpt=(b.secondary_technician && b.secondary_technician.cross_company && !techCache.some(t=>t.id===b.secondary_technician_id))
+    ? `<option value="${b.secondary_technician_id}" selected>${esc(b.secondary_technician.name)} (${esc(b.secondary_technician.company||'partner')})</option>` : '';
+  const secondTechOpts=['<option value="">— None —</option>', xcoSecondOpt,
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
   const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);
@@ -1144,6 +1149,7 @@ function openBooking(b){
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
     ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-row"><span>🔧</span><div><strong>Two-person lift</strong>${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</div></div>`:''}
+    ${b.secondary_technician?`<div class="bk-row"><span>${ic('customers')}</span><div>2nd tech: <strong>${esc(b.secondary_technician.name)}</strong>${b.secondary_technician.cross_company?` <span class="evt-xco" title="From the partner company — the customer never sees this">${esc(b.secondary_technician.company||'PARTNER')}</span>`:''}</div></div>`:''}
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
       ${showSecond?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}

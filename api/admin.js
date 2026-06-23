@@ -1091,7 +1091,13 @@ async function bookingCreate(req, res, db, auth, body) {
   // If a DB hasn't been migrated yet, the insert reports the missing column —
   // drop it and retry so a booking can still be created. Loop in case more than
   // one optional column is missing.
+  //
+  // EXCEPTION: if the office actually assigned a SECOND technician but the
+  // secondary_technician_id column is missing, do NOT silently drop them — that
+  // would create a one-tech job and the second tech would never see it. Fail
+  // loudly with a fix hint so the booking isn't quietly wrong.
   const OPTIONAL_INSERT_COLS = ['sms_consent', 'secondary_technician_id', 'needs_lifting', 'tv_size_category'];
+  const wantedSecondTech = !!bookingInsert.secondary_technician_id;
   let insertObj = { ...bookingInsert };
   let bRow, bErr;
   for (let attempt = 0; attempt < OPTIONAL_INSERT_COLS.length + 1; attempt++) {
@@ -1099,6 +1105,9 @@ async function bookingCreate(req, res, db, auth, body) {
     if (!bErr) break;
     const missing = OPTIONAL_INSERT_COLS.find(c => (bErr.message || '').includes(c) && c in insertObj);
     if (!missing) break;                       // not an optional-column problem — give up
+    if (missing === 'secondary_technician_id' && wantedSecondTech) {
+      return res.status(503).json({ error: 'This database can\'t store a second technician yet (missing the two-technician upgrade). Apply migration 0019_secondary_technician.sql in Supabase, then rebook. The booking was not created so the second tech isn\'t silently lost.' });
+    }
     console.warn(`[admin] bookings.${missing} not found, retrying without it`);
     delete insertObj[missing];
   }
@@ -1573,7 +1582,7 @@ async function photoGallery(req, res, db, auth) {
   const offset = Number(req.query.offset) || 0;
   const { data, error } = await db.from('booking_photos')
     .select(`id, url, caption, uploader_name, created_at, booking_id,
-             booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians ( name ) )`)
+             booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians!technician_id ( name ) )`)
     .eq('business_id', biz.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -1783,15 +1792,22 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 // the dashboard never goes down waiting on a migration.
 let bookingLiftCols = true;
 function bookingSelect() {
+  // The technician embeds are disambiguated by FK column (technician_id /
+  // secondary_technician_id) because bookings has TWO foreign keys to
+  // technicians once migration 0019 is applied; without the hint PostgREST
+  // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
           address_line1, city, state, postal_code,
           customer:customers ( id, name, phone, email ),
-          technician:technicians ( id, name, status, color, business_id, business:businesses ( name ) ),
+          technician:technicians!technician_id ( id, name, status, color, business_id, business:businesses ( name ) ),
           service:services ( id, name ),
           photos:booking_photos ( count ),
           notes_list:booking_notes ( count )`;
-  return bookingLiftCols ? `${base}, secondary_technician_id, needs_lifting, tv_size_category` : base;
+  return bookingLiftCols
+    ? `${base}, secondary_technician_id, needs_lifting, tv_size_category,
+          secondary_technician:technicians!secondary_technician_id ( id, name, status, color, business_id, business:businesses ( name ) )`
+    : base;
 }
 // Run a bookings read, retrying once without the 0019 columns if they're missing.
 // makeQuery receives the select string and returns a fresh (awaitable) query.
@@ -1831,6 +1847,15 @@ function shapeBooking(b) {
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
     customer: b.customer || null,
     technician: b.technician ? { id: b.technician.id, name: b.technician.name, status: b.technician.status, color: b.technician.color } : null,
+    // Second technician (large-TV lifts / cross-company helpers). Carries the
+    // company name + a cross-company flag so the dashboard can label a partner
+    // helper (e.g. "George · Doms") without exposing it to the customer.
+    secondary_technician: b.secondary_technician ? {
+      id: b.secondary_technician.id, name: b.secondary_technician.name,
+      status: b.secondary_technician.status, color: b.secondary_technician.color,
+      company: b.secondary_technician.business?.name || null,
+      cross_company: !!(b.secondary_technician.business_id && b.business_id && b.secondary_technician.business_id !== b.business_id),
+    } : null,
     service: b.service || null,
     photo_count: Array.isArray(b.photos) ? (b.photos[0]?.count || 0) : 0,
     note_count: Array.isArray(b.notes_list) ? (b.notes_list[0]?.count || 0) : 0,
@@ -1916,7 +1941,7 @@ async function reviewCheck(req, res, body) {
 
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
-    .select('id, reviewed_at, service_area:service_areas(name), technician:technicians(name), business:businesses(slug, name)')
+    .select('id, reviewed_at, service_area:service_areas(name), technician:technicians!technician_id(name), business:businesses(slug, name)')
     .eq('id', reviewToken.booking_id)
     .single();
 
@@ -1957,7 +1982,7 @@ async function reviewSubmit(req, res, body) {
     .select(`
       id, reviewed_at, customer_id, business_id, status, service_area_id,
       customer:customers(name, phone, email),
-      technician:technicians(id, name, phone),
+      technician:technicians!technician_id(id, name, phone),
       service_area:service_areas(name),
       business:businesses(id, slug, name, feedback_email)
     `)
@@ -2062,7 +2087,7 @@ async function reviews(req, res, db, auth) {
     .select(`
       id, status, scheduled_at, review_rating, review_text, reviewed_at,
       customer:customers(name, phone),
-      technician:technicians(id, name, color),
+      technician:technicians!technician_id(id, name, color),
       service_area:service_areas(name)
     `)
     .eq('business_id', biz.id)
@@ -2107,7 +2132,7 @@ async function badReviews(req, res, db, auth) {
   const { data: revs, error } = await db.from('bookings')
     .select(`id, business_id, scheduled_at, reviewed_at, review_rating, review_text,
              customer:customers ( name, phone ),
-             technician:technicians ( id, name )`)
+             technician:technicians!technician_id ( id, name )`)
     .in('business_id', bizIds)
     .in('review_rating', [1, 2, 3])
     .gte('reviewed_at', since)
