@@ -2958,20 +2958,21 @@ function nbTotalTvs(){
 }
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
 function nbValidateTvMountingRequired(){
-  // TV mounting requires: frame_tv (type), size, fireplace, surface
-  const requiredKeys = ['frame_tv', 'size', 'fireplace', 'surface'];
-  const hasTvMountingGroups = nbOptionGroups.some(g => requiredKeys.includes(g.key));
-  if(!hasTvMountingGroups) return null; // Not a TV mounting booking
-
-  for(const key of requiredKeys){
+  // Only applies to TV Mounting bookings — detected by the per-TV option groups
+  // (size/fireplace/surface) that load only for that category.
+  const isTvMounting = nbOptionGroups.some(g => ['size','fireplace','surface'].includes(g.key));
+  if(!isTvMounting) return null;
+  // TV Type is tracked separately from the option groups (regular + Frame/Gallery
+  // counts), so check it via the TV total rather than a group.
+  if(nbTotalTvs() <= 0) return 'Please choose the TV type (how many TVs).';
+  // Each of these is a required choice once it's a TV mounting job.
+  const need = (key, label) => {
     const g = nbOptionGroups.find(x => x.key === key);
-    if(!g) return `${key} group not found`;
-    if(!nbQty[g.id] || Object.values(nbQty[g.id]).every(c => c <= 0)){
-      const labels = { frame_tv:'TV Type', size:'TV Size', fireplace:'Fireplace', surface:'Wall Surface' };
-      return `${labels[key]} is required`;
-    }
-  }
-  return null; // All required fields filled
+    if(!g) return null; // group absent on this DB — don't block
+    const filled = nbQty[g.id] && Object.values(nbQty[g.id]).some(c => c > 0);
+    return filled ? null : `Please select the ${label}.`;
+  };
+  return need('size','TV size') || need('fireplace','fireplace option') || need('surface','wall surface');
 }
 // Trim TV-bound groups down when the TV count drops below what's selected.
 function nbClampTvBound(){
@@ -3441,6 +3442,14 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
   if(!email){ err.textContent='Email is required for booking confirmation'; return; }
+
+  // TV mounting (the main paid service) requires a credit card on file — cash and
+  // quote are not allowed for these jobs. Card details are validated below.
+  const isTvMounting=nbOptionGroups.some(g=>['size','fireplace','surface'].includes(g.key));
+  if(isTvMounting && paymentMethod!=='card'){
+    err.textContent='A credit card is required for TV mounting bookings. Choose “Credit Card” and enter the card.';
+    return;
+  }
 
   // Second-technician requirement, driven by the "Lifting Help" selection.
   // "cannot help lift" / "86"+" make a 2nd tech mandatory; "can help lift" makes
