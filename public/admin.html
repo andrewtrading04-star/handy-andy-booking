@@ -1135,7 +1135,7 @@ function openBooking(b){
   document.getElementById('bkBody').innerHTML=`
     ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
-    <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
+    <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
     <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
     ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
     ${b.customer?.phone?`<div class="bk-row"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
