@@ -402,16 +402,36 @@ async function availabilityOverview(req, res, db, auth) {
     // New Booking calendar already uses). Mapped to { technician_id, date, slot_key }.
     // No business filter: a tech busy on a CROSS-COMPANY job (booked by the
     // partner company) must still show as occupied here, so the office never
-    // double-books them. (Matched by technician_id, which is globally unique.)
-    const { data: bk } = await db.from('bookings')
-      .select('technician_id, scheduled_at')
-      .in('technician_id', ids)
-      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
-      .order('scheduled_at', { ascending: true }).limit(2000);
-    bookings = (bk || []).map(b => {
+    // double-books them. (technician_id is globally unique.) A tech counts as
+    // busy whether they're the PRIMARY or the SECOND tech on the job — without the
+    // secondary_technician_id leg, a tech booked only as a helper would wrongly
+    // show free here (the bug that let the same helper be stacked onto two jobs).
+    const idList = ids.join(',');
+    const runBk = (withSecond) => {
+      let q = db.from('bookings')
+        .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
+        .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+        .order('scheduled_at', { ascending: true }).limit(2000);
+      return withSecond
+        ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
+        : q.in('technician_id', ids);
+    };
+    let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
+    if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) {
+      bookingLiftCols = false;
+      ({ data: bk } = await runBk(false));
+    }
+    const idSet = new Set(ids);
+    const occRows = [];
+    for (const b of (bk || [])) {
       const slot_key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
-      return slot_key ? { technician_id: b.technician_id, date: localDateStr(tz, b.scheduled_at), slot_key } : null;
-    }).filter(Boolean);
+      if (!slot_key) continue;
+      const date = localDateStr(tz, b.scheduled_at);
+      if (idSet.has(b.technician_id)) occRows.push({ technician_id: b.technician_id, date, slot_key });
+      if (b.secondary_technician_id && idSet.has(b.secondary_technician_id))
+        occRows.push({ technician_id: b.secondary_technician_id, date, slot_key });
+    }
+    bookings = occRows;
   }
   return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions, bookings });
 }
@@ -918,19 +938,33 @@ async function availableDates(req, res, db, auth) {
   const winStart = localDateStartUTC(tz, monthStart);
   const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
   // No business filter: a partner tech's jobs in their OWN company must also
-  // count as busy, so cross-company bookings can't double-book them.
-  const { data: bk } = await db.from('bookings')
-    .select('technician_id, scheduled_at')
-    .in('technician_id', techIds)
-    .neq('status', 'cancelled').not('scheduled_at', 'is', null)
-    .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString());
+  // count as busy, so cross-company bookings can't double-book them. Count a tech
+  // as busy whether they're the PRIMARY or the SECOND tech — a date a tech is
+  // only a helper on must not show as bookable (mirrors bookedSlotKeysForTech).
+  const tidList = techIds.join(',');
+  const runBk = (withSecond) => {
+    let q = db.from('bookings')
+      .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString());
+    return withSecond
+      ? q.or(`technician_id.in.(${tidList}),secondary_technician_id.in.(${tidList})`)
+      : q.in('technician_id', techIds);
+  };
+  let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
+  if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) {
+    bookingLiftCols = false;
+    ({ data: bk } = await runBk(false));
+  }
+  const techIdSet = new Set(techIds);
   const occ = {};   // `${techId}:${date}` -> Set(slot_key)
+  const addOcc = (tid, date, key) => { (occ[`${tid}:${date}`] = occ[`${tid}:${date}`] || new Set()).add(key); };
   for (const b of (bk || [])) {
     const date = localDateStr(tz, b.scheduled_at);
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     if (!key) continue;
-    const k = `${b.technician_id}:${date}`;
-    (occ[k] = occ[k] || new Set()).add(key);
+    if (techIdSet.has(b.technician_id)) addOcc(b.technician_id, date, key);
+    if (b.secondary_technician_id && techIdSet.has(b.secondary_technician_id)) addOcc(b.secondary_technician_id, date, key);
   }
 
   // Compute one tech's free slot set for a given date (recurring ± exceptions − booked).
