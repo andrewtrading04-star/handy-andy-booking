@@ -540,6 +540,7 @@
         <select class="search" style="margin:0" id="nbSecondTech"></select>
         <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Pick anyone from either company. Times shown only when both are available.</div>
       </div>
+      <div id="nbBringsOwnNote" style="display:none;font-size:12px;color:var(--ink-2);margin:8px 0 6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">This technician brings their own second person, so no second tech needs to be scheduled. The two-person fee still applies.</div>
       <input type="hidden" id="nbDate">
       <div id="nbCalWrap" style="display:none;">
         <div class="nb-cal-head">
@@ -1491,6 +1492,7 @@ async function renderAnalytics(){
   const cmpBtnStyle='padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;';
   view.innerHTML=`
     <div class="ana">
+      <div id="emailQuotaWarning"></div>
       <div class="ana-head">
         <div>
           <h1>📊 ${esc(current?current.name:'Booking')} Analytics</h1>
@@ -1539,6 +1541,15 @@ async function renderAnalytics(){
     cmpBtn.style.color='var(--accent)';
     loadAnalytics();
   }));
+
+  // Fetch and display email quota warning
+  try{
+    const quotaRes=await api('email_quota',{ params:{ business:current.slug }});
+    const quotaWarn=document.getElementById('emailQuotaWarning');
+    if(quotaWarn && quotaRes.warning){
+      quotaWarn.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:14px;color:#856404;">${esc(quotaRes.warning)}</div>`;
+    }
+  }catch(err){ console.warn('[email_quota]',err.message); }
 
   await loadAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
@@ -2445,6 +2456,7 @@ async function openNewBooking(){
   resetNbSteps();
   nbSelectedSlot=null;
   nbServiceId=null;
+  nbBookingKey=nbNewKey();   // fresh idempotency key for this booking attempt
   document.getElementById('nbSlots').innerHTML='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
@@ -2489,19 +2501,17 @@ async function openNewBooking(){
     // Partner-company roster for cross-company booking (best-effort). When a
     // partner exists, a second "company" pool lets the office book their techs.
     nbPartner = null;
-    try{
-      const pt = await api('partner_technicians',{ params:{ business:current.slug }});
-      if(pt && pt.partner && (pt.technicians||[]).length){
-        nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
-      }
-    }catch(err){ /* no partner / not configured — single-company booking only */ }
-    nbPopulateTechs();
-    nbPopulateSecondTechs();
+    await nbLoadPartnerTechs();
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
 }
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
+// One idempotency key per new-booking attempt (set on modal open). Every submit
+// for this attempt carries the SAME key, so a double-click / double-submit is
+// de-duplicated server-side into a single booking instead of creating two.
+let nbBookingKey=null;
+function nbNewKey(){ return (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : 'k-'+Date.now()+'-'+Math.random().toString(16).slice(2); }
 // Cross-company booking: own roster, and the partner company's roster (if any).
 // The primary AND the second technician each have their own company pool, so a
 // two-tech job can pair (say) a Doms primary with an "any Handy Andy" helper.
@@ -2514,6 +2524,20 @@ function nbPoolList(){
   const list=[{ pool:'own', name:(current&&current.name)||'Our', techs:nbOwnTechs }];
   if(nbPartner) list.push({ pool:'partner', name:nbPartner.name, techs:nbPartner.technicians });
   return list;
+}
+// Load/reload partner technicians, optionally filtered by postal code
+async function nbLoadPartnerTechs(){
+  try{
+    const params={ business:current.slug };
+    const postalCode=document.getElementById('nbZip').value.trim();
+    if(postalCode) params.postal_code=postalCode;
+    const pt = await api('partner_technicians',{ params });
+    if(pt && pt.partner && (pt.technicians||[]).length){
+      nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
+    }
+  }catch(err){ /* no partner / not configured or postal code not found */ }
+  nbPopulateTechs();
+  nbPopulateSecondTechs();
 }
 function nbTechOptionsHtml(excludeNames = []){
   return nbPoolList().map(g=>
@@ -2533,6 +2557,24 @@ function nbParseTech(val){
   if(!val) return null;
   if(val.indexOf('any:')===0) return { id:'any', pool:val.slice(4) };
   return { id:val, pool:nbPoolOfTech(val) };
+}
+// Every tech across every company pool, for name lookups.
+function nbAllTechs(){ return nbPoolList().reduce((a,g)=>a.concat(g.techs||[]),[]); }
+// Techs who bring their OWN second person on a two-person job (an off-schedule
+// spouse/helper). When one of them is the PRIMARY we don't schedule — or
+// require — a roster second tech; they cover it themselves. The customer is
+// still charged the two-person fee (the lifting line item is unaffected). Same
+// people excluded from the second-tech dropdown. Keep in sync with admin.js.
+const NB_BRINGS_OWN_SECOND=['juan','zach'];
+function nbTechBringsOwnSecond(id){
+  if(!id||id==='any') return false;
+  const t=nbAllTechs().find(x=>x.id===id);
+  return !!(t&&NB_BRINGS_OWN_SECOND.includes((t.name||'').trim().toLowerCase()));
+}
+// True when the currently-selected PRIMARY tech brings their own second person.
+function nbPrimaryBringsOwnSecond(){
+  const prim=nbParseTech(document.getElementById('nbTech').value);
+  return !!(prim&&nbTechBringsOwnSecond(prim.id));
 }
 // Fill the PRIMARY technician dropdown (defaults to "Any <own> Technician").
 function nbPopulateTechs(){
@@ -2630,6 +2672,7 @@ function nbSecondTechMode(){
 // exact SAME concrete person on both sides is ignored.
 function nbEffectiveSecondTech(){
   if(nbSecondTechMode()==='none') return null;
+  if(nbPrimaryBringsOwnSecond()) return null;   // Juan/Zach bring their own helper
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
   if(!sec) return null;
   const prim=nbParseTech(document.getElementById('nbTech').value);
@@ -2641,6 +2684,9 @@ function nbEffectiveSecondTech(){
 // Only a same-concrete-person pair is rejected.
 function nbAvailabilityBlockedReason(){
   const mode=nbSecondTechMode();
+  // Juan/Zach bring their own helper, so a two-person job is never blocked on
+  // picking a roster second tech — availability is just the primary's own.
+  if(nbPrimaryBringsOwnSecond()) return '';
   const prim=nbParseTech(document.getElementById('nbTech').value);
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
   const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
@@ -2659,8 +2705,14 @@ let nbPrevSecondMode='none';
 function syncSecondTech(){
   const wrap=document.getElementById('nbSecondTechWrap');
   const sel=document.getElementById('nbSecondTech');
+  const note=document.getElementById('nbBringsOwnNote');
   const mode=nbSecondTechMode();
-  if(mode==='none'){
+  const ownSecond=nbPrimaryBringsOwnSecond();
+  // When the primary brings their own second person, never show the picker — the
+  // helper is off-schedule, so there's no roster tech to choose. Show a note
+  // instead (only when a 2nd person is actually wanted) so the office knows the
+  // two-person fee still applies.
+  if(mode==='none' || ownSecond){
     wrap.style.display='none';
     if(sel.value) sel.value='';                 // drop any stale secondary
   }else{
@@ -2668,6 +2720,7 @@ function syncSecondTech(){
     document.getElementById('nbSecondTechLabel').textContent =
       mode==='mandatory' ? 'Second technician — required (both must be free)' : 'Second technician — optional (helper)';
   }
+  if(note) note.style.display=(ownSecond && mode!=='none') ? '' : 'none';
   if(mode!==nbPrevSecondMode){
     nbPrevSecondMode=mode;
     onSecondTechChanged();                       // requirement changed → re-pick date/slot
@@ -2801,6 +2854,8 @@ async function loadNbSlots(date){
   if(prim.pool==='partner') params.pool='partner';
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
+  const postalCode=document.getElementById('nbZip').value.trim();
+  if(postalCode) params.postal_code=postalCode;
   try{
     const r=await api('available_slots',{ params });
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
@@ -2811,6 +2866,18 @@ async function loadNbSlots(date){
 }
 document.getElementById('nbTech').addEventListener('change',()=>{
   // Tech changed — recompute the calendar and clear any prior date/slot pick.
+  document.getElementById('nbDate').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbSlotsWrap').style.display='none';
+  // Switching to/from a "brings own helper" tech (Juan/Zach) flips whether the
+  // second-tech picker is shown and whether availability is a pair or single.
+  syncSecondTech();
+  loadNbCalendar();
+});
+document.getElementById('nbZip').addEventListener('change',()=>{
+  // Postal code changed — reload partner techs filtered to this service area
+  nbLoadPartnerTechs();
+  // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
   document.getElementById('nbSlotsWrap').style.display='none';
@@ -2890,6 +2957,23 @@ function nbTotalTvs(){
   return nbFrameTvQty.regular + nbFrameTvQty.frame;
 }
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
+function nbValidateTvMountingRequired(){
+  // Only applies to TV Mounting bookings — detected by the per-TV option groups
+  // (size/fireplace/surface) that load only for that category.
+  const isTvMounting = nbOptionGroups.some(g => ['size','fireplace','surface'].includes(g.key));
+  if(!isTvMounting) return null;
+  // TV Type is tracked separately from the option groups (regular + Frame/Gallery
+  // counts), so check it via the TV total rather than a group.
+  if(nbTotalTvs() <= 0) return 'Please choose the TV type (how many TVs).';
+  // Each of these is a required choice once it's a TV mounting job.
+  const need = (key, label) => {
+    const g = nbOptionGroups.find(x => x.key === key);
+    if(!g) return null; // group absent on this DB — don't block
+    const filled = nbQty[g.id] && Object.values(nbQty[g.id]).some(c => c > 0);
+    return filled ? null : `Please select the ${label}.`;
+  };
+  return need('size','TV size') || need('fireplace','fireplace option') || need('surface','wall surface');
+}
 // Trim TV-bound groups down when the TV count drops below what's selected.
 function nbClampTvBound(){
   const cap=nbTotalTvs();
@@ -3342,6 +3426,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const assurion=nbAssurionActive;
   const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
   if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
+  const tvMountingErr=nbValidateTvMountingRequired();
+  if(tvMountingErr){ err.textContent=tvMountingErr; return; }
   const travelFee=assurion?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
   const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
@@ -3357,17 +3443,29 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
 
   if(!email){ err.textContent='Email is required for booking confirmation'; return; }
 
+  // TV mounting (the main paid service) requires a credit card on file — cash and
+  // quote are not allowed for these jobs. Card details are validated below.
+  const isTvMounting=nbOptionGroups.some(g=>['size','fireplace','surface'].includes(g.key));
+  if(isTvMounting && paymentMethod!=='card'){
+    err.textContent='A credit card is required for TV mounting bookings. Choose “Credit Card” and enter the card.';
+    return;
+  }
+
   // Second-technician requirement, driven by the "Lifting Help" selection.
   // "cannot help lift" / "86"+" make a 2nd tech mandatory; "can help lift" makes
   // it optional. The second tech may be "any" (auto-picked server-side) or come
   // from the other company. Validate BEFORE tokenizing a card so we never charge
   // then fail.
   const secondMode=assurion?'none':nbSecondTechMode();
-  const sec=(secondMode!=='none') ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
+  // Juan/Zach bring their own second person (off-schedule), so no roster second
+  // tech is chosen or required — but the two-person fee still rides on the line
+  // items, so the customer is charged the same.
+  const ownSecond=!assurion && nbPrimaryBringsOwnSecond();
+  const sec=(secondMode!=='none' && !ownSecond) ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
   // Either tech may be "any" — the server resolves "any + any" to two distinct
   // people. Only reject a missing second tech, or the same concrete person twice.
   const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
-  if(secondMode==='mandatory'){
+  if(secondMode==='mandatory' && !ownSecond){
     if(!sec){ err.textContent='This job requires a second technician. Please select one.'; return; }
     if(samePerson){ err.textContent='The two technicians must be different.'; return; }
   }
@@ -3377,11 +3475,13 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
 
   // For card payments, tokenize the card with Stripe before creating the booking.
   let paymentMethodId=null;
+  // Disable submit button early to prevent double-submission
+  if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
+
   if(paymentMethod==='card'){
-    if(!email){ err.textContent='Email is required to save a card on file'; return; }
+    if(!email){ err.textContent='Email is required to save a card on file'; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
     try{
       await ensureNbStripe();
-      if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
       const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
         type:'card', card:nbStripeCard,
         billing_details:{ name, email, phone },
@@ -3393,6 +3493,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
+      idempotency_key: nbBookingKey,
       customer:{ name, phone, email,
         address_line1:document.getElementById('nbAddr').value.trim(),
         city:document.getElementById('nbCity').value.trim(),

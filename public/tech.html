@@ -410,7 +410,7 @@ async function showDetail(id){
       <button class="back" id="back">‹ Today's jobs</button>
       ${j.cross_company?`<div class="xco-banner">
         <div class="xco-banner-h">⚠ THIS JOB IS FOR ${esc((j.company_name||'THE OTHER COMPANY').toUpperCase())}</div>
-        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}, not your own company.</div>
+        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}.</div>
       </div>`:''}
       <div class="card">
         <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
@@ -947,6 +947,9 @@ async function initDevPanel(attempt){
   try{
     const res=await fetch(new URL(API+'?action=dev_techs',location.origin),{cache:'no-store'});
     if(!res.ok){
+      // Dev bypass is disabled in production — hide the panel entirely so techs
+      // only ever see phone + PIN. (403 = bypass off; not a transient error.)
+      if(res.status===403){ const p=document.getElementById('devPanel'); if(p) p.style.display='none'; return; }
       let msg='HTTP '+res.status;
       try{ const e=await res.json(); if(e&&e.error) msg=e.error; }catch{}
       // Cold start / transient: retry once before giving up.
