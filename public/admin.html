@@ -138,6 +138,13 @@
   .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
   .evt.s-cancelled,.evt.s-no_show{border-left-color:#c4ccd6;opacity:.6;}
   .evt.s-cancelled .evt-n{text-decoration:line-through;}
+  /* Cross-company secondary technician booking (partner tech helping with large lift) */
+  .evt.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;box-shadow:0 0 0 1px rgba(255,179,102,.3) inset;}
+  body.doms .evt.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;box-shadow:0 0 0 1px rgba(77,141,255,.3) inset;}
+  .evt.xco-secondary .evt-xco{background:#ffb366;color:#7a4620;}
+  body.doms .evt.xco-secondary .evt-xco{background:#4d8dff;color:#fff;}
+  .job.xco-secondary .evt-xco{background:#ffb366;color:#7a4620;}
+  body.doms .job.xco-secondary .evt-xco{background:#4d8dff;color:#fff;}
   .dayempty{height:6px;}
 
   /* availability board (technician × day, with time-slot pills) */
@@ -170,6 +177,8 @@
   .wrap{padding:16px 18px;max-width:1100px;}
   .section-title{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;font-weight:700;}
   .job{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:9px;}
+  .job.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;}
+  body.doms .job.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;}
   .job .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
   .job .name{font-weight:700;font-size:15px;}
   .job .meta{color:var(--mute);font-size:13px;margin-top:4px;line-height:1.6;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
@@ -1013,9 +1022,10 @@ function renderCalBody(){
 
 // ── Jobs view ──────────────────────────────────────────────────────────────
 function evtCard(b){
-  return `<div class="evt s-${b.status}" data-id="${b.id}">
+  const xcoSecondary = b.secondary_technician?.cross_company;
+  return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
     <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
-    <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}</div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>':''}${xcoSecondary?` <span class="evt-xco" style="background:#ffb366;color:#7a4620;" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
   </div>`;
 }
@@ -1048,10 +1058,13 @@ function renderListView(dates){
     if(!items.length) return; any=true;
     const h=colHeadLabel(ds);
     html+=`<div class="section-title">${h.dow}, ${h.md} · ${items.length} job${items.length===1?'':'s'}</div>`;
-    html+=items.map(b=>`<div class="job evt-row" data-id="${b.id}"><div class="row">
-        <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span></div>
+    html+=items.map(b=>{
+      const xcoSecondary = b.secondary_technician?.cross_company;
+      return `<div class="job evt-row${xcoSecondary?' xco-secondary':''}" data-id="${b.id}"><div class="row">
+        <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>${xcoSecondary?` <span class="evt-xco" style="background:#ffb366;color:#7a4620;">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
         <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
-        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div></div>`).join('');
+        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div></div>`;
+    }).join('');
   });
   html+='</div>';
   view.innerHTML = any ? html : '<div class="empty">No jobs this week.</div>';
