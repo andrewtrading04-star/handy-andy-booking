@@ -2489,14 +2489,7 @@ async function openNewBooking(){
     // Partner-company roster for cross-company booking (best-effort). When a
     // partner exists, a second "company" pool lets the office book their techs.
     nbPartner = null;
-    try{
-      const pt = await api('partner_technicians',{ params:{ business:current.slug }});
-      if(pt && pt.partner && (pt.technicians||[]).length){
-        nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
-      }
-    }catch(err){ /* no partner / not configured — single-company booking only */ }
-    nbPopulateTechs();
-    nbPopulateSecondTechs();
+    await nbLoadPartnerTechs();
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
@@ -2514,6 +2507,20 @@ function nbPoolList(){
   const list=[{ pool:'own', name:(current&&current.name)||'Our', techs:nbOwnTechs }];
   if(nbPartner) list.push({ pool:'partner', name:nbPartner.name, techs:nbPartner.technicians });
   return list;
+}
+// Load/reload partner technicians, optionally filtered by postal code
+async function nbLoadPartnerTechs(){
+  try{
+    const params={ business:current.slug };
+    const postalCode=document.getElementById('nbZip').value.trim();
+    if(postalCode) params.postal_code=postalCode;
+    const pt = await api('partner_technicians',{ params });
+    if(pt && pt.partner && (pt.technicians||[]).length){
+      nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
+    }
+  }catch(err){ /* no partner / not configured or postal code not found */ }
+  nbPopulateTechs();
+  nbPopulateSecondTechs();
 }
 function nbTechOptionsHtml(excludeNames = []){
   return nbPoolList().map(g=>
@@ -2801,6 +2808,8 @@ async function loadNbSlots(date){
   if(prim.pool==='partner') params.pool='partner';
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
+  const postalCode=document.getElementById('nbZip').value.trim();
+  if(postalCode) params.postal_code=postalCode;
   try{
     const r=await api('available_slots',{ params });
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
@@ -2811,6 +2820,15 @@ async function loadNbSlots(date){
 }
 document.getElementById('nbTech').addEventListener('change',()=>{
   // Tech changed — recompute the calendar and clear any prior date/slot pick.
+  document.getElementById('nbDate').value='';
+  nbSelectedSlot=null;
+  document.getElementById('nbSlotsWrap').style.display='none';
+  loadNbCalendar();
+});
+document.getElementById('nbZip').addEventListener('change',()=>{
+  // Postal code changed — reload partner techs filtered to this service area
+  nbLoadPartnerTechs();
+  // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
   document.getElementById('nbSlotsWrap').style.display='none';

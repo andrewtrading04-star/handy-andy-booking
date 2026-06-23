@@ -51,6 +51,18 @@ async function rosterBizId(db, hostBiz, pool) {
   return hostBiz.id;
 }
 
+// Look up the service_area_id for a postal code in a given business.
+// Returns null if postal_code is not provided or not found.
+async function serviceAreaIdFromPostal(db, businessId, postalCode) {
+  if (!postalCode) return null;
+  const { data } = await db.from('service_area_zips')
+    .select('service_area_id')
+    .eq('business_id', businessId)
+    .eq('postal_code', postalCode)
+    .maybeSingle();
+  return data?.service_area_id || null;
+}
+
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 function toE164(raw) {
@@ -627,6 +639,7 @@ async function availableSlots(req, res, db, auth) {
   const dateStr = (req.query.date || '').toString();
   const techId = (req.query.technician_id || '').toString();
   const techId2 = (req.query.secondary_technician_id || '').toString();
+  const postalCode = (req.query.postal_code || '').toString();
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
@@ -638,6 +651,14 @@ async function availableSlots(req, res, db, auth) {
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
+
+  // For cross-company secondary tech selection, look up the service area
+  // from the postal code so secondary techs match the customer's location.
+  let serviceAreaId = null;
+  if (wantPair && techId2 === 'any') {
+    serviceAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+  }
+
   let keys;
   if (!wantPair) {
     keys = await availableSlotKeys(db, ridPrimary, techId, dateStr, dow, tz);
@@ -648,7 +669,8 @@ async function availableSlots(req, res, db, auth) {
     // a (possibly different) company pool.
     const ridSecondary = await rosterBizId(db, biz, (req.query.pool2 || '').toString());
     const pMap = await freeSlotTechMap(db, ridPrimary, techId, dateStr, dow, tz);
-    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz);
+    // Pass serviceAreaId to secondary tech filtering for cross-company pairs
+    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz, serviceAreaId);
     keys = new Set();
     for (const [k, P] of pMap) {
       const S = sMap.get(k);
@@ -740,11 +762,13 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
 // that is either a concrete tech or "any" of a roster (recurring ± exceptions −
 // existing bookings). Used to match a DISTINCT two-tech pair for big-TV jobs:
 // the union of the two sides' free techs in a slot must be ≥ 2 distinct people.
-async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz) {
+async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaId = null) {
   let techIds;
   if (!techId || techId === 'any') {
-    const { data: techs } = await db.from('technicians')
+    let query = db.from('technicians')
       .select('id').eq('business_id', bizId).eq('active', true);
+    if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
+    const { data: techs } = await query;
     techIds = (techs || []).map(t => t.id);
   } else {
     techIds = [techId];
@@ -766,10 +790,13 @@ async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz) {
 // one-time exception) who is NOT already booked for that slot. Falls back to any
 // active tech who is free in that slot so we never auto-create a double-booking.
 // excludeTechId skips one tech (e.g. the primary, when auto-picking the second).
-async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null) {
-  const { data: techs } = await db.from('technicians')
+// serviceAreaId restricts to techs in a specific service area (for cross-company secondary tech selection).
+async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null) {
+  let query = db.from('technicians')
     .select('id').eq('business_id', bizId).eq('active', true)
     .order('created_at', { ascending: true });
+  if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
+  const { data: techs } = await query;
   const list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
   if (!list.length) return null;
   if (dateStr && slotKey) {
@@ -1028,10 +1055,15 @@ async function bookingCreate(req, res, db, auth, body) {
   // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift). The
   // second tech may come from EITHER company (pool2) and may be "any", which we
   // auto-pick from that pool excluding the primary so it's never the same person.
+  // For cross-company secondary tech selection, filter by the booking's service area.
   let secondary_technician_id = body.secondary_technician_id || null;
   if (secondary_technician_id === 'any') {
     const rid2 = await rosterBizId(db, biz, (body.pool2 || '').toString());
-    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id);
+    // Look up service area from postal code for cross-company tech filtering
+    const serviceAreaId = body.pool2 === 'partner'
+      ? await serviceAreaIdFromPostal(db, biz.id, c.postal_code)
+      : null;
+    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id, serviceAreaId);
   }
   // A mandatory two-person job (large TV, customer can't help lift) must end up
   // with a concrete second technician, and the two must differ.
@@ -1659,12 +1691,22 @@ async function technicians(req, res, db, auth) {
 // The OTHER company's bookable technicians, so a secretary can fill a gap with a
 // partner tech when their own are full. Scope is enforced on the HOST business
 // (the caller's own) — only names + ids are returned for the picker.
+// When postal_code is provided, filters to techs in that service area.
 async function partnerTechnicians(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const partner = await partnerBusiness(db, biz.slug);
   if (!partner) return res.status(200).json({ partner: null, technicians: [] });
-  const { data, error } = await db.from('technicians')
-    .select('id, name').eq('business_id', partner.id).eq('active', true).order('name');
+
+  const postalCode = (req.query.postal_code || '').toString();
+  let serviceAreaId = null;
+  if (postalCode) {
+    serviceAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+  }
+
+  let query = db.from('technicians')
+    .select('id, name').eq('business_id', partner.id).eq('active', true);
+  if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
+  const { data, error } = await query.order('name');
   if (error) throw error;
   return res.status(200).json({
     partner: { slug: partner.slug, name: partner.name },
