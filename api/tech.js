@@ -278,7 +278,7 @@ async function debugIdentity(req, res, db, auth) {
   // Every recent booking in my business (any tech) so we can see what the
   // dashboard sees and compare technician_id / business_id.
   const { data: bizBookings } = await db.from('bookings')
-    .select('id, status, scheduled_at, business_id, technician_id, technician:technicians ( name )')
+    .select('id, status, scheduled_at, business_id, technician_id, technician:technicians!technician_id ( name )')
     .eq('business_id', auth.business_id)
     .order('scheduled_at', { ascending: false }).limit(20);
 
