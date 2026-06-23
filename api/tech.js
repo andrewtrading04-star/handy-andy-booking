@@ -334,14 +334,20 @@ async function job(req, res, db, auth) {
   const id = (req.query.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
   // Primary OR second tech, any business, so a (cross-company) helper opens it.
+  // The two technician embeds use explicit FK hints (technician_id /
+  // secondary_technician_id) so PostgREST knows which relationship to follow.
+  // The secondary embed is dropped on deployments predating migration 0019.
   const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
-             review_rating, review_text, reviewed_at, business_id,
+             review_rating, review_text, reviewed_at, business_id, technician_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
              business:businesses ( name ),
+             technician:technicians!technician_id ( name ),${techHasSecondCol ? `
+             secondary_technician_id,
+             secondary_technician:technicians!secondary_technician_id ( name ),` : ''}
              line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`), auth)
     .eq('id', id)
     .maybeSingle();
@@ -350,6 +356,17 @@ async function job(req, res, db, auth) {
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
   shaped.company_name = data.business?.name || null;
+  // The OTHER technician on a two-person job (the partner the viewer works
+  // alongside). If the viewer is the primary, that's the secondary tech; if
+  // they're the secondary helper, it's the primary. Shown so each tech knows
+  // who else is coming.
+  const primaryName = data.technician?.name || null;
+  const secondaryName = data.secondary_technician?.name || null;
+  if (primaryName && secondaryName) {
+    shaped.partner_tech = (data.technician_id === auth.tech_id) ? secondaryName : primaryName;
+  } else {
+    shaped.partner_tech = null;
+  }
   return res.status(200).json({ job: shaped });
 }
 

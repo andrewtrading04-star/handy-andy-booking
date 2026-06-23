@@ -268,6 +268,7 @@ const ICONS = {
   location: {e:'📍', f:'fa-solid fa-location-dot'},
   navigate: {e:'🧭', f:'fa-solid fa-diamond-turn-right'},
   camera:   {e:'📷', f:'fa-solid fa-camera'},
+  users:    {e:'👥', f:'fa-solid fa-users'},
 };
 function isDoms(){ return !!(tech && tech.slug==='doms'); }
 function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
@@ -428,7 +429,7 @@ async function showDetail(id){
         </div>
         ${j.review_text?`<div class="note-b" style="margin-top:8px;background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;">“${esc(j.review_text)}”</div>`:'<div class="sub" style="color:var(--mute);font-size:13px;margin-top:6px;font-style:italic;">No comment left.</div>'}
       </div>`:''}
-      ${(j.line_items&&j.line_items.length)?`<div class="card"><h3>Job Details</h3>${j.line_items.map(li=>`<div class="kv">• ${esc(liName(li.name))}</div>`).join('')}</div>`:''}
+      ${(j.line_items&&j.line_items.length)||j.partner_tech?`<div class="card"><h3>Job Details</h3>${(j.line_items||[]).map(li=>`<div class="kv">• ${esc(liName(li.name))}</div>`).join('')}${j.partner_tech?`<div class="kv" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}</div>`:''}
 
       <div class="card">
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
