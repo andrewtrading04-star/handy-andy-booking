@@ -540,6 +540,7 @@
         <select class="search" style="margin:0" id="nbSecondTech"></select>
         <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Pick anyone from either company. Times shown only when both are available.</div>
       </div>
+      <div id="nbBringsOwnNote" style="display:none;font-size:12px;color:var(--ink-2);margin:8px 0 6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">This technician brings their own second person, so no second tech needs to be scheduled. The two-person fee still applies.</div>
       <input type="hidden" id="nbDate">
       <div id="nbCalWrap" style="display:none;">
         <div class="nb-cal-head">
@@ -2547,6 +2548,24 @@ function nbParseTech(val){
   if(val.indexOf('any:')===0) return { id:'any', pool:val.slice(4) };
   return { id:val, pool:nbPoolOfTech(val) };
 }
+// Every tech across every company pool, for name lookups.
+function nbAllTechs(){ return nbPoolList().reduce((a,g)=>a.concat(g.techs||[]),[]); }
+// Techs who bring their OWN second person on a two-person job (an off-schedule
+// spouse/helper). When one of them is the PRIMARY we don't schedule — or
+// require — a roster second tech; they cover it themselves. The customer is
+// still charged the two-person fee (the lifting line item is unaffected). Same
+// people excluded from the second-tech dropdown. Keep in sync with admin.js.
+const NB_BRINGS_OWN_SECOND=['juan','zach'];
+function nbTechBringsOwnSecond(id){
+  if(!id||id==='any') return false;
+  const t=nbAllTechs().find(x=>x.id===id);
+  return !!(t&&NB_BRINGS_OWN_SECOND.includes((t.name||'').trim().toLowerCase()));
+}
+// True when the currently-selected PRIMARY tech brings their own second person.
+function nbPrimaryBringsOwnSecond(){
+  const prim=nbParseTech(document.getElementById('nbTech').value);
+  return !!(prim&&nbTechBringsOwnSecond(prim.id));
+}
 // Fill the PRIMARY technician dropdown (defaults to "Any <own> Technician").
 function nbPopulateTechs(){
   const sel=document.getElementById('nbTech');
@@ -2643,6 +2662,7 @@ function nbSecondTechMode(){
 // exact SAME concrete person on both sides is ignored.
 function nbEffectiveSecondTech(){
   if(nbSecondTechMode()==='none') return null;
+  if(nbPrimaryBringsOwnSecond()) return null;   // Juan/Zach bring their own helper
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
   if(!sec) return null;
   const prim=nbParseTech(document.getElementById('nbTech').value);
@@ -2654,6 +2674,9 @@ function nbEffectiveSecondTech(){
 // Only a same-concrete-person pair is rejected.
 function nbAvailabilityBlockedReason(){
   const mode=nbSecondTechMode();
+  // Juan/Zach bring their own helper, so a two-person job is never blocked on
+  // picking a roster second tech — availability is just the primary's own.
+  if(nbPrimaryBringsOwnSecond()) return '';
   const prim=nbParseTech(document.getElementById('nbTech').value);
   const sec=nbParseTech(document.getElementById('nbSecondTech').value);
   const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
@@ -2672,8 +2695,14 @@ let nbPrevSecondMode='none';
 function syncSecondTech(){
   const wrap=document.getElementById('nbSecondTechWrap');
   const sel=document.getElementById('nbSecondTech');
+  const note=document.getElementById('nbBringsOwnNote');
   const mode=nbSecondTechMode();
-  if(mode==='none'){
+  const ownSecond=nbPrimaryBringsOwnSecond();
+  // When the primary brings their own second person, never show the picker — the
+  // helper is off-schedule, so there's no roster tech to choose. Show a note
+  // instead (only when a 2nd person is actually wanted) so the office knows the
+  // two-person fee still applies.
+  if(mode==='none' || ownSecond){
     wrap.style.display='none';
     if(sel.value) sel.value='';                 // drop any stale secondary
   }else{
@@ -2681,6 +2710,7 @@ function syncSecondTech(){
     document.getElementById('nbSecondTechLabel').textContent =
       mode==='mandatory' ? 'Second technician — required (both must be free)' : 'Second technician — optional (helper)';
   }
+  if(note) note.style.display=(ownSecond && mode!=='none') ? '' : 'none';
   if(mode!==nbPrevSecondMode){
     nbPrevSecondMode=mode;
     onSecondTechChanged();                       // requirement changed → re-pick date/slot
@@ -2829,6 +2859,9 @@ document.getElementById('nbTech').addEventListener('change',()=>{
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
   document.getElementById('nbSlotsWrap').style.display='none';
+  // Switching to/from a "brings own helper" tech (Juan/Zach) flips whether the
+  // second-tech picker is shown and whether availability is a pair or single.
+  syncSecondTech();
   loadNbCalendar();
 });
 document.getElementById('nbZip').addEventListener('change',()=>{
@@ -3387,11 +3420,15 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // from the other company. Validate BEFORE tokenizing a card so we never charge
   // then fail.
   const secondMode=assurion?'none':nbSecondTechMode();
-  const sec=(secondMode!=='none') ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
+  // Juan/Zach bring their own second person (off-schedule), so no roster second
+  // tech is chosen or required — but the two-person fee still rides on the line
+  // items, so the customer is charged the same.
+  const ownSecond=!assurion && nbPrimaryBringsOwnSecond();
+  const sec=(secondMode!=='none' && !ownSecond) ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
   // Either tech may be "any" — the server resolves "any + any" to two distinct
   // people. Only reject a missing second tech, or the same concrete person twice.
   const samePerson = prim && sec && prim.id!=='any' && sec.id!=='any' && sec.id===prim.id;
-  if(secondMode==='mandatory'){
+  if(secondMode==='mandatory' && !ownSecond){
     if(!sec){ err.textContent='This job requires a second technician. Please select one.'; return; }
     if(samePerson){ err.textContent='The two technicians must be different.'; return; }
   }

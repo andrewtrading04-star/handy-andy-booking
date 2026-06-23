@@ -30,10 +30,17 @@ const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arri
 // dropdown; this server-side list is the backstop so an "Any <company>"
 // auto-pick can't slip them into the secondary slot. Matched case-insensitively
 // by first name. Keep in sync with nbPopulateSecondTechs() in admin.html.
+//
+// These SAME techs bring their OWN second person on two-person jobs (an
+// off-schedule spouse/helper). So when one of them is the PRIMARY, we never
+// assign — nor require — a roster second tech: they cover it themselves. The
+// customer is still charged the two-person fee (the lifting line item stays).
+// bringsOwnSecondTech() is the readable alias for that primary-side rule.
 const SECONDARY_INELIGIBLE_NAMES = ['juan', 'zach'];
 function isSecondaryIneligibleName(name) {
   return SECONDARY_INELIGIBLE_NAMES.includes((name || '').trim().toLowerCase());
 }
+const bringsOwnSecondTech = isSecondaryIneligibleName;
 
 // ── Cross-company booking ────────────────────────────────────────────────────
 // Each business may book the OTHER company's technicians when its own are full.
@@ -1129,12 +1136,27 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id = await pickAvailableTech(db, rid, body.scheduled_date, body.scheduled_slot, tz);
   }
 
+  // Does the primary tech bring their own second person (Juan/Zach + spouse)? If
+  // so we never assign a roster second tech and a two-person job doesn't require
+  // one. Resolve the primary's name to decide (covers a concrete pick AND an
+  // "any" pick that happened to land on Juan/Zach).
+  let primaryBringsOwnSecond = false;
+  if (technician_id) {
+    const { data: pt } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle();
+    primaryBringsOwnSecond = bringsOwnSecondTech(pt?.name);
+  }
+
   // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift). The
   // second tech may come from EITHER company (pool2) and may be "any", which we
   // auto-pick from that pool excluding the primary so it's never the same person.
   // For cross-company secondary tech selection, filter by the booking's service area.
   let secondary_technician_id = body.secondary_technician_id || null;
-  if (secondary_technician_id === 'any') {
+  if (primaryBringsOwnSecond) {
+    // Juan/Zach bring their own helper (off-schedule) — never put a roster tech
+    // in the secondary slot, even if the form sent one. The two-person fee still
+    // applies (it rides on the line items, not on this field).
+    secondary_technician_id = null;
+  } else if (secondary_technician_id === 'any') {
     const rid2 = await rosterBizId(db, biz, (body.pool2 || '').toString());
     // Look up service area from postal code for cross-company tech filtering
     const serviceAreaId = body.pool2 === 'partner'
@@ -1152,8 +1174,10 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
   // A mandatory two-person job (large TV, customer can't help lift) must end up
-  // with a concrete second technician, and the two must differ.
-  if (body.needs_lifting && !secondary_technician_id) {
+  // with a concrete second technician, and the two must differ — UNLESS the
+  // primary brings their own second person (Juan/Zach), who covers the job
+  // without a roster second tech.
+  if (body.needs_lifting && !secondary_technician_id && !primaryBringsOwnSecond) {
     return res.status(400).json({ error: 'This job requires a second technician, but no one from the chosen team is free for that time. Pick a specific second tech or another time.' });
   }
   if (secondary_technician_id && secondary_technician_id === technician_id) {
