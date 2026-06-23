@@ -1272,10 +1272,28 @@ async function bookingUpdate(req, res, db, auth, body) {
   switch (body.action) {
     case 'confirm':
       patch.status = newStatus = 'confirmed'; patch.confirmed_at = now; break;
-    case 'reschedule':
-      if (!body.scheduled_at) return res.status(400).json({ error: 'scheduled_at required' });
-      patch.scheduled_at = body.scheduled_at;
-      if (body.scheduled_end) patch.scheduled_end = body.scheduled_end; break;
+    case 'reschedule': {
+      // Preferred path: a calendar date + one of the fixed slots. Convert it to a
+      // timestamp server-side in the business timezone (same logic as new
+      // bookings) and derive scheduled_end from the slot, so the calendar shows
+      // the right time range. Falls back to a raw scheduled_at if one is passed.
+      const rtz = biz.timezone || 'America/Denver';
+      if (body.scheduled_date && body.scheduled_slot) {
+        const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
+        if (!slotDef) return res.status(400).json({ error: 'Invalid time slot' });
+        const [sh, sm] = slotDef.start.split(':').map(Number);
+        const [eh, em] = slotDef.end.split(':').map(Number);
+        const midnight = localDateStartUTC(rtz, body.scheduled_date);
+        patch.scheduled_at = new Date(midnight.getTime() + (sh * 60 + sm) * 60000).toISOString();
+        patch.scheduled_end = new Date(midnight.getTime() + (eh * 60 + em) * 60000).toISOString();
+      } else if (body.scheduled_at) {
+        patch.scheduled_at = body.scheduled_at;
+        if (body.scheduled_end) patch.scheduled_end = body.scheduled_end;
+      } else {
+        return res.status(400).json({ error: 'scheduled_at (or scheduled_date + scheduled_slot) required' });
+      }
+      break;
+    }
     case 'assign':
       // Only touch the field that was actually sent, so changing the second tech
       // doesn't wipe the primary (and vice-versa). Skip the secondary if the DB

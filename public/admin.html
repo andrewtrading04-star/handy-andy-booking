@@ -228,6 +228,9 @@
   .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
   .nb-slot:hover{border-color:var(--accent);}
   .nb-slot.on{border-color:var(--accent);background:rgba(238,108,40,.07);font-weight:600;}
+  /* Reschedule modal */
+  .rs-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
+  .rs-slots{display:grid;gap:8px;}
   /* New-booking calendar */
   .nb-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;width:100%;}
   .nb-cal-title{font-size:14px;font-weight:700;color:var(--ink);}
@@ -575,6 +578,23 @@
     <div style="display:flex;gap:8px;margin-top:16px;">
       <button class="btn ghost" type="button" id="bkClose">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- Reschedule modal: tap a date + one of the fixed time slots -->
+<div id="rsModal" class="modal hidden">
+  <div class="sheet" style="max-width:420px;">
+    <h2>Reschedule</h2>
+    <div class="sub" id="rsSub" style="font-size:13px;margin:-8px 0 16px;"></div>
+    <label class="rs-lbl" for="rsDate">New date</label>
+    <input type="date" id="rsDate" class="search" style="margin:0 0 16px;">
+    <label class="rs-lbl">New time</label>
+    <div id="rsSlots" class="rs-slots"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;">
+      <button class="btn" type="button" id="rsSave">Save new time</button>
+      <button class="btn ghost" type="button" id="rsCancel">Cancel</button>
+    </div>
+    <div class="err" id="rsErr"></div>
   </div>
 </div>
 
@@ -1154,7 +1174,7 @@ function openBooking(b){
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
   const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', secondary_technician_id: sa.value||null }); close(); };
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
-  const rs=document.getElementById('bkResched'); if(rs) rs.onclick=async()=>{ const v=prompt('New date & time (YYYY-MM-DD HH:MM):'); if(v){ const iso=new Date(v.replace(' ','T')).toISOString(); await updateBooking({ id:b.id, action:'reschedule', scheduled_at: iso }); close(); } };
+  const rs=document.getElementById('bkResched'); if(rs) rs.onclick=()=>openReschedule(b, close);
   const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? This permanently deletes it.')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
   const ro=document.getElementById('bkReopen'); if(ro) ro.onclick=async()=>{ if(confirm('Reopen this completed job? It will be marked as assigned or confirmed.')){  await updateBooking({ id:b.id, action:'reopen' }); close(); } };
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
@@ -1167,6 +1187,66 @@ function openBooking(b){
   document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
   document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
 }
+
+// ── Reschedule modal: pick a date + one of the fixed time slots ──────────────
+// The five fixed slots mirror the server's single source of truth
+// (api/_lib/availability.js). The admin taps a date + slot; the server converts
+// that to a timezone-correct start/end, so there's no typing and no parsing.
+const BOOKING_SLOTS=[
+  {key:'s1',label:'8:00 AM – 10:00 AM',start:'08:00',end:'10:00'},
+  {key:'s2',label:'11:00 AM – 1:00 PM',start:'11:00',end:'13:00'},
+  {key:'s3',label:'2:00 PM – 4:00 PM', start:'14:00',end:'16:00'},
+  {key:'s4',label:'5:00 PM – 8:00 PM', start:'17:00',end:'20:00'},
+  {key:'s5',label:'8:00 PM – 10:30 PM',start:'20:00',end:'22:30'},
+];
+// Which slot a booking currently sits in (so we can pre-highlight it).
+function rsSlotKeyForIso(iso){
+  let hhmm; try{ hhmm=new Date(iso).toLocaleTimeString('en-GB',{timeZone:tz(),hour:'2-digit',minute:'2-digit',hour12:false}); }catch{ return null; }
+  if(!hhmm) return null;
+  const toMin=s=>{ const[h,m]=s.split(':').map(Number); return h*60+m; };
+  const t=toMin(hhmm);
+  for(const s of BOOKING_SLOTS) if(t>=toMin(s.start)&&t<toMin(s.end)) return s.key;
+  for(const s of BOOKING_SLOTS) if(toMin(s.start)===t) return s.key;
+  return null;
+}
+let rsState=null;   // { bookingId, date, slot, onDone }
+function openReschedule(b, onDone){
+  const curDate=localDateOf(b.scheduled_at)||todayStr();
+  rsState={ bookingId:b.id, date:curDate, slot:rsSlotKeyForIso(b.scheduled_at), onDone:onDone||null };
+  document.getElementById('rsSub').innerHTML=`${esc(b.customer?.name||'Customer')} · now <strong>${esc(fmtDateTime(b.scheduled_at))}</strong>`;
+  const di=document.getElementById('rsDate'); di.value=curDate; di.min=todayStr();
+  document.getElementById('rsErr').textContent='';
+  renderRsSlots();
+  document.getElementById('rsModal').classList.remove('hidden');
+}
+function renderRsSlots(){
+  document.getElementById('rsSlots').innerHTML=BOOKING_SLOTS.map(s=>
+    `<button type="button" class="nb-slot${rsState&&rsState.slot===s.key?' on':''}" data-key="${s.key}">${esc(s.label)}</button>`).join('');
+}
+function closeRsModal(){ document.getElementById('rsModal').classList.add('hidden'); rsState=null; }
+document.getElementById('rsDate').addEventListener('change',e=>{ if(rsState) rsState.date=e.target.value; });
+document.getElementById('rsSlots').addEventListener('click',e=>{
+  const btn=e.target.closest('.nb-slot'); if(!btn||!rsState) return;
+  rsState.slot=btn.dataset.key; renderRsSlots();
+});
+document.getElementById('rsCancel').onclick=closeRsModal;
+document.getElementById('rsModal').addEventListener('click',e=>{ if(e.target.id==='rsModal') closeRsModal(); });
+document.getElementById('rsSave').onclick=async()=>{
+  if(!rsState) return;
+  const err=document.getElementById('rsErr'); err.textContent='';
+  if(!rsState.date){ err.textContent='Pick a date.'; return; }
+  if(!rsState.slot){ err.textContent='Pick a time.'; return; }
+  const btn=document.getElementById('rsSave'); btn.disabled=true;
+  const onDone=rsState.onDone;
+  try{
+    await api('booking_update',{ method:'POST', body:{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot }});
+    toast('Rescheduled ✓');
+    closeRsModal();
+    if(onDone) onDone();        // close the booking detail modal too
+    refreshCurrent();
+  }catch(e2){ err.textContent=e2.message; }   // keep the modal open on a conflict
+  finally{ btn.disabled=false; }
+};
 
 // ── Booking photos (in the detail modal) ────────────────────────────────────
 async function loadBookingPhotos(id){
