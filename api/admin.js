@@ -202,6 +202,7 @@ export default async function handler(req, res) {
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
+      case 'email_quota': return await emailQuota(req, res, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -2452,4 +2453,72 @@ async function estimateSendEmail(req, res, db, auth, body) {
   await db.from('estimates').update({ status: 'contacted' }).eq('id', body.id).eq('business_id', biz.id).catch(() => {});
 
   return res.status(200).json({ ok: true });
+}
+
+// Get email quota from Resend for the current business
+async function emailQuota(req, res, auth) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  const db = serviceClient();
+
+  let business;
+  if (auth.scope === 'all') {
+    // For owner, need to specify business via query param
+    const slug = (req.query.business || '').toString();
+    if (!slug) return res.status(400).json({ error: 'business parameter required for owner' });
+    const { data: biz, error } = await db.from('businesses').select('id, slug').eq('slug', slug).eq('active', true).maybeSingle();
+    if (error || !biz) return res.status(404).json({ error: 'Business not found' });
+    business = biz;
+  } else {
+    // For secretary, use their scoped business
+    const { data: biz, error } = await db.from('businesses').select('id, slug').eq('slug', auth.scope).eq('active', true).maybeSingle();
+    if (error || !biz) return res.status(404).json({ error: 'Business not found' });
+    business = biz;
+  }
+
+  const { apiKey } = emailConfig(business.slug);
+  if (!apiKey) {
+    return res.status(200).json({ quotaAvailable: null, warning: null });
+  }
+
+  try {
+    const resendRes = await fetch('https://api.resend.com/account', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!resendRes.ok) {
+      console.warn(`[email_quota] Resend API error ${resendRes.status} for ${business.slug}`);
+      return res.status(200).json({ quotaAvailable: null, warning: null });
+    }
+
+    const accountData = await resendRes.json();
+    const monthlyQuota = accountData.monthly_quota || 3000;
+    const dailyQuota = accountData.daily_quota || 100;
+    const monthlyUsed = accountData.monthly_sent || 0;
+    const dailyUsed = accountData.daily_sent || 0;
+
+    const monthlyPercent = (monthlyUsed / monthlyQuota) * 100;
+    const dailyPercent = (dailyUsed / dailyQuota) * 100;
+
+    let warning = null;
+    if (monthlyPercent >= 90) {
+      warning = `⚠️ Email quota approaching limit: ${monthlyUsed}/${monthlyQuota} this month (${Math.round(monthlyPercent)}%)`;
+    } else if (dailyPercent >= 90) {
+      warning = `⚠️ Email quota approaching limit: ${dailyUsed}/${dailyQuota} today (${Math.round(dailyPercent)}%)`;
+    }
+
+    return res.status(200).json({
+      quotaAvailable: true,
+      monthlyQuota,
+      monthlyUsed,
+      monthlyPercent,
+      dailyQuota,
+      dailyUsed,
+      dailyPercent,
+      warning
+    });
+  } catch (err) {
+    console.error('[email_quota]', err);
+    return res.status(200).json({ quotaAvailable: null, warning: null });
+  }
 }

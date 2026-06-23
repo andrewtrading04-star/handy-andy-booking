@@ -1492,6 +1492,7 @@ async function renderAnalytics(){
   const cmpBtnStyle='padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;';
   view.innerHTML=`
     <div class="ana">
+      <div id="emailQuotaWarning"></div>
       <div class="ana-head">
         <div>
           <h1>📊 ${esc(current?current.name:'Booking')} Analytics</h1>
@@ -1540,6 +1541,15 @@ async function renderAnalytics(){
     cmpBtn.style.color='var(--accent)';
     loadAnalytics();
   }));
+
+  // Fetch and display email quota warning
+  try{
+    const quotaRes=await api('email_quota',{ params:{ business:current.slug }});
+    const quotaWarn=document.getElementById('emailQuotaWarning');
+    if(quotaWarn && quotaRes.warning){
+      quotaWarn.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:14px;color:#856404;">${esc(quotaRes.warning)}</div>`;
+    }
+  }catch(err){ console.warn('[email_quota]',err.message); }
 
   await loadAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
@@ -2947,6 +2957,22 @@ function nbTotalTvs(){
   return nbFrameTvQty.regular + nbFrameTvQty.frame;
 }
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
+function nbValidateTvMountingRequired(){
+  // TV mounting requires: frame_tv (type), size, fireplace, surface
+  const requiredKeys = ['frame_tv', 'size', 'fireplace', 'surface'];
+  const hasTvMountingGroups = nbOptionGroups.some(g => requiredKeys.includes(g.key));
+  if(!hasTvMountingGroups) return null; // Not a TV mounting booking
+
+  for(const key of requiredKeys){
+    const g = nbOptionGroups.find(x => x.key === key);
+    if(!g) return `${key} group not found`;
+    if(!nbQty[g.id] || Object.values(nbQty[g.id]).every(c => c <= 0)){
+      const labels = { frame_tv:'TV Type', size:'TV Size', fireplace:'Fireplace', surface:'Wall Surface' };
+      return `${labels[key]} is required`;
+    }
+  }
+  return null; // All required fields filled
+}
 // Trim TV-bound groups down when the TV count drops below what's selected.
 function nbClampTvBound(){
   const cap=nbTotalTvs();
@@ -3399,6 +3425,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const assurion=nbAssurionActive;
   const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
   if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
+  const tvMountingErr=nbValidateTvMountingRequired();
+  if(tvMountingErr){ err.textContent=tvMountingErr; return; }
   const travelFee=assurion?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
   const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
