@@ -24,6 +24,17 @@ import { uploadImage, deleteImage } from './_lib/storage.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
+// Technicians who can NEVER be the second tech on a two-person job. They cover
+// out-of-town territories (Zach → Austin, Juan → Houston) and only ever work as
+// the primary on their own jobs. The frontend hides them from the second-tech
+// dropdown; this server-side list is the backstop so an "Any <company>"
+// auto-pick can't slip them into the secondary slot. Matched case-insensitively
+// by first name. Keep in sync with nbPopulateSecondTechs() in admin.html.
+const SECONDARY_INELIGIBLE_NAMES = ['juan', 'zach'];
+function isSecondaryIneligibleName(name) {
+  return SECONDARY_INELIGIBLE_NAMES.includes((name || '').trim().toLowerCase());
+}
+
 // ── Cross-company booking ────────────────────────────────────────────────────
 // Each business may book the OTHER company's technicians when its own are full.
 // A booking always lives on its HOST business (the one the secretary is logged
@@ -669,8 +680,9 @@ async function availableSlots(req, res, db, auth) {
     // a (possibly different) company pool.
     const ridSecondary = await rosterBizId(db, biz, (req.query.pool2 || '').toString());
     const pMap = await freeSlotTechMap(db, ridPrimary, techId, dateStr, dow, tz);
-    // Pass serviceAreaId to secondary tech filtering for cross-company pairs
-    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz, serviceAreaId);
+    // Pass serviceAreaId + ineligible-secondary filter to the SECOND-tech side so
+    // an "Any <company>" pick never offers a slot only Juan/Zach can cover.
+    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz, serviceAreaId, true);
     keys = new Set();
     for (const [k, P] of pMap) {
       const S = sMap.get(k);
@@ -762,14 +774,16 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
 // that is either a concrete tech or "any" of a roster (recurring ± exceptions −
 // existing bookings). Used to match a DISTINCT two-tech pair for big-TV jobs:
 // the union of the two sides' free techs in a slot must be ≥ 2 distinct people.
-async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaId = null) {
+async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaId = null, excludeIneligibleSecondary = false) {
   let techIds;
   if (!techId || techId === 'any') {
     let query = db.from('technicians')
-      .select('id').eq('business_id', bizId).eq('active', true);
+      .select('id, name').eq('business_id', bizId).eq('active', true);
     if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
     const { data: techs } = await query;
-    techIds = (techs || []).map(t => t.id);
+    let pool = techs || [];
+    if (excludeIneligibleSecondary) pool = pool.filter(t => !isSecondaryIneligibleName(t.name));
+    techIds = pool.map(t => t.id);
   } else {
     techIds = [techId];
   }
@@ -791,13 +805,15 @@ async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaI
 // active tech who is free in that slot so we never auto-create a double-booking.
 // excludeTechId skips one tech (e.g. the primary, when auto-picking the second).
 // serviceAreaId restricts to techs in a specific service area (for cross-company secondary tech selection).
-async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null) {
+// excludeIneligibleSecondary drops techs who can never be a second tech (Juan/Zach).
+async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null, excludeIneligibleSecondary = false) {
   let query = db.from('technicians')
-    .select('id').eq('business_id', bizId).eq('active', true)
+    .select('id, name').eq('business_id', bizId).eq('active', true)
     .order('created_at', { ascending: true });
   if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
   const { data: techs } = await query;
-  const list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
+  let list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
+  if (excludeIneligibleSecondary) list = list.filter(t => !isSecondaryIneligibleName(t.name));
   if (!list.length) return null;
   if (dateStr && slotKey) {
     const dow = dayOfWeekFor(dateStr);
@@ -1063,7 +1079,16 @@ async function bookingCreate(req, res, db, auth, body) {
     const serviceAreaId = body.pool2 === 'partner'
       ? await serviceAreaIdFromPostal(db, biz.id, c.postal_code)
       : null;
-    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id, serviceAreaId);
+    // Never auto-pick Juan/Zach as the second tech (out-of-town, primary-only).
+    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id, serviceAreaId, true);
+  }
+  // Backstop: a concrete second tech (or one that slipped through) must never be
+  // an out-of-town, primary-only tech (Juan/Zach). Verify by name before saving.
+  if (secondary_technician_id) {
+    const { data: secTech } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
+    if (secTech && isSecondaryIneligibleName(secTech.name)) {
+      return res.status(400).json({ error: `${secTech.name} can't be booked as a second technician. Pick another second tech or another time.` });
+    }
   }
   // A mandatory two-person job (large TV, customer can't help lift) must end up
   // with a concrete second technician, and the two must differ.

@@ -1025,7 +1025,7 @@ function evtCard(b){
   const xcoSecondary = b.secondary_technician?.cross_company;
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
     <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
-    <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>':''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
   </div>`;
 }
