@@ -725,19 +725,32 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
   if (!techId || !dateStr) return new Set();
   const dayStart = localDateStartUTC(tz, dateStr);
   const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1));
-  // Match by technician_id ALONE (no business filter): a tech booked for ANY
-  // company in this slot is unavailable everywhere. This is what makes a
-  // cross-company booking remove the slot on BOTH platforms. (technician_id is a
-  // globally-unique UUID, so this never widens results for single-company jobs.)
-  let q = db.from('bookings')
-    .select('id, scheduled_at')
-    .eq('technician_id', techId)
-    .neq('status', 'cancelled')
-    .not('scheduled_at', 'is', null)
-    .gte('scheduled_at', dayStart.toISOString())
-    .lt('scheduled_at', dayEnd.toISOString());
-  if (excludeId) q = q.neq('id', excludeId);
-  const { data } = await q;
+  // Match where the tech is the PRIMARY *or* the SECOND tech on a two-person job,
+  // for ANY company (no business filter): a tech booked anywhere in this slot is
+  // unavailable everywhere. This is what makes a cross-company booking remove the
+  // slot on BOTH platforms. (technician_id is a globally-unique UUID, so this
+  // never widens results for single-company jobs.) Checking secondary_technician_id
+  // too means a tech booked as a HELPER is correctly seen as busy — without it a
+  // second job could be stacked onto a tech who's already someone's second tech.
+  const run = (withSecond) => {
+    let q = db.from('bookings')
+      .select('id, scheduled_at')
+      .neq('status', 'cancelled')
+      .not('scheduled_at', 'is', null)
+      .gte('scheduled_at', dayStart.toISOString())
+      .lt('scheduled_at', dayEnd.toISOString());
+    q = withSecond
+      ? q.or(`technician_id.eq.${techId},secondary_technician_id.eq.${techId}`)
+      : q.eq('technician_id', techId);
+    if (excludeId) q = q.neq('id', excludeId);
+    return q;
+  };
+  // Drop the secondary leg on databases predating migration 0019 (column absent).
+  let { data, error } = await run(bookingLiftCols);
+  if (error && /secondary_technician_id/.test(error.message || '')) {
+    bookingLiftCols = false;
+    ({ data, error } = await run(false));
+  }
   const taken = new Set();
   for (const b of (data || [])) {
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
@@ -1005,6 +1018,20 @@ async function bookingCreate(req, res, db, auth, body) {
   if (!c.name && !c.phone) return res.status(400).json({ error: 'Customer name or phone required' });
   console.log(`[admin] booking create: biz=${biz.slug} customer email=${c.email ? 'present' : 'ABSENT'} phone=${c.phone ? 'present' : 'absent'}`);
 
+  // Idempotency: the dashboard sends one key per booking attempt. A double-submit
+  // (double-click, or two concurrent requests) carries the SAME key. If a booking
+  // with this key already exists, return it instead of creating a duplicate. This
+  // is the first line of defense; a partial unique index (migration 0024) is the
+  // real backstop for the concurrent race (handled at insert time below). The
+  // select is best-effort: on a DB predating 0024 the column is absent and the
+  // query errors — we ignore that and fall through to a normal create.
+  const idempotencyKey = (body.idempotency_key || '').toString().trim() || null;
+  if (idempotencyKey) {
+    const { data: dupe } = await db.from('bookings')
+      .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+    if (dupe?.id) return res.status(200).json({ id: dupe.id, duplicate: true });
+  }
+
   // Reuse an existing customer (by phone, then email) or create one.
   let customer_id = c.id || null;
   let matchedExisting = !!c.id;
@@ -1142,6 +1169,7 @@ async function bookingCreate(req, res, db, auth, body) {
     needs_lifting: !!body.needs_lifting,
     tv_size_category: body.tv_size_category || null,
     sms_consent: !!body.sms_consent,
+    idempotency_key: idempotencyKey,
   };
 
   // Some columns depend on later migrations (0014 sms_consent, 0019 lift cols).
@@ -1153,13 +1181,22 @@ async function bookingCreate(req, res, db, auth, body) {
   // secondary_technician_id column is missing, do NOT silently drop them — that
   // would create a one-tech job and the second tech would never see it. Fail
   // loudly with a fix hint so the booking isn't quietly wrong.
-  const OPTIONAL_INSERT_COLS = ['sms_consent', 'secondary_technician_id', 'needs_lifting', 'tv_size_category'];
+  const OPTIONAL_INSERT_COLS = ['sms_consent', 'secondary_technician_id', 'needs_lifting', 'tv_size_category', 'idempotency_key'];
   const wantedSecondTech = !!bookingInsert.secondary_technician_id;
   let insertObj = { ...bookingInsert };
   let bRow, bErr;
   for (let attempt = 0; attempt < OPTIONAL_INSERT_COLS.length + 1; attempt++) {
     ({ data: bRow, error: bErr } = await db.from('bookings').insert(insertObj).select('id').single());
     if (!bErr) break;
+    // Concurrent duplicate: a simultaneous request with the SAME idempotency key
+    // won the race and already inserted. The unique index (0024) rejects this one
+    // with a 23505 — return the winner's booking instead of erroring, so a
+    // double-submit is a no-op rather than a phantom job.
+    if (idempotencyKey && (bErr.code === '23505' || /idempotency/i.test(bErr.message || '') || /duplicate key/i.test(bErr.message || ''))) {
+      const { data: winner } = await db.from('bookings')
+        .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+      if (winner?.id) return res.status(200).json({ id: winner.id, duplicate: true });
+    }
     const missing = OPTIONAL_INSERT_COLS.find(c => (bErr.message || '').includes(c) && c in insertObj);
     if (!missing) break;                       // not an optional-column problem — give up
     if (missing === 'secondary_technician_id' && wantedSecondTech) {

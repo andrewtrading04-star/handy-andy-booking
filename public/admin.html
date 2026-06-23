@@ -2445,6 +2445,7 @@ async function openNewBooking(){
   resetNbSteps();
   nbSelectedSlot=null;
   nbServiceId=null;
+  nbBookingKey=nbNewKey();   // fresh idempotency key for this booking attempt
   document.getElementById('nbSlots').innerHTML='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
@@ -2495,6 +2496,11 @@ async function openNewBooking(){
   modal.classList.remove('hidden');
 }
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
+// One idempotency key per new-booking attempt (set on modal open). Every submit
+// for this attempt carries the SAME key, so a double-click / double-submit is
+// de-duplicated server-side into a single booking instead of creating two.
+let nbBookingKey=null;
+function nbNewKey(){ return (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : 'k-'+Date.now()+'-'+Math.random().toString(16).slice(2); }
 // Cross-company booking: own roster, and the partner company's roster (if any).
 // The primary AND the second technician each have their own company pool, so a
 // two-tech job can pair (say) a Doms primary with an "any Handy Andy" helper.
@@ -3413,6 +3419,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   try{
     await api('booking_create',{ method:'POST', body:{
       business: current.slug,
+      idempotency_key: nbBookingKey,
       customer:{ name, phone, email,
         address_line1:document.getElementById('nbAddr').value.trim(),
         city:document.getElementById('nbCity').value.trim(),
