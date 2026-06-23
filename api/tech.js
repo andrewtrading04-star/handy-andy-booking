@@ -162,12 +162,14 @@ async function login(req, res, body) {
 }
 
 function devBypassOn() {
-  // Always allow dev bypass in development (no TECH_DEV_BYPASS env var needed)
-  return true;
+  // Off by default so production is locked to phone + PIN. Set TECH_DEV_BYPASS=1
+  // ONLY in a non-production environment to re-enable the no-PIN tech picker.
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.TECH_DEV_BYPASS || '').toLowerCase());
 }
 
 // List every technician (with business) so the dev login screen can pick one.
 async function devTechs(req, res) {
+  if (!devBypassOn()) return res.status(403).json({ error: 'Dev bypass disabled' });
   const db = serviceClient();
   const { data, error } = await db.from('technicians')
     .select('id, name, business_id, businesses ( slug, name )')

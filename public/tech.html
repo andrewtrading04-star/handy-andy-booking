@@ -947,6 +947,9 @@ async function initDevPanel(attempt){
   try{
     const res=await fetch(new URL(API+'?action=dev_techs',location.origin),{cache:'no-store'});
     if(!res.ok){
+      // Dev bypass is disabled in production — hide the panel entirely so techs
+      // only ever see phone + PIN. (403 = bypass off; not a transient error.)
+      if(res.status===403){ const p=document.getElementById('devPanel'); if(p) p.style.display='none'; return; }
       let msg='HTTP '+res.status;
       try{ const e=await res.json(); if(e&&e.error) msg=e.error; }catch{}
       // Cold start / transient: retry once before giving up.
