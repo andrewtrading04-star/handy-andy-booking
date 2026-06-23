@@ -1967,7 +1967,7 @@ function bookingSelect() {
           service:services ( id, name ),
           photos:booking_photos ( count ),
           notes_list:booking_notes ( count ),
-          line_items:booking_line_items ( option_id, label, price, quantity )`;
+          line_items:booking_line_items ( option_id, name, kind, quantity, unit_price, line_total )`;
   return bookingLiftCols
     ? `${base}, secondary_technician_id, needs_lifting, tv_size_category,
           secondary_technician:technicians!secondary_technician_id ( id, name, status, color, business_id, business:businesses ( name ) )`
@@ -2021,7 +2021,16 @@ function shapeBooking(b) {
       cross_company: !!(b.secondary_technician.business_id && b.business_id && b.secondary_technician.business_id !== b.business_id),
     } : null,
     service: b.service || null,
-    line_items: Array.isArray(b.line_items) ? b.line_items : [],
+    // Normalize the stored columns (name/unit_price) to the {label, price} shape
+    // the dashboard renders. line_total is the per-line subtotal (unit × qty).
+    line_items: Array.isArray(b.line_items) ? b.line_items.map(li => ({
+      option_id: li.option_id || null,
+      label: li.name,
+      kind: li.kind,
+      quantity: Number(li.quantity) || 1,
+      price: Number(li.unit_price) || 0,
+      line_total: Number(li.line_total) || 0,
+    })) : [],
     photo_count: Array.isArray(b.photos) ? (b.photos[0]?.count || 0) : 0,
     note_count: Array.isArray(b.notes_list) ? (b.notes_list[0]?.count || 0) : 0,
   };
