@@ -410,7 +410,7 @@ async function showDetail(id){
       <button class="back" id="back">‹ Today's jobs</button>
       ${j.cross_company?`<div class="xco-banner">
         <div class="xco-banner-h">⚠ THIS JOB IS FOR ${esc((j.company_name||'THE OTHER COMPANY').toUpperCase())}</div>
-        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}, not your own company.</div>
+        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}.</div>
       </div>`:''}
       <div class="card">
         <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>

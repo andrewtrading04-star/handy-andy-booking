@@ -3395,11 +3395,13 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
 
   // For card payments, tokenize the card with Stripe before creating the booking.
   let paymentMethodId=null;
+  // Disable submit button early to prevent double-submission
+  if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
+
   if(paymentMethod==='card'){
-    if(!email){ err.textContent='Email is required to save a card on file'; return; }
+    if(!email){ err.textContent='Email is required to save a card on file'; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
     try{
       await ensureNbStripe();
-      if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
       const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
         type:'card', card:nbStripeCard,
         billing_details:{ name, email, phone },
