@@ -106,6 +106,7 @@ export default async function handler(req, res) {
     // while the app is still being built. Remove the env var for production.
     if (action === 'dev_techs') return await devTechs(req, res);
     if (action === 'dev_login') return await devLogin(req, res, body);
+    if (action === 'diagnostic') return await diagnostic(req, res);
 
     const auth = verifyToken(getBearer(req));
     if (!auth || auth.kind !== 'tech') return res.status(401).json({ error: 'Unauthorized' });
@@ -193,6 +194,33 @@ async function devLogin(req, res, body) {
   if (error || !tech) return res.status(404).json({ error: 'Technician not found' });
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
   return res.status(200).json({ token, technician: { id: tech.id, name: tech.name, status: tech.status, slug: tech.businesses?.slug || '', tz: tech.businesses?.timezone || 'America/Denver' } });
+}
+
+// Diagnostic: show login readiness for all technicians (phone + PIN setup).
+async function diagnostic(req, res) {
+  const db = serviceClient();
+  const { data, error } = await db.from('technicians')
+    .select('id, name, phone, active, pin_hash')
+    .eq('active', true)
+    .order('name');
+  if (error) throw error;
+
+  const ready = [];
+  const missing = [];
+
+  for (const t of data || []) {
+    const issues = [];
+    if (!t.phone) issues.push('missing phone');
+    if (!t.pin_hash) issues.push('missing PIN');
+
+    if (issues.length) {
+      missing.push({ id: t.id, name: t.name, issues });
+    } else {
+      ready.push({ id: t.id, name: t.name, phone: t.phone });
+    }
+  }
+
+  return res.status(200).json({ ready, missing, total_active: data?.length || 0 });
 }
 
 async function jobs(req, res, db, auth) {
