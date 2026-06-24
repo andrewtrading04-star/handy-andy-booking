@@ -190,21 +190,43 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
     const base = String(details.baseUrl || '').replace(/\/$/, '');
     const icsUrl = `${base}/api/book?action=ics&title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
       + `&location=${encodeURIComponent(calLoc)}&details=${encodeURIComponent(calDesc)}`;
-    // Apple button only when we have an absolute base URL to serve the .ics from.
-    const appleBtn = base ? `
-            <td width="50%" valign="top" style="padding-left:6px;">
-              <a href="${esc(icsUrl)}" style="display:block;text-align:center;background:#11181c;border:1px solid #11181c;border-radius:11px;padding:13px 10px;text-decoration:none;font-size:13.5px;font-weight:700;color:#ffffff;">&#127822;&nbsp; Apple Calendar</a>
-            </td>` : '';
-    const gWidth = appleBtn ? '50%' : '100%';
-    const gPad   = appleBtn ? 'padding-right:6px;' : '';
+    // Outlook (web) deep-link — prefills a new event. Works without a base URL.
+    const isoStamp = (sec) => new Date(sec * 1000).toISOString();
+    const outlook = 'https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent'
+      + `&subject=${encodeURIComponent(calTitle)}`
+      + `&startdt=${encodeURIComponent(isoStamp(startSec))}`
+      + `&enddt=${encodeURIComponent(isoStamp(endSec))}`
+      + `&body=${encodeURIComponent(calDesc)}`
+      + `&location=${encodeURIComponent(calLoc)}`;
+
+    // Provider logos: served from Google's stable favicon CDN so the recipient's
+    // mail client renders the real Google / Outlook / Apple marks. If a client
+    // blocks images, each row still reads as plain text (the provider name).
+    const favicon = (domain) => `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
+    const calRow = (href, iconUrl, label, first) => `
+            <a href="${esc(href)}" style="display:block;text-decoration:none;${first ? '' : 'border-top:1px solid #eef0f2;'}">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+                <td width="44" valign="middle" style="padding:15px 0 15px 18px;"><img src="${esc(iconUrl)}" width="26" height="26" alt="" style="display:block;border:0;"></td>
+                <td valign="middle" style="padding:15px 18px 15px 12px;font-size:16px;font-weight:600;color:#11181c;">${label}</td>
+              </tr></table>
+            </a>`;
+    const rows = [
+      calRow(gcal, favicon('calendar.google.com'), 'Google Calendar', true),
+      calRow(outlook, favicon('outlook.com'), 'Outlook Calendar', false),
+    ];
+    // Apple row only when we have an absolute base URL to serve the .ics from.
+    if (base) rows.push(calRow(icsUrl, favicon('apple.com'), 'Apple Calendar', false));
+
     calendarBlock = `
-      <tr><td style="padding:20px 28px 0;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af;margin:0 0 9px;">Add to your calendar</div>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td width="${gWidth}" valign="top" style="${gPad}">
-              <a href="${esc(gcal)}" style="display:block;text-align:center;background:#ffffff;border:1px solid #d7dbe0;border-radius:11px;padding:13px 10px;text-decoration:none;font-size:13.5px;font-weight:700;color:#11181c;">&#128197;&nbsp; Google Calendar</a>
-            </td>${appleBtn}
-        </tr></table>
+      <tr><td style="padding:24px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr><td align="center" style="padding-bottom:12px;">
+            <span style="display:inline-block;border:1px solid #e5e7eb;border-radius:999px;padding:12px 26px;font-size:16px;font-weight:600;color:#11181c;">&#128197;&nbsp;&nbsp;Add to Calendar</span>
+          </td></tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e9ebee;border-radius:16px;">
+          <tr><td>${rows.join('')}</td></tr>
+        </table>
       </td></tr>`;
   }
 
