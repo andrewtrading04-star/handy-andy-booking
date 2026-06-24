@@ -299,6 +299,14 @@
   .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer;}
   .gal-del{position:absolute;top:7px;right:7px;width:26px;height:26px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;}
   .gal-del:hover{background:#dc2626;}
+  .gal-tabs{display:flex;gap:8px;margin-bottom:14px;}
+  .gal-tab{background:#fff;border:1px solid var(--line);color:var(--mute);padding:7px 15px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;}
+  .gal-tab.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .gal-count{background:rgba(0,0,0,.10);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:800;}
+  .gal-tab.on .gal-count{background:rgba(255,255,255,.26);}
+  .gal-toggle{margin-top:8px;display:inline-block;background:var(--accent);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;}
+  .gal-toggle.undo{background:#fff;color:var(--mute);border:1px solid var(--line);}
+  .gal-toggle:hover{filter:brightness(1.04);}
   .gal-item figcaption{padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--ink-2);}
   /* lightbox */
   .lightbox{position:fixed;inset:0;background:rgba(10,15,25,.92);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -1412,32 +1420,73 @@ document.getElementById('custForm').addEventListener('submit',async e=>{
 });
 
 // ── Photo gallery (every job photo for this business) ───────────────────────
+// Photos belong to one of two groups: 'private' (default) or 'posted'. The two
+// tabs filter the gallery by group; each photo can be flipped between them.
+let galleryPhotos=[];
+let galleryGroup='private';
+
 async function renderGallery(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   try{
-    const d=await api('photo_gallery',{ params:{ business:current.slug, limit:120 }});
-    const photos=d.photos||[];
-    if(!photos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
-    view.innerHTML=`<div class="wrap"><div class="gal-head">${photos.length} photo${photos.length===1?'':'s'}</div>
-      <div class="gallery">${photos.map(p=>`
-        <figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
-          <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
-          <img src="${esc(p.url)}" loading="lazy" alt="job photo">
-          <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br><span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span></figcaption>
-        </figure>`).join('')}</div></div>`;
-    view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
-    view.querySelectorAll('.gal-del').forEach(btn=>btn.addEventListener('click',async(e)=>{
-      e.stopPropagation();
-      if(!confirm('Delete this photo?')) return;
-      btn.disabled=true;
-      try{
-        await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid }});
-        toast('Photo deleted');
-        const fig=btn.closest('.gal-item'); if(fig) fig.remove();
-      }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
-    }));
+    const d=await api('photo_gallery',{ params:{ business:current.slug, limit:200 }});
+    galleryPhotos=d.photos||[];
+    drawGallery();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+
+function drawGallery(){
+  const view=document.getElementById('view');
+  if(!galleryPhotos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
+  const grp=p=>((p.status||'private')==='posted'?'posted':'private');
+  const priv=galleryPhotos.filter(p=>grp(p)==='private');
+  const posted=galleryPhotos.filter(p=>grp(p)==='posted');
+  const shown=galleryGroup==='posted'?posted:priv;
+  const card=p=>{
+    const isPosted=grp(p)==='posted';
+    return `<figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
+        <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
+        <img src="${esc(p.url)}" loading="lazy" alt="job photo">
+        <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
+          <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span><br>
+          <button class="gal-toggle ${isPosted?'undo':''}" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" data-to="${isPosted?'private':'posted'}">${isPosted?'Make Private':'Post'}</button>
+        </figcaption>
+      </figure>`;
+  };
+  view.innerHTML=`<div class="wrap">
+    <div class="gal-tabs">
+      <button class="gal-tab ${galleryGroup==='private'?'on':''}" data-g="private">Private <span class="gal-count">${priv.length}</span></button>
+      <button class="gal-tab ${galleryGroup==='posted'?'on':''}" data-g="posted">Posted <span class="gal-count">${posted.length}</span></button>
+    </div>
+    ${shown.length
+      ? `<div class="gallery">${shown.map(card).join('')}</div>`
+      : `<div class="empty">No ${galleryGroup==='posted'?'posted':'private'} photos.</div>`}
+  </div>`;
+  view.querySelectorAll('.gal-tab').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; drawGallery(); }));
+  view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
+  view.querySelectorAll('.gal-del').forEach(btn=>btn.addEventListener('click',async(e)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this photo?')) return;
+    btn.disabled=true;
+    try{
+      await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid }});
+      toast('Photo deleted');
+      galleryPhotos=galleryPhotos.filter(p=>String(p.id)!==String(btn.dataset.pid));
+      drawGallery();
+    }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
+  }));
+  view.querySelectorAll('.gal-toggle').forEach(btn=>btn.addEventListener('click',async(e)=>{
+    e.stopPropagation();
+    const to=btn.dataset.to;
+    btn.disabled=true;
+    try{
+      await api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid, status:to }});
+      const ph=galleryPhotos.find(p=>String(p.id)===String(btn.dataset.pid));
+      if(ph) ph.status=to;
+      toast(to==='posted'?'Moved to Posted':'Moved to Private');
+      drawGallery();
+    }catch(err){ btn.disabled=false; toast(err.message||'Could not update photo'); }
+  }));
 }
 
 // ── Booking Analytics ───────────────────────────────────────────────────────

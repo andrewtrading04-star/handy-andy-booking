@@ -184,6 +184,7 @@ export default async function handler(req, res) {
       case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
       case 'booking_photo_add':    return await bookingPhotoAdd(req, res, db, auth, body);
       case 'booking_photo_delete': return await bookingPhotoDelete(req, res, db, auth, body);
+      case 'booking_photo_set_status': return await bookingPhotoSetStatus(req, res, db, auth, body);
       case 'booking_notes':        return await bookingNotes(req, res, db, auth);
       case 'booking_note_add':     return await bookingNoteAdd(req, res, db, auth, body);
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
@@ -1733,22 +1734,56 @@ async function photoGallery(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   const offset = Number(req.query.offset) || 0;
-  const { data, error } = await db.from('booking_photos')
-    .select(`id, url, caption, uploader_name, created_at, booking_id,
+  const sel = (withStatus) => db.from('booking_photos')
+    .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''},
              booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians!technician_id ( name ) )`)
     .eq('business_id', biz.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
+  // Try selecting the photo group (status). If the 0026 migration hasn't been
+  // applied yet the column is missing — fall back and treat everything as
+  // 'private' so the gallery still loads.
+  let { data, error } = await sel(true);
+  let hasStatus = true;
+  if (error && /status/i.test(error.message || '')) {
+    hasStatus = false;
+    ({ data, error } = await sel(false));
+  }
   if (error) throw error;
   const photos = (data || []).map(p => ({
     id: p.id, url: p.url, caption: p.caption, uploader_name: p.uploader_name, created_at: p.created_at,
     booking_id: p.booking_id,
+    status: hasStatus ? (p.status || 'private') : 'private',
     customer_name: p.booking?.customer?.name || 'Customer',
     technician_name: p.booking?.technician?.name || null,
     scheduled_at: p.booking?.scheduled_at || null,
-    status: p.booking?.status || null,
+    status_booking: p.booking?.status || null,
   }));
-  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit });
+  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit, status_supported: hasStatus });
+}
+
+// Move a photo between the Private and Posted groups. No-op-safe: validates the
+// target group and that the photo belongs to this business.
+async function bookingPhotoSetStatus(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.photo_id) return res.status(400).json({ error: 'photo_id required' });
+  const status = (body.status || '').toString();
+  if (status !== 'private' && status !== 'posted') {
+    return res.status(400).json({ error: "status must be 'private' or 'posted'" });
+  }
+  const { data, error } = await db.from('booking_photos')
+    .update({ status })
+    .eq('id', body.photo_id).eq('business_id', biz.id)
+    .select('id, status').single();
+  if (error) {
+    if (/status/i.test(error.message || '')) {
+      return res.status(400).json({ error: 'Photo groups need the 0026 migration applied to the database first.' });
+    }
+    throw error;
+  }
+  if (!data) return res.status(404).json({ error: 'Photo not found' });
+  return res.status(200).json({ ok: true, id: data.id, status: data.status });
 }
 
 // ── Customers (search) ───────────────────────────────────────────────────────
