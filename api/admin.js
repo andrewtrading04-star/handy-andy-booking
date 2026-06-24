@@ -216,6 +216,7 @@ export default async function handler(req, res) {
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
+      case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
@@ -2451,6 +2452,70 @@ async function markEstimateContacted(db, businessId, id) {
   } catch (e) {
     console.warn('[estimate] mark contacted threw:', e.message);
   }
+}
+
+// Create an estimate from New Booking form data, then email it to the customer
+async function estimateCreate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const { customer_name, customer_phone, customer_email, selections, service_label } = body;
+  if (!customer_name || !customer_email) return res.status(400).json({ error: 'Customer name and email required' });
+
+  // Build a description from the selections (services + options)
+  let description = '';
+  if (selections && Array.isArray(selections)) {
+    const items = selections
+      .map(s => {
+        const qty = s.quantity > 1 ? `(×${s.quantity}) ` : '';
+        return `${qty}${s.label}${s.price ? ` — $${s.price.toFixed(2)}` : ''}`;
+      });
+    description = items.join(', ');
+  }
+  description = description || 'Estimate for services requested';
+
+  // Create the estimate record
+  const { data: est, error: createErr } = await db.from('estimates').insert({
+    business_id: biz.id,
+    customer_name: customer_name.trim(),
+    customer_phone: customer_phone ? customer_phone.trim() : null,
+    customer_email: customer_email.trim(),
+    service_label: service_label || 'Custom Estimate',
+    description,
+    status: 'new',
+    sms_consent: body.sms_consent !== false,
+    source: 'manual',
+  }).select('id').maybeSingle();
+
+  if (createErr) throw createErr;
+  if (!est) return res.status(500).json({ error: 'Failed to create estimate' });
+
+  // Now send the email immediately
+  if (!emailNotificationsOn()) {
+    // Still created, but email won't send
+    return res.status(201).json({ id: est.id, ok: true, warning: 'Email notifications are turned off' });
+  }
+
+  const { apiKey } = emailConfig(biz.slug);
+  if (!apiKey) {
+    return res.status(201).json({ id: est.id, ok: true, warning: 'Email service not configured' });
+  }
+
+  const firstName = (customer_name || '').trim().split(/\s+/)[0];
+  const { subject, html } = estimateEmail(
+    { firstName, serviceLabel: service_label || 'Custom Estimate', description },
+    brandFor(biz.slug)
+  );
+
+  try {
+    await sendEmail({ slug: biz.slug, to: customer_email.trim(), subject, html, throwOnError: true });
+    await markEstimateContacted(db, biz.id, est.id);
+  } catch (e) {
+    console.warn('[estimate_create] email send failed, but estimate created:', e.message);
+    return res.status(201).json({ id: est.id, ok: true, warning: `Estimate created but email failed: ${e.message}` });
+  }
+
+  return res.status(201).json({ id: est.id, ok: true });
 }
 
 // Send quote SMS to customer

@@ -197,6 +197,7 @@
   .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:#c4ccd6;}
   .search{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:11px 13px;font-size:14px;margin-bottom:12px;}
   .search:focus{outline:none;border-color:var(--accent);}
+  #jobSearchWrap{display:flex !important;justify-content:space-between;align-items:center;flex-wrap:wrap;}
   table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
@@ -541,6 +542,16 @@
 
     <div id="greeting" class="greeting hidden"></div>
 
+    <div id="jobSearchWrap" style="display:none;background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;gap:8px;">
+      <input type="text" id="jobSearch" placeholder="Search jobs by customer name…" style="flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);margin:0;cursor:pointer;">
+          <input type="checkbox" id="jobSearchShowCanceled" style="cursor:pointer;">
+          <span>Include canceled</span>
+        </label>
+      </div>
+    </div>
+
     <div class="cal-head" id="calHead">
       <div class="cal-nav">
         <button class="arrow" id="prevWk">‹</button>
@@ -616,6 +627,7 @@
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
+        <button class="btn ghost" type="button" id="nbSendEstimate">Send estimate</button>
         <button class="btn ghost" type="button" id="nbCancel">Cancel</button>
       </div>
       <div class="err" id="nbErr"></div>
@@ -974,6 +986,7 @@ function navTo(s){
   }
 }
 function refreshCurrent(){
+  document.getElementById('jobSearchWrap').style.display = section==='schedule'?'flex':'none';
   if(section==='schedule'){ renderSchedule(); renderGreeting(); }
   else if(section==='estimates') renderEstimates();
   else if(section==='customers') renderCustomers();
@@ -1008,6 +1021,8 @@ document.getElementById('viewToggle').querySelectorAll('button').forEach(b=>b.ad
 document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); });
 document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); });
 document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); });
+document.getElementById('jobSearch').addEventListener('input', e=>{ jobSearchQuery=e.target.value; renderCalBody(); });
+document.getElementById('jobSearchShowCanceled').addEventListener('change', e=>{ jobSearchShowCanceled=e.target.checked; renderCalBody(); });
 
 function rangeBounds(dates){
   return [ addDays(dates[0],-1)+'T00:00:00.000Z', addDays(dates[6],2)+'T00:00:00.000Z' ];
@@ -1017,6 +1032,7 @@ async function renderSchedule(silent){
   const dates = currentWeekDates();
   const [from,to] = rangeBounds(dates);
   const view=document.getElementById('view');
+  document.getElementById('jobSearchWrap').style.display='flex';
   if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
   try{
     const d = await api('calendar', { params:{ business: current.slug, from, to } });
@@ -1046,10 +1062,24 @@ function renderSidebarFilters(){
   al.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterTech=b.dataset.tech; renderSidebarFilters(); renderCalBody(); }));
 }
 
+let jobSearchQuery = '', jobSearchShowCanceled = false;
+
 function passFilters(b){
   if(filterArea && b.service_area_id!==filterArea) return false;
   if(filterTech==='unassigned'){ if(b.technician_id) return false; }
   else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
+
+  // Search filter
+  if(jobSearchQuery){
+    const q = jobSearchQuery.toLowerCase();
+    const custName = (b.customer?.name||'').toLowerCase();
+    const custPhone = (b.customer?.phone||'').toLowerCase();
+    if(!custName.includes(q) && !custPhone.includes(q)) return false;
+  }
+
+  // Canceled filter
+  if(b.status === 'cancelled' && !jobSearchShowCanceled) return false;
+
   return true;
 }
 
@@ -2706,6 +2736,7 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
 document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+document.getElementById('nbSendEstimate').addEventListener('click', sendEstimateFromBooking);
 document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 async function openNewBooking(){
   if(!current) return;
@@ -3670,6 +3701,45 @@ document.getElementById('nbPaymentMethod').addEventListener('change',async e=>{
   document.getElementById('nbCardWrap').style.display=isCard?'':'none';
   if(isCard){ try{ await ensureNbStripe(); }catch(err){ document.getElementById('nbErr').textContent=err.message; } }
 });
+
+async function sendEstimateFromBooking(e){
+  e.preventDefault();
+  const err=document.getElementById('nbErr'); err.textContent='';
+  const name=document.getElementById('nbName').value.trim();
+  const phone=document.getElementById('nbPhone').value.trim();
+  const email=document.getElementById('nbEmail').value.trim();
+
+  if(!name){ err.textContent='Customer name required'; return; }
+  if(!email){ err.textContent='Customer email required'; return; }
+
+  const selections=nbCollectSelections();
+  if(selections.length===0){ err.textContent='Select at least one service to send'; return; }
+
+  const btn=document.getElementById('nbSendEstimate');
+  const prevText=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='Sending…';
+
+  try{
+    await api('estimate_create',{ method:'POST', body:{
+      business: current.slug,
+      customer_name: name,
+      customer_phone: phone,
+      customer_email: email,
+      selections,
+      service_label: document.getElementById('nbService')?.value ?
+        document.querySelector(`#nbService option[value="${document.getElementById('nbService').value}"]`)?.textContent :
+        'Custom Service',
+      sms_consent: document.getElementById('nbSmsConsent').checked,
+    }});
+    toast('Estimate sent to customer ✓');
+  }catch(e){
+    err.textContent=e.message;
+  }finally{
+    btn.disabled=false;
+    btn.textContent=prevText;
+  }
+}
 
 document.getElementById('nbForm').addEventListener('submit',async e=>{
   e.preventDefault();
