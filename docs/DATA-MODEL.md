@@ -58,7 +58,7 @@ through the serverless functions, which use the **service-role key**
 
 1. **Run the migration** — paste `supabase/migrations/0001_initial_schema.sql`
    into Supabase → SQL Editor → Run. It seeds both businesses, their service
-   areas, technicians (Kregg/Juan/Steve/Zach, TK/George) and secretaries
+   areas, technicians (Kregg/Juan/Steve/Zach, TK/Gregory) and secretaries
    (Heather, Joey).
 2. **Set env vars** (locally in `.env`, and in Vercel → Settings → Env):
    see `.env.example`. You must add `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`,

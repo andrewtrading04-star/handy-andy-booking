@@ -2050,7 +2050,7 @@ function shapeBooking(b) {
     technician: b.technician ? { id: b.technician.id, name: b.technician.name, status: b.technician.status, color: b.technician.color } : null,
     // Second technician (large-TV lifts / cross-company helpers). Carries the
     // company name + a cross-company flag so the dashboard can label a partner
-    // helper (e.g. "George · Doms") without exposing it to the customer.
+    // helper (e.g. "Gregory · Doms") without exposing it to the customer.
     secondary_technician: b.secondary_technician ? {
       id: b.secondary_technician.id, name: b.secondary_technician.name,
       status: b.secondary_technician.status, color: b.secondary_technician.color,
