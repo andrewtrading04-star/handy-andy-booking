@@ -507,7 +507,7 @@
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
-      <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
+      <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
@@ -876,6 +876,8 @@ function enterApp(){
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  const navTech=document.getElementById('navTechnicians');
+  if(navTech) navTech.style.display = role==='owner' ? '' : 'none';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
