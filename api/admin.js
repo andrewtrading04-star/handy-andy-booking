@@ -21,6 +21,7 @@ import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, a
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
+import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
@@ -204,6 +205,7 @@ export default async function handler(req, res) {
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
+      case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -2567,4 +2569,106 @@ async function emailQuota(req, res, auth) {
     console.error('[email_quota]', err);
     return res.status(200).json({ quotaAvailable: null, warning: null });
   }
+}
+
+// ── Payroll Report ──────────────────────────────────────────────────────────
+// Owner-only: show tech earnings for a week across all technicians in the business.
+// Returns per-tech breakdown with job details, flags, and payment states.
+async function payroll(req, res, db, auth) {
+  if (auth.role !== 'owner') {
+    return res.status(403).json({ error: 'Owner only' });
+  }
+
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+
+  const weekStart = (req.query.week_start || '').toString();
+  const parsedWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC(biz.timezone || 'America/Denver').toISOString().split('T')[0];
+  const weekEnd = addDaysStr(parsedWeek, 6);
+
+  // All active technicians for this business
+  const { data: techs, error: techErr } = await db.from('technicians')
+    .select('id, name').eq('business_id', biz.id).eq('active', true).order('name');
+  if (techErr) throw techErr;
+
+  // Completed jobs for all techs in the week with payroll computation
+  const { data: jobs, error: jobErr } = await db.from('bookings')
+    .select(`
+      id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
+      tip, notes, customer_notes, zenbooker_job_number,
+      technician_id, secondary_technician_id,
+      customers(name), services(name),
+      line_items:booking_line_items(kind, name, unit_price, line_total)
+    `)
+    .eq('business_id', biz.id)
+    .eq('status', 'completed')
+    .gte('scheduled_at', parsedWeek + 'T00:00:00Z')
+    .lte('scheduled_at', weekEnd + 'T23:59:59Z')
+    .order('scheduled_at');
+  if (jobErr) throw jobErr;
+
+  // Map job_id -> list of techs who worked it (primary or secondary)
+  const jobTechs = {};
+  for (const b of jobs || []) {
+    jobTechs[b.id] = [];
+    if (b.technician_id) jobTechs[b.id].push(b.technician_id);
+    if (b.secondary_technician_id) jobTechs[b.id].push(b.secondary_technician_id);
+  }
+
+  // Compute payroll for each tech
+  const techPayroll = {};
+  for (const tech of techs || []) {
+    techPayroll[tech.id] = { name: tech.name, jobs: [], deferred: [], total: 0 };
+  }
+
+  for (const b of jobs || []) {
+    const techList = jobTechs[b.id] || [];
+    for (const techId of techList) {
+      if (!techPayroll[techId]) continue;
+
+      const result = computeJobPay({
+        status: b.status,
+        payment_status: b.payment_status,
+        price: b.price,
+        subtotal: b.subtotal,
+        amount_paid: b.amount_paid,
+        tip: b.tip,
+        notes: b.notes,
+        customer_notes: b.customer_notes,
+        zenbooker_job_number: b.zenbooker_job_number,
+        service_name: b.services?.name || '',
+        business_slug: biz.slug,
+        line_items: b.line_items || [],
+      }, techPayroll[techId].name);
+
+      const jobBase = {
+        id: b.id,
+        customer_name: b.customers?.name || 'Unknown',
+        service: b.services?.name || 'Service',
+        time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+      };
+
+      if (result.state === 'deferred') {
+        techPayroll[techId].deferred.push({ ...jobBase, customer_due: Math.floor((Number(b.price) || 0) - (Number(b.amount_paid) || 0)) });
+      } else if (result.state !== 'excluded') {
+        techPayroll[techId].jobs.push({
+          ...jobBase,
+          tech_pay: result.pay,
+          breakdown: result.breakdown,
+          flags: result.flags,
+          needs_review: result.flags.length > 0 || result.state === 'partial',
+        });
+        techPayroll[techId].total += result.pay;
+      }
+    }
+  }
+
+  // Format response
+  const data = Object.values(techPayroll).filter(t => t.jobs.length > 0 || t.deferred.length > 0);
+  return res.status(200).json({
+    week_start: parsedWeek,
+    week_end: weekEnd,
+    pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
+    techs: data,
+    total: data.reduce((sum, t) => sum + t.total, 0),
+  });
 }
