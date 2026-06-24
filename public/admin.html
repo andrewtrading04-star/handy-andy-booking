@@ -295,8 +295,10 @@
   /* photo gallery page */
   .gal-head{font-size:13px;color:var(--mute);font-weight:700;margin-bottom:12px;}
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
-  .gal-item{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .gal-item{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05);}
   .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer;}
+  .gal-del{position:absolute;top:7px;right:7px;width:26px;height:26px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;}
+  .gal-del:hover{background:#dc2626;}
   .gal-item figcaption{padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--ink-2);}
   /* lightbox */
   .lightbox{position:fixed;inset:0;background:rgba(10,15,25,.92);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -1419,11 +1421,22 @@ async function renderGallery(){
     if(!photos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
     view.innerHTML=`<div class="wrap"><div class="gal-head">${photos.length} photo${photos.length===1?'':'s'}</div>
       <div class="gallery">${photos.map(p=>`
-        <figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}">
+        <figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
+          <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
           <img src="${esc(p.url)}" loading="lazy" alt="job photo">
           <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br><span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span></figcaption>
         </figure>`).join('')}</div></div>`;
     view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
+    view.querySelectorAll('.gal-del').forEach(btn=>btn.addEventListener('click',async(e)=>{
+      e.stopPropagation();
+      if(!confirm('Delete this photo?')) return;
+      btn.disabled=true;
+      try{
+        await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid }});
+        toast('Photo deleted');
+        const fig=btn.closest('.gal-item'); if(fig) fig.remove();
+      }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
+    }));
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 
