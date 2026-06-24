@@ -146,6 +146,7 @@
   .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;}
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotchip.on::after{content:'✓';float:right;font-weight:800;}
+  .slotbonus{display:inline-block;margin-left:8px;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;vertical-align:middle;letter-spacing:.3px;}
 </style>
 </head>
 <body>
@@ -235,12 +236,23 @@ async function api(action,{method='GET',params={},body=null}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
   for(const[k,v]of Object.entries(params)) if(v!=null&&v!=='') url.searchParams.set(k,v);
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
-  if(res.status===401){ logout(); throw new Error('Session expired'); }
   const data=await res.json().catch(()=>({}));
+  // A 401 on an AUTHENTICATED call means the saved token is no longer valid — log
+  // out and prompt re-login. But a 401 from login/dev_login is just bad
+  // credentials, so let the real error ("Incorrect phone or PIN") surface instead
+  // of the misleading "Session expired".
+  if(res.status===401 && action!=='login' && action!=='dev_login'){ logout(); throw new Error('Session expired'); }
   if(!res.ok) throw new Error(data.error||'Request failed');
   return data;
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// A slot's label plus a green "+$N bonus" badge when the slot carries a pay
+// bonus (e.g. the late 8 PM slot). Driven by slot.bonus from availability.js so
+// there's one source of truth.
+function slotLabelHtml(s){
+  const base=esc(s.label);
+  return s&&s.bonus ? `${base}<span class="slotbonus">+$${esc(s.bonus)} bonus</span>` : base;
+}
 // Strip the category prefix ("TV Size: ", "Bracket: ", "Fireplace: ", "Wall Surface: ", …)
 // so payment line items read as the bare option (e.g. "33-59 inch").
 function liName(name){ const s=String(name||''); const i=s.indexOf(':'); return (i>-1?s.slice(i+1):s).trim()||s; }
@@ -635,7 +647,7 @@ function renderAvailability(){
   const rows=availDefs.days.map((dn,di)=>`
     <div class="card"><h3>${esc(dn)}</h3>
       <div class="chips">${availDefs.slots.map(s=>
-        `<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`
+        `<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${slotLabelHtml(s)}</button>`
       ).join('')}</div>
     </div>`).join('');
   v.innerHTML=`<div class="avail">
@@ -703,7 +715,7 @@ function openExceptionEditor(dateStr){
   document.getElementById('exEditorLabel').textContent=`Your availability for ${dateLabel(dateStr)}:`;
   const box=document.getElementById('exSlots');
   box.innerHTML=availDefs.slots.map(s=>
-    `<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`
+    `<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${slotLabelHtml(s)}</button>`
   ).join('');
   box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
     const k=ch.dataset.key;

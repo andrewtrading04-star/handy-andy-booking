@@ -9,7 +9,7 @@ export const SLOTS = [
   { key: 's2', label: '11:00 AM – 1:00 PM', start: '11:00', end: '13:00' },
   { key: 's3', label: '2:00 PM – 4:00 PM',  start: '14:00', end: '16:00' },
   { key: 's4', label: '5:00 PM – 8:00 PM',  start: '17:00', end: '20:00' },
-  { key: 's5', label: '8:00 PM – 10:30 PM', start: '20:00', end: '22:30' },
+  { key: 's5', label: '8:00 PM – 10:30 PM', start: '20:00', end: '22:30', bonus: 75 },
 ];
 
 export const SLOT_KEYS = new Set(SLOTS.map(s => s.key));

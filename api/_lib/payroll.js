@@ -290,6 +290,16 @@ export function computeJobPay(job, techName) {
   // ── Detect multi-tech: when "Second Technician" or "Lifting Help" line item is present.
   const multiTech = detectMultiTech(job);
 
+  // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
+  let afterHoursBonus = 0;
+  for (const li of job.line_items || []) {
+    if (/after.?hours|8\s*pm/i.test(li.name || '')) {
+      afterHoursBonus = 75;  // Hard rule: $75 bonus to tech
+      break;
+    }
+  }
+
+
   // ── Standard TV-mounting walk: base (by size) + each add-on line item.
   let pay = 0;
   let sawSize = false;
@@ -377,13 +387,18 @@ export function computeJobPay(job, techName) {
     if (multiTech.secondTechBonus) {
       newBreakdown.push({ label: 'Second Technician bonus', amount: multiTech.secondTechBonus });
     }
-    const finalPay = basePay + tippay + multiTech.secondTechBonus;
+    // Add after-hours bonus (8 PM jobs).
+    if (afterHoursBonus) {
+      newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
+    }
+    const finalPay = basePay + tippay + multiTech.secondTechBonus + afterHoursBonus;
     flags.push(`Multi-tech job (split 50/50) — verify second tech assignment`);
     return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
-    // Single tech: full tips.
+    // Single tech: full tips + after-hours bonus.
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    pay += tip;
+    if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
+    pay += tip + afterHoursBonus;
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 }
@@ -464,6 +479,19 @@ function runSelfTests() {
     { name: '98"+', line_total: 229 },
     { name: 'Second Technician', line_total: 70 }
   ] }), 'Juan').pay, 115, 'multi-tech Juan (130/2 + 40/2 + 30 = 65 + 20 + 30)');
+
+  // After-hours 8 PM bonus (single tech).
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'After-Hours Service Fee (8 PM)', kind: 'fee', line_total: 75 }
+  ] }), 'Kregg').pay, 135, '8pm single tech (60 + 75 bonus)');
+
+  // After-hours 8 PM bonus (multi-tech).
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'After-Hours Service Fee (8 PM)', kind: 'fee', line_total: 75 },
+    { name: 'Second Technician', line_total: 70 }
+  ] }), 'Zach').pay, 140, '8pm multi-tech (70/2 + 30 + 75 = 35 + 30 + 75)');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;

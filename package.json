@@ -1,6 +1,7 @@
 {
   "name": "handy-andy-booking",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "scripts": {
     "import:zenbooker": "node --env-file=.env scripts/import-zenbooker.mjs",
