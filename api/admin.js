@@ -16,7 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
-import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
@@ -94,14 +94,18 @@ function toE164(raw) {
   return d ? `+${d}` : null;
 }
 
-async function sendSMS(phoneNumber, message) {
-  if (!smsNotificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
+// Low-level SMS send that REPORTS its outcome instead of swallowing it.
+// Returns { ok:true } or { ok:false, skipped?, error? } so callers that need to
+// tell the user why a text didn't go out (e.g. the Estimates tab) can surface a
+// real reason. `skipped` is a config/precondition miss; `error` is a live
+// Twilio failure (the message string is safe to show).
+async function sendSMSResult(phoneNumber, message) {
+  if (!smsNotificationsOn()) return { ok: false, skipped: 'notifications_off' };
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
-    console.warn('[SMS] Twilio not configured; message not sent:', message);
-    return;
+    return { ok: false, skipped: 'not_configured' };
   }
   const to = toE164(phoneNumber);
-  if (!to) { console.warn('[SMS] Unusable phone, not sent:', phoneNumber); return; }
+  if (!to) return { ok: false, skipped: 'bad_phone' };
   const formData = new URLSearchParams();
   formData.append('From', process.env.TWILIO_PHONE_NUMBER);
   formData.append('To', to);
@@ -113,11 +117,21 @@ async function sendSMS(phoneNumber, message) {
       headers: { 'Authorization': `Basic ${auth}` },
       body: formData,
     });
-    if (!res.ok) { const t = await res.text().catch(()=> ''); throw new Error(`Twilio ${res.status}: ${t.slice(0,300)}`); }
+    if (!res.ok) { const t = await res.text().catch(()=> ''); return { ok: false, error: `Twilio ${res.status}: ${t.slice(0,300)}` }; }
     console.log('[SMS] Sent to', to.slice(-4));
+    return { ok: true };
   } catch (e) {
-    console.error('[SMS]', e.message);
+    return { ok: false, error: e.message };
   }
+}
+
+// Fire-and-forget SMS for internal notifications (tech assigned, etc.). Keeps
+// the original swallow-and-log behavior so existing callers are unaffected.
+async function sendSMS(phoneNumber, message) {
+  const r = await sendSMSResult(phoneNumber, message);
+  if (r.ok) return;
+  if (r.error) console.error('[SMS]', r.error);
+  else console.warn(`[SMS] not sent (${r.skipped}):`, message);
 }
 
 // Display label for an internal note/photo authored from the dashboard.
@@ -2427,6 +2441,18 @@ async function estimateUpdate(req, res, db, auth, body) {
   return res.status(200).json({ ok: true });
 }
 
+// Best-effort "mark contacted" after a quote goes out. Never throws — a failed
+// status bump must not turn a successful send into an error for the user.
+async function markEstimateContacted(db, businessId, id) {
+  try {
+    const { error } = await db.from('estimates')
+      .update({ status: 'contacted' }).eq('id', id).eq('business_id', businessId);
+    if (error) console.warn('[estimate] could not mark contacted:', error.message);
+  } catch (e) {
+    console.warn('[estimate] mark contacted threw:', e.message);
+  }
+}
+
 // Send quote SMS to customer
 async function estimateSendSms(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -2434,17 +2460,25 @@ async function estimateSendSms(req, res, db, auth, body) {
   if (!body.id) return res.status(400).json({ error: 'id required' });
 
   const { data: est } = await db.from('estimates')
-    .select('customer_name, customer_phone, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+    .select('customer_name, customer_phone, service_label, description, sms_consent').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
-  if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available' });
+  if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available for this estimate.' });
+  if (est.sms_consent === false) return res.status(400).json({ error: 'Customer did not consent to receive text messages.' });
 
-  const svcTxt = est.service_label ? `${est.service_label} — ` : '';
-  const msg = `Here is your quote for ${biz.name}. ${svcTxt}${est.description || 'Your estimate request'}. Check your email for more details.`;
-  await sendSMS(est.customer_phone, msg);
+  const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
+  const greeting = firstName ? `Hi ${firstName}, ` : '';
+  const svcTxt = est.service_label ? `${est.service_label}: ` : '';
+  const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${est.description || 'Your estimate request'}. We'll reach out to finalize details and get you scheduled.`;
 
-  // Mark as contacted
-  await db.from('estimates').update({ status: 'contacted' }).eq('id', body.id).eq('business_id', biz.id).catch(() => {});
+  const r = await sendSMSResult(est.customer_phone, msg);
+  if (!r.ok) {
+    if (r.skipped === 'notifications_off') return res.status(503).json({ error: 'Texting is turned off until the account is approved.' });
+    if (r.skipped === 'not_configured')   return res.status(503).json({ error: 'SMS service (Twilio) is not configured.' });
+    if (r.skipped === 'bad_phone')        return res.status(400).json({ error: `"${est.customer_phone}" is not a valid mobile number.` });
+    return res.status(502).json({ error: r.error || 'Text message failed to send.' });
+  }
 
+  await markEstimateContacted(db, biz.id, body.id);
   return res.status(200).json({ ok: true });
 }
 
@@ -2457,49 +2491,28 @@ async function estimateSendEmail(req, res, db, auth, body) {
   const { data: est } = await db.from('estimates')
     .select('customer_name, customer_email, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
-  if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available' });
+  if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available for this estimate.' });
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
 
-  const { apiKey, from } = emailConfig(biz.slug);
+  const { apiKey } = emailConfig(biz.slug);
   if (!apiKey) {
     console.warn('[estimate] Resend key not set, cannot send email');
-    return res.status(500).json({ error: 'Email service not configured' });
+    return res.status(503).json({ error: 'Email service is not configured.' });
   }
 
-  const svcTxt = est.service_label ? `<strong>${est.service_label}</strong><br>` : '';
-  const html = `
-<div style="font-family:sans-serif;max-width:600px;">
-  <h2>Your ${biz.name} Quote</h2>
-  <p>Hi ${est.customer_name},</p>
-  <p>Here is your estimate:</p>
-  <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin:16px 0;">
-    ${svcTxt}
-    <p style="margin:0;white-space:pre-wrap;">${est.description || 'Estimate request'}</p>
-  </div>
-  <p>A member of our team will reach out to discuss this quote further.</p>
-  <p>Thank you!</p>
-</div>
-  `;
+  const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
+  const { subject, html } = estimateEmail(
+    { firstName, serviceLabel: est.service_label, description: est.description },
+    brandFor(biz.slug)
+  );
 
-  const resendRes = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: est.customer_email,
-      subject: `Your ${biz.name} Estimate`,
-      html,
-    }),
-  });
-
-  if (!resendRes.ok) {
-    const err = await resendRes.text();
-    throw new Error(`Email API error: ${resendRes.status} ${err}`);
+  try {
+    await sendEmail({ slug: biz.slug, to: est.customer_email, subject, html, throwOnError: true });
+  } catch (e) {
+    return res.status(502).json({ error: `Email failed to send: ${e.message}` });
   }
 
-  // Mark as contacted
-  await db.from('estimates').update({ status: 'contacted' }).eq('id', body.id).eq('business_id', biz.id).catch(() => {});
-
+  await markEstimateContacted(db, biz.id, body.id);
   return res.status(200).json({ ok: true });
 }
 

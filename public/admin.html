@@ -2405,10 +2405,10 @@ async function renderEstimates(){
       setEstimate(sel.dataset.estStatus,{ status:e.target.value });
     }));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
-      sendEstimateMessage(b.dataset.estSms,'sms');
+      sendEstimateMessage(b.dataset.estSms,'sms',b);
     }));
     document.querySelectorAll('#estWrap [data-est-email]').forEach(b=>b.addEventListener('click',()=>{
-      sendEstimateMessage(b.dataset.estEmail,'email');
+      sendEstimateMessage(b.dataset.estEmail,'email',b);
     }));
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
@@ -2455,14 +2455,20 @@ async function setEstimate(id, payload){
   catch(err){ toast(err.message); }
 }
 
-async function sendEstimateMessage(estimateId, type){
+async function sendEstimateMessage(estimateId, type, btn){
+  const label = type === 'sms' ? 'text message' : 'email';
+  if(!confirm(`Send this estimate to the customer via ${label}?`)) return;
+  const prev = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
   try{
     const action = type === 'sms' ? 'estimate_send_sms' : 'estimate_send_email';
     await api(action,{ method:'POST', body:{ business:current.slug, id:estimateId }});
-    const msg = type === 'sms' ? 'Quote sent via SMS!' : 'Quote sent via email!';
-    toast(msg);
+    toast(type === 'sms' ? 'Estimate texted to customer ✓' : 'Estimate emailed to customer ✓');
     renderEstimates();
-  }catch(err){ toast(err.message); }
+  }catch(err){
+    if(btn){ btn.disabled = false; btn.textContent = prev; }
+    toast(err.message || `Could not send ${label}.`);
+  }
 }
 
 // Lightweight unread-count badge for the sidebar (status = new).
