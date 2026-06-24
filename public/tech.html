@@ -235,8 +235,12 @@ async function api(action,{method='GET',params={},body=null}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
   for(const[k,v]of Object.entries(params)) if(v!=null&&v!=='') url.searchParams.set(k,v);
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
-  if(res.status===401){ logout(); throw new Error('Session expired'); }
   const data=await res.json().catch(()=>({}));
+  // A 401 on an AUTHENTICATED call means the saved token is no longer valid — log
+  // out and prompt re-login. But a 401 from login/dev_login is just bad
+  // credentials, so let the real error ("Incorrect phone or PIN") surface instead
+  // of the misleading "Session expired".
+  if(res.status===401 && action!=='login' && action!=='dev_login'){ logout(); throw new Error('Session expired'); }
   if(!res.ok) throw new Error(data.error||'Request failed');
   return data;
 }

@@ -138,15 +138,34 @@ export default async function handler(req, res) {
 
 async function login(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const phone = (body.phone || '').toString().trim();
+  const rawPhone = (body.phone || '').toString().trim();
   const pin = (body.pin || '').toString().trim();
-  if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
+  if (!rawPhone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
 
   const db = serviceClient();
+  // The number a tech types ("(720) 656-8761") rarely matches how it's stored
+  // in the DB ("+17206568761"). verify_technician_pin does an EXACT string
+  // compare, so we try the input in every canonical form — E.164, raw, and
+  // digits-only — until one matches. This lets a tech type their number however
+  // they like, regardless of which format is on their record.
+  const digits = rawPhone.replace(/\D/g, '');
+  const national = digits.length === 11 && digits[0] === '1' ? digits.slice(1) : digits;
+  const candidates = [...new Set([
+    toE164(rawPhone),   // +17206568761
+    rawPhone,           // (720) 656-8761  (covers records stored verbatim)
+    digits,             // 17206568761 or 7206568761
+    national,           // 7206568761
+  ].filter(Boolean))];
+
   // Verify against the hashed PIN inside the DB; the hash never leaves Postgres.
-  const { data, error } = await db.rpc('verify_technician_pin', { p_phone: phone, p_pin: pin });
+  let tech = null, error = null;
+  for (const cand of candidates) {
+    const r = await db.rpc('verify_technician_pin', { p_phone: cand, p_pin: pin });
+    if (r.error) { error = r.error; break; }
+    const t = Array.isArray(r.data) ? r.data[0] : r.data;
+    if (t) { tech = t; break; }
+  }
   if (error) throw error;
-  const tech = Array.isArray(data) ? data[0] : data;
   if (!tech) return res.status(401).json({ error: 'Incorrect phone or PIN' });
 
   const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
@@ -197,6 +216,9 @@ async function devLogin(req, res, body) {
 }
 
 // Diagnostic: show login readiness for all technicians (phone + PIN setup).
+// Shows the EXACT stored phone string so a format mismatch is obvious, and
+// reports whether a PIN hash exists. No secrets are leaked (hash itself stays
+// in Postgres). Read-only.
 async function diagnostic(req, res) {
   const db = serviceClient();
   const { data, error } = await db.from('technicians')
@@ -214,9 +236,9 @@ async function diagnostic(req, res) {
     if (!t.pin_hash) issues.push('missing PIN');
 
     if (issues.length) {
-      missing.push({ id: t.id, name: t.name, issues });
+      missing.push({ id: t.id, name: t.name, stored_phone: t.phone || null, issues });
     } else {
-      ready.push({ id: t.id, name: t.name, phone: t.phone });
+      ready.push({ id: t.id, name: t.name, stored_phone: t.phone });
     }
   }
 
