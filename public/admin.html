@@ -436,6 +436,38 @@
   .ana .err{ background:#fff5f5; border:1px solid #ffd9d9; border-radius:12px; }
   .ana .loading{ text-align:center; padding:60px; color:var(--mute); }
   @media(max-width:600px){ .ana .abar{ flex-wrap:wrap; gap:3px 8px; margin-bottom:10px; } .ana .alabel{ width:100%; min-width:0; flex:0 0 100%; } .ana .atrack{ flex:1 1 auto; min-width:0; } }
+
+  /* ───────── Payroll Report (scoped to .payrep, report/PDF look) ───────── */
+  .payrep{ max-width:1180px; }
+  .payrep .pr-kpis{ display:flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff; margin:6px 0 4px; }
+  .payrep .pr-kpi{ flex:1 1 170px; padding:18px 20px; border-left:1px solid var(--line); }
+  .payrep .pr-kpi:first-child{ border-left:none; }
+  .payrep .pr-kpi .v{ font-size:27px; font-weight:800; letter-spacing:-.02em; line-height:1.1; }
+  .payrep .pr-kpi .v.green{ color:var(--green); }
+  .payrep .pr-kpi .v.blue{ color:var(--accent); }
+  .payrep .pr-kpi .v.ink{ color:var(--ink); font-size:19px; }
+  .payrep .pr-kpi .l{ font-size:12px; color:var(--mute); margin-top:5px; line-height:1.35; }
+  @media(max-width:760px){ .payrep .pr-kpi{ flex:1 1 50%; } .payrep .pr-kpi:nth-child(odd){ border-left:none; } }
+
+  .payrep .pr-sec{ font-size:19px; font-weight:800; color:var(--accent); letter-spacing:-.01em; margin:32px 0 0; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .payrep .pr-sec .meta{ font-weight:600; color:var(--mute); font-size:14px; }
+  .payrep .pr-sec .amt{ color:var(--green); }
+  .payrep .pr-note{ font-size:12.5px; color:var(--mute); margin:9px 0 0; }
+
+  .payrep .pr-tbl{ width:100%; border-collapse:separate; border-spacing:0; font-size:13.5px; margin-top:14px; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
+  .payrep .pr-tbl thead th{ background:var(--accent-soft); color:var(--accent); font-weight:700; text-align:left; padding:10px 13px; font-size:12px; text-transform:none; letter-spacing:0; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .payrep .pr-tbl th.r, .payrep .pr-tbl td.r{ text-align:right; }
+  .payrep .pr-tbl tbody td{ padding:10px 13px; border-bottom:1px solid var(--line2); color:var(--ink-2); vertical-align:top; }
+  .payrep .pr-tbl tbody tr.z td{ background:#fafbfc; }
+  .payrep .pr-tbl tr.pr-total td{ background:var(--accent-soft); font-weight:800; color:var(--ink); border-top:1px solid var(--line); border-bottom:none; }
+  .payrep .pr-money{ font-weight:700; color:var(--ink); white-space:nowrap; }
+  .payrep .pr-name{ font-weight:600; color:var(--ink); }
+  .payrep .pr-li{ font-size:12px; color:var(--mute); margin-top:3px; }
+  .payrep .pr-flag-ic{ color:var(--amber); margin-left:4px; }
+  .payrep .pr-warn td{ background:#fffbeb; border-bottom:1px solid var(--line2); }
+  .payrep .pr-warn .m{ color:#92660b; font-size:12px; border-left:3px solid var(--amber); padding-left:10px; line-height:1.5; }
+  .payrep .pr-defer-amt{ color:var(--amber); font-weight:700; white-space:nowrap; }
+  .payrep .pr-empty{ color:var(--mute); font-size:13px; padding:18px 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -2146,17 +2178,17 @@ async function renderPayroll(){
     <div class="ana">
       <div class="ana-head">
         <div>
-          <h1>💰 Payroll Report</h1>
-          <div class="ana-sub" id="payUpdated">Select a week to view payroll data</div>
+          <h1>Weekly Payroll</h1>
+          <div class="ana-sub" id="payUpdated">Loading…</div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="arrow" id="payPrev">‹</button>
-          <input type="date" id="payWeekInput" value="${payrollWeek}" style="padding:8px; border:1px solid var(--border); border-radius:4px; font-size:14px;">
+          <input type="date" id="payWeekInput" value="${payrollWeek}" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
           <button class="arrow" id="payNext">›</button>
-          <button class="btn" id="payRefresh">Refresh</button>
+          <button class="btn ghost" id="payRefresh" style="width:auto;">Refresh</button>
         </div>
       </div>
-      <div id="payContent" class="loading">Loading payroll data…</div>
+      <div id="payContent" class="payrep loading">Loading payroll data…</div>
     </div>`;
 
   document.getElementById('payWeekInput').addEventListener('change', e=>{ payrollWeek=e.target.value; loadPayroll(); });
@@ -2174,87 +2206,112 @@ async function loadPayroll(){
 
   try{
     const d=await api('payroll',{ params:{ business:current.slug, week_start:payrollWeek } });
-    if(upd) upd.textContent=`Week of ${new Date(d.week_start+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric'})} · Pay date ${new Date(d.pay_date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
+    if(upd){
+      const bizName = (current && current.name) ? current.name : '';
+      upd.innerHTML=`Pay period: <strong>${payFmtDateUTC(d.week_start,{month:'long',day:'numeric'})} – ${payFmtDateUTC(d.week_end,{month:'long',day:'numeric',year:'numeric'})}</strong>${bizName?` · ${esc(bizName)}`:''}`;
+    }
     renderPayrollData(d);
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading payroll: ${esc(err.message)}</div>`;
   }
 }
 
+function payFmtUSD(n){ return '$'+Number(n||0).toLocaleString('en-US'); }
+function payFmtDateUTC(ds,opts){ return new Date(ds+'T00:00:00Z').toLocaleDateString('en-US', Object.assign({timeZone:'UTC'},opts)); }
+
 function renderPayrollData(d){
   const content=document.getElementById('payContent'); if(!content) return;
+  content.className='payrep';
   const techs=d.techs||[];
 
-  if(!techs.length){ content.innerHTML='<div class="card"><div class="empty">No earnings this week.</div></div>'; return; }
-
-  let html=`<div class="section card"><h2>Tech Earnings Summary</h2>`;
-  html+=`<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">`;
-
-  let totalWeek=0;
-  for(const tech of techs){
-    totalWeek+=tech.total;
-    html+=`<div style="padding:12px; border:1px solid var(--border); border-radius:4px;">
-      <div style="font-weight:bold; font-size:16px;">${esc(tech.name)}</div>
-      <div style="font-size:14px; color:var(--mute);">${tech.jobs.length} job${tech.jobs.length===1?'':'s'}</div>
-      <div style="font-size:18px; font-weight:bold; color:var(--brand); margin-top:8px;">$${tech.total.toLocaleString('en-US')}</div>
-      ${tech.deferred.length?`<div style="font-size:12px; color:var(--amber);">${tech.deferred.length} deferred</div>`:''}
-    </div>`;
+  if(!techs.length){
+    content.innerHTML=`<div class="pr-empty">No earnings recorded for this week.</div>`;
+    return;
   }
-  html+=`</div></div>`;
 
-  html+=`<div style="padding:16px; background:var(--board); border-radius:4px; margin-top:12px; text-align:center;">
-    <div style="font-size:12px; color:var(--mute);">TOTAL WEEK PAYROLL</div>
-    <div style="font-size:32px; font-weight:bold; color:var(--brand);">$${d.total.toLocaleString('en-US')}</div>
+  const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
+  const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
+  const payDateLbl = payFmtDateUTC(d.pay_date,{month:'short',day:'numeric',year:'numeric'});
+
+  let html='';
+
+  // ── KPI strip ────────────────────────────────────────────────────────────
+  html+=`<div class="pr-kpis">
+    <div class="pr-kpi"><div class="v green">${payFmtUSD(d.total)}</div><div class="l">Total Payroll<br>(this week)</div></div>
+    <div class="pr-kpi"><div class="v blue">${techs.length}</div><div class="l">Technicians Paid</div></div>
+    <div class="pr-kpi"><div class="v blue">${jobsCount}</div><div class="l">Jobs Worked</div></div>
+    <div class="pr-kpi"><div class="v ink">${payDateLbl}</div><div class="l">Pay Date<br>(Saturday + 9 days)</div></div>
   </div>`;
 
-  for(const tech of techs){
-    html+=`<div class="section card"><h3>${esc(tech.name)} — $${tech.total.toLocaleString('en-US')}</h3>`;
+  // ── Per-Person Detail ────────────────────────────────────────────────────
+  html+=`<div class="pr-sec">Payroll — Per-Person Detail</div>`;
+  html+=`<div class="pr-note">Each technician's job count and total pay for the week. Deferred jobs are completed but not yet paid.</div>`;
+  html+=`<table class="pr-tbl"><thead><tr>
+      <th>Technician</th><th class="r">Jobs</th><th class="r">Deferred</th><th class="r">Total Pay</th>
+    </tr></thead><tbody>`;
+  techs.forEach((t,i)=>{
+    html+=`<tr class="${i%2?'z':''}">
+      <td class="pr-name">${esc(t.name)}</td>
+      <td class="r">${t.jobs.length}</td>
+      <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
+      <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
+    </tr>`;
+  });
+  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(d.total)}</td></tr>`;
+  html+=`</tbody></table>`;
 
-    if(tech.jobs.length){
-      html+=`<table style="width:100%; border-collapse:collapse; font-size:14px;">
-        <thead><tr style="border-bottom:1px solid var(--border);">
-          <th style="text-align:left; padding:8px;">Customer</th>
-          <th style="text-align:left; padding:8px;">Service</th>
-          <th style="text-align:right; padding:8px;">Pay</th>
-        </tr></thead>
-        <tbody>`;
-      for(const job of tech.jobs){
-        html+=`<tr style="border-bottom:1px solid var(--board);" data-id="${job.id}">
-          <td style="text-align:left; padding:8px;">${esc(job.customer_name)}</td>
-          <td style="text-align:left; padding:8px;">${esc(job.service)} · ${job.time}</td>
-          <td style="text-align:right; padding:8px;"><strong>$${job.tech_pay}</strong>${job.needs_review?` <span style="color:var(--amber);">⚠️</span>`:''}</td>
+  // ── Per-Tech Job Breakdown ───────────────────────────────────────────────
+  const techsWithJobs = techs.filter(t=>t.jobs.length);
+  if(techsWithJobs.length){
+    html+=`<div class="pr-sec">Per-Tech Job Breakdown</div>`;
+    html+=`<div class="pr-note">Every paid job per technician — customer, pay breakdown, and total pay. ⚠️ flags a job that needs review.</div>`;
+    for(const t of techsWithJobs){
+      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${t.jobs.length} job${t.jobs.length===1?'':'s'}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
+      html+=`<table class="pr-tbl"><thead><tr>
+          <th>Time</th><th>Customer</th><th>Pay breakdown</th><th class="r">Pay</th>
+        </tr></thead><tbody>`;
+      t.jobs.forEach((job,i)=>{
+        const bd = (job.breakdown&&job.breakdown.length)
+          ? job.breakdown.map(b=>`${esc(b.label)} ${payFmtUSD(b.amount)}`).join('  ·  ')
+          : '—';
+        html+=`<tr class="${i%2?'z':''}">
+          <td style="white-space:nowrap; color:var(--mute);">${esc(job.time)}</td>
+          <td><span class="pr-name">${esc(job.customer_name)}</span><div class="pr-li">${esc(job.service)}</div></td>
+          <td><div class="pr-li" style="margin-top:0;">${bd}</div></td>
+          <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span>${job.needs_review?`<span class="pr-flag-ic">⚠️</span>`:''}</td>
         </tr>`;
-        if(job.breakdown && job.breakdown.length){
-          html+=`<tr style="background:var(--board);">
-            <td colspan="3" style="padding:8px;">
-              <div style="font-size:12px; color:var(--mute);">`;
-          for(const b of job.breakdown){
-            html+=`<div>${esc(b.label)}: $${b.amount}</div>`;
-          }
-          html+=`</div>`;
-          if(job.flags && job.flags.length){
-            html+=`<div style="margin-top:8px; padding:8px; background:var(--bg); border-left:2px solid var(--amber); border-radius:2px;">`;
-            for(const f of job.flags){
-              html+=`<div style="font-size:12px; color:var(--amber);">⚠️ ${esc(f)}</div>`;
-            }
-            html+=`</div>`;
-          }
-          html+=`</td></tr>`;
+        if(job.flags && job.flags.length){
+          html+=`<tr class="pr-warn"><td></td><td colspan="3"><div class="m">${job.flags.map(f=>'⚠️ '+esc(f)).join('<br>')}</div></td></tr>`;
         }
-      }
+      });
+      html+=`<tr class="pr-total"><td colspan="3">Total — ${esc(t.name)}</td><td class="r">${payFmtUSD(t.total)}</td></tr>`;
       html+=`</tbody></table>`;
     }
+  }
 
-    if(tech.deferred && tech.deferred.length){
-      html+=`<div style="margin-top:16px; padding:12px; background:rgba(180,83,9,0.1); border-left:2px solid var(--amber); border-radius:4px;">
-        <div style="font-weight:bold; color:var(--amber); font-size:12px; margin-bottom:8px;">DEFERRED (unpaid)</div>`;
-      for(const j of tech.deferred){
-        html+=`<div style="font-size:12px; margin:4px 0;">${esc(j.customer_name)} · $${j.customer_due} outstanding</div>`;
-      }
-      html+=`</div>`;
-    }
-
-    html+=`</div>`;
+  // ── Awaiting Customer Payment (deferred) ─────────────────────────────────
+  const deferRows=[];
+  for(const t of techs){
+    for(const j of (t.deferred||[])) deferRows.push({ tech:t.name, ...j });
+  }
+  if(deferRows.length){
+    const deferTotal = deferRows.reduce((s,j)=>s+(Number(j.customer_due)||0),0);
+    html+=`<div class="pr-sec">Awaiting Customer Payment (deferred)</div>`;
+    html+=`<div class="pr-note">Work completed but not yet paid — tech pay is deferred until the customer pays.</div>`;
+    html+=`<table class="pr-tbl"><thead><tr>
+        <th>Time</th><th>Customer</th><th>Service</th><th>Tech</th><th class="r">Outstanding</th>
+      </tr></thead><tbody>`;
+    deferRows.forEach((j,i)=>{
+      html+=`<tr class="${i%2?'z':''}">
+        <td style="white-space:nowrap; color:var(--mute);">${esc(j.time)}</td>
+        <td class="pr-name">${esc(j.customer_name)}</td>
+        <td>${esc(j.service)}</td>
+        <td>${esc(j.tech)}</td>
+        <td class="r"><span class="pr-defer-amt">${payFmtUSD(j.customer_due)}</span></td>
+      </tr>`;
+    });
+    html+=`<tr class="pr-total"><td colspan="4">TOTAL OUTSTANDING</td><td class="r">${payFmtUSD(deferTotal)}</td></tr>`;
+    html+=`</tbody></table>`;
   }
 
   content.innerHTML=html;
