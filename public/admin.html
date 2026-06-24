@@ -2442,7 +2442,7 @@ function estCard(e){
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
-        ${(e.customer_phone&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
+        ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
