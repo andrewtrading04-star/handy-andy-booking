@@ -2222,7 +2222,7 @@ function renderPayrollData(d){
         html+=`<tr style="border-bottom:1px solid var(--board);" data-id="${job.id}">
           <td style="text-align:left; padding:8px;">${esc(job.customer_name)}</td>
           <td style="text-align:left; padding:8px;">${esc(job.service)} · ${job.time}</td>
-          <td style="text-align:right; padding:8px;"><strong>$${job.tech_pay}</strong>${job.needs_review?` <span style="color:var(--amber);">⚠️</span>':''}</td>
+          <td style="text-align:right; padding:8px;"><strong>$${job.tech_pay}</strong>${job.needs_review?` <span style="color:var(--amber);">⚠️</span>`:''}</td>
         </tr>`;
         if(job.breakdown && job.breakdown.length){
           html+=`<tr style="background:var(--board);">
