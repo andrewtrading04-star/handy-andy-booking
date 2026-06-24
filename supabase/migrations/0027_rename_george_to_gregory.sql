@@ -11,12 +11,12 @@
 -- ============================================================================
 set search_path = app, public, extensions;
 
-update app.technicians t
+-- Only the Doms business ever had a technician named "George", so a plain
+-- name match is sufficient and avoids a join. Fully schema-qualified so it
+-- runs correctly from the Supabase SQL Editor regardless of search_path.
+update app.technicians
    set name = 'Gregory'
-  from app.businesses b
- where t.business_id = b.id
-   and b.slug = 'doms'
-   and t.name ilike 'george%';
+ where name ilike 'george%';
 
 -- ============================================================================
 -- DONE. Verify with:
