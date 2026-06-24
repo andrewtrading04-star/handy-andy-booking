@@ -310,6 +310,7 @@
   .slotchip{background:#fff;border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12px;font-weight:600;}
   .slotchip.on{background:var(--accent);border-color:var(--accent);color:#fff;}
   .slotchip.on::after{content:' ✓';font-weight:800;}
+  .slotbonus{display:inline-block;margin-left:6px;background:#16a34a;color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:999px;vertical-align:middle;letter-spacing:.3px;}
   .sub{color:var(--mute);}
 
   @media(max-width:880px){
@@ -690,6 +691,9 @@ async function api(action, { method='GET', params={}, body=null } = {}) {
 }
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// A slot's label plus a green "+$N bonus" badge when the slot pays a bonus
+// (e.g. the late 8 PM slot). Driven by slot.bonus from availability.js.
+function slotLabelHtml(s){ const base=esc(s.label); return s&&s.bonus ? `${base}<span class="slotbonus">+$${esc(s.bonus)} bonus</span>` : base; }
 
 // ── Iconography ────────────────────────────────────────────────────────────
 // Handy Andy keeps emoji icons; Doms uses Font Awesome 6 (Free Solid/Regular).
@@ -2342,7 +2346,7 @@ async function openAvailability(techId, techName){
     availExceptions=d.exceptions||[];
     const weekly=availDefs.days.map((dn,di)=>`
       <div class="avail-day"><div class="dl">${esc(dn)}</div><div class="avail-chips">${
-        availDefs.slots.map(s=>`<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${esc(s.label)}</button>`).join('')
+        availDefs.slots.map(s=>`<button type="button" class="slotchip ${availState.has(di+':'+s.key)?'on':''}" data-day="${di}" data-key="${s.key}">${slotLabelHtml(s)}</button>`).join('')
       }</div></div>`).join('');
     body.innerHTML=`<div id="availWeekly">${weekly}</div>
       <div style="border-top:1px solid var(--line);margin:16px 0 12px;"></div>
@@ -2381,7 +2385,7 @@ function openExceptionEditor(dateStr){
   exEditState=effectiveKeysForDate(dateStr);
   document.getElementById('exEditorLabel').textContent=`Availability for ${dateLabel(dateStr)}:`;
   const box=document.getElementById('exSlots');
-  box.innerHTML=availDefs.slots.map(s=>`<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${esc(s.label)}</button>`).join('');
+  box.innerHTML=availDefs.slots.map(s=>`<button type="button" class="slotchip ${exEditState.has(s.key)?'on':''}" data-key="${s.key}">${slotLabelHtml(s)}</button>`).join('');
   box.querySelectorAll('.slotchip').forEach(ch=>ch.addEventListener('click',()=>{
     const k=ch.dataset.key;
     if(exEditState.has(k)){ exEditState.delete(k); ch.classList.remove('on'); }
