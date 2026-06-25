@@ -538,7 +538,6 @@
     <nav class="side-nav" id="sideNav">
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
-      <button data-nav="brackets"><span class="ic" data-ico="brackets">📺</span> Bracket Inventory</button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
@@ -546,6 +545,7 @@
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
     </nav>
 
     <div id="schedSidebar">
@@ -2736,6 +2736,7 @@ async function renderBrackets(){
               <th>Tilting</th>
               <th>Full Motion</th>
               <th>Total</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>`;
@@ -2749,12 +2750,13 @@ async function renderBrackets(){
         <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
         <td class="bracket-qty"><strong class="${lowClass}">${total}</strong></td>
+        <td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}')">Edit</button></td>
       </tr>`;
     }
     html+=`</tbody></table></div>`;
 
     html+=`<div class="bracket-section">
-      <h3>Recent Purchases (Walmart Orders)</h3>
+      <h3>Recent Walmart Orders</h3>
       <table class="bracket-table">
         <thead>
           <tr>
@@ -2763,26 +2765,27 @@ async function renderBrackets(){
             <th>Flat</th>
             <th>Tilting</th>
             <th>Full Motion</th>
-            <th>Total</th>
             <th>Status</th>
-            <th>Order Date</th>
+            <th>Date</th>
           </tr>
         </thead>
         <tbody>`;
 
-    for(const p of purch.purchases||[]){
-      const total=p.flat_qty+p.tilting_qty+p.full_motion_qty;
-      const statusClass=p.status==='canceled'?'low':'';
-      html+=`<tr>
-        <td>${esc(p.technician_name)}</td>
-        <td>${p.walmart_order_num?esc(p.walmart_order_num):'-'}</td>
-        <td class="bracket-qty">${p.flat_qty}</td>
-        <td class="bracket-qty">${p.tilting_qty}</td>
-        <td class="bracket-qty">${p.full_motion_qty}</td>
-        <td class="bracket-qty"><strong>${total}</strong></td>
-        <td><span class="pay pay-${p.status}" style="color:inherit;">${p.status}</span></td>
-        <td>${p.order_date||'-'}</td>
-      </tr>`;
+    if((purch.purchases||[]).length===0){
+      html+=`<tr><td colspan="7" style="text-align:center;color:var(--mute);">No orders yet</td></tr>`;
+    }else{
+      for(const p of purch.purchases){
+        const total=p.flat_qty+p.tilting_qty+p.full_motion_qty;
+        html+=`<tr>
+          <td>${esc(p.technician_name)}</td>
+          <td>${p.walmart_order_num?esc(p.walmart_order_num):'-'}</td>
+          <td class="bracket-qty">${p.flat_qty}</td>
+          <td class="bracket-qty">${p.tilting_qty}</td>
+          <td class="bracket-qty">${p.full_motion_qty}</td>
+          <td><span class="pay pay-${p.status}" style="color:inherit;">${p.status}</span></td>
+          <td>${p.order_date||'-'}</td>
+        </tr>`;
+      }
     }
     html+=`</tbody></table></div>`;
     html+=`</div>`;
@@ -2790,6 +2793,57 @@ async function renderBrackets(){
   }catch(e){
     console.error('renderBrackets failed',e);
     document.getElementById('view').innerHTML=`<div class="wrap"><div class="section card"><h2>Error loading bracket inventory</h2><p>${esc(e.message)}</p></div></div>`;
+  }
+}
+
+async function openBracketEdit(techId, techName){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`
+    <div class="sheet">
+      <h2>Update Brackets: ${esc(techName)}</h2>
+      <label class="fld">Flat Brackets</label>
+      <input type="number" id="bracketFlat" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <label class="fld">Tilting Brackets</label>
+      <input type="number" id="bracketTilting" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <label class="fld">Full Motion Brackets</label>
+      <input type="number" id="bracketFullMotion" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
+        <button class="btn" onclick="saveBracketCount('${techId}','${esc(techName)}')" style="flex:1;">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeBracketModal(); });
+  window.bracketModal=modal;
+}
+
+function closeBracketModal(){
+  if(window.bracketModal){ window.bracketModal.remove(); window.bracketModal=null; }
+}
+
+async function saveBracketCount(techId, techName){
+  const flat=parseInt(document.getElementById('bracketFlat').value)||0;
+  const tilting=parseInt(document.getElementById('bracketTilting').value)||0;
+  const fullMotion=parseInt(document.getElementById('bracketFullMotion').value)||0;
+  try{
+    await api('bracket_update',{
+      method:'POST',
+      body:{
+        business:current.slug,
+        technician_id:techId,
+        flat_delta:flat,
+        tilting_delta:tilting,
+        full_motion_delta:fullMotion,
+        action:'adjust',
+      }
+    });
+    toast('✓ Updated bracket count for '+techName);
+    closeBracketModal();
+    renderBrackets();
+  }catch(e){
+    toast('Error: '+e.message);
   }
 }
 
