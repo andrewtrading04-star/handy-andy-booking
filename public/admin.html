@@ -3859,7 +3859,7 @@ document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id
 // ── Boot ─────────────────────────────────────────────────────────────────
 async function tryAutoLogin(){
   try{
-    const d = await api('login', { method:'POST', body:{ password:'' } });
+    const d = await api('session_status');
     token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
     localStorage.setItem('ha_admin_token',token);
     localStorage.setItem('ha_admin_role',role);
@@ -3867,7 +3867,7 @@ async function tryAutoLogin(){
     localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
     localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
     enterApp();
-  }catch{ /* password required — leave the login screen visible */ }
+  }catch{ /* session invalid or expired — show login screen */ }
 }
 // Brand the login screen per dedicated entry link (/handy-andy, /heather,
 // /doms, /joey, or ?team=). Purely cosmetic — the password is what grants
