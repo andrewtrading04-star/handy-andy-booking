@@ -558,3 +558,80 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 
   return { subject, html };
 }
+
+// ── Estimate / quote email ──────────────────────────────────────────────────
+// Sent from the admin Estimates tab when the office emails a customer their
+// quote. Mirrors the house style (accent header, tinted body, content card,
+// website footer). `details`: { firstName, serviceLabel, description }.
+export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
+  const b = brand || EMAIL_BRANDS['handy-andy'];
+  const accent = b.accent;
+  const rgb = hexRgb(accent);
+  const tintBg = `rgba(${rgb},0.06)`;
+  const firstName = (details.firstName || '').trim();
+  const serviceLabel = (details.serviceLabel || '').trim();
+  const description = (details.description || '').trim();
+
+  const subject = `Your ${b.name} Estimate`;
+
+  const serviceRow = serviceLabel
+    ? `<div style="font-size:15px;font-weight:800;color:#11181c;margin:0 0 8px;">${esc(serviceLabel)}</div>`
+    : '';
+  const bodyRow = description
+    ? `<div style="font-size:14px;color:#3a4453;line-height:1.6;white-space:pre-wrap;">${esc(description)}</div>`
+    : `<div style="font-size:14px;color:#5b6470;line-height:1.6;">Details of your estimate request.</div>`;
+
+  const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
+<body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your estimate from ${esc(b.name)}.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
+
+        <!-- Header -->
+        <tr><td style="background:${accent};padding:18px 28px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</td>
+            <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:rgba(255,255,255,.82);">Your Estimate</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Intro -->
+        <tr><td style="background:${tintBg};padding:30px 28px 26px;">
+          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 10px;">Here's your estimate</div>
+          <div style="font-size:15px;color:#5b6470;line-height:1.6;">Hi ${esc(firstName || 'there')}, thanks for reaching out. Here are the details of the estimate you requested:</div>
+        </td></tr>
+
+        <!-- Estimate card -->
+        <tr><td style="padding:24px 28px 8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;">
+            <tr><td style="padding:18px 18px;">
+              ${serviceRow}
+              ${bodyRow}
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <!-- Next steps -->
+        <tr><td style="padding:18px 28px 28px;">
+          <div style="font-size:14px;color:#3a4453;line-height:1.6;">A member of our team will reach out shortly to finalize the details and get you scheduled. If you have any questions, just reply to this email.</div>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:8px 28px 32px;">
+          <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;">
+            <div style="font-size:13px;color:#6b7280;line-height:1.6;">Thank you for choosing ${esc(b.name)}!</div>
+            <div style="font-size:12px;color:#9ca3af;margin-top:10px;">${esc(b.website)}</div>
+          </div>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html };
+}

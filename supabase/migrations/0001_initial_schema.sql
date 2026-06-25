@@ -497,7 +497,7 @@ join (values
   ('handy-andy', 'Steve'),
   ('handy-andy', 'Zach'),
   ('doms',       'TK'),
-  ('doms',       'George')
+  ('doms',       'Gregory')
 ) as v(slug, name) on v.slug = b.slug
 where not exists (
   select 1 from technicians t where t.business_id = b.id and t.name = v.name

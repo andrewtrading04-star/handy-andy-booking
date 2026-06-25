@@ -197,6 +197,7 @@
   .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:#c4ccd6;}
   .search{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:11px 13px;font-size:14px;margin-bottom:12px;}
   .search:focus{outline:none;border-color:var(--accent);}
+  #jobSearchWrap{display:flex !important;justify-content:space-between;align-items:center;flex-wrap:wrap;}
   table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
@@ -436,6 +437,38 @@
   .ana .err{ background:#fff5f5; border:1px solid #ffd9d9; border-radius:12px; }
   .ana .loading{ text-align:center; padding:60px; color:var(--mute); }
   @media(max-width:600px){ .ana .abar{ flex-wrap:wrap; gap:3px 8px; margin-bottom:10px; } .ana .alabel{ width:100%; min-width:0; flex:0 0 100%; } .ana .atrack{ flex:1 1 auto; min-width:0; } }
+
+  /* ───────── Payroll Report (scoped to .payrep, report/PDF look) ───────── */
+  .payrep{ max-width:1180px; }
+  .payrep .pr-kpis{ display:flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff; margin:6px 0 4px; }
+  .payrep .pr-kpi{ flex:1 1 170px; padding:18px 20px; border-left:1px solid var(--line); }
+  .payrep .pr-kpi:first-child{ border-left:none; }
+  .payrep .pr-kpi .v{ font-size:27px; font-weight:800; letter-spacing:-.02em; line-height:1.1; }
+  .payrep .pr-kpi .v.green{ color:var(--green); }
+  .payrep .pr-kpi .v.blue{ color:var(--accent); }
+  .payrep .pr-kpi .v.ink{ color:var(--ink); font-size:19px; }
+  .payrep .pr-kpi .l{ font-size:12px; color:var(--mute); margin-top:5px; line-height:1.35; }
+  @media(max-width:760px){ .payrep .pr-kpi{ flex:1 1 50%; } .payrep .pr-kpi:nth-child(odd){ border-left:none; } }
+
+  .payrep .pr-sec{ font-size:19px; font-weight:800; color:var(--accent); letter-spacing:-.01em; margin:32px 0 0; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .payrep .pr-sec .meta{ font-weight:600; color:var(--mute); font-size:14px; }
+  .payrep .pr-sec .amt{ color:var(--green); }
+  .payrep .pr-note{ font-size:12.5px; color:var(--mute); margin:9px 0 0; }
+
+  .payrep .pr-tbl{ width:100%; border-collapse:separate; border-spacing:0; font-size:13.5px; margin-top:14px; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
+  .payrep .pr-tbl thead th{ background:var(--accent-soft); color:var(--accent); font-weight:700; text-align:left; padding:10px 13px; font-size:12px; text-transform:none; letter-spacing:0; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .payrep .pr-tbl th.r, .payrep .pr-tbl td.r{ text-align:right; }
+  .payrep .pr-tbl tbody td{ padding:10px 13px; border-bottom:1px solid var(--line2); color:var(--ink-2); vertical-align:top; }
+  .payrep .pr-tbl tbody tr.z td{ background:#fafbfc; }
+  .payrep .pr-tbl tr.pr-total td{ background:var(--accent-soft); font-weight:800; color:var(--ink); border-top:1px solid var(--line); border-bottom:none; }
+  .payrep .pr-money{ font-weight:700; color:var(--ink); white-space:nowrap; }
+  .payrep .pr-name{ font-weight:600; color:var(--ink); }
+  .payrep .pr-li{ font-size:12px; color:var(--mute); margin-top:3px; }
+  .payrep .pr-flag-ic{ color:var(--amber); margin-left:4px; }
+  .payrep .pr-warn td{ background:#fffbeb; border-bottom:1px solid var(--line2); }
+  .payrep .pr-warn .m{ color:#92660b; font-size:12px; border-left:3px solid var(--amber); padding-left:10px; line-height:1.5; }
+  .payrep .pr-defer-amt{ color:var(--amber); font-weight:700; white-space:nowrap; }
+  .payrep .pr-empty{ color:var(--mute); font-size:13px; padding:18px 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -475,7 +508,7 @@
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
-      <button data-nav="technicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
+      <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
@@ -508,6 +541,16 @@
     <div id="badAlerts" class="bad-alerts hidden"></div>
 
     <div id="greeting" class="greeting hidden"></div>
+
+    <div id="jobSearchWrap" style="display:none;background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;gap:8px;">
+      <input type="text" id="jobSearch" placeholder="Search jobs by customer name…" style="flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);margin:0;cursor:pointer;">
+          <input type="checkbox" id="jobSearchShowCanceled" style="cursor:pointer;">
+          <span>Include canceled</span>
+        </label>
+      </div>
+    </div>
 
     <div class="cal-head" id="calHead">
       <div class="cal-nav">
@@ -584,6 +627,7 @@
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
+        <button class="btn ghost" type="button" id="nbSendEstimate">Send estimate</button>
         <button class="btn ghost" type="button" id="nbCancel">Cancel</button>
       </div>
       <div class="err" id="nbErr"></div>
@@ -869,6 +913,8 @@ function enterApp(){
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  const navTech=document.getElementById('navTechnicians');
+  if(navTech) navTech.style.display = role==='owner' ? '' : 'none';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
@@ -965,6 +1011,7 @@ function navTo(s){
   }
 }
 function refreshCurrent(){
+  document.getElementById('jobSearchWrap').style.display = section==='schedule'?'flex':'none';
   if(section==='schedule'){ renderSchedule(); renderGreeting(); }
   else if(section==='estimates') renderEstimates();
   else if(section==='customers') renderCustomers();
@@ -999,6 +1046,8 @@ document.getElementById('viewToggle').querySelectorAll('button').forEach(b=>b.ad
 document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); });
 document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); });
 document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); });
+document.getElementById('jobSearch').addEventListener('input', e=>{ jobSearchQuery=e.target.value; renderCalBody(); });
+document.getElementById('jobSearchShowCanceled').addEventListener('change', e=>{ jobSearchShowCanceled=e.target.checked; renderCalBody(); });
 
 function rangeBounds(dates){
   return [ addDays(dates[0],-1)+'T00:00:00.000Z', addDays(dates[6],2)+'T00:00:00.000Z' ];
@@ -1008,6 +1057,7 @@ async function renderSchedule(silent){
   const dates = currentWeekDates();
   const [from,to] = rangeBounds(dates);
   const view=document.getElementById('view');
+  document.getElementById('jobSearchWrap').style.display='flex';
   if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
   try{
     const d = await api('calendar', { params:{ business: current.slug, from, to } });
@@ -1037,10 +1087,24 @@ function renderSidebarFilters(){
   al.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterTech=b.dataset.tech; renderSidebarFilters(); renderCalBody(); }));
 }
 
+let jobSearchQuery = '', jobSearchShowCanceled = false;
+
 function passFilters(b){
   if(filterArea && b.service_area_id!==filterArea) return false;
   if(filterTech==='unassigned'){ if(b.technician_id) return false; }
   else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
+
+  // Search filter
+  if(jobSearchQuery){
+    const q = jobSearchQuery.toLowerCase();
+    const custName = (b.customer?.name||'').toLowerCase();
+    const custPhone = (b.customer?.phone||'').toLowerCase();
+    if(!custName.includes(q) && !custPhone.includes(q)) return false;
+  }
+
+  // Canceled filter
+  if(b.status === 'cancelled' && !jobSearchShowCanceled) return false;
+
   return true;
 }
 
@@ -2171,17 +2235,17 @@ async function renderPayroll(){
     <div class="ana">
       <div class="ana-head">
         <div>
-          <h1>💰 Payroll Report</h1>
-          <div class="ana-sub" id="payUpdated">Select a week to view payroll data</div>
+          <h1>Weekly Payroll</h1>
+          <div class="ana-sub" id="payUpdated">Loading…</div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="arrow" id="payPrev">‹</button>
-          <input type="date" id="payWeekInput" value="${payrollWeek}" style="padding:8px; border:1px solid var(--border); border-radius:4px; font-size:14px;">
+          <input type="date" id="payWeekInput" value="${payrollWeek}" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
           <button class="arrow" id="payNext">›</button>
-          <button class="btn" id="payRefresh">Refresh</button>
+          <button class="btn ghost" id="payRefresh" style="width:auto;">Refresh</button>
         </div>
       </div>
-      <div id="payContent" class="loading">Loading payroll data…</div>
+      <div id="payContent" class="payrep loading">Loading payroll data…</div>
     </div>`;
 
   document.getElementById('payWeekInput').addEventListener('change', e=>{ payrollWeek=e.target.value; loadPayroll(); });
@@ -2199,87 +2263,112 @@ async function loadPayroll(){
 
   try{
     const d=await api('payroll',{ params:{ business:current.slug, week_start:payrollWeek } });
-    if(upd) upd.textContent=`Week of ${new Date(d.week_start+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric'})} · Pay date ${new Date(d.pay_date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
+    if(upd){
+      const bizName = (current && current.name) ? current.name : '';
+      upd.innerHTML=`Pay period: <strong>${payFmtDateUTC(d.week_start,{month:'long',day:'numeric'})} – ${payFmtDateUTC(d.week_end,{month:'long',day:'numeric',year:'numeric'})}</strong>${bizName?` · ${esc(bizName)}`:''}`;
+    }
     renderPayrollData(d);
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading payroll: ${esc(err.message)}</div>`;
   }
 }
 
+function payFmtUSD(n){ return '$'+Number(n||0).toLocaleString('en-US'); }
+function payFmtDateUTC(ds,opts){ return new Date(ds+'T00:00:00Z').toLocaleDateString('en-US', Object.assign({timeZone:'UTC'},opts)); }
+
 function renderPayrollData(d){
   const content=document.getElementById('payContent'); if(!content) return;
+  content.className='payrep';
   const techs=d.techs||[];
 
-  if(!techs.length){ content.innerHTML='<div class="card"><div class="empty">No earnings this week.</div></div>'; return; }
-
-  let html=`<div class="section card"><h2>Tech Earnings Summary</h2>`;
-  html+=`<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">`;
-
-  let totalWeek=0;
-  for(const tech of techs){
-    totalWeek+=tech.total;
-    html+=`<div style="padding:12px; border:1px solid var(--border); border-radius:4px;">
-      <div style="font-weight:bold; font-size:16px;">${esc(tech.name)}</div>
-      <div style="font-size:14px; color:var(--mute);">${tech.jobs.length} job${tech.jobs.length===1?'':'s'}</div>
-      <div style="font-size:18px; font-weight:bold; color:var(--brand); margin-top:8px;">$${tech.total.toLocaleString('en-US')}</div>
-      ${tech.deferred.length?`<div style="font-size:12px; color:var(--amber);">${tech.deferred.length} deferred</div>`:''}
-    </div>`;
+  if(!techs.length){
+    content.innerHTML=`<div class="pr-empty">No earnings recorded for this week.</div>`;
+    return;
   }
-  html+=`</div></div>`;
 
-  html+=`<div style="padding:16px; background:var(--board); border-radius:4px; margin-top:12px; text-align:center;">
-    <div style="font-size:12px; color:var(--mute);">TOTAL WEEK PAYROLL</div>
-    <div style="font-size:32px; font-weight:bold; color:var(--brand);">$${d.total.toLocaleString('en-US')}</div>
+  const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
+  const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
+  const payDateLbl = payFmtDateUTC(d.pay_date,{month:'short',day:'numeric',year:'numeric'});
+
+  let html='';
+
+  // ── KPI strip ────────────────────────────────────────────────────────────
+  html+=`<div class="pr-kpis">
+    <div class="pr-kpi"><div class="v green">${payFmtUSD(d.total)}</div><div class="l">Total Payroll<br>(this week)</div></div>
+    <div class="pr-kpi"><div class="v blue">${techs.length}</div><div class="l">Technicians Paid</div></div>
+    <div class="pr-kpi"><div class="v blue">${jobsCount}</div><div class="l">Jobs Worked</div></div>
+    <div class="pr-kpi"><div class="v ink">${payDateLbl}</div><div class="l">Pay Date<br>(Saturday + 9 days)</div></div>
   </div>`;
 
-  for(const tech of techs){
-    html+=`<div class="section card"><h3>${esc(tech.name)} — $${tech.total.toLocaleString('en-US')}</h3>`;
+  // ── Per-Person Detail ────────────────────────────────────────────────────
+  html+=`<div class="pr-sec">Payroll — Per-Person Detail</div>`;
+  html+=`<div class="pr-note">Each technician's job count and total pay for the week. Deferred jobs are completed but not yet paid.</div>`;
+  html+=`<table class="pr-tbl"><thead><tr>
+      <th>Technician</th><th class="r">Jobs</th><th class="r">Deferred</th><th class="r">Total Pay</th>
+    </tr></thead><tbody>`;
+  techs.forEach((t,i)=>{
+    html+=`<tr class="${i%2?'z':''}">
+      <td class="pr-name">${esc(t.name)}</td>
+      <td class="r">${t.jobs.length}</td>
+      <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
+      <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
+    </tr>`;
+  });
+  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(d.total)}</td></tr>`;
+  html+=`</tbody></table>`;
 
-    if(tech.jobs.length){
-      html+=`<table style="width:100%; border-collapse:collapse; font-size:14px;">
-        <thead><tr style="border-bottom:1px solid var(--border);">
-          <th style="text-align:left; padding:8px;">Customer</th>
-          <th style="text-align:left; padding:8px;">Service</th>
-          <th style="text-align:right; padding:8px;">Pay</th>
-        </tr></thead>
-        <tbody>`;
-      for(const job of tech.jobs){
-        html+=`<tr style="border-bottom:1px solid var(--board);" data-id="${job.id}">
-          <td style="text-align:left; padding:8px;">${esc(job.customer_name)}</td>
-          <td style="text-align:left; padding:8px;">${esc(job.service)} · ${job.time}</td>
-          <td style="text-align:right; padding:8px;"><strong>$${job.tech_pay}</strong>${job.needs_review?` <span style="color:var(--amber);">⚠️</span>':''}</td>
+  // ── Per-Tech Job Breakdown ───────────────────────────────────────────────
+  const techsWithJobs = techs.filter(t=>t.jobs.length);
+  if(techsWithJobs.length){
+    html+=`<div class="pr-sec">Per-Tech Job Breakdown</div>`;
+    html+=`<div class="pr-note">Every paid job per technician — customer, pay breakdown, and total pay. ⚠️ flags a job that needs review.</div>`;
+    for(const t of techsWithJobs){
+      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${t.jobs.length} job${t.jobs.length===1?'':'s'}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
+      html+=`<table class="pr-tbl"><thead><tr>
+          <th>Time</th><th>Customer</th><th>Pay breakdown</th><th class="r">Pay</th>
+        </tr></thead><tbody>`;
+      t.jobs.forEach((job,i)=>{
+        const bd = (job.breakdown&&job.breakdown.length)
+          ? job.breakdown.map(b=>`${esc(b.label)} ${payFmtUSD(b.amount)}`).join('  ·  ')
+          : '—';
+        html+=`<tr class="${i%2?'z':''}">
+          <td style="white-space:nowrap; color:var(--mute);">${esc(job.time)}</td>
+          <td><span class="pr-name">${esc(job.customer_name)}</span><div class="pr-li">${esc(job.service)}</div></td>
+          <td><div class="pr-li" style="margin-top:0;">${bd}</div></td>
+          <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span>${job.needs_review?`<span class="pr-flag-ic">⚠️</span>`:''}</td>
         </tr>`;
-        if(job.breakdown && job.breakdown.length){
-          html+=`<tr style="background:var(--board);">
-            <td colspan="3" style="padding:8px;">
-              <div style="font-size:12px; color:var(--mute);">`;
-          for(const b of job.breakdown){
-            html+=`<div>${esc(b.label)}: $${b.amount}</div>`;
-          }
-          html+=`</div>`;
-          if(job.flags && job.flags.length){
-            html+=`<div style="margin-top:8px; padding:8px; background:var(--bg); border-left:2px solid var(--amber); border-radius:2px;">`;
-            for(const f of job.flags){
-              html+=`<div style="font-size:12px; color:var(--amber);">⚠️ ${esc(f)}</div>`;
-            }
-            html+=`</div>`;
-          }
-          html+=`</td></tr>`;
+        if(job.flags && job.flags.length){
+          html+=`<tr class="pr-warn"><td></td><td colspan="3"><div class="m">${job.flags.map(f=>'⚠️ '+esc(f)).join('<br>')}</div></td></tr>`;
         }
-      }
+      });
+      html+=`<tr class="pr-total"><td colspan="3">Total — ${esc(t.name)}</td><td class="r">${payFmtUSD(t.total)}</td></tr>`;
       html+=`</tbody></table>`;
     }
+  }
 
-    if(tech.deferred && tech.deferred.length){
-      html+=`<div style="margin-top:16px; padding:12px; background:rgba(180,83,9,0.1); border-left:2px solid var(--amber); border-radius:4px;">
-        <div style="font-weight:bold; color:var(--amber); font-size:12px; margin-bottom:8px;">DEFERRED (unpaid)</div>`;
-      for(const j of tech.deferred){
-        html+=`<div style="font-size:12px; margin:4px 0;">${esc(j.customer_name)} · $${j.customer_due} outstanding</div>`;
-      }
-      html+=`</div>`;
-    }
-
-    html+=`</div>`;
+  // ── Awaiting Customer Payment (deferred) ─────────────────────────────────
+  const deferRows=[];
+  for(const t of techs){
+    for(const j of (t.deferred||[])) deferRows.push({ tech:t.name, ...j });
+  }
+  if(deferRows.length){
+    const deferTotal = deferRows.reduce((s,j)=>s+(Number(j.customer_due)||0),0);
+    html+=`<div class="pr-sec">Awaiting Customer Payment (deferred)</div>`;
+    html+=`<div class="pr-note">Work completed but not yet paid — tech pay is deferred until the customer pays.</div>`;
+    html+=`<table class="pr-tbl"><thead><tr>
+        <th>Time</th><th>Customer</th><th>Service</th><th>Tech</th><th class="r">Outstanding</th>
+      </tr></thead><tbody>`;
+    deferRows.forEach((j,i)=>{
+      html+=`<tr class="${i%2?'z':''}">
+        <td style="white-space:nowrap; color:var(--mute);">${esc(j.time)}</td>
+        <td class="pr-name">${esc(j.customer_name)}</td>
+        <td>${esc(j.service)}</td>
+        <td>${esc(j.tech)}</td>
+        <td class="r"><span class="pr-defer-amt">${payFmtUSD(j.customer_due)}</span></td>
+      </tr>`;
+    });
+    html+=`<tr class="pr-total"><td colspan="4">TOTAL OUTSTANDING</td><td class="r">${payFmtUSD(deferTotal)}</td></tr>`;
+    html+=`</tbody></table>`;
   }
 
   content.innerHTML=html;
@@ -2371,10 +2460,10 @@ async function renderEstimates(){
       setEstimate(sel.dataset.estStatus,{ status:e.target.value });
     }));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
-      sendEstimateMessage(b.dataset.estSms,'sms');
+      sendEstimateMessage(b.dataset.estSms,'sms',b);
     }));
     document.querySelectorAll('#estWrap [data-est-email]').forEach(b=>b.addEventListener('click',()=>{
-      sendEstimateMessage(b.dataset.estEmail,'email');
+      sendEstimateMessage(b.dataset.estEmail,'email',b);
     }));
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
@@ -2408,7 +2497,7 @@ function estCard(e){
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
-        ${(e.customer_phone&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
+        ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
@@ -2421,14 +2510,20 @@ async function setEstimate(id, payload){
   catch(err){ toast(err.message); }
 }
 
-async function sendEstimateMessage(estimateId, type){
+async function sendEstimateMessage(estimateId, type, btn){
+  const label = type === 'sms' ? 'text message' : 'email';
+  if(!confirm(`Send this estimate to the customer via ${label}?`)) return;
+  const prev = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
   try{
     const action = type === 'sms' ? 'estimate_send_sms' : 'estimate_send_email';
     await api(action,{ method:'POST', body:{ business:current.slug, id:estimateId }});
-    const msg = type === 'sms' ? 'Quote sent via SMS!' : 'Quote sent via email!';
-    toast(msg);
+    toast(type === 'sms' ? 'Estimate texted to customer ✓' : 'Estimate emailed to customer ✓');
     renderEstimates();
-  }catch(err){ toast(err.message); }
+  }catch(err){
+    if(btn){ btn.disabled = false; btn.textContent = prev; }
+    toast(err.message || `Could not send ${label}.`);
+  }
 }
 
 // Lightweight unread-count badge for the sidebar (status = new).
@@ -2666,6 +2761,7 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
 document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+document.getElementById('nbSendEstimate').addEventListener('click', sendEstimateFromBooking);
 document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 async function openNewBooking(){
   if(!current) return;
@@ -3630,6 +3726,45 @@ document.getElementById('nbPaymentMethod').addEventListener('change',async e=>{
   document.getElementById('nbCardWrap').style.display=isCard?'':'none';
   if(isCard){ try{ await ensureNbStripe(); }catch(err){ document.getElementById('nbErr').textContent=err.message; } }
 });
+
+async function sendEstimateFromBooking(e){
+  e.preventDefault();
+  const err=document.getElementById('nbErr'); err.textContent='';
+  const name=document.getElementById('nbName').value.trim();
+  const phone=document.getElementById('nbPhone').value.trim();
+  const email=document.getElementById('nbEmail').value.trim();
+
+  if(!name){ err.textContent='Customer name required'; return; }
+  if(!email){ err.textContent='Customer email required'; return; }
+
+  const selections=nbCollectSelections();
+  if(selections.length===0){ err.textContent='Select at least one service to send'; return; }
+
+  const btn=document.getElementById('nbSendEstimate');
+  const prevText=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='Sending…';
+
+  try{
+    await api('estimate_create',{ method:'POST', body:{
+      business: current.slug,
+      customer_name: name,
+      customer_phone: phone,
+      customer_email: email,
+      selections,
+      service_label: document.getElementById('nbService')?.value ?
+        document.querySelector(`#nbService option[value="${document.getElementById('nbService').value}"]`)?.textContent :
+        'Custom Service',
+      sms_consent: document.getElementById('nbSmsConsent').checked,
+    }});
+    toast('Estimate sent to customer ✓');
+  }catch(e){
+    err.textContent=e.message;
+  }finally{
+    btn.disabled=false;
+    btn.textContent=prevText;
+  }
+}
 
 document.getElementById('nbForm').addEventListener('submit',async e=>{
   e.preventDefault();

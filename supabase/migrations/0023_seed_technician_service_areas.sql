@@ -37,8 +37,8 @@ begin
 
   -- Assign Doms technicians
   if doms_id is not null then
-    -- TK and George → Denver
+    -- TK and Gregory → Denver
     update app.technicians set service_area_id = denver_doms_id
-    where business_id = doms_id and name in ('TK', 'George') and service_area_id is null;
+    where business_id = doms_id and name in ('TK', 'Gregory') and service_area_id is null;
   end if;
 end $$;
