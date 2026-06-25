@@ -228,8 +228,13 @@
   .es-li-rm:hover{color:#dc2626;}
   .es-lines-head{display:grid;grid-template-columns:1fr 56px 84px 30px;gap:6px;font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
   .es-lines-head span:nth-child(2),.es-lines-head span:nth-child(3){text-align:right;}
-  .es-total-row{display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:800;color:var(--ink);margin:12px 0 4px;padding:10px 12px;background:var(--accent-soft);border-radius:10px;}
+  .es-tax-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ink-2);margin:12px 0 0;padding:0 12px;}
+  .es-tax-toggle{display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;}
+  .es-tax-toggle input{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;}
+  .es-sub-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ink-2);margin:6px 0 0;padding:0 12px;}
+  .es-total-row{display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:800;color:var(--ink);margin:8px 0 4px;padding:10px 12px;background:var(--accent-soft);border-radius:10px;}
   .es-total-row .amt{color:var(--accent);}
+  .es-quote-sub{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mute);padding:1px 0;}
   .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
@@ -727,6 +732,11 @@
     <div class="es-lines-head"><span>Description</span><span>Qty</span><span>Price</span><span></span></div>
     <div class="es-lines" id="esLines"></div>
     <button class="btn ghost sm" type="button" id="esAddLine">+ Add line item</button>
+    <div class="es-tax-row">
+      <label class="es-tax-toggle"><input type="checkbox" id="esTaxOn" checked> Apply sales tax (8.75%)</label>
+      <span id="esTaxAmt">$0.00</span>
+    </div>
+    <div class="es-sub-row"><span>Subtotal</span><span id="esSubtotal">$0.00</span></div>
     <div class="es-total-row"><span>Estimated total</span><span class="amt" id="esTotal">$0.00</span></div>
     <label class="fld" style="margin-top:14px;">Internal Notes <span style="text-transform:none;font-weight:500;color:var(--mute);">(office only, not sent)</span></label>
     <textarea class="search" id="esNotes" placeholder="Private notes" style="min-height:48px;resize:vertical;"></textarea>
@@ -2480,10 +2490,18 @@ const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:
 const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
 let estFilter = 'all';
 let estCache = {};   // id -> estimate row, so the quote modal can open without a refetch
+const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
 // Sum of qty × unit price across line items, rounded to cents.
 function estLineTotal(items){ return Math.round((Array.isArray(items)?items:[]).reduce((t,it)=>t+(Number(it.qty)||0)*(Number(it.unit_price)||0),0)*100)/100; }
 function money2(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2); }
+// { subtotal, tax, total } for a set of line items at a tax rate (fraction).
+function estTotals(items, taxRate){
+  const subtotal=estLineTotal(items);
+  const rate=Number(taxRate)||0;
+  const tax=Math.round(subtotal*rate*100)/100;
+  return { subtotal, tax, total:Math.round((subtotal+tax)*100)/100 };
+}
 
 async function renderEstimates(){
   const view=document.getElementById('view');
@@ -2533,10 +2551,15 @@ function estCard(e){
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   // Priced quote summary (line items). Shown when the office has built a quote.
   const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)):[];
+  const eTax=(e.tax_rate==null)?0:Number(e.tax_rate);
+  const t=estTotals(lines,eTax);
+  const taxLines=eTax>0?
+    `<div class="est-quote-sub"><span>Subtotal</span><span>${money2(t.subtotal)}</span></div>`+
+    `<div class="est-quote-sub"><span>Tax (${(eTax*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span>${money2(t.tax)}</span></div>`:'';
   const quote=lines.length?`<div class="est-quote">${lines.map(it=>{
     const qty=Number(it.qty)||0; const lt=qty*(Number(it.unit_price)||0);
     return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(it.description||'Item')}</span><b>${money2(lt)}</b></div>`;
-  }).join('')}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(estLineTotal(lines))}</span></div></div>`:'';
+  }).join('')}${taxLines}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(t.total)}</span></div></div>`:'';
   const hasQuote=lines.length>0;
   const buildLabel=hasQuote?'Edit quote':'Build quote';
   return `<div class="job est-card" data-status="${esc(e.status)}">
@@ -2583,12 +2606,16 @@ function esReadLines(){
     unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
   })).filter(it=>it.description||it.unit_price>0);
 }
+function esCurrentTaxRate(){ return document.getElementById('esTaxOn').checked ? EST_TAX_RATE : 0; }
 function esRecalcTotal(){
   const rows=[...document.querySelectorAll('#esLines [data-line]')].map(row=>({
     qty: parseFloat(row.querySelector('.es-li-qty').value)||0,
     unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
   }));
-  document.getElementById('esTotal').textContent=money2(estLineTotal(rows));
+  const t=estTotals(rows,esCurrentTaxRate());
+  document.getElementById('esSubtotal').textContent=money2(t.subtotal);
+  document.getElementById('esTaxAmt').textContent=money2(t.tax);
+  document.getElementById('esTotal').textContent=money2(t.total);
 }
 function esWireLineRow(row){
   row.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',esRecalcTotal));
@@ -2607,6 +2634,10 @@ function openEstimateEdit(id){
   document.getElementById('esDesc').value=e.description||'';
   document.getElementById('esNotes').value=e.notes||'';
   document.getElementById('esErr').textContent='';
+  // Tax toggle: ON by default for a fresh quote; reflect the stored rate when a
+  // quote already exists (so turning tax off persists across reopens).
+  const hasQuote=Array.isArray(e.line_items)&&e.line_items.length>0;
+  document.getElementById('esTaxOn').checked = hasQuote ? Number(e.tax_rate)>0 : true;
   const wrap=document.getElementById('esLines'); wrap.innerHTML='';
   const lines=Array.isArray(e.line_items)?e.line_items:[];
   if(lines.length) lines.forEach(it=>esAddLineRow(it));
@@ -2616,6 +2647,7 @@ function openEstimateEdit(id){
 }
 function closeEstimateEdit(){ document.getElementById('estModal').classList.add('hidden'); }
 document.getElementById('esAddLine').addEventListener('click',()=>esAddLineRow({ qty:1 }));
+document.getElementById('esTaxOn').addEventListener('change',esRecalcTotal);
 document.getElementById('esCancel').addEventListener('click',closeEstimateEdit);
 document.getElementById('estModal').addEventListener('click',e=>{ if(e.target.id==='estModal') closeEstimateEdit(); });
 document.getElementById('esSave').addEventListener('click',async()=>{
@@ -2630,6 +2662,7 @@ document.getElementById('esSave').addEventListener('click',async()=>{
       description: document.getElementById('esDesc').value.trim(),
       notes: document.getElementById('esNotes').value.trim(),
       line_items: esReadLines(),
+      tax_rate: esCurrentTaxRate(),
     }});
     toast('Quote saved ✓');
     closeEstimateEdit();

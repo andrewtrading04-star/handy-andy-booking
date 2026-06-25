@@ -2414,7 +2414,7 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, created_at';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, created_at';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -2461,17 +2461,33 @@ async function estimateUpdate(req, res, db, auth, body) {
   if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
   if (typeof body.description === 'string') patch.description = body.description.trim();
   if (Array.isArray(body.line_items)) patch.line_items = sanitizeLineItems(body.line_items);
+  if (body.tax_rate !== undefined) patch.tax_rate = normalizeTaxRate(body.tax_rate);
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
 
-  // line_items is a not-yet-applied migration on some databases. If it's the only
-  // change and the column is missing, surface a clear message instead of a 500.
+  // line_items / tax_rate come from a not-yet-applied migration on some
+  // databases. If the missing column is one of those, surface a clear message
+  // instead of a 500 so the office knows to apply migration 0028.
   let { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
-  if (error && missingColumn(error.message) === 'line_items') {
-    return res.status(503).json({ error: 'The line-items feature needs a quick database update (migration 0028) before it can save. Please apply it and try again.' });
+  if (error && ['line_items', 'tax_rate'].includes(missingColumn(error.message))) {
+    return res.status(503).json({ error: 'The quote builder needs a quick database update (migration 0028) before it can save. Please apply it and try again.' });
   }
   if (error) throw error;
   return res.status(200).json({ ok: true });
 }
+
+// Clamp a tax rate to a sane fraction (0 .. 0.25). Accepts 8.75 (percent) or
+// 0.0875 (fraction); values > 1 are treated as a percentage.
+function normalizeTaxRate(raw) {
+  let r = Number(raw);
+  if (!Number.isFinite(r) || r < 0) r = 0;
+  if (r > 1) r = r / 100;
+  if (r > 0.25) r = 0.25;
+  return Math.round(r * 100000) / 100000;
+}
+
+// Default sales-tax rate applied to new quotes (8.75%). Mirrors the
+// estimates.tax_rate column default in migration 0028.
+const DEFAULT_EST_TAX_RATE = 0.0875;
 
 // Normalize quote line items to the stored shape: { description, qty, unit_price }.
 // Drops blank rows, clamps to sane numbers, caps the list so a bad client can't
@@ -2493,17 +2509,34 @@ function sanitizeLineItems(items) {
     .filter(it => it.description || it.unit_price > 0);
 }
 
-// Fetch one estimate by id, tolerating the line_items column being absent
-// (migration 0028 not applied). Returns { ...row, line_items: [] } either way.
+// Fetch one estimate by id, tolerating the quote columns (line_items, tax_rate)
+// being absent (migration 0028 not applied) by dropping whichever is missing and
+// retrying. Returns the row with line_items: [] and tax_rate: 0 defaulted.
 async function fetchEstimate(db, id, businessId, baseCols) {
-  const withLI = `${baseCols}, line_items`;
-  let { data, error } = await db.from('estimates').select(withLI).eq('id', id).eq('business_id', businessId).maybeSingle();
-  if (error && missingColumn(error.message) === 'line_items') {
-    ({ data, error } = await db.from('estimates').select(baseCols).eq('id', id).eq('business_id', businessId).maybeSingle());
+  const optional = ['line_items', 'tax_rate'];
+  let cols = [baseCols, ...optional].join(', ');
+  let data, error;
+  for (let i = 0; i < 4; i++) {
+    ({ data, error } = await db.from('estimates').select(cols).eq('id', id).eq('business_id', businessId).maybeSingle());
+    if (!error) break;
+    const col = missingColumn(error.message);
+    if (!col || !cols.includes(col)) break;
+    cols = cols.split(',').map(s => s.trim()).filter(c => c !== col).join(', ');
   }
   if (error) throw error;
-  if (data && !Array.isArray(data.line_items)) data.line_items = [];
+  if (data) {
+    if (!Array.isArray(data.line_items)) data.line_items = [];
+    if (data.tax_rate == null) data.tax_rate = 0;
+  }
   return data;
+}
+
+// { subtotal, tax, total } for a quote, all rounded to cents.
+function quoteTotals(items, taxRate) {
+  const subtotal = lineItemsTotal(items);
+  const rate = Number(taxRate) || 0;
+  const tax = Math.round(subtotal * rate * 100) / 100;
+  return { subtotal, tax, total: Math.round((subtotal + tax) * 100) / 100 };
 }
 
 // Insert an estimate, tolerating a column the local schema doesn't have yet
@@ -2603,7 +2636,7 @@ async function estimateCreate(req, res, db, auth, body) {
 
   const firstName = (customer_name || '').trim().split(/\s+/)[0];
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items },
+    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE },
     brandFor(biz.slug)
   );
 
@@ -2635,9 +2668,9 @@ async function estimateSendSms(req, res, db, auth, body) {
   // If the office built priced line items, lead with the total; otherwise fall
   // back to the request description so the text is never empty/meaningless.
   const items = Array.isArray(est.line_items) ? est.line_items : [];
-  const total = lineItemsTotal(items);
+  const { total } = quoteTotals(items, est.tax_rate);
   const body_txt = items.length
-    ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}`
+    ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}${Number(est.tax_rate) > 0 ? ' (incl. tax)' : ''}`
     : (est.description || 'Your estimate request');
   const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
 
@@ -2672,7 +2705,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items },
+    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate },
     brandFor(biz.slug)
   );
 

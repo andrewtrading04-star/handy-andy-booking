@@ -563,9 +563,10 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 // Sent from the admin Estimates tab when the office emails a customer their
 // quote. Mirrors the house style (accent header, tinted body, content card,
 // website footer).
-// `details`: { firstName, serviceLabel, description, lineItems }
+// `details`: { firstName, serviceLabel, description, lineItems, taxRate }
 //   lineItems: [{ description, qty, unit_price }] — when present, renders a
 //   priced quote table + total; otherwise falls back to the request description.
+//   taxRate: fraction (e.g. 0.0875) — adds a subtotal + tax + total breakdown.
 export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const b = brand || EMAIL_BRANDS['handy-andy'];
   const accent = b.accent;
@@ -585,7 +586,10 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
     }))
     .filter(it => it.description || it.unit_price > 0);
   const hasLineItems = lineItems.length > 0;
-  const total = lineItems.reduce((t, it) => t + it.qty * it.unit_price, 0);
+  const subtotal = Math.round(lineItems.reduce((t, it) => t + it.qty * it.unit_price, 0) * 100) / 100;
+  const taxRate = Number(details.taxRate) > 0 ? Number(details.taxRate) : 0;
+  const taxAmt = Math.round(subtotal * taxRate * 100) / 100;
+  const total = Math.round((subtotal + taxAmt) * 100) / 100;
 
   const subject = `Your ${b.name} Estimate`;
 
@@ -604,11 +608,22 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
         <td style="padding:10px 0;border-bottom:1px solid #eef0f2;font-size:14px;color:#11181c;font-weight:700;text-align:right;white-space:nowrap;">${money(lineTotal)}</td>
       </tr>`;
     }).join('');
+    // When tax applies, show a subtotal + tax breakdown above the total.
+    const taxRows = taxRate > 0 ? `
+        <tr>
+          <td style="padding:12px 0 0;font-size:14px;color:#5b6470;">Subtotal</td>
+          <td style="padding:12px 0 0;font-size:14px;color:#11181c;text-align:right;white-space:nowrap;">${money(subtotal)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0 0;font-size:14px;color:#5b6470;">Tax (${(taxRate * 100).toFixed(2).replace(/\.?0+$/, '')}%)</td>
+          <td style="padding:4px 0 0;font-size:14px;color:#11181c;text-align:right;white-space:nowrap;">${money(taxAmt)}</td>
+        </tr>` : '';
     const descNote = description
       ? `<div style="font-size:13px;color:#5b6470;line-height:1.6;margin:0 0 14px;white-space:pre-wrap;">${esc(description)}</div>`
       : '';
     bodyRow = `${descNote}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         ${rows}
+        ${taxRows}
         <tr>
           <td style="padding:14px 0 0;font-size:15px;font-weight:800;color:#11181c;">Estimated total</td>
           <td style="padding:14px 0 0;font-size:18px;font-weight:800;color:${accent};text-align:right;white-space:nowrap;">${money(total)}</td>
