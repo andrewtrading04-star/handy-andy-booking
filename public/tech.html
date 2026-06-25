@@ -228,8 +228,22 @@
 
 <script>
 const API='/api/tech';
-let token=localStorage.getItem('ha_tech_token')||'';
-let tech=JSON.parse(localStorage.getItem('ha_tech_info')||'null');
+// Bulletproof localStorage bootstrap (runs at the very top — must never throw,
+// or ALL page JS halts and the login form silently breaks). Guards both storage
+// ACCESS throwing (Chrome "block cookies" / iOS private mode) and a corrupt or
+// literal-"undefined" value throwing on JSON.parse. Falls back on bad data,
+// which also auto-heals a device already bricked this way on its next load.
+function lsGet(key){ try{ return localStorage.getItem(key); }catch{ return null; } }
+function lsSet(key, val){ try{ localStorage.setItem(key, val); }catch{} }
+function lsDel(key){ try{ localStorage.removeItem(key); }catch{} }
+function lsJSON(key, fallback){
+  const raw=lsGet(key);
+  if(raw==null||raw===''||raw==='undefined'||raw==='null') return fallback;
+  try{ const v=JSON.parse(raw); return v==null?fallback:v; }
+  catch{ lsDel(key); return fallback; }
+}
+let token=lsGet('ha_tech_token')||'';
+let tech=lsJSON('ha_tech_info', null);
 
 async function api(action,{method='GET',params={},body=null}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
@@ -299,11 +313,11 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
   try{
     const d=await api('login',{method:'POST',body:{phone:document.getElementById('phone').value.trim(),pin:document.getElementById('pin').value.trim()}});
     token=d.token; tech=d.technician;
-    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    lsSet('ha_tech_token',token||''); lsSet('ha_tech_info',JSON.stringify(tech||null));
     showJobs();
   }catch(e2){ err.textContent=e2.message; }
 });
-function logout(){ token='';tech=null; localStorage.removeItem('ha_tech_token');localStorage.removeItem('ha_tech_info');
+function logout(){ token='';tech=null; lsDel('ha_tech_token');lsDel('ha_tech_info');
   show('login'); }
 document.getElementById('logout').addEventListener('click',logout);
 
@@ -985,7 +999,7 @@ document.getElementById('devBtn').addEventListener('click',async()=>{
   try{
     const d=await api('dev_login',{method:'POST',body:{tech_id:techId}});
     token=d.token; tech=d.technician;
-    localStorage.setItem('ha_tech_token',token); localStorage.setItem('ha_tech_info',JSON.stringify(tech));
+    lsSet('ha_tech_token',token||''); lsSet('ha_tech_info',JSON.stringify(tech||null));
     showJobs();
   }catch(e){ document.getElementById('loginErr').textContent=e.message; }
 });

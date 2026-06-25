@@ -657,11 +657,30 @@
 
 <script>
 const API = '/api/admin';
-let token = localStorage.getItem('ha_admin_token') || '';
-let role = localStorage.getItem('ha_admin_role') || '';
-let userName = localStorage.getItem('ha_admin_name') || '';
-let appConfig = JSON.parse(localStorage.getItem('ha_admin_config') || '{}'); // { email, sms } outbound channels
-let businesses = JSON.parse(localStorage.getItem('ha_admin_biz') || '[]');
+// ── Bulletproof localStorage bootstrap ───────────────────────────────────────
+// This runs at the very TOP of the script. If anything here throws, ALL page JS
+// halts: no event handlers attach, the login form falls back to a NATIVE submit
+// (the page just "flashes"), and the password show/hide eye does nothing — i.e.
+// the dashboard is unusable with no way to sign in. Two mobile-specific hazards
+// must be neutralised: (1) localStorage ACCESS itself throws when storage is
+// blocked (Chrome "block cookies", iOS private mode); (2) a corrupt or literal
+// "undefined" value (left by a past JSON.stringify(undefined) write) throws on
+// JSON.parse. lsGet/lsJSON/lsSet swallow both and fall back, which also
+// auto-heals any device already bricked this way on its next load.
+function lsGet(key){ try{ return localStorage.getItem(key); }catch{ return null; } }
+function lsSet(key, val){ try{ localStorage.setItem(key, val); }catch{} }
+function lsDel(key){ try{ localStorage.removeItem(key); }catch{} }
+function lsJSON(key, fallback){
+  const raw = lsGet(key);
+  if(raw==null || raw==='' || raw==='undefined' || raw==='null') return fallback;
+  try{ const v = JSON.parse(raw); return v==null ? fallback : v; }
+  catch{ lsDel(key); return fallback; }
+}
+let token = lsGet('ha_admin_token') || '';
+let role = lsGet('ha_admin_role') || '';
+let userName = lsGet('ha_admin_name') || '';
+let appConfig = lsJSON('ha_admin_config', {}); // { email, sms } outbound channels
+let businesses = lsJSON('ha_admin_biz', []);
 let current = null;            // current business object
 let greetingData = null;       // { jobs, estimates, tz } for the schedule greeting
 let greetingClock = null;      // interval handle for the live greeting clock
@@ -694,7 +713,13 @@ async function api(action, { method='GET', params={}, body=null } = {}) {
     headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) { logout(); throw new Error('Session expired — please sign in again'); }
+  // A 401 on an AUTHENTICATED call means the saved token is stale — log out and
+  // prompt re-login. But a 401 from the login / session_status calls is just a
+  // bad password or absent session: don't call logout() (it would mask the real
+  // server message), let the caller surface "Incorrect password" instead.
+  if (res.status === 401 && action !== 'login' && action !== 'session_status') {
+    logout(); throw new Error('Session expired — please sign in again');
+  }
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
@@ -798,12 +823,12 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   if(btn){ btn.disabled=true; }
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
-    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
-    localStorage.setItem('ha_admin_token',token);
-    localStorage.setItem('ha_admin_role',role);
-    localStorage.setItem('ha_admin_name',userName);
-    localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
-    localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
+    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    lsSet('ha_admin_token',token);
+    lsSet('ha_admin_role',role);
+    lsSet('ha_admin_name',userName);
+    lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
+    lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
   } catch(err){
     // Network failures on mobile Safari surface as "Load failed" / "Failed to
@@ -818,7 +843,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 });
 function logout(){
   token=''; role=''; userName=''; appConfig={}; businesses=[]; current=null;
-  localStorage.removeItem('ha_admin_token'); localStorage.removeItem('ha_admin_role'); localStorage.removeItem('ha_admin_name'); localStorage.removeItem('ha_admin_config'); localStorage.removeItem('ha_admin_biz');
+  lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
   if(pollTimer) clearInterval(pollTimer);
   if(alertTimer){ clearInterval(alertTimer); alertTimer=null; }
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
@@ -3725,12 +3750,12 @@ document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id
 async function tryAutoLogin(){
   try{
     const d = await api('session_status');
-    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses;
-    localStorage.setItem('ha_admin_token',token);
-    localStorage.setItem('ha_admin_role',role);
-    localStorage.setItem('ha_admin_name',userName);
-    localStorage.setItem('ha_admin_config',JSON.stringify(appConfig));
-    localStorage.setItem('ha_admin_biz',JSON.stringify(businesses));
+    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    lsSet('ha_admin_token',token);
+    lsSet('ha_admin_role',role);
+    lsSet('ha_admin_name',userName);
+    lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
+    lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
   }catch{ /* session invalid or expired — show login screen */ }
 }
