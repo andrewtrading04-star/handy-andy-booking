@@ -434,7 +434,7 @@ async function status(req, res, db, auth, body) {
   // advance it too. All downstream writes use the job's OWN business_id, not the
   // tech's home business.
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
+    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
     .eq('id', id).maybeSingle();
   const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
@@ -447,6 +447,12 @@ async function status(req, res, db, auth, body) {
       .eq('booking_id', id).eq('business_id', jobBizId);
     if ((count || 0) < MIN_PHOTOS_TO_COMPLETE) {
       return res.status(400).json({ error: `Add at least ${MIN_PHOTOS_TO_COMPLETE} photos before marking this job complete (${count || 0} so far).` });
+    }
+    // Gate completion on payment. Either tech can take the payment (card or cash),
+    // but it must be collected before the job can be marked complete. Once paid,
+    // the booking's shared payment_status reflects it for BOTH techs on the job.
+    if (Number(existing.price) > 0 && existing.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Charge the card or take a cash payment before marking this job complete.' });
     }
   }
 

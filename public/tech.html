@@ -322,6 +322,7 @@ function logout(){ token='';tech=null; lsDel('ha_tech_token');lsDel('ha_tech_inf
 document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
+  if(which!=='detailView' && detailPoll){ clearInterval(detailPoll); detailPoll=null; }
   for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
@@ -411,11 +412,12 @@ function renderDay(){
 
 const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
   confirmed:{to:'on_the_way',label:'On My Way',cls:'blue'},
-  on_the_way:{to:'completed',label:'Job Complete',cls:'green'},
-  in_progress:{to:'completed',label:'Job Complete',cls:'green'} };
+  on_the_way:{to:'completed',label:'Mark Complete',cls:'green'},
+  in_progress:{to:'completed',label:'Mark Complete',cls:'green'} };
 
 const MIN_PHOTOS=2;
 let curJob=null, curPhotos=[], curNotes=[];
+let detailPoll=null;   // refreshes the open job so a 2nd tech's payment shows up
 
 async function showDetail(id){
   show('detailView');
@@ -430,6 +432,10 @@ async function showDetail(id){
     const next=NEXT[j.status];
     const photoOK=curPhotos.length>=MIN_PHOTOS;
     const needsPhotos=next && next.to==='completed' && !photoOK;
+    // Payment must be collected (card or cash) before completing. Either tech can
+    // take it; once paid, the shared payment_status unblocks completion for both.
+    const paidOK = !(Number(j.price)>0) || j.payment_status==='paid';
+    const needsPayment = next && next.to==='completed' && !paidOK;
 
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
@@ -487,6 +493,8 @@ async function showDetail(id){
     </div>
     ${ next ? (needsPhotos
         ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📷 Add ${MIN_PHOTOS-curPhotos.length} more photo${MIN_PHOTOS-curPhotos.length===1?'':'s'} to complete</button></div>`
+        : needsPayment
+        ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">💳 Take payment to complete</button></div>`
         : `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>`)
       : (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
 
@@ -526,6 +534,21 @@ async function showDetail(id){
     const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=async()=>{ if(confirm('Charge the card on file for $'+j.price+'?')){ await paymentAction(j.id,'charge'); } };
     const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
     const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
+
+    // Multi-tech sync: while this job is open, unpaid, and not yet complete, poll
+    // so that if the OTHER tech on the job takes the payment, this screen switches
+    // to "paid" and unblocks Mark Complete on its own — no manual refresh needed.
+    if(detailPoll){ clearInterval(detailPoll); detailPoll=null; }
+    if(j.status!=='completed' && !paidOK){
+      detailPoll=setInterval(async()=>{
+        try{
+          const {job:fresh}=await api('job',{params:{id}});
+          if(fresh && (fresh.payment_status!==j.payment_status || fresh.status!==j.status)){
+            clearInterval(detailPoll); detailPoll=null; showDetail(id);
+          }
+        }catch(_){}
+      }, 12000);
+    }
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
 }
