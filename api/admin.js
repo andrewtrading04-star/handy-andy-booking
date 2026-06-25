@@ -221,6 +221,10 @@ export default async function handler(req, res) {
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
+      case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
+      case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
+      case 'bracket_update': return await bracketUpdate(req, res, db, auth, body);
+      case 'bracket_parse_email': return await bracketParseEmail(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
@@ -2886,5 +2890,269 @@ async function payroll(req, res, db, auth) {
     pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
     techs: data,
     total: data.reduce((sum, t) => sum + t.total, 0),
+  });
+}
+
+// ── Bracket Inventory ────────────────────────────────────────────────────────
+// Get current bracket inventory for all technicians in the business
+async function bracketInventory(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const { data: inv, error } = await db.from('bracket_inventory')
+    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
+             technician:technicians ( id, name )`)
+    .eq('business_id', bizId)
+    .order('technician:technicians(name)');
+  if (error) throw error;
+
+  // Ensure every active tech has an inventory row (create if missing)
+  const { data: techs } = await db.from('technicians')
+    .select('id, name').eq('business_id', bizId).eq('active', true).order('name');
+
+  const invByTech = new Map((inv || []).map(i => [i.technician_id, i]));
+  const missing = (techs || []).filter(t => !invByTech.has(t.id));
+
+  if (missing.length) {
+    const toInsert = missing.map(t => ({
+      business_id: bizId,
+      technician_id: t.id,
+      flat_qty: 0,
+      tilting_qty: 0,
+      full_motion_qty: 0,
+    }));
+    await db.from('bracket_inventory').insert(toInsert);
+  }
+
+  const final = (inv || []).concat(
+    missing.map(t => ({
+      id: null,
+      technician_id: t.id,
+      flat_qty: 0,
+      tilting_qty: 0,
+      full_motion_qty: 0,
+      updated_at: new Date().toISOString(),
+      technician: { id: t.id, name: t.name },
+    }))
+  );
+
+  return res.status(200).json({
+    inventory: final.map(i => ({
+      technician_id: i.technician_id,
+      technician_name: i.technician?.name || 'Unknown',
+      flat: i.flat_qty || 0,
+      tilting: i.tilting_qty || 0,
+      full_motion: i.full_motion_qty || 0,
+      total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
+      updated_at: i.updated_at,
+    })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
+  });
+}
+
+// Get purchase history (Walmart orders)
+async function bracketPurchases(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
+
+  const { data: purch, error } = await db.from('bracket_purchases')
+    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, estimated_delivery, created_at,
+             technician:technicians ( id, name )`)
+    .eq('business_id', bizId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  return res.status(200).json({
+    purchases: (purch || []).map(p => ({
+      id: p.id,
+      walmart_order_num: p.walmart_order_num,
+      technician_name: p.technician?.name || 'Unknown',
+      flat_qty: p.flat_qty || 0,
+      tilting_qty: p.tilting_qty || 0,
+      full_motion_qty: p.full_motion_qty || 0,
+      total_qty: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
+      status: p.status,
+      order_date: p.order_date,
+      estimated_delivery: p.estimated_delivery,
+      created_at: p.created_at,
+    })),
+  });
+}
+
+// Update bracket inventory (manual adjustment or usage logging)
+async function bracketUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const techId = (body.technician_id || '').toString();
+  const action = (body.action || 'adjust').toString(); // 'adjust' | 'usage'
+
+  if (!techId) return res.status(400).json({ error: 'technician_id required' });
+
+  // Verify tech belongs to the business
+  const { data: tech } = await db.from('technicians').select('id').eq('id', techId).eq('business_id', bizId).single();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  // Get or create inventory row
+  let { data: inv } = await db.from('bracket_inventory')
+    .select('*').eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+
+  if (!inv) {
+    await db.from('bracket_inventory').insert({
+      business_id: bizId,
+      technician_id: techId,
+      flat_qty: 0,
+      tilting_qty: 0,
+      full_motion_qty: 0,
+    });
+    inv = { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
+  }
+
+  // Calculate new quantities
+  const flat = (inv.flat_qty || 0) + (body.flat_delta || 0);
+  const tilting = (inv.tilting_qty || 0) + (body.tilting_delta || 0);
+  const fullMotion = (inv.full_motion_qty || 0) + (body.full_motion_delta || 0);
+
+  // Ensure no negative inventory
+  if (flat < 0 || tilting < 0 || fullMotion < 0) {
+    return res.status(400).json({ error: 'Insufficient inventory for this operation' });
+  }
+
+  // Update inventory
+  const { error: e1 } = await db.from('bracket_inventory').update({
+    flat_qty: flat,
+    tilting_qty: tilting,
+    full_motion_qty: fullMotion,
+  }).eq('technician_id', techId).eq('business_id', bizId);
+  if (e1) throw e1;
+
+  // Log usage if applicable
+  if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta)) {
+    await db.from('bracket_usage_logs').insert({
+      business_id: bizId,
+      booking_id: body.booking_id || null,
+      technician_id: techId,
+      flat_used: Math.abs(body.flat_delta || 0),
+      tilting_used: Math.abs(body.tilting_delta || 0),
+      full_motion_used: Math.abs(body.full_motion_delta || 0),
+      logged_by_kind: 'admin',
+      notes: body.notes || null,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    inventory: {
+      flat_qty: flat,
+      tilting_qty: tilting,
+      full_motion_qty: fullMotion,
+      total: flat + tilting + fullMotion,
+    },
+  });
+}
+
+// Parse Walmart email to create bracket purchase record
+// Called by: scheduled email watcher or manual submission
+async function bracketParseEmail(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const emailBody = (body.email_body || '').toString().trim();
+  const techName = (body.technician_name || '').toString().trim();
+  const walmartOrderNum = (body.walmart_order_num || '').toString().trim();
+  const flatQty = parseInt(body.flat_qty) || 0;
+  const tiltingQty = parseInt(body.tilting_qty) || 0;
+  const fullMotionQty = parseInt(body.full_motion_qty) || 0;
+
+  if (!techName) return res.status(400).json({ error: 'technician_name required' });
+  if (!walmartOrderNum && !emailBody) return res.status(400).json({ error: 'walmart_order_num or email_body required' });
+
+  // Find technician by name (case-insensitive, partial match)
+  const { data: techs } = await db.from('technicians')
+    .select('id, name').eq('business_id', bizId).eq('active', true);
+
+  const tech = (techs || []).find(t => t.name.toLowerCase().includes(techName.toLowerCase()));
+  if (!tech) return res.status(404).json({ error: `Technician "${techName}" not found` });
+
+  // Check if we already have this order
+  let existing = null;
+  if (walmartOrderNum) {
+    const { data: e } = await db.from('bracket_purchases')
+      .select('id, status').eq('walmart_order_num', walmartOrderNum).eq('business_id', bizId).maybeSingle();
+    existing = e;
+  }
+
+  // Extract order date from email or use today
+  let orderDate = new Date().toISOString().slice(0, 10);
+  const dateMatch = emailBody.match(/order\s+(?:number|#|date)?[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+  if (dateMatch) {
+    const parts = dateMatch[1].split(/[\/\-]/);
+    const m = parseInt(parts[0]);
+    const d = parseInt(parts[1]);
+    const y = parts[2].length === 4 ? parts[2] : `20${parts[2]}`;
+    orderDate = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  const totalQty = flatQty + tiltingQty + fullMotionQty;
+  if (totalQty <= 0) return res.status(400).json({ error: 'At least one bracket qty required' });
+
+  let result;
+  if (existing) {
+    // Update existing order
+    const { error: e } = await db.from('bracket_purchases').update({
+      flat_qty: flatQty,
+      tilting_qty: tiltingQty,
+      full_motion_qty: fullMotionQty,
+    }).eq('id', existing.id);
+    if (e) throw e;
+    result = { id: existing.id, action: 'updated' };
+  } else {
+    // Create new purchase record
+    const { data: p, error: e } = await db.from('bracket_purchases').insert({
+      business_id: bizId,
+      technician_id: tech.id,
+      walmart_order_num: walmartOrderNum || `manual-${Date.now()}`,
+      flat_qty: flatQty,
+      tilting_qty: tiltingQty,
+      full_motion_qty: fullMotionQty,
+      order_date: orderDate,
+    }).select('id').single();
+    if (e) throw e;
+    result = { id: p.id, action: 'created' };
+  }
+
+  // Update inventory
+  const { error: e2 } = await db.from('bracket_inventory').update({
+    flat_qty: db.raw('flat_qty + ?', [flatQty]),
+    tilting_qty: db.raw('tilting_qty + ?', [tiltingQty]),
+    full_motion_qty: db.raw('full_motion_qty + ?', [fullMotionQty]),
+  }).eq('technician_id', tech.id).eq('business_id', bizId);
+  if (e2) {
+    // Fallback: create inventory row if it doesn't exist
+    const { data: inv } = await db.from('bracket_inventory')
+      .select('id').eq('technician_id', tech.id).eq('business_id', bizId).maybeSingle();
+    if (!inv) {
+      await db.from('bracket_inventory').insert({
+        business_id: bizId,
+        technician_id: tech.id,
+        flat_qty: flatQty,
+        tilting_qty: tiltingQty,
+        full_motion_qty: fullMotionQty,
+      });
+    }
+  }
+
+  return res.status(200).json({
+    ok: true,
+    purchase: result,
+    inventory_updated: {
+      flat: flatQty,
+      tilting: tiltingQty,
+      full_motion: fullMotionQty,
+      total: totalQty,
+    },
   });
 }

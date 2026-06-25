@@ -240,6 +240,15 @@
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
   .pay-refunded{background:#fee2e2;color:#b91c1c;} .pay-void{background:#f1f3f6;color:var(--mute);}
   .evt-paid{font-size:10px;font-weight:800;color:#15803d;margin-left:auto;}
+  /* Bracket Inventory */
+  .bracket-table{width:100%;border-collapse:collapse;margin-bottom:20px;}
+  .bracket-table th{background:var(--line2);padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.02em;}
+  .bracket-table td{padding:12px;border-bottom:1px solid var(--line2);font-size:13px;}
+  .bracket-table tr:hover{background:var(--line2);}
+  .bracket-qty{font-weight:600;color:var(--ink);text-align:center;}
+  .bracket-qty.low{color:#dc2626;}
+  .bracket-section{margin-bottom:28px;}
+  .bracket-section h3{font-size:16px;font-weight:700;color:var(--ink);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line);}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.25);z-index:80;}
 
   /* modals */
@@ -529,6 +538,7 @@
     <nav class="side-nav" id="sideNav">
       <button data-nav="schedule" class="on"><span class="ic" data-ico="schedule">📅</span> Schedule</button>
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
+      <button data-nav="brackets"><span class="ic" data-ico="brackets">📺</span> Bracket Inventory</button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
@@ -1047,12 +1057,13 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',webanalytics:'Website Analytics'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',webanalytics:'Website Analytics'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
     if(s==='estimates') renderEstimates();
+    else if(s==='brackets') renderBrackets();
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
@@ -1066,6 +1077,7 @@ function refreshCurrent(){
   document.getElementById('jobSearchWrap').style.display = section==='schedule'?'flex':'none';
   if(section==='schedule'){ renderSchedule(); renderGreeting(); }
   else if(section==='estimates') renderEstimates();
+  else if(section==='brackets') renderBrackets();
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
   else if(section==='reviews') renderReviews();
@@ -2701,6 +2713,84 @@ async function refreshEstimateBadge(){
     if(badge){ badge.textContent=n; badge.style.display=n?'inline-block':'none'; }
     return n;
   }catch{ return 0; }
+}
+
+// ── Bracket Inventory ──────────────────────────────────────────────────────────
+async function renderBrackets(){
+  const view=document.getElementById('view');
+  if(!current) return;
+  try{
+    const [inv, purch]=await Promise.all([
+      api('bracket_inventory',{ params:{ business:current.slug }}),
+      api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}),
+    ]);
+
+    let html=`<div class="wrap">
+      <div class="bracket-section">
+        <h3>Current Inventory by Technician</h3>
+        <table class="bracket-table">
+          <thead>
+            <tr>
+              <th>Technician</th>
+              <th>Flat</th>
+              <th>Tilting</th>
+              <th>Full Motion</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+    for(const tech of inv.inventory||[]){
+      const total=tech.flat+tech.tilting+tech.full_motion;
+      const lowClass=total<3?'low':'';
+      html+=`<tr>
+        <td>${esc(tech.technician_name)}</td>
+        <td class="bracket-qty"><span class="${lowClass}">${tech.flat}</span></td>
+        <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
+        <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
+        <td class="bracket-qty"><strong class="${lowClass}">${total}</strong></td>
+      </tr>`;
+    }
+    html+=`</tbody></table></div>`;
+
+    html+=`<div class="bracket-section">
+      <h3>Recent Purchases (Walmart Orders)</h3>
+      <table class="bracket-table">
+        <thead>
+          <tr>
+            <th>Technician</th>
+            <th>Order #</th>
+            <th>Flat</th>
+            <th>Tilting</th>
+            <th>Full Motion</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Order Date</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    for(const p of purch.purchases||[]){
+      const total=p.flat_qty+p.tilting_qty+p.full_motion_qty;
+      const statusClass=p.status==='canceled'?'low':'';
+      html+=`<tr>
+        <td>${esc(p.technician_name)}</td>
+        <td>${p.walmart_order_num?esc(p.walmart_order_num):'-'}</td>
+        <td class="bracket-qty">${p.flat_qty}</td>
+        <td class="bracket-qty">${p.tilting_qty}</td>
+        <td class="bracket-qty">${p.full_motion_qty}</td>
+        <td class="bracket-qty"><strong>${total}</strong></td>
+        <td><span class="pay pay-${p.status}" style="color:inherit;">${p.status}</span></td>
+        <td>${p.order_date||'-'}</td>
+      </tr>`;
+    }
+    html+=`</tbody></table></div>`;
+    html+=`</div>`;
+    view.innerHTML=html;
+  }catch(e){
+    console.error('renderBrackets failed',e);
+    document.getElementById('view').innerHTML=`<div class="wrap"><div class="section card"><h2>Error loading bracket inventory</h2><p>${esc(e.message)}</p></div></div>`;
+  }
 }
 
 // ── Schedule greeting ("Jarvis" intro) ──────────────────────────────────────
