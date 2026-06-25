@@ -2736,7 +2736,7 @@ async function renderBrackets(){
               <th>Tilting</th>
               <th>Full Motion</th>
               <th>Total</th>
-              <th>Action</th>
+              ${role==='owner'?'<th>Action</th>':''}
             </tr>
           </thead>
           <tbody>`;
@@ -2750,7 +2750,7 @@ async function renderBrackets(){
         <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
         <td class="bracket-qty"><strong class="${lowClass}">${total}</strong></td>
-        <td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}')">Edit</button></td>
+        ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}')">Edit</button></td>`:''}
       </tr>`;
     }
     html+=`</tbody></table></div>`;

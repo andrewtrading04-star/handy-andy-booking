@@ -2980,8 +2980,10 @@ async function bracketPurchases(req, res, db, auth) {
 }
 
 // Update bracket inventory (manual adjustment or usage logging)
+// Owner-only: secretaries (Heather/Joey) get read-only access to inventory.
 async function bracketUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can edit bracket inventory.' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const bizId = biz.id;
 
@@ -3056,6 +3058,7 @@ async function bracketUpdate(req, res, db, auth, body) {
 // Called by: scheduled email watcher or manual submission
 async function bracketParseEmail(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can record bracket orders.' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const bizId = biz.id;
 
