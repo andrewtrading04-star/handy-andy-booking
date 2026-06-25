@@ -2902,8 +2902,7 @@ async function bracketInventory(req, res, db, auth) {
   const { data: inv, error } = await db.from('bracket_inventory')
     .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
              technician:technicians ( id, name )`)
-    .eq('business_id', bizId)
-    .order('technician:technicians(name)');
+    .eq('business_id', bizId);
   if (error) throw error;
 
   // Ensure every active tech has an inventory row (create if missing)
