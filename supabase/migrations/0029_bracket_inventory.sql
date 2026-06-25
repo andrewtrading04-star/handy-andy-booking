@@ -25,9 +25,9 @@ create table if not exists bracket_purchases (
   flat_qty          integer not null default 0,            -- flat brackets
   tilting_qty       integer not null default 0,            -- tilting brackets
   full_motion_qty   integer not null default 0,            -- full motion brackets
-  status            text not null default 'confirmed',     -- confirmed | canceled
+  status            text not null default 'ordered',       -- ordered | delivered | canceled
   order_date        date,
-  estimated_delivery date,
+  delivered_date    date,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );

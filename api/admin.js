@@ -2955,7 +2955,7 @@ async function bracketPurchases(req, res, db, auth) {
   const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
 
   const { data: purch, error } = await db.from('bracket_purchases')
-    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, estimated_delivery, created_at,
+    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, created_at,
              technician:technicians ( id, name )`)
     .eq('business_id', bizId)
     .order('created_at', { ascending: false })
@@ -2973,7 +2973,7 @@ async function bracketPurchases(req, res, db, auth) {
       total_qty: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
       status: p.status,
       order_date: p.order_date,
-      estimated_delivery: p.estimated_delivery,
+      delivered_date: p.delivered_date,
       created_at: p.created_at,
     })),
   });
@@ -3123,25 +3123,25 @@ async function bracketParseEmail(req, res, db, auth, body) {
     result = { id: p.id, action: 'created' };
   }
 
-  // Update inventory
-  const { error: e2 } = await db.from('bracket_inventory').update({
-    flat_qty: db.raw('flat_qty + ?', [flatQty]),
-    tilting_qty: db.raw('tilting_qty + ?', [tiltingQty]),
-    full_motion_qty: db.raw('full_motion_qty + ?', [fullMotionQty]),
-  }).eq('technician_id', tech.id).eq('business_id', bizId);
-  if (e2) {
-    // Fallback: create inventory row if it doesn't exist
-    const { data: inv } = await db.from('bracket_inventory')
-      .select('id').eq('technician_id', tech.id).eq('business_id', bizId).maybeSingle();
-    if (!inv) {
-      await db.from('bracket_inventory').insert({
-        business_id: bizId,
-        technician_id: tech.id,
-        flat_qty: flatQty,
-        tilting_qty: tiltingQty,
-        full_motion_qty: fullMotionQty,
-      });
-    }
+  // Update inventory: read current, add purchased qty, write back. (Supabase JS
+  // has no atomic increment, so we read-then-write.)
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('technician_id', tech.id).eq('business_id', bizId).maybeSingle();
+  if (inv) {
+    await db.from('bracket_inventory').update({
+      flat_qty: (inv.flat_qty || 0) + flatQty,
+      tilting_qty: (inv.tilting_qty || 0) + tiltingQty,
+      full_motion_qty: (inv.full_motion_qty || 0) + fullMotionQty,
+    }).eq('id', inv.id);
+  } else {
+    await db.from('bracket_inventory').insert({
+      business_id: bizId,
+      technician_id: tech.id,
+      flat_qty: flatQty,
+      tilting_qty: tiltingQty,
+      full_motion_qty: fullMotionQty,
+    });
   }
 
   return res.status(200).json({
