@@ -2802,7 +2802,11 @@ async function payroll(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
 
   const weekStart = (req.query.week_start || '').toString();
-  const parsedWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC(biz.timezone || 'America/Denver').toISOString().split('T')[0];
+  // Always run on a whole Sun–Sat week: take the requested date (or today) and
+  // snap it back to that week's Sunday, so a stray weekday can't yield a partial
+  // period. addDaysStr(date, -dayOfWeekFor(date)) lands on the preceding Sunday.
+  const rawWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC(biz.timezone || 'America/Denver').toISOString().split('T')[0];
+  const parsedWeek = addDaysStr(rawWeek, -dayOfWeekFor(rawWeek));
   const weekEnd = addDaysStr(parsedWeek, 6);
 
   // All active technicians for this business

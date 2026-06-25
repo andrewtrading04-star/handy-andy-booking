@@ -2303,18 +2303,25 @@ async function renderPayroll(){
           <div class="ana-sub" id="payUpdated">Loading…</div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="arrow" id="payPrev">‹</button>
-          <input type="date" id="payWeekInput" value="${payrollWeek}" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
-          <button class="arrow" id="payNext">›</button>
+          <span style="font-size:13px; font-weight:700; color:var(--mute);">Week of</span>
+          <button class="arrow" id="payPrev" title="Previous week">‹</button>
+          <input type="date" id="payWeekInput" value="${payrollWeek}" title="Pick any day — it snaps to that week (Sun–Sat)" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
+          <button class="arrow" id="payNext" title="Next week">›</button>
           <button class="btn ghost" id="payRefresh" style="width:auto;">Refresh</button>
         </div>
       </div>
       <div id="payContent" class="payrep loading">Loading payroll data…</div>
     </div>`;
 
-  document.getElementById('payWeekInput').addEventListener('change', e=>{ payrollWeek=e.target.value; loadPayroll(); });
-  document.getElementById('payPrev').addEventListener('click', ()=>{ const d=new Date(payrollWeek+'T00:00:00Z'); d.setDate(d.getDate()-7); payrollWeek=d.toISOString().split('T')[0]; document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
-  document.getElementById('payNext').addEventListener('click', ()=>{ const d=new Date(payrollWeek+'T00:00:00Z'); d.setDate(d.getDate()+7); payrollWeek=d.toISOString().split('T')[0]; document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
+  // The picker is week-based: whatever day is chosen snaps back to that week's
+  // Sunday, so payroll is always run on a whole Sun–Sat week — never a single day.
+  document.getElementById('payWeekInput').addEventListener('change', e=>{
+    payrollWeek = e.target.value ? sundayOf(e.target.value) : sundayOf(todayStr());
+    document.getElementById('payWeekInput').value = payrollWeek;
+    loadPayroll();
+  });
+  document.getElementById('payPrev').addEventListener('click', ()=>{ payrollWeek=addDays(payrollWeek,-7); document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
+  document.getElementById('payNext').addEventListener('click', ()=>{ payrollWeek=addDays(payrollWeek,7); document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
   document.getElementById('payRefresh').addEventListener('click', loadPayroll);
 
   await loadPayroll();
