@@ -181,6 +181,7 @@
   body.doms .job.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;}
   .job .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
   .job .name{font-weight:700;font-size:15px;}
+  .rating-badge{display:inline-block;font-size:13px;font-weight:600;color:var(--orange);margin-left:8px;white-space:nowrap;}
   .job .meta{color:var(--mute);font-size:13px;margin-top:4px;line-height:1.6;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
   .job .time{font-weight:700;font-size:13px;text-align:right;white-space:nowrap;color:var(--ink-2);}
   .job.evt-row{cursor:pointer;}
@@ -2425,7 +2426,7 @@ async function renderTechnicians(){
     document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
-          <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}</div>
+          <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}${t.average_rating ? ` <span class="rating-badge">⭐ ${t.average_rating}</span>` : ''}</div>
             <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div></div>
           <select class="assign tstatus"><option value="available" ${t.status==='available'?'selected':''}>available</option>
             <option value="on_job" ${t.status==='on_job'?'selected':''}>on job</option>

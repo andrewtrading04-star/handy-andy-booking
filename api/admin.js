@@ -1880,6 +1880,23 @@ async function technicians(req, res, db, auth) {
   if (error) throw error;
   // Never leak the hash; just say whether a PIN is set.
   const techs = (data || []).map(({ pin_hash, ...t }) => ({ ...t, pin_set: !!pin_hash }));
+
+  // Fetch average rating for each technician from bookings
+  for (const tech of techs) {
+    const { data: ratings, error: ratingsError } = await db
+      .from('bookings')
+      .select('review_rating')
+      .eq('technician_id', tech.id)
+      .not('review_rating', 'is', null);
+
+    if (!ratingsError && ratings && ratings.length > 0) {
+      const avgRating = ratings.reduce((sum, r) => sum + r.review_rating, 0) / ratings.length;
+      tech.average_rating = Math.round(avgRating * 10) / 10; // Round to 1 decimal place
+    } else {
+      tech.average_rating = null;
+    }
+  }
+
   return res.status(200).json({ technicians: techs });
 }
 
