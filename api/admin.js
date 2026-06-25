@@ -2865,6 +2865,7 @@ async function payroll(req, res, db, auth) {
         customer_name: b.customers?.name || 'Unknown',
         service: b.services?.name || 'Service',
         time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        scheduled_at: b.scheduled_at,
       };
 
       if (result.state === 'deferred') {

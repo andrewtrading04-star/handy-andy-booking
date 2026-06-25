@@ -2364,6 +2364,65 @@ function renderPayrollData(d){
     <div class="pr-kpi"><div class="v ink">${payDateLbl}</div><div class="l">Pay Date<br>(Saturday + 9 days)</div></div>
   </div>`;
 
+  // ── Daily Breakdown ──────────────────────────────────────────────────────
+  html+=`<div class="pr-sec">Daily Breakdown</div>`;
+  html+=`<div class="pr-note">Jobs by day for each technician this week.</div>`;
+
+  // Organize jobs by date
+  const daysOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const weekStart = new Date(d.week_start+'T00:00:00Z');
+  const jobsByDate = {};
+
+  // Initialize dates for the week
+  for(let i=0;i<7;i++){
+    const date = new Date(weekStart);
+    date.setDate(date.getDate() + i);
+    const dateStr = date.toISOString().split('T')[0];
+    jobsByDate[dateStr] = [];
+  }
+
+  // Populate jobs by date
+  for(const t of techs){
+    for(const job of (t.jobs||[])){
+      if(job.scheduled_at){
+        const jobDate = job.scheduled_at.split('T')[0];
+        if(jobsByDate[jobDate]){
+          jobsByDate[jobDate].push({ tech_name: t.name, ...job });
+        }
+      }
+    }
+  }
+
+  // Display by day
+  for(let i=0;i<7;i++){
+    const date = new Date(weekStart);
+    date.setDate(date.getDate() + i);
+    const dateStr = date.toISOString().split('T')[0];
+    const dayName = daysOfWeek[date.getUTCDay()];
+    const dayLabel = payFmtDateUTC(dateStr, {month:'short',day:'numeric'});
+    const dayJobs = jobsByDate[dateStr] || [];
+
+    html+=`<div style="margin:16px 0; padding:12px; background:var(--line2); border-radius:8px;">
+      <strong>${dayName}, ${dayLabel}</strong>
+      <table class="pr-tbl" style="margin-top:8px;"><thead><tr>
+        <th>Technician</th><th>Time</th><th>Customer</th><th class="r">Pay</th>
+      </tr></thead><tbody>`;
+
+    if(dayJobs.length === 0){
+      html+=`<tr><td colspan="4" style="text-align:center; color:var(--mute); padding:8px;">No jobs this day</td></tr>`;
+    } else {
+      dayJobs.forEach((job, idx) => {
+        html+=`<tr class="${idx%2?'z':''}">
+          <td style="font-weight:600;">${esc(job.tech_name)}</td>
+          <td style="color:var(--mute);">${esc(job.time)}</td>
+          <td>${esc(job.customer_name)}</td>
+          <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span></td>
+        </tr>`;
+      });
+    }
+    html+=`</tbody></table></div>`;
+  }
+
   // ── Per-Person Detail ────────────────────────────────────────────────────
   html+=`<div class="pr-sec">Payroll — Per-Person Detail</div>`;
   html+=`<div class="pr-note">Each technician's job count and total pay for the week. Deferred jobs are completed but not yet paid.</div>`;
