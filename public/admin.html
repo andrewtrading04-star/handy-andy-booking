@@ -2,31 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<script>
-/* TEMP DIAGNOSTIC (remove after) — ES5-only so it parses on ANY engine. Surfaces
-   any script error (including a PARSE error in the main inline script) on-screen
-   so a phone with no devtools can report why login breaks. */
-(function(){
-  function box(){
-    var d=document.getElementById('__diag__');
-    if(!d){
-      d=document.createElement('div'); d.id='__diag__';
-      d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2147483647;background:#b00020;color:#fff;font:12px/1.45 monospace;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto';
-      (document.body||document.documentElement).appendChild(d);
-    }
-    return d;
-  }
-  window.addEventListener('error',function(e){
-    var m='JS ERROR: '+(e.message||(e.error&&e.error.message)||e.type);
-    if(e.filename){ m+=' @ '+String(e.filename).split('/').pop(); }
-    if(e.lineno){ m+=' :'+e.lineno+':'+e.colno; }
-    box().textContent+=m+'\n';
-  },true);
-  window.addEventListener('unhandledrejection',function(e){
-    box().textContent+='PROMISE: '+((e.reason&&(e.reason.message||e.reason))||'?')+'\n';
-  });
-})();
-</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
 <title>Schedule — Admin</title>
@@ -512,7 +487,6 @@
     </div>
     <button class="btn" type="submit">Sign in</button>
     <div class="err" id="loginErr"></div>
-    <div style="margin-top:10px;font:11px/1.3 monospace;color:#888;text-align:center">build 3fcfc3a · <span id="__jsran__" style="color:#b00020">JS did not run</span></div>
   </form>
 </div>
 
@@ -3950,8 +3924,6 @@ brandLogin();
 
 if(token && businesses.length) enterApp();
 else tryAutoLogin();
-/* TEMP DIAGNOSTIC marker — only runs if the whole script parsed & executed. */
-try{ var __r=document.getElementById('__jsran__'); if(__r){ __r.textContent='JS ran ✓'; __r.style.color='#0a7d33'; } }catch(e){}
 </script>
 </body>
 </html>
