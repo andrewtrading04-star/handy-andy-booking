@@ -161,6 +161,7 @@ export default async function handler(req, res) {
   try {
     if (action === 'login') return await login(req, res, body);
     if (action === 'review') return await review(req, res, body);
+    if (action === 'session_status') return await sessionStatus(req, res);
 
     // Everything below requires a valid admin token.
     const auth = verifyToken(getBearer(req));
@@ -264,6 +265,28 @@ async function login(req, res, body) {
     sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
   };
   return res.status(200).json({ token, role, scope, name, config, businesses: businesses || [] });
+}
+
+// Validate the current session token and return user data. Called by tryAutoLogin()
+// to restore a session without requiring a new password entry. If the token is
+// invalid or expired, returns 401 and the frontend shows the login screen.
+async function sessionStatus(req, res) {
+  const auth = verifyToken(getBearer(req));
+  if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
+
+  const db = serviceClient();
+  let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
+  if (auth.scope !== 'all') q = q.eq('slug', auth.scope);
+  const { data: businesses, error } = await q;
+  if (error) throw error;
+
+  const config = {
+    email: !!process.env.RESEND_API_KEY,
+    sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+  };
+  return res.status(200).json({
+    token: getBearer(req), role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
+  });
 }
 
 // Resolve the requested business and enforce the token's scope.
