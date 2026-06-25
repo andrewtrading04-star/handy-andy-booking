@@ -562,7 +562,10 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 // ── Estimate / quote email ──────────────────────────────────────────────────
 // Sent from the admin Estimates tab when the office emails a customer their
 // quote. Mirrors the house style (accent header, tinted body, content card,
-// website footer). `details`: { firstName, serviceLabel, description }.
+// website footer).
+// `details`: { firstName, serviceLabel, description, lineItems }
+//   lineItems: [{ description, qty, unit_price }] — when present, renders a
+//   priced quote table + total; otherwise falls back to the request description.
 export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const b = brand || EMAIL_BRANDS['handy-andy'];
   const accent = b.accent;
@@ -571,15 +574,52 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
   const firstName = (details.firstName || '').trim();
   const serviceLabel = (details.serviceLabel || '').trim();
   const description = (details.description || '').trim();
+  const money = n => '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+
+  // Keep only line items that have a description or a price.
+  const lineItems = (Array.isArray(details.lineItems) ? details.lineItems : [])
+    .map(it => ({
+      description: String((it && it.description) || '').trim(),
+      qty: Number(it && it.qty) || 0,
+      unit_price: Number(it && it.unit_price) || 0,
+    }))
+    .filter(it => it.description || it.unit_price > 0);
+  const hasLineItems = lineItems.length > 0;
+  const total = lineItems.reduce((t, it) => t + it.qty * it.unit_price, 0);
 
   const subject = `Your ${b.name} Estimate`;
 
   const serviceRow = serviceLabel
     ? `<div style="font-size:15px;font-weight:800;color:#11181c;margin:0 0 8px;">${esc(serviceLabel)}</div>`
     : '';
-  const bodyRow = description
-    ? `<div style="font-size:14px;color:#3a4453;line-height:1.6;white-space:pre-wrap;">${esc(description)}</div>`
-    : `<div style="font-size:14px;color:#5b6470;line-height:1.6;">Details of your estimate request.</div>`;
+
+  // Priced quote table when line items exist; plain description otherwise.
+  let bodyRow;
+  if (hasLineItems) {
+    const rows = lineItems.map(it => {
+      const qtyTxt = it.qty && it.qty !== 1 ? `<span style="color:#8a909c;font-weight:600;">×${it.qty}</span> ` : '';
+      const lineTotal = it.qty * it.unit_price;
+      return `<tr>
+        <td style="padding:10px 0;border-bottom:1px solid #eef0f2;font-size:14px;color:#3a4453;">${qtyTxt}${esc(it.description || 'Item')}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #eef0f2;font-size:14px;color:#11181c;font-weight:700;text-align:right;white-space:nowrap;">${money(lineTotal)}</td>
+      </tr>`;
+    }).join('');
+    const descNote = description
+      ? `<div style="font-size:13px;color:#5b6470;line-height:1.6;margin:0 0 14px;white-space:pre-wrap;">${esc(description)}</div>`
+      : '';
+    bodyRow = `${descNote}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        ${rows}
+        <tr>
+          <td style="padding:14px 0 0;font-size:15px;font-weight:800;color:#11181c;">Estimated total</td>
+          <td style="padding:14px 0 0;font-size:18px;font-weight:800;color:${accent};text-align:right;white-space:nowrap;">${money(total)}</td>
+        </tr>
+      </table>
+      <div style="font-size:12px;color:#9ca3af;line-height:1.6;margin-top:12px;">This is an estimate, not a final invoice. Final pricing may vary based on on-site conditions.</div>`;
+  } else {
+    bodyRow = description
+      ? `<div style="font-size:14px;color:#3a4453;line-height:1.6;white-space:pre-wrap;">${esc(description)}</div>`
+      : `<div style="font-size:14px;color:#5b6470;line-height:1.6;">Details of your estimate request.</div>`;
+  }
 
   const html = `<!doctype html>
 <html>

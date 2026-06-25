@@ -213,6 +213,23 @@
   .est-thumb{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;}
   .est-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);align-items:center;}
   .est-status-sel{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 9px;font-size:13px;font-weight:600;}
+  /* Estimate line-item editor */
+  .est-quote{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
+  .est-quote-line{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--ink-2);padding:2px 0;}
+  .est-quote-line b{color:var(--ink);}
+  .est-quote-total{display:flex;justify-content:space-between;gap:10px;font-size:14px;font-weight:800;color:var(--ink);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2);}
+  .est-quote-total .amt{color:var(--accent);}
+  .fld{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin:0 0 6px;text-transform:uppercase;letter-spacing:.03em;}
+  .es-lines{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
+  .es-line{display:grid;grid-template-columns:1fr 56px 84px 30px;gap:6px;align-items:center;}
+  .es-line .search{margin:0;}
+  .es-line .es-li-qty,.es-line .es-li-price{text-align:right;}
+  .es-li-rm{background:none;border:none;color:var(--mute);font-size:16px;cursor:pointer;padding:4px;line-height:1;}
+  .es-li-rm:hover{color:#dc2626;}
+  .es-lines-head{display:grid;grid-template-columns:1fr 56px 84px 30px;gap:6px;font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  .es-lines-head span:nth-child(2),.es-lines-head span:nth-child(3){text-align:right;}
+  .es-total-row{display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:800;color:var(--ink);margin:12px 0 4px;padding:10px 12px;background:var(--accent-soft);border-radius:10px;}
+  .es-total-row .amt{color:var(--accent);}
   .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
@@ -693,6 +710,31 @@
       </div>
       <div class="err" id="cuErr"></div>
     </form>
+  </div>
+</div>
+
+<!-- Estimate / quote-builder modal -->
+<div id="estModal" class="modal hidden">
+  <div class="sheet">
+    <h2>Build Estimate</h2>
+    <div class="sub" id="esCustLine" style="font-size:13px;color:var(--mute);margin:-8px 0 16px;"></div>
+    <input type="hidden" id="esId">
+    <label class="fld">Service / Title</label>
+    <input class="search" id="esService" placeholder="e.g. Drywall Repair">
+    <label class="fld">Description <span style="text-transform:none;font-weight:500;color:var(--mute);">(shown to customer, optional)</span></label>
+    <textarea class="search" id="esDesc" placeholder="A short summary of the work" style="min-height:60px;resize:vertical;"></textarea>
+    <label class="fld">Line Items</label>
+    <div class="es-lines-head"><span>Description</span><span>Qty</span><span>Price</span><span></span></div>
+    <div class="es-lines" id="esLines"></div>
+    <button class="btn ghost sm" type="button" id="esAddLine">+ Add line item</button>
+    <div class="es-total-row"><span>Estimated total</span><span class="amt" id="esTotal">$0.00</span></div>
+    <label class="fld" style="margin-top:14px;">Internal Notes <span style="text-transform:none;font-weight:500;color:var(--mute);">(office only, not sent)</span></label>
+    <textarea class="search" id="esNotes" placeholder="Private notes" style="min-height:48px;resize:vertical;"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn" type="button" id="esSave">Save quote</button>
+      <button class="btn ghost" type="button" id="esCancel">Cancel</button>
+    </div>
+    <div class="err" id="esErr"></div>
   </div>
 </div>
 
@@ -2437,7 +2479,11 @@ const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:
 // Status colors: Needs Response = red, Estimate sent = black, Estimate approved = blue.
 const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
 let estFilter = 'all';
+let estCache = {};   // id -> estimate row, so the quote modal can open without a refetch
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
+// Sum of qty × unit price across line items, rounded to cents.
+function estLineTotal(items){ return Math.round((Array.isArray(items)?items:[]).reduce((t,it)=>t+(Number(it.qty)||0)*(Number(it.unit_price)||0),0)*100)/100; }
+function money2(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2); }
 
 async function renderEstimates(){
   const view=document.getElementById('view');
@@ -2452,6 +2498,7 @@ async function renderEstimates(){
     const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
     const items=d.estimates||[];
     refreshEstimateBadge();
+    estCache={}; items.forEach(it=>{ estCache[it.id]=it; });
     if(!items.length){ document.getElementById('estWrap').innerHTML='<div class="empty">No estimate requests yet.</div>'; return; }
     document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
     // wire controls
@@ -2459,6 +2506,7 @@ async function renderEstimates(){
       sel.style.color = EST_COLOR[e.target.value] || '#16181d';
       setEstimate(sel.dataset.estStatus,{ status:e.target.value });
     }));
+    document.querySelectorAll('#estWrap [data-est-edit]').forEach(b=>b.addEventListener('click',()=>openEstimateEdit(b.dataset.estEdit)));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
       sendEstimateMessage(b.dataset.estSms,'sms',b);
     }));
@@ -2483,6 +2531,14 @@ function estCard(e){
   const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
   const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  // Priced quote summary (line items). Shown when the office has built a quote.
+  const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)):[];
+  const quote=lines.length?`<div class="est-quote">${lines.map(it=>{
+    const qty=Number(it.qty)||0; const lt=qty*(Number(it.unit_price)||0);
+    return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(it.description||'Item')}</span><b>${money2(lt)}</b></div>`;
+  }).join('')}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(estLineTotal(lines))}</span></div></div>`:'';
+  const hasQuote=lines.length>0;
+  const buildLabel=hasQuote?'Edit quote':'Build quote';
   return `<div class="job est-card" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
@@ -2490,13 +2546,15 @@ function estCard(e){
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
         <div class="est-desc">${esc(e.description||'')}</div>
         ${slotChips}
+        ${quote}
       </div>
       ${photo}
     </div>
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
-      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
+        <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
         ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
@@ -2504,6 +2562,81 @@ function estCard(e){
     </div>
   </div>`;
 }
+
+// ── Estimate quote builder (line items) ──────────────────────────────────────
+function esLineRow(it){
+  it=it||{};
+  const d=esc(it.description||'');
+  const q=(it.qty!=null&&it.qty!=='')?esc(String(it.qty)):'1';
+  const p=(it.unit_price!=null&&it.unit_price!=='')?esc(String(it.unit_price)):'';
+  return `<div class="es-line" data-line>
+    <input class="search es-li-desc" placeholder="Description" value="${d}">
+    <input class="search es-li-qty" type="number" inputmode="decimal" min="0" step="0.5" value="${q}">
+    <input class="search es-li-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" value="${p}">
+    <button class="es-li-rm" type="button" title="Remove">✕</button>
+  </div>`;
+}
+function esReadLines(){
+  return [...document.querySelectorAll('#esLines [data-line]')].map(row=>({
+    description: row.querySelector('.es-li-desc').value.trim(),
+    qty: parseFloat(row.querySelector('.es-li-qty').value)||0,
+    unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
+  })).filter(it=>it.description||it.unit_price>0);
+}
+function esRecalcTotal(){
+  const rows=[...document.querySelectorAll('#esLines [data-line]')].map(row=>({
+    qty: parseFloat(row.querySelector('.es-li-qty').value)||0,
+    unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
+  }));
+  document.getElementById('esTotal').textContent=money2(estLineTotal(rows));
+}
+function esWireLineRow(row){
+  row.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',esRecalcTotal));
+  row.querySelector('.es-li-rm').addEventListener('click',()=>{ row.remove(); esRecalcTotal(); });
+}
+function esAddLineRow(it){
+  const wrap=document.getElementById('esLines');
+  wrap.insertAdjacentHTML('beforeend',esLineRow(it));
+  esWireLineRow(wrap.lastElementChild);
+}
+function openEstimateEdit(id){
+  const e=estCache[id]; if(!e) return;
+  document.getElementById('esId').value=e.id;
+  document.getElementById('esCustLine').textContent=`${e.customer_name||'—'}${e.customer_email?' · '+e.customer_email:''}${e.customer_phone?' · '+e.customer_phone:''}`;
+  document.getElementById('esService').value=e.service_label||'';
+  document.getElementById('esDesc').value=e.description||'';
+  document.getElementById('esNotes').value=e.notes||'';
+  document.getElementById('esErr').textContent='';
+  const wrap=document.getElementById('esLines'); wrap.innerHTML='';
+  const lines=Array.isArray(e.line_items)?e.line_items:[];
+  if(lines.length) lines.forEach(it=>esAddLineRow(it));
+  else esAddLineRow({ qty:1 });
+  esRecalcTotal();
+  document.getElementById('estModal').classList.remove('hidden');
+}
+function closeEstimateEdit(){ document.getElementById('estModal').classList.add('hidden'); }
+document.getElementById('esAddLine').addEventListener('click',()=>esAddLineRow({ qty:1 }));
+document.getElementById('esCancel').addEventListener('click',closeEstimateEdit);
+document.getElementById('estModal').addEventListener('click',e=>{ if(e.target.id==='estModal') closeEstimateEdit(); });
+document.getElementById('esSave').addEventListener('click',async()=>{
+  const id=document.getElementById('esId').value;
+  const btn=document.getElementById('esSave'); const prev=btn.textContent;
+  const err=document.getElementById('esErr'); err.textContent='';
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    await api('estimate_update',{ method:'POST', body:{
+      business: current.slug, id,
+      service_label: document.getElementById('esService').value.trim(),
+      description: document.getElementById('esDesc').value.trim(),
+      notes: document.getElementById('esNotes').value.trim(),
+      line_items: esReadLines(),
+    }});
+    toast('Quote saved ✓');
+    closeEstimateEdit();
+    renderEstimates();
+  }catch(e2){ err.textContent=e2.message; }
+  finally{ btn.disabled=false; btn.textContent=prev; }
+});
 
 async function setEstimate(id, payload){
   try{ await api('estimate_update',{ method:'POST', body:{ business:current.slug, id, ...payload }}); toast('Saved'); renderEstimates(); }

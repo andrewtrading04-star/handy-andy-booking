@@ -2414,7 +2414,7 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, created_at';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, created_at';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -2458,11 +2458,77 @@ async function estimateUpdate(req, res, db, auth, body) {
     patch.status = body.status;
   }
   if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
+  if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
+  if (typeof body.description === 'string') patch.description = body.description.trim();
+  if (Array.isArray(body.line_items)) patch.line_items = sanitizeLineItems(body.line_items);
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
 
-  const { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  // line_items is a not-yet-applied migration on some databases. If it's the only
+  // change and the column is missing, surface a clear message instead of a 500.
+  let { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  if (error && missingColumn(error.message) === 'line_items') {
+    return res.status(503).json({ error: 'The line-items feature needs a quick database update (migration 0028) before it can save. Please apply it and try again.' });
+  }
   if (error) throw error;
   return res.status(200).json({ ok: true });
+}
+
+// Normalize quote line items to the stored shape: { description, qty, unit_price }.
+// Drops blank rows, clamps to sane numbers, caps the list so a bad client can't
+// bloat a row. qty/unit_price are coerced to non-negative numbers.
+function sanitizeLineItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .slice(0, 50)
+    .map(it => {
+      const description = String((it && it.description) || '').trim().slice(0, 300);
+      let qty = Number(it && it.qty);
+      let unit_price = Number(it && it.unit_price);
+      if (!Number.isFinite(qty) || qty < 0) qty = 0;
+      if (!Number.isFinite(unit_price) || unit_price < 0) unit_price = 0;
+      // round qty to 2 decimals (allows "1.5 hrs"), price to cents
+      qty = Math.round(qty * 100) / 100;
+      unit_price = Math.round(unit_price * 100) / 100;
+      return { description, qty, unit_price };
+    })
+    .filter(it => it.description || it.unit_price > 0);
+}
+
+// Fetch one estimate by id, tolerating the line_items column being absent
+// (migration 0028 not applied). Returns { ...row, line_items: [] } either way.
+async function fetchEstimate(db, id, businessId, baseCols) {
+  const withLI = `${baseCols}, line_items`;
+  let { data, error } = await db.from('estimates').select(withLI).eq('id', id).eq('business_id', businessId).maybeSingle();
+  if (error && missingColumn(error.message) === 'line_items') {
+    ({ data, error } = await db.from('estimates').select(baseCols).eq('id', id).eq('business_id', businessId).maybeSingle());
+  }
+  if (error) throw error;
+  if (data && !Array.isArray(data.line_items)) data.line_items = [];
+  return data;
+}
+
+// Insert an estimate, tolerating a column the local schema doesn't have yet
+// (e.g. line_items before migration 0028 is applied) by dropping it and retrying.
+async function insertEstimateResilient(db, row) {
+  const payload = { ...row };
+  for (let i = 0; i < 6; i++) {
+    const { data, error } = await db.from('estimates').insert(payload).select('id').maybeSingle();
+    if (!error) return { data, error: null };
+    const col = missingColumn(error.message);
+    if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
+      console.warn(`[estimate_create] '${col}' column missing, retrying without it`);
+      delete payload[col];
+      continue;
+    }
+    return { data: null, error };
+  }
+  return { data: null, error: new Error('insert estimate failed after stripping unknown columns') };
+}
+
+// Sum of qty * unit_price across line items, rounded to cents.
+function lineItemsTotal(items) {
+  const sum = (Array.isArray(items) ? items : [])
+    .reduce((t, it) => t + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0);
+  return Math.round(sum * 100) / 100;
 }
 
 // Best-effort "mark contacted" after a quote goes out. Never throws — a failed
@@ -2485,8 +2551,11 @@ async function estimateCreate(req, res, db, auth, body) {
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
   if (!customer_name || !customer_email) return res.status(400).json({ error: 'Customer name and email required' });
 
-  // Build a description from the selections (services + options)
+  // Build a description from the selections (services + options) and a parallel
+  // set of priced line items, so the estimate carries a real quote the office
+  // can later refine on the Estimates tab.
   let description = '';
+  let line_items = [];
   if (selections && Array.isArray(selections)) {
     const items = selections
       .map(s => {
@@ -2494,21 +2563,29 @@ async function estimateCreate(req, res, db, auth, body) {
         return `${qty}${s.label}${s.price ? ` — $${s.price.toFixed(2)}` : ''}`;
       });
     description = items.join(', ');
+    line_items = sanitizeLineItems(selections.map(s => ({
+      description: s.label,
+      qty: s.quantity || 1,
+      unit_price: s.price || 0,
+    })));
   }
   description = description || 'Estimate for services requested';
 
-  // Create the estimate record
-  const { data: est, error: createErr } = await db.from('estimates').insert({
+  // Create the estimate record. insertResilientEstimate() tolerates the
+  // line_items column being absent (migration 0028 not yet applied) by dropping
+  // it and retrying, so an estimate is never lost to schema drift.
+  const { data: est, error: createErr } = await insertEstimateResilient(db, {
     business_id: biz.id,
     customer_name: customer_name.trim(),
     customer_phone: customer_phone ? customer_phone.trim() : null,
     customer_email: customer_email.trim(),
     service_label: service_label || 'Custom Estimate',
     description,
+    line_items,
     status: 'new',
     sms_consent: body.sms_consent !== false,
     source: 'manual',
-  }).select('id').maybeSingle();
+  });
 
   if (createErr) throw createErr;
   if (!est) return res.status(500).json({ error: 'Failed to create estimate' });
@@ -2526,7 +2603,7 @@ async function estimateCreate(req, res, db, auth, body) {
 
   const firstName = (customer_name || '').trim().split(/\s+/)[0];
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: service_label || 'Custom Estimate', description },
+    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items },
     brandFor(biz.slug)
   );
 
@@ -2547,8 +2624,7 @@ async function estimateSendSms(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.id) return res.status(400).json({ error: 'id required' });
 
-  const { data: est } = await db.from('estimates')
-    .select('customer_name, customer_phone, service_label, description, sms_consent').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_phone, service_label, description, sms_consent');
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available for this estimate.' });
   if (est.sms_consent === false) return res.status(400).json({ error: 'Customer did not consent to receive text messages.' });
@@ -2556,7 +2632,14 @@ async function estimateSendSms(req, res, db, auth, body) {
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
   const greeting = firstName ? `Hi ${firstName}, ` : '';
   const svcTxt = est.service_label ? `${est.service_label}: ` : '';
-  const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${est.description || 'Your estimate request'}. We'll reach out to finalize details and get you scheduled.`;
+  // If the office built priced line items, lead with the total; otherwise fall
+  // back to the request description so the text is never empty/meaningless.
+  const items = Array.isArray(est.line_items) ? est.line_items : [];
+  const total = lineItemsTotal(items);
+  const body_txt = items.length
+    ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}`
+    : (est.description || 'Your estimate request');
+  const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
   if (!r.ok) {
@@ -2576,8 +2659,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.id) return res.status(400).json({ error: 'id required' });
 
-  const { data: est } = await db.from('estimates')
-    .select('customer_name, customer_email, service_label, description').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_email, service_label, description');
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available for this estimate.' });
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
@@ -2590,7 +2672,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: est.service_label, description: est.description },
+    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items },
     brandFor(biz.slug)
   );
 
