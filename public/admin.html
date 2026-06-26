@@ -1132,8 +1132,6 @@ async function renderSchedule(silent){
     techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
     if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
     renderSidebarFilters();
-    // Check for pending brackets and show banner if owner
-    if(role==='owner') showBracketBanner();
     renderCalBody();
   }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
@@ -2792,40 +2790,6 @@ async function refreshEstimateBadge(){
   }catch{ return 0; }
 }
 
-// ── Bracket alerts on main dashboard ────────────────────────────────────────
-// Show an alert banner at the top if there are pending (unassigned) brackets.
-// Owner-only; automatically shown on the main dashboard and persists until
-// all pending deliveries are assigned.
-async function showBracketBanner(){
-  try{
-    const pend=await api('bracket_pending',{ params:{ business:current.slug }});
-    const pending=(pend&&pend.pending)||[];
-    if(!pending.length) return; // no pending deliveries
-
-    const total=pending.reduce((sum,p)=>sum+p.total,0);
-    const bannerHtml=`<div style="background:#fef08a;border-bottom:2px solid #eab308;padding:12px 16px;margin-bottom:16px;border-radius:8px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-        <div>
-          <strong style="font-size:15px;color:#854d0e;">📦 ${total} bracket${total===1?'':'s'} pending assignment</strong>
-          <div style="font-size:13px;color:#a16207;margin-top:2px;">Awaiting assignment to technicians</div>
-        </div>
-        <button class="btn" onclick="navTo('brackets')" style="white-space:nowrap;flex-shrink:0;">Assign Now</button>
-      </div>
-    </div>`;
-
-    const view=document.getElementById('view');
-    const existing=view.querySelector('[data-bracket-banner]');
-    if(existing) existing.remove();
-
-    const banner=document.createElement('div');
-    banner.setAttribute('data-bracket-banner','true');
-    banner.innerHTML=bannerHtml;
-    view.insertBefore(banner, view.firstChild);
-  }catch(e){
-    // Silently fail — don't break the main dashboard if bracket check fails
-  }
-}
-
 // ── Bracket Inventory ──────────────────────────────────────────────────────────
 async function renderBrackets(){
   const view=document.getElementById('view');
@@ -3021,14 +2985,22 @@ async function renderGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !current){ if(el) el.classList.add('hidden'); return; }
   try{
-    const [s,newEst]=await Promise.all([
+    const reqs=[
       api('summary',{ params:{ business:current.slug }}),
       refreshEstimateBadge(),
-    ]);
+    ];
+    // Owner: also check for pending brackets
+    if(role==='owner'){
+      reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
+    }
+    const [s,newEst,...rest]=await Promise.all(reqs);
+    const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
+
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
       jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
       estimates: newEst,
+      brackets: role==='owner' ? bracketPending.reduce((sum,p)=>sum+p.total,0) : 0,
       tz: (s.business && s.business.timezone) || tz(),
       revenue: s.revenue || null,
     };
@@ -3064,14 +3036,20 @@ function paintGreeting(){
   const estTxt = est===0
     ? 'no estimates are waiting on a response'
     : `you have <b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} a response`;
+  const brackets = greetingData.brackets || 0;
+  const bracketsTxt = brackets > 0
+    ? `, and <b>${brackets}</b> bracket${brackets===1?'':'s'} <span class="greet-link" data-gobrackets="1">pending assignment</span>`
+    : '';
   el.innerHTML=
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
-    `<div class="greet-line">${jobsTxt}, and ${estTxt}.</div>`+
+    `<div class="greet-line">${jobsTxt}, and ${estTxt}${bracketsTxt}.</div>`+
     greetStatsHtml()+
     greetNoteHtml();
-  const link=el.querySelector('[data-goest]');
-  if(link) link.addEventListener('click',()=>navTo('estimates'));
+  const estLink=el.querySelector('[data-goest]');
+  if(estLink) estLink.addEventListener('click',()=>navTo('estimates'));
+  const bracketLink=el.querySelector('[data-gobrackets]');
+  if(bracketLink) bracketLink.addEventListener('click',()=>navTo('brackets'));
 }
 // Temporary note shown in the greeting banner. Auto-disappears once `expires`
 // passes. Set to a { for, text, expires } object to show one; null = no note.
