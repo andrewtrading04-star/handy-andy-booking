@@ -1,6 +1,9 @@
 import { mirrorBooking } from './_lib/mirror.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
+import { serviceClient } from './_lib/supabase.js';
+import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS } from './_lib/availability.js';
+import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 
 // After creating the Zenbooker job this handler does several more sequential
 // calls (auto-assign check, Stripe card-on-file, CRM mirror, confirmation email).
@@ -127,6 +130,177 @@ function serveIcs(req, res) {
   return res.status(200).send(lines.join('\r\n'));
 }
 
+// ── Doms native booking (no Zenbooker) ───────────────────────────────────────
+// Writes the booking straight into the CRM, saves the card on file in Doms' OWN
+// Stripe account, assigns an available Doms tech (so the slot is occupied), and
+// sends a Doms-branded confirmation. `selectedSlot` is the
+// 'doms_<YYYY-MM-DD>_<slotKey>' id returned by /api/slots?business=doms.
+async function bookDoms(req, res) {
+  const b = req.body || {};
+  const customer = b.customer || {};
+  if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
+  if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (!customer.address) return res.status(400).json({ error: 'customer.address required' });
+
+  const parsed = parseSlotId(b.selectedSlot);
+  if (!parsed || parsed.businessSlug !== 'doms') {
+    return res.status(400).json({ error: 'A valid time slot is required' });
+  }
+  const { dateStr, slotKey } = parsed;
+  const tz = 'America/Denver';
+  const startUTC = slotStartUTC(tz, dateStr, slotKey);
+  const endUTC   = slotEndUTC(tz, dateStr, slotKey);
+  if (!startUTC) return res.status(400).json({ error: 'Invalid time slot' });
+
+  let db;
+  try { db = serviceClient(); }
+  catch (e) { return res.status(500).json({ error: 'Booking storage not configured', message: e.message }); }
+
+  // Resolve Doms business + its Denver service area + the per-zip surcharge.
+  const { data: biz } = await db.from('businesses').select('id').eq('slug', 'doms').single();
+  if (!biz) return res.status(500).json({ error: 'Doms business not configured' });
+  const { data: area } = await db.from('service_areas')
+    .select('id').eq('business_id', biz.id).eq('name', 'Denver').maybeSingle();
+
+  const zip = String(b.postal_code || customer.zip || '').trim();
+  let surcharge = 0;
+  if (zip) {
+    const { data: z } = await db.from('service_area_zips').select('*')
+      .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
+    surcharge = Number(z?.surcharge) || 0;
+  }
+
+  // ── Line items for storage. Prefer explicit line_items; else map the
+  // email_summary lines the widget already computed for display.
+  const sum = b.email_summary || {};
+  let lines = [];
+  if (Array.isArray(b.line_items) && b.line_items.length) {
+    lines = b.line_items.map(li => ({
+      kind: li.kind || 'option',
+      name: String(li.name || 'Item').slice(0, 200),
+      quantity: Number(li.quantity) || 1,
+      unit_price: Number(li.unit_price) || 0,
+      line_total: Number(li.line_total != null ? li.line_total : li.unit_price) || 0,
+    }));
+  } else if (Array.isArray(sum.lines) && sum.lines.length) {
+    lines = sum.lines.map(l => {
+      const qty = Number(l.qty) || 1;
+      const amount = Number(l.amount) || 0;   // line total as displayed
+      return { kind: 'option', name: String(l.label || 'Item').slice(0, 200),
+        quantity: qty, unit_price: qty ? amount / qty : amount, line_total: amount };
+    });
+  }
+  // Add the travel surcharge server-side if the widget didn't already include it,
+  // so a stale/tampered widget can never drop it.
+  if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
+    lines.push({ kind: 'fee', name: 'Service area surcharge', quantity: 1, unit_price: surcharge, line_total: surcharge });
+  }
+  const tip = Number(b.tip) || 0;
+  const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+  const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
+  // Never below the surcharge-inclusive server subtotal.
+  const price = Math.max(subtotal, widgetTotal) || subtotal;
+
+  // ── Save the card on file in DOMS' Stripe account (best-effort). The card was
+  // tokenized client-side with Doms' publishable key, so only Doms' secret key
+  // can attach/charge it. Never fail the booking if this errors.
+  let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
+  if (b.payment_method_id) {
+    if (!stripeConfigured('doms')) {
+      cardNote = `Card captured (${b.payment_method_id}) but DOMS_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
+    } else {
+      try {
+        const r = await saveCardOnFile({
+          email: customer.email,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          phone: customer.phone, paymentMethodId: b.payment_method_id, slug: 'doms',
+        });
+        stripeCustomerId = r.customerId;
+        paymentStatus = 'card_on_file';
+        cardNote = 'Card is on file (Doms Stripe).';
+      } catch (e) {
+        cardNote = `Card capture failed: ${e.message}`;
+      }
+    }
+  }
+
+  // ── Assign an available Doms tech so the slot is actually occupied.
+  let technician_id = null;
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey }); }
+  catch (e) { console.warn('[book-doms] tech pick failed:', e.message); }
+
+  // ── Write the booking (creates customer, booking, line items, status event,
+  // review token) and get the new id back.
+  let result = {};
+  try {
+    result = (await mirrorBooking({
+      businessSlug: 'doms', source: 'widget',
+      service_area_id: area?.id || null,
+      technician_id,
+      status: technician_id ? 'assigned' : 'confirmed',
+      scheduled_at: startUTC.toISOString(),
+      scheduled_end: endUTC ? endUTC.toISOString() : null,
+      duration_minutes: 120,
+      service_name: "Dom's TV Mounting",
+      idempotency_key: b.idempotency_key || null,
+      customer: {
+        first_name: customer.first_name, last_name: customer.last_name,
+        name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+        email: customer.email, phone: customer.phone,
+      },
+      address: { line1: customer.address, city: b.city || 'Denver', state: b.state || 'CO', postal_code: zip },
+      line_items: lines, subtotal, price, tip,
+      payment_status: paymentStatus,
+      stripe_customer_id: stripeCustomerId,
+      stripe_payment_method_id: b.payment_method_id || null,
+      notes: cardNote || null,
+      customer_notes: b.customer_notes || sum.notes || null,
+    })) || {};
+  } catch (e) {
+    console.error('[book-doms] mirror error:', e.message);
+    return res.status(500).json({ error: 'Could not save booking', message: e.message });
+  }
+  const bookingId = result.booking_id || null;
+
+  // ── Doms-branded confirmation email (best-effort; never fails the booking).
+  const domsEmail = emailConfig('doms');
+  const willSend = emailNotificationsOn() && !!domsEmail.apiKey && !!customer.email;
+  if (willSend) {
+    try {
+      const [yy, mm, dd] = dateStr.split('-').map(Number);
+      const dateLong = new Date(Date.UTC(yy, mm - 1, dd, 12)).toLocaleDateString('en-US',
+        { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      const slot = SLOTS.find(s => s.key === slotKey);
+      const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+      const emailLines = lines.map(l => ({ label: l.name, qty: l.quantity, amount: l.line_total }));
+      const { subject, html } = bookingConfirmationEmail({
+        firstName:   customer.first_name || sum.firstName || '',
+        dateLong,
+        timeWindow:  sum.timeWindow || (slot ? slot.label : ''),
+        serviceName: "Dom's TV Mounting",
+        address:     { line1: customer.address, city: b.city || 'Denver', state: b.state || 'CO', zip },
+        lines:       emailLines,
+        total:       price,
+        tip,
+        startEpoch:  Math.floor(startUTC.getTime() / 1000),
+        endEpoch:    endUTC ? Math.floor(endUTC.getTime() / 1000) : null,
+        baseUrl, jobId: bookingId,
+      }, brandFor('doms'));
+      const sent = await sendEmail({ slug: 'doms', to: customer.email, subject, html, replyTo: domsEmail.from });
+      if (!sent.sent) console.warn('[book-doms] confirmation email not sent:', sent.skipped || sent.error);
+    } catch (e) {
+      console.error('[book-doms] confirmation email error:', e.message);
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    booking_id: bookingId, job_id: bookingId,
+    status: technician_id ? 'assigned' : 'confirmed',
+    card_saved: paymentStatus === 'card_on_file',
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -139,6 +313,9 @@ export default async function handler(req, res) {
   // stay under Vercel's 12-function Hobby cap.
   if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
+
+  // Doms is CRM-native — branch before any Zenbooker work.
+  if (req.body && req.body.business === 'doms') return bookDoms(req, res);
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
   if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });

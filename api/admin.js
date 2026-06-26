@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey } from './_lib/stripe.js';
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
@@ -1075,8 +1075,9 @@ async function availableDates(req, res, db, auth) {
 
 // Attach a tokenized payment method to a Stripe customer (card on file).
 // Returns { customerId, pmId } or null if Stripe isn't configured.
-async function saveCardOnFile(pmId, cust) {
-  const SK = process.env.STRIPE_SECRET_KEY;
+// `slug` selects the business's Stripe account (Doms has its own).
+async function saveCardOnFile(pmId, cust, slug = null) {
+  const SK = businessSecretKey(slug);
   if (!SK) return null;
   const sAuth = { Authorization: `Bearer ${SK}`, 'Content-Type': 'application/x-www-form-urlencoded' };
   // Create a Stripe customer for the card.
@@ -1321,7 +1322,7 @@ async function bookingCreate(req, res, db, auth, body) {
   // Save a tokenized card on file in Stripe so it can be charged at service time.
   if (paymentMethod === 'card' && body.payment_method_id) {
     try {
-      const ids = await saveCardOnFile(body.payment_method_id, { name: c.name, email: c.email, phone: c.phone });
+      const ids = await saveCardOnFile(body.payment_method_id, { name: c.name, email: c.email, phone: c.phone }, biz.slug);
       if (ids) await db.from('bookings').update({
         stripe_customer_id: ids.customerId, stripe_payment_method_id: ids.pmId,
       }).eq('id', bRow.id);
@@ -1627,6 +1628,9 @@ async function bookingPayment(req, res, db, auth, body) {
   const id = body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   const act = (body.action || 'charge').toString();
+  // Each business is its own Stripe account; charge/refund the card with THIS
+  // booking's business key (Handy Andy → global key, Doms → DOMS_STRIPE_SECRET_KEY).
+  const slug = biz.slug;
 
   const { data: b, error } = await db.from('bookings')
     .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
@@ -1648,7 +1652,7 @@ async function bookingPayment(req, res, db, auth, body) {
 
   if (act === 'refund') {
     if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this booking to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id } }); }
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, slug }); }
     catch (e) { return res.status(e.status || 400).json({ error: 'Refund failed: ' + e.message }); }
     await db.from('bookings').update({ payment_status: 'refunded' }).eq('id', id);
     return res.status(200).json({ ok: true, payment_status: 'refunded' });
@@ -1656,7 +1660,7 @@ async function bookingPayment(req, res, db, auth, body) {
 
   // Charge the card on file.
   if (act !== 'charge') return res.status(400).json({ error: `Unknown payment action "${act}"` });
-  if (!stripeConfigured()) return res.status(400).json({ error: 'Payments are not configured (STRIPE_SECRET_KEY missing). Use “Mark paid (cash)”.' });
+  if (!stripeConfigured(slug)) return res.status(400).json({ error: 'Payments are not configured for this business. Use “Mark paid (cash)”.' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
   const dollars = body.amount != null ? Number(body.amount) : Number(b.price);
   if (!dollars || dollars <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
@@ -1666,16 +1670,16 @@ async function bookingPayment(req, res, db, auth, body) {
   let pmId = b.stripe_payment_method_id || null;
   try {
     if (!custId && b.customer && b.customer.email) {
-      const r = await findCardOnFileByEmail(b.customer.email);
+      const r = await findCardOnFileByEmail(b.customer.email, slug);
       custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
     }
-    if (custId && !pmId) pmId = await defaultPaymentMethod(custId);
+    if (custId && !pmId) pmId = await defaultPaymentMethod(custId, slug);
   } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use “Mark paid (cash)” instead.' });
 
   let pi;
   try {
-    pi = await stripe('/payment_intents', { body: {
+    pi = await stripe('/payment_intents', { slug, body: {
       amount: Math.round(dollars * 100), currency: 'usd',
       customer: custId, payment_method: pmId, off_session: true, confirm: true,
       description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug },

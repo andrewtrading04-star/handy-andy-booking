@@ -29,12 +29,13 @@ export async function mirrorBooking(ctx = {}) {
       service_area_id = area?.id || null;
     }
 
-    // Technician: by provider id, then by assigned-provider name, then ctx name.
+    // Technician: an explicit CRM technician_id wins (native bookings already
+    // know who they assigned); else resolve by provider id, then by name.
     const assigned = (job.assigned_providers || job.providers || [])[0] || {};
     const providerName = first(ctx.technician_name, assigned.name, assigned.display_name);
-    let technician_id = null;
+    let technician_id = ctx.technician_id || null;
     const providerId = first(ctx.technician_provider_id, assigned.id, assigned.provider_id);
-    if (providerId) {
+    if (!technician_id && providerId) {
       const { data: t } = await db.from('technicians').select('id')
         .eq('business_id', biz.id).eq('zenbooker_provider_id', String(providerId)).maybeSingle();
       technician_id = t?.id || null;
@@ -85,10 +86,21 @@ export async function mirrorBooking(ctx = {}) {
     const price = Number(first(ctx.price, job.total, job.price, job.amount, 0)) || 0;
 
     const bookingRow = {
-      business_id: biz.id, customer_id, technician_id, service_id, service_area_id,
-      status: technician_id ? 'assigned' : 'confirmed',
+      business_id: biz.id, customer_id, technician_id, service_id,
+      // Native callers (no Zenbooker territory) can pass service_area_id directly;
+      // Zenbooker callers keep resolving it from the territory id above.
+      service_area_id: ctx.service_area_id || service_area_id,
+      status: ctx.status || (technician_id ? 'assigned' : 'confirmed'),
       source: ctx.source || 'widget',
       scheduled_at: scheduled_at || null,
+      // Optional, additive — only set when the caller provides them so existing
+      // Zenbooker mirrors are byte-for-byte unchanged.
+      ...(ctx.scheduled_end ? { scheduled_end: ctx.scheduled_end } : {}),
+      ...(ctx.duration_minutes ? { duration_minutes: Number(ctx.duration_minutes) } : {}),
+      ...(ctx.subtotal != null ? { subtotal: Number(ctx.subtotal) || 0 } : {}),
+      ...(ctx.payment_status ? { payment_status: ctx.payment_status } : {}),
+      ...(ctx.stripe_customer_id ? { stripe_customer_id: ctx.stripe_customer_id } : {}),
+      ...(ctx.stripe_payment_method_id ? { stripe_payment_method_id: ctx.stripe_payment_method_id } : {}),
       price, tip: Number(ctx.tip) || 0,
       address_line1: a.line1 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
       notes: first(ctx.notes, providerName && `Zenbooker tech: ${providerName}`),
@@ -102,6 +114,27 @@ export async function mirrorBooking(ctx = {}) {
       const { data } = await db.from('bookings')
         .upsert(bookingRow, { onConflict: 'business_id,zenbooker_job_id' }).select('id').single();
       booking_id = data?.id || null;
+    } else if (ctx.idempotency_key) {
+      // Native bookings: a retried submit (same key) must not duplicate. The
+      // idempotency index is PARTIAL (…WHERE idempotency_key IS NOT NULL), which
+      // can't be an upsert arbiter — so insert and, on the unique violation,
+      // return the existing booking instead (and skip re-writing line items).
+      bookingRow.idempotency_key = String(ctx.idempotency_key);
+      const ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      if (!ins.error) {
+        booking_id = ins.data?.id || null;
+      } else if (ins.error.code === '23505' || /duplicate key|idempotency/i.test(ins.error.message || '')) {
+        const { data: existing } = await db.from('bookings').select('id')
+          .eq('business_id', biz.id).eq('idempotency_key', String(ctx.idempotency_key)).maybeSingle();
+        if (existing?.id) return { booking_id: existing.id, customer_id, business_id: biz.id, technician_id, duplicate: true };
+        return;
+      } else if (/idempotency_key/.test(ins.error.message || '')) {
+        // DB predates migration 0024 (no idempotency_key column) — insert without it.
+        delete bookingRow.idempotency_key;
+        booking_id = (await db.from('bookings').insert(bookingRow).select('id').single()).data?.id || null;
+      } else {
+        return;   // best-effort: swallow
+      }
     } else {
       booking_id = (await db.from('bookings').insert(bookingRow).select('id').single()).data?.id || null;
     }
@@ -128,6 +161,10 @@ export async function mirrorBooking(ctx = {}) {
       booking_id, business_id: biz.id, technician_id,
       status: bookingRow.status, note: `Mirrored from ${ctx.source || 'widget'} booking`,
     });
+
+    // Native callers (e.g. the Doms widget) need the new row's id to confirm /
+    // email the booking. Zenbooker callers ignore the return value.
+    return { booking_id, customer_id, business_id: biz.id, technician_id };
   } catch (e) {
     console.warn('[mirror] non-fatal:', e.message);
   }

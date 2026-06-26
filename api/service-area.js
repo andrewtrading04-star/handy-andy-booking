@@ -1,5 +1,37 @@
 // /api/service-area.js
 // Looks up which Zenbooker territory serves a zip code.
+// Doms (business=doms) is native: it answers from the CRM's service_area_zips
+// table instead of Zenbooker and returns the per-zip travel surcharge.
+import { serviceClient } from './_lib/supabase.js';
+
+// Native CRM zip check for Doms — no Zenbooker. Returns whether the zip is
+// covered, the per-zip surcharge, and a metro default city/state.
+async function domsServiceArea(req, res) {
+  const zip = String((req.body && (req.body.zip || req.body.postal_code)) || '').trim();
+  if (!zip) return res.status(400).json({ error: 'zip is required' });
+  try {
+    const db = serviceClient();
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', 'doms').single();
+    if (!biz) return res.status(500).json({ error: 'Doms business not configured' });
+    // select('*') is resilient if the surcharge column (migration 0031) isn't applied yet.
+    const { data: z } = await db.from('service_area_zips')
+      .select('*').eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
+    if (!z) return res.status(200).json({ in_service_area: false, territory_id: null });
+    return res.status(200).json({
+      in_service_area: true,
+      territory_id:    'doms-denver',   // sentinel: Doms has no Zenbooker territory
+      territory_name:  'Denver',
+      surcharge:       Number(z.surcharge) || 0,
+      timezone:        'America/Denver',
+      city:            'Denver',
+      state:           'CO',
+      lat:             null,
+      lng:             null,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Service area check failed', message: err.message });
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -7,6 +39,9 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
+
+  // Doms is CRM-native — branch before any Zenbooker work.
+  if (req.body && req.body.business === 'doms') return domsServiceArea(req, res);
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
   if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });

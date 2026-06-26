@@ -3,6 +3,7 @@
 // Both the tech app and the admin dashboard read this (so there is a single
 // source of truth) and every write is validated against it server-side, which
 // is what enforces "no other time slots are allowed".
+import { localDateStartUTC, addDaysStr } from './time.js';
 
 export const SLOTS = [
   { key: 's1', label: '8:00 AM – 10:00 AM', start: '08:00', end: '10:00' },
@@ -83,6 +84,224 @@ export function computeExceptionRows(recurringKeys, selected) {
     else if (!inSel && inRecur) rows.push({ slot_key: key, is_available: false });
   }
   return rows;
+}
+
+// ── Public, customer-facing open-slot computation (no Zenbooker) ─────────────
+// Mirrors the admin dashboard's availability math (recurring weekly availability
+// + one-time exceptions − existing bookings) but packaged for a PUBLIC booking
+// widget so a business with no Zenbooker territory (e.g. Doms) can show real
+// open times. Kept self-contained so the public path never imports the large
+// admin handler; the occupancy logic intentionally matches
+// api/admin.js (bookedSlotKeysForTech / singleTechSlotKeys).
+
+const SLOT_BY_KEY = Object.fromEntries(SLOTS.map(s => [s.key, s]));
+
+// 'YYYY-MM-DD' for "today" in a timezone.
+export function todayStr(tz) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+// Local wall-clock 'HH:MM' (tz) for an instant ISO string.
+function localHHMM(tz, instantISO) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' })
+    .formatToParts(new Date(instantISO)).reduce((a, x) => (a[x.type] = x.value, a), {});
+  const hh = p.hour === '24' ? '00' : p.hour;   // some envs emit 24 for midnight
+  return `${hh}:${p.minute}`;
+}
+// Local calendar date 'YYYY-MM-DD' (tz) for an instant.
+function localDateStr(tz, instantISO) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(instantISO));
+}
+function toMin(s) { const [h, m] = s.split(':').map(Number); return h * 60 + m; }
+// Which fixed slot (if any) a local wall-clock time falls inside: [start,end).
+function slotKeyForLocalTime(hhmm) {
+  const t = toMin(hhmm);
+  for (const s of SLOTS) if (t >= toMin(s.start) && t < toMin(s.end)) return s.key;
+  for (const s of SLOTS) if (toMin(s.start) === t) return s.key;   // exact-start fallback
+  return null;
+}
+
+// Interpret a LOCAL wall time ('HH:MM' on YYYY-MM-DD in tz) and return its UTC
+// Date. Used to anchor scheduled_at/scheduled_end for a booked slot.
+function localTimeToUTC(tz, dateStr, hhmm) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = hhmm.split(':').map(Number);
+  const ms = Date.UTC(y, m - 1, d, hh, mm, 0);
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(ms)).reduce((a, x) => (a[x.type] = x.value, a), {});
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+  return new Date(ms - (asUTC - ms));   // ms - offset(local-utc)
+}
+
+// UTC Date for the START / END of a fixed slot on a local calendar date.
+export function slotStartUTC(tz, dateStr, slotKey) {
+  const s = SLOT_BY_KEY[slotKey]; return s ? localTimeToUTC(tz, dateStr, s.start) : null;
+}
+export function slotEndUTC(tz, dateStr, slotKey) {
+  const s = SLOT_BY_KEY[slotKey]; return s ? localTimeToUTC(tz, dateStr, s.end) : null;
+}
+
+// Parse a public slot id '<slug>_<YYYY-MM-DD>_<slotKey>' back to its parts.
+export function parseSlotId(id) {
+  const m = /^(.+)_(\d{4}-\d{2}-\d{2})_(s[1-5])$/.exec(String(id || ''));
+  return m ? { businessSlug: m[1], dateStr: m[2], slotKey: m[3] } : null;
+}
+
+// Compute open slots for the next `days` days for a business, from its
+// technicians' availability minus existing bookings. Returns
+//   { days: [{ date, day_of_week, timeslots: [{ id, slot_key, formatted, start, end, bonus }] }], timezone }
+// using the same { days:[{date,timeslots:[{id,formatted}]}] } shape the widget
+// already consumes from the Zenbooker proxy. Four batched queries total.
+export async function publicOpenSlots(db, { businessSlug, days = 30 }) {
+  const horizon = Math.max(1, Math.min(Number(days) || 30, 60));
+  const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
+  if (!biz) return { days: [], timezone: 'America/Denver' };
+  const tz = biz.timezone || 'America/Denver';
+
+  const { data: techs } = await db.from('technicians')
+    .select('id').eq('business_id', biz.id).eq('active', true);
+  const techIds = (techs || []).map(t => t.id);
+  if (!techIds.length) return { days: [], timezone: tz };
+
+  const start = todayStr(tz);
+  const endExclusive = addDaysStr(start, horizon);
+
+  // Recurring weekly availability: `${techId}:${dow}` -> Set(slot_key)
+  const { data: av } = await db.from('technician_availability')
+    .select('technician_id, day_of_week, slot_key').in('technician_id', techIds);
+  const recur = new Map();
+  for (const r of (av || [])) {
+    const k = `${r.technician_id}:${r.day_of_week}`;
+    if (!recur.has(k)) recur.set(k, new Set());
+    recur.get(k).add(r.slot_key);
+  }
+
+  // One-time exceptions in the window: `${techId}:${date}` -> Map(slot_key -> is_available)
+  const { data: exc } = await db.from('technician_availability_exceptions')
+    .select('technician_id, exception_date, slot_key, is_available')
+    .in('technician_id', techIds)
+    .gte('exception_date', start).lt('exception_date', endExclusive);
+  const excMap = new Map();
+  for (const e of (exc || [])) {
+    const k = `${e.technician_id}:${e.exception_date}`;
+    if (!excMap.has(k)) excMap.set(k, new Map());
+    excMap.get(k).set(e.slot_key, e.is_available);
+  }
+
+  // Existing bookings in the window. NO business filter: a tech booked on ANY
+  // company's job is busy everywhere (technician_id is globally unique), which
+  // is what stops a cross-company double-booking. `${techId}:${date}:${slot}`.
+  const winStart = localDateStartUTC(tz, start).toISOString();
+  const winEnd = localDateStartUTC(tz, endExclusive).toISOString();
+  const idList = techIds.join(',');
+  const runB = (withSecond) => {
+    let q = db.from('bookings')
+      .select('technician_id, secondary_technician_id, scheduled_at')
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .gte('scheduled_at', winStart).lt('scheduled_at', winEnd);
+    return withSecond
+      ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
+      : q.in('technician_id', techIds);
+  };
+  let { data: bk, error: bkErr } = await runB(true);
+  if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) ({ data: bk } = await runB(false));
+  const techIdSet = new Set(techIds);
+  const booked = new Set();
+  for (const b of (bk || [])) {
+    const slotKey = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+    if (!slotKey) continue;
+    const dateStr = localDateStr(tz, b.scheduled_at);
+    for (const tid of [b.technician_id, b.secondary_technician_id]) {
+      if (tid && techIdSet.has(tid)) booked.add(`${tid}:${dateStr}:${slotKey}`);
+    }
+  }
+
+  const out = [];
+  for (let i = 0; i < horizon; i++) {
+    const dateStr = addDaysStr(start, i);
+    const dow = dayOfWeekFor(dateStr);
+    const open = new Set();
+    for (const tid of techIds) {
+      const set = new Set(recur.get(`${tid}:${dow}`) || []);
+      const ex = excMap.get(`${tid}:${dateStr}`);
+      if (ex) for (const [sk, avail] of ex) { if (avail) set.add(sk); else set.delete(sk); }
+      for (const sk of set) if (!booked.has(`${tid}:${dateStr}:${sk}`)) open.add(sk);
+    }
+    if (!open.size) continue;
+    const timeslots = SLOTS.filter(s => open.has(s.key)).map(s => ({
+      id: `${businessSlug}_${dateStr}_${s.key}`,
+      slot_key: s.key,
+      formatted: s.label,
+      start: slotStartUTC(tz, dateStr, s.key).toISOString(),
+      end: slotEndUTC(tz, dateStr, s.key).toISOString(),
+      bonus: s.bonus || 0,
+    }));
+    out.push({ date: dateStr, day_of_week: dow, timeslots });
+  }
+  return { days: out, timezone: tz };
+}
+
+// Recurring weekly availability ± one-time exceptions for ONE tech on a date.
+async function recurringPlusExceptions(db, techId, dateStr, dow) {
+  const { data: av } = await db.from('technician_availability')
+    .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
+  const set = new Set((av || []).map(x => x.slot_key));
+  const { data: exc } = await db.from('technician_availability_exceptions')
+    .select('slot_key, is_available').eq('technician_id', techId).eq('exception_date', dateStr);
+  for (const e of (exc || [])) { if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key); }
+  return set;
+}
+let _liftOne = true;
+// Slot keys already occupied by a non-cancelled booking for ONE tech on a date
+// (across ANY business — a tech booked anywhere is busy everywhere).
+async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
+  const dayStart = localDateStartUTC(tz, dateStr).toISOString();
+  const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
+  const run = (withSecond) => {
+    let q = db.from('bookings').select('scheduled_at')
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .gte('scheduled_at', dayStart).lt('scheduled_at', dayEnd);
+    return withSecond
+      ? q.or(`technician_id.eq.${techId},secondary_technician_id.eq.${techId}`)
+      : q.eq('technician_id', techId);
+  };
+  let { data, error } = await run(_liftOne);
+  if (error && /secondary_technician_id/.test(error.message || '')) { _liftOne = false; ({ data } = await run(false)); }
+  const taken = new Set();
+  for (const b of (data || [])) { const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)); if (k) taken.add(k); }
+  return taken;
+}
+
+// Pick the first active tech who is available (recurring/exception) AND free for
+// an exact date+slot, so a public booking actually OCCUPIES the slot (prevents
+// two customers grabbing the same window). Falls back to any tech free that slot,
+// else null (the office will assign). Returns a CRM technician id.
+export async function pickOpenTech(db, { businessSlug, dateStr, slotKey }) {
+  const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
+  if (!biz) return null;
+  const tz = biz.timezone || 'America/Denver';
+  const dow = dayOfWeekFor(dateStr);
+  const { data: techs } = await db.from('technicians')
+    .select('id').eq('business_id', biz.id).eq('active', true)
+    .order('created_at', { ascending: true });
+  const list = techs || [];
+  // First choice: on the normal schedule AND free in this slot.
+  for (const t of list) {
+    const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
+    if (!keys.has(slotKey)) continue;
+    const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+    if (!booked.has(slotKey)) return t.id;
+  }
+  // Fallback: any active tech who is at least free in this slot.
+  for (const t of list) {
+    const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+    if (!booked.has(slotKey)) return t.id;
+  }
+  return null;
 }
 
 // Validate & normalize an incoming exception set for ONE date: an array of

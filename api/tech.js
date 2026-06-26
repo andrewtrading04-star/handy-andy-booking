@@ -538,11 +538,15 @@ async function jobPayment(req, res, db, auth, body) {
 
   const build = () => scopeMine(db.from('bookings')
     .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             business:businesses ( slug ),
              customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
     .eq('id', id).maybeSingle();
   const { data: b, error } = await fetchMine(build);
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
 
+  // Charge/refund with THIS booking's business Stripe account (the card lives in
+  // whichever account the booking belongs to — Doms cards aren't in HA's account).
+  const slug = b.business?.slug || null;
   const now = new Date().toISOString();
 
   if (act === 'mark_paid') {
@@ -556,14 +560,14 @@ async function jobPayment(req, res, db, auth, body) {
 
   if (act === 'refund') {
     if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this job to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id } }); }
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, slug }); }
     catch (e) { return res.status(e.status || 402).json({ error: 'Refund failed: ' + e.message }); }
     await db.from('bookings').update({ payment_status: 'refunded', paid_at: null }).eq('id', id);
     return res.status(200).json({ ok: true, payment_status: 'refunded' });
   }
 
   if (act === 'charge') {
-    if (!stripeConfigured()) return res.status(400).json({ error: 'Payments are not configured on the server.' });
+    if (!stripeConfigured(slug)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
     const dollars = Number(b.price) || 0;
     if (dollars <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
 
@@ -571,16 +575,16 @@ async function jobPayment(req, res, db, auth, body) {
     let pmId = b.stripe_payment_method_id || null;
     try {
       if (!custId && b.customer && b.customer.email) {
-        const r = await findCardOnFileByEmail(b.customer.email);
+        const r = await findCardOnFileByEmail(b.customer.email, slug);
         custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
       }
-      if (custId && !pmId) pmId = await defaultPaymentMethod(custId);
+      if (custId && !pmId) pmId = await defaultPaymentMethod(custId, slug);
     } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use "Mark paid (cash)" instead.' });
 
     let pi;
     try {
-      pi = await stripe('/payment_intents', { body: {
+      pi = await stripe('/payment_intents', { slug, body: {
         amount: Math.round(dollars * 100), currency: 'usd',
         customer: custId, payment_method: pmId, off_session: true, confirm: true,
         description: `Job ${id}`, metadata: { job_id: id },
