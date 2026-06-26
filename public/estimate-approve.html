@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Approve your estimate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#2563eb;            /* set per-brand at runtime */
+    --green:#22c55e; --red:#ef4444;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-h1:clamp(24px,5.5vw,32px); --fs-h2:21px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;letter-spacing:-.01em;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:100%;max-width:480px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
+  h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.12;margin-bottom:8px;}
+  .hl{color:var(--accent);}
+  .sub{color:var(--mute);font-size:15px;margin-bottom:8px;line-height:1.55;}
+
+  /* ── Quote card ── */
+  .quote{margin:22px 0 8px;background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:18px;text-align:left;}
+  .quote .svc{font-size:15px;font-weight:800;color:var(--ink);margin-bottom:10px;}
+  .qline{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--ink-2);padding:9px 0;border-bottom:1px solid var(--line2);}
+  .qline b{color:var(--ink);font-weight:700;white-space:nowrap;}
+  .qsub{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--mute);padding:7px 0 0;}
+  .qtotal{display:flex;justify-content:space-between;gap:12px;font-size:16px;font-weight:800;color:var(--ink);margin-top:12px;padding-top:12px;border-top:1px solid var(--line2);}
+  .qtotal .amt{color:var(--accent);}
+  .qnote{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:12px;}
+
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:15px 24px;font-size:16px;font-weight:800;cursor:pointer;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;margin-top:18px;letter-spacing:.2px;}
+  .btn:hover{filter:brightness(.96);}
+  .btn:disabled{opacity:.6;cursor:default;}
+
+  .state{display:none;}
+  .state.show{display:block;}
+  .check{width:64px;height:64px;border-radius:50%;background:color-mix(in srgb,var(--green) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:var(--green);}
+  .state h2{font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;margin-bottom:8px;}
+  .state p{color:var(--mute);font-size:14px;line-height:1.55;}
+  .error{display:none;color:var(--red);font-size:14px;margin-top:18px;font-weight:600;}
+  .error.show{display:block;}
+  .muted{color:var(--mute);font-size:14px;}
+  #loading{color:var(--mute);font-size:15px;padding:24px 0;}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div id="loading">Loading your estimate…</div>
+
+  <!-- Review + approve -->
+  <div class="state" id="approveSection">
+    <h1>Approve your <span class="hl">estimate</span></h1>
+    <p class="sub" id="approveSub">Here's the quote from our team. Tap the button to approve it.</p>
+    <div id="quoteBox"></div>
+    <button class="btn" id="approveBtn">&#10003; I approve this estimate</button>
+  </div>
+
+  <!-- Success -->
+  <div class="state" id="doneSection">
+    <div class="check">&#10003;</div>
+    <h2 id="doneTitle">Thank you — you're approved!</h2>
+    <p id="doneMsg">We've let our team know you'd like to move forward. We'll be in touch shortly to get you scheduled.</p>
+  </div>
+
+  <!-- Already approved -->
+  <div class="state" id="alreadySection">
+    <div class="check">&#10003;</div>
+    <h2>You've already approved this estimate</h2>
+    <p id="alreadyMsg">Thanks! Our team has it and will reach out to get you scheduled.</p>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+</div>
+
+<script>
+const API = '/api/admin';
+const BRANDS = {
+  'handy-andy': { name: 'Handy Andy',        accent: '#FF6B35' },
+  'doms':       { name: "Dom's TV Mounting", accent: '#2563EB' },
+};
+const token = new URLSearchParams(location.search).get('token');
+const $ = (id) => document.getElementById(id);
+let saving = false;
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(n){ return '$' + (Math.round((Number(n)||0)*100)/100).toFixed(2); }
+function applyBrand(slug){
+  const brand = BRANDS[slug] || BRANDS['handy-andy'];
+  document.documentElement.style.setProperty('--accent', brand.accent);
+}
+function show(id){ ['approveSection','doneSection','alreadySection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
+function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
+
+function renderQuote(info){
+  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)) : [];
+  const t = info.totals || { subtotal:0, tax:0, total:0 };
+  const rate = Number(info.tax_rate)||0;
+  const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
+  let body;
+  if (items.length){
+    const rows = items.map(it=>{
+      const qty=Number(it.qty)||0; const lt=qty*(Number(it.unit_price)||0);
+      const q = qty&&qty!==1 ? `<b>×${esc(qty)}</b> ` : '';
+      return `<div class="qline"><span>${q}${esc(it.description||'Item')}</span><b>${money(lt)}</b></div>`;
+    }).join('');
+    const taxRows = rate>0
+      ? `<div class="qsub"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`+
+        `<div class="qsub"><span>Tax (${(rate*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span>${money(t.tax)}</span></div>`
+      : '';
+    body = `${rows}${taxRows}<div class="qtotal"><span>Estimated total</span><span class="amt">${money(t.total)}</span></div>`+
+      `<div class="qnote">This is an estimate, not a final invoice. Final pricing may vary based on on-site conditions.</div>`;
+  } else {
+    body = `<div class="muted">${esc(info.description||'Details of your estimate request.')}</div>`;
+  }
+  $('quoteBox').innerHTML = `<div class="quote">${svc}${body}</div>`;
+}
+
+async function load(){
+  if (!token){ showError('This approval link is missing its token. Please use the button in your estimate email.'); return; }
+  try{
+    const res = await fetch(`${API}?action=estimate_approve_info&token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+    if (!res.ok){ showError(data.error || 'We could not load this estimate.'); return; }
+    applyBrand(data.business_slug);
+    $('loading').style.display='none';
+    if (data.already_approved){ show('alreadySection'); return; }
+    renderQuote(data);
+    show('approveSection');
+  }catch(e){ showError('Network error. Please try again.'); }
+}
+
+$('approveBtn').addEventListener('click', async ()=>{
+  if (saving) return;
+  saving = true;
+  const btn = $('approveBtn');
+  btn.disabled = true; btn.textContent = 'Approving…';
+  try{
+    const res = await fetch(`${API}?action=estimate_approve`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (!res.ok){
+      btn.disabled=false; btn.innerHTML='&#10003; I approve this estimate'; saving=false;
+      showError(data.error || 'We could not record your approval. Please try again.');
+      return;
+    }
+    if (data.already){ show('alreadySection'); return; }
+    show('doneSection');
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='&#10003; I approve this estimate'; saving=false;
+    showError('Network error. Please try again.');
+  }
+});
+
+load();
+</script>
+</body>
+</html>

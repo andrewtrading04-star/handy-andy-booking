@@ -575,6 +575,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
   const firstName = (details.firstName || '').trim();
   const serviceLabel = (details.serviceLabel || '').trim();
   const description = (details.description || '').trim();
+  const approveUrl = (details.approveUrl || '').trim();
   const money = n => '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
 
   // Keep only line items that have a description or a price.
@@ -670,9 +671,17 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
         </td></tr>
 
         <!-- Next steps -->
-        <tr><td style="padding:18px 28px 28px;">
+        <tr><td style="padding:18px 28px 22px;">
           <div style="font-size:14px;color:#3a4453;line-height:1.6;">A member of our team will reach out shortly to finalize the details and get you scheduled. If you have any questions, just reply to this email.</div>
         </td></tr>
+        ${approveUrl ? `
+        <!-- Approve CTA -->
+        <tr><td style="padding:0 28px 30px;">
+          <div style="text-align:center;">
+            <a href="${esc(approveUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:16px;font-weight:800;padding:15px 42px;border-radius:10px;letter-spacing:.3px;">&#10003; I approve this estimate</a>
+            <div style="font-size:12px;color:#9ca3af;line-height:1.6;margin-top:11px;">Click above to let us know you'd like to move forward with this quote.</div>
+          </div>
+        </td></tr>` : ''}
 
         <!-- Footer -->
         <tr><td style="padding:8px 28px 32px;">

@@ -175,6 +175,8 @@ export default async function handler(req, res) {
   try {
     if (action === 'login') return await login(req, res, body);
     if (action === 'review') return await review(req, res, body);
+    if (action === 'estimate_approve') return await estimateApprove(req, res, body);
+    if (action === 'estimate_approve_info') return await estimateApproveInfo(req, res, body);
     if (action === 'session_status') return await sessionStatus(req, res);
 
     // Everything below requires a valid admin token.
@@ -2435,7 +2437,7 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, created_at';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, approved_at, created_at';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -2725,8 +2727,13 @@ async function estimateSendEmail(req, res, db, auth, body) {
   }
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
+  // Short-lived signed link the customer clicks to approve this quote. Verified
+  // server-side by estimate_approve — no public token column needed on the row.
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000); // 90 days
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate },
+    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl },
     brandFor(biz.slug)
   );
 
@@ -2738,6 +2745,100 @@ async function estimateSendEmail(req, res, db, auth, body) {
 
   await markEstimateContacted(db, biz.id, body.id);
   return res.status(200).json({ ok: true });
+}
+
+// ── Public estimate approval (token-based, no admin auth) ────────────────────
+// The "I approve" button in a quote email links to /estimate-approve.html with a
+// short-lived signed token (kind=estimate_approve, estimate_id). The page loads a
+// read-only quote summary (GET info) and records approval (POST). Mirrors the
+// public review flow. Service role bypasses RLS; the estimate id is global.
+function approveTokenEstimateId(raw) {
+  const t = verifyToken((raw || '').toString());
+  if (!t || t.kind !== 'estimate_approve' || !t.estimate_id) return null;
+  return t.estimate_id;
+}
+
+// Fetch one estimate by id across any business (for the public approve page),
+// dropping quote columns the schema may not have yet so it never 500s. The
+// business is fetched separately (not via an embed) so the column-drop retry
+// can't mangle a comma-containing join.
+async function fetchEstimateAnyBiz(db, id) {
+  let cols = 'id, business_id, customer_name, service_label, description, line_items, tax_rate, approved_at';
+  let data, error;
+  for (let i = 0; i < 5; i++) {
+    ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
+    if (!error) break;
+    const col = missingColumn(error.message);
+    if (!col || !cols.includes(col)) break;
+    cols = cols.split(',').map(s => s.trim()).filter(c => c !== col).join(', ');
+  }
+  if (error) throw error;
+  if (!data) return null;
+  if (!Array.isArray(data.line_items)) data.line_items = [];
+  if (data.tax_rate == null) data.tax_rate = 0;
+  if (!('approved_at' in data)) data.approved_at = null;
+  const { data: biz } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
+  data.business = biz || null;
+  return data;
+}
+
+async function estimateApproveInfo(req, res, body) {
+  const token = (req.query.token || (body && body.token) || '').toString();
+  const id = approveTokenEstimateId(token);
+  if (!id) return res.status(401).json({ error: 'This approval link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const est = await fetchEstimateAnyBiz(db, id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+  const items = Array.isArray(est.line_items) ? est.line_items : [];
+  const totals = quoteTotals(items, est.tax_rate);
+  return res.status(200).json({
+    business_slug: est.business?.slug || 'handy-andy',
+    business_name: est.business?.name || 'Handy Andy',
+    customer_name: est.customer_name || '',
+    service_label: est.service_label || '',
+    description: est.description || '',
+    line_items: items,
+    tax_rate: Number(est.tax_rate) || 0,
+    totals,
+    already_approved: !!est.approved_at,
+    approved_at: est.approved_at || null,
+  });
+}
+
+async function estimateApprove(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const token = ((body && body.token) || req.query.token || '').toString();
+  const id = approveTokenEstimateId(token);
+  if (!id) return res.status(401).json({ error: 'This approval link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const { data: est, error } = await db.from('estimates')
+    .select('id, approved_at, business:businesses(slug, name)')
+    .eq('id', id).maybeSingle();
+  if (error) {
+    if (missingColumn(error.message) === 'approved_at') {
+      return res.status(503).json({ error: 'Approvals need a quick database update (migration 0030) before they can be recorded.' });
+    }
+    throw error;
+  }
+  if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+  const businessName = est.business?.name || 'Handy Andy';
+  if (est.approved_at) {
+    return res.status(200).json({ ok: true, already: true, approved_at: est.approved_at, business_name: businessName });
+  }
+
+  const now = new Date().toISOString();
+  const { error: uErr } = await db.from('estimates').update({ approved_at: now }).eq('id', est.id);
+  if (uErr) {
+    if (missingColumn(uErr.message) === 'approved_at') {
+      return res.status(503).json({ error: 'Approvals need a quick database update (migration 0030) before they can be recorded.' });
+    }
+    throw uErr;
+  }
+  return res.status(200).json({ ok: true, approved_at: now, business_name: businessName });
 }
 
 // Get email quota from Resend for the current business
