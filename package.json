@@ -11,6 +11,8 @@
     "test:email": "node --env-file=.env scripts/test-confirmation-email.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.38.0"
+    "@supabase/supabase-js": "^2.38.0",
+    "imapflow": "^1.4.3",
+    "mailparser": "^3.9.12"
   }
 }

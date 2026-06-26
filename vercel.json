@@ -2,7 +2,8 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "crons": [
-    { "path": "/api/migrate?action=send_reminders", "schedule": "0 15 * * *" }
+    { "path": "/api/migrate?action=send_reminders", "schedule": "0 15 * * *" },
+    { "path": "/api/migrate?action=watch_walmart_email", "schedule": "0 8 * * *" }
   ],
   "rewrites": [
     { "source": "/handy-andy", "destination": "/admin.html" },

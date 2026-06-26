@@ -7,6 +7,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
+import { watchWalmartEmails } from './_lib/walmart-watcher.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -150,6 +151,27 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[send_reminders]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Walmart bracket-delivery watcher. Secured by CRON_SECRET (same as
+  // send_reminders) so a scheduled trigger can call it. Reads the AOL inbox over
+  // IMAP, records delivered bracket orders, and bumps the shared "Shop"
+  // inventory. Never modifies the inbox.
+  //   &dry=1   parse + report what WOULD be recorded without writing anything
+  if (action === 'watch_walmart_email') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await watchWalmartEmails({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[watch_walmart_email]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
