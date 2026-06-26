@@ -179,6 +179,7 @@
         <button id="availBtn">My Availability</button>
         <button id="reviewsBtn">⭐ Reviews</button>
         <button id="payrollBtn">💵 Payroll</button>
+        <button id="inventoryBtn">📦 Inventory</button>
         <button id="logout">Log out</button>
       </div>
     </div>
@@ -207,6 +208,9 @@
 
   <!-- Reviews -->
   <div id="reviewsView" class="hidden"></div>
+
+  <!-- Bracket inventory (read-only) -->
+  <div id="inventoryView" class="hidden"></div>
 
 </div>
 
@@ -323,7 +327,7 @@ document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
   if(which!=='detailView' && detailPoll){ clearInterval(detailPoll); detailPoll=null; }
-  for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+  for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView','inventoryView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
 // All day math runs in the BUSINESS timezone so the tech app's calendar lines
@@ -659,6 +663,7 @@ let exEditState=new Set();          // slot keys selected in the open date edito
 document.getElementById('availBtn').addEventListener('click',showAvailability);
 document.getElementById('payrollBtn').addEventListener('click',showPayroll);
 document.getElementById('reviewsBtn').addEventListener('click',showReviews);
+document.getElementById('inventoryBtn').addEventListener('click',showInventory);
 
 let payrollWeekStart='';            // 'YYYY-MM-DD' for Sunday of current week
 
@@ -982,6 +987,54 @@ function renderReviews(data){
     <div style="height:40px;"></div>
   </div>`;
   document.getElementById('reviewsBack').addEventListener('click',showJobs);
+}
+
+// ── Bracket inventory (read-only) ─────────────────────────────────────────────
+// Techs can SEE their bracket stock but not edit it — counts are managed by the
+// office. Mirrors the Reviews/Payroll screens (load → render, back to jobs).
+async function showInventory(){
+  show('inventoryView');
+  const v=document.getElementById('inventoryView');
+  v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('bracket_inventory');
+    renderInventory(d);
+  }catch(e){
+    v.innerHTML=`<div class="detail"><button class="back" id="invBack">‹ Today's jobs</button><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
+    document.getElementById('invBack').addEventListener('click',showJobs);
+  }
+}
+
+function renderInventory(data){
+  const v=document.getElementById('inventoryView');
+  const flat=Number(data.flat)||0, tilt=Number(data.tilting)||0, fm=Number(data.full_motion)||0;
+  const total=Number(data.total)||(flat+tilt+fm);
+  const row=(label,qty)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);">
+      <div style="font-weight:600;font-size:15px;">${esc(label)}</div>
+      <div style="font-weight:800;font-size:20px;${qty===0?'color:var(--mute);':''}">${qty}</div>
+    </div>`;
+  v.innerHTML=`<div class="detail">
+    <button class="back" id="invBack">‹ Today's jobs</button>
+
+    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Inventory</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">TV mounting brackets assigned to you</div></div>
+
+    <div class="card">
+      ${row('Flat',flat)}
+      ${row('Tilting',tilt)}
+      ${row('Full Motion',fm)}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 4px;">
+        <div style="font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);">Total</div>
+        <div style="font-weight:900;font-size:24px;color:var(--green);">${total}</div>
+      </div>
+    </div>
+
+    <div class="sub" style="color:var(--mute);font-size:12px;text-align:center;margin-top:14px;padding:0 12px;">Counts are managed by the office. If something looks off, let them know.</div>
+
+    <div style="height:40px;"></div>
+  </div>`;
+  document.getElementById('invBack').addEventListener('click',showJobs);
 }
 
 // Dev bypass: load the no-PIN tech picker. Surfaces failures into the dropdown

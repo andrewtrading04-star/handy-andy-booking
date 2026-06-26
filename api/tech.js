@@ -128,6 +128,7 @@ export default async function handler(req, res) {
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
       case 'tech_payroll':     return await techPayroll(req, res, db, auth);
       case 'tech_reviews':     return await techReviews(req, res, db, auth);
+      case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -971,4 +972,29 @@ async function techReviews(req, res, db, auth) {
   });
 
   return res.status(200).json({ average, total, week_count: weekCount, reviews });
+}
+
+// ── Bracket inventory (read-only) ────────────────────────────────────────────
+// The logged-in tech's own bracket stock (flat / tilting / full motion). Techs
+// can SEE their count but NOT change it — only the owner edits counts (admin
+// dashboard) and assigns deliveries. The tech id comes from the signed token,
+// never the request, so a tech can only ever read their OWN inventory.
+async function bracketInventory(req, res, db, auth) {
+  const { data: inv, error } = await db.from('bracket_inventory')
+    .select('flat_qty, tilting_qty, full_motion_qty, updated_at')
+    .eq('technician_id', auth.tech_id)
+    .eq('business_id', auth.business_id)
+    .maybeSingle();
+  if (error) throw error;
+
+  const flat = inv?.flat_qty || 0;
+  const tilting = inv?.tilting_qty || 0;
+  const full_motion = inv?.full_motion_qty || 0;
+  return res.status(200).json({
+    flat,
+    tilting,
+    full_motion,
+    total: flat + tilting + full_motion,
+    updated_at: inv?.updated_at || null,
+  });
 }
