@@ -58,7 +58,10 @@ function afterHoursFeeFor(slotId, territoryId) {
   if (!startMs) return 0;
   const tz = TERRITORY_TZ[territoryId] || 'America/Denver';
   const hour = Number(new Date(startMs).toLocaleString('en-US', { timeZone: tz, hour: '2-digit', hour12: false })) % 24;
-  return hour >= 20 ? AFTER_HOURS_FEE : 0;
+  if (hour < 20) return 0;
+  // Mirror Zenbooker's after-hours config: $100 on Sundays, $75 every other day.
+  const weekday = new Date(startMs).toLocaleString('en-US', { timeZone: tz, weekday: 'long' });
+  return weekday === 'Sunday' ? 100 : AFTER_HOURS_FEE;
 }
 
 // Distance surcharge for the outer Denver territories. Zenbooker DOES have these

@@ -545,12 +545,15 @@
     if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
     return items;
   }
-  function slotSurcharge(sl){
+  function slotSurcharge(sl,ds){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
     if(!m)return 0;let h=parseInt(m[1]);
     if(m[2].toUpperCase()==='PM'&&h!==12)h+=12;
     if(m[2].toUpperCase()==='AM'&&h===12)h=0;
-    return h>=20?75:0;
+    if(h<20)return 0;
+    // After-hours fee mirrors Zenbooker: $100 on Sundays, $75 every other day.
+    const isSunday=ds?new Date(ds+'T12:00:00').getDay()===0:false;
+    return isSunday?100:75;
   }
   // After-hours fee for the currently selected slot. $75 for any job starting at
   // 8 PM or later. The server (api/book.js) independently recomputes & enforces
@@ -558,7 +561,7 @@
   function selectedSlotSurcharge(){
     if(!selectedSlot||!selectedDate)return 0;
     const sl=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot);
-    return sl?slotSurcharge(sl):0;
+    return sl?slotSurcharge(sl,selectedDate):0;
   }
 
   // ─── Styles ───────────────────────────────────────────────────────────────
@@ -1000,7 +1003,7 @@
       const slots=slotsByDate[selectedDate];
       const df=fmtDate(selectedDate);
       const slotBtns=slots.map(sl=>{
-        const on=selectedSlot===sl.id, sur=slotSurcharge(sl);
+        const on=selectedSlot===sl.id, sur=slotSurcharge(sl,selectedDate);
         return `<div class="ha-slot" data-id="${sl.id}" style="background:${on?'rgba(255,102,0,0.12)':'#1f1f23'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:8px!important;padding:14px 10px!important;cursor:pointer!important;text-align:center!important;">
           <div style="font-size:13px!important;font-weight:600!important;color:#fff!important;">${sl.arrival_window}${sur>0?` <span style="color:#ff9944!important;font-size:11px!important;">+$${sur}</span>`:''}</div>
         </div>`;
