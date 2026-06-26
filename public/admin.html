@@ -220,7 +220,9 @@
   .est-quote-line b{color:var(--ink);}
   .est-quote-total{display:flex;justify-content:space-between;gap:10px;font-size:14px;font-weight:800;color:var(--ink);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2);}
   .est-quote-total .amt{color:var(--accent);}
-  .est-approved{display:inline-flex;align-items:center;gap:6px;margin-top:10px;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:8px;padding:6px 11px;font-size:13px;font-weight:800;line-height:1.3;}
+  .est-approval{display:inline-flex;align-items:center;gap:6px;margin-top:10px;border-radius:8px;padding:6px 11px;font-size:13px;font-weight:800;line-height:1.3;}
+  .est-approval.approved{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
+  .est-approval.waiting{background:#fef3c7;color:#b45309;border:1px solid #fde68a;}
   .fld{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin:0 0 6px;text-transform:uppercase;letter-spacing:.03em;}
   .es-lines{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
   .es-line{display:grid;grid-template-columns:1fr 56px 84px 30px;gap:6px;align-items:center;}
@@ -2643,7 +2645,9 @@ function estCard(e){
   const hasQuote=lines.length>0;
   const buildLabel=hasQuote?'Edit quote':'Build quote';
   const approvedAt=e.approved_at?new Date(e.approved_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-  const approved=e.approved_at?`<div class="est-approved">✓ Customer approved this estimate${approvedAt?` · ${esc(approvedAt)}`:''}</div>`:'';
+  const approved=e.approved_at
+    ? `<div class="est-approval approved">✓ Customer approved${approvedAt?` · ${esc(approvedAt)}`:''}</div>`
+    : `<div class="est-approval waiting">⏳ Waiting on approval</div>`;
   return `<div class="job est-card" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
