@@ -199,8 +199,11 @@ export async function publicOpenSlots(db, { businessSlug, days = 30 }) {
   const winEnd = localDateStartUTC(tz, endExclusive).toISOString();
   const idList = techIds.join(',');
   const runB = (withSecond) => {
+    // The SELECT (not just the filter) must drop secondary_technician_id on the
+    // fallback, or a pre-0019 DB errors on BOTH attempts and no slot ever reads
+    // as booked (→ overbooking). Matches admin.js's conditional-select pattern.
     let q = db.from('bookings')
-      .select('technician_id, secondary_technician_id, scheduled_at')
+      .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
       .neq('status', 'cancelled').not('scheduled_at', 'is', null)
       .gte('scheduled_at', winStart).lt('scheduled_at', winEnd);
     return withSecond
