@@ -31,15 +31,16 @@ export default async function handler(req, res) {
       // whether its subtotal already includes the +$25 service_territory surcharge.
       const BASES = new Set([99, 109, 119, 149, 179, 229]);     // base price => surcharge NOT applied
       const WITH25 = new Set([124, 134, 144, 174, 204, 254]);   // base+25   => surcharge applied
-      const recentDen2 = []; let scanned = 0, lastCursor = 0;
-      for (let page = 0; page < 45; page++) {
-        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}`, { headers: H });
+      const recentDen2 = []; const histo = {}; let scanned = 0;
+      for (let page = 0; page < 8; page++) {
+        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_min=2026-06-01&start_date_max=2026-09-01`, { headers: H });
         const j = await r.json().catch(() => ({}));
         const results = j.results || [];
         if (!results.length) break;
-        scanned += results.length; lastCursor = page * 50;
+        scanned += results.length;
         for (const job of results) {
           const tname = (job.territory && (job.territory.name || job.territory.id)) || 'none';
+          histo[tname] = (histo[tname] || 0) + 1;
           if (/Denver #2/i.test(String(tname))) {
             const sub = Number(job.invoice && job.invoice.subtotal) || 0;
             const created = job.created_at || job.date_created || job.created || null;
@@ -51,10 +52,8 @@ export default async function handler(req, res) {
         }
         if (results.length < 50) break;
       }
-      // keep the last (most recent) 12 Denver #2 jobs seen
-      const tail = recentDen2.slice(-12);
       return res.status(200).json({ serviceConfig_distance_rules: (serviceConfig.territory_price_adjustments || []).filter(a => a.adjustment_type === 'service_territory'),
-        scanned, lastCursor, recent_denver2_jobs: tail });
+        scanned, territory_histogram: histo, denver2_jobs: recentDen2.slice(0, 15) });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
