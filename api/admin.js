@@ -198,6 +198,7 @@ export default async function handler(req, res) {
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
+      case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
       case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
       case 'booking_photo_add':    return await bookingPhotoAdd(req, res, db, auth, body);
@@ -1617,6 +1618,64 @@ async function bookingUpdate(req, res, db, auth, body) {
     notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at).catch(console.error);
   }
   return res.status(200).json({ ok: true });
+}
+
+// Normalize editor line items into storable booking_line_items rows. Each
+// editor line is just { text, price } (a dollar amount), so quantity is always 1
+// and line_total == unit_price == price. `kind` is preserved when the client
+// sends it back (so a fee/tip/coupon line keeps its category); new lines default
+// to 'service'. Blank lines (no text and no price) are dropped.
+function sanitizeBookingLineItems(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(it => {
+    const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
+    const price = Math.round((Number(it && (it.price != null ? it.price : (it.line_total != null ? it.line_total : it.unit_price))) || 0) * 100) / 100;
+    const kind = (it && it.kind) || 'service';
+    const taxable = !(it && it.taxable === false);
+    return { name, quantity: 1, unit_price: price, line_total: price, kind, taxable };
+  }).filter(it => it.name || it.unit_price);
+}
+
+// ── Edit a booking's line items (text + price) ───────────────────────────────
+// Owner + secretary. The office sees every line on a job, so the posted set is
+// authoritative: we delete the old rows and insert the new ones, then set the
+// booking's price to the sum of the lines so the total can never drift from the
+// items it's made of. Works on any job, including imported (Zenbooker) jobs that
+// arrived with no line items at all — the editor seeds one line from the price.
+async function bookingLineItemsSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const { data: existing, error: e0 } = await db.from('bookings')
+    .select('id').eq('id', id).eq('business_id', biz.id).single();
+  if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
+
+  const items = sanitizeBookingLineItems(body.items);
+
+  // Replace the whole set: drop the current rows, insert the edited ones.
+  const { error: delErr } = await db.from('booking_line_items')
+    .delete().eq('booking_id', id).eq('business_id', biz.id);
+  if (delErr) throw delErr;
+
+  if (items.length) {
+    const rows = items.map(it => ({
+      booking_id: id, business_id: biz.id,
+      kind: it.kind, name: it.name,
+      quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
+      taxable: it.taxable,
+    }));
+    const { error: insErr } = await db.from('booking_line_items').insert(rows);
+    if (insErr) throw insErr;
+  }
+
+  const price = Math.round(items.reduce((t, it) => t + it.line_total, 0) * 100) / 100;
+  const { error: upErr } = await db.from('bookings')
+    .update({ price }).eq('id', id).eq('business_id', biz.id);
+  if (upErr) throw upErr;
+
+  return res.status(200).json({ ok: true, price, count: items.length });
 }
 
 // ── Booking payments: charge card on file | mark paid (cash) | refund ────────

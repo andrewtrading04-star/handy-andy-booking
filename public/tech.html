@@ -464,7 +464,15 @@ async function showDetail(id){
         </div>
         ${j.review_text?`<div class="note-b" style="margin-top:8px;background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;">“${esc(j.review_text)}”</div>`:'<div class="sub" style="color:var(--mute);font-size:13px;margin-top:6px;font-style:italic;">No comment left.</div>'}
       </div>`:''}
-      ${(j.line_items&&j.line_items.length)||j.partner_tech?`<div class="card"><h3>Job Details</h3>${(j.line_items||[]).map(li=>`<div class="kv">• ${esc(liName(li.name))}</div>`).join('')}${j.partner_tech?`<div class="kv" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}</div>`:''}
+      <div class="card"><h3>Line Items</h3>
+        <div id="liEditor"></div>
+        <button class="btn ghost sm" id="liAdd" style="margin-top:8px;">+ Add line item</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
+          <div style="font-weight:700;">Total: <span id="liTotal"></span></div>
+          <button class="btn sm" id="liSave">Save</button>
+        </div>
+        ${j.partner_tech?`<div class="kv" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}
+      </div>
 
       <div class="card">
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
@@ -539,6 +547,10 @@ async function showDetail(id){
     const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
     const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
 
+    // Line-item editor (text + price). Techs only edit the visible work lines;
+    // fees/tips are preserved server-side and the total is recomputed there.
+    mountTechLineItems(j, id);
+
     // Multi-tech sync: while this job is open, unpaid, and not yet complete, poll
     // so that if the OTHER tech on the job takes the payment, this screen switches
     // to "paid" and unblocks Mark Complete on its own — no manual refresh needed.
@@ -555,6 +567,40 @@ async function showDetail(id){
     }
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Line-item editor ─────────────────────────────────────────────────────────
+// Every line is { text, price }. Techs see only the work lines (fees/tips are
+// hidden), so the total shown adds back hidden_total to match the booking price.
+// A job with no work lines (e.g. imported) seeds one line from price − hidden.
+function fmtUsd(n){ return '$'+(Math.round((Number(n)||0)*100)/100); }
+function mountTechLineItems(j, id){
+  const wrap=document.getElementById('liEditor');
+  const totalEl=document.getElementById('liTotal');
+  if(!wrap||!totalEl) return;
+  const hiddenTotal=Number(j.hidden_total)||0;
+  let rows=(j.line_items&&j.line_items.length)
+    ? j.line_items.map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0 }))
+    : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal) }];
+  const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
+  const render=()=>{
+    wrap.innerHTML=rows.map((r,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <input type="text" data-i="${i}" data-f="name" value="${esc(r.name)}" placeholder="Description" style="flex:1;min-width:0;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;">
+      <div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="price" value="${r.price}" style="width:84px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;text-align:right;"></div>
+      <button class="btn ghost sm" data-del="${i}" title="Remove" style="padding:8px 12px;">×</button>
+    </div>`).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
+    wrap.querySelectorAll('input[data-f]').forEach(inp=>inp.addEventListener('input',()=>{ rows[+inp.dataset.i][inp.dataset.f]=inp.value; recalc(); }));
+    wrap.querySelectorAll('button[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ rows.splice(+btn.dataset.del,1); render(); }));
+    recalc();
+  };
+  render();
+  const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', price:0 }); render(); };
+  const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
+    const items=rows.map(r=>({ name:(r.name||'').trim(), price:Number(r.price)||0 })).filter(r=>r.name||r.price);
+    save.disabled=true;
+    try{ await api('job_line_items_save',{method:'POST',body:{id,items}}); toast('Line items saved'); showDetail(id); }
+    catch(e){ toast(e.message); save.disabled=false; }
+  };
 }
 
 // ── Photos ──────────────────────────────────────────────────────────────────

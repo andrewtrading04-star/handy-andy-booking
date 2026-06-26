@@ -116,6 +116,7 @@ export default async function handler(req, res) {
       case 'jobs':             return await jobs(req, res, db, auth);
       case 'job':              return await job(req, res, db, auth);
       case 'status':           return await status(req, res, db, auth, body);
+      case 'job_line_items_save': return await jobLineItemsSave(req, res, db, auth, body);
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
       case 'job_photos':       return await jobPhotos(req, res, db, auth);
       case 'job_photo_add':    return await jobPhotoAdd(req, res, db, auth, body);
@@ -421,6 +422,73 @@ async function job(req, res, db, auth) {
     shaped.partner_tech = null;
   }
   return res.status(200).json({ job: shaped });
+}
+
+// Normalize editor line items to storable rows. Each editor line is { text, price }
+// (a dollar amount), so quantity is 1 and line_total == unit_price == price.
+// Blank lines (no text and no price) are dropped.
+function sanitizeWorkLineItems(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(it => {
+    const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
+    const price = Math.round((Number(it && (it.price != null ? it.price : (it.line_total != null ? it.line_total : it.unit_price))) || 0) * 100) / 100;
+    return { name, quantity: 1, unit_price: price, line_total: price };
+  }).filter(it => it.name || it.unit_price);
+}
+
+// ── Edit a job's line items (text + price), tech-side ────────────────────────
+// A tech can edit the visible "work" lines on any of their own jobs (primary OR
+// second tech). Fees/tips/coupons/the dismount up-sell are hidden from techs, so
+// those rows are preserved untouched — the tech only replaces the work lines. The
+// booking total is then recomputed from ALL remaining rows (preserved + new) so
+// the price always equals the sum of its parts. The job id and tech scope come
+// from the signed token, never the request, so a tech can only edit their own job.
+async function jobLineItemsSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  // Job must belong to this tech. Pull the current line items (with ids + kind)
+  // so we know which are hidden (keep) vs visible work (replace).
+  const build = () => scopeMine(db.from('bookings')
+    .select('id, business_id, line_items:booking_line_items ( id, kind, name, line_total )'), auth)
+    .eq('id', id).maybeSingle();
+  const { data: bk, error } = await fetchMine(build);
+  if (error || !bk) return res.status(404).json({ error: 'Job not found' });
+  const bizId = bk.business_id;
+
+  const existing = Array.isArray(bk.line_items) ? bk.line_items : [];
+  const visibleIds = existing.filter(li => !isHiddenLi(li)).map(li => li.id);
+
+  // Replace only the visible work lines; the hidden fee/tip/coupon/dismount rows
+  // stay exactly as they were.
+  if (visibleIds.length) {
+    const { error: delErr } = await db.from('booking_line_items').delete().in('id', visibleIds);
+    if (delErr) throw delErr;
+  }
+
+  const items = sanitizeWorkLineItems(body.items);
+  if (items.length) {
+    const rows = items.map(it => ({
+      booking_id: id, business_id: bizId,
+      kind: 'service', name: it.name,
+      quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
+      taxable: true,
+    }));
+    const { error: insErr } = await db.from('booking_line_items').insert(rows);
+    if (insErr) throw insErr;
+  }
+
+  // Recompute the booking total from every remaining line (preserved hidden + new
+  // work) so it can never drift from the items it's made of.
+  const { data: all, error: sumErr } = await db.from('booking_line_items')
+    .select('line_total').eq('booking_id', id);
+  if (sumErr) throw sumErr;
+  const price = Math.round((all || []).reduce((t, r) => t + (Number(r.line_total) || 0), 0) * 100) / 100;
+  const { error: upErr } = await db.from('bookings').update({ price }).eq('id', id);
+  if (upErr) throw upErr;
+
+  return res.status(200).json({ ok: true, price });
 }
 
 async function status(req, res, db, auth, body) {
@@ -787,16 +855,19 @@ async function setAvailabilityException(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, date, count: rows.length });
 }
 
+// Line items the tech should never see as "work" (fees, tips, coupons, and the
+// dismount up-sell which is a payment concern, not a task). Shared by shapeJob
+// (to filter the view) and jobLineItemsSave (to preserve these when a tech edits
+// the visible work items, so techs can't touch fees/tips and the total stays right).
+const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
+function isHiddenLi(li) {
+  const kind = (li && li.kind) || 'service';
+  if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
+  return HIDDEN_LI.has(((li && li.name) || '').trim());
+}
+
 function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
-  // Line items the tech should never see as "work" (fees, tips, coupons, and the
-  // dismount up-sell which is a payment concern, not a task).
-  const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
-  const isHiddenLi = (li) => {
-    const kind = li.kind || 'service';
-    if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
-    return HIDDEN_LI.has((li.name || '').trim());
-  };
   // Service name: use the linked service only (TV Mounting, Handyman, etc).
   // Don't fall back to line item names—they're internal detail, not service categories.
   const serviceName = b.service?.name || null;
@@ -824,6 +895,12 @@ function shapeJob(b, full = false, forTech = false) {
     out.maps_key = process.env.GOOGLE_MAPS_API_KEY || null;
     // For techs, only show work items; hide fees, tips, coupons, and dismount.
     out.line_items = (b.line_items || []).filter(li => forTech ? !isHiddenLi(li) : true);
+    // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the
+    // line-item editor can seed correctly: when a job has no visible work lines, the
+    // starting line should be (price − hidden_total), not the whole price.
+    out.hidden_total = forTech
+      ? Math.round((b.line_items || []).filter(isHiddenLi).reduce((t, li) => t + (Number(li.line_total) || 0), 0) * 100) / 100
+      : 0;
     out.payment_status = b.payment_status || 'unpaid';
     out.paid_at = b.paid_at || null;
     out.stripe_customer_id = b.stripe_customer_id || null;
