@@ -1,6 +1,8 @@
 // /api/service-area.js
 // Looks up which Zenbooker territory serves a zip code.
 
+export const config = { maxDuration: 60 }; // TEMP: deep job paging in the diagnostic
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -25,29 +27,34 @@ export default async function handler(req, res) {
           pricing_method: sj.pricing_method, base_price: sj.base_price, min_price: sj.min_price };
       } catch (e) { serviceConfig = { error: e.message }; }
 
-      // (B) Recent jobs — territory histogram + raw pricing of any non-core-Denver Denver job.
-      const histo = {}; const samples = []; let scanned = 0;
-      for (let page = 0; page < 10; page++) {
-        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_after=2026-06-15&start_date_before=2026-08-01`, { headers: H });
+      // (B) Page DEEP to reach the most-recent Denver #2 jobs; classify each by
+      // whether its subtotal already includes the +$25 service_territory surcharge.
+      const BASES = new Set([99, 109, 119, 149, 179, 229]);     // base price => surcharge NOT applied
+      const WITH25 = new Set([124, 134, 144, 174, 204, 254]);   // base+25   => surcharge applied
+      const recentDen2 = []; let scanned = 0, lastCursor = 0;
+      for (let page = 0; page < 45; page++) {
+        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}`, { headers: H });
         const j = await r.json().catch(() => ({}));
         const results = j.results || [];
+        if (!results.length) break;
+        scanned += results.length; lastCursor = page * 50;
         for (const job of results) {
-          scanned++;
           const tname = (job.territory && (job.territory.name || job.territory.id)) || 'none';
-          histo[tname] = (histo[tname] || 0) + 1;
-          const isOuter = /#2|#3|#4|boulder|colorado spr/i.test(String(tname));
-          if (isOuter && samples.length < 6) {
-            const ps = (job.services || []).flatMap(s => (s.pricing_summary || []).map(p => `${p.description}=${p.amount}`));
-            samples.push({ job_number: job.job_number, territory: tname,
-              invoice_subtotal: job.invoice && job.invoice.subtotal,
-              invoice_total: job.invoice && (job.invoice.amount_due != null ? job.invoice.amount_due : job.invoice.total),
-              services_top_keys: (job.services || [])[0] ? Object.keys(job.services[0]) : [],
-              pricing_lines: ps });
+          if (/Denver #2/i.test(String(tname))) {
+            const sub = Number(job.invoice && job.invoice.subtotal) || 0;
+            const created = job.created_at || job.date_created || job.created || null;
+            let cls = 'other';
+            if (BASES.has(sub)) cls = 'NO surcharge (base price)';
+            else if (WITH25.has(sub)) cls = 'HAS +$25 surcharge';
+            recentDen2.push({ job_number: job.job_number, subtotal: sub, created, classify: cls });
           }
         }
         if (results.length < 50) break;
       }
-      return res.status(200).json({ serviceConfig, scanned, territory_histogram: histo, outer_job_samples: samples });
+      // keep the last (most recent) 12 Denver #2 jobs seen
+      const tail = recentDen2.slice(-12);
+      return res.status(200).json({ serviceConfig_distance_rules: (serviceConfig.territory_price_adjustments || []).filter(a => a.adjustment_type === 'service_territory'),
+        scanned, lastCursor, recent_denver2_jobs: tail });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
