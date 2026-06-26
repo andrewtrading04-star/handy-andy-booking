@@ -222,6 +222,8 @@ export default async function handler(req, res) {
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'payroll': return await payroll(req, res, db, auth);
+      case 'bracket_pending': return await bracketPending(req, res, db, auth);
+      case 'bracket_assign': return await bracketAssign(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -2870,5 +2872,97 @@ async function payroll(req, res, db, auth) {
     pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
     techs: data,
     total: data.reduce((sum, t) => sum + t.total, 0),
+  });
+}
+
+// ── Bracket Inventory: Pending Deliveries & Assignment ──────────────────────
+// Fetch pending bracket deliveries waiting to be assigned to a tech.
+async function bracketPending(req, res, db, auth) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const { data: pending, error } = await db.from('bracket_purchases')
+    .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, order_date, delivered_date, created_at')
+    .eq('business_id', bizId)
+    .eq('status', 'delivered')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  return res.status(200).json({
+    pending: (pending || []).map(p => ({
+      id: p.id,
+      order_num: p.walmart_order_num || '(manual)',
+      flat: p.flat_qty || 0,
+      tilting: p.tilting_qty || 0,
+      full_motion: p.full_motion_qty || 0,
+      total: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
+      delivered_date: p.delivered_date,
+      created_at: p.created_at,
+    })),
+  });
+}
+
+// Assign a pending bracket delivery to a technician. Moves brackets from the
+// pending purchase to the tech's inventory and marks the purchase assigned.
+async function bracketAssign(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can assign brackets.' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const purchaseId = (body.purchase_id || '').toString().trim();
+  const techId = (body.technician_id || '').toString().trim();
+  if (!purchaseId || !techId) return res.status(400).json({ error: 'purchase_id and technician_id required' });
+
+  // Fetch the pending purchase
+  const { data: purchase, error: purchErr } = await db.from('bracket_purchases')
+    .select('*').eq('id', purchaseId).eq('business_id', bizId).eq('status', 'delivered').single();
+  if (purchErr || !purchase) return res.status(404).json({ error: 'Pending delivery not found' });
+
+  // Verify tech exists in this business
+  const { data: tech, error: techErr } = await db.from('technicians')
+    .select('id').eq('id', techId).eq('business_id', bizId).single();
+  if (techErr || !tech) return res.status(404).json({ error: 'Technician not found' });
+
+  const flat = purchase.flat_qty || 0;
+  const tilting = purchase.tilting_qty || 0;
+  const full_motion = purchase.full_motion_qty || 0;
+
+  // Get or create the tech's inventory row
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+
+  if (inv) {
+    // Update existing row
+    const { error: upErr } = await db.from('bracket_inventory').update({
+      flat_qty: (inv.flat_qty || 0) + flat,
+      tilting_qty: (inv.tilting_qty || 0) + tilting,
+      full_motion_qty: (inv.full_motion_qty || 0) + full_motion,
+    }).eq('id', inv.id);
+    if (upErr) throw upErr;
+  } else {
+    // Create new row
+    const { error: insErr } = await db.from('bracket_inventory').insert({
+      business_id: bizId,
+      technician_id: techId,
+      flat_qty: flat,
+      tilting_qty: tilting,
+      full_motion_qty: full_motion,
+    });
+    if (insErr) throw insErr;
+  }
+
+  // Mark the purchase as assigned
+  const { error: markErr } = await db.from('bracket_purchases').update({
+    status: 'pending_assignment',
+    assigned_at: new Date().toISOString(),
+  }).eq('id', purchaseId);
+  if (markErr) throw markErr;
+
+  return res.status(200).json({
+    ok: true,
+    assigned: { flat, tilting, full_motion, total: flat + tilting + full_motion },
   });
 }

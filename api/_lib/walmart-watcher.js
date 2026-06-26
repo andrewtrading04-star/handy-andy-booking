@@ -9,19 +9,18 @@
 //   2. Finds recent emails from Walmart that say a package was DELIVERED.
 //   3. Parses the order number, date, and each line item's quantity + bracket
 //      type (flat / tilting / full_motion) from the product name.
-//   4. Records the delivery in bracket_purchases and adds the brackets to the
-//      shared "Shop" inventory pile — exactly mirroring the manual
-//      bracketParseEmail write path in api/admin.js.
+//   4. Records the delivery in bracket_purchases with status 'delivered'.
+//      Frontend then shows an alert so the owner can assign them to a tech.
 //
 // Design goals:
 //   * Idempotent — a delivery is counted at most once. Dedupe is by
 //     walmart_order_num (the purchase row), so the same email can be re-scanned
 //     every run with no double-counting and WITHOUT touching the inbox's
 //     read/unseen state (it's the owner's personal mailbox).
-//   * Shared pile — delivery emails never name a technician, so every delivery
-//     lands on a sentinel "Shop" technician (active:false so it never appears in
-//     job-assignment pickers, but its inventory row still shows on the
-//     dashboard). No schema change required.
+//   * Pending assignment — delivery emails never name a technician. Each
+//     delivery records with status 'delivered', and the dashboard shows an alert
+//     for the owner to manually assign them to a tech. This gives visibility +
+//     control.
 //   * Bounded — only scans Walmart mail from the last LOOKBACK_DAYS so the run
 //     stays small and fast.
 import { ImapFlow } from 'imapflow';
@@ -30,12 +29,7 @@ import { serviceClient } from './supabase.js';
 
 const LOOKBACK_DAYS = 30;      // only scan Walmart mail this recent
 const MAX_MESSAGES   = 40;     // hard cap per run (newest first)
-const SENTINEL_NAME  = 'Shop'; // shared-pile technician for unassigned deliveries
-
-// Which business the brackets belong to. Override with WALMART_BUSINESS_SLUG.
-function businessSlug() {
-  return (process.env.WALMART_BUSINESS_SLUG || 'handy-andy').toString();
-}
+const BUSINESS_SLUG  = 'handy-andy'; // which business; can be overridden with WALMART_BUSINESS_SLUG
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -114,21 +108,9 @@ export function parseWalmartEmail(subject, body) {
 
 // ── Inventory write (mirrors api/admin.js bracketParseEmail) ──────────────────
 
-// Find-or-create the shared "Shop" sentinel technician for this business.
-async function getShopTechId(db, bizId) {
-  const { data: existing } = await db.from('technicians')
-    .select('id').eq('business_id', bizId).ilike('name', SENTINEL_NAME).maybeSingle();
-  if (existing) return existing.id;
-  const { data: created, error } = await db.from('technicians')
-    .insert({ business_id: bizId, name: SENTINEL_NAME, active: false })
-    .select('id').single();
-  if (error) throw new Error(`could not create "${SENTINEL_NAME}" technician: ${error.message}`);
-  return created.id;
-}
-
-// Record one delivered order and bump inventory. Idempotent on walmart_order_num.
-async function recordDelivery(db, bizId, techId, parsed, today) {
-  // Already counted? (dedupe by order number) — skip without touching inventory.
+// Record one delivered order (pending assignment). Idempotent on walmart_order_num.
+async function recordDelivery(db, bizId, parsed, today) {
+  // Already counted? (dedupe by order number) — skip.
   const { data: prior } = await db.from('bracket_purchases')
     .select('id').eq('walmart_order_num', parsed.orderNum).eq('business_id', bizId).maybeSingle();
   if (prior) return { status: 'skipped', reason: 'already recorded' };
@@ -137,7 +119,6 @@ async function recordDelivery(db, bizId, techId, parsed, today) {
 
   const { error: insErr } = await db.from('bracket_purchases').insert({
     business_id: bizId,
-    technician_id: techId,
     walmart_order_num: parsed.orderNum,
     flat_qty: flat,
     tilting_qty: tilting,
@@ -147,26 +128,6 @@ async function recordDelivery(db, bizId, techId, parsed, today) {
     delivered_date: today,
   });
   if (insErr) throw new Error(`bracket_purchases insert failed: ${insErr.message}`);
-
-  // Read-then-write inventory increment (no atomic increment in supabase-js).
-  const { data: inv } = await db.from('bracket_inventory')
-    .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
-  if (inv) {
-    await db.from('bracket_inventory').update({
-      flat_qty: (inv.flat_qty || 0) + flat,
-      tilting_qty: (inv.tilting_qty || 0) + tilting,
-      full_motion_qty: (inv.full_motion_qty || 0) + full_motion,
-    }).eq('id', inv.id);
-  } else {
-    await db.from('bracket_inventory').insert({
-      business_id: bizId,
-      technician_id: techId,
-      flat_qty: flat,
-      tilting_qty: tilting,
-      full_motion_qty: full_motion,
-    });
-  }
 
   return { status: 'recorded', flat, tilting, full_motion };
 }
@@ -182,7 +143,7 @@ export async function watchWalmartEmails(opts = {}) {
   }
 
   const db = serviceClient();
-  const slug = businessSlug();
+  const slug = process.env.WALMART_BUSINESS_SLUG || BUSINESS_SLUG;
   const { data: biz, error: bizErr } = await db.from('businesses')
     .select('id, slug').eq('slug', slug).single();
   if (bizErr || !biz) throw new Error(`business "${slug}" not found (set WALMART_BUSINESS_SLUG?)`);
@@ -201,7 +162,6 @@ export async function watchWalmartEmails(opts = {}) {
     logger: false,
   });
 
-  let shopTechId = null;
   try {
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
@@ -259,8 +219,7 @@ export async function watchWalmartEmails(opts = {}) {
         }
 
         try {
-          if (!shopTechId) shopTechId = await getShopTechId(db, bizId);
-          const r = await recordDelivery(db, bizId, shopTechId, parsed, today);
+          const r = await recordDelivery(db, bizId, parsed, today);
           if (r.status === 'recorded') {
             summary.recorded++;
             summary.details.push({ order: parsed.orderNum, status: 'recorded', flat: r.flat, tilting: r.tilting, full_motion: r.full_motion, unknown: parsed.unknown });
