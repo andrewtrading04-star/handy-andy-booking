@@ -20,15 +20,15 @@ export default async function handler(req, res) {
       try {
         const sr = await fetch(`https://api.zenbooker.com/v1/services/${SVC}`, { headers: H });
         const sj = await sr.json().catch(() => ({}));
-        serviceConfig = { status: sr.status, keys: Object.keys(sj || {}),
-          territory_adjustments: sj.territory_adjustments || sj.territory_pricing || sj.adjustments || null,
-          base_price: sj.base_price || sj.price || null };
+        serviceConfig = { status: sr.status,
+          territory_price_adjustments: sj.territory_price_adjustments || null,
+          pricing_method: sj.pricing_method, base_price: sj.base_price, min_price: sj.min_price };
       } catch (e) { serviceConfig = { error: e.message }; }
 
       // (B) Recent jobs — territory histogram + raw pricing of any non-core-Denver Denver job.
       const histo = {}; const samples = []; let scanned = 0;
-      for (let page = 0; page < 6; page++) {
-        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}`, { headers: H });
+      for (let page = 0; page < 10; page++) {
+        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_after=2026-06-15&start_date_before=2026-08-01`, { headers: H });
         const j = await r.json().catch(() => ({}));
         const results = j.results || [];
         for (const job of results) {
