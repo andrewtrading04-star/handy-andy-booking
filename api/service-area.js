@@ -1,64 +1,11 @@
 // /api/service-area.js
 // Looks up which Zenbooker territory serves a zip code.
 
-export const config = { maxDuration: 60 }; // TEMP: deep job paging in the diagnostic
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  // TEMPORARY read-only diagnostic — inspect actual pricing on recent Denver-outer
-  // jobs to confirm whether Zenbooker applies the territory surcharge. Remove after use.
-  if (req.method === 'GET' && req.query.debug === 'terradj') {
-    if (req.query.token !== 'terr-7q2x') return res.status(403).json({ error: 'forbidden' });
-    const KEY = process.env.ZENBOOKER_API_KEY;
-    const SVC = '1685657518404x705274829881212200'; // HA default TV Installation service
-    const H = { Authorization: `Bearer ${KEY}` };
-    try {
-      // (A) Service definition — does Zenbooker have territory adjustments configured?
-      let serviceConfig = null;
-      try {
-        const sr = await fetch(`https://api.zenbooker.com/v1/services/${SVC}`, { headers: H });
-        const sj = await sr.json().catch(() => ({}));
-        serviceConfig = { status: sr.status,
-          territory_price_adjustments: sj.territory_price_adjustments || null,
-          pricing_method: sj.pricing_method, base_price: sj.base_price, min_price: sj.min_price };
-      } catch (e) { serviceConfig = { error: e.message }; }
-
-      // (B) Page DEEP to reach the most-recent Denver #2 jobs; classify each by
-      // whether its subtotal already includes the +$25 service_territory surcharge.
-      const BASES = new Set([99, 109, 119, 149, 179, 229]);     // base price => surcharge NOT applied
-      const WITH25 = new Set([124, 134, 144, 174, 204, 254]);   // base+25   => surcharge applied
-      const recentDen2 = []; const histo = {}; let scanned = 0;
-      for (let page = 0; page < 8; page++) {
-        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_min=2026-06-01&start_date_max=2026-09-01`, { headers: H });
-        const j = await r.json().catch(() => ({}));
-        const results = j.results || [];
-        if (!results.length) break;
-        scanned += results.length;
-        for (const job of results) {
-          const tname = (job.territory && (job.territory.name || job.territory.id)) || 'none';
-          histo[tname] = (histo[tname] || 0) + 1;
-          if (/Denver #2/i.test(String(tname))) {
-            const sub = Number(job.invoice && job.invoice.subtotal) || 0;
-            const created = job.created_at || job.date_created || job.created || null;
-            let cls = 'other';
-            if (BASES.has(sub)) cls = 'NO surcharge (base price)';
-            else if (WITH25.has(sub)) cls = 'HAS +$25 surcharge';
-            recentDen2.push({ job_number: job.job_number, subtotal: sub, created, classify: cls });
-          }
-        }
-        if (results.length < 50) break;
-      }
-      return res.status(200).json({ serviceConfig_distance_rules: (serviceConfig.territory_price_adjustments || []).filter(a => a.adjustment_type === 'service_territory'),
-        scanned, territory_histogram: histo, denver2_jobs: recentDen2.slice(0, 15) });
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
-  }
-
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;

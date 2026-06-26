@@ -61,6 +61,20 @@ function afterHoursFeeFor(slotId, territoryId) {
   return hour >= 20 ? AFTER_HOURS_FEE : 0;
 }
 
+// Distance surcharge for the outer Denver territories. Zenbooker DOES have these
+// configured as `service_territory` price adjustments, but it only applies them
+// through its own hosted booking flow — jobs created via the API (this widget)
+// are NOT charged the adjustment (confirmed: API-created Denver-outer jobs land at
+// base price). The widget already shows this surcharge to the customer, so we
+// charge it here to match. Mirrors Zenbooker's own values exactly. If Zenbooker
+// ever starts applying these to API jobs, remove this to avoid a double-charge.
+const TERRITORY_SURCHARGE = {
+  '1707513178246x806633139915194400': 25,  // Denver #2
+  '1687393551618x123774611115737090': 35,  // Denver #3
+  '1723559782141x609094402068185100': 100, // Denver #4 Boulder/Colorado Springs
+};
+function territorySurchargeFor(territoryId) { return TERRITORY_SURCHARGE[territoryId] || 0; }
+
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
 // RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
 function icsEscape(s) {
@@ -189,6 +203,13 @@ export default async function handler(req, res) {
   const afterHoursFee = afterHoursFeeFor(selectedSlot, territory_id);
   if (afterHoursFee > 0) {
     services.push({ custom_service: { name: 'After-Hours Service Fee (8 PM)', price: afterHoursFee, duration: 0, taxable: true } });
+  }
+  // Distance surcharge for outer Denver territories (#2 +$25, #3 +$35, #4 +$100).
+  // The widget displays it; Zenbooker does not apply it to API-created jobs, so
+  // charge it here to match what the customer was quoted.
+  const territorySurcharge = territorySurchargeFor(territory_id);
+  if (territorySurcharge > 0) {
+    services.push({ custom_service: { name: 'Service area surcharge', price: territorySurcharge, duration: 0, taxable: true } });
   }
   if (couponDiscount > 0) {
     services.push({ custom_service: { name: `Coupon ${couponCode} (-$${couponDiscount})`, price: -couponDiscount, duration: 0, taxable: false } });

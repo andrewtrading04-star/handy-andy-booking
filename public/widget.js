@@ -122,11 +122,11 @@
   const WEEKDAY_DISC = { 0:15, 2:10 };
   const TAX_RATE = 0.0825;
 
-  // Zenbooker per-territory price adjustments for the TV Installation service.
-  // Mirrors Zenbooker's "Territory Adjustments" so the quoted total matches what
-  // Zenbooker charges. Zenbooker applies these to the job automatically — this is
-  // DISPLAY ONLY (it is NOT sent to /api/book, which would double-charge).
-  // To update: Zenbooker → Services → TV Installation → Territory Adjustments.
+  // Per-territory distance surcharge for the outer Denver territories. This drives
+  // the on-screen "Service area surcharge" line. Zenbooker has the same values
+  // configured (Services → TV Installation → Territory Adjustments) but only applies
+  // them through its hosted booking flow — NOT to API-created jobs — so api/book.js
+  // charges the matching amount from territory_id. Keep these two maps in sync.
   const TERRITORY_ADJUSTMENTS = {
     '1707513178246x806633139915194400': 25, // Denver #2
     '1687393551618x123774611115737090': 35, // Denver #3
