@@ -117,7 +117,7 @@ function renderQuote(info){
     body = `${rows}${taxRows}<div class="qtotal"><span>Estimated total</span><span class="amt">${money(t.total)}</span></div>`+
       `<div class="qnote">This is an estimate, not a final invoice. Final pricing may vary based on on-site conditions.</div>`;
   } else {
-    body = `<div class="muted">${esc(info.description||'Details of your estimate request.')}</div>`;
+    body = `<div class="muted" style="white-space:pre-wrap;">${esc(info.description||'Details of your estimate request.')}</div>`;
   }
   $('quoteBox').innerHTML = `<div class="quote">${svc}${body}</div>`;
 }

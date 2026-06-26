@@ -2727,7 +2727,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   }
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
-  // Short-lived signed link the customer clicks to approve this quote. Verified
+  // 90-day signed link the customer clicks to approve this quote. Verified
   // server-side by estimate_approve — no public token column needed on the row.
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000); // 90 days
@@ -2749,7 +2749,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
 
 // ── Public estimate approval (token-based, no admin auth) ────────────────────
 // The "I approve" button in a quote email links to /estimate-approve.html with a
-// short-lived signed token (kind=estimate_approve, estimate_id). The page loads a
+// 90-day signed token (kind=estimate_approve, estimate_id). The page loads a
 // read-only quote summary (GET info) and records approval (POST). Mirrors the
 // public review flow. Service role bypasses RLS; the estimate id is global.
 function approveTokenEstimateId(raw) {
