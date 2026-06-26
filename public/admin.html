@@ -1132,6 +1132,8 @@ async function renderSchedule(silent){
     techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
     if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
     renderSidebarFilters();
+    // Check for pending brackets and show banner if owner
+    if(role==='owner') showBracketBanner();
     renderCalBody();
   }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
@@ -2788,6 +2790,40 @@ async function refreshEstimateBadge(){
     if(badge){ badge.textContent=n; badge.style.display=n?'inline-block':'none'; }
     return n;
   }catch{ return 0; }
+}
+
+// ── Bracket alerts on main dashboard ────────────────────────────────────────
+// Show an alert banner at the top if there are pending (unassigned) brackets.
+// Owner-only; automatically shown on the main dashboard and persists until
+// all pending deliveries are assigned.
+async function showBracketBanner(){
+  try{
+    const pend=await api('bracket_pending',{ params:{ business:current.slug }});
+    const pending=(pend&&pend.pending)||[];
+    if(!pending.length) return; // no pending deliveries
+
+    const total=pending.reduce((sum,p)=>sum+p.total,0);
+    const bannerHtml=`<div style="background:#fef08a;border-bottom:2px solid #eab308;padding:12px 16px;margin-bottom:16px;border-radius:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div>
+          <strong style="font-size:15px;color:#854d0e;">📦 ${total} bracket${total===1?'':'s'} pending assignment</strong>
+          <div style="font-size:13px;color:#a16207;margin-top:2px;">Awaiting assignment to technicians</div>
+        </div>
+        <button class="btn" onclick="navTo('brackets')" style="white-space:nowrap;flex-shrink:0;">Assign Now</button>
+      </div>
+    </div>`;
+
+    const view=document.getElementById('view');
+    const existing=view.querySelector('[data-bracket-banner]');
+    if(existing) existing.remove();
+
+    const banner=document.createElement('div');
+    banner.setAttribute('data-bracket-banner','true');
+    banner.innerHTML=bannerHtml;
+    view.insertBefore(banner, view.firstChild);
+  }catch(e){
+    // Silently fail — don't break the main dashboard if bracket check fails
+  }
 }
 
 // ── Bracket Inventory ──────────────────────────────────────────────────────────
