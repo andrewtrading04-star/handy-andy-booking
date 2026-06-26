@@ -227,6 +227,8 @@ export default async function handler(req, res) {
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
       case 'bracket_update': return await bracketUpdate(req, res, db, auth, body);
       case 'bracket_parse_email': return await bracketParseEmail(req, res, db, auth, body);
+      case 'bracket_pending': return await bracketPending(req, res, db, auth);
+      case 'bracket_assign': return await bracketAssign(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
@@ -3082,7 +3084,7 @@ async function bracketPurchases(req, res, db, auth) {
   const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
 
   const { data: purch, error } = await db.from('bracket_purchases')
-    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, created_at,
+    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at,
              technician:technicians ( id, name )`)
     .eq('business_id', bizId)
     .order('created_at', { ascending: false })
@@ -3093,7 +3095,7 @@ async function bracketPurchases(req, res, db, auth) {
     purchases: (purch || []).map(p => ({
       id: p.id,
       walmart_order_num: p.walmart_order_num,
-      technician_name: p.technician?.name || 'Unknown',
+      technician_name: p.technician?.name || 'Unassigned',
       flat_qty: p.flat_qty || 0,
       tilting_qty: p.tilting_qty || 0,
       full_motion_qty: p.full_motion_qty || 0,
@@ -3101,6 +3103,7 @@ async function bracketPurchases(req, res, db, auth) {
       status: p.status,
       order_date: p.order_date,
       delivered_date: p.delivered_date,
+      order_url: p.order_url || null,
       created_at: p.created_at,
     })),
   });
@@ -3283,5 +3286,98 @@ async function bracketParseEmail(req, res, db, auth, body) {
       full_motion: fullMotionQty,
       total: totalQty,
     },
+  });
+}
+
+// ── Pending deliveries: brackets that arrived but aren't assigned to a tech yet
+// A bracket_purchases row with technician_id IS NULL is a "just delivered, not
+// yet assigned" delivery (recorded by the email watcher or seeded manually).
+async function bracketPending(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const { data: pending, error } = await db.from('bracket_purchases')
+    .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, order_date, delivered_date, order_url, created_at')
+    .eq('business_id', bizId)
+    .is('technician_id', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  return res.status(200).json({
+    pending: (pending || []).map(p => ({
+      id: p.id,
+      walmart_order_num: p.walmart_order_num,
+      flat: p.flat_qty || 0,
+      tilting: p.tilting_qty || 0,
+      full_motion: p.full_motion_qty || 0,
+      total: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
+      order_date: p.order_date,
+      delivered_date: p.delivered_date,
+      order_url: p.order_url || null,
+      created_at: p.created_at,
+    })),
+  });
+}
+
+// Assign a pending delivery to a technician: stamp the purchase with the tech
+// and add the delivered quantities to that tech's bracket_inventory. Owner-only.
+async function bracketAssign(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can assign brackets.' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const purchaseId = (body.purchase_id || '').toString().trim();
+  const techId = (body.technician_id || '').toString().trim();
+  if (!purchaseId || !techId) return res.status(400).json({ error: 'purchase_id and technician_id required' });
+
+  // Fetch the pending purchase (must belong to this business and be unassigned).
+  const { data: purchase } = await db.from('bracket_purchases')
+    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id')
+    .eq('id', purchaseId).eq('business_id', bizId).maybeSingle();
+  if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
+  if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
+
+  // Verify tech belongs to the business.
+  const { data: tech } = await db.from('technicians')
+    .select('id, name').eq('id', techId).eq('business_id', bizId).maybeSingle();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  const flat = purchase.flat_qty || 0;
+  const tilting = purchase.tilting_qty || 0;
+  const full_motion = purchase.full_motion_qty || 0;
+
+  // Stamp the delivery with the tech.
+  const { error: stampErr } = await db.from('bracket_purchases')
+    .update({ technician_id: techId, status: 'delivered' })
+    .eq('id', purchaseId);
+  if (stampErr) throw stampErr;
+
+  // Add quantities to the tech's inventory (read-then-write; no atomic increment).
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+  if (inv) {
+    const { error: upErr } = await db.from('bracket_inventory').update({
+      flat_qty: (inv.flat_qty || 0) + flat,
+      tilting_qty: (inv.tilting_qty || 0) + tilting,
+      full_motion_qty: (inv.full_motion_qty || 0) + full_motion,
+    }).eq('id', inv.id);
+    if (upErr) throw upErr;
+  } else {
+    const { error: insErr } = await db.from('bracket_inventory').insert({
+      business_id: bizId,
+      technician_id: techId,
+      flat_qty: flat,
+      tilting_qty: tilting,
+      full_motion_qty: full_motion,
+    });
+    if (insErr) throw insErr;
+  }
+
+  return res.status(200).json({
+    ok: true,
+    technician_name: tech.name,
+    assigned: { flat, tilting, full_motion, total: flat + tilting + full_motion },
   });
 }
