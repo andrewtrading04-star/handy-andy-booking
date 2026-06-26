@@ -39,6 +39,38 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // TEMPORARY read-only diagnostic — investigate a Zenbooker tech double-booking. Remove after use.
+  if (req.method === 'GET' && req.query.debug === 'zbktech') {
+    if (req.query.token !== 'tech-9k3') return res.status(403).json({ error: 'forbidden' });
+    const KEY = process.env.ZENBOOKER_API_KEY;
+    const H = { Authorization: `Bearer ${KEY}` };
+    const TZ = 'America/Denver';
+    const loc = (ts) => ts ? new Date(ts).toLocaleString('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+    try {
+      // Jobs scheduled Jun 25–28 (the working date-window params)
+      const jobs = [];
+      for (let page = 0; page < 4; page++) {
+        const r = await fetch(`https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_min=2026-06-25&start_date_max=2026-06-29`, { headers: H });
+        const j = await r.json().catch(() => ({}));
+        const results = j.results || [];
+        for (const job of results) {
+          const provs = (job.assigned_providers || job.providers || []).map(p => p.name || p.display_name || p.id);
+          jobs.push({ job_number: job.job_number, customer: job.customer && job.customer.name,
+            start: loc(job.start_date || job.start_time || job.scheduled_start), start_raw: job.start_date || job.start_time || job.scheduled_start,
+            territory: job.territory && job.territory.name, status: job.status, canceled: job.canceled,
+            assigned: provs, unable_to_auto_assign: job.unable_to_auto_assign });
+        }
+        if (results.length < 50) break;
+      }
+      jobs.sort((a, b) => String(a.start_raw).localeCompare(String(b.start_raw)));
+      // Any provider with 2+ jobs in the same arrival window = double-booked
+      const byProvSlot = {};
+      for (const j of jobs) { if (j.canceled) continue; for (const p of j.assigned) { const k = `${p} @ ${j.start}`; (byProvSlot[k] = byProvSlot[k] || []).push(j.job_number); } }
+      const doubleBooked = Object.entries(byProvSlot).filter(([, v]) => v.length > 1).map(([k, v]) => ({ slot: k, jobs: v }));
+      return res.status(200).json({ window: 'Jun 25–28 2026', job_count: jobs.length, jobs, doubleBooked });
+    } catch (e) { return res.status(500).json({ error: e.message }); }
+  }
+
   // TEMPORARY read-only diagnostic — investigate a tech double-booking. Remove after use.
   if (req.method === 'GET' && req.query.debug === 'tech') {
     if (req.query.token !== 'tech-9k3') return res.status(403).json({ error: 'forbidden' });
