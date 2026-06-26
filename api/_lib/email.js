@@ -127,6 +127,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
     row('Date', details.dateLong) +
     row('Arrival window', details.timeWindow) +
     row('Service', details.serviceName || 'TV Installation') +
+    row('Your technician', details.technicianName) +
     row('Address', addressLine);
 
   // Price block — only rendered when the widget supplied line items + a total, so

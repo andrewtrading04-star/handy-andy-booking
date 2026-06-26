@@ -228,6 +228,12 @@ async function bookDoms(req, res) {
   let technician_id = null;
   try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey }); }
   catch (e) { console.warn('[book-doms] tech pick failed:', e.message); }
+  // Resolve the assigned tech's name for the confirmation email (best-effort).
+  let technicianName = null;
+  if (technician_id) {
+    try { const { data: _t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle(); technicianName = _t?.name || null; }
+    catch (e) { /* name is best-effort */ }
+  }
 
   // ── Write the booking (creates customer, booking, line items, status event,
   // review token) and get the new id back.
@@ -278,6 +284,7 @@ async function bookDoms(req, res) {
         dateLong,
         timeWindow:  sum.timeWindow || (slot ? slot.label : ''),
         serviceName: "Dom's TV Mounting",
+        technicianName,
         address:     { line1: customer.address, city: b.city || 'Denver', state: b.state || 'CO', zip },
         lines:       emailLines,
         total:       price,
@@ -445,6 +452,7 @@ export default async function handler(req, res) {
     // check that job sits silently unstaffed at a time the tech is already booked. We
     // flag it on the job and in the response so the office is alerted to reassign/reschedule.
     let autoAssignFailed = false;
+    let technicianName = null;
     try {
       let jobState = data;
       if (jobState.unable_to_auto_assign === undefined && jobState.assigned_providers === undefined && data.id) {
@@ -453,6 +461,9 @@ export default async function handler(req, res) {
       }
       autoAssignFailed = jobState.unable_to_auto_assign === true
         || (Array.isArray(jobState.assigned_providers) && jobState.assigned_providers.length === 0);
+      // Capture the assigned tech name(s) for the confirmation email.
+      const _provs = Array.isArray(jobState.assigned_providers) ? jobState.assigned_providers : [];
+      if (_provs.length) technicianName = _provs.map(p => p.name || p.display_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()).filter(Boolean).join(' & ') || null;
       if (autoAssignFailed && jobId) {
         await fetch(`https://api.zenbooker.com/v1/jobs/${jobId}/notes`, {
           method:  'POST',
@@ -569,6 +580,7 @@ export default async function handler(req, res) {
           dateLong:    sum.dateLong  || when.dateLong  || '',
           timeWindow:  sum.timeWindow || when.timeWindow || '',
           serviceName: 'TV Installation',
+          technicianName,
           address:     { line1: customer.address, city: resolvedCity, state: resolvedState, zip: zipForLookup },
           lines:       Array.isArray(sum.lines) ? sum.lines : null,
           total:       sum.total != null ? sum.total : null,
