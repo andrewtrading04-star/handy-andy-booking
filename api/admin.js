@@ -1471,12 +1471,6 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Cancel deletes the booking outright. Child rows (line items, status events,
   // photos, notes) are removed by ON DELETE CASCADE.
-  if (body.action === 'cancel') {
-    const { error: eDel } = await db.from('bookings').delete().eq('id', id).eq('business_id', biz.id);
-    if (eDel) throw eDel;
-    return res.status(200).json({ ok: true, deleted: true });
-  }
-
   const patch = {};
   let newStatus = null;
   const now = new Date().toISOString();
@@ -1484,6 +1478,11 @@ async function bookingUpdate(req, res, db, auth, body) {
   switch (body.action) {
     case 'confirm':
       patch.status = newStatus = 'confirmed'; patch.confirmed_at = now; break;
+    case 'cancel':
+      // Soft-cancel: keep the row (status='cancelled') so it stays auditable and
+      // visible under "Include canceled". Every slot-occupancy query excludes
+      // cancelled bookings, so the slot is freed exactly as the old delete did.
+      patch.status = newStatus = 'cancelled'; patch.cancelled_at = now; break;
     case 'reschedule': {
       // Preferred path: a calendar date + one of the fixed slots. Convert it to a
       // timestamp server-side in the business timezone (same logic as new
