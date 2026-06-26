@@ -38,6 +38,43 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // TEMPORARY read-only diagnostic — investigate a tech double-booking. Remove after use.
+  if (req.method === 'GET' && req.query.debug === 'tech') {
+    if (req.query.token !== 'tech-9k3') return res.status(403).json({ error: 'forbidden' });
+    try {
+      const db = serviceClient();
+      const TZ = 'America/Denver';
+      const loc = (ts) => ts ? new Date(ts).toLocaleString('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+      const dow = (ts) => ts ? new Date(ts).toLocaleString('en-US', { timeZone: TZ, weekday: 'long' }) : null;
+      const { data: biz } = await db.from('businesses').select('id,timezone').eq('slug', 'handy-andy').single();
+      const { data: bks } = await db.from('bookings')
+        .select('id, scheduled_at, scheduled_end, status, technician_id, secondary_technician_id, customer_id, created_at, source')
+        .eq('business_id', biz.id).order('created_at', { ascending: false }).limit(15);
+      const custIds = [...new Set((bks || []).map(b => b.customer_id).filter(Boolean))];
+      const techIds = [...new Set((bks || []).flatMap(b => [b.technician_id, b.secondary_technician_id]).filter(Boolean))];
+      const { data: custs } = custIds.length ? await db.from('customers').select('id,name').in('id', custIds) : { data: [] };
+      const { data: techs } = techIds.length ? await db.from('technicians').select('id,name').in('id', techIds) : { data: [] };
+      const cmap = Object.fromEntries((custs || []).map(c => [c.id, c.name]));
+      const tmap = Object.fromEntries((techs || []).map(t => [t.id, t.name]));
+      const recent = (bks || []).map(b => ({ id: b.id, customer: cmap[b.customer_id], status: b.status, source: b.source,
+        local: loc(b.scheduled_at), day: dow(b.scheduled_at), scheduled_at: b.scheduled_at,
+        tech: tmap[b.technician_id] || null, second_tech: tmap[b.secondary_technician_id] || null, created: b.created_at }));
+      // Gregory: availability + all his bookings
+      const { data: greg } = await db.from('technicians').select('id,name,active').eq('business_id', biz.id).ilike('name', '%greg%').maybeSingle();
+      let gregory = null;
+      if (greg) {
+        const { data: avail } = await db.from('technician_availability').select('day_of_week,slot_key').eq('technician_id', greg.id);
+        const { data: gb } = await db.from('bookings').select('id,scheduled_at,status,technician_id,secondary_technician_id')
+          .or(`technician_id.eq.${greg.id},secondary_technician_id.eq.${greg.id}`).order('scheduled_at', { ascending: false }).limit(20);
+        gregory = { id: greg.id, name: greg.name, active: greg.active,
+          availability: (avail || []).map(a => ({ day_of_week: a.day_of_week, slot_key: a.slot_key })),
+          bookings: (gb || []).map(b => ({ id: b.id, local: loc(b.scheduled_at), day: dow(b.scheduled_at), status: b.status, role: b.technician_id === greg.id ? 'primary' : 'second' })) };
+      }
+      return res.status(200).json({ timezone: biz.timezone, recent_bookings: recent, gregory });
+    } catch (e) { return res.status(500).json({ error: e.message, stack: e.stack }); }
+  }
+
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Doms is CRM-native — branch before any Zenbooker work.
