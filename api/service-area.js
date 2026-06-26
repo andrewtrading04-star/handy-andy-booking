@@ -6,6 +6,47 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // TEMPORARY read-only diagnostic — inspect actual pricing on recent Denver-outer
+  // jobs to confirm whether Zenbooker applies the territory surcharge. Remove after use.
+  if (req.method === 'GET' && req.query.debug === 'terradj') {
+    if (req.query.token !== 'terr-7q2x') return res.status(403).json({ error: 'forbidden' });
+    const KEY = process.env.ZENBOOKER_API_KEY;
+    const ADJ = {
+      '1707513178246x806633139915194400': 25,  // Denver #2
+      '1687393551618x123774611115737090': 35,  // Denver #3
+      '1723559782141x609094402068185100': 100, // Denver #4 Boulder/CS
+    };
+    const out = [];
+    try {
+      for (let page = 0; page < 8 && out.length < 10; page++) {
+        const u = `https://api.zenbooker.com/v1/jobs?limit=50&cursor=${page * 50}&start_date_after=2026-05-01&start_date_before=2026-12-31`;
+        const r = await fetch(u, { headers: { Authorization: `Bearer ${KEY}` } });
+        const j = await r.json().catch(() => ({}));
+        const results = j.results || [];
+        for (const job of results) {
+          const tid = job.territory && job.territory.id;
+          if (ADJ[tid]) {
+            const ps = (job.services || []).flatMap(s => (s.pricing_summary || []).map(p => `${p.description}=${p.amount}`));
+            out.push({
+              job_number: job.job_number,
+              territory: job.territory && job.territory.name,
+              expected_surcharge: ADJ[tid],
+              invoice_subtotal: job.invoice && job.invoice.subtotal,
+              invoice_total: job.invoice && (job.invoice.amount_due != null ? job.invoice.amount_due : job.invoice.total),
+              pricing_lines: ps,
+            });
+            if (out.length >= 10) break;
+          }
+        }
+        if (results.length < 50) break;
+      }
+      return res.status(200).json({ note: 'Denver-outer jobs — does any pricing line reflect the territory surcharge?', count: out.length, jobs: out });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
