@@ -92,6 +92,12 @@ const ACCENTS = { 'handy-andy':'#ff6600', 'doms':'#2563eb' };
 if (ACCENTS[SLUG]) document.documentElement.style.setProperty('--accent', ACCENTS[SLUG]);
 document.documentElement.style.setProperty('--accent-soft', hexToSoft(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()));
 
+// "Book now" destination for the TV Mounting tile, per business. The tile links
+// straight to the booking page instead of continuing the estimate flow.
+// target="_top" so an embedding iframe navigates the whole page.
+const BOOK_URLS = { 'handy-andy':'https://www.ihandyandy.com/book', 'doms':'https://www.domstvmounting.com/book' };
+const BOOK_URL = BOOK_URLS[SLUG] || '';
+
 const WINDOWS = [
   { key:'s1', label:'8:00 AM – 10:00 AM' },
   { key:'s2', label:'11:00 AM – 1:00 PM' },
@@ -165,8 +171,15 @@ function stepService(){
     `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
       <span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}
     </button>`).join('');
-  const inner = state.services.length
-    ? `<div class="grid">${opts}</div>`
+  // TV Mounting is an extra tile styled like the others, but instead of
+  // continuing the estimate flow it links straight to the booking page.
+  const tvm = BOOK_URL
+    ? `<a class="opt" href="${BOOK_URL}" target="_top" rel="noopener">
+      <span>TV Mounting</span><small>Book your TV mount install instantly.</small>
+    </a>`
+    : '';
+  const inner = (state.services.length || tvm)
+    ? `<div class="grid">${opts}${tvm}</div>`
     : `<div class="sub">No services available right now. Please call us instead.</div>`;
   return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
     { nextDisabled: !state.serviceId });
