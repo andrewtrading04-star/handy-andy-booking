@@ -435,6 +435,9 @@ async function showDetail(id){
     // take it; once paid, the shared payment_status unblocks completion for both.
     const paidOK = !(Number(j.price)>0) || j.payment_status==='paid';
     const needsPayment = next && next.to==='completed' && !paidOK;
+    // A company bracket job can't be completed until one tech records who supplied it.
+    const bracketOK = !(j.bracket && j.bracket.needed) || !!(j.bracket && j.bracket.supplied_by);
+    const needsBracket = next && next.to==='completed' && !bracketOK;
 
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
@@ -468,6 +471,21 @@ async function showDetail(id){
         </div>
         ${j.partner_tech?`<div class="kv" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}
       </div>
+
+      ${j.bracket&&j.bracket.needed?`<div class="card"><h3>📦 Bracket</h3>
+        <div class="kv">${esc(j.bracket.label)}</div>
+        ${j.bracket.supplied_by
+          ? `<div class="kv" style="margin-top:8px;color:var(--green);font-weight:700;">✓ Supplied by ${esc(j.bracket.supplied_by_name||'technician')}</div>
+             <button class="btn ghost sm" id="bracketChange" style="margin-top:8px;">Change</button>`
+          : `<div class="sub" style="color:var(--amber,#f59e0b);font-size:13px;margin:8px 0;font-weight:600;">Who supplied this bracket? Required before completing.</div>`}
+        <div id="bracketPick" class="${j.bracket.supplied_by?'hidden':''}" style="margin-top:8px;">
+          <select id="bracketTech" style="width:100%;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:10px;font-size:15px;">
+            <option value="">— Select technician —</option>
+            ${j.bracket.techs.map(t=>`<option value="${esc(t.id)}" ${t.id===j.bracket.supplied_by?'selected':''}>${esc(t.name)}</option>`).join('')}
+          </select>
+          <button class="btn" id="bracketSave" style="margin-top:8px;width:100%;">Save supplier</button>
+        </div>
+      </div>`:''}
 
       <div class="card">
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
@@ -512,6 +530,8 @@ async function showDetail(id){
         ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📷 Add ${MIN_PHOTOS-curPhotos.length} more photo${MIN_PHOTOS-curPhotos.length===1?'':'s'} to complete</button></div>`
         : needsPayment
         ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">💳 Take payment to complete</button></div>`
+        : needsBracket
+        ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📦 Record who supplied the bracket</button></div>`
         : `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>`)
       : (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
 
@@ -561,6 +581,16 @@ async function showDetail(id){
     // Line-item editor (text + price). Techs only edit the visible work lines;
     // fees/tips are preserved server-side and the total is recomputed there.
     mountTechLineItems(j, id);
+
+    // Bracket supplier: record which tech supplied the bracket (required to complete).
+    const bch=document.getElementById('bracketChange'); if(bch) bch.onclick=()=>{ const p=document.getElementById('bracketPick'); if(p) p.classList.remove('hidden'); };
+    const bsave=document.getElementById('bracketSave'); if(bsave) bsave.onclick=async()=>{
+      const tid=document.getElementById('bracketTech').value;
+      if(!tid){ toast('Select which technician supplied the bracket'); return; }
+      bsave.disabled=true;
+      try{ await api('job_bracket_supplier',{method:'POST',body:{id,technician_id:tid}}); toast('Bracket supplier saved ✓'); showDetail(id); }
+      catch(e){ toast(e.message); bsave.disabled=false; }
+    };
 
     // Multi-tech sync: while this job is open, unpaid, and not yet complete, poll
     // so that if the OTHER tech on the job takes the payment, this screen switches

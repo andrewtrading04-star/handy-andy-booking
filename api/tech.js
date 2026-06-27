@@ -127,6 +127,7 @@ export default async function handler(req, res) {
       case 'job_line_items_save': return await jobLineItemsSave(req, res, db, auth, body);
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
       case 'job_card_update':  return await jobCardUpdate(req, res, db, auth, body);
+      case 'job_bracket_supplier': return await jobBracketSetSupplier(req, res, db, auth, body);
       case 'job_photos':       return await jobPhotos(req, res, db, auth);
       case 'job_photo_add':    return await jobPhotoAdd(req, res, db, auth, body);
       case 'job_photo_delete': return await jobPhotoDelete(req, res, db, auth, body);
@@ -398,6 +399,29 @@ async function job(req, res, db, auth) {
   } else {
     shaped.partner_tech = null;
   }
+  // Bracket-supplier info: which company bracket(s) this job uses, the tech(s)
+  // who could have supplied it, and who's recorded so far. Best-effort — if the
+  // 0035 column isn't applied yet, no bracket card is shown (and no completion gate).
+  shaped.bracket = null;
+  const need = detectBracketQtys(data.line_items || []);
+  if (bracketTotal(need) > 0) {
+    try {
+      const { data: bs, error: bsErr } = await db.from('bookings').select('bracket_supplied_by').eq('id', id).maybeSingle();
+      if (!bsErr) {
+        const techs = [];
+        if (data.technician_id) techs.push({ id: data.technician_id, name: data.technician?.name || 'Technician' });
+        if (data.secondary_technician_id) techs.push({ id: data.secondary_technician_id, name: data.secondary_technician?.name || 'Technician' });
+        const suppliedBy = bs?.bracket_supplied_by || null;
+        shaped.bracket = {
+          needed: true,
+          label: bracketLabel(need),
+          techs,
+          supplied_by: suppliedBy,
+          supplied_by_name: (techs.find(t => t.id === suppliedBy) || {}).name || null,
+        };
+      }
+    } catch (e) { /* 0035 not applied — leave bracket null */ }
+  }
   return res.status(200).json({ job: shaped });
 }
 
@@ -499,6 +523,11 @@ async function status(req, res, db, auth, body) {
     // the booking's shared payment_status reflects it for BOTH techs on the job.
     if (Number(existing.price) > 0 && existing.payment_status !== 'paid') {
       return res.status(400).json({ error: 'Charge the card or take a cash payment before marking this job complete.' });
+    }
+    // Gate completion on recording who supplied the bracket — on a two-person job
+    // only one tech supplies it, and that tech's inventory must be the one counted.
+    if (await jobNeedsBracketSupplier(db, id)) {
+      return res.status(400).json({ error: 'Select which technician supplied the bracket before completing this job.' });
     }
   }
 
@@ -619,6 +648,45 @@ async function jobCardUpdate(req, res, db, auth, body) {
   const { error: upErr } = await db.from('bookings').update(patch).eq('id', id);
   if (upErr) throw upErr;
   return res.status(200).json({ ok: true });
+}
+
+// ── Record which tech supplied the bracket (and move it off their inventory) ──
+// On a two-person job only one tech supplies the bracket; that tech's stock is
+// the one counted. Either tech on the job can record it. Re-recording to a
+// different tech gives the count back to the previous supplier first.
+async function jobBracketSetSupplier(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString();
+  const supplierId = (body.technician_id || '').toString();
+  if (!id || !supplierId) return res.status(400).json({ error: 'id and technician_id required' });
+
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, business_id, technician_id, ${techHasSecondCol ? 'secondary_technician_id, ' : ''}bracket_supplied_by, line_items:booking_line_items ( name, quantity )`), auth)
+    .eq('id', id).maybeSingle();
+  let { data: b, error } = await fetchMine(build);
+  if (error && /bracket_supplied_by/.test(error.message || '')) {
+    return res.status(400).json({ error: "Bracket tracking isn't set up yet (run migration 0035)." });
+  }
+  if (error || !b) return res.status(404).json({ error: 'Job not found' });
+
+  const jobTechs = [b.technician_id, b.secondary_technician_id].filter(Boolean);
+  if (!jobTechs.includes(supplierId)) return res.status(400).json({ error: 'Pick a technician who is on this job.' });
+
+  const qtys = detectBracketQtys(b.line_items || []);
+  if (bracketTotal(qtys) <= 0) return res.status(400).json({ error: 'This job has no company-supplied bracket.' });
+
+  const prev = b.bracket_supplied_by || null;
+  if (prev === supplierId) return res.status(200).json({ ok: true, supplied_by: supplierId });
+
+  // Move the count: give it back to the previous supplier (if any), take from the new one.
+  if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1);
+  await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1);
+
+  const { error: upErr } = await db.from('bookings')
+    .update({ bracket_supplied_by: supplierId, bracket_supplied_at: new Date().toISOString() })
+    .eq('id', id);
+  if (upErr) throw upErr;
+  return res.status(200).json({ ok: true, supplied_by: supplierId });
 }
 
 // ── Payment (techs can charge or mark-paid at service time) ────────────────────
@@ -893,6 +961,60 @@ function isHiddenLi(li) {
   const kind = (li && li.kind) || 'service';
   if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
   return HIDDEN_LI.has(((li && li.name) || '').trim());
+}
+
+// Count the COMPANY-supplied brackets on a job by type, from its line items.
+// "Customer supplied" brackets don't draw from inventory and are ignored.
+function detectBracketQtys(lineItems) {
+  const out = { flat: 0, tilting: 0, full_motion: 0 };
+  for (const li of lineItems || []) {
+    const name = (li.name || '').toLowerCase();
+    const qty = Number(li.quantity) || 1;
+    if (/customer.?supplied/.test(name)) continue;
+    if (/full.?motion/.test(name)) out.full_motion += qty;
+    else if (/tilt/.test(name)) out.tilting += qty;
+    else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
+  }
+  return out;
+}
+function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }
+// Human label for the brackets on a job, e.g. "1× Full Motion".
+function bracketLabel(q) {
+  const parts = [];
+  if (q.full_motion) parts.push(`${q.full_motion}× Full Motion`);
+  if (q.tilting) parts.push(`${q.tilting}× Tilting`);
+  if (q.flat) parts.push(`${q.flat}× Flat`);
+  return parts.join(', ');
+}
+
+// Add (sign +1) or subtract (sign -1) bracket quantities from a tech's inventory
+// row, creating it if missing. Floors at 0 so the read-only count never goes negative.
+async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+  const cur = inv || { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
+  const next = {
+    flat_qty:        Math.max(0, (Number(cur.flat_qty) || 0) + sign * (qtys.flat || 0)),
+    tilting_qty:     Math.max(0, (Number(cur.tilting_qty) || 0) + sign * (qtys.tilting || 0)),
+    full_motion_qty: Math.max(0, (Number(cur.full_motion_qty) || 0) + sign * (qtys.full_motion || 0)),
+  };
+  if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
+  else await db.from('bracket_inventory').insert({ business_id: businessId, technician_id: techId, ...next });
+}
+
+// Does this job still need a bracket-supplier selection before it can complete?
+// Best-effort: if the bracket_supplied_by column (0035) isn't applied yet, never
+// block completion.
+async function jobNeedsBracketSupplier(db, bookingId) {
+  try {
+    const { data: b, error } = await db.from('bookings')
+      .select('bracket_supplied_by, line_items:booking_line_items ( name, quantity )')
+      .eq('id', bookingId).maybeSingle();
+    if (error || !b) return false;
+    if (b.bracket_supplied_by) return false;
+    return bracketTotal(detectBracketQtys(b.line_items || [])) > 0;
+  } catch (e) { return false; }
 }
 
 function shapeJob(b, full = false, forTech = false) {
