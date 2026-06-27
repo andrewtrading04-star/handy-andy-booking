@@ -422,20 +422,19 @@ async function bookHandyAndy(req, res) {
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
   const price = Math.max(subtotal, widgetTotal) || subtotal;
 
-  // ── Save the card on file in Handy Andy's Stripe account (best-effort). Handy
-  // Andy's account IS the main account the booking widget tokenizes against
-  // (its publishable key), so the card is saved/charged with the global secret
-  // key — guaranteeing the publishable/secret pair always match.
+  // ── Save the card on file in Handy Andy's Stripe account (best-effort), using
+  // HANDY_ANDY_STRIPE_SECRET_KEY. The card is tokenized in the browser with the
+  // matching publishable key, so the publishable/secret pair are the same account.
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
-    if (!stripeConfigured({ account: 'global' })) {
-      cardNote = `Card captured (${b.payment_method_id}) but STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
+    if (!stripeConfigured({ account: 'handy-andy' })) {
+      cardNote = `Card captured (${b.payment_method_id}) but HANDY_ANDY_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
     } else {
       try {
         const r = await saveCardOnFile({
           email: customer.email,
           name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'global',
+          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'handy-andy',
         });
         stripeCustomerId = r.customerId;
         paymentStatus = 'card_on_file';
@@ -473,7 +472,7 @@ async function bookHandyAndy(req, res) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
-      stripe_account: 'global',
+      stripe_account: 'handy-andy',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
         name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
