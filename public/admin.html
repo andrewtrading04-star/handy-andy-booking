@@ -2627,11 +2627,17 @@ async function renderTechnicians(){
           <button class="btn ghost sm" data-act="pin">Set PIN</button>
           <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
         </div>
+        ${role==='owner'?`<div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
+          <span class="meta" style="font-size:13px;">Max jobs per day</span>
+          <input type="number" min="0" inputmode="numeric" class="maxjobs" value="${t.max_jobs_per_day!=null?t.max_jobs_per_day:''}" placeholder="No limit" style="width:110px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
+          <span class="meta" style="font-size:12px;color:var(--mute);">leave blank for no limit</span>
+        </div>`:''}
       </div>`).join('') || '<div class="empty">No technicians.</div>';
 
     document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
       const id=card.dataset.id;
       card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
+      const mj=card.querySelector('.maxjobs'); if(mj) mj.addEventListener('change',e=>saveTech({ id, max_jobs_per_day:e.target.value }));
       card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
         if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim()); }
         if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }

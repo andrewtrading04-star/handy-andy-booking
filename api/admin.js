@@ -2035,16 +2035,17 @@ async function zipArea(req, res, db, auth) {
 
 async function technicians(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  // service_area_id (migration 0022) lets the New Booking form show only the
-  // techs who cover the customer's metro. Select it optimistically; fall back
-  // without it on a DB that predates that column.
-  let { data, error } = await db.from('technicians')
-    .select('id, name, phone, email, status, active, service_area_id, pin_hash')
-    .eq('business_id', biz.id).order('name');
-  if (error && missingColumn(error.message) === 'service_area_id') {
-    ({ data, error } = await db.from('technicians')
-      .select('id, name, phone, email, status, active, pin_hash')
-      .eq('business_id', biz.id).order('name'));
+  // service_area_id (0022) powers the New Booking metro filter; max_jobs_per_day
+  // (0034) is the per-tech daily cap. Both optional — drop whichever column the
+  // DB doesn't have yet so the roster always loads.
+  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash';
+  let data, error;
+  for (let i = 0; i < 4; i++) {
+    ({ data, error } = await db.from('technicians').select(cols).eq('business_id', biz.id).order('name'));
+    if (!error) break;
+    const col = missingColumn(error.message);
+    if (col && cols.includes(col)) { cols = cols.split(', ').filter(c => c !== col).join(', '); continue; }
+    break;
   }
   if (error) throw error;
   // Never leak the hash; just say whether a PIN is set.
@@ -2111,6 +2112,12 @@ async function technicianUpdate(req, res, db, auth, body) {
   if (body.email !== undefined) patch.email = body.email || null;
   if (body.color !== undefined) patch.color = body.color || null;
   if (body.active !== undefined) patch.active = !!body.active;
+  // Daily job cap — OWNER ONLY (secretaries can open the Technicians tab but must
+  // not set it). Empty/blank = no limit; otherwise a non-negative whole number.
+  if (auth.role === 'owner' && body.max_jobs_per_day !== undefined) {
+    const v = body.max_jobs_per_day;
+    patch.max_jobs_per_day = (v === '' || v == null) ? null : Math.max(0, Math.floor(Number(v)) || 0);
+  }
   if (Object.keys(patch).length) {
     const { error } = await db.from('technicians').update(patch).eq('id', id).eq('business_id', biz.id);
     if (error) throw error;

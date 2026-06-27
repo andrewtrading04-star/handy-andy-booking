@@ -177,10 +177,13 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   const tz = timezone || areaTz || biz.timezone || 'America/Denver';
 
   // Technicians for this business, optionally narrowed to one metro's roster.
-  let techQ = db.from('technicians').select('id').eq('business_id', biz.id).eq('active', true);
-  if (serviceAreaId) techQ = techQ.eq('service_area_id', serviceAreaId);
-  const { data: techs } = await techQ;
+  // max_jobs_per_day (migration 0034) caps how many jobs a tech takes in a day;
+  // selected optimistically with a fallback if the column isn't applied yet.
+  const techSel = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q; };
+  let { data: techs, error: techErr } = await techSel('id, max_jobs_per_day');
+  if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await techSel('id'));
   const techIds = (techs || []).map(t => t.id);
+  const maxByTech = new Map((techs || []).map(t => [t.id, (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day))]));
   if (!techIds.length) return { days: [], timezone: tz };
 
   const start = todayStr(tz);
@@ -230,12 +233,18 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) ({ data: bk } = await runB(false));
   const techIdSet = new Set(techIds);
   const booked = new Set();
+  // Jobs already booked per tech per day: `${techId}:${date}` -> count. Used to
+  // drop a tech from a day once they hit their max_jobs_per_day cap.
+  const dayCount = new Map();
   for (const b of (bk || [])) {
     const slotKey = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     if (!slotKey) continue;
     const dateStr = localDateStr(tz, b.scheduled_at);
     for (const tid of [b.technician_id, b.secondary_technician_id]) {
-      if (tid && techIdSet.has(tid)) booked.add(`${tid}:${dateStr}:${slotKey}`);
+      if (tid && techIdSet.has(tid)) {
+        booked.add(`${tid}:${dateStr}:${slotKey}`);
+        dayCount.set(`${tid}:${dateStr}`, (dayCount.get(`${tid}:${dateStr}`) || 0) + 1);
+      }
     }
   }
 
@@ -245,6 +254,9 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
     const dow = dayOfWeekFor(dateStr);
     const open = new Set();
     for (const tid of techIds) {
+      // Skip a tech who's already at their daily job cap for this date.
+      const cap = maxByTech.get(tid);
+      if (cap != null && (dayCount.get(`${tid}:${dateStr}`) || 0) >= cap) continue;
       const set = new Set(recur.get(`${tid}:${dow}`) || []);
       const ex = excMap.get(`${tid}:${dateStr}`);
       if (ex) for (const [sk, avail] of ex) { if (avail) set.add(sk); else set.delete(sk); }
@@ -311,21 +323,24 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   const dow = dayOfWeekFor(dateStr);
   // Only this metro's technicians may be assigned its jobs (Houston -> Juan,
   // Austin -> Zach, …), so a booking never lands on a tech from another city.
-  let techQ = db.from('technicians')
-    .select('id').eq('business_id', biz.id).eq('active', true);
-  if (serviceAreaId) techQ = techQ.eq('service_area_id', serviceAreaId);
-  const { data: techs } = await techQ.order('created_at', { ascending: true });
+  const baseQ = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q.order('created_at', { ascending: true }); };
+  let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day');
+  if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await baseQ('id'));
   const list = techs || [];
-  // First choice: on the normal schedule AND free in this slot.
+  // A tech at their daily job cap is not eligible for this date.
+  const atCap = (t, booked) => { const c = (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)); return c != null && booked.size >= c; };
+  // First choice: on the normal schedule AND free in this slot AND under their cap.
   for (const t of list) {
     const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
     if (!keys.has(slotKey)) continue;
     const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+    if (atCap(t, booked)) continue;
     if (!booked.has(slotKey)) return t.id;
   }
-  // Fallback: any active tech who is at least free in this slot.
+  // Fallback: any active tech who is at least free in this slot and under their cap.
   for (const t of list) {
     const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+    if (atCap(t, booked)) continue;
     if (!booked.has(slotKey)) return t.id;
   }
   return null;
