@@ -163,12 +163,6 @@
       <button class="btn big" type="submit">Sign in</button>
       <div class="err" id="loginErr"></div>
     </form>
-    <!-- Dev bypass: always visible during development -->
-    <div id="devPanel" style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
-      <div class="field"><label>🛠 Dev login (no PIN)</label>
-        <select id="devTech" class="" style="width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:14px;font-size:15px;"></select></div>
-      <button class="btn ghost" type="button" id="devBtn">Enter as this tech</button>
-    </div>
   </div>
 
   <!-- Jobs list -->
@@ -255,10 +249,10 @@ async function api(action,{method='GET',params={},body=null}={}){
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
   const data=await res.json().catch(()=>({}));
   // A 401 on an AUTHENTICATED call means the saved token is no longer valid — log
-  // out and prompt re-login. But a 401 from login/dev_login is just bad
-  // credentials, so let the real error ("Incorrect phone or PIN") surface instead
-  // of the misleading "Session expired".
-  if(res.status===401 && action!=='login' && action!=='dev_login'){ logout(); throw new Error('Session expired'); }
+  // out and prompt re-login. But a 401 from login is just bad credentials, so let
+  // the real error ("Incorrect phone or PIN") surface instead of the misleading
+  // "Session expired".
+  if(res.status===401 && action!=='login'){ logout(); throw new Error('Session expired'); }
   if(!res.ok) throw new Error(data.error||'Request failed');
   return data;
 }
@@ -1083,55 +1077,12 @@ function renderInventory(data){
   document.getElementById('invBack').addEventListener('click',showJobs);
 }
 
-// Dev bypass: load the no-PIN tech picker. Surfaces failures into the dropdown
-// (instead of silently leaving it empty) and retries once for serverless cold
-// starts, so an empty list is always explainable.
-async function initDevPanel(attempt){
-  attempt=attempt||1;
-  const sel=document.getElementById('devTech');
-  const setPlaceholder=(txt)=>{ sel.innerHTML=`<option value="" disabled selected>${esc(txt)}</option>`; };
-  setPlaceholder('Loading technicians…');
-  try{
-    const res=await fetch(new URL(API+'?action=dev_techs',location.origin),{cache:'no-store'});
-    if(!res.ok){
-      // Dev bypass is disabled in production — hide the panel entirely so techs
-      // only ever see phone + PIN. (403 = bypass off; not a transient error.)
-      if(res.status===403){ const p=document.getElementById('devPanel'); if(p) p.style.display='none'; return; }
-      let msg='HTTP '+res.status;
-      try{ const e=await res.json(); if(e&&e.error) msg=e.error; }catch{}
-      // Cold start / transient: retry once before giving up.
-      if(attempt<2){ return initDevPanel(attempt+1); }
-      setPlaceholder('Couldn’t load techs ('+msg+')');
-      return;
-    }
-    const d=await res.json();
-    if(!d.technicians||!d.technicians.length){
-      setPlaceholder('No active technicians found');
-      return;
-    }
-    sel.innerHTML=d.technicians.map(t=>`<option value="${t.id}">${esc(t.name)} — ${esc(t.business)}</option>`).join('');
-  }catch(e){
-    if(attempt<2){ return initDevPanel(attempt+1); }
-    setPlaceholder('Couldn’t load techs (network)');
-  }
-}
-document.getElementById('devBtn').addEventListener('click',async()=>{
-  const techId=document.getElementById('devTech').value;
-  if(!techId){ document.getElementById('loginErr').textContent='Pick a technician first (list still loading or failed).'; return; }
-  try{
-    const d=await api('dev_login',{method:'POST',body:{tech_id:techId}});
-    token=d.token; tech=d.technician;
-    lsSet('ha_tech_token',token||''); lsSet('ha_tech_info',JSON.stringify(tech||null));
-    showJobs();
-  }catch(e){ document.getElementById('loginErr').textContent=e.message; }
-});
-
 // Lightbox close (tap backdrop or ×)
 document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
 document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
 
 // Boot
-if(token&&tech) showJobs(); else { show('login'); initDevPanel(); }
+if(token&&tech) showJobs(); else { show('login'); }
 </script>
 </body>
 </html>
