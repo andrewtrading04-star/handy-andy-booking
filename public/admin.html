@@ -979,8 +979,10 @@ function enterApp(){
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  // Technicians: everyone (owner + each secretary sees/manages only their own
+  // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
-  if(navTech) navTech.style.display = role==='owner' ? '' : 'none';
+  if(navTech) navTech.style.display = '';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
