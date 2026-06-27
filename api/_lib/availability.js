@@ -163,7 +163,8 @@ export function parseSlotId(id) {
 // (optional) overrides the zone explicitly; otherwise the area's, then the
 // business's, then Denver. Omit both for a single-area business (e.g. Doms).
 export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null }) {
-  const horizon = Math.max(1, Math.min(Number(days) || 30, 60));
+  // Allow booking up to ~3 months out (cap kept as a sanity bound on the batched queries).
+  const horizon = Math.max(1, Math.min(Number(days) || 30, 95));
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return { days: [], timezone: 'America/Denver' };
 

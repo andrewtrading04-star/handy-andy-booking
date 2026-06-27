@@ -1234,8 +1234,8 @@
     try{
       const provReq=needsTwoTechs()?2:1;
       const slotsUrl=NATIVE
-        ?`${API_BASE}/slots?business=handy-andy&service_area_id=${encodeURIComponent(serviceAreaId)}&days=30`
-        :`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=30&min_providers_needed=${provReq}`;
+        ?`${API_BASE}/slots?business=handy-andy&service_area_id=${encodeURIComponent(serviceAreaId)}&days=92`
+        :`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=92&min_providers_needed=${provReq}`;
       const r=await fetch(slotsUrl);
       const d=await r.json();
       slotsByDate={};calYear=null;calMonth=null;
