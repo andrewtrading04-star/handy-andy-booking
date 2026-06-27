@@ -101,6 +101,10 @@ export async function mirrorBooking(ctx = {}) {
       ...(ctx.payment_status ? { payment_status: ctx.payment_status } : {}),
       ...(ctx.stripe_customer_id ? { stripe_customer_id: ctx.stripe_customer_id } : {}),
       ...(ctx.stripe_payment_method_id ? { stripe_payment_method_id: ctx.stripe_payment_method_id } : {}),
+      // Which Stripe account the card was saved in, so charges later pick the
+      // right key. Only set when the caller stamps it (native paths); Zenbooker
+      // mirrors leave it NULL = legacy global/slug behavior.
+      ...(ctx.stripe_account ? { stripe_account: ctx.stripe_account } : {}),
       price, tip: Number(ctx.tip) || 0,
       address_line1: a.line1 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
       notes: first(ctx.notes, providerName && `Zenbooker tech: ${providerName}`),

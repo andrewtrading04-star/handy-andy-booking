@@ -82,6 +82,21 @@ async function serviceAreaIdFromPostal(db, businessId, postalCode) {
   return data?.service_area_id || null;
 }
 
+// Build a Map(postal_code -> tech_payout) for a business, for payroll's travel
+// payout. One batched read; returns an empty Map if the tech_payout column isn't
+// applied yet (migration 0032) so payroll never breaks waiting on a migration.
+async function travelPayoutMap(db, businessId) {
+  const map = new Map();
+  let { data, error } = await db.from('service_area_zips')
+    .select('postal_code, tech_payout').eq('business_id', businessId);
+  if (error) return map;   // column missing or read failed -> no payouts
+  for (const r of data || []) {
+    const p = Number(r.tech_payout) || 0;
+    if (p > 0) map.set(String(r.postal_code), p);
+  }
+  return map;
+}
+
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 function toE164(raw) {
@@ -1692,11 +1707,21 @@ async function bookingPayment(req, res, db, auth, body) {
   // booking's business key (Handy Andy → global key, Doms → DOMS_STRIPE_SECRET_KEY).
   const slug = biz.slug;
 
-  const { data: b, error } = await db.from('bookings')
-    .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
-             customer:customers ( id, name, email, phone, stripe_customer_id )`)
-    .eq('id', id).eq('business_id', biz.id).single();
+  // stripe_account (migration 0032) may not be applied yet — select it
+  // optimistically and fall back without it so charging never breaks on deploy
+  // order. Absent column -> b.stripe_account undefined -> legacy slug behavior.
+  const payCols = (withAcct) => `id, price, payment_status, ${withAcct ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             customer:customers ( id, name, email, phone, stripe_customer_id )`;
+  let { data: b, error } = await db.from('bookings').select(payCols(true)).eq('id', id).eq('business_id', biz.id).single();
+  if (error && missingColumn(error.message) === 'stripe_account') {
+    ({ data: b, error } = await db.from('bookings').select(payCols(false)).eq('id', id).eq('business_id', biz.id).single());
+  }
   if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+
+  // The card lives in the Stripe account it was saved in. Prefer the per-booking
+  // marker; fall back to the business slug for bookings made before stamping
+  // (Handy Andy -> global account, Doms -> Doms account) so nothing changes for them.
+  const acct = { account: b.stripe_account || null, slug };
 
   const now = new Date().toISOString();
 
@@ -1712,7 +1737,7 @@ async function bookingPayment(req, res, db, auth, body) {
 
   if (act === 'refund') {
     if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this booking to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, slug }); }
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, ...acct }); }
     catch (e) { return res.status(e.status || 400).json({ error: 'Refund failed: ' + e.message }); }
     await db.from('bookings').update({ payment_status: 'refunded' }).eq('id', id);
     return res.status(200).json({ ok: true, payment_status: 'refunded' });
@@ -1720,7 +1745,7 @@ async function bookingPayment(req, res, db, auth, body) {
 
   // Charge the card on file.
   if (act !== 'charge') return res.status(400).json({ error: `Unknown payment action "${act}"` });
-  if (!stripeConfigured(slug)) return res.status(400).json({ error: 'Payments are not configured for this business. Use “Mark paid (cash)”.' });
+  if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured for this business. Use “Mark paid (cash)”.' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
   const dollars = body.amount != null ? Number(body.amount) : Number(b.price);
   if (!dollars || dollars <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
@@ -1730,16 +1755,16 @@ async function bookingPayment(req, res, db, auth, body) {
   let pmId = b.stripe_payment_method_id || null;
   try {
     if (!custId && b.customer && b.customer.email) {
-      const r = await findCardOnFileByEmail(b.customer.email, slug);
+      const r = await findCardOnFileByEmail(b.customer.email, acct);
       custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
     }
-    if (custId && !pmId) pmId = await defaultPaymentMethod(custId, slug);
+    if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
   } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use “Mark paid (cash)” instead.' });
 
   let pi;
   try {
-    pi = await stripe('/payment_intents', { slug, body: {
+    pi = await stripe('/payment_intents', { ...acct, body: {
       amount: Math.round(dollars * 100), currency: 'usd',
       customer: custId, payment_method: pmId, off_session: true, confirm: true,
       description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug },
@@ -3000,7 +3025,7 @@ async function payroll(req, res, db, auth) {
   const { data: jobs, error: jobErr } = await db.from('bookings')
     .select(`
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
-      tip, notes, customer_notes, zenbooker_job_number,
+      tip, notes, customer_notes, zenbooker_job_number, postal_code,
       technician_id, secondary_technician_id,
       customers(name), services(name),
       line_items:booking_line_items(kind, name, unit_price, line_total)
@@ -3011,6 +3036,10 @@ async function payroll(req, res, db, auth) {
     .lte('scheduled_at', weekEnd + 'T23:59:59Z')
     .order('scheduled_at');
   if (jobErr) throw jobErr;
+
+  // Per-zip travel payout (the "$X paid to the tech" half of the surcharge tier).
+  // One batched lookup; tolerant of the tech_payout column not existing yet.
+  const travelPayoutByZip = await travelPayoutMap(db, biz.id);
 
   // Map job_id -> list of techs who worked it (primary or secondary)
   const jobTechs = {};
@@ -3044,6 +3073,7 @@ async function payroll(req, res, db, auth) {
         service_name: b.services?.name || '',
         business_slug: biz.slug,
         line_items: b.line_items || [],
+        travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
       }, techPayroll[techId].name);
 
       const jobBase = {

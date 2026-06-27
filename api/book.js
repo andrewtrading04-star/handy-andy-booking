@@ -2,7 +2,7 @@ import { mirrorBooking } from './_lib/mirror.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { serviceClient } from './_lib/supabase.js';
-import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS } from './_lib/availability.js';
+import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 
 // After creating the Zenbooker job this handler does several more sequential
@@ -249,6 +249,7 @@ async function bookDoms(req, res) {
       duration_minutes: 120,
       service_name: "Dom's TV Mounting",
       idempotency_key: b.idempotency_key || null,
+      stripe_account: 'doms',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
         name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -308,6 +309,202 @@ async function bookDoms(req, res) {
   });
 }
 
+// ── Handy Andy native booking (no Zenbooker) ─────────────────────────────────
+// Multi-metro version of bookDoms. The customer's ZIP resolves the service area
+// (Denver / Houston / Austin), which fixes BOTH the timezone the slot is anchored
+// in AND the technician roster the slot may be assigned from (Houston -> Juan,
+// Austin -> Zach, Denver -> Kregg/Steve). Surcharge, after-hours fee, and coupon
+// are enforced server-side. `selectedSlot` is the 'handy-andy_<YYYY-MM-DD>_<slotKey>'
+// id returned by /api/slots?business=handy-andy.
+async function bookHandyAndy(req, res) {
+  const b = req.body || {};
+  const customer = b.customer || {};
+  if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
+  if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (!customer.address) return res.status(400).json({ error: 'customer.address required' });
+
+  const parsed = parseSlotId(b.selectedSlot);
+  if (!parsed || parsed.businessSlug !== 'handy-andy') {
+    return res.status(400).json({ error: 'A valid time slot is required' });
+  }
+  const { dateStr, slotKey } = parsed;
+
+  let db;
+  try { db = serviceClient(); }
+  catch (e) { return res.status(500).json({ error: 'Booking storage not configured', message: e.message }); }
+
+  const { data: biz } = await db.from('businesses').select('id').eq('slug', 'handy-andy').single();
+  if (!biz) return res.status(500).json({ error: 'Handy Andy business not configured' });
+
+  // ZIP -> service area: timezone, tech roster scope, and per-zip surcharge.
+  const zip = String(b.postal_code || customer.zip || '').trim();
+  if (!zip) return res.status(400).json({ error: 'A ZIP code is required' });
+  const { data: z } = await db.from('service_area_zips')
+    .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
+    .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
+  if (!z || !z.service_area) {
+    return res.status(400).json({ error: "Sorry — that ZIP code isn't in our service area." });
+  }
+  const area = z.service_area;
+  const serviceAreaId = area.id;
+  const tz = area.timezone || 'America/Denver';
+  const surcharge = Number(z.surcharge) || 0;
+
+  const startUTC = slotStartUTC(tz, dateStr, slotKey);
+  const endUTC   = slotEndUTC(tz, dateStr, slotKey);
+  if (!startUTC) return res.status(400).json({ error: 'Invalid time slot' });
+
+  // After-hours fee: the 8 PM slot (s5) is charged $100 on Sundays, $75 otherwise.
+  const dow = dayOfWeekFor(dateStr);
+  const afterHours = slotKey === 's5' ? (dow === 0 ? 100 : 75) : 0;
+
+  // Coupon (validated server-side; unknown codes are ignored, never trusted).
+  const couponCode = String(b.coupon || '').trim().toUpperCase();
+  const couponAmt = COUPONS[couponCode] || 0;
+
+  // ── Line items for storage. Prefer explicit line_items; else the email_summary
+  // lines the widget computed for display.
+  const sum = b.email_summary || {};
+  let lines = [];
+  if (Array.isArray(b.line_items) && b.line_items.length) {
+    lines = b.line_items.map(li => ({
+      kind: li.kind || 'option',
+      name: String(li.name || 'Item').slice(0, 200),
+      quantity: Number(li.quantity) || 1,
+      unit_price: Number(li.unit_price) || 0,
+      line_total: Number(li.line_total != null ? li.line_total : li.unit_price) || 0,
+    }));
+  } else if (Array.isArray(sum.lines) && sum.lines.length) {
+    lines = sum.lines.map(l => {
+      const qty = Number(l.qty) || 1;
+      const amount = Number(l.amount) || 0;
+      return { kind: 'option', name: String(l.label || 'Item').slice(0, 200),
+        quantity: qty, unit_price: qty ? amount / qty : amount, line_total: amount };
+    });
+  }
+  // Enforce the money the customer must owe, server-side, so a stale/tampered
+  // widget can never drop the surcharge or after-hours fee.
+  if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
+    lines.push({ kind: 'fee', name: 'Service area surcharge', quantity: 1, unit_price: surcharge, line_total: surcharge });
+  }
+  if (afterHours > 0 && !lines.some(l => /after.?hours/i.test(l.name))) {
+    lines.push({ kind: 'fee', name: 'After-hours fee', quantity: 1, unit_price: afterHours, line_total: afterHours });
+  }
+  if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
+    lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
+  }
+  const tip = Number(b.tip) || 0;
+  const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+  const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
+  const price = Math.max(subtotal, widgetTotal) || subtotal;
+
+  // ── Save the card on file in HANDY ANDY's own Stripe account (best-effort).
+  let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
+  if (b.payment_method_id) {
+    if (!stripeConfigured({ account: 'handy-andy' })) {
+      cardNote = `Card captured (${b.payment_method_id}) but HANDY_ANDY_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
+    } else {
+      try {
+        const r = await saveCardOnFile({
+          email: customer.email,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'handy-andy',
+        });
+        stripeCustomerId = r.customerId;
+        paymentStatus = 'card_on_file';
+        cardNote = 'Card is on file (Handy Andy Stripe).';
+      } catch (e) {
+        cardNote = `Card capture failed: ${e.message}`;
+      }
+    }
+  }
+
+  // ── Assign a tech from THIS metro's roster so the slot is occupied.
+  let technician_id = null;
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'handy-andy', dateStr, slotKey, serviceAreaId, timezone: tz }); }
+  catch (e) { console.warn('[book-ha] tech pick failed:', e.message); }
+  let technicianName = null;
+  if (technician_id) {
+    try { const { data: _t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle(); technicianName = _t?.name || null; }
+    catch (e) { /* name is best-effort */ }
+  }
+
+  const city = b.city || area.name || null;
+  const state = b.state || area.state || null;
+
+  // ── Write the booking (customer, booking, line items, status event, review token).
+  let result = {};
+  try {
+    result = (await mirrorBooking({
+      businessSlug: 'handy-andy', source: 'widget',
+      service_area_id: serviceAreaId,
+      technician_id,
+      status: technician_id ? 'assigned' : 'confirmed',
+      scheduled_at: startUTC.toISOString(),
+      scheduled_end: endUTC ? endUTC.toISOString() : null,
+      duration_minutes: 120,
+      service_name: 'TV Mounting',
+      idempotency_key: b.idempotency_key || null,
+      stripe_account: 'handy-andy',
+      customer: {
+        first_name: customer.first_name, last_name: customer.last_name,
+        name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+        email: customer.email, phone: customer.phone,
+      },
+      address: { line1: customer.address, city, state, postal_code: zip },
+      line_items: lines, subtotal, price, tip,
+      payment_status: paymentStatus,
+      stripe_customer_id: stripeCustomerId,
+      stripe_payment_method_id: b.payment_method_id || null,
+      notes: cardNote || null,
+      customer_notes: b.customer_notes || sum.notes || null,
+    })) || {};
+  } catch (e) {
+    console.error('[book-ha] mirror error:', e.message);
+    return res.status(500).json({ error: 'Could not save booking', message: e.message });
+  }
+  const bookingId = result.booking_id || null;
+
+  // ── Handy Andy-branded confirmation email (best-effort; never fails booking).
+  const haEmail = emailConfig('handy-andy');
+  const willSend = emailNotificationsOn() && !!haEmail.apiKey && !!customer.email;
+  if (willSend) {
+    try {
+      const [yy, mm, dd] = dateStr.split('-').map(Number);
+      const dateLong = new Date(Date.UTC(yy, mm - 1, dd, 12)).toLocaleDateString('en-US',
+        { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      const slot = SLOTS.find(s => s.key === slotKey);
+      const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+      const emailLines = lines.map(l => ({ label: l.name, qty: l.quantity, amount: l.line_total }));
+      const { subject, html } = bookingConfirmationEmail({
+        firstName:   customer.first_name || sum.firstName || '',
+        dateLong,
+        timeWindow:  sum.timeWindow || (slot ? slot.label : ''),
+        serviceName: 'TV Mounting',
+        technicianName,
+        address:     { line1: customer.address, city, state, zip },
+        lines:       emailLines,
+        total:       price,
+        tip,
+        startEpoch:  Math.floor(startUTC.getTime() / 1000),
+        endEpoch:    endUTC ? Math.floor(endUTC.getTime() / 1000) : null,
+        baseUrl, jobId: bookingId,
+      }, brandFor('handy-andy'));
+      const sent = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });
+      if (!sent.sent) console.warn('[book-ha] confirmation email not sent:', sent.skipped || sent.error);
+    } catch (e) {
+      console.error('[book-ha] confirmation email error:', e.message);
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    booking_id: bookingId, job_id: bookingId,
+    status: technician_id ? 'assigned' : 'confirmed',
+    card_saved: paymentStatus === 'card_on_file',
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -321,8 +518,9 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
-  // Doms is CRM-native — branch before any Zenbooker work.
+  // Native CRM businesses — branch before any Zenbooker work.
   if (req.body && req.body.business === 'doms') return bookDoms(req, res);
+  if (req.body && req.body.business === 'handy-andy') return bookHandyAndy(req, res);
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
   if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });

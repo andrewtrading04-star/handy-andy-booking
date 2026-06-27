@@ -156,14 +156,29 @@ export function parseSlotId(id) {
 //   { days: [{ date, day_of_week, timeslots: [{ id, slot_key, formatted, start, end, bonus }] }], timezone }
 // using the same { days:[{date,timeslots:[{id,formatted}]}] } shape the widget
 // already consumes from the Zenbooker proxy. Four batched queries total.
-export async function publicOpenSlots(db, { businessSlug, days = 30 }) {
+// `serviceAreaId` (optional) restricts availability to the technicians assigned
+// to ONE metro and computes slot times in that area's timezone — required for a
+// multi-metro business (e.g. Handy Andy: Denver techs in Mountain, Houston/Austin
+// techs in Central, and only the metro's own techs may take its jobs). `timezone`
+// (optional) overrides the zone explicitly; otherwise the area's, then the
+// business's, then Denver. Omit both for a single-area business (e.g. Doms).
+export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null }) {
   const horizon = Math.max(1, Math.min(Number(days) || 30, 60));
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return { days: [], timezone: 'America/Denver' };
-  const tz = biz.timezone || 'America/Denver';
 
-  const { data: techs } = await db.from('technicians')
-    .select('id').eq('business_id', biz.id).eq('active', true);
+  // Timezone precedence: explicit arg > the service area's tz > business tz > Denver.
+  let areaTz = null;
+  if (serviceAreaId && !timezone) {
+    const { data: area } = await db.from('service_areas').select('timezone').eq('id', serviceAreaId).maybeSingle();
+    areaTz = area?.timezone || null;
+  }
+  const tz = timezone || areaTz || biz.timezone || 'America/Denver';
+
+  // Technicians for this business, optionally narrowed to one metro's roster.
+  let techQ = db.from('technicians').select('id').eq('business_id', biz.id).eq('active', true);
+  if (serviceAreaId) techQ = techQ.eq('service_area_id', serviceAreaId);
+  const { data: techs } = await techQ;
   const techIds = (techs || []).map(t => t.id);
   if (!techIds.length) return { days: [], timezone: tz };
 
@@ -283,14 +298,22 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
 // an exact date+slot, so a public booking actually OCCUPIES the slot (prevents
 // two customers grabbing the same window). Falls back to any tech free that slot,
 // else null (the office will assign). Returns a CRM technician id.
-export async function pickOpenTech(db, { businessSlug, dateStr, slotKey }) {
+export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null }) {
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return null;
-  const tz = biz.timezone || 'America/Denver';
+  let areaTz = null;
+  if (serviceAreaId && !timezone) {
+    const { data: area } = await db.from('service_areas').select('timezone').eq('id', serviceAreaId).maybeSingle();
+    areaTz = area?.timezone || null;
+  }
+  const tz = timezone || areaTz || biz.timezone || 'America/Denver';
   const dow = dayOfWeekFor(dateStr);
-  const { data: techs } = await db.from('technicians')
-    .select('id').eq('business_id', biz.id).eq('active', true)
-    .order('created_at', { ascending: true });
+  // Only this metro's technicians may be assigned its jobs (Houston -> Juan,
+  // Austin -> Zach, …), so a booking never lands on a tech from another city.
+  let techQ = db.from('technicians')
+    .select('id').eq('business_id', biz.id).eq('active', true);
+  if (serviceAreaId) techQ = techQ.eq('service_area_id', serviceAreaId);
+  const { data: techs } = await techQ.order('created_at', { ascending: true });
   const list = techs || [];
   // First choice: on the normal schedule AND free in this slot.
   for (const t of list) {

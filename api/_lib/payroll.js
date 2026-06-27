@@ -299,6 +299,12 @@ export function computeJobPay(job, techName) {
     }
   }
 
+  // ── Travel payout: the "$X paid to the tech" half of the per-zip travel tier
+  // (Denver/Houston/Austin #2–#4). Looked up from the booking's service-area tier
+  // by the caller and passed in as job.travel_payout. Treated like the after-hours
+  // bonus (a per-trip stipend), not split, so each tech on the trip earns it.
+  const travelPayout = Number(job.travel_payout) || 0;
+
 
   // ── Standard TV-mounting walk: base (by size) + each add-on line item.
   let pay = 0;
@@ -391,14 +397,19 @@ export function computeJobPay(job, techName) {
     if (afterHoursBonus) {
       newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     }
-    const finalPay = basePay + tippay + multiTech.secondTechBonus + afterHoursBonus;
+    // Travel-tier payout (not split — each tech on the trip earns it).
+    if (travelPayout) {
+      newBreakdown.push({ label: 'Travel payout', amount: travelPayout });
+    }
+    const finalPay = basePay + tippay + multiTech.secondTechBonus + afterHoursBonus + travelPayout;
     flags.push(`Multi-tech job (split 50/50) — verify second tech assignment`);
     return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
-    // Single tech: full tips + after-hours bonus.
+    // Single tech: full tips + after-hours bonus + travel payout.
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
     if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
-    pay += tip + afterHoursBonus;
+    if (travelPayout) breakdown.push({ label: 'Travel payout', amount: travelPayout });
+    pay += tip + afterHoursBonus + travelPayout;
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 }

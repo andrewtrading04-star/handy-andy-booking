@@ -29,6 +29,9 @@ const MIN_PHOTOS_TO_COMPLETE = 2;
 // their own app. Some deployments predate the 0019 secondary_technician_id
 // column; if a query referencing it errors, fall back to primary-only matching.
 let techHasSecondCol = true;
+// bookings.stripe_account (migration 0032) may not be applied yet; flipped off
+// the first time a select errors on it so the charge path degrades gracefully.
+let techHasStripeAcctCol = true;
 function scopeMine(q, auth) {
   return techHasSecondCol
     ? q.or(`technician_id.eq.${auth.tech_id},secondary_technician_id.eq.${auth.tech_id}`)
@@ -567,17 +570,23 @@ async function jobPayment(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const act = (body.action || 'charge').toString();
 
+  // stripe_account (migration 0032) may not be applied yet — select it
+  // optimistically and drop it if the column is missing, so charging never
+  // breaks on deploy order (absent -> undefined -> legacy slug behavior).
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, price, payment_status, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+    .select(`id, price, payment_status, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              business:businesses ( slug ),
              customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
     .eq('id', id).maybeSingle();
-  const { data: b, error } = await fetchMine(build);
+  let { data: b, error } = await fetchMine(build);
+  if (error && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
 
-  // Charge/refund with THIS booking's business Stripe account (the card lives in
-  // whichever account the booking belongs to — Doms cards aren't in HA's account).
+  // Charge/refund with the Stripe account the booking's card lives in: the
+  // per-booking marker if stamped, else the business slug (legacy: Handy Andy ->
+  // global account, Doms -> Doms account). Doms cards aren't in HA's account.
   const slug = b.business?.slug || null;
+  const acct = { account: b.stripe_account || null, slug };
   const now = new Date().toISOString();
 
   if (act === 'mark_paid') {
@@ -591,14 +600,14 @@ async function jobPayment(req, res, db, auth, body) {
 
   if (act === 'refund') {
     if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this job to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, slug }); }
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, ...acct }); }
     catch (e) { return res.status(e.status || 402).json({ error: 'Refund failed: ' + e.message }); }
     await db.from('bookings').update({ payment_status: 'refunded', paid_at: null }).eq('id', id);
     return res.status(200).json({ ok: true, payment_status: 'refunded' });
   }
 
   if (act === 'charge') {
-    if (!stripeConfigured(slug)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
+    if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
     const dollars = Number(b.price) || 0;
     if (dollars <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
 
@@ -606,16 +615,16 @@ async function jobPayment(req, res, db, auth, body) {
     let pmId = b.stripe_payment_method_id || null;
     try {
       if (!custId && b.customer && b.customer.email) {
-        const r = await findCardOnFileByEmail(b.customer.email, slug);
+        const r = await findCardOnFileByEmail(b.customer.email, acct);
         custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
       }
-      if (custId && !pmId) pmId = await defaultPaymentMethod(custId, slug);
+      if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
     } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use "Mark paid (cash)" instead.' });
 
     let pi;
     try {
-      pi = await stripe('/payment_intents', { slug, body: {
+      pi = await stripe('/payment_intents', { ...acct, body: {
         amount: Math.round(dollars * 100), currency: 'usd',
         customer: custId, payment_method: pmId, off_session: true, confirm: true,
         description: `Job ${id}`, metadata: { job_id: id },
@@ -880,6 +889,20 @@ function shapeJob(b, full = false, forTech = false) {
 // Tech pay for one Sun–Sat week, computed from the rate sheet (api/_lib/payroll.js).
 // Jobs are bucketed: paid (counted this week), deferred (unpaid — future week),
 // or flagged (computed but needs owner review). Pay date = period-end Sat + 15d.
+// Map(postal_code -> tech_payout) for a business's travel tiers. One batched
+// read; empty Map if the tech_payout column (migration 0032) isn't applied yet.
+async function travelPayoutMap(db, businessId) {
+  const map = new Map();
+  const { data, error } = await db.from('service_area_zips')
+    .select('postal_code, tech_payout').eq('business_id', businessId);
+  if (error) return map;
+  for (const r of data || []) {
+    const p = Number(r.tech_payout) || 0;
+    if (p > 0) map.set(String(r.postal_code), p);
+  }
+  return map;
+}
+
 async function techPayroll(req, res, db, auth) {
   const weekStart = (req.query.week_start || '').toString();
   if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
@@ -899,7 +922,7 @@ async function techPayroll(req, res, db, auth) {
   const { data: jobs, error } = await db.from('bookings')
     .select(`
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
-      tip, notes, customer_notes, zenbooker_job_number,
+      tip, notes, customer_notes, zenbooker_job_number, postal_code,
       customers(name), services(name),
       line_items:booking_line_items(kind, name, unit_price, line_total)
     `)
@@ -910,6 +933,9 @@ async function techPayroll(req, res, db, auth) {
     .order('scheduled_at');
 
   if (error) throw error;
+
+  // Per-zip travel payout (the "$X paid to the tech" half of the surcharge tier).
+  const travelPayoutByZip = await travelPayoutMap(db, auth.business_id);
 
   const paidJobs = [];
   const deferredJobs = [];
@@ -929,6 +955,7 @@ async function techPayroll(req, res, db, auth) {
       service_name: b.services?.name || '',
       business_slug: businessSlug,
       line_items: b.line_items || [],
+      travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
     }, techName);
 
     const base = {
