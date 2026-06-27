@@ -19,7 +19,12 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct } from './_lib/stripe.js';
+
+// Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
+// to expose). Handy Andy uses the main account; Doms uses its own.
+const STRIPE_PK_GLOBAL = process.env.STRIPE_PUBLISHABLE_KEY || 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
+function bookingStripePk(slug) { return slug === 'doms' ? (process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null) : STRIPE_PK_GLOBAL; }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
@@ -214,6 +219,7 @@ export default async function handler(req, res) {
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
       case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
+      case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
       case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
       case 'booking_photo_add':    return await bookingPhotoAdd(req, res, db, auth, body);
@@ -1700,6 +1706,46 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, price, count: items.length });
 }
 
+// ── Add / change the card on file (customer wants to pay with a different card) ──
+// The office tokenizes the new card client-side (booking.stripe_pk) and posts the
+// payment_method_id here; we attach it in the booking's Stripe account and point
+// the booking at it, so the next charge uses the new card.
+async function bookingCardUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  const pmId = (body.payment_method_id || '').toString();
+  if (!id || !pmId) return res.status(400).json({ error: 'id and payment_method_id required' });
+
+  const cols = (withAcct) => `id, payment_status, ${withAcct ? 'stripe_account, ' : ''}customer:customers ( name, email, phone )`;
+  let { data: b, error } = await db.from('bookings').select(cols(true)).eq('id', id).eq('business_id', biz.id).single();
+  if (error && missingColumn(error.message) === 'stripe_account') {
+    ({ data: b, error } = await db.from('bookings').select(cols(false)).eq('id', id).eq('business_id', biz.id).single());
+  }
+  if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+  if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid — the card cannot be changed.' });
+
+  const acct = { account: b.stripe_account || null, slug: biz.slug };
+  if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured for this business.' });
+
+  let r;
+  try {
+    r = await saveCardOnFileAcct({
+      email: b.customer?.email, name: b.customer?.name, phone: b.customer?.phone,
+      paymentMethodId: pmId, ...acct,
+    });
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: 'Could not save the card: ' + e.message });
+  }
+
+  const patch = { stripe_payment_method_id: pmId };
+  if (r.customerId) patch.stripe_customer_id = r.customerId;
+  if (b.payment_status !== 'card_on_file') patch.payment_status = 'card_on_file';
+  const { error: upErr } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
+  if (upErr) throw upErr;
+  return res.status(200).json({ ok: true });
+}
+
 // ── Booking payments: charge card on file | mark paid (cash) | refund ────────
 // Business model is "card on file at booking, charged at time of service". The
 // card was attached to a Stripe customer (keyed by email) by the live widget,
@@ -2177,6 +2223,7 @@ function bookingSelect() {
   const base = `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
           address_line1, city, state, postal_code,
+          business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
           technician:technicians!technician_id ( id, name, status, color, business_id, business:businesses ( name ) ),
           service:services ( id, name ),
@@ -2204,6 +2251,8 @@ function shapeBooking(b) {
     id: b.id,
     status: b.status,
     source: b.source,
+    // Publishable key for the "Change card" UI, by the booking's business.
+    stripe_pk: bookingStripePk(b.business?.slug || null),
     scheduled_at: b.scheduled_at,
     scheduled_end: b.scheduled_end,
     duration_minutes: b.duration_minutes,

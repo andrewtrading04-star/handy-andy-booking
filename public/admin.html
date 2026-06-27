@@ -1351,8 +1351,18 @@ function openBooking(b){
     <div class="bk-actions" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
+      ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkChangeCard">💳 Change card</button>`:''}
       ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
       ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
+    </div>
+    <div id="bkCardBox" class="hidden" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
+      <div class="sub" style="font-size:13px;color:var(--mute);margin-bottom:8px;">Enter the card the customer wants to use:</div>
+      <div id="bkCardEl" style="padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;"></div>
+      <div id="bkCardErr" style="color:#dc2626;font-size:13px;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn sm" id="bkCardSave">Save card</button>
+        <button class="btn ghost sm" id="bkCardCancel">Cancel</button>
+      </div>
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Line items</div>
       <div id="bkLineItems"></div>
@@ -1384,6 +1394,8 @@ function openBooking(b){
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=async()=>{ if(confirm(`Charge ${money(b.price)} to the card on file for ${b.customer?.name||'this customer'}?`)){ ch.disabled=true; await paymentAction(b.id,'charge',b.price); close(); } };
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
+  const cc=document.getElementById('bkChangeCard'); if(cc) cc.onclick=()=>{ const box=document.getElementById('bkCardBox'); if(box){ box.classList.remove('hidden'); cc.style.display='none'; mountBkCard(b); } };
+  const ccx=document.getElementById('bkCardCancel'); if(ccx) ccx.onclick=()=>{ const box=document.getElementById('bkCardBox'); if(box) box.classList.add('hidden'); if(cc) cc.style.display=''; };
   // Photos + notes (loaded async; they don't refresh the whole list on change).
   loadBookingPhotos(b.id);
   loadBookingNotes(b.id);
@@ -1439,6 +1451,34 @@ function mountLineItemsEditor(b){
       refreshCurrent();
     }catch(err){ toast(err.message); }
     finally{ btn.disabled=false; }
+  };
+}
+
+// ── Change / add the card on file (admin booking modal) ──────────────────────
+// Tokenizes a new card with the booking's account publishable key (b.stripe_pk)
+// and saves it via booking_card_update, so the next charge uses the new card.
+let _bkStripe=null,_bkCard=null;
+function mountBkCard(b){
+  const errEl=document.getElementById('bkCardErr');
+  const pk=b.stripe_pk||NB_STRIPE_KEY;
+  if(!window.Stripe){ if(errEl) errEl.textContent='Payment library not loaded. Refresh and try again.'; return; }
+  if(!pk){ if(errEl) errEl.textContent='Card entry is not set up for this business.'; return; }
+  try{ _bkStripe=window.Stripe(pk); }catch(e){ if(errEl) errEl.textContent='Could not start card entry.'; return; }
+  if(_bkCard){ try{ _bkCard.unmount(); }catch(e){} }
+  _bkCard=_bkStripe.elements().create('card');
+  _bkCard.mount('#bkCardEl');
+  const save=document.getElementById('bkCardSave');
+  if(save) save.onclick=async()=>{
+    if(errEl) errEl.textContent='';
+    save.disabled=true; save.textContent='Saving…';
+    const {paymentMethod,error}=await _bkStripe.createPaymentMethod({type:'card',card:_bkCard});
+    if(error){ if(errEl) errEl.textContent=error.message; save.disabled=false; save.textContent='Save card'; return; }
+    try{
+      await api('booking_card_update',{method:'POST',body:{business:current.slug,id:b.id,payment_method_id:paymentMethod.id}});
+      toast('Card updated ✓');
+      document.getElementById('bkModal').classList.add('hidden');
+      refreshCurrent();
+    }catch(e){ if(errEl) errEl.textContent=e.message; save.disabled=false; save.textContent='Save card'; }
   };
 }
 
