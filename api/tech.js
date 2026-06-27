@@ -16,7 +16,16 @@ import { smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile } from './_lib/stripe.js';
+
+// Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
+// Handy Andy's account is the main account; Doms has its own. Publishable keys
+// are safe to expose. The global default mirrors the booking widget's key.
+const STRIPE_PK_GLOBAL = process.env.STRIPE_PUBLISHABLE_KEY || 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
+function jobStripePk(slug) {
+  if (slug === 'doms') return process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null;
+  return STRIPE_PK_GLOBAL;
+}
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
 
@@ -117,6 +126,7 @@ export default async function handler(req, res) {
       case 'status':           return await status(req, res, db, auth, body);
       case 'job_line_items_save': return await jobLineItemsSave(req, res, db, auth, body);
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
+      case 'job_card_update':  return await jobCardUpdate(req, res, db, auth, body);
       case 'job_photos':       return await jobPhotos(req, res, db, auth);
       case 'job_photo_add':    return await jobPhotoAdd(req, res, db, auth, body);
       case 'job_photo_delete': return await jobPhotoDelete(req, res, db, auth, body);
@@ -363,7 +373,7 @@ async function job(req, res, db, auth) {
              payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
-             business:businesses ( name ),
+             business:businesses ( name, slug ),
              technician:technicians!technician_id ( name ),${techHasSecondCol ? `
              secondary_technician_id,
              secondary_technician:technicians!secondary_technician_id ( name ),` : ''}
@@ -375,6 +385,8 @@ async function job(req, res, db, auth) {
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
   shaped.company_name = data.business?.name || null;
+  // Publishable key so the tech app can collect/replace the card on file.
+  shaped.stripe_pk = jobStripePk(data.business?.slug || null);
   // The OTHER technician on a two-person job (the partner the viewer works
   // alongside). If the viewer is the primary, that's the secondary tech; if
   // they're the secondary helper, it's the primary. Shown so each tech knows
@@ -561,6 +573,48 @@ async function status(req, res, db, auth, body) {
   }
 
   return res.status(200).json({ ok: true, status: next });
+}
+
+// ── Add / change the card on file (customer wants to pay with a different card) ──
+// The tech tokenizes the new card client-side (job.stripe_pk) and posts the
+// payment_method_id here; we attach it in the booking's Stripe account and point
+// the booking at it, so the next charge uses the new card. Scoped to the tech's
+// own job (id + tech from the token).
+async function jobCardUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString();
+  const pmId = (body.payment_method_id || '').toString();
+  if (!id || !pmId) return res.status(400).json({ error: 'id and payment_method_id required' });
+
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, payment_status, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id,
+             business:businesses ( slug ),
+             customer:customers ( name, email, phone )`), auth)
+    .eq('id', id).maybeSingle();
+  let { data: b, error } = await fetchMine(build);
+  if (error && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
+  if (error || !b) return res.status(404).json({ error: 'Job not found' });
+  if (b.payment_status === 'paid') return res.status(400).json({ error: 'This job is already paid — the card cannot be changed.' });
+
+  const acct = { account: b.stripe_account || null, slug: b.business?.slug || null };
+  if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
+
+  let r;
+  try {
+    r = await saveCardOnFile({
+      email: b.customer?.email, name: b.customer?.name, phone: b.customer?.phone,
+      paymentMethodId: pmId, ...acct,
+    });
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: 'Could not save the card: ' + e.message });
+  }
+
+  const patch = { stripe_payment_method_id: pmId };
+  if (r.customerId) patch.stripe_customer_id = r.customerId;
+  if (b.payment_status !== 'card_on_file') patch.payment_status = 'card_on_file';
+  const { error: upErr } = await db.from('bookings').update(patch).eq('id', id);
+  if (upErr) throw upErr;
+  return res.status(200).json({ ok: true });
 }
 
 // ── Payment (techs can charge or mark-paid at service time) ────────────────────

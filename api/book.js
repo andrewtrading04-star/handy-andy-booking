@@ -235,6 +235,8 @@ async function bookDoms(req, res) {
     catch (e) { /* name is best-effort */ }
   }
 
+  if (cardNote) console.log('[book-doms] card:', cardNote);
+
   // ── Write the booking (creates customer, booking, line items, status event,
   // review token) and get the new id back.
   let result = {};
@@ -260,7 +262,8 @@ async function bookDoms(req, res) {
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
       stripe_payment_method_id: b.payment_method_id || null,
-      notes: cardNote || null,
+      // Card status is logged server-side only — not written to office notes.
+      notes: null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};
   } catch (e) {
@@ -398,17 +401,20 @@ async function bookHandyAndy(req, res) {
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
   const price = Math.max(subtotal, widgetTotal) || subtotal;
 
-  // ── Save the card on file in HANDY ANDY's own Stripe account (best-effort).
+  // ── Save the card on file in Handy Andy's Stripe account (best-effort). Handy
+  // Andy's account IS the main account the booking widget tokenizes against
+  // (its publishable key), so the card is saved/charged with the global secret
+  // key — guaranteeing the publishable/secret pair always match.
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
-    if (!stripeConfigured({ account: 'handy-andy' })) {
-      cardNote = `Card captured (${b.payment_method_id}) but HANDY_ANDY_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
+    if (!stripeConfigured({ account: 'global' })) {
+      cardNote = `Card captured (${b.payment_method_id}) but STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
     } else {
       try {
         const r = await saveCardOnFile({
           email: customer.email,
           name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'handy-andy',
+          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'global',
         });
         stripeCustomerId = r.customerId;
         paymentStatus = 'card_on_file';
@@ -431,6 +437,7 @@ async function bookHandyAndy(req, res) {
 
   const city = b.city || area.name || null;
   const state = b.state || area.state || null;
+  if (cardNote) console.log('[book-ha] card:', cardNote);
 
   // ── Write the booking (customer, booking, line items, status event, review token).
   let result = {};
@@ -445,7 +452,7 @@ async function bookHandyAndy(req, res) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
-      stripe_account: 'handy-andy',
+      stripe_account: 'global',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
         name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -456,7 +463,8 @@ async function bookHandyAndy(req, res) {
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
       stripe_payment_method_id: b.payment_method_id || null,
-      notes: cardNote || null,
+      // Card status is logged server-side only — not written to office notes.
+      notes: null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};
   } catch (e) {

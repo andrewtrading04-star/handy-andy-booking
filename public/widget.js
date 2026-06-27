@@ -13,6 +13,19 @@
   const STRIPE_KEY  = 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
   const THANKYOU_URL= 'https://www.ihandyandy.com/thankyou/';
 
+  // ── Native (off-Zenbooker) booking mode ──────────────────────────────────
+  // When on, the widget books through the CRM's own service-area / slots / book
+  // engine (business=handy-andy) instead of Zenbooker. During rollout it's
+  // OPT-IN via ?native=1 on the host page (so real traffic is unaffected); flip
+  // NATIVE_DEFAULT to true to make it the default for everyone, or use ?native=0
+  // to force the old Zenbooker path as a fallback.
+  const NATIVE_DEFAULT = false;
+  let NATIVE = NATIVE_DEFAULT;
+  try { const _np = new URLSearchParams(location.search).get('native'); if (_np === '1') NATIVE = true; if (_np === '0') NATIVE = false; } catch (e) {}
+  // Set from the native zip check; used by slots, surcharge, and tech scoping.
+  let serviceAreaId = null, nativeSurcharge = 0, areaName = '';
+  const isDenver = () => NATIVE ? /denver/i.test(areaName) : territoryId === DENVER_ID;
+
   // Fallback only — the zip check returns the customer's real city/state, which takes priority.
   const TERRITORY_LOCATION = {
     '1707514546803x280800015001583600': { city:'Houston',     state:'TX' }, // Houston #1
@@ -132,7 +145,7 @@
     '1687393551618x123774611115737090': 35, // Denver #3
     '1723559782141x609094402068185100': 100, // Denver #4 Boulder/Colorado Springs
   };
-  function territoryAdjustment(){ return TERRITORY_ADJUSTMENTS[territoryId] || 0; }
+  function territoryAdjustment(){ return NATIVE ? nativeSurcharge : (TERRITORY_ADJUSTMENTS[territoryId] || 0); }
   const ZIP_DISCOUNTS = { '77011': 10 };
   function zipDiscount(){ return ZIP_DISCOUNTS[customer.zip] || 0; }
 
@@ -448,7 +461,7 @@
   // Show "behind the wall" if ANY TV has drywall AND no TVs are above a fireplace (can't run wires behind fireplaces)
   function canHideBehindWall(){ return hasDrywall() && !hasFireplace(); }
   // Denver requires 2 techs for 98"+ TVs (techs work solo there; other cities have helpers)
-  function needsTwoTechs(){ return territoryId===DENVER_ID && hasXLargeTV(); }
+  function needsTwoTechs(){ return isDenver() && hasXLargeTV(); }
 
   function shouldSkip(k){
     // Skip bracket only if ALL TVs are Frame/Gallery (no regular TVs mixed in)
@@ -1172,7 +1185,7 @@
     // If entering slots, fetch them
     if(STEP_KEYS[ni]==='slots')fetchSlots();
     // If entering lifting and cat is large, auto-select
-    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='xlarge'&&territoryId===DENVER_ID){
+    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='xlarge'&&isDenver()){
       const sec=getSec('lifting');
       const opt=sec?.options.find(o=>o.forCat==='large');
       if(opt)selectOnly(sec.id,opt.id);
@@ -1198,12 +1211,19 @@
     btn.textContent='Checking…'; btn.disabled=true;
     customer.zip=zip;
     try{
-      const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zip})});
+      const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(NATIVE?{zip,business:'handy-andy'}:{zip})});
       const d=await r.json();
       if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
-      serviceConfig=SERVICE_CONFIGS[TERRITORY_CONFIG_MAP[territoryId]||'default'];
+      if(NATIVE){
+        // Native: the surcharge + metro come from the CRM zip check, and the
+        // pricing profile is chosen by metro name (Austin is cheaper).
+        serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; areaName=d.territory_name||'';
+        serviceConfig=SERVICE_CONFIGS[/austin/i.test(areaName)?'austin':'default'];
+      } else {
+        serviceConfig=SERVICE_CONFIGS[TERRITORY_CONFIG_MAP[territoryId]||'default'];
+      }
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}
@@ -1213,7 +1233,10 @@
   async function fetchSlots(){
     try{
       const provReq=needsTwoTechs()?2:1;
-      const r=await fetch(`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=30&min_providers_needed=${provReq}`);
+      const slotsUrl=NATIVE
+        ?`${API_BASE}/slots?business=handy-andy&service_area_id=${encodeURIComponent(serviceAreaId)}&days=30`
+        :`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=30&min_providers_needed=${provReq}`;
+      const r=await fetch(slotsUrl);
       const d=await r.json();
       slotsByDate={};calYear=null;calMonth=null;
       for(const day of(d.days||[])){
@@ -1313,6 +1336,7 @@
       zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
+      ...(NATIVE&&{business:'handy-andy'}),
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
     };

@@ -147,6 +147,7 @@
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotbonus{display:inline-block;margin-left:8px;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;vertical-align:middle;letter-spacing:.3px;}
 </style>
+<script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
 <div class="wrap">
@@ -487,12 +488,22 @@ async function showDetail(id){
       ${j.price?`<div class="card"><h3>Payment</h3>
         ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>`<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}</span><span>$${li.line_total}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
-          <div><div class="sub" style="color:var(--mute);font-size:13px;">Total</div><div style="font-weight:700;font-size:18px;">$${j.price}</div></div>
-          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${j.payment_status}</div></div>
+          <div><div class="sub" style="color:var(--mute);font-size:13px;">Total (incl. tax)</div><div style="font-weight:800;font-size:24px;">$${j.price}</div></div>
+          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${esc(j.payment_status)}</div></div>
         </div>
         ${j.payment_status!=='paid'&&j.payment_status!=='refunded'?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
           <button class="btn sm" id="jobCharge">Charge card</button>
           <button class="btn ghost sm" id="jobMarkPaid">Mark paid (cash)</button>
+          <button class="btn ghost sm" id="jobChangeCard">💳 Change card</button>
+        </div>
+        <div id="cardBox" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+          <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:8px;">Enter the card the customer wants to use:</div>
+          <div id="cardEl" style="background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:14px;"></div>
+          <div id="cardErr" style="color:#f87171;font-size:13px;margin-top:8px;"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="btn sm" id="cardSave">Save card</button>
+            <button class="btn ghost sm" id="cardCancel">Cancel</button>
+          </div>
         </div>`:''}
         ${j.payment_status==='paid'?`<button class="btn ghost sm" id="jobRefund">Refund</button>`:''}
       </div>`:''}
@@ -541,6 +552,12 @@ async function showDetail(id){
     const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
     const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
 
+    // Change / add card on file (customer wants to pay with a different card).
+    const jcc=document.getElementById('jobChangeCard');
+    if(jcc) jcc.onclick=()=>{ const box=document.getElementById('cardBox'); if(box){ box.classList.remove('hidden'); jcc.style.display='none'; mountTechCard(j); } };
+    const ccx=document.getElementById('cardCancel');
+    if(ccx) ccx.onclick=()=>{ const box=document.getElementById('cardBox'); if(box) box.classList.add('hidden'); if(jcc) jcc.style.display=''; };
+
     // Line-item editor (text + price). Techs only edit the visible work lines;
     // fees/tips are preserved server-side and the total is recomputed there.
     mountTechLineItems(j, id);
@@ -561,6 +578,29 @@ async function showDetail(id){
     }
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Change / add the card on file ────────────────────────────────────────────
+// Tokenizes a new card with the job's account publishable key (j.stripe_pk) and
+// saves it via job_card_update, so the next charge uses the new card.
+let _techStripe=null,_techCard=null;
+function mountTechCard(j){
+  const errEl=document.getElementById('cardErr');
+  if(!window.Stripe){ if(errEl) errEl.textContent='Payment library not loaded. Refresh and try again.'; return; }
+  if(!j.stripe_pk){ if(errEl) errEl.textContent='Card entry is not set up for this job.'; return; }
+  try{ _techStripe=window.Stripe(j.stripe_pk); }catch(e){ if(errEl) errEl.textContent='Could not start card entry.'; return; }
+  if(_techCard){ try{ _techCard.unmount(); }catch(e){} }
+  _techCard=_techStripe.elements().create('card',{style:{base:{color:'#fff',fontSize:'16px','::placeholder':{color:'#8a8a99'}}}});
+  _techCard.mount('#cardEl');
+  const save=document.getElementById('cardSave');
+  if(save) save.onclick=async()=>{
+    if(errEl) errEl.textContent='';
+    save.disabled=true; save.textContent='Saving…';
+    const {paymentMethod,error}=await _techStripe.createPaymentMethod({type:'card',card:_techCard});
+    if(error){ if(errEl) errEl.textContent=error.message; save.disabled=false; save.textContent='Save card'; return; }
+    try{ await api('job_card_update',{method:'POST',body:{id:j.id,payment_method_id:paymentMethod.id}}); toast('Card updated ✓'); showDetail(j.id); }
+    catch(e){ if(errEl) errEl.textContent=e.message; save.disabled=false; save.textContent='Save card'; }
+  };
 }
 
 // ── Line-item editor ─────────────────────────────────────────────────────────
