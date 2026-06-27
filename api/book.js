@@ -417,6 +417,16 @@ async function bookHandyAndy(req, res) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
+  // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
+  // an existing tax line) — added server-side so a stale/tampered widget can't
+  // drop it. Placed before the coupon so tax is on the pre-discount amount.
+  if (!lines.some(l => /^tax\b/i.test(l.name))) {
+    const taxable = lines
+      .filter(l => l.kind !== 'coupon' && !/^tax\b/i.test(l.name || ''))
+      .reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+    const tax = Math.round(taxable * 0.0825 * 100) / 100;
+    if (tax > 0) lines.push({ kind: 'fee', name: 'Tax (8.25%)', quantity: 1, unit_price: tax, line_total: tax });
+  }
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;

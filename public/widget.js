@@ -1317,6 +1317,10 @@
     const _ahFee=selectedSlotSurcharge();
     if(_ahFee>0)_lines.push({label:'After-hours fee (8 PM)',qty:1,amount:_ahFee});
     if(zipDiscount()>0)_lines.push({label:'Location',qty:1,amount:-zipDiscount()});
+    // Sales tax on the taxable subtotal (matches the checkout screen's base).
+    const _taxBase=calcTotal()+territoryAdjustment()+_ahFee-zipDiscount();
+    const _tax=Math.round(_taxBase*TAX_RATE*100)/100;
+    if(_tax>0)_lines.push({label:'Tax (8.25%)',qty:1,amount:_tax});
     const _couponDisc=COUPONS[couponCode]||0;
     if(_couponDisc>0)_lines.push({label:`Coupon ${couponCode}`,qty:1,amount:-_couponDisc});
     const bookingSummary={
@@ -1326,7 +1330,7 @@
       address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
       dateISO:selectedDate||'', dateLong:_df?`${_df.long}, ${_df.date}`:'',
       timeWindow:_slot.arrival_window||'',
-      lines:_lines, total:calcTotal()+territoryAdjustment()+_ahFee-zipDiscount()-_couponDisc, tip:tipAmount||0,
+      lines:_lines, total:_taxBase+_tax-_couponDisc, tip:tipAmount||0,
       twoTechs:typeof needsTwoTechs==='function'?needsTwoTechs():false,
     };
     const payload={
