@@ -226,6 +226,7 @@ export default async function handler(req, res) {
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'technicians':       return await technicians(req, res, db, auth);
+      case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
@@ -1967,11 +1968,32 @@ async function customerUpdate(req, res, db, auth, body) {
 }
 
 // ── Technicians ──────────────────────────────────────────────────────────────
+// Resolve which service area (metro) a zip falls in, so New Booking can show
+// only that metro's technicians. Returns { service_area_id, name } (nulls if the
+// zip isn't mapped — the form then shows all techs, unfiltered).
+async function zipArea(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const postal = (req.query.postal_code || '').toString().trim();
+  if (!postal) return res.status(200).json({ service_area_id: null, name: null });
+  const { data } = await db.from('service_area_zips')
+    .select('service_area_id, service_area:service_areas ( name )')
+    .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle();
+  return res.status(200).json({ service_area_id: data?.service_area_id || null, name: data?.service_area?.name || null });
+}
+
 async function technicians(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const { data, error } = await db.from('technicians')
-    .select('id, name, phone, email, status, active, pin_hash')
+  // service_area_id (migration 0022) lets the New Booking form show only the
+  // techs who cover the customer's metro. Select it optimistically; fall back
+  // without it on a DB that predates that column.
+  let { data, error } = await db.from('technicians')
+    .select('id, name, phone, email, status, active, service_area_id, pin_hash')
     .eq('business_id', biz.id).order('name');
+  if (error && missingColumn(error.message) === 'service_area_id') {
+    ({ data, error } = await db.from('technicians')
+      .select('id, name, phone, email, status, active, pin_hash')
+      .eq('business_id', biz.id).order('name'));
+  }
   if (error) throw error;
   // Never leak the hash; just say whether a PIN is set.
   const techs = (data || []).map(({ pin_hash, ...t }) => ({ ...t, pin_set: !!pin_hash }));

@@ -3297,10 +3297,13 @@ async function openNewBooking(){
   document.getElementById('nbDate').value='';
   document.getElementById('nbCalWrap').style.display='none';
   nbCalMonth=new Date(); nbCalMonth.setDate(1);
+  nbZipAreaId=null;   // no zip yet -> all techs until a metro is resolved
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
-      techCache.length ? Promise.resolve({technicians:techCache}) : api('technicians',{ params:{ business:current.slug }}),
+      // Always fetch (not techCache) so each tech carries service_area_id for the
+      // zip-based metro filter on the tech dropdowns.
+      api('technicians',{ params:{ business:current.slug }}),
     ]);
     nbServices = svc.services || [];
     nbSelectedSlot = null;
@@ -3345,6 +3348,17 @@ function nbNewKey(){ return (window.crypto&&crypto.randomUUID) ? crypto.randomUU
 // The primary AND the second technician each have their own company pool, so a
 // two-tech job can pair (say) a Doms primary with an "any Handy Andy" helper.
 let nbOwnTechs=[], nbPartner=null;
+// Service area (metro) of the entered zip, so the tech dropdowns show ONLY the
+// techs who cover that metro (e.g. 80123 -> Kregg & Steve). Null = show everyone.
+let nbZipAreaId=null;
+// Restrict the OWN roster to the entered zip's metro. Falls back to the full
+// roster if no zip is set or none of our techs are tagged to that metro (so the
+// dropdown is never empty due to missing area data).
+function nbFilterOwn(techs){
+  if(!nbZipAreaId) return techs;
+  const matched=(techs||[]).filter(t=>t.service_area_id===nbZipAreaId);
+  return matched.length?matched:techs;
+}
 // Every company pool we can book from: always our own, plus the partner company
 // (if any). Each tech <select> lists EVERY tech from EVERY pool, grouped by
 // company, each group led by an "Any <company>" choice — so the office can pick
@@ -3369,12 +3383,16 @@ async function nbLoadPartnerTechs(){
   nbPopulateSecondTechs();
 }
 function nbTechOptionsHtml(excludeNames = []){
-  return nbPoolList().map(g=>
-    `<optgroup label="${esc(g.name)} Team">`+
+  return nbPoolList().map(g=>{
+    // Own team is narrowed to the zip's metro; the partner pool is already
+    // filtered server-side by postal code in nbLoadPartnerTechs.
+    const techs = g.pool==='own' ? nbFilterOwn(g.techs) : g.techs;
+    return `<optgroup label="${esc(g.name)} Team">`+
       `<option value="any:${g.pool}">Any ${esc(g.name)} Technician</option>`+
-      g.techs.filter(t=> !excludeNames.some(n=> t.name.toLowerCase() === n.toLowerCase()))
+      techs.filter(t=> !excludeNames.some(n=> t.name.toLowerCase() === n.toLowerCase()))
         .map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
-    `</optgroup>`).join('');
+    `</optgroup>`;
+  }).join('');
 }
 // Which company a concrete tech id belongs to (for setting pool on submit).
 function nbPoolOfTech(id){
@@ -3703,9 +3721,13 @@ document.getElementById('nbTech').addEventListener('change',()=>{
   syncSecondTech();
   loadNbCalendar();
 });
-document.getElementById('nbZip').addEventListener('change',()=>{
-  // Postal code changed — reload partner techs filtered to this service area
-  nbLoadPartnerTechs();
+document.getElementById('nbZip').addEventListener('change',async ()=>{
+  // Postal code changed — resolve its metro so the tech dropdowns show only that
+  // metro's techs, then reload partner techs (also filtered to this area).
+  const postal=document.getElementById('nbZip').value.trim();
+  nbZipAreaId=null;
+  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; }catch(err){} }
+  nbLoadPartnerTechs();   // repopulates both tech dropdowns via nbTechOptionsHtml
   // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
