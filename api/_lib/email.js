@@ -493,6 +493,10 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const tintBg   = `rgba(${rgb},0.06)`;
   const firstName = (details.firstName || '').trim();
   const reviewUrl = details.reviewUrl || '#';
+  // 1×1 open-tracking pixel (set when the email is opened). Best-effort: many
+  // mail clients block remote images, so an un-opened status isn't conclusive.
+  const pixelUrl = (details.pixelUrl || '').trim();
+  const pixel = pixelUrl ? `<img src="${esc(pixelUrl)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;">` : '';
 
   const subject = `How did we do?`;
 
@@ -501,6 +505,7 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
 <body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">How did we do? ${esc(b.name)} would love to hear from you.</div>
+  ${pixel}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
@@ -620,10 +625,9 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
           <td style="padding:4px 0 0;font-size:14px;color:#5b6470;">Tax (${(taxRate * 100).toFixed(2).replace(/\.?0+$/, '')}%)</td>
           <td style="padding:4px 0 0;font-size:14px;color:#11181c;text-align:right;white-space:nowrap;">${money(taxAmt)}</td>
         </tr>` : '';
-    const descNote = description
-      ? `<div style="font-size:13px;color:#5b6470;line-height:1.6;margin:0 0 14px;white-space:pre-wrap;">${esc(description)}</div>`
-      : '';
-    bodyRow = `${descNote}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    // No description paragraph here — the line-item list below IS the breakdown,
+    // so repeating it as prose just duplicates the same content.
+    bodyRow = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         ${rows}
         ${taxRows}
         <tr>

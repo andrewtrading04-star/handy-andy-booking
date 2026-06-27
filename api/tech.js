@@ -530,6 +530,7 @@ async function status(req, res, db, auth, body) {
     console.log(`[review] job ${id} marked completed, review_token=${existing.review_token}, email=${existing.customer?.email}`);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
+    const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(existing.review_token)}`;
 
     // Brand the email by the JOB's business (orange vs blue) — for a
     // cross-company job that's the host company, not the tech's own.
@@ -545,12 +546,15 @@ async function status(req, res, db, auth, body) {
           const { subject, html } = reviewEmail({
             firstName: existing.customer.name || 'there',
             reviewUrl: reviewLink,
+            pixelUrl,
           }, brand);
           const { from } = emailConfig(slug);
           const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
           if (emailResult.sent) {
-            const newMeta = { ...(existing.metadata || {}), review_email_sent_at: new Date().toISOString() };
+            const nowIso = new Date().toISOString();
+            const newMeta = { ...(existing.metadata || {}), review_email_sent_at: nowIso };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+            await db.from('bookings').update({ review_email_sent_at: nowIso, review_email_count: 1 }).eq('id', id);
             console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);
           } else {
             console.warn(`[review] email NOT sent to ${existing.customer.email} (${slug}) booking=${id}:`, emailResult.skipped || emailResult.error);

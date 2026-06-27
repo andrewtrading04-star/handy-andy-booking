@@ -19,7 +19,7 @@
   // OPT-IN via ?native=1 on the host page (so real traffic is unaffected); flip
   // NATIVE_DEFAULT to true to make it the default for everyone, or use ?native=0
   // to force the old Zenbooker path as a fallback.
-  const NATIVE_DEFAULT = false;
+  const NATIVE_DEFAULT = true;   // Handy Andy booking now runs on the CRM, not Zenbooker. Use ?native=0 to force the old path.
   let NATIVE = NATIVE_DEFAULT;
   try { const _np = new URLSearchParams(location.search).get('native'); if (_np === '1') NATIVE = true; if (_np === '0') NATIVE = false; } catch (e) {}
   // Set from the native zip check; used by slots, surcharge, and tech scoping.

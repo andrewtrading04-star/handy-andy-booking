@@ -4,6 +4,27 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_l
 import { serviceClient } from './_lib/supabase.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
+import { verifyToken } from './_lib/auth.js';
+
+// 1×1 transparent GIF for review-email open tracking.
+const TRACKING_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+// GET /api/book?action=review_open&token=<review_token> — records the first open
+// of a "How did we do?" email, then returns the pixel. Never errors visibly.
+async function serveReviewPixel(req, res) {
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  try {
+    const t = verifyToken(((req.query || {}).token || '').toString());
+    if (t && t.kind === 'review' && t.booking_id) {
+      const db = serviceClient();
+      await db.from('bookings')
+        .update({ review_email_opened_at: new Date().toISOString() })
+        .eq('id', t.booking_id).is('review_email_opened_at', null);
+    }
+  } catch (e) { /* tracking is best-effort; always return the pixel */ }
+  return res.status(200).send(TRACKING_GIF);
+}
 
 // After creating the Zenbooker job this handler does several more sequential
 // calls (auto-assign check, Stripe card-on-file, CRM mirror, confirmation email).
@@ -524,6 +545,7 @@ export default async function handler(req, res) {
   // booking-confirmation emails. Lives here (rather than its own api/ file) to
   // stay under Vercel's 12-function Hobby cap.
   if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'review_open') return serveReviewPixel(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.

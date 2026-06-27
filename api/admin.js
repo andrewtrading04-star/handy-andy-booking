@@ -233,6 +233,8 @@ export default async function handler(req, res) {
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
       case 'reviews':           return await reviews(req, res, db, auth);
+      case 'review_requests':   return await reviewRequests(req, res, db, auth);
+      case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
@@ -1590,6 +1592,7 @@ async function bookingUpdate(req, res, db, auth, body) {
     if (newStatus === 'completed' && existing.review_token) {
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
+      const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(existing.review_token)}`;
 
       // Send review email immediately
       if (existing.customer?.email) {
@@ -1598,15 +1601,18 @@ async function bookingUpdate(req, res, db, auth, body) {
           const { subject, html } = reviewEmail({
             firstName: existing.customer.name || 'there',
             reviewUrl: reviewLink,
+            pixelUrl,
           }, brand);
           const { from } = emailConfig(biz.slug);
           const emailResult = await sendEmail({ slug: biz.slug, to: existing.customer.email, subject, html, replyTo: from });
 
-          // Mark review email as sent in metadata
+          // Mark review email as sent — in metadata (back-compat) and the tracking
+          // columns (migration 0033; best-effort so it never blocks completion).
           if (emailResult.sent) {
             const meta = existing.metadata || {};
             const newMeta = { ...meta, review_email_sent_at: now };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+            await db.from('bookings').update({ review_email_sent_at: now, review_email_count: 1 }).eq('id', id);
             console.log(`[review] email sent to ${existing.customer.email} (${biz.slug}) booking=${id}`);
           }
         } catch (e) {
@@ -2463,6 +2469,78 @@ async function sendFeedbackEmail(params) {
 }
 
 // ── Reviews list (admin dashboard reviews tab) ──────────────────────────────
+// Review-request tracking: every completed job and where its "How did we do?"
+// email stands — sent, opened (pixel), and whether a review came back. Tolerant
+// of the 0033 tracking columns not being applied yet (falls back to metadata).
+async function reviewRequests(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business || ''); } catch (e) { return bail(res, e); }
+  const cols = (t) => `id, scheduled_at, completed_at, review_rating, reviewed_at, review_token, metadata,
+      ${t ? 'review_email_sent_at, review_email_opened_at, review_email_count, ' : ''}
+      customer:customers(name, email), technician:technicians!technician_id(name)`;
+  let hasTrack = true;
+  let { data, error } = await db.from('bookings').select(cols(true))
+    .eq('business_id', biz.id).eq('status', 'completed')
+    .order('completed_at', { ascending: false }).limit(300);
+  if (error && /review_email_/.test(error.message || '')) {
+    hasTrack = false;
+    ({ data, error } = await db.from('bookings').select(cols(false))
+      .eq('business_id', biz.id).eq('status', 'completed')
+      .order('completed_at', { ascending: false }).limit(300));
+  }
+  if (error) throw error;
+  const rows = (data || []).map(b => ({
+    id: b.id,
+    customer_name: b.customer?.name || '—',
+    has_email: !!b.customer?.email,
+    technician_name: b.technician?.name || '—',
+    completed_at: b.completed_at || b.scheduled_at || null,
+    sent_at: (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null,
+    opened_at: hasTrack ? (b.review_email_opened_at || null) : null,
+    send_count: hasTrack ? (b.review_email_count || 0) : (b.metadata?.review_email_sent_at ? 1 : 0),
+    rating: b.review_rating || null,
+    reviewed_at: b.reviewed_at || null,
+    tracking: hasTrack,
+  }));
+  return res.status(200).json({ requests: rows });
+}
+
+// Resend the "How did we do?" email for one completed job.
+async function reviewResend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: b, error } = await db.from('bookings')
+    .select('id, review_token, metadata, customer:customers(name, email)')
+    .eq('id', id).eq('business_id', biz.id).single();
+  if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b.review_token) return res.status(400).json({ error: 'This job has no review link yet.' });
+  if (!b.customer?.email) return res.status(400).json({ error: 'No customer email on file for this job.' });
+  if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
+
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(b.review_token)}`;
+  const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(b.review_token)}`;
+  const { from } = emailConfig(biz.slug);
+  const { subject, html } = reviewEmail({ firstName: b.customer.name || 'there', reviewUrl: reviewLink, pixelUrl }, brandFor(biz.slug));
+  try {
+    await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from, throwOnError: true });
+  } catch (e) {
+    return res.status(502).json({ error: 'Email failed to send: ' + e.message });
+  }
+
+  const now = new Date().toISOString();
+  await db.from('bookings').update({ metadata: { ...(b.metadata || {}), review_email_sent_at: now } }).eq('id', id);
+  // Best-effort tracking-column bump (no-op if migration 0033 isn't applied).
+  try {
+    const { data: cur } = await db.from('bookings').select('review_email_count').eq('id', id).single();
+    const next = (Number(cur?.review_email_count) || 0) + 1;
+    await db.from('bookings').update({ review_email_sent_at: now, review_email_count: next }).eq('id', id);
+  } catch (e) { /* column absent — metadata already updated above */ }
+
+  return res.status(200).json({ ok: true });
+}
+
 async function reviews(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
 
@@ -2769,8 +2847,13 @@ async function estimateCreate(req, res, db, auth, body) {
   }
 
   const firstName = (customer_name || '').trim().split(/\s+/)[0];
+  // 90-day signed approve link (same as the Estimates-tab "send" flow), so the
+  // New Booking estimate email also gets an "I approve this estimate" button.
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const approveToken = signToken({ kind: 'estimate_approve', estimate_id: est.id }, 7776000);
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE },
+    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl },
     brandFor(biz.slug)
   );
 

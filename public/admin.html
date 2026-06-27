@@ -2608,8 +2608,44 @@ async function renderReviews(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
   try{
-    const d=await api('reviews',{ params:{ business:current.slug }});
+    const [d, rq]=await Promise.all([
+      api('reviews',{ params:{ business:current.slug }}),
+      api('review_requests',{ params:{ business:current.slug }}).catch(()=>({requests:[]})),
+    ]);
     const reviews=d.reviews||[];
+    const requests=rq.requests||[];
+
+    // ── Review-request tracking: sent / opened / reviewed, with a resend button.
+    const reqRows=requests.map(r=>{
+      const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
+      const pill='display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;';
+      const base=pill+'background:#eef0f2;color:#5b6470;';
+      const okp=pill+'background:#dcfce7;color:#15803d;';
+      const starp=pill+'background:#fef3c7;color:#a16207;';
+      const sent = r.sent_at
+        ? `<span style="${okp}">Sent${r.send_count>1?` ×${r.send_count}`:''}</span>`
+        : `<span style="${base}">Not sent</span>`;
+      const opened = r.opened_at
+        ? `<span style="${okp}">Opened</span>`
+        : (r.sent_at?`<span style="${base}">Not opened</span>`:'');
+      const reviewed = r.rating
+        ? `<span style="${starp}">${'⭐'.repeat(r.rating)}</span>`
+        : `<span style="${base}">No review yet</span>`;
+      const canResend = r.has_email;
+      return `<div class="job">
+        <div class="row">
+          <div style="flex:1;min-width:0;">
+            <div class="name">${esc(r.customer_name)}</div>
+            <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
+            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${sent}${opened}${reviewed}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap;">
+            ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
     const revHtml=reviews.map(r=>`
       <div class="job">
         <div class="row">
@@ -2621,7 +2657,18 @@ async function renderReviews(){
           <div style="text-align:right;white-space:nowrap;color:var(--mute);font-size:12px;">${new Date(r.reviewed_at).toLocaleDateString()}</div>
         </div>
       </div>`).join('');
-    document.getElementById('revWrap').innerHTML=revHtml||'<div class="empty">No reviews yet.</div>';
+
+    document.getElementById('revWrap').innerHTML=
+      `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">Review requests</div>`+
+      (reqRows||'<div class="empty">No completed jobs yet.</div>')+
+      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received</div>`+
+      (revHtml||'<div class="empty">No reviews yet.</div>');
+
+    document.querySelectorAll('#revWrap [data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
+      btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
+      try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend }}); toast('Review email sent ✓'); renderReviews(); }
+      catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
+    }));
   }catch(err){ const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
