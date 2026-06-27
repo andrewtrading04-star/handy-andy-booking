@@ -664,7 +664,6 @@
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
         <button class="btn ghost" type="button" id="nbSendEstimate">Send estimate</button>
-        <button class="btn ghost" type="button" id="nbCancel">Cancel</button>
       </div>
       <div class="err" id="nbErr"></div>
     </form>
@@ -3320,7 +3319,8 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
-document.getElementById('nbCancel').addEventListener('click', ()=>document.getElementById('modal').classList.add('hidden'));
+// Close New Booking by clicking the backdrop (no Cancel button needed).
+document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 document.getElementById('nbSendEstimate').addEventListener('click', sendEstimateFromBooking);
 document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 async function openNewBooking(){
