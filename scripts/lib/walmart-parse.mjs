@@ -9,6 +9,21 @@
 // Order number format: 7 digits, dash, 8 digits (often "Order number: #…").
 // ============================================================================
 
+// Minimal HTML → text, used only when an email has no text/plain part. Keeping
+// image alt-text (Walmart lists line items there) is essential, so we convert
+// <img alt="…"> to its alt text before stripping tags.
+export function stripHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/<img[^>]*\balt=["']([^"']*)["'][^>]*>/gi, ' $1 ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'")
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
 // Walmart order number: 7 digits - 8 digits, optionally prefixed with '#'
 // and an "Order number:" label.
 export function extractOrderNum(text) {
@@ -81,16 +96,20 @@ export function extractOrderDate(text, todayISO) {
 // Parse a whole email (subject + body text) into a bracket-sync payload, or null
 // if it isn't an identifiable Walmart order email.
 export function parseWalmartEmail({ subject = '', text = '', html = '', todayISO } = {}) {
-  const body = text || '';
-  const full = subject + '\n' + body + '\n' + html;
+  // Use ONE body representation for quantity/number/date parsing. An email
+  // carries the same items in both text/plain and text/html — concatenating
+  // them would double-count every line item. Prefer the plaintext part; fall
+  // back to stripped HTML only when there is no plaintext.
+  const body = (text && text.trim()) ? text : stripHtml(html);
+  const forNum = subject + '\n' + body;
 
-  const walmart_order_num = extractOrderNum(full);
+  const walmart_order_num = extractOrderNum(forNum);
   if (!walmart_order_num) return null;
 
   const status = detectStatus(subject, body);
-  const { flat, tilting, fullMotion } = extractBrackets(full);
+  const { flat, tilting, fullMotion } = extractBrackets(body);
   const order_url = extractOrderUrl(html || body);
-  const order_date = extractOrderDate(full, todayISO);
+  const order_date = extractOrderDate(forNum, todayISO);
   const today = todayISO || new Date().toISOString().slice(0, 10);
 
   return {
