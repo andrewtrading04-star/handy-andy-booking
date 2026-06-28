@@ -410,11 +410,11 @@ async function summary(req, res, db, auth) {
     .eq('business_id', biz.id).eq('active', true).order('name');
   if (e3) throw e3;
 
-  // Owner-only: profit for the viewed week (revenue − tech payout − bracket
-  // cost) plus profit for TODAY — the real current Denver day, independent of
-  // which week is being viewed — via the same engine as the List view.
-  // Sensitive margin data: gated on owner; never even computed for
-  // secretaries/techs.
+  // Owner-only: REALIZED profit (revenue − tech payout − bracket cost) for the
+  // viewed week and for TODAY (the real current Denver day, independent of the
+  // viewed week). Only money actually earned counts — a job contributes once it
+  // is COMPLETED and PAID, never while it's still upcoming/unpaid. Sensitive
+  // margin data: gated on owner; never even computed for secretaries/techs.
   let profit = null;
   if (auth.role === 'owner') {
     const { data: pjobs } = await fetchBookingRows(sel => db.from('bookings')
@@ -423,24 +423,22 @@ async function summary(req, res, db, auth) {
       .gte('scheduled_at', rangeStart.toISOString())
       .lt('scheduled_at', rangeEnd.toISOString())
       .order('scheduled_at', { ascending: true }));
-    const econ = await computeJobEconomics(db, biz, pjobs || [], true);
-    let pWeek = 0;
-    for (const b of pjobs || []) {
-      if (b.status === 'cancelled') continue;
-      const e = econ[b.id]; if (!e) continue;
-      const t = new Date(b.scheduled_at);
-      if (t >= weekStart && t < weekEnd) pWeek += Number(e.profit) || 0;
-    }
-    // Profit today = today's jobs (fetched above for the real current Denver
-    // day), so it never depends on the viewed week's range. Only count money
-    // actually earned: a job contributes only once it is COMPLETED and PAID.
-    const paidDoneToday = (today || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
-    const todayEcon = await computeJobEconomics(db, biz, paidDoneToday, true);
-    let pToday = 0;
-    for (const b of paidDoneToday) {
-      const e = todayEcon[b.id]; if (!e) continue;
-      pToday += Number(e.profit) || 0;
-    }
+
+    const earned = (rows) => (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    const sumProfit = async (rows) => {
+      const e = await computeJobEconomics(db, biz, rows, true);
+      return rows.reduce((n, b) => n + (Number(e[b.id]?.profit) || 0), 0);
+    };
+
+    // Profit this week — completed+paid jobs scheduled within the viewed week.
+    const paidDoneWeek = earned(pjobs).filter(b => {
+      const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd;
+    });
+    // Profit today — completed+paid jobs on the real current Denver day.
+    const paidDoneToday = earned(today);
+
+    const pWeek  = await sumProfit(paidDoneWeek);
+    const pToday = await sumProfit(paidDoneToday);
     profit = { week: Math.round(pWeek), today: Math.round(pToday) };
   }
 
