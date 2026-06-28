@@ -28,7 +28,8 @@ export function isJuan(techName) {
   return /\bjuan\b/i.test(String(techName || ''));
 }
 export function isRetired(techName) {
-  return /\bevan\b/i.test(String(techName || ''));
+  // Dismissed techs — never paid (rate sheet §10): Evan and Israel.
+  return /\b(evan|israel)\b/i.test(String(techName || ''));
 }
 
 // ── Rate sheet ───────────────────────────────────────────────────────────────
@@ -173,6 +174,15 @@ function matchItem(name) {
 }
 
 const round0 = (n) => Math.floor(Number(n) || 0);   // drop cents to whole dollars
+
+// Quantity on a dismount line: an explicit Nx / xN prefix in the label wins,
+// else the line's quantity field, else 1.
+function dismountQty(name, li) {
+  const m = String(name || '').match(/\bx\s*(\d+)\b|\b(\d+)\s*x\b/i);
+  if (m) return Math.max(1, parseInt(m[1] || m[2], 10));
+  const q = Number(li && li.quantity);
+  return q > 1 ? Math.round(q) : 1;
+}
 
 // ── Payment gating ───────────────────────────────────────────────────────────
 // Paid: payment_status 'paid', OR notes mention cash/venmo (treat as paid).
@@ -350,12 +360,19 @@ export function computeJobPay(job, techName) {
     // The $60 ($30/tech) bonus is added separately when the split runs.
     if (SECOND_TECH_RE.test(name)) continue;
 
-    // Dismount / Guaranteed Dismount Service (GDS): the tech earns a flat $60 in
-    // both cases per the owner. GDS is free to the customer ($0); a plain dismount
-    // is charged ($119/$129/etc) — the tech's pay is $60 either way.
+    // Dismount pay (rate sheet §5):
+    //  • Guaranteed Dismount SOLD (a charged line, per-unit lt > 0)     -> $0 (counts as sold)
+    //  • Guaranteed Dismount REDEEMED ($0 standalone, per-unit lt <= 0) -> $60
+    //  • Plain dismount: per-unit customer charge > $60 -> $60, else $50
+    //  • Quantity (Nx prefix or qty field) multiplies the per-unit pay.
     if (/dismount/i.test(name)) {
-      breakdown.push({ label: /guaranteed/i.test(name) ? 'Guaranteed Dismount Service' : 'Dismount', amount: 60 });
-      pay += 60;
+      const isGuaranteed = /guaranteed/i.test(name);
+      const qty = dismountQty(name, li);
+      const perUnit = lt / qty;
+      const unit = isGuaranteed ? (perUnit > 0 ? 0 : 60) : (perUnit > 60 ? 60 : 50);
+      const amt = unit * qty;
+      if (amt) breakdown.push({ label: `${isGuaranteed ? 'Guaranteed Dismount' : 'Dismount'}${qty > 1 ? ` ×${qty}` : ''}`, amount: amt });
+      pay += amt;
       continue;
     }
 
@@ -467,12 +484,13 @@ function runSelfTests() {
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 255 -> 3h*65=195');
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 50, line_items: [] }), 'Kregg').pay, 130, 'handyman min 2h = 130');
 
-  // Dismount + Guaranteed Dismount Service: flat $60 to the tech in every case
-  // (owner rule). GDS is free to the customer; a plain dismount is charged.
-  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 119 }] }), 'Zach').pay, 60, 'dismount charged -> 60');
-  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 45 }] }), 'Zach').pay, 60, 'dismount any price -> 60');
-  eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 60, 'GDS -> 60');
-  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GDS free -> 60');
+  // Dismount (rate sheet §5): plain charge >$60 -> $60, <=$60 -> $50; Guaranteed
+  // Dismount SOLD ($ line) -> $0, REDEEMED ($0 standalone) -> $60; xN multiplies.
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 119 }] }), 'Zach').pay, 60, 'dismount >$60 -> 60');
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 45 }] }), 'Zach').pay, 50, 'dismount <=$60 -> 50');
+  eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 0, 'GD sold -> 0');
+  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GD redeemed -> 60');
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount x3', line_total: 170 }] }), 'Zach').pay, 150, 'dismount x3 $170 -> 3x$50=150');
 
   // TV swap flat.
   eq(computeJobPay(job({ service_name: 'TV Swap', line_items: [{ name: 'TV Swap', line_total: 120 }] }), 'Zach').pay, 60, 'tv swap flat 60');
