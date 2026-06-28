@@ -413,8 +413,8 @@
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
-  .greet-stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}
-  .gstat{flex:1 1 150px;min-width:130px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
+  .greet-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+  .gstat{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
     border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;}
   .gstat-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.78;font-weight:700;}
   .gstat-v{font-size:20px;font-weight:800;line-height:1.1;}
@@ -3292,11 +3292,12 @@ function greetStatsHtml(){
   const profitCards = pf ?
     `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">Profit so far this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>` : '';
+  // 2×2 grid — top: Revenue today | This month, bottom: Profit today | Profit this week.
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue today</span><span class="gstat-v">${money(r.today||0)}</span></div>`+
-    profitCards+
     `<div class="gstat"><span class="gstat-l">This month</span><span class="gstat-v">${money(r.month||0)}</span>`+
       `<span class="gstat-s ${p.cls}">proj ${money(r.projectedMonth||0)} · ${p.txt}</span></div>`+
+    profitCards+
   `</div>`;
 }
 function startGreetingClock(){
