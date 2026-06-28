@@ -71,8 +71,9 @@ async function applyMigration(filename) {
 }
 
 // Status ladder for bracket purchases — sync only ever upgrades a row's status
-// (ordered → delivered), never moves it backwards.
-const BRACKET_STATUS_RANK = { ordered: 0, delivered: 1, canceled: 2 };
+// (in_route → delivered), never moves it backwards. 'ordered' is the legacy
+// alias of 'in_route' (rank 0) so old rows compare correctly.
+const BRACKET_STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
 // Upsert one Walmart order into bracket_purchases for every active business.
 // Auth/method are checked by the caller (the bracket_sync action). Returns the
@@ -86,8 +87,8 @@ async function bracketSync(req, res) {
   const tilting_qty     = Math.max(0, parseInt(body.tilting_qty)     || 0);
   const full_motion_qty = Math.max(0, parseInt(body.full_motion_qty) || 0);
   const totalQty        = flat_qty + tilting_qty + full_motion_qty;
-  const rawStatus       = (body.status || 'ordered').toString();
-  const status          = Object.prototype.hasOwnProperty.call(BRACKET_STATUS_RANK, rawStatus) ? rawStatus : 'ordered';
+  const rawStatus       = (body.status || 'in_route').toString();
+  const status          = Object.prototype.hasOwnProperty.call(BRACKET_STATUS_RANK, rawStatus) ? rawStatus : 'in_route';
   const order_date      = body.order_date     || null;
   const delivered_date  = body.delivered_date || null;
   const order_url       = body.order_url      || null;
@@ -100,7 +101,7 @@ async function bracketSync(req, res) {
   const results = [];
   for (const biz of (businesses || [])) {
     const { data: existing } = await db.from('bracket_purchases')
-      .select('id, status, flat_qty, tilting_qty, full_motion_qty, order_url')
+      .select('id, status, flat_qty, tilting_qty, full_motion_qty, order_url, technician_id')
       .eq('business_id', biz.id)
       .eq('walmart_order_num', walmart_order_num)
       .maybeSingle();
@@ -114,9 +115,14 @@ async function bracketSync(req, res) {
         if (status === 'delivered' && delivered_date) patch.delivered_date = delivered_date;
       }
       if (order_url && !existing.order_url) patch.order_url = order_url;
-      // Backfill quantities if the existing row was a bare delivery-only insert.
-      if (totalQty > 0 && (existing.flat_qty + existing.tilting_qty + existing.full_motion_qty) === 0) {
-        patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty;
+      // While the order is still UNASSIGNED, keep its quantities authoritative
+      // from the email (this self-heals any earlier bad/manual entry). Once a
+      // tech is assigned the quantities are frozen — assignment already moved
+      // them into that tech's inventory.
+      if (totalQty > 0 && !existing.technician_id) {
+        if (existing.flat_qty        !== flat_qty)        patch.flat_qty        = flat_qty;
+        if (existing.tilting_qty     !== tilting_qty)     patch.tilting_qty     = tilting_qty;
+        if (existing.full_motion_qty !== full_motion_qty) patch.full_motion_qty = full_motion_qty;
       }
       if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged', status: existing.status }); continue; }
       const { error: upErr } = await db.from('bracket_purchases').update(patch).eq('id', existing.id);

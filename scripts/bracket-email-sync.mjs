@@ -2,259 +2,162 @@
 // ============================================================================
 // scripts/bracket-email-sync.mjs  —  Walmart order email → bracket inventory
 // ============================================================================
-// Reads unread Walmart order emails from Gmail (via IMAP + App Password),
-// parses bracket type/quantity/status, and pushes each order to the HAD CRM
-// via POST /api/migrate?action=bracket_sync.
+// Reads Walmart order emails from one or more Gmail mailboxes (via IMAP + App
+// Password), parses bracket type/quantity/status/tracking-URL, and pushes each
+// order to the HAD CRM via POST /api/migrate?action=bracket_sync.
 //
-// After processing, each email is marked SEEN so it won't be re-processed.
+// IMPORTANT — why it reads by content, not sender:
+//   Walmart orders are placed under one account (e.g. domstvmounting@gmail.com)
+//   and may be FORWARDED to another (andrewtrading04@gmail.com). A forwarded
+//   email's From: is the forwarder, NOT walmart.com — so we match Walmart
+//   emails by body content + a recent-date window, never by sender alone.
 //
-// Env vars (set as GitHub Actions secrets):
-//   GMAIL_USER          andrewtrading04@gmail.com
-//   GMAIL_APP_PASSWORD  16-character Google App Password (not your real password)
+//   The sync endpoint is idempotent (keyed on the Walmart order number, per
+//   business) so we do NOT rely on read/unread state and we do NOT mutate the
+//   mailbox — every run re-scans the window and upserts safely.
+//
+// Accounts (set as GitHub Actions secrets). At least the primary is required:
+//   GMAIL_USER          / GMAIL_APP_PASSWORD          (primary mailbox)
+//   GMAIL_USER_2        / GMAIL_APP_PASSWORD_2         (optional 2nd mailbox)
+// Plus:
 //   CRON_SECRET         same value as the Vercel CRON_SECRET env var
-//   VERCEL_URL          optional override (default: https://handy-andy-booking.vercel.app)
+//   VERCEL_URL          optional (default https://handy-andy-booking.vercel.app)
+//   LOOKBACK_DAYS       optional (default 45)
 // ============================================================================
 
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { parseWalmartEmail } from './lib/walmart-parse.mjs';
 
-const GMAIL_USER     = process.env.GMAIL_USER        || '';
-const GMAIL_PASS     = process.env.GMAIL_APP_PASSWORD || '';
-const CRON_SECRET    = process.env.CRON_SECRET        || '';
-const VERCEL_URL     = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
+const CRON_SECRET = process.env.CRON_SECRET || '';
+const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
+const LOOKBACK_DAYS = parseInt(process.env.LOOKBACK_DAYS) || 45;
 
-if (!GMAIL_USER || !GMAIL_PASS || !CRON_SECRET) {
-  console.error('[bracket-sync] Missing required env: GMAIL_USER, GMAIL_APP_PASSWORD, CRON_SECRET');
-  process.exit(1);
+const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
+
+// Mailboxes to scan: primary + optional secondary.
+function mailboxes() {
+  const list = [];
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+    list.push({ user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
+  if (process.env.GMAIL_USER_2 && process.env.GMAIL_APP_PASSWORD_2)
+    list.push({ user: process.env.GMAIL_USER_2, pass: process.env.GMAIL_APP_PASSWORD_2 });
+  return list;
 }
 
-// ── HTML → plain text ──────────────────────────────────────────────────────
-function stripHtml(html) {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-// ── Status from subject line ───────────────────────────────────────────────
-function detectStatus(subject, bodyText) {
-  const s = (subject + ' ' + bodyText).toLowerCase();
-  if (/cancel/i.test(subject))                                  return 'canceled';
-  if (/delivered|has been delivered|was delivered/i.test(s))    return 'delivered';
-  return 'ordered';   // placed / confirmed / shipped all stay 'ordered' until delivered
-}
-
-// ── Extract Walmart order number ───────────────────────────────────────────
-// Walmart format: 7 digits, dash, 8 digits  (e.g. 2000147-84714253)
-function extractOrderNum(text) {
-  const m = text.match(/\b(\d{7}-\d{8})\b/);
-  return m ? m[1] : null;
-}
-
-// ── Extract bracket quantities from email text ─────────────────────────────
-// Strategy:
-//   1. Try paragraph blocks (blank-line separated) — look for bracket type +
-//      quantity in the same block.
-//   2. Scan line-by-line with a lookahead for a "Qty: N" on the next line.
-// Both passes accumulate and their results are merged.
-function extractBrackets(text) {
-  let flat = 0, tilting = 0, fullMotion = 0;
-
-  function qtySuffix(block) {
-    const m = block.match(/(?:qty|quantity)[:\s]*(\d+)/i)
-           || block.match(/[×x]\s*(\d+)/i)
-           || block.match(/(\d+)\s*(?:unit|pack|piece|pcs)/i);
-    return m ? parseInt(m[1], 10) : 1;
+// Merge multiple parsed emails for the SAME order (e.g. a confirmation plus a
+// later delivery email, or the same order forwarded twice). Keep the highest
+// status, the largest seen quantities, and the first non-null url/date.
+function mergeByOrder(payloads) {
+  const byOrder = new Map();
+  for (const p of payloads) {
+    const cur = byOrder.get(p.walmart_order_num);
+    if (!cur) { byOrder.set(p.walmart_order_num, { ...p }); continue; }
+    cur.flat_qty        = Math.max(cur.flat_qty, p.flat_qty);
+    cur.tilting_qty     = Math.max(cur.tilting_qty, p.tilting_qty);
+    cur.full_motion_qty = Math.max(cur.full_motion_qty, p.full_motion_qty);
+    if ((STATUS_RANK[p.status] ?? 0) > (STATUS_RANK[cur.status] ?? 0)) cur.status = p.status;
+    cur.order_url      = cur.order_url || p.order_url;
+    cur.delivered_date = cur.delivered_date || p.delivered_date;
+    if (p.order_date && (!cur.order_date || p.order_date < cur.order_date)) cur.order_date = p.order_date;
   }
-
-  // Pass 1 — paragraph blocks
-  for (const block of text.split(/\n{2,}/)) {
-    const lower = block.toLowerCase();
-    const qty   = qtySuffix(block);
-    if (/full[\s\-]?motion/i.test(block))                              fullMotion += qty;
-    else if (/tilting/i.test(block))                                   tilting    += qty;
-    else if (/\bflat\b/i.test(block) && /mount|bracket|tv/i.test(block)) flat     += qty;
-  }
-
-  // Pass 2 — line by line (catches "Item\nQty: 2" layout)
-  if (flat + tilting + fullMotion === 0) {
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line  = lines[i];
-      const ahead = (lines[i + 1] || '') + ' ' + (lines[i + 2] || '');
-      const qty   = qtySuffix(ahead) || 1;
-      if (/full[\s\-]?motion/i.test(line))                               fullMotion += qty;
-      else if (/tilting/i.test(line))                                    tilting    += qty;
-      else if (/\bflat\b/i.test(line) && /mount|bracket|tv/i.test(line)) flat       += qty;
-    }
-  }
-
-  return { flat, tilting, fullMotion };
+  return [...byOrder.values()];
 }
 
-// ── Extract order/tracking URL from HTML ───────────────────────────────────
-function extractOrderUrl(html) {
-  if (!html) return null;
-  const hrefs = [...html.matchAll(/href=["']([^"']+)["']/g)].map(m => m[1]);
-  return (
-    hrefs.find(u => /walmart\.com\/orders/i.test(u))  ||
-    hrefs.find(u => /w-mt\.co/i.test(u))              ||
-    hrefs.find(u => /track/i.test(u) && /walmart/i.test(u)) ||
-    null
-  );
-}
-
-// ── Parse a mailparser message into a bracket order payload ───────────────
-function parseEmail(msg) {
-  const subject  = msg.subject || '';
-  const html     = msg.html    || '';
-  const text     = msg.text    || stripHtml(html);
-  const fullText = subject + '\n' + text;
-
-  const walmart_order_num = extractOrderNum(fullText);
-  if (!walmart_order_num) return null;   // not an order email we can identify
-
-  const status   = detectStatus(subject, text);
-  const { flat, tilting, fullMotion } = extractBrackets(text);
-  const order_url = extractOrderUrl(html);
-
-  // Try to parse an order date from the email body
-  let order_date = new Date().toISOString().slice(0, 10);
-  const dm = text.match(/(?:order(?:ed)?|placed)[:\s]+([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4})/i);
-  if (dm) {
-    try {
-      const d = new Date(dm[1]);
-      if (!isNaN(d.getTime())) order_date = d.toISOString().slice(0, 10);
-    } catch { /* keep today */ }
-  }
-
-  const delivered_date = (status === 'delivered') ? new Date().toISOString().slice(0, 10) : null;
-
-  return {
-    walmart_order_num,
-    flat_qty:       flat,
-    tilting_qty:    tilting,
-    full_motion_qty: fullMotion,
-    status,
-    order_date,
-    delivered_date,
-    order_url,
-  };
-}
-
-// ── POST to Vercel bracket-sync endpoint ───────────────────────────────────
+// POST one order to the bracket-sync endpoint.
 async function syncOrder(payload) {
-  const url = `${VERCEL_URL}/api/migrate?action=bracket_sync`;
-  const res = await fetch(url, {
+  const res = await fetch(`${VERCEL_URL}/api/migrate?action=bracket_sync`, {
     method:  'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${CRON_SECRET}`,
-    },
-    body: JSON.stringify(payload),
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CRON_SECRET}` },
+    body:    JSON.stringify(payload),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`${res.status} ${JSON.stringify(json)}`);
   return json;
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────
-async function main() {
+// Scan one mailbox, returning every parsed Walmart order payload found.
+async function scanMailbox({ user, pass }, todayISO) {
   const client = new ImapFlow({
-    host:   'imap.gmail.com',
-    port:   993,
-    secure: true,
-    auth:   { user: GMAIL_USER, pass: GMAIL_PASS },
-    logger: false,   // silence verbose IMAP logs
+    host: 'imap.gmail.com', port: 993, secure: true,
+    auth: { user, pass }, logger: false,
   });
-
+  const found = [];
   await client.connect();
-  console.log('[bracket-sync] Connected to Gmail IMAP');
-
-  await client.mailboxOpen('INBOX');
-
-  // Search for UNSEEN emails FROM walmart.com (any subdomain — substring match).
-  // The 30-day window catches anything that arrived while the action was paused.
-  // { uid: true } makes search + fetch + flag all operate on stable UIDs.
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  let uids = await client.search({ from: 'walmart.com', seen: false, since }, { uid: true });
-  if (!Array.isArray(uids)) uids = [];
-
-  if (!uids.length) {
-    console.log('[bracket-sync] No new Walmart emails — nothing to do.');
-    await client.logout();
-    return;
-  }
-
-  console.log(`[bracket-sync] Found ${uids.length} unread Walmart email(s)`);
-
-  let synced = 0;
-  const toMark = [];
-
-  for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
-    let parsed;
-    try {
-      parsed = await simpleParser(msg.source);
-    } catch (e) {
-      console.warn(`[bracket-sync] Could not parse email uid=${msg.uid}:`, e.message);
-      toMark.push(msg.uid);
-      continue;
-    }
-
-    const payload = parseEmail(parsed);
-
-    if (!payload) {
-      console.log(`[bracket-sync] uid=${msg.uid} — no order number found, skipping`);
-      toMark.push(msg.uid);
-      continue;
-    }
-
-    const totalQty = payload.flat_qty + payload.tilting_qty + payload.full_motion_qty;
-    console.log(
-      `[bracket-sync] uid=${msg.uid} order=${payload.walmart_order_num}` +
-      ` status=${payload.status}` +
-      ` flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
+  console.log(`[bracket-sync] Connected: ${user}`);
+  try {
+    await client.mailboxOpen('INBOX');
+    const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    // Walmart order emails, direct OR forwarded. Direct ones are from
+    // walmart.com; forwarded ones quote "...walmart.com" in the body. The
+    // parser then requires a real Walmart order number, filtering any noise.
+    let uids = await client.search(
+      { since, or: [ { from: 'walmart.com' }, { body: 'walmart' } ] },
+      { uid: true }
     );
+    if (!Array.isArray(uids)) uids = [];
+    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return found; }
+    console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
 
-    // Skip if no quantities AND status isn't a status-upgrade (delivery email
-    // for an order we don't know about yet — can't create without quantities).
-    if (totalQty === 0 && payload.status === 'ordered') {
-      console.log(`[bracket-sync] Skipping — no bracket quantities detected`);
-      toMark.push(msg.uid);
-      continue;
+    for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
+      let parsed;
+      try { parsed = await simpleParser(msg.source); }
+      catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
+      const payload = parseWalmartEmail({
+        subject: parsed.subject || '',
+        text:    parsed.text || '',
+        html:    parsed.html || '',
+        todayISO,
+      });
+      if (!payload) continue;   // not an identifiable Walmart order email
+      console.log(
+        `[bracket-sync] ${user}: order=${payload.walmart_order_num} status=${payload.status} ` +
+        `flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
+      );
+      found.push(payload);
     }
-
-    try {
-      const result = await syncOrder(payload);
-      console.log(`[bracket-sync] Synced — ${JSON.stringify(result.results)}`);
-      synced++;
-    } catch (e) {
-      console.error(`[bracket-sync] Sync failed for ${payload.walmart_order_num}:`, e.message);
-      // Don't mark as read — retry next run
-      continue;
-    }
-
-    toMark.push(msg.uid);
+  } finally {
+    await client.logout().catch(() => {});
   }
-
-  // Mark all processed emails as SEEN so they aren't re-processed next run.
-  if (toMark.length) {
-    await client.messageFlagsAdd(toMark, ['\\Seen'], { uid: true });
-    console.log(`[bracket-sync] Marked ${toMark.length} email(s) as read`);
-  }
-
-  await client.logout();
-  console.log(`[bracket-sync] Done — synced ${synced} order(s)`);
+  return found;
 }
 
-main().catch(e => {
-  console.error('[bracket-sync] Fatal:', e);
-  process.exit(1);
-});
+async function main() {
+  if (!CRON_SECRET) { console.error('[bracket-sync] Missing CRON_SECRET'); process.exit(1); }
+  const boxes = mailboxes();
+  if (!boxes.length) { console.error('[bracket-sync] No mailbox configured (set GMAIL_USER + GMAIL_APP_PASSWORD)'); process.exit(1); }
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Gather from every configured mailbox.
+  let all = [];
+  for (const box of boxes) {
+    try { all = all.concat(await scanMailbox(box, todayISO)); }
+    catch (e) { console.error(`[bracket-sync] mailbox ${box.user} failed: ${e.message}`); }
+  }
+
+  const orders = mergeByOrder(all);
+  if (!orders.length) { console.log('[bracket-sync] No Walmart orders found — nothing to sync.'); return; }
+  console.log(`[bracket-sync] ${orders.length} distinct order(s) to sync`);
+
+  let synced = 0;
+  for (const order of orders) {
+    // A brand-new order with no parsed quantities can't be created — skip it
+    // (a later confirmation email with quantities will create it).
+    const qty = order.flat_qty + order.tilting_qty + order.full_motion_qty;
+    if (qty === 0 && order.status === 'in_route') {
+      console.log(`[bracket-sync] ${order.walmart_order_num}: no quantities, skipping`);
+      continue;
+    }
+    try {
+      const r = await syncOrder(order);
+      console.log(`[bracket-sync] ${order.walmart_order_num}: ${JSON.stringify(r.results)}`);
+      synced++;
+    } catch (e) {
+      console.error(`[bracket-sync] ${order.walmart_order_num}: sync failed — ${e.message}`);
+    }
+  }
+  console.log(`[bracket-sync] Done — ${synced}/${orders.length} order(s) synced`);
+}
+
+main().catch(e => { console.error('[bracket-sync] Fatal:', e); process.exit(1); });

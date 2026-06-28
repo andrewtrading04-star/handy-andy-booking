@@ -3001,6 +3001,46 @@ async function refreshEstimateBadge(){
 }
 
 // ── Bracket Inventory ──────────────────────────────────────────────────────────
+// Friendly status pill for a Walmart bracket order: In route / Delivered / Canceled.
+// 'ordered' is the legacy alias of 'in_route'.
+function bracketStatusBadge(status){
+  const s=(status||'in_route').toLowerCase();
+  const base='display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;';
+  if(s==='delivered') return `<span style="${base}background:#dcfce7;color:#15803d;">✓ Delivered</span>`;
+  if(s==='canceled'||s==='cancelled') return `<span style="${base}background:#f3f4f6;color:#6b7280;text-decoration:line-through;">Canceled</span>`;
+  return `<span style="${base}background:#fef3c7;color:#b45309;">🚚 In route</span>`;
+}
+
+// Assign modal: pick a technician for an unassigned Walmart order.
+function openAssignModal(purchaseId, orderNum){
+  const opts=(window._bracketInv||[]).map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)}</option>`).join('');
+  const modal=document.createElement('div'); modal.className='modal';
+  modal.innerHTML=`<div class="sheet">
+    <h2>Assign order${orderNum?` #${esc(orderNum)}`:''}</h2>
+    <p style="color:var(--mute);font-size:13px;margin:-4px 0 12px;">Pick the technician these brackets belong to. They'll be added to that tech's inventory.</p>
+    <label class="fld">Technician</label>
+    <select id="modalAssignTech" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin-bottom:12px;">
+      <option value="">Select technician…</option>${opts}
+    </select>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn" style="flex:1;background:var(--line);color:var(--ink-2);" onclick="closeAssignModal()">Cancel</button>
+      <button class="btn" style="flex:1;" onclick="confirmAssign('${esc(purchaseId)}')">Assign</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeAssignModal(); });
+  window._assignModal=modal;
+}
+function closeAssignModal(){ if(window._assignModal){ window._assignModal.remove(); window._assignModal=null; } }
+async function confirmAssign(purchaseId){
+  const sel=document.getElementById('modalAssignTech'); const techId=sel?sel.value:'';
+  if(!techId){ toast('Pick a technician first'); return; }
+  try{
+    const r=await api('bracket_assign',{ method:'POST', body:{ business:current.slug, purchase_id:purchaseId, technician_id:techId }});
+    toast('✓ Assigned to '+(r.technician_name||'technician'));
+    closeAssignModal(); renderBrackets();
+  }catch(e){ toast('Error: '+e.message); }
+}
+
 async function renderBrackets(){
   const view=document.getElementById('view');
   if(!current) return;
@@ -3010,6 +3050,7 @@ async function renderBrackets(){
       api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}),
       api('bracket_pending',{ params:{ business:current.slug }}),
     ]);
+    window._bracketInv=inv.inventory||[];   // tech list for the Assign modal
 
     let html=`<div class="wrap">
       <div class="bracket-section">
@@ -3065,13 +3106,19 @@ async function renderBrackets(){
         const orderCell=p.order_url
           ? `<a href="${esc(p.order_url)}" target="_blank" rel="noopener">${p.walmart_order_num?esc(p.walmart_order_num):'View order'} ↗</a>`
           : (p.walmart_order_num?esc(p.walmart_order_num):'-');
+        const assigned=p.technician_name && p.technician_name!=='Unassigned';
+        const techCell=assigned
+          ? `<strong>${esc(p.technician_name)}</strong>`
+          : (role==='owner'
+              ? `<button class="seg-btn" onclick="openAssignModal('${esc(p.id)}','${esc(p.walmart_order_num||'')}')">Assign tech ▾</button>`
+              : `<span style="color:var(--mute);">Unassigned</span>`);
         html+=`<tr>
-          <td>${esc(p.technician_name)}</td>
+          <td>${techCell}</td>
           <td>${orderCell}</td>
           <td class="bracket-qty">${p.flat_qty}</td>
           <td class="bracket-qty">${p.tilting_qty}</td>
           <td class="bracket-qty">${p.full_motion_qty}</td>
-          <td><span class="pay pay-${p.status}" style="color:inherit;">${p.status}</span></td>
+          <td>${bracketStatusBadge(p.status)}</td>
           <td>${p.order_date||'-'}</td>
         </tr>`;
       }
@@ -3084,7 +3131,7 @@ async function renderBrackets(){
     if(pending.length){
       const techOpts=(inv.inventory||[]).map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)}</option>`).join('');
       html+=`<div class="bracket-section" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 18px;">
-        <h3 style="border-bottom-color:#fde68a;">📦 Just Delivered — Assign to a Technician</h3>`;
+        <h3 style="border-bottom-color:#fde68a;">📦 Unassigned Walmart Orders — Assign to a Technician</h3>`;
       for(const d of pending){
         const parts=[];
         if(d.flat) parts.push(`${d.flat} Flat`);
@@ -3095,7 +3142,8 @@ async function renderBrackets(){
         const link=d.order_url?`<a href="${esc(d.order_url)}" target="_blank" rel="noopener">View Walmart order ↗</a>`:'';
         html+=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #fde68a;">
           <div style="flex:1;min-width:200px;">
-            <strong style="font-size:14px;">${esc(desc)} delivered</strong>
+            <strong style="font-size:14px;">${esc(desc)}</strong> ${bracketStatusBadge(d.status)}
+            ${d.walmart_order_num?`<span style="color:var(--mute);font-size:12px;"> · #${esc(d.walmart_order_num)}</span>`:''}
             ${when?`<span style="color:var(--mute);font-size:12px;"> · ${esc(when)}</span>`:''}
             ${link?`<div style="font-size:12px;margin-top:2px;">${link}</div>`:''}
           </div>

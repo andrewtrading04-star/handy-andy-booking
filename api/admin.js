@@ -432,11 +432,12 @@ async function summary(req, res, db, auth) {
       if (t >= weekStart && t < weekEnd) pWeek += Number(e.profit) || 0;
     }
     // Profit today = today's jobs (fetched above for the real current Denver
-    // day), so it never depends on the viewed week's range.
-    const todayEcon = await computeJobEconomics(db, biz, today || [], true);
+    // day), so it never depends on the viewed week's range. Only count money
+    // actually earned: a job contributes only once it is COMPLETED and PAID.
+    const paidDoneToday = (today || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    const todayEcon = await computeJobEconomics(db, biz, paidDoneToday, true);
     let pToday = 0;
-    for (const b of today || []) {
-      if (b.status === 'cancelled') continue;
+    for (const b of paidDoneToday) {
       const e = todayEcon[b.id]; if (!e) continue;
       pToday += Number(e.profit) || 0;
     }
@@ -3666,7 +3667,7 @@ async function bracketPending(req, res, db, auth) {
   const bizId = biz.id;
 
   const { data: pending, error } = await db.from('bracket_purchases')
-    .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, order_date, delivered_date, order_url, created_at')
+    .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at')
     .eq('business_id', bizId)
     .is('technician_id', null)
     .order('created_at', { ascending: false });
@@ -3680,6 +3681,7 @@ async function bracketPending(req, res, db, auth) {
       tilting: p.tilting_qty || 0,
       full_motion: p.full_motion_qty || 0,
       total: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
+      status: p.status || 'in_route',
       order_date: p.order_date,
       delivered_date: p.delivered_date,
       order_url: p.order_url || null,
@@ -3702,7 +3704,7 @@ async function bracketAssign(req, res, db, auth, body) {
 
   // Fetch the pending purchase (must belong to this business and be unassigned).
   const { data: purchase } = await db.from('bracket_purchases')
-    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id')
+    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id, walmart_order_num')
     .eq('id', purchaseId).eq('business_id', bizId).maybeSingle();
   if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
   if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
@@ -3716,11 +3718,25 @@ async function bracketAssign(req, res, db, auth, body) {
   const tilting = purchase.tilting_qty || 0;
   const full_motion = purchase.full_motion_qty || 0;
 
-  // Stamp the delivery with the tech.
+  // Stamp the order with the tech. Do NOT touch status — an order can be
+  // assigned while it's still in route; its delivery status updates on its own
+  // when the delivery email arrives.
   const { error: stampErr } = await db.from('bracket_purchases')
-    .update({ technician_id: techId, status: 'delivered' })
+    .update({ technician_id: techId })
     .eq('id', purchaseId);
   if (stampErr) throw stampErr;
+
+  // The sync mirrors every Walmart order to BOTH businesses as unassigned
+  // twins. Now that this one is assigned to a specific tech, drop the still-
+  // unassigned duplicate(s) of the same order in other businesses so the same
+  // physical delivery isn't shown or counted twice.
+  if (purchase.walmart_order_num) {
+    await db.from('bracket_purchases')
+      .delete()
+      .eq('walmart_order_num', purchase.walmart_order_num)
+      .is('technician_id', null)
+      .neq('business_id', bizId);
+  }
 
   // Add quantities to the tech's inventory (read-then-write; no atomic increment).
   const { data: inv } = await db.from('bracket_inventory')
