@@ -1258,13 +1258,13 @@ function listEcon(b){
     const profNeg = ec.assigned && ec.profit<0 ? ' neg' : '';
     const brackets = (ec.assigned && ec.bracket_cost>0)
       ? `<span class="ec-item"><label>Brackets</label> ${money(ec.bracket_cost)}</span>` : '';
-    priv = `<span class="ec-item"><label>Payout</label> ${payout}</span>`+
+    priv = `<span class="ec-item"><label>Tech Pay</label> ${payout}</span>`+
            brackets+
            `<span class="ec-item ec-profit${profNeg}"><label>Profit</label> ${profit}</span>`;
   }
   return `<div class="evt-econ">`+
     `<span class="ec-svc ${catCls}">${esc(ec.service_cat)}</span>`+
-    `<span class="ec-item"><label>Cost</label> ${money(ec.customer_cost)}</span>`+
+    `<span class="ec-item"><label>Total</label> ${money(ec.customer_cost)}</span>`+
     priv+
     `<span class="ec-pay ${payCls}">${payLbl}</span>`+
   `</div>`;
@@ -3213,6 +3213,7 @@ async function renderGreeting(){
       brackets: role==='owner' ? bracketPending.reduce((sum,p)=>sum+p.total,0) : 0,
       tz: (s.business && s.business.timezone) || tz(),
       revenue: s.revenue || null,
+      profit: s.profit || null,
     };
     paintGreeting();
     if(section==='schedule') el.classList.remove('hidden');
@@ -3286,8 +3287,14 @@ function greetPace(r){
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, p=greetPace(r);
+  const pf=greetingData.profit;
+  // Owner-only profit cards (server omits these for secretaries/techs).
+  const profitCards = pf ?
+    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Profit so far this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>` : '';
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue today</span><span class="gstat-v">${money(r.today||0)}</span></div>`+
+    profitCards+
     `<div class="gstat"><span class="gstat-l">This month</span><span class="gstat-v">${money(r.month||0)}</span>`+
       `<span class="gstat-s ${p.cls}">proj ${money(r.projectedMonth||0)} · ${p.txt}</span></div>`+
   `</div>`;

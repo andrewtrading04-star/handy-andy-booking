@@ -417,10 +417,34 @@ async function summary(req, res, db, auth) {
     .eq('business_id', biz.id).eq('active', true).order('name');
   if (e3) throw e3;
 
+  // Owner-only: profit today + week-to-date (revenue − tech payout − bracket
+  // hardware cost), using the same engine as the List view. Sensitive margin data
+  // — NEVER computed for secretaries/techs (this whole block is gated on owner).
+  let profit = null;
+  if (auth.role === 'owner') {
+    const { data: weekJobs } = await fetchBookingRows(sel => db.from('bookings')
+      .select(sel)
+      .eq('business_id', biz.id)
+      .gte('scheduled_at', weekStart.toISOString())
+      .lt('scheduled_at', tomorrow.toISOString())
+      .order('scheduled_at', { ascending: true }));
+    const econ = await computeJobEconomics(db, biz, weekJobs || [], true);
+    let pToday = 0, pWeek = 0;
+    for (const b of weekJobs || []) {
+      if (b.status === 'cancelled') continue;
+      const e = econ[b.id]; if (!e) continue;
+      const prof = Number(e.profit) || 0;
+      pWeek += prof;
+      if (new Date(b.scheduled_at) >= todayStart) pToday += prof;
+    }
+    profit = { today: Math.round(pToday), week: Math.round(pWeek) };
+  }
+
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: tz },
     today: (today || []).map(shapeBooking),
     revenue,
+    profit,
     technicians: techs || [],
     counts: {
       todayTotal: (today || []).length,
