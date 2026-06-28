@@ -119,6 +119,12 @@
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
 
+  /* Targeted notice banner (e.g. coverage notes for specific techs) */
+  .tech-notice{display:flex;align-items:flex-start;gap:10px;margin:0 16px 12px;padding:13px 15px;
+    background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.40);border-radius:12px;
+    color:#ffd98a;font-size:14.5px;font-weight:600;line-height:1.45;}
+  .tech-notice .tn-ic{font-size:17px;line-height:1.2;flex:0 0 auto;}
+  .tech-notice a{color:#ffd98a;font-weight:800;text-decoration:underline;white-space:nowrap;}
   /* Photos */
   .phreq{float:right;font-size:11px;font-weight:800;letter-spacing:.3px;color:var(--amber);background:rgba(255,176,32,.12);padding:2px 9px;border-radius:12px;text-transform:none;}
   .phreq.ok{color:var(--green);background:rgba(39,192,147,.14);}
@@ -178,6 +184,7 @@
         <button id="logout">Log out</button>
       </div>
     </div>
+    <div id="techNotice" class="tech-notice hidden"></div>
     <div class="weekbar">
       <div class="weekbar-top">
         <div class="weekbar-title" id="weekTitle">—</div>
@@ -348,7 +355,26 @@ async function showJobs(date){
   show('jobsView');
   applyIconTheme();
   document.getElementById('techName').textContent=tech?tech.name:'';
+  renderTechNotice();
   await loadWeek();
+}
+
+// Targeted dashboard notice. Currently: Joey-off coverage note, shown to TK and
+// Gregory only, all day Sunday (Denver time). Stays until removed by request.
+function isSundayDenver(){
+  try{ return new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',weekday:'short'}).format(new Date())==='Sun'; }
+  catch{ return new Date().getDay()===0; }
+}
+function renderTechNotice(){
+  const el=document.getElementById('techNotice'); if(!el) return;
+  const name=String(tech&&tech.name||'');
+  const forTech=/\b(tk|gregory)\b/i.test(name);
+  if(forTech && isSundayDenver()){
+    el.innerHTML=`<span class="tn-ic">📣</span><span>Joey is off today. Please contact Andrew if you need anything. <a href="tel:3374997817">337-499-7817</a>.</span>`;
+    el.classList.remove('hidden');
+  }else{
+    el.innerHTML=''; el.classList.add('hidden');
+  }
 }
 
 async function loadWeek(){
