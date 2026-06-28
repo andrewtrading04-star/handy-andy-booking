@@ -1139,10 +1139,21 @@ async function techPayroll(req, res, db, auth) {
   const weekEnd = addDaysStr(weekStart, 6);
 
   // The tech's business slug drives Dom's-vs-HA handling inside the engine.
-  const { data: techRow } = await db.from('technicians')
-    .select('name, businesses(slug)').eq('id', techId).single();
+  // Also pull the owner-set manual "expected pay" (may predate migration 0038).
+  let techRow = null;
+  {
+    let r = await db.from('technicians')
+      .select('name, businesses(slug), manual_pay_amount, manual_pay_date').eq('id', techId).single();
+    if (r.error && /manual_pay_(amount|date)/.test(r.error.message || '')) {
+      r = await db.from('technicians').select('name, businesses(slug)').eq('id', techId).single();
+    }
+    techRow = r.data;
+  }
   const techName = techRow?.name || '';
   const businessSlug = techRow?.businesses?.slug || '';
+  const manualPay = (techRow?.manual_pay_amount != null || techRow?.manual_pay_date)
+    ? { amount: techRow.manual_pay_amount != null ? Number(techRow.manual_pay_amount) : null, date: techRow.manual_pay_date || null }
+    : null;
 
   // Completed jobs for this tech in the week, with everything the engine needs.
   // Completed jobs for this tech this week. secondary_technician_id (migration
@@ -1229,6 +1240,7 @@ async function techPayroll(req, res, db, auth) {
     jobs: paidJobs,
     deferred: deferredJobs,
     total: totalPay,
+    manual_pay: manualPay,
   });
 }
 

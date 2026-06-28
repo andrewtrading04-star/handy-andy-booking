@@ -980,6 +980,24 @@ function renderPayroll(data){
   const weekEnd=addDaysStr(payrollWeekStart,6);
   const payDate=data.pay_date||addDaysStr(weekEnd,9);
 
+  // Owner-set expected pay for the upcoming deposit (transitional, while HA/Dom's
+  // payroll still comes from the external tool). Shown prominently at the top.
+  const mp=data.manual_pay;
+  let mpBanner='';
+  if(mp && (mp.date || mp.amount!=null)){
+    let when='';
+    if(mp.date){
+      const dd=new Date(mp.date+'T00:00:00'), n=dd.getDate();
+      const suf=(n%100>=11&&n%100<=13)?'th':(['th','st','nd','rd'][n%10]||'th');
+      when=` — ${dd.toLocaleString('en-US',{month:'long'})} ${n}${suf}`;
+    }
+    const amt=mp.amount!=null?`<div style="font-size:30px;font-weight:800;margin-top:3px;line-height:1;">$${Number(mp.amount).toLocaleString()}</div>`:'';
+    mpBanner=`<div class="card" style="background:var(--green,#16a34a);color:#06240f;border:none;">
+      <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">💰 Expected pay${when}</div>
+      ${amt}
+    </div>`;
+  }
+
   const paidJobs=data.jobs||[];
   const deferredJobs=data.deferred||[];
   const reviewCount=paidJobs.filter(j=>j.needs_review).length;
@@ -1016,6 +1034,8 @@ function renderPayroll(data){
 
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">Payroll</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Weekly earnings</div></div>
+
+    ${mpBanner}
 
     <div class="card">
       <h3>Week of ${fmtDs(payrollWeekStart,{month:'short',day:'numeric'})} – ${fmtDs(weekEnd,{month:'short',day:'numeric'})}</h3>
