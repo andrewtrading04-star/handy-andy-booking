@@ -75,9 +75,36 @@ async function applyMigration(filename) {
 // alias of 'in_route' (rank 0) so old rows compare correctly.
 const BRACKET_STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
-// Upsert one Walmart order into bracket_purchases for every active business.
-// Auth/method are checked by the caller (the bracket_sync action). Returns the
-// HTTP response with a per-business result list.
+// Adjust a tech's bracket_inventory by a (possibly negative) delta, clamped at
+// zero. Used to self-heal inventory when an already-assigned order's quantities
+// are corrected from the email.
+async function adjustBracketInventory(db, businessId, technicianId, delta) {
+  const clamp = (n) => Math.max(0, n || 0);
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
+  if (!inv) {
+    await db.from('bracket_inventory').insert({
+      business_id: businessId, technician_id: technicianId,
+      flat_qty: clamp(delta.flat), tilting_qty: clamp(delta.tilting), full_motion_qty: clamp(delta.full_motion),
+    });
+    return;
+  }
+  await db.from('bracket_inventory').update({
+    flat_qty:        clamp((inv.flat_qty || 0)        + delta.flat),
+    tilting_qty:     clamp((inv.tilting_qty || 0)     + delta.tilting),
+    full_motion_qty: clamp((inv.full_motion_qty || 0) + delta.full_motion),
+  }).eq('id', inv.id);
+}
+
+// Sync one Walmart order into bracket_purchases. Auth/method checked by caller.
+//   • Unassigned everywhere → mirror the order to every active business as an
+//     unassigned delivery (so it can be assigned from either platform).
+//   • Already assigned to a tech in some business → that business OWNS it:
+//     update only that row, self-heal its quantities from the email (moving the
+//     tech's inventory by the difference), and drop leftover unassigned twins in
+//     other businesses so the same delivery isn't shown or counted twice.
+// Status only ever upgrades (in_route → delivered), never downgrades.
 async function bracketSync(req, res) {
   const body = req.body || {};
   const walmart_order_num = (body.walmart_order_num || '').toString().trim();
@@ -94,46 +121,78 @@ async function bracketSync(req, res) {
   const order_url       = body.order_url      || null;
 
   const db = serviceClient();
-  const { data: businesses, error: bizErr } = await db.from('businesses')
-    .select('id, slug').eq('active', true);
+  const { data: businesses, error: bizErr } = await db.from('businesses').select('id, slug').eq('active', true);
   if (bizErr) return res.status(500).json({ error: bizErr.message });
+  const slugOf = (id) => (businesses || []).find(b => b.id === id)?.slug || id;
+
+  // Every row for this order across all businesses.
+  const { data: rows, error: rowsErr } = await db.from('bracket_purchases')
+    .select('id, business_id, status, flat_qty, tilting_qty, full_motion_qty, order_url, technician_id')
+    .eq('walmart_order_num', walmart_order_num);
+  if (rowsErr) return res.status(500).json({ error: rowsErr.message });
 
   const results = [];
-  for (const biz of (businesses || [])) {
-    const { data: existing } = await db.from('bracket_purchases')
-      .select('id, status, flat_qty, tilting_qty, full_motion_qty, order_url, technician_id')
-      .eq('business_id', biz.id)
-      .eq('walmart_order_num', walmart_order_num)
-      .maybeSingle();
+  const upgrades = (fromStatus) => (BRACKET_STATUS_RANK[status] ?? 0) > (BRACKET_STATUS_RANK[fromStatus] ?? 0);
+  const statusPatch = () => {
+    const p = {};
+    if (status === 'delivered' && delivered_date) p.delivered_date = delivered_date;
+    p.status = status;
+    return p;
+  };
 
-    if (existing) {
-      const currentRank = BRACKET_STATUS_RANK[existing.status] ?? 0;
-      const newRank     = BRACKET_STATUS_RANK[status] ?? 0;
-      const patch = {};
-      if (newRank > currentRank) {
-        patch.status = status;
-        if (status === 'delivered' && delivered_date) patch.delivered_date = delivered_date;
-      }
-      if (order_url && !existing.order_url) patch.order_url = order_url;
-      // While the order is still UNASSIGNED, keep its quantities authoritative
-      // from the email (this self-heals any earlier bad/manual entry). Once a
-      // tech is assigned the quantities are frozen — assignment already moved
-      // them into that tech's inventory.
-      if (totalQty > 0 && !existing.technician_id) {
-        if (existing.flat_qty        !== flat_qty)        patch.flat_qty        = flat_qty;
-        if (existing.tilting_qty     !== tilting_qty)     patch.tilting_qty     = tilting_qty;
-        if (existing.full_motion_qty !== full_motion_qty) patch.full_motion_qty = full_motion_qty;
-      }
-      if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged', status: existing.status }); continue; }
-      const { error: upErr } = await db.from('bracket_purchases').update(patch).eq('id', existing.id);
-      results.push({ business: biz.slug, action: upErr ? 'update_failed' : 'updated', patch, error: upErr?.message });
-    } else {
-      if (totalQty === 0) { results.push({ business: biz.slug, action: 'skipped', reason: 'no_qty_for_new_order' }); continue; }
-      const { error: insErr } = await db.from('bracket_purchases').insert({
-        business_id: biz.id, technician_id: null, walmart_order_num,
-        flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
+  const assignedRow = (rows || []).find(r => r.technician_id);
+  if (assignedRow) {
+    // The assigned tech's business owns this order.
+    const patch = {};
+    if (upgrades(assignedRow.status)) Object.assign(patch, statusPatch());
+    if (order_url && !assignedRow.order_url) patch.order_url = order_url;
+    // Self-heal quantities (e.g. a pre-fix mis-parse) and move the tech's
+    // inventory by the difference so counts stay consistent.
+    if (totalQty > 0 && (assignedRow.flat_qty !== flat_qty || assignedRow.tilting_qty !== tilting_qty || assignedRow.full_motion_qty !== full_motion_qty)) {
+      await adjustBracketInventory(db, assignedRow.business_id, assignedRow.technician_id, {
+        flat:        flat_qty        - (assignedRow.flat_qty || 0),
+        tilting:     tilting_qty     - (assignedRow.tilting_qty || 0),
+        full_motion: full_motion_qty - (assignedRow.full_motion_qty || 0),
       });
-      results.push({ business: biz.slug, action: insErr ? 'insert_failed' : 'created', error: insErr?.message });
+      patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty;
+    }
+    if (Object.keys(patch).length) {
+      const { error } = await db.from('bracket_purchases').update(patch).eq('id', assignedRow.id);
+      results.push({ business: slugOf(assignedRow.business_id), action: error ? 'update_failed' : 'updated_assigned', patch, error: error?.message });
+    } else {
+      results.push({ business: slugOf(assignedRow.business_id), action: 'unchanged' });
+    }
+    // Drop leftover unassigned twins of the same order anywhere else.
+    for (const r of (rows || [])) {
+      if (r.id === assignedRow.id || r.technician_id) continue;
+      await db.from('bracket_purchases').delete().eq('id', r.id);
+      results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
+    }
+  } else {
+    // Unassigned everywhere — mirror to every active business.
+    const byBiz = new Map((rows || []).map(r => [r.business_id, r]));
+    for (const biz of (businesses || [])) {
+      const existing = byBiz.get(biz.id);
+      if (existing) {
+        const patch = {};
+        if (upgrades(existing.status)) Object.assign(patch, statusPatch());
+        if (order_url && !existing.order_url) patch.order_url = order_url;
+        if (totalQty > 0) {
+          if (existing.flat_qty        !== flat_qty)        patch.flat_qty        = flat_qty;
+          if (existing.tilting_qty     !== tilting_qty)     patch.tilting_qty     = tilting_qty;
+          if (existing.full_motion_qty !== full_motion_qty) patch.full_motion_qty = full_motion_qty;
+        }
+        if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged' }); continue; }
+        const { error } = await db.from('bracket_purchases').update(patch).eq('id', existing.id);
+        results.push({ business: biz.slug, action: error ? 'update_failed' : 'updated', patch, error: error?.message });
+      } else {
+        if (totalQty === 0) { results.push({ business: biz.slug, action: 'skipped', reason: 'no_qty_for_new_order' }); continue; }
+        const { error } = await db.from('bracket_purchases').insert({
+          business_id: biz.id, technician_id: null, walmart_order_num,
+          flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
+        });
+        results.push({ business: biz.slug, action: error ? 'insert_failed' : 'created', error: error?.message });
+      }
     }
   }
 
