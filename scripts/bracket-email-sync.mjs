@@ -180,10 +180,12 @@ async function main() {
 
   await client.mailboxOpen('INBOX');
 
-  // Search for UNSEEN emails FROM walmart.com. The 30-day window catches
-  // anything that arrived while the action was paused.
+  // Search for UNSEEN emails FROM walmart.com (any subdomain — substring match).
+  // The 30-day window catches anything that arrived while the action was paused.
+  // { uid: true } makes search + fetch + flag all operate on stable UIDs.
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const uids  = await client.search({ from: '@walmart.com', unseen: true, since });
+  let uids = await client.search({ from: 'walmart.com', seen: false, since }, { uid: true });
+  if (!Array.isArray(uids)) uids = [];
 
   if (!uids.length) {
     console.log('[bracket-sync] No new Walmart emails — nothing to do.');
@@ -196,7 +198,7 @@ async function main() {
   let synced = 0;
   const toMark = [];
 
-  for await (const msg of client.fetch(uids, { uid: true, source: true })) {
+  for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
     let parsed;
     try {
       parsed = await simpleParser(msg.source);
