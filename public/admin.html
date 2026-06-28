@@ -1125,9 +1125,9 @@ document.getElementById('viewToggle').querySelectorAll('button').forEach(b=>b.ad
   document.querySelectorAll('#viewToggle button').forEach(x=>x.classList.toggle('on',x.dataset.view===calView));
   renderCalBody();
 }));
-document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); });
-document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); });
-document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); });
+document.getElementById('prevWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?-1:-7); renderSchedule(); refreshGreetingStats(); });
+document.getElementById('nextWk').addEventListener('click',()=>{ anchorDate=addDays(anchorDate, calView==='day'?1:7); renderSchedule(); refreshGreetingStats(); });
+document.getElementById('todayBtn').addEventListener('click',()=>{ anchorDate=todayStr(); renderSchedule(); refreshGreetingStats(); });
 document.getElementById('jobSearch').addEventListener('input', e=>{ jobSearchQuery=e.target.value; renderCalBody(); });
 document.getElementById('jobSearchShowCanceled').addEventListener('change', e=>{ jobSearchShowCanceled=e.target.checked; renderCalBody(); });
 
@@ -3195,8 +3195,9 @@ async function renderGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !current){ if(el) el.classList.add('hidden'); return; }
   try{
+    // Stats follow the week shown on the schedule — send that week's Sunday.
     const reqs=[
-      api('summary',{ params:{ business:current.slug }}),
+      api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }}),
       refreshEstimateBadge(),
     ];
     // Owner: also check for pending brackets
@@ -3219,6 +3220,17 @@ async function renderGreeting(){
     if(section==='schedule') el.classList.remove('hidden');
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
+}
+// Re-fetch just the week/month stats when the schedule week changes, and repaint
+// the greeting. Owner-only (the stat boxes don't exist for anyone else).
+async function refreshGreetingStats(){
+  if(role!=='owner' || !current || !greetingData) return;
+  try{
+    const s=await api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }});
+    greetingData.revenue=s.revenue||null;
+    greetingData.profit=s.profit||null;
+    paintGreeting();
+  }catch{ /* leave current numbers on a transient error */ }
 }
 function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
 function getTimeGreeting(name, tz) {
@@ -3275,28 +3287,19 @@ function greetNoteHtml(){
     return `<div class="greet-note"><span class="gn-ic">⚠️</span><span>${esc(GREET_NOTE.text)}</span></div>`;
   }catch(e){ return ''; }
 }
-// Owner-only metrics strip: revenue today, monthly pace vs last month.
-function greetPace(r){
-  const last=Number(r.lastMonth||0), proj=Number(r.projectedMonth||0);
-  if(!last) return { txt:'no prior month', cls:'flat' };
-  const pct=Math.round((proj-last)/last*100);
-  if(pct>=5)  return { txt:`▲ ${pct}% vs last mo`, cls:'up' };
-  if(pct<=-5) return { txt:`▼ ${Math.abs(pct)}% vs last mo`, cls:'down' };
-  return { txt:'on track vs last mo', cls:'flat' };
-}
+// Owner-only metrics strip: revenue + profit for the viewed week and its month.
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
-  const r=greetingData.revenue, p=greetPace(r);
-  const pf=greetingData.profit;
-  // Owner-only profit cards (server omits these for secretaries/techs).
+  const r=greetingData.revenue, pf=greetingData.profit;
+  // 2×2 grid, all relative to the WEEK shown on the schedule:
+  //   top:    Revenue this week | Revenue this month
+  //   bottom: Profit this week  | Profit this month   (owner-only, server-gated)
   const profitCards = pf ?
-    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Profit so far this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>` : '';
-  // 2×2 grid — top: Revenue today | This month, bottom: Profit today | Profit this week.
+    `<div class="gstat"><span class="gstat-l">Profit this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Profit this month</span><span class="gstat-v" style="color:#4ade80;">${money(pf.month||0)}</span></div>` : '';
   return `<div class="greet-stats">`+
-    `<div class="gstat"><span class="gstat-l">Revenue today</span><span class="gstat-v">${money(r.today||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">This month</span><span class="gstat-v">${money(r.month||0)}</span>`+
-      `<span class="gstat-s ${p.cls}">proj ${money(r.projectedMonth||0)} · ${p.txt}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Revenue this month</span><span class="gstat-v">${money(r.month||0)}</span></div>`+
     profitCards+
   `</div>`;
 }

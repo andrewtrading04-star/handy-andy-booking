@@ -366,10 +366,21 @@ async function summary(req, res, db, auth) {
 
   const todayStart = localDayStartUTC(tz, 0);
   const tomorrow = localDayStartUTC(tz, 1);
-  const weekStart = startOfWeekUTC(tz);
-  const monthStart = startOfMonthUTC(tz);
 
-  // Today's jobs (joined).
+  // The 4 stat boxes track the WEEK shown on the schedule. `week` is any date in
+  // that week (the client sends the week's Sunday); default = the current week.
+  const wparam = (req.query.week || '').toString();
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(wparam) ? new Date(wparam + 'T12:00:00Z') : new Date();
+  const weekStart = startOfWeekUTC(tz, base);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const monthStart = startOfMonthUTC(tz, weekStart);
+  const monthEnd = startOfMonthUTC(tz, new Date(monthStart.getTime() + 40 * 24 * 60 * 60 * 1000));
+  // A week can straddle two months (e.g. Jun 28–Jul 4), so pull the union range.
+  const rangeStart = weekStart < monthStart ? weekStart : monthStart;
+  const rangeEnd = weekEnd > monthEnd ? weekEnd : monthEnd;
+
+  // Today's jobs — for the "jobs scheduled today" line + counts. Always the real
+  // today, regardless of which week is being viewed.
   const { data: today, error: e1 } = await fetchBookingRows(sel => db.from('bookings')
     .select(sel)
     .eq('business_id', biz.id)
@@ -378,38 +389,20 @@ async function summary(req, res, db, auth) {
     .order('scheduled_at', { ascending: true }));
   if (e1) throw e1;
 
-  // Revenue: pull this month's non-cancelled jobs once, bucket client-side.
-  const { data: monthJobs, error: e2 } = await db.from('bookings')
+  // Revenue across the viewed week's union range, bucketed into week + month.
+  const { data: rangeJobs, error: e2 } = await db.from('bookings')
     .select('price, scheduled_at, status')
     .eq('business_id', biz.id)
-    .gte('scheduled_at', monthStart.toISOString())
+    .gte('scheduled_at', rangeStart.toISOString())
+    .lt('scheduled_at', rangeEnd.toISOString())
     .in('status', ACTIVE_STATUSES);
   if (e2) throw e2;
-
   const sum = (rows) => Math.round(rows.reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
-  const inRange = (since) => monthJobs.filter(r => r.scheduled_at && new Date(r.scheduled_at) >= since);
+  const inWindow = (rows, a, b) => rows.filter(r => { const t = new Date(r.scheduled_at); return t >= a && t < b; });
   const revenue = {
-    today: sum(inRange(todayStart).filter(r => new Date(r.scheduled_at) < tomorrow)),
-    week:  sum(inRange(weekStart)),
-    month: sum(monthJobs),
+    week:  sum(inWindow(rangeJobs, weekStart, weekEnd)),
+    month: sum(inWindow(rangeJobs, monthStart, monthEnd)),
   };
-
-  // Last month's revenue (same active statuses) — baseline for the "pace" chip.
-  const lastMonthStart = startOfMonthUTC(tz, new Date(monthStart.getTime() - 24 * 60 * 60 * 1000));
-  const { data: lastMonthJobs } = await db.from('bookings')
-    .select('price')
-    .eq('business_id', biz.id)
-    .gte('scheduled_at', lastMonthStart.toISOString())
-    .lt('scheduled_at', monthStart.toISOString())
-    .in('status', ACTIVE_STATUSES);
-  revenue.lastMonth = sum(lastMonthJobs || []);
-
-  // Run-rate projection for the current month (local calendar): month-to-date
-  // revenue scaled by how much of the month has elapsed.
-  const [ly, lm, ld] = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
-    .format(new Date()).split('-').map(Number);
-  const daysInMonth = new Date(ly, lm, 0).getDate();
-  revenue.projectedMonth = ld > 0 ? Math.round(revenue.month / ld * daysInMonth) : revenue.month;
 
   // Technicians + live status.
   const { data: techs, error: e3 } = await db.from('technicians')
@@ -417,27 +410,28 @@ async function summary(req, res, db, auth) {
     .eq('business_id', biz.id).eq('active', true).order('name');
   if (e3) throw e3;
 
-  // Owner-only: profit today + week-to-date (revenue − tech payout − bracket
-  // hardware cost), using the same engine as the List view. Sensitive margin data
-  // — NEVER computed for secretaries/techs (this whole block is gated on owner).
+  // Owner-only: profit for the viewed week + its month (revenue − tech payout −
+  // bracket cost), via the same engine as the List view. Sensitive margin data —
+  // gated on owner; the field is never even computed for secretaries/techs.
   let profit = null;
   if (auth.role === 'owner') {
-    const { data: weekJobs } = await fetchBookingRows(sel => db.from('bookings')
+    const { data: pjobs } = await fetchBookingRows(sel => db.from('bookings')
       .select(sel)
       .eq('business_id', biz.id)
-      .gte('scheduled_at', weekStart.toISOString())
-      .lt('scheduled_at', tomorrow.toISOString())
+      .gte('scheduled_at', rangeStart.toISOString())
+      .lt('scheduled_at', rangeEnd.toISOString())
       .order('scheduled_at', { ascending: true }));
-    const econ = await computeJobEconomics(db, biz, weekJobs || [], true);
-    let pToday = 0, pWeek = 0;
-    for (const b of weekJobs || []) {
+    const econ = await computeJobEconomics(db, biz, pjobs || [], true);
+    let pWeek = 0, pMonth = 0;
+    for (const b of pjobs || []) {
       if (b.status === 'cancelled') continue;
       const e = econ[b.id]; if (!e) continue;
       const prof = Number(e.profit) || 0;
-      pWeek += prof;
-      if (new Date(b.scheduled_at) >= todayStart) pToday += prof;
+      const t = new Date(b.scheduled_at);
+      if (t >= weekStart && t < weekEnd) pWeek += prof;
+      if (t >= monthStart && t < monthEnd) pMonth += prof;
     }
-    profit = { today: Math.round(pToday), week: Math.round(pWeek) };
+    profit = { week: Math.round(pWeek), month: Math.round(pMonth) };
   }
 
   return res.status(200).json({
