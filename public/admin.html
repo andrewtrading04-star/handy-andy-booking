@@ -127,12 +127,13 @@
   .todot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;}
   .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
   .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
-  .evt{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .evt{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);overflow:hidden;}
   .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
-  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);}
+  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);line-height:1.3;}
+  .evt-time{white-space:nowrap;}
   .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
   .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .evt-b{display:flex;align-items:center;gap:6px;}
+  .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
   .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
   .evt.s-pending{border-left-color:var(--amber);}
   .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
@@ -243,7 +244,7 @@
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
   .pay-refunded{background:#fee2e2;color:#b91c1c;} .pay-void{background:#f1f3f6;color:var(--mute);}
-  .evt-paid{font-size:10px;font-weight:800;color:#15803d;margin-left:auto;}
+  .evt-paid{font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:1px 7px;margin-left:auto;white-space:nowrap;}
   /* Bracket Inventory */
   .bracket-table{width:100%;border-collapse:collapse;margin-bottom:20px;}
   .bracket-table th{background:var(--line2);padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.02em;}
@@ -327,7 +328,7 @@
   .note-b{font-size:13.5px;line-height:1.45;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;}
   .note-del{background:transparent;border:none;color:#b91c1c;font-size:11px;font-weight:700;padding:5px 0 0;cursor:pointer;}
   .bk-note-input{width:100%;background:#fff;border:1px solid var(--line);border-radius:9px;color:var(--ink);padding:9px 11px;font-size:13.5px;min-height:54px;margin-top:8px;resize:vertical;font-family:inherit;}
-  .evt-photo{font-size:10px;font-weight:800;color:var(--mute);margin-left:6px;}
+  .evt-photo{font-size:10px;font-weight:700;color:var(--mute);white-space:nowrap;}
   /* photo gallery page */
   .gal-head{font-size:13px;color:var(--mute);font-weight:700;margin-bottom:12px;}
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
@@ -1201,7 +1202,7 @@ function renderCalBody(){
 function evtCard(b){
   const xcoSecondary = b.secondary_technician?.cross_company;
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
-    <div class="evt-t">${esc(fmtTimeRange(b))}<span class="evt-dur">${esc(fmtDuration(b))}</span></div>
+    <div class="evt-t"><span class="evt-time">${esc(fmtTimeRange(b)).replace(/\s*[–-]\s*/,'–')}</span><span class="evt-dur">${esc(fmtDuration(b))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
   </div>`;
