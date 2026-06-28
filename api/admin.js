@@ -511,6 +511,8 @@ async function computeJobEconomics(db, biz, rows, includePay) {
         business_slug: biz.slug,
         line_items: b.line_items || [],
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
+        // Two assigned techs split the job 50/50 even without a "lift help" line.
+        second_tech: techNames.length > 1,
       };
       let payout = 0;
       for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
@@ -3300,6 +3302,8 @@ async function payroll(req, res, db, auth) {
         business_slug: biz.slug,
         line_items: b.line_items || [],
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
+        // Two techs on the job -> split 50/50 even without a "lift help" line.
+        second_tech: (jobTechs[b.id] || []).length > 1,
       }, techPayroll[techId].name);
 
       const jobBase = {

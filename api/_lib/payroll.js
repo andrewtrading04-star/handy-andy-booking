@@ -41,8 +41,8 @@ const TV_SIZE_RATES = [
   { test: /(32|thirty.?two).*(less|under|below)|under.*32|32"?\s*or\s*less/, juan: 50, other: 50, label: '32" & under' },
   { test: /33.*59|33"?–?59/,                                                  juan: 60, other: 60, label: '33"–59"' },
   { test: /60.*69|60"?–?69/,                                                  juan: 80, other: 70, label: '60"–69"' },
-  { test: /70.*84|70"?–?84/,                                                  juan: 90, other: 80, label: '70"–84"' },
-  { test: /85.*97|85"?–?97/,                                                  juan: 110, other: 110, label: '85"–97"' },
+  { test: /70.*8[45]|70"?[–-]?8[45]/,                                         juan: 90, other: 80, label: '70"–84"' },
+  { test: /8[56].*97|8[56]"?[–-]?97/,                                         juan: 110, other: 110, label: '85"–97"' },
   { test: /98|98"?\+|9[0-9]"?\s*\+/,                                          juan: 130, other: 130, label: '98"+' },
 ];
 
@@ -62,6 +62,13 @@ const ITEM_RATES = {
   'customer supplied bracket': { juan: 0, other: 0 },
   'i have my own bracket':   { juan: 0, other: 0 },
   'i have my own mounting bracket': { juan: 0, other: 0 },
+  // Bracket choice for 85"–100" TVs (verbose widget labels). Brackets still pay
+  // $0 to other techs; Juan keeps his bracket reimbursement.
+  '85 100 flat bracket':        { juan: 25, other: 0 },
+  '85 100 tilting bracket':     { juan: 35, other: 0 },
+  '85 100 full motion bracket': { juan: 60, other: 0 },
+  // Samsung Frame "bracket in the box" (verbose widget wording -> $15 both).
+  'i will be using the bracket that comes in the box samsung frame tv': { juan: 15, other: 15 },
 
   // Add-ons (same for everyone).
   'samsung frame box':       { juan: 15, other: 15 },
@@ -70,6 +77,7 @@ const ITEM_RATES = {
   'soundbar installation':   { juan: 35, other: 35 },
   'apple tv':                { juan: 15, other: 15 },
   'apple tv installation':   { juan: 15, other: 15 },
+  'apple tv installation mounting bracket included': { juan: 15, other: 15 },
   'led light strip':         { juan: 35, other: 35 },
   'led lights':              { juan: 35, other: 35 },
   'shelf installation':      { juan: 35, other: 35 },
@@ -81,14 +89,18 @@ const ITEM_RATES = {
   // Wires / fireplace / surface.
   'behind wall wires':       { juan: 45, other: 35 },
   'hide wires behind the wall': { juan: 45, other: 35 },
+  'yes hide the wires behind the wall': { juan: 45, other: 35 },
   'outside wall wires':      { juan: 15, other: 15 },
   'hide wires outside the wall': { juan: 15, other: 15 },
+  'yes hide the wires outside the wall': { juan: 15, other: 15 },
   'hang wires under the tv': { juan: 0, other: 0 },
   'wires hang under the tv': { juan: 0, other: 0 },
   'above fireplace':         { juan: 25, other: 20 },
   'tv above a fireplace':    { juan: 25, other: 20 },
+  'i have 1 tv above a fireplace': { juan: 25, other: 20 },
   'not over fireplace':      { juan: 0, other: 0 },
   'tv not over a fireplace': { juan: 0, other: 0 },
+  'i have 1 tv not over a fireplace': { juan: 0, other: 0 },
   'tv not above a fireplace': { juan: 0, other: 0 },
   'brick stone surface':     { juan: 25, other: 25 },
   'brick':                   { juan: 25, other: 25 },
@@ -143,6 +155,11 @@ function keyOf(s) {
 
 function matchSize(name) {
   const n = String(name || '').toLowerCase();
+  // The booking widget's LIFTING question answers ("My TV is 70-85 inches and I
+  // can help lift it", "My TV is 85 inches or larger") embed a size range but are
+  // NOT a TV-size base selection. Never let them score base pay — the real size
+  // options ("70\"-85\"", "33\"-59\"") never say "my tv is" / "lift" / "help" / "larger".
+  if (/my tv is|\b(?:lift|help|larger)\b/i.test(n)) return null;
   for (const r of TV_SIZE_RATES) if (r.test.test(n)) return r;
   return null;
 }
@@ -182,16 +199,22 @@ function tipFor(job) {
   return tip;
 }
 
-// ── Multi-tech detection (when "Second Technician" or "Lifting Help" line item exists) ──
+// The line-item wordings that signal a two-person ("lift help") job. Covers the
+// internal "Second Technician"/"Lifting Help" markers AND the customer-facing
+// widget options ("…I cannot help lift it", "My TV is 85 inches or larger").
+// NOTE: "…I CAN help lift it" must NOT match — the negative lookalike is excluded
+// by requiring "cannot" in the lift branch.
+const SECOND_TECH_RE = /second\s*technician|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
+
+// ── Multi-tech detection (when a two-person "lift help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.
-// Bonus is $30 per tech if customer paid for it (line_total >= 70), else $0.
-// (Customer pays $70; business splits ~$60 between two techs at $30 each = $10 margin)
+// Bonus is $30 per tech if the customer paid for it (line_total >= 70), else $0.
+// (Customer pays $70; the ~$60 add-on splits $30/$30 between the two techs.)
 function detectMultiTech(job) {
   for (const li of job.line_items || []) {
     const name = String(li.name || '').toLowerCase();
-    if (/second\s*technician|cannot\s*lift\s*86|lifting\s*help/i.test(name)) {
+    if (SECOND_TECH_RE.test(name)) {
       const lt = Number(li.line_total) || 0;
-      // If customer paid >= $70 for the add-on, each tech gets +$30 bonus per the rate sheet.
       const bonus = lt >= 70 ? 30 : 0;
       return { hasSecondTech: true, secondTechBonus: bonus };
     }
@@ -289,8 +312,11 @@ export function computeJobPay(job, techName) {
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 
-  // ── Detect multi-tech: when "Second Technician" or "Lifting Help" line item is present.
+  // ── Detect multi-tech: when a two-person "lift help" line item is present, OR
+  // the caller tells us a second technician is assigned to the job. Either way the
+  // job's pay is computed then split 50/50 between the two techs.
   const multiTech = detectMultiTech(job);
+  if (job.second_tech) multiTech.hasSecondTech = true;
 
   // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
   let afterHoursBonus = 0;
@@ -320,22 +346,16 @@ export function computeJobPay(job, techName) {
     // Skip non-labor bookkeeping lines.
     if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /travel fee/i.test(name)) continue;
 
-    // Skip "Second Technician" / "Lifting Help" markers — they're not labor to calculate.
-    // The $60 bonus is added separately if present.
-    if (/second\s*technician|cannot\s*lift\s*86|lifting\s*help/i.test(name)) continue;
+    // Skip the two-person "lift help" marker — it's not a labor line to price.
+    // The $60 ($30/tech) bonus is added separately when the split runs.
+    if (SECOND_TECH_RE.test(name)) continue;
 
-    // Dismount (threshold) — standalone or line item.
-    if (/guaranteed dismount/i.test(name)) {
-      // Sold (charged ~$35) -> $0; Redeemed (charged $0) -> $60.
-      const amt = lt > 0 ? 0 : 60;
-      breakdown.push({ label: amt ? 'Guaranteed Dismount (redeemed)' : 'Guaranteed Dismount (sold)', amount: amt });
-      pay += amt;
-      continue;
-    }
-    if (/\bdismount\b/i.test(name)) {
-      const amt = lt > 60 ? 60 : 50;
-      breakdown.push({ label: `Dismount (cust $${round0(lt)})`, amount: amt });
-      pay += amt;
+    // Dismount / Guaranteed Dismount Service (GDS): the tech earns a flat $60 in
+    // both cases per the owner. GDS is free to the customer ($0); a plain dismount
+    // is charged ($119/$129/etc) — the tech's pay is $60 either way.
+    if (/dismount/i.test(name)) {
+      breakdown.push({ label: /guaranteed/i.test(name) ? 'Guaranteed Dismount Service' : 'Dismount', amount: 60 });
+      pay += 60;
       continue;
     }
 
@@ -348,10 +368,11 @@ export function computeJobPay(job, techName) {
       pay += amt;
       continue;
     }
-    // For both Handy Andy and Dom's, TV size detection is the same.
-    // If we encounter a size name we don't match, flag for owner review.
+    // The widget's lifting-question answers ("My TV is under 70 inches", "…I can
+    // help lift it") are $0 no-ops — skip them silently. Only flag a "My TV is…"
+    // descriptor we couldn't price when the customer was actually CHARGED for it.
     if (/my tv is|under 70|70.?85|86\s*\+?/i.test(name) && !matchSize(name)) {
-      flags.push(`Size descriptor "${name}" — verify rate bracket for pay calculation`);
+      if (lt > 0) flags.push(`Size descriptor "${name}" — verify rate bracket for pay calculation`);
       continue;
     }
 
@@ -446,13 +467,12 @@ function runSelfTests() {
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 255 -> 3h*65=195');
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 50, line_items: [] }), 'Kregg').pay, 130, 'handyman min 2h = 130');
 
-  // Dismount thresholds.
-  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 80 }] }), 'Zach').pay, 60, 'dismount >60 -> 60');
-  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 45 }] }), 'Zach').pay, 50, 'dismount <=60 -> 50');
-
-  // Guaranteed Dismount sold vs redeemed.
-  eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 0, 'GD sold = 0');
-  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GD redeemed = 60');
+  // Dismount + Guaranteed Dismount Service: flat $60 to the tech in every case
+  // (owner rule). GDS is free to the customer; a plain dismount is charged.
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 119 }] }), 'Zach').pay, 60, 'dismount charged -> 60');
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 45 }] }), 'Zach').pay, 60, 'dismount any price -> 60');
+  eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 60, 'GDS -> 60');
+  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GDS free -> 60');
 
   // TV swap flat.
   eq(computeJobPay(job({ service_name: 'TV Swap', line_items: [{ name: 'TV Swap', line_total: 120 }] }), 'Zach').pay, 60, 'tv swap flat 60');

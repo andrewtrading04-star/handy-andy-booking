@@ -447,6 +447,8 @@ async function job(req, res, db, auth) {
       business_slug: data.business?.slug || '',
       line_items: data.line_items || [],
       travel_payout: travelMap.get(String(data.postal_code || '')) || 0,
+      // A second assigned tech splits the job 50/50 even without a "lift help" line.
+      second_tech: !!data.secondary_technician_id,
     }, viewerName);
     shaped.tech_pay = Math.round(Number(pay.pay) || 0);
   } catch (e) { shaped.tech_pay = null; }
@@ -1143,19 +1145,32 @@ async function techPayroll(req, res, db, auth) {
   const businessSlug = techRow?.businesses?.slug || '';
 
   // Completed jobs for this tech in the week, with everything the engine needs.
-  const { data: jobs, error } = await db.from('bookings')
-    .select(`
+  // Completed jobs for this tech this week. secondary_technician_id (migration
+  // 0019) is selected optimistically so a two-tech job splits 50/50; dropped on
+  // older DBs so payroll never breaks waiting on a migration.
+  const secCol = techHasSecondCol ? 'secondary_technician_id, ' : '';
+  const jobsSelect = `
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
-      tip, notes, customer_notes, zenbooker_job_number, postal_code,
+      tip, notes, customer_notes, zenbooker_job_number, postal_code, ${secCol}
       customers(name), services(name),
       line_items:booking_line_items(kind, name, unit_price, line_total)
-    `)
+    `;
+  let { data: jobs, error } = await db.from('bookings')
+    .select(jobsSelect)
     .eq('technician_id', techId)
     .eq('status', 'completed')
     .gte('scheduled_at', weekStart + 'T00:00:00Z')
     .lte('scheduled_at', weekEnd + 'T23:59:59Z')
     .order('scheduled_at');
-
+  if (error && /secondary_technician_id/.test(error.message || '')) {
+    techHasSecondCol = false;
+    ({ data: jobs, error } = await db.from('bookings')
+      .select(jobsSelect.replace('secondary_technician_id, ', ''))
+      .eq('technician_id', techId).eq('status', 'completed')
+      .gte('scheduled_at', weekStart + 'T00:00:00Z')
+      .lte('scheduled_at', weekEnd + 'T23:59:59Z')
+      .order('scheduled_at'));
+  }
   if (error) throw error;
 
   // Per-zip travel payout (the "$X paid to the tech" half of the surcharge tier).
@@ -1180,6 +1195,7 @@ async function techPayroll(req, res, db, auth) {
       business_slug: businessSlug,
       line_items: b.line_items || [],
       travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
+      second_tech: !!b.secondary_technician_id,
     }, techName);
 
     const base = {

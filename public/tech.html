@@ -465,8 +465,7 @@ async function showDetail(id){
       <div class="card"><h3>Line Items</h3>
         <div id="liEditor"></div>
         <button class="btn ghost sm" id="liAdd" style="margin-top:8px;">+ Add line item</button>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
-          <div style="font-weight:700;">Total: <span id="liTotal"></span></div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
           <button class="btn sm" id="liSave">Save</button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:800;font-size:15px;">
@@ -644,8 +643,8 @@ function mountTechCard(j){
 function fmtUsd(n){ return '$'+(Math.round((Number(n)||0)*100)/100); }
 function mountTechLineItems(j, id){
   const wrap=document.getElementById('liEditor');
-  const totalEl=document.getElementById('liTotal');
-  if(!wrap||!totalEl) return;
+  const totalEl=document.getElementById('liTotal'); // optional — the Total line was removed
+  if(!wrap) return;
   const hiddenTotal=Number(j.hidden_total)||0;
   // Existing lines (already on the booking) show TEXT + remove only — techs don't
   // see the customer pricing on them. A line the tech ADDS gets a price field so
@@ -653,7 +652,7 @@ function mountTechLineItems(j, id){
   let rows=(j.line_items&&j.line_items.length)
     ? j.line_items.map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
     : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal), existing:true }];
-  const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
+  const recalc=()=>{ if(!totalEl) return; const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
   const render=()=>{
     wrap.innerHTML=rows.map((r,i)=>{
       const priceCell = r.existing ? '' :
