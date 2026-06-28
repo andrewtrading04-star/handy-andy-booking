@@ -70,6 +70,71 @@ async function applyMigration(filename) {
   }
 }
 
+// Status ladder for bracket purchases — sync only ever upgrades a row's status
+// (ordered → delivered), never moves it backwards.
+const BRACKET_STATUS_RANK = { ordered: 0, delivered: 1, canceled: 2 };
+
+// Upsert one Walmart order into bracket_purchases for every active business.
+// Auth/method are checked by the caller (the bracket_sync action). Returns the
+// HTTP response with a per-business result list.
+async function bracketSync(req, res) {
+  const body = req.body || {};
+  const walmart_order_num = (body.walmart_order_num || '').toString().trim();
+  if (!walmart_order_num) return res.status(400).json({ error: 'walmart_order_num required' });
+
+  const flat_qty        = Math.max(0, parseInt(body.flat_qty)        || 0);
+  const tilting_qty     = Math.max(0, parseInt(body.tilting_qty)     || 0);
+  const full_motion_qty = Math.max(0, parseInt(body.full_motion_qty) || 0);
+  const totalQty        = flat_qty + tilting_qty + full_motion_qty;
+  const rawStatus       = (body.status || 'ordered').toString();
+  const status          = Object.prototype.hasOwnProperty.call(BRACKET_STATUS_RANK, rawStatus) ? rawStatus : 'ordered';
+  const order_date      = body.order_date     || null;
+  const delivered_date  = body.delivered_date || null;
+  const order_url       = body.order_url      || null;
+
+  const db = serviceClient();
+  const { data: businesses, error: bizErr } = await db.from('businesses')
+    .select('id, slug').eq('active', true);
+  if (bizErr) return res.status(500).json({ error: bizErr.message });
+
+  const results = [];
+  for (const biz of (businesses || [])) {
+    const { data: existing } = await db.from('bracket_purchases')
+      .select('id, status, flat_qty, tilting_qty, full_motion_qty, order_url')
+      .eq('business_id', biz.id)
+      .eq('walmart_order_num', walmart_order_num)
+      .maybeSingle();
+
+    if (existing) {
+      const currentRank = BRACKET_STATUS_RANK[existing.status] ?? 0;
+      const newRank     = BRACKET_STATUS_RANK[status] ?? 0;
+      const patch = {};
+      if (newRank > currentRank) {
+        patch.status = status;
+        if (status === 'delivered' && delivered_date) patch.delivered_date = delivered_date;
+      }
+      if (order_url && !existing.order_url) patch.order_url = order_url;
+      // Backfill quantities if the existing row was a bare delivery-only insert.
+      if (totalQty > 0 && (existing.flat_qty + existing.tilting_qty + existing.full_motion_qty) === 0) {
+        patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty;
+      }
+      if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged', status: existing.status }); continue; }
+      const { error: upErr } = await db.from('bracket_purchases').update(patch).eq('id', existing.id);
+      results.push({ business: biz.slug, action: upErr ? 'update_failed' : 'updated', patch, error: upErr?.message });
+    } else {
+      if (totalQty === 0) { results.push({ business: biz.slug, action: 'skipped', reason: 'no_qty_for_new_order' }); continue; }
+      const { error: insErr } = await db.from('bracket_purchases').insert({
+        business_id: biz.id, technician_id: null, walmart_order_num,
+        flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
+      });
+      results.push({ business: biz.slug, action: insErr ? 'insert_failed' : 'created', error: insErr?.message });
+    }
+  }
+
+  console.log('[bracket_sync]', walmart_order_num, results.map(r => `${r.business}:${r.action}`).join(', '));
+  return res.status(200).json({ ok: true, order: walmart_order_num, results });
+}
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -150,6 +215,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[send_reminders]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Walmart bracket order sync. Called by the bracket-tracker GitHub Action
+  // after it parses order emails from Gmail. Upserts bracket_purchases for
+  // EVERY active business so both dashboards show the same orders. Secured by
+  // CRON_SECRET (same as send_reminders, NOT the admin bearer). Status only
+  // ever upgrades (ordered → delivered), never downgrades. POST JSON body:
+  //   { walmart_order_num, flat_qty, tilting_qty, full_motion_qty,
+  //     status, order_date, delivered_date, order_url }
+  if (action === 'bracket_sync') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await bracketSync(req, res);
+    } catch (e) {
+      console.error('[bracket_sync]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

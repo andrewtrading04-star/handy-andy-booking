@@ -4,7 +4,7 @@
 // ============================================================================
 // Reads unread Walmart order emails from Gmail (via IMAP + App Password),
 // parses bracket type/quantity/status, and pushes each order to the HAD CRM
-// via POST /api/bracket-sync.
+// via POST /api/migrate?action=bracket_sync.
 //
 // After processing, each email is marked SEEN so it won't be re-processed.
 //
@@ -151,7 +151,7 @@ function parseEmail(msg) {
 
 // ── POST to Vercel bracket-sync endpoint ───────────────────────────────────
 async function syncOrder(payload) {
-  const url = `${VERCEL_URL}/api/bracket-sync`;
+  const url = `${VERCEL_URL}/api/migrate?action=bracket_sync`;
   const res = await fetch(url, {
     method:  'POST',
     headers: {
