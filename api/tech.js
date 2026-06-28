@@ -403,9 +403,12 @@ async function job(req, res, db, auth) {
   // Bracket-supplier info: which company bracket(s) this job uses, the tech(s)
   // who could have supplied it, and who's recorded so far. Best-effort — if the
   // 0035 column isn't applied yet, no bracket card is shown (and no completion gate).
+  // Only ASK who supplied the bracket on a two-person job — there one tech of the
+  // pair brought it, so the office must know whose stock to count. On a solo job
+  // the assigned tech is obviously the supplier, so no card and no completion gate.
   shaped.bracket = null;
   const need = detectBracketQtys(data.line_items || []);
-  if (bracketTotal(need) > 0) {
+  if (data.secondary_technician_id && bracketTotal(need) > 0) {
     try {
       const { data: bs, error: bsErr } = await db.from('bookings').select('bracket_supplied_by').eq('id', id).maybeSingle();
       if (!bsErr) {
@@ -1008,21 +1011,36 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
 // Best-effort: if the bracket_supplied_by column (0035) isn't applied yet, never
 // block completion.
 async function jobNeedsBracketSupplier(db, bookingId) {
+  // The supplier question only exists for two-person jobs. Without 0019's second
+  // tech column there's no such thing, so never gate.
+  if (!techHasSecondCol) return false;
   try {
     const { data: b, error } = await db.from('bookings')
-      .select('bracket_supplied_by, line_items:booking_line_items ( name, quantity )')
+      .select('bracket_supplied_by, secondary_technician_id, line_items:booking_line_items ( name, quantity )')
       .eq('id', bookingId).maybeSingle();
     if (error || !b) return false;
+    if (!b.secondary_technician_id) return false;   // solo job: assigned tech is the supplier
     if (b.bracket_supplied_by) return false;
     return bracketTotal(detectBracketQtys(b.line_items || [])) > 0;
   } catch (e) { return false; }
 }
 
+// Collapse the linked service into the category the tech should see: "TV
+// Mounting", "Handyman", or "Assurion". Mirrors the dashboard's classifier so
+// both apps label a job the same way.
+function classifyServiceCat(b) {
+  if (/assurion/i.test(String(b.notes || '')) || /assurion/i.test(String(b.service?.name || ''))) return 'Assurion';
+  const svc = String(b.service?.name || '').toLowerCase();
+  const names = (b.line_items || []).map(li => String(li.name || '').toLowerCase());
+  if (/handyman/.test(svc) || names.some(n => /handyman/.test(n))) return 'Handyman';
+  return 'TV Mounting';
+}
+
 function shapeJob(b, full = false, forTech = false) {
   const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
-  // Service name: use the linked service only (TV Mounting, Handyman, etc).
-  // Don't fall back to line item names—they're internal detail, not service categories.
-  const serviceName = b.service?.name || null;
+  // Show the service CATEGORY the tech recognizes — "TV Mounting", "Handyman",
+  // or "Assurion" — never the generic linked-service name "Service".
+  const serviceName = classifyServiceCat(b);
   const out = {
     id: b.id,
     status: b.status,
