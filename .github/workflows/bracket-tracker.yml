@@ -1,0 +1,33 @@
+name: Bracket inventory tracker
+
+# Reads unread Walmart order emails from Gmail, parses bracket types and
+# quantities, and pushes each order to the HAD CRM via /api/bracket-sync.
+# Runs every 15 minutes so deliveries appear in the dashboard quickly.
+# The sync endpoint is idempotent — duplicate runs are harmless.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes
+  workflow_dispatch: {}        # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install email parsing dependencies
+        run: npm install --no-save imapflow mailparser
+
+      - name: Sync Walmart bracket orders from Gmail
+        env:
+          GMAIL_USER:          ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:  ${{ secrets.GMAIL_APP_PASSWORD }}
+          CRON_SECRET:         ${{ secrets.CRON_SECRET }}
+        run: node scripts/bracket-email-sync.mjs
