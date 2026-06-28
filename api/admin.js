@@ -26,7 +26,7 @@ import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, 
 const STRIPE_PK_GLOBAL = process.env.STRIPE_PUBLISHABLE_KEY || 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
 function bookingStripePk(slug) { return slug === 'doms' ? (process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null) : STRIPE_PK_GLOBAL; }
 import { uploadImage, deleteImage } from './_lib/storage.js';
-import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
+import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 
@@ -489,6 +489,27 @@ function classifyService(b) {
 // Projection forces completed+paid so an upcoming job still shows what it's
 // expected to earn. When includePay is false (secretary) the payroll engine is
 // never run, so those private numbers don't leave the server.
+// What the business pays to BUY each bracket (hardware cost), deducted from
+// profit. Juan buys his own brackets and is reimbursed through his payout, so for
+// a Juan job the hardware cost is already counted there — don't double-deduct.
+// Customer-supplied / in-the-box brackets cost the business nothing.
+const BRACKET_HW_COST = [
+  { test: /full\s*motion/i, cost: 60 },
+  { test: /tilting/i,       cost: 28 },
+  { test: /\bflat\b/i,      cost: 20 },
+];
+function bracketHardwareCost(lineItems, hasJuan) {
+  if (hasJuan) return 0;
+  let total = 0;
+  for (const li of lineItems || []) {
+    const n = String(li.name || '');
+    if (/own bracket|in the box|customer supplied/i.test(n)) continue;
+    const hit = BRACKET_HW_COST.find(b => b.test.test(n));
+    if (hit) total += hit.cost * (Number(li.quantity) || 1);
+  }
+  return total;
+}
+
 async function computeJobEconomics(db, biz, rows, includePay) {
   const travelPayoutByZip = includePay ? await travelPayoutMap(db, biz.id) : null;
   const out = {};
@@ -516,8 +537,11 @@ async function computeJobEconomics(db, biz, rows, includePay) {
       };
       let payout = 0;
       for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
+      // Bracket hardware the business bought (skipped when Juan supplies his own).
+      const bracketCost = bracketHardwareCost(b.line_items, techNames.some(isJuan));
       econ.tech_payout = Math.round(payout);
-      econ.profit = Math.round(cost - payout);
+      econ.bracket_cost = Math.round(bracketCost);
+      econ.profit = Math.round(cost - payout - bracketCost);
       econ.assigned = techNames.length > 0;
     }
     out[b.id] = econ;

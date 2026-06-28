@@ -1256,7 +1256,10 @@ function listEcon(b){
     const payout = ec.assigned ? money(ec.tech_payout) : '—';
     const profit = ec.assigned ? money(ec.profit) : '—';
     const profNeg = ec.assigned && ec.profit<0 ? ' neg' : '';
+    const brackets = (ec.assigned && ec.bracket_cost>0)
+      ? `<span class="ec-item"><label>Brackets</label> ${money(ec.bracket_cost)}</span>` : '';
     priv = `<span class="ec-item"><label>Payout</label> ${payout}</span>`+
+           brackets+
            `<span class="ec-item ec-profit${profNeg}"><label>Profit</label> ${profit}</span>`;
   }
   return `<div class="evt-econ">`+
