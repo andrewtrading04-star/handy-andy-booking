@@ -426,6 +426,31 @@ async function job(req, res, db, auth) {
       }
     } catch (e) { /* 0035 not applied — leave bracket null */ }
   }
+
+  // The viewing tech's expected pay for THIS job — shown under the line-items
+  // Save button. Computed by the same payroll engine that cuts paychecks, but
+  // projected as completed+paid so an in-progress job still shows what it'll
+  // earn. Each tech sees only their own number (their name drives the rate).
+  shaped.tech_pay = null;
+  try {
+    const viewerName = (data.technician_id === auth.tech_id)
+      ? (data.technician?.name || null)
+      : (data.secondary_technician?.name || data.technician?.name || null);
+    const travelMap = await travelPayoutMap(db, data.business_id);
+    const pay = computeJobPay({
+      status: 'completed',
+      payment_status: 'paid',
+      price: data.price,
+      notes: data.notes,
+      customer_notes: data.customer_notes,
+      service_name: data.service?.name || '',
+      business_slug: data.business?.slug || '',
+      line_items: data.line_items || [],
+      travel_payout: travelMap.get(String(data.postal_code || '')) || 0,
+    }, viewerName);
+    shaped.tech_pay = Math.round(Number(pay.pay) || 0);
+  } catch (e) { shaped.tech_pay = null; }
+
   return res.status(200).json({ job: shaped });
 }
 

@@ -469,6 +469,10 @@ async function showDetail(id){
           <div style="font-weight:700;">Total: <span id="liTotal"></span></div>
           <button class="btn sm" id="liSave">Save</button>
         </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:800;font-size:15px;">
+          <span>Technicians Total Pay</span>
+          <span style="color:var(--green);">${j.tech_pay!=null?fmtUsd(j.tech_pay):'—'}</span>
+        </div>
         ${j.partner_tech?`<div class="kv" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}
       </div>
 
