@@ -92,6 +92,9 @@
           city: loc.city,
           state: loc.state,
           zip_code: customer.zip || enteredZip || null,
+          // Once the customer enters their name, every later event carries it so
+          // the booking analytics can show who the session belongs to.
+          customer_name: `${customer.first_name||''} ${customer.last_name||''}`.trim() || null,
           error_message,
         }),
       });
@@ -1174,6 +1177,12 @@
       tipAmount=parseInt(b.dataset.tip);render();
     }));
     root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{optionComments[e.target.dataset.o]=e.target.value;}));
+    // Capture the customer's name as soon as they type it (on blur) so the booking
+    // analytics shows who the session belongs to, even if they don't finish booking.
+    const fnEl=root.querySelector('#c-fn'), lnEl=root.querySelector('#c-ln');
+    const captureName=()=>{ if(fnEl)customer.first_name=fnEl.value.trim(); if(lnEl)customer.last_name=lnEl.value.trim(); if(customer.first_name||customer.last_name) logEvent('answer','customer_name'); };
+    if(fnEl)fnEl.addEventListener('blur',captureName);
+    if(lnEl)lnEl.addEventListener('blur',captureName);
     // Card inputs replaced by Stripe Elements — no manual binding needed
   }
 

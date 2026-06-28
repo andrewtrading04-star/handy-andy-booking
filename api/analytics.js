@@ -104,7 +104,7 @@ export default async function handler(req, res) {
           id: e.session_id,
           visitor: e.session_id.includes('.') ? e.session_id.split('.')[0] : e.session_id,
           firstTs: null, lastTs: null,
-          device: null, source: null, browser: null,
+          device: null, source: null, browser: null, customer: null,
           city: null, state: null, zip: null,
           maxStep: -1, booked: false, bookedValue: null, bookedTs: null,
           priceShown: false, lastPrice: null,
@@ -119,6 +119,9 @@ export default async function handler(req, res) {
       if (!s.device && e.device_type) s.device = e.device_type;
       if (!s.source && e.traffic_source) s.source = e.traffic_source;
       if (!s.browser && e.browser) s.browser = parseBrowser(e.browser);
+      // Customer name once they enter it on the booking form (or book). Keep the
+      // latest non-empty value for the session.
+      if (e.customer_name && String(e.customer_name).trim()) s.customer = String(e.customer_name).trim();
       if (e.city) s.city = e.city;
       if (e.state) s.state = e.state;
       if (e.zip_code) s.zip = e.zip_code;
@@ -271,7 +274,7 @@ export default async function handler(req, res) {
       .slice(0, 30)
       .map(s => ({
         when: new Date(s.lastTs).toISOString(),
-        device: s.device, source: s.source, browser: s.browser,
+        device: s.device, source: s.source, browser: s.browser, customer: s.customer,
         city: s.city, zip: s.zip,
         furthest: s.booked ? 'Booked' : (STEPS[s.maxStep]?.label || '—'),
         booked: s.booked,
