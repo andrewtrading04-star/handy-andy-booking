@@ -206,6 +206,17 @@
   .empty{color:var(--mute);text-align:center;padding:48px 0;}
   .stars{color:var(--amber);}
   /* Estimates */
+  /* Owner-only economics strip on the Schedule > List rows */
+  .evt-econ{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--line2);font-size:12.5px;}
+  .ec-svc{font-weight:800;font-size:10.5px;letter-spacing:.3px;padding:2px 9px;border-radius:999px;text-transform:uppercase;white-space:nowrap;}
+  .ec-svc.ec-tv{background:#e0e7ff;color:#3730a3;}
+  .ec-svc.ec-handyman{background:#fef3c7;color:#92400e;}
+  .ec-svc.ec-assurion{background:#dcfce7;color:#15803d;}
+  .ec-item{display:inline-flex;gap:5px;align-items:baseline;color:var(--ink);font-weight:800;}
+  .ec-item label{color:var(--mute);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;}
+  .ec-item.ec-profit{color:#15803d;} .ec-item.ec-profit.neg{color:#dc2626;}
+  .ec-pay{margin-left:auto;font-weight:800;font-size:10.5px;padding:2px 9px;border-radius:999px;letter-spacing:.3px;white-space:nowrap;}
+  .ec-pay.paid{background:#dcfce7;color:#15803d;} .ec-pay.unpaid{background:#fee2e2;color:#b91c1c;} .ec-pay.refunded{background:#f1f5f9;color:#64748b;}
   .est-filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
   .seg-btn{background:#fff;border:1px solid var(--line);color:var(--ink-2);padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;}
   .seg-btn.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
@@ -1228,6 +1239,27 @@ function renderJobsView(dates){
     const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
   }));
 }
+// Owner-only economics strip for a Schedule > List row. Returns '' for
+// secretaries/techs (the server only attaches b.econ for the owner) so the
+// figures never reach a non-owner dashboard.
+function listEcon(b){
+  if(role!=='owner' || !b.econ) return '';
+  const ec=b.econ;
+  const catCls = ec.service_cat==='TV Mounting'?'ec-tv':ec.service_cat==='Handyman'?'ec-handyman':'ec-assurion';
+  const ps=b.payment_status||'unpaid';
+  const payCls = ps==='paid'?'paid':ps==='refunded'?'refunded':'unpaid';
+  const payLbl = ps==='paid'?'PAID':ps==='refunded'?'REFUNDED':'UNPAID';
+  const payout = ec.assigned ? money(ec.tech_payout) : '—';
+  const profit = ec.assigned ? money(ec.profit) : '—';
+  const profNeg = ec.assigned && ec.profit<0 ? ' neg' : '';
+  return `<div class="evt-econ">`+
+    `<span class="ec-svc ${catCls}">${esc(ec.service_cat)}</span>`+
+    `<span class="ec-item"><label>Cost</label> ${money(ec.customer_cost)}</span>`+
+    `<span class="ec-item"><label>Payout</label> ${payout}</span>`+
+    `<span class="ec-item ec-profit${profNeg}"><label>Profit</label> ${profit}</span>`+
+    `<span class="ec-pay ${payCls}">${payLbl}</span>`+
+  `</div>`;
+}
 function renderListView(dates){
   const view=document.getElementById('view');
   let html='<div class="wrap">';
@@ -1242,7 +1274,7 @@ function renderListView(dates){
       return `<div class="job evt-row${xcoSecondary?' xco-secondary':''}" data-id="${b.id}"><div class="row">
         <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>${xcoSecondary?` <span class="xco-secondary-tag">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
         <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
-        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div></div>`;
+        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div>${listEcon(b)}</div>`;
     }).join('');
   });
   html+='</div>';

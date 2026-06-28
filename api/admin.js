@@ -450,12 +450,76 @@ async function calendar(req, res, db, auth) {
   const { data: areas } = await db.from('service_areas')
     .select('id, name, state').eq('business_id', biz.id).eq('active', true).order('name');
 
+  // Owner-only job economics for the List view (service category, cost to
+  // customer, projected tech payout, profit). Computed from the same payroll
+  // engine that cuts paychecks, but projected as if completed+paid so upcoming
+  // jobs show their expected numbers. Never computed for secretaries/techs.
+  let econById = {};
+  if (auth.role === 'owner') {
+    try { econById = await computeJobEconomics(db, biz, bk || []); }
+    catch (e) { console.warn('[admin] calendar economics failed:', e.message); econById = {}; }
+  }
+
+  const bookings = (bk || []).map(b => {
+    const s = shapeBooking(b);
+    if (econById[b.id]) s.econ = econById[b.id];
+    return s;
+  });
+
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: biz.timezone || 'America/Denver' },
-    bookings: (bk || []).map(shapeBooking),
+    bookings,
     technicians: techs || [],
     areas: areas || [],
   });
+}
+
+// Owner-only: collapse a service into exactly one of the three buckets the
+// office cares about — "TV Mounting", "Handyman", or "Assurion".
+function classifyService(b) {
+  if (/assurion/i.test(String(b.notes || '')) || /assurion/i.test(String(b.service?.name || ''))) return 'Assurion';
+  const svc = String(b.service?.name || '').toLowerCase();
+  const names = (b.line_items || []).map(li => String(li.name || '').toLowerCase());
+  if (/handyman/.test(svc) || names.some(n => /handyman/.test(n))) return 'Handyman';
+  return 'TV Mounting';
+}
+
+// Owner-only: per-booking { service_cat, customer_cost, tech_payout, profit,
+// assigned }. tech_payout is the projected total paid to every tech on the job
+// (primary + any second tech); profit = cost − payout. Projection forces
+// completed+paid so an upcoming job still shows what it's expected to earn.
+async function computeJobEconomics(db, biz, rows) {
+  const travelPayoutByZip = await travelPayoutMap(db, biz.id);
+  const out = {};
+  for (const b of rows) {
+    const techNames = [];
+    if (b.technician?.name) techNames.push(b.technician.name);
+    if (b.secondary_technician?.name) techNames.push(b.secondary_technician.name);
+    const projJob = {
+      status: 'completed',
+      payment_status: 'paid',
+      price: b.price,
+      subtotal: b.subtotal,
+      notes: b.notes,
+      customer_notes: b.customer_notes,
+      zenbooker_job_number: b.zenbooker_job_number,
+      service_name: b.service?.name || '',
+      business_slug: biz.slug,
+      line_items: b.line_items || [],
+      travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
+    };
+    let payout = 0;
+    for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
+    const cost = Number(b.price) || 0;
+    out[b.id] = {
+      service_cat: classifyService(b),
+      customer_cost: cost,
+      tech_payout: Math.round(payout),
+      profit: Math.round(cost - payout),
+      assigned: techNames.length > 0,
+    };
+  }
+  return out;
 }
 
 // All techs' weekly availability + upcoming exceptions for one business, so the
