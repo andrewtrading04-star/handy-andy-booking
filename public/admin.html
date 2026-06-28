@@ -3287,16 +3287,18 @@ function greetNoteHtml(){
     return `<div class="greet-note"><span class="gn-ic">⚠️</span><span>${esc(GREET_NOTE.text)}</span></div>`;
   }catch(e){ return ''; }
 }
-// Owner-only metrics strip: revenue + profit for the viewed week and its month.
+// Owner-only metrics strip: revenue (week/month) + profit (week/today).
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
-  // 2×2 grid, all relative to the WEEK shown on the schedule:
-  //   top:    Revenue this week | Revenue this month
-  //   bottom: Profit this week  | Profit this month   (owner-only, server-gated)
+  // 2×2 grid:
+  //   top:    Revenue this week | Revenue this month   (relative to viewed week)
+  //   bottom: Profit this week  | Profit today         (today = real Denver day)
+  // Profit is owner-only and server-gated; "today" is always the current Denver
+  // date regardless of which week is on the schedule.
   const profitCards = pf ?
     `<div class="gstat"><span class="gstat-l">Profit this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Profit this month</span><span class="gstat-v" style="color:#4ade80;">${money(pf.month||0)}</span></div>` : '';
+    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>` : '';
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">Revenue this month</span><span class="gstat-v">${money(r.month||0)}</span></div>`+

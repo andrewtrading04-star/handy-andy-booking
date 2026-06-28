@@ -410,9 +410,11 @@ async function summary(req, res, db, auth) {
     .eq('business_id', biz.id).eq('active', true).order('name');
   if (e3) throw e3;
 
-  // Owner-only: profit for the viewed week + its month (revenue − tech payout −
-  // bracket cost), via the same engine as the List view. Sensitive margin data —
-  // gated on owner; the field is never even computed for secretaries/techs.
+  // Owner-only: profit for the viewed week (revenue − tech payout − bracket
+  // cost) plus profit for TODAY — the real current Denver day, independent of
+  // which week is being viewed — via the same engine as the List view.
+  // Sensitive margin data: gated on owner; never even computed for
+  // secretaries/techs.
   let profit = null;
   if (auth.role === 'owner') {
     const { data: pjobs } = await fetchBookingRows(sel => db.from('bookings')
@@ -422,16 +424,23 @@ async function summary(req, res, db, auth) {
       .lt('scheduled_at', rangeEnd.toISOString())
       .order('scheduled_at', { ascending: true }));
     const econ = await computeJobEconomics(db, biz, pjobs || [], true);
-    let pWeek = 0, pMonth = 0;
+    let pWeek = 0;
     for (const b of pjobs || []) {
       if (b.status === 'cancelled') continue;
       const e = econ[b.id]; if (!e) continue;
-      const prof = Number(e.profit) || 0;
       const t = new Date(b.scheduled_at);
-      if (t >= weekStart && t < weekEnd) pWeek += prof;
-      if (t >= monthStart && t < monthEnd) pMonth += prof;
+      if (t >= weekStart && t < weekEnd) pWeek += Number(e.profit) || 0;
     }
-    profit = { week: Math.round(pWeek), month: Math.round(pMonth) };
+    // Profit today = today's jobs (fetched above for the real current Denver
+    // day), so it never depends on the viewed week's range.
+    const todayEcon = await computeJobEconomics(db, biz, today || [], true);
+    let pToday = 0;
+    for (const b of today || []) {
+      if (b.status === 'cancelled') continue;
+      const e = todayEcon[b.id]; if (!e) continue;
+      pToday += Number(e.profit) || 0;
+    }
+    profit = { week: Math.round(pWeek), today: Math.round(pToday) };
   }
 
   return res.status(200).json({
