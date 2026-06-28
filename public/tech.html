@@ -265,6 +265,11 @@ async function api(action,{method='GET',params={},body=null}={}){
   return data;
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// Status pill. A completed job shows a green check mark (.b-completed is green).
+function statusBadge(status){
+  const s=status||'';
+  return `<span class="badge b-${s}">${s==='completed'?'Completed ✓':s.replace(/_/g,' ')}</span>`;
+}
 // A slot's label plus a green "+$N bonus" badge when the slot carries a pay
 // bonus (e.g. the late 8 PM slot). Driven by slot.bonus from availability.js so
 // there's one source of truth.
@@ -430,7 +435,7 @@ function renderDay(){
       <div class="t">${fmtTime(j.scheduled_at)}</div>
       <div class="n">${esc(j.customer_name)}</div>
       <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
-      <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span>
+      ${statusBadge(j.status)}
     </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dLabel}.<br>Enjoy your day! 🎉</div>`;
   list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
 }
@@ -472,7 +477,7 @@ async function showDetail(id){
         <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}.</div>
       </div>`:''}
       <div class="card">
-        <h3>${fmtTime(j.scheduled_at)} · <span class="badge b-${j.status}">${j.status.replace(/_/g,' ')}</span></h3>
+        <h3>${fmtTime(j.scheduled_at)} · ${statusBadge(j.status)}</h3>
         <div class="big-name">${esc(j.customer_name)}</div>
         <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}

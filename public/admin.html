@@ -1281,7 +1281,7 @@ function renderListView(dates){
     html+=items.map(b=>{
       const xcoSecondary = b.secondary_technician?.cross_company;
       return `<div class="job evt-row${xcoSecondary?' xco-secondary':''}" data-id="${b.id}"><div class="row">
-        <div><div class="name">${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>${xcoSecondary?` <span class="xco-secondary-tag">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
+        <div><div class="name">${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}${xcoSecondary?` <span class="xco-secondary-tag">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
         <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
         <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div>${listEcon(b)}</div>`;
     }).join('');
@@ -1349,6 +1349,13 @@ async function renderAvailabilityGrid(dates){
   });
 }
 
+// Status pill. A completed job shows a green check mark, matching the "Paid ✓"
+// pill (.b-completed already uses the same green as .pay-paid).
+function statusBadge(status){
+  const s=status||'';
+  return `<span class="badge b-${s}">${s==='completed'?'Completed ✓':s.replace(/_/g,' ')}</span>`;
+}
+
 // ── Booking detail modal ───────────────────────────────────────────────────
 function openBooking(b){
   const m=document.getElementById('bkModal');
@@ -1369,7 +1376,7 @@ function openBooking(b){
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
   const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);
-  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} <span class="badge b-${b.status}">${b.status.replace(/_/g,' ')}</span>`;
+  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}`;
   document.getElementById('bkBody').innerHTML=`
     ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
