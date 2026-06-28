@@ -646,7 +646,7 @@ let _techStripe=null,_techCard=null;
 function mountTechCard(j){
   const errEl=document.getElementById('cardErr');
   if(!window.Stripe){ if(errEl) errEl.textContent='Payment library not loaded. Refresh and try again.'; return; }
-  if(!j.stripe_pk){ if(errEl) errEl.textContent='Card entry is not set up for this job.'; return; }
+  if(!j.stripe_pk){ if(errEl) errEl.textContent="Card entry isn't available for this company yet — please take cash and tap “Mark paid (cash)”."; return; }
   try{ _techStripe=window.Stripe(j.stripe_pk); }catch(e){ if(errEl) errEl.textContent='Could not start card entry.'; return; }
   if(_techCard){ try{ _techCard.unmount(); }catch(e){} }
   _techCard=_techStripe.elements().create('card',{style:{base:{color:'#fff',fontSize:'16px','::placeholder':{color:'#8a8a99'}}}});
