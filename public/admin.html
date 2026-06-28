@@ -519,6 +519,10 @@
   .payrep .pr-defer-amt{ color:var(--amber); font-weight:700; white-space:nowrap; }
   .payrep .pr-empty{ color:var(--mute); font-size:13px; padding:18px 0; text-align:center; }
 </style>
+<!-- Stripe.js — loaded up front so "Change card" / charge flows always have
+     window.Stripe available (previously only the New Booking flow loaded it
+     lazily, so Change card failed with "Payment library not loaded"). -->
+<script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
 
