@@ -256,7 +256,8 @@
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
   .pay-refunded{background:#fee2e2;color:#b91c1c;} .pay-void{background:#f1f3f6;color:var(--mute);}
-  .evt-paid{font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:1px 7px;margin-left:auto;white-space:nowrap;}
+  .evt-paid,.evt-complete{font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+  .evt-pills{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;}
   /* Bracket Inventory */
   .bracket-table{width:100%;border-collapse:collapse;margin-bottom:20px;}
   .bracket-table th{background:var(--line2);padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.02em;}
@@ -1216,7 +1217,7 @@ function evtCard(b){
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(fmtTimeRange(b)).replace(/\s*[–-]\s*/,'–')}</span><span class="evt-dur">${esc(fmtDuration(b))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
-    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${(b.payment_status==='paid'||b.status==='completed')?`<span class="evt-pills">${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}${b.status==='completed'?'<span class="evt-complete">✓ COMPLETE</span>':''}</span>`:''}</div>
   </div>`;
 }
 function dayColumn(ds){
