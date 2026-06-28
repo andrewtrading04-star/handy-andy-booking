@@ -95,31 +95,53 @@ export function extractOrderDate(text, todayISO) {
 
 // Parse a whole email (subject + body text) into a bracket-sync payload, or null
 // if it isn't an identifiable Walmart order email.
-export function parseWalmartEmail({ subject = '', text = '', html = '', todayISO } = {}) {
-  // Use ONE body representation for quantity/number/date parsing. An email
-  // carries the same items in both text/plain and text/html — concatenating
-  // them would double-count every line item. Prefer the plaintext part; fall
-  // back to stripped HTML only when there is no plaintext.
+// Parse a whole email into an ARRAY of order payloads. A forwarded Walmart
+// "conversation" can bundle several orders in one message; each order has its
+// own "Order number:" marker followed by its own item list. We segment the body
+// at those markers and parse each segment independently, so items never bleed
+// from one order into another. Returns [] if no Walmart order is found.
+export function parseWalmartEmails({ subject = '', text = '', html = '', todayISO } = {}) {
+  // Use ONE body representation. An email carries the same items in both
+  // text/plain and text/html — concatenating them would double-count every
+  // line. Prefer plaintext; fall back to stripped HTML only when absent.
   const body = (text && text.trim()) ? text : stripHtml(html);
-  const forNum = subject + '\n' + body;
-
-  const walmart_order_num = extractOrderNum(forNum);
-  if (!walmart_order_num) return null;
-
-  const status = detectStatus(subject, body);
-  const { flat, tilting, fullMotion } = extractBrackets(body);
-  const order_url = extractOrderUrl(html || body);
-  const order_date = extractOrderDate(forNum, todayISO);
   const today = todayISO || new Date().toISOString().slice(0, 10);
 
-  return {
-    walmart_order_num,
-    flat_qty: flat,
-    tilting_qty: tilting,
-    full_motion_qty: fullMotion,
-    status,
-    order_date,
-    delivered_date: status === 'delivered' ? today : null,
-    order_url,
-  };
+  // Every "Order number: #XXXXXXX-XXXXXXXX" marker and where it starts.
+  const markerRe = /order\s*(?:number|#)\s*:?\s*#?(\d{7}-\d{8})/gi;
+  const markers = [];
+  let m;
+  while ((m = markerRe.exec(body))) markers.push({ num: m[1], index: m.index });
+
+  // No labeled marker — fall back to a single bare order number anywhere.
+  if (!markers.length) {
+    const num = extractOrderNum(subject + '\n' + body);
+    if (!num) return [];
+    markers.push({ num, index: 0 });
+  }
+
+  const out = [];
+  for (let i = 0; i < markers.length; i++) {
+    // An order's items live between its marker and the next order's marker.
+    const seg = body.slice(markers[i].index, (i + 1 < markers.length) ? markers[i + 1].index : body.length);
+    const { flat, tilting, fullMotion } = extractBrackets(seg);
+    const status = detectStatus(subject, seg);
+    out.push({
+      walmart_order_num: markers[i].num,
+      flat_qty: flat,
+      tilting_qty: tilting,
+      full_motion_qty: fullMotion,
+      status,
+      order_date: extractOrderDate(seg, today),
+      delivered_date: status === 'delivered' ? today : null,
+      order_url: extractOrderUrl(seg) || extractOrderUrl(html),
+    });
+  }
+  return out;
+}
+
+// Back-compat single-order helper: first order found, or null.
+export function parseWalmartEmail(input) {
+  const all = parseWalmartEmails(input);
+  return all.length ? all[0] : null;
 }

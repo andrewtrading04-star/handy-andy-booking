@@ -27,7 +27,7 @@
 
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { parseWalmartEmail } from './lib/walmart-parse.mjs';
+import { parseWalmartEmails } from './lib/walmart-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
@@ -103,18 +103,20 @@ async function scanMailbox({ user, pass }, todayISO) {
       let parsed;
       try { parsed = await simpleParser(msg.source); }
       catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
-      const payload = parseWalmartEmail({
+      // One email can bundle several orders (a forwarded "conversation").
+      const orders = parseWalmartEmails({
         subject: parsed.subject || '',
         text:    parsed.text || '',
         html:    parsed.html || '',
         todayISO,
       });
-      if (!payload) continue;   // not an identifiable Walmart order email
-      console.log(
-        `[bracket-sync] ${user}: order=${payload.walmart_order_num} status=${payload.status} ` +
-        `flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
-      );
-      found.push(payload);
+      for (const payload of orders) {
+        console.log(
+          `[bracket-sync] ${user}: order=${payload.walmart_order_num} status=${payload.status} ` +
+          `flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
+        );
+        found.push(payload);
+      }
     }
   } finally {
     await client.logout().catch(() => {});
