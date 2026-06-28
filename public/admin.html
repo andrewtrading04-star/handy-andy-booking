@@ -224,6 +224,7 @@
   .est-approval{display:inline-flex;align-items:center;gap:6px;margin-top:10px;border-radius:8px;padding:6px 11px;font-size:13px;font-weight:800;line-height:1.3;}
   .est-approval.approved{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
   .est-approval.waiting{background:#fef3c7;color:#b45309;border:1px solid #fde68a;}
+  .est-approval.not-approved{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;}
   .fld{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin:0 0 6px;text-transform:uppercase;letter-spacing:.03em;}
   .es-lines{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
   .es-line{display:grid;grid-template-columns:1fr 56px 84px 30px;gap:6px;align-items:center;}
@@ -2721,6 +2722,12 @@ async function renderReviews(){
 
 // ── Estimates (customer quote requests) ─────────────────────────────────────
 const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:'Estimate approved' };
+// A sent estimate that the customer hasn't approved within this many days is
+// automatically filed under the "Not approved" folder. Derived from created_at
+// at render time — no background job, no stored status. Self-heals if approved.
+const NOT_APPROVED_DAYS = 7;
+function estAgeDays(e){ return e&&e.created_at ? (Date.now()-new Date(e.created_at).getTime())/86400000 : 0; }
+function isNotApproved(e){ return e && e.status==='contacted' && !e.approved_at && estAgeDays(e)>=NOT_APPROVED_DAYS; }
 // Status colors: Needs Response = red, Estimate sent = black, Estimate approved = blue.
 const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
 let estFilter = 'all';
@@ -2740,7 +2747,7 @@ function estTotals(items, taxRate){
 
 async function renderEstimates(){
   const view=document.getElementById('view');
-  const filters=Object.entries({all:'All',...EST_STATUS}).map(([k,v])=>
+  const filters=Object.entries({all:'All',...EST_STATUS,not_approved:'Not approved'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <div class="est-filters" id="estFilters">${filters}</div>
@@ -2748,11 +2755,18 @@ async function renderEstimates(){
   </div>`;
   document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
   try{
-    const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
-    const items=d.estimates||[];
+    // "Not approved" is a virtual folder over sent ("contacted") estimates that
+    // have aged past NOT_APPROVED_DAYS without approval — ask the server for the
+    // sent ones, then bucket client-side so aged-out quotes leave the "Estimate
+    // sent" tab and appear only under "Not approved".
+    const serverStatus = (estFilter==='not_approved') ? 'contacted' : estFilter;
+    const d=await api('estimates',{ params:{ business:current.slug, status:serverStatus }});
+    let items=d.estimates||[];
+    if(estFilter==='not_approved') items=items.filter(isNotApproved);
+    else if(estFilter==='contacted') items=items.filter(e=>!isNotApproved(e));
     refreshEstimateBadge();
     estCache={}; items.forEach(it=>{ estCache[it.id]=it; });
-    if(!items.length){ document.getElementById('estWrap').innerHTML='<div class="empty">No estimate requests yet.</div>'; return; }
+    if(!items.length){ document.getElementById('estWrap').innerHTML=`<div class="empty">${estFilter==='not_approved'?'No unapproved estimates past '+NOT_APPROVED_DAYS+' days. 🎉':'No estimate requests yet.'}</div>`; return; }
     document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
     // wire controls
     document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
@@ -2800,7 +2814,9 @@ function estCard(e){
   const approvedAt=e.approved_at?new Date(e.approved_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const approved=e.approved_at
     ? `<div class="est-approval approved">✓ Customer approved${approvedAt?` · ${esc(approvedAt)}`:''}</div>`
-    : `<div class="est-approval waiting">⏳ Waiting on approval</div>`;
+    : (isNotApproved(e)
+      ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
+      : `<div class="est-approval waiting">⏳ Waiting on approval</div>`);
   return `<div class="job est-card" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
