@@ -140,6 +140,7 @@ export default async function handler(req, res) {
       case 'tech_payroll':     return await techPayroll(req, res, db, auth);
       case 'tech_reviews':     return await techReviews(req, res, db, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
+      case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -1225,6 +1226,28 @@ async function techReviews(req, res, db, auth) {
 // can SEE their count but NOT change it — only the owner edits counts (admin
 // dashboard) and assigns deliveries. The tech id comes from the signed token,
 // never the request, so a tech can only ever read their OWN inventory.
+// TEMPORARY: let a tech set their OWN bracket counts. The tech id + business come
+// from the signed token (never the request), so a tech can only edit their own row.
+async function bracketInventorySet(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const n = (v) => Math.max(0, Math.floor(Number(v) || 0));
+  const flat = n(body.flat), tilting = n(body.tilting), full_motion = n(body.full_motion);
+  const now = new Date().toISOString();
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id').eq('technician_id', auth.tech_id).eq('business_id', auth.business_id).maybeSingle();
+  if (inv) {
+    const { error } = await db.from('bracket_inventory')
+      .update({ flat_qty: flat, tilting_qty: tilting, full_motion_qty: full_motion, updated_at: now })
+      .eq('id', inv.id);
+    if (error) throw error;
+  } else {
+    const { error } = await db.from('bracket_inventory')
+      .insert({ business_id: auth.business_id, technician_id: auth.tech_id, flat_qty: flat, tilting_qty: tilting, full_motion_qty: full_motion });
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, flat, tilting, full_motion, total: flat + tilting + full_motion });
+}
+
 async function bracketInventory(req, res, db, auth) {
   const { data: inv, error } = await db.from('bracket_inventory')
     .select('flat_qty, tilting_qty, full_motion_qty, updated_at')
