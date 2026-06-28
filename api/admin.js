@@ -450,15 +450,13 @@ async function calendar(req, res, db, auth) {
   const { data: areas } = await db.from('service_areas')
     .select('id, name, state').eq('business_id', biz.id).eq('active', true).order('name');
 
-  // Owner-only job economics for the List view (service category, cost to
-  // customer, projected tech payout, profit). Computed from the same payroll
-  // engine that cuts paychecks, but projected as if completed+paid so upcoming
-  // jobs show their expected numbers. Never computed for secretaries/techs.
+  // Job economics for the List view. Everyone (owner + secretary) gets the
+  // service category, cost to customer, and paid status. Tech payout and profit
+  // are PRIVATE to the owner — the payroll projection only runs when
+  // auth.role==='owner', so those numbers are never even sent to a secretary.
   let econById = {};
-  if (auth.role === 'owner') {
-    try { econById = await computeJobEconomics(db, biz, bk || []); }
-    catch (e) { console.warn('[admin] calendar economics failed:', e.message); econById = {}; }
-  }
+  try { econById = await computeJobEconomics(db, biz, bk || [], auth.role === 'owner'); }
+  catch (e) { console.warn('[admin] calendar economics failed:', e.message); econById = {}; }
 
   const bookings = (bk || []).map(b => {
     const s = shapeBooking(b);
@@ -484,40 +482,43 @@ function classifyService(b) {
   return 'TV Mounting';
 }
 
-// Owner-only: per-booking { service_cat, customer_cost, tech_payout, profit,
-// assigned }. tech_payout is the projected total paid to every tech on the job
-// (primary + any second tech); profit = cost − payout. Projection forces
-// completed+paid so an upcoming job still shows what it's expected to earn.
-async function computeJobEconomics(db, biz, rows) {
-  const travelPayoutByZip = await travelPayoutMap(db, biz.id);
+// Per-booking economics for the List view. Always returns { service_cat,
+// customer_cost }. When includePay is true (owner only) it also returns the
+// projected { tech_payout, profit, assigned } — tech_payout is the total paid to
+// every tech on the job (primary + any second tech) and profit = cost − payout.
+// Projection forces completed+paid so an upcoming job still shows what it's
+// expected to earn. When includePay is false (secretary) the payroll engine is
+// never run, so those private numbers don't leave the server.
+async function computeJobEconomics(db, biz, rows, includePay) {
+  const travelPayoutByZip = includePay ? await travelPayoutMap(db, biz.id) : null;
   const out = {};
   for (const b of rows) {
-    const techNames = [];
-    if (b.technician?.name) techNames.push(b.technician.name);
-    if (b.secondary_technician?.name) techNames.push(b.secondary_technician.name);
-    const projJob = {
-      status: 'completed',
-      payment_status: 'paid',
-      price: b.price,
-      subtotal: b.subtotal,
-      notes: b.notes,
-      customer_notes: b.customer_notes,
-      zenbooker_job_number: b.zenbooker_job_number,
-      service_name: b.service?.name || '',
-      business_slug: biz.slug,
-      line_items: b.line_items || [],
-      travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
-    };
-    let payout = 0;
-    for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
     const cost = Number(b.price) || 0;
-    out[b.id] = {
-      service_cat: classifyService(b),
-      customer_cost: cost,
-      tech_payout: Math.round(payout),
-      profit: Math.round(cost - payout),
-      assigned: techNames.length > 0,
-    };
+    const econ = { service_cat: classifyService(b), customer_cost: cost };
+    if (includePay) {
+      const techNames = [];
+      if (b.technician?.name) techNames.push(b.technician.name);
+      if (b.secondary_technician?.name) techNames.push(b.secondary_technician.name);
+      const projJob = {
+        status: 'completed',
+        payment_status: 'paid',
+        price: b.price,
+        subtotal: b.subtotal,
+        notes: b.notes,
+        customer_notes: b.customer_notes,
+        zenbooker_job_number: b.zenbooker_job_number,
+        service_name: b.service?.name || '',
+        business_slug: biz.slug,
+        line_items: b.line_items || [],
+        travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
+      };
+      let payout = 0;
+      for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
+      econ.tech_payout = Math.round(payout);
+      econ.profit = Math.round(cost - payout);
+      econ.assigned = techNames.length > 0;
+    }
+    out[b.id] = econ;
   }
   return out;
 }

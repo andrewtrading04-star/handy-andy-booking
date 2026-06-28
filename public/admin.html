@@ -1239,24 +1239,30 @@ function renderJobsView(dates){
     const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
   }));
 }
-// Owner-only economics strip for a Schedule > List row. Returns '' for
-// secretaries/techs (the server only attaches b.econ for the owner) so the
-// figures never reach a non-owner dashboard.
+// Economics strip for a Schedule > List row. Everyone sees the service bucket,
+// cost to customer, and paid status. Tech payout + profit are owner-only — and
+// the server only sends those fields to the owner, so this is private by data,
+// not just hidden. Returns '' if the server attached no econ for this row.
 function listEcon(b){
-  if(role!=='owner' || !b.econ) return '';
+  if(!b.econ) return '';
   const ec=b.econ;
   const catCls = ec.service_cat==='TV Mounting'?'ec-tv':ec.service_cat==='Handyman'?'ec-handyman':'ec-assurion';
   const ps=b.payment_status||'unpaid';
   const payCls = ps==='paid'?'paid':ps==='refunded'?'refunded':'unpaid';
   const payLbl = ps==='paid'?'PAID':ps==='refunded'?'REFUNDED':'UNPAID';
-  const payout = ec.assigned ? money(ec.tech_payout) : '—';
-  const profit = ec.assigned ? money(ec.profit) : '—';
-  const profNeg = ec.assigned && ec.profit<0 ? ' neg' : '';
+  // Owner-only: projected tech payout + profit (server omits these for secretaries).
+  let priv='';
+  if(role==='owner' && ec.tech_payout!=null){
+    const payout = ec.assigned ? money(ec.tech_payout) : '—';
+    const profit = ec.assigned ? money(ec.profit) : '—';
+    const profNeg = ec.assigned && ec.profit<0 ? ' neg' : '';
+    priv = `<span class="ec-item"><label>Payout</label> ${payout}</span>`+
+           `<span class="ec-item ec-profit${profNeg}"><label>Profit</label> ${profit}</span>`;
+  }
   return `<div class="evt-econ">`+
     `<span class="ec-svc ${catCls}">${esc(ec.service_cat)}</span>`+
     `<span class="ec-item"><label>Cost</label> ${money(ec.customer_cost)}</span>`+
-    `<span class="ec-item"><label>Payout</label> ${payout}</span>`+
-    `<span class="ec-item ec-profit${profNeg}"><label>Profit</label> ${profit}</span>`+
+    priv+
     `<span class="ec-pay ${payCls}">${payLbl}</span>`+
   `</div>`;
 }
