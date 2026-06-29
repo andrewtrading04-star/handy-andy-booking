@@ -225,11 +225,16 @@ async function adjustWirePlateInv(db, businessId, technicianId, delta) {
     .eq('id', inv.id);
 }
 
-// Sync one Amazon plate order into wire_plate_purchases. Same shape as
-// bracketSync: unassigned orders mirror to every active business (assignable
-// from either dashboard); once a tech is assigned, that business owns the row,
-// self-heals its plate count from the email, and unassigned twins are dropped.
-// Status only ever upgrades. Auth/method checked by the caller.
+// Sync one Amazon plate order into wire_plate_purchases. Unassigned orders mirror
+// to every active business (assignable from either dashboard); once a tech is
+// assigned, that business owns the row and unassigned twins are dropped.
+//
+// CREDITING (the key rule): plates are added to a tech's ON-HAND count only when
+// the order is actually DELIVERED — not when it's assigned. An en-route order can
+// be reserved to a tech, but their on-hand count doesn't move until delivery.
+// `credited` tracks that the plates were counted, so it happens exactly once.
+// While uncredited, status follows the email (in_route <-> delivered); once
+// credited it's locked. Auth/method checked by the caller.
 async function wirePlateSync(req, res) {
   const body = req.body || {};
   const amazon_order_num = (body.amazon_order_num || '').toString().trim();
@@ -248,29 +253,50 @@ async function wirePlateSync(req, res) {
   if (bizErr) return res.status(500).json({ error: bizErr.message });
   const slugOf = (id) => (businesses || []).find(b => b.id === id)?.slug || id;
 
-  const { data: rows, error: rowsErr } = await db.from('wire_plate_purchases')
-    .select('id, business_id, status, units, plates, order_url, technician_id')
+  // `credited` arrives with migration 0041; degrade gracefully (skip auto-credit)
+  // if it isn't applied yet, so the sync never crashes.
+  let hasCredited = true;
+  let { data: rows, error: rowsErr } = await db.from('wire_plate_purchases')
+    .select('id, business_id, status, units, plates, order_url, technician_id, credited')
     .eq('amazon_order_num', amazon_order_num);
+  if (rowsErr && /credited/.test(rowsErr.message || '')) {
+    hasCredited = false;
+    ({ data: rows, error: rowsErr } = await db.from('wire_plate_purchases')
+      .select('id, business_id, status, units, plates, order_url, technician_id')
+      .eq('amazon_order_num', amazon_order_num));
+  }
   if (rowsErr) return res.status(500).json({ error: rowsErr.message });
 
   const results = [];
-  const upgrades = (fromStatus) => (BRACKET_STATUS_RANK[status] ?? 0) > (BRACKET_STATUS_RANK[fromStatus] ?? 0);
-  const statusPatch = () => {
-    const p = { status };
-    if (status === 'delivered' && delivered_date) p.delivered_date = delivered_date;
-    return p;
-  };
 
   const assignedRow = (rows || []).find(r => r.technician_id);
   if (assignedRow) {
     const patch = {};
-    if (upgrades(assignedRow.status)) Object.assign(patch, statusPatch());
-    if (order_url && !assignedRow.order_url) patch.order_url = order_url;
-    if (plates > 0 && assignedRow.plates !== plates) {
-      // Self-heal: move the tech's plate count by the difference.
-      await adjustWirePlateInv(db, assignedRow.business_id, assignedRow.technician_id, plates - (assignedRow.plates || 0));
-      patch.units = units; patch.plates = plates;
+    const wasCredited = !!assignedRow.credited;
+    // Status follows the email while uncredited; locked once counted.
+    if (!wasCredited && assignedRow.status !== status) {
+      patch.status = status;
+      patch.delivered_date = status === 'delivered' ? (delivered_date || null) : null;
     }
+    if (order_url && !assignedRow.order_url) patch.order_url = order_url;
+    if (plates > 0 && assignedRow.plates !== plates) { patch.units = units; patch.plates = plates; }
+
+    const effStatus = patch.status || assignedRow.status;
+    const effPlates = (patch.plates != null) ? patch.plates : (assignedRow.plates || 0);
+
+    if (hasCredited && !wasCredited && effStatus === 'delivered') {
+      // DELIVERED + assigned for the first time → add plates to the tech's on-hand.
+      await adjustWirePlateInv(db, assignedRow.business_id, assignedRow.technician_id, effPlates);
+      patch.credited = true;
+    } else if (hasCredited && wasCredited && effStatus === 'canceled') {
+      // A counted order was canceled/returned → take the plates back.
+      await adjustWirePlateInv(db, assignedRow.business_id, assignedRow.technician_id, -(assignedRow.plates || 0));
+      patch.credited = false;
+    } else if (hasCredited && wasCredited && patch.plates != null) {
+      // Quantity corrected after counting → move the tech's count by the delta.
+      await adjustWirePlateInv(db, assignedRow.business_id, assignedRow.technician_id, effPlates - (assignedRow.plates || 0));
+    }
+
     if (Object.keys(patch).length) {
       const { error } = await db.from('wire_plate_purchases').update(patch).eq('id', assignedRow.id);
       results.push({ business: slugOf(assignedRow.business_id), action: error ? 'update_failed' : 'updated_assigned', error: error?.message });
@@ -288,7 +314,10 @@ async function wirePlateSync(req, res) {
       const existing = byBiz.get(biz.id);
       if (existing) {
         const patch = {};
-        if (upgrades(existing.status)) Object.assign(patch, statusPatch());
+        if (existing.status !== status) {
+          patch.status = status;
+          patch.delivered_date = status === 'delivered' ? (delivered_date || null) : null;
+        }
         if (order_url && !existing.order_url) patch.order_url = order_url;
         if (plates > 0) { if (existing.units !== units) patch.units = units; if (existing.plates !== plates) patch.plates = plates; }
         if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged' }); continue; }

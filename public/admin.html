@@ -3072,7 +3072,7 @@ async function renderBrackets(){
       api('bracket_inventory',{ params:{ business:current.slug }}),
       api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}),
       api('bracket_pending',{ params:{ business:current.slug }}),
-      api('wire_plate_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})),
+      api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})),
     ]);
     window._bracketInv=inv.inventory||[];   // tech list for the Assign modal
 
@@ -3111,6 +3111,7 @@ async function renderBrackets(){
     // whenever a tech completes a "Hide wires BEHIND the wall" job.
     html+=`<div class="bracket-section">
       <h3>Wire Concealment Plates <span style="font-weight:400;font-size:12px;color:var(--mute);">— from Amazon · −1 per "behind the wall" job</span></h3>
+      <p style="color:var(--mute);font-size:12px;margin:-4px 0 10px;">"On hand" counts only plates that have been <strong>delivered</strong>. En-route orders are reserved below and added on delivery.</p>
       <table class="bracket-table">
         <thead>
           <tr>
@@ -3131,35 +3132,49 @@ async function renderBrackets(){
     }
     html+=`</tbody></table>`;
 
-    // Pending Amazon plate deliveries — arrived but not yet given to a tech.
-    // Assigning adds the order's plates (units × 5) to that tech's count.
-    const wpPending=(wpPend&&wpPend.pending)||[];
-    if(wpPending.length){
-      const techOpts=(inv.inventory||[]).map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)}</option>`).join('');
-      html+=`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px 16px;margin-top:12px;">
-        <strong style="font-size:13px;">📦 Amazon plate deliveries to assign</strong>`;
-      for(const d of wpPending){
-        const when=d.delivered_date||d.order_date||'';
-        const link=d.order_url?`<a href="${esc(d.order_url)}" target="_blank" rel="noopener">View Amazon order ↗</a>`:'';
-        html+=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #fde68a;">
-          <div style="flex:1;min-width:200px;">
-            <strong style="font-size:14px;">${d.plates} plate${d.plates===1?'':'s'}</strong>
-            <span style="color:var(--mute);font-size:12px;"> · ${d.units} unit${d.units===1?'':'s'} × 5</span>
-            ${d.amazon_order_num?`<span style="color:var(--mute);font-size:12px;"> · #${esc(d.amazon_order_num)}</span>`:''}
-            ${when?`<span style="color:var(--mute);font-size:12px;"> · ${esc(when)}</span>`:''}
-            ${link?`<div style="font-size:12px;margin-top:2px;">${link}</div>`:''}
-          </div>
-          ${role==='owner'?`<div style="display:flex;gap:8px;align-items:center;">
-            <select id="wpAssignTech_${esc(d.id)}" style="padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
-              <option value="">Select technician…</option>
-              ${techOpts}
-            </select>
-            <button class="btn" onclick="assignWirePlateDelivery('${esc(d.id)}')">Assign</button>
-          </div>`:`<span style="color:var(--mute);font-size:12px;">Owner assigns</span>`}
-        </div>`;
-      }
-      html+=`</div>`;
+    // ── Recent Amazon Orders ── every plate order with its status + who it's
+    // reserved for. Unassigned orders get an Assign control; en-route orders are
+    // reserved (plates count toward the tech only once delivered).
+    const wpOrders=(wpPend&&wpPend.orders)||[];
+    const techOpts=(inv.inventory||[]).map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)}</option>`).join('');
+    const wpBadge=(o)=>{
+      const st=(o.status||'in_route').toLowerCase();
+      if(st==='delivered') return `<span class="evt-paid" style="background:#dcfce7;color:#166534;">✓ Delivered</span>`;
+      if(st==='canceled'||st==='cancelled') return `<span style="color:var(--mute);font-size:12px;">Canceled</span>`;
+      return `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">🚚 En route</span>`;
+    };
+    html+=`<div style="margin-top:14px;"><strong style="font-size:13px;">📦 Recent Amazon Orders</strong>
+      <table class="bracket-table" style="margin-top:8px;">
+        <thead><tr><th>Plates</th><th>Status</th><th>Technician</th><th>Order #</th><th>Date</th></tr></thead>
+        <tbody>`;
+    if(!wpOrders.length){
+      html+=`<tr><td colspan="5" style="text-align:center;color:var(--mute);">No Amazon plate orders yet</td></tr>`;
     }
+    for(const o of wpOrders){
+      const when=o.delivered_date||o.order_date||'';
+      const orderCell=o.order_url
+        ? `<a href="${esc(o.order_url)}" target="_blank" rel="noopener">${o.amazon_order_num?esc(o.amazon_order_num):'View'} ↗</a>`
+        : (o.amazon_order_num?esc(o.amazon_order_num):'-');
+      const assigned=!!o.technician_name;
+      const techCell=assigned
+        ? `<strong>${esc(o.technician_name)}</strong>${o.credited?'':' <span style="color:var(--mute);font-size:11px;">(reserved)</span>'}`
+        : (role==='owner'
+            ? `<div style="display:flex;gap:6px;align-items:center;">
+                 <select id="wpAssignTech_${esc(o.id)}" style="padding:6px;border:1px solid var(--line);border-radius:8px;font-size:12px;">
+                   <option value="">Assign…</option>${techOpts}
+                 </select>
+                 <button class="seg-btn" onclick="assignWirePlateDelivery('${esc(o.id)}')">Go</button>
+               </div>`
+            : `<span style="color:var(--mute);">Unassigned</span>`);
+      html+=`<tr>
+        <td class="bracket-qty"><strong>${o.plates}</strong> <span style="color:var(--mute);font-size:11px;">(${o.units}×5)</span></td>
+        <td>${wpBadge(o)}</td>
+        <td>${techCell}</td>
+        <td>${orderCell}</td>
+        <td>${when||'-'}</td>
+      </tr>`;
+    }
+    html+=`</tbody></table></div>`;
     html+=`</div>`;
 
     // Orders split: active (incoming) shown up top; DELIVERED ones tucked into
@@ -3286,7 +3301,10 @@ async function assignWirePlateDelivery(purchaseId){
       method:'POST',
       body:{ business:current.slug, purchase_id:purchaseId, technician_id:techId },
     });
-    toast('✓ Assigned '+((r.assigned&&r.assigned.plates)||'')+' plates to '+(r.technician_name||'technician'));
+    const who=r.technician_name||'technician';
+    toast(r.credited
+      ? `✓ Added ${(r.assigned&&r.assigned.plates)||''} plates to ${who}`
+      : `✓ Reserved for ${who} — plates count when delivered`);
     renderBrackets();
   }catch(e){
     toast('Error: '+e.message);
