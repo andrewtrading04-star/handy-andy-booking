@@ -19,9 +19,13 @@
 
 // Words that identify the plate product in the email body/subject. Strict by
 // design. Override at runtime with AMAZON_PLATE_MATCH (a regex source string).
+// Default is tuned to the actual product ordered — ANONION "Single Brush Wall
+// Plate ... Cable Pass Through Insert ... Low Voltage Mounting Bracket" — using
+// distinctive phrases (not the brand) so a same-type reorder still matches while
+// a USB charger never does.
 export const PLATE_MATCH = process.env.AMAZON_PLATE_MATCH
   ? new RegExp(process.env.AMAZON_PLATE_MATCH, 'i')
-  : /(wire|cable|cord)[\s-]*(concealment|conceal|hider|management|pass[\s-]*through)|recessed\s+(cable|wire|media)\s+plate|in[\s-]?wall\s+(cable|wire|cord)/i;
+  : /brush\s+wall\s+plate|cable\s+pass[\s-]*through|low\s+voltage\s+mounting\s+bracket|(?:wire|cable|cord)[\s-]*(?:concealment|conceal|hider|pass[\s-]*through)|recessed\s+(?:cable|wire|media)\s+plate|in[\s-]?wall\s+(?:cable|wire|cord)/i;
 
 // One Amazon unit yields this many plates. Stated by the owner: "each 1 purchased
 // supplies 5 behind the wall wire concealments." The sync endpoint re-derives
@@ -60,6 +64,11 @@ export function extractUnits(text) {
   let m;
   while ((m = re.exec(text))) { units += parseInt(m[1], 10) || 0; hits++; }
   if (hits) return units;
+  // Amazon delivery/confirmation emails often show "N item(s) from Amazon"
+  // instead of a Qty field. One ORDER LINE of this 10-pack is one purchased
+  // unit (= 5 concealments), regardless of how many physical plates are inside.
+  const im = text.match(/\b(\d{1,3})\s+items?\s+from\s+amazon/i);
+  if (im) return parseInt(im[1], 10) || 1;
   return PLATE_MATCH.test(text) ? 1 : 0;
 }
 
