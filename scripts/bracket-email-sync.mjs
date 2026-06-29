@@ -28,7 +28,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseWalmartEmails } from './lib/walmart-parse.mjs';
-import { parseAmazonPlateEmail, stripHtml } from './lib/amazon-parse.mjs';
+import { parseAmazonPlateEmail } from './lib/amazon-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
@@ -174,16 +174,6 @@ async function scanMailbox({ user, pass }, todayISO) {
           `[bracket-sync] ${user}: amazon order=${plate.amazon_order_num} status=${plate.status} ` +
           `units=${plate.units} plates=${plate.plates}`
         );
-        // TEMP DIAGNOSTIC: show exactly which quantity tokens drove `units`, so a
-        // mis-count (e.g. 3 vs 2) can be traced to the real email wording.
-        if (process.env.DEBUG_AMAZON) {
-          const dbg = (email.text && email.text.trim()) ? email.text : stripHtml(email.html);
-          const qty = [...dbg.matchAll(/(?:qty|quantity)\s*:?\s*(\d{1,3})/gi)].map(m => m[0]);
-          const items = dbg.match(/\b(\d{1,3})\s+items?\s+from\s+amazon/i);
-          console.log(`[bracket-sync][debug] subj="${email.subject}"`);
-          console.log(`[bracket-sync][debug] qtyTokens=${JSON.stringify(qty)} itemsToken=${items ? items[0] : null}`);
-          console.log(`[bracket-sync][debug] bodySnippet=${JSON.stringify(dbg.replace(/\s+/g, ' ').slice(0, 700))}`);
-        }
         amazon.push(plate);
       }
     }

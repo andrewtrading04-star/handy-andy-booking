@@ -59,16 +59,23 @@ export function extractOrderNum(text) {
 // be found but the product clearly matches, assume 1.
 export function extractUnits(text) {
   if (!text) return 0;
-  let units = 0, hits = 0;
-  const re = /(?:qty|quantity)\s*:?\s*(\d{1,3})/gi;
-  let m;
-  while ((m = re.exec(text))) { units += parseInt(m[1], 10) || 0; hits++; }
-  if (hits) return units;
-  // Amazon delivery/confirmation emails often show "N item(s) from Amazon"
-  // instead of a Qty field. One ORDER LINE of this 10-pack is one purchased
-  // unit (= 5 concealments), regardless of how many physical plates are inside.
+  // Count ONLY the plate line's quantity, not other items in the same order.
+  // An Amazon order can bundle several products ("Ordered: 2 ANONION... and 1
+  // more item"), each with its own "Quantity: N". Summing them over-counts
+  // (2 plates + 1 other = 3). Anchor to where the plate product is named, then
+  // take the FIRST "Quantity/Qty: N" that follows it (Amazon prints the qty
+  // right after each item's title: "...10 PACK 1 Gang Quantity: 2 24.99 USD").
+  const pm = text.match(PLATE_MATCH);
+  if (pm && pm.index != null) {
+    const after = text.slice(pm.index);
+    const q = after.match(/(?:qty|quantity)\s*:?\s*(\d{1,3})/i);
+    if (q) return parseInt(q[1], 10) || 1;
+  }
+  // Fallback: "N item(s) from Amazon" (some delivery emails have no Qty field).
+  // Only trust this for a single-item order — for multi-item orders it counts
+  // everything, so cap it at 1 when the order clearly has "more item(s)".
   const im = text.match(/\b(\d{1,3})\s+items?\s+from\s+amazon/i);
-  if (im) return parseInt(im[1], 10) || 1;
+  if (im && !/more item/i.test(text)) return parseInt(im[1], 10) || 1;
   return PLATE_MATCH.test(text) ? 1 : 0;
 }
 
@@ -77,9 +84,18 @@ export function extractUnits(text) {
 //   delivered — delivered
 //   canceled  — canceled / refunded
 export function detectStatus(subject, text) {
-  const s = ((subject || '') + ' ' + (text || '')).toLowerCase();
-  if (/cancel(?:l?ed|lation)?\b|\brefund(?:ed)?\b|return\s+(?:initiated|complete)/i.test(s)) return 'canceled';
-  if (/\bdelivered\b|was delivered|has been delivered|delivery complete|package was left/i.test(s)) return 'delivered';
+  const subj = (subject || '').toLowerCase();
+  const body = (text || '').toLowerCase();
+  if (/cancel(?:l?ed|lation)?\b|\brefund(?:ed)?\b|return\s+(?:initiated|complete)/i.test(subj + ' ' + body)) return 'canceled';
+  // Subject is the clearest signal of an Amazon email's purpose. A delivery
+  // email leads with "Delivered:"; an order/ship email leads with "Ordered:"/
+  // "Shipped:"/"Arriving"/"Out for delivery".
+  if (/^\s*delivered\b/.test(subj)) return 'delivered';
+  if (/^\s*ordered\b|thanks for your order|order confirmation|^\s*shipped\b|out for delivery|arriving/.test(subj)) return 'in_route';
+  // Body fallback: require a STRONG delivered phrase. A bare "delivered" is not
+  // enough — it appears as a step label in Amazon's progress tracker
+  // ("Ordered  Shipped  Out for delivery  Delivered  Arriving Thursday").
+  if (/\bwas delivered\b|has been delivered|delivered today|your package was delivered|package was left|delivery complete/i.test(body)) return 'delivered';
   return 'in_route';
 }
 
