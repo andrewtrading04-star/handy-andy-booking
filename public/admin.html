@@ -1388,7 +1388,11 @@ function openBooking(b){
   // dropdown shows the right person instead of falsely reading "None".
   const xcoSecondOpt=(b.secondary_technician && b.secondary_technician.cross_company && !techCache.some(t=>t.id===b.secondary_technician_id))
     ? `<option value="${b.secondary_technician_id}" selected>${esc(b.secondary_technician.name)} (${esc(b.secondary_technician.company||'partner')})</option>` : '';
-  const secondTechOpts=['<option value="">— None —</option>', xcoSecondOpt,
+  // "Auto" sends 'any' → the server picks the scheduled 2nd tech (for a Dom's job
+  // that's the Handy Andy tech working that day, in roster order; else any tech
+  // actually scheduled+free; else it stays unassigned).
+  const secondTechOpts=['<option value="">— None —</option>',
+    '<option value="any">⭐ Auto-pick scheduled 2nd tech</option>', xcoSecondOpt,
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
   const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);

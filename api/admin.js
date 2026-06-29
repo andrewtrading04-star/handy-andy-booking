@@ -1104,6 +1104,54 @@ async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId 
   return list[0].id;
 }
 
+// Pick a SECONDARY tech who is genuinely SCHEDULED to work AND free in this exact
+// slot, trying each roster scope in priority order (roster order = created_at
+// ascending). Skips the primary and out-of-town primary-only techs (Juan/Zach).
+// Unlike pickAvailableTech, it never falls back to a tech who isn't on the
+// schedule that day — that's the whole point of the cross-company default: only
+// assign someone who is actually working. Returns null if no scheduled tech is
+// free in any scope (caller leaves the 2nd-tech slot blank for manual assignment).
+async function pickScheduledSecondary(db, scopes, dateStr, slotKey, tz, excludeTechId = null) {
+  if (!dateStr || !slotKey) return null;
+  const dow = dayOfWeekFor(dateStr);
+  for (const sc of scopes) {
+    if (!sc || !sc.bizId) continue;
+    let query = db.from('technicians').select('id, name')
+      .eq('business_id', sc.bizId).eq('active', true)
+      .order('created_at', { ascending: true });
+    if (sc.serviceAreaId) query = query.eq('service_area_id', sc.serviceAreaId);
+    const { data: techs } = await query;
+    for (const t of (techs || [])) {
+      if (excludeTechId && t.id === excludeTechId) continue;
+      if (isSecondaryIneligibleName(t.name)) continue;
+      const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
+      if (!keys.has(slotKey)) continue;                          // not scheduled this slot
+      const booked = await bookedSlotKeysForTech(db, sc.bizId, t.id, dateStr, tz);
+      if (!booked.has(slotKey)) return t.id;                     // scheduled + free → take
+    }
+  }
+  return null;
+}
+
+// Resolve the default SECONDARY tech for a job. For a Dom's job the default is the
+// Handy Andy technician scheduled to work that day (same metro, roster order);
+// if none is scheduled+free, fall back to any tech scheduled+free that day (e.g.
+// the other Dom's tech). For a Handy Andy job, keep the existing pool-based pick.
+async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz, primaryTechId, pool2) {
+  const partner = await partnerBusiness(db, biz.slug);
+  if (biz.slug === 'doms' && partner) {
+    const haArea  = await serviceAreaIdFromPostal(db, partner.id, postalCode);
+    const ownArea = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+    return await pickScheduledSecondary(db, [
+      { bizId: partner.id, serviceAreaId: haArea },   // Handy Andy first — the new default
+      { bizId: biz.id,     serviceAreaId: ownArea },   // fallback: any available Dom's tech
+    ], dateStr, slotKey, tz, primaryTechId);
+  }
+  const rid2 = await rosterBizId(db, biz, (pool2 || '').toString());
+  const serviceAreaId = pool2 === 'partner' ? await serviceAreaIdFromPostal(db, biz.id, postalCode) : null;
+  return await pickAvailableTech(db, rid2, dateStr, slotKey, tz, primaryTechId, serviceAreaId, true);
+}
+
 async function singleTechSlotKeys(db, techId, dateStr, dow) {
   const { data: av } = await db.from('technician_availability')
     .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
@@ -1385,13 +1433,11 @@ async function bookingCreate(req, res, db, auth, body) {
     // applies (it rides on the line items, not on this field).
     secondary_technician_id = null;
   } else if (secondary_technician_id === 'any') {
-    const rid2 = await rosterBizId(db, biz, (body.pool2 || '').toString());
-    // Look up service area from postal code for cross-company tech filtering
-    const serviceAreaId = body.pool2 === 'partner'
-      ? await serviceAreaIdFromPostal(db, biz.id, c.postal_code)
-      : null;
-    // Never auto-pick Juan/Zach as the second tech (out-of-town, primary-only).
-    secondary_technician_id = await pickAvailableTech(db, rid2, body.scheduled_date, body.scheduled_slot, tz, technician_id, serviceAreaId, true);
+    // Default the 2nd tech. For a Dom's job this prefers the Handy Andy tech
+    // scheduled to work that day; otherwise the existing pool-based pick. Never
+    // auto-picks Juan/Zach, and never picks a tech who isn't scheduled+free.
+    secondary_technician_id = await resolveDefaultSecondary(
+      db, biz, c.postal_code, body.scheduled_date, body.scheduled_slot, tz, technician_id, body.pool2);
   }
   // Backstop: a concrete second tech (or one that slipped through) must never be
   // an out-of-town, primary-only tech (Juan/Zach). Verify by name before saving.
@@ -1672,7 +1718,7 @@ async function bookingUpdate(req, res, db, auth, body) {
   // Confirm the booking belongs to this business before touching it. The 0019
   // column (secondary_technician_id) may not exist yet — fall back without it so
   // confirm/cancel/status/assign keep working until the migration is applied.
-  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, review_token, sms_consent, metadata, customer:customers ( phone, email, name )`;
+  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, postal_code, review_token, sms_consent, metadata, customer:customers ( phone, email, name )`;
   let { data: existing, error: e0 } = await db.from('bookings')
     .select(existingSel()).eq('id', id).eq('business_id', biz.id).single();
   if (e0 && /secondary_technician_id/.test(e0.message || '')) {
@@ -1722,7 +1768,18 @@ async function bookingUpdate(req, res, db, auth, body) {
       // doesn't wipe the primary (and vice-versa). Skip the secondary if the DB
       // hasn't been migrated for it yet.
       if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
-      if (body.secondary_technician_id !== undefined && bookingLiftCols) patch.secondary_technician_id = body.secondary_technician_id || null;
+      if (body.secondary_technician_id !== undefined && bookingLiftCols) {
+        let sec = body.secondary_technician_id || null;
+        // 'any' → resolve to the scheduled default (Handy Andy first for Dom's).
+        if (sec === 'any') {
+          const aTz = biz.timezone || 'America/Denver';
+          const effTechId = (body.technician_id !== undefined ? patch.technician_id : existing.technician_id) || null;
+          const aDate = existing.scheduled_at ? localDateStr(aTz, existing.scheduled_at) : null;
+          const aSlot = existing.scheduled_at ? slotKeyForLocalTime(localHHMM(aTz, existing.scheduled_at)) : null;
+          sec = await resolveDefaultSecondary(db, biz, existing.postal_code, aDate, aSlot, aTz, effTechId, body.pool2);
+        }
+        patch.secondary_technician_id = sec;
+      }
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
       break;
     case 'reopen':
