@@ -102,6 +102,29 @@ const syncOrder = (payload) => syncTo('bracket_sync', payload);
 
 // Scan one mailbox, returning every parsed Walmart order AND Amazon plate order
 // payload found: { walmart: [...], amazon: [...] }.
+// Each criterion is run as its OWN small IMAP SEARCH and the UIDs are unioned.
+// A single 8-way nested-OR search fails ("Command failed"/BAD) on some large
+// mailboxes; per-term searches are simple and far more reliable, and a failure
+// of one term still lets the others through.
+const SEARCH_TERMS = [
+  { from: 'walmart.com' }, { body: 'walmart' },
+  { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
+  { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
+];
+
+async function searchUids(client, since) {
+  const all = new Set();
+  for (const term of SEARCH_TERMS) {
+    try {
+      const uids = await client.search({ since, ...term }, { uid: true });
+      if (Array.isArray(uids)) for (const u of uids) all.add(u);
+    } catch (e) {
+      console.warn(`[bracket-sync] search ${JSON.stringify(term)} failed: ${e.message}`);
+    }
+  }
+  return [...all];
+}
+
 async function scanMailbox({ user, pass }, todayISO) {
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
@@ -109,6 +132,9 @@ async function scanMailbox({ user, pass }, todayISO) {
     // Don't let one slow/bad mailbox hang the whole run.
     socketTimeout: 60000, greetingTimeout: 15000, connectionTimeout: 15000,
   });
+  // A dropped/timed-out socket emits an 'error' event; without a listener Node
+  // crashes the whole process. Swallow it — per-mailbox failures are handled below.
+  client.on('error', (e) => console.warn(`[bracket-sync] ${user} imap error: ${e.message}`));
   const walmart = [], amazon = [];
   await client.connect();
   console.log(`[bracket-sync] Connected: ${user}`);
@@ -123,15 +149,7 @@ async function scanMailbox({ user, pass }, todayISO) {
     //     Plus the distinctive plate product phrases, so a FORWARDED order whose
     //     From: isn't amazon.com is still caught. Each parser then requires a
     //     real order number (and, for Amazon, a product match) to qualify.
-    let uids = await client.search(
-      { since, or: [
-        { from: 'walmart.com' }, { body: 'walmart' },
-        { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
-        { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
-      ] },
-      { uid: true }
-    );
-    if (!Array.isArray(uids)) uids = [];
+    let uids = await searchUids(client, since);
     if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon }; }
     console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
 
@@ -160,7 +178,9 @@ async function scanMailbox({ user, pass }, todayISO) {
       }
     }
   } finally {
-    await client.logout().catch(() => {});
+    // Close cleanly; if logout hangs/fails (e.g. after a failed command), force
+    // the socket shut so it can't linger and fire a fatal timeout later.
+    await client.logout().catch(() => { try { client.close(); } catch (_) {} });
   }
   return { walmart, amazon };
 }
@@ -226,4 +246,10 @@ async function main() {
   console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s) synced`);
 }
 
-main().catch(e => { console.error('[bracket-sync] Fatal:', e); process.exit(1); });
+// Force exit once the work is done. A lingering IMAP socket (e.g. one left open
+// by a mailbox whose command failed) would otherwise keep the process alive
+// until its timeout fires an unhandled 'error' and crashes with exit 1 — after
+// the sync already succeeded. Exiting explicitly makes the run's success final.
+main()
+  .then(() => process.exit(0))
+  .catch(e => { console.error('[bracket-sync] Fatal:', e); process.exit(1); });
