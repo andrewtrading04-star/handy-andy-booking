@@ -573,6 +573,31 @@ async function status(req, res, db, auth, body) {
     status: next, note: body.note || 'Updated by technician',
   });
 
+  // On completion: auto-decrement wire concealment plates for "behind the wall"
+  // jobs (one plate per line unit). Stamped in metadata so re-completing the same
+  // job never double-deducts. Charged to the recorded bracket supplier if known,
+  // otherwise the tech completing the job. Best-effort — never blocks completion.
+  if (next === 'completed' && !existing.metadata?.wire_plate_deducted_at) {
+    try {
+      const { data: liRows } = await db.from('booking_line_items')
+        .select('name, quantity').eq('booking_id', id);
+      const plateQty = detectWirePlateQty(liRows || []);
+      if (plateQty > 0) {
+        let chargeTech = auth.tech_id;
+        try {
+          const { data: sup } = await db.from('bookings')
+            .select('bracket_supplied_by').eq('id', id).maybeSingle();
+          if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
+        } catch (_) { /* column may not exist; fall back to completing tech */ }
+        await adjustWirePlateInventory(db, jobBizId, chargeTech, plateQty, id);
+        const newMeta = { ...(existing.metadata || {}), wire_plate_deducted_at: new Date().toISOString() };
+        await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+      }
+    } catch (e) {
+      console.error(`[wireplate] decrement failed for booking ${id}:`, e.message);
+    }
+  }
+
   // Reflect availability in the admin dashboard.
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
@@ -1032,6 +1057,52 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
   };
   if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
   else await db.from('bracket_inventory').insert({ business_id: businessId, technician_id: techId, ...next });
+}
+
+// Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
+// the wall" service. Match on behind + wall + a wire/conceal word so small label
+// variations still count, while a surface ("on the wall") cord-cover line — which
+// uses no plate — does not.
+function detectWirePlateQty(lineItems) {
+  let n = 0;
+  for (const li of lineItems || []) {
+    const name = (li.name || '').toLowerCase();
+    if (/behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name)) {
+      n += Number(li.quantity) || 1;
+    }
+  }
+  return n;
+}
+
+// Subtract wire concealment plates from a tech's inventory (floor 0) and log the
+// usage. No-ops gracefully if migration 0039 hasn't added the columns yet, and
+// never throws into the completion path (inventory bookkeeping must not block a
+// tech from finishing a job).
+async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) {
+  if (!qty || !techId) return;
+  let { data: inv, error } = await db.from('bracket_inventory')
+    .select('id, wire_plate_qty')
+    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+  if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
+  if (!inv) {
+    const { data: created } = await db.from('bracket_inventory')
+      .insert({ business_id: businessId, technician_id: techId, wire_plate_qty: 0 })
+      .select('id, wire_plate_qty').maybeSingle();
+    inv = created || { id: null, wire_plate_qty: 0 };
+  }
+  const nextQty = Math.max(0, (Number(inv.wire_plate_qty) || 0) - qty);
+  if (inv.id) {
+    await db.from('bracket_inventory')
+      .update({ wire_plate_qty: nextQty, updated_at: new Date().toISOString() })
+      .eq('id', inv.id);
+  }
+  try {
+    await db.from('bracket_usage_logs').insert({
+      business_id: businessId, booking_id: bookingId || null, technician_id: techId,
+      flat_used: 0, tilting_used: 0, full_motion_used: 0, wire_plate_used: qty,
+      logged_by_kind: 'technician', notes: 'Behind-the-wall wire concealment',
+    });
+  } catch (_) { /* usage log is best-effort */ }
 }
 
 // Does this job still need a bracket-supplier selection before it can complete?

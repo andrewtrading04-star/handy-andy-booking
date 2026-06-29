@@ -1752,6 +1752,34 @@ async function bookingUpdate(req, res, db, auth, body) {
         }, 20 * 60 * 1000);
       }
     }
+
+    // Auto-decrement wire concealment plates when a "behind the wall" job is
+    // completed from the dashboard — same rule as the tech app. Stamped in
+    // metadata so completing/reopening never double-deducts (the stamp is shared
+    // with the tech path). Best-effort; never blocks completion.
+    if (newStatus === 'completed' && !existing.metadata?.wire_plate_deducted_at) {
+      try {
+        const { data: liRows } = await db.from('booking_line_items')
+          .select('name, quantity').eq('booking_id', id);
+        const plateQty = detectWirePlateQty(liRows || []);
+        if (plateQty > 0) {
+          let chargeTech = existing.technician_id || null;
+          try {
+            const { data: sup } = await db.from('bookings')
+              .select('bracket_supplied_by').eq('id', id).maybeSingle();
+            if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
+          } catch (_) { /* column may not exist; fall back to assigned tech */ }
+          if (chargeTech) {
+            await adjustWirePlateInventory(db, biz.id, chargeTech, plateQty, id);
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            const newMeta = { ...(cur?.metadata || existing.metadata || {}), wire_plate_deducted_at: now };
+            await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+          }
+        }
+      } catch (e) {
+        console.error(`[wireplate] decrement failed for booking ${id}:`, e.message);
+      }
+    }
   }
 
   // Notify the technician when they are newly assigned to this job (only when the
@@ -3397,10 +3425,17 @@ async function bracketInventory(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const bizId = biz.id;
 
-  const { data: inv, error } = await db.from('bracket_inventory')
-    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
+  let { data: inv, error } = await db.from('bracket_inventory')
+    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
              technician:technicians ( id, name )`)
     .eq('business_id', bizId);
+  // wire_plate_qty arrives with migration 0039; degrade gracefully if not applied yet.
+  if (error && /wire_plate_qty/.test(error.message || '')) {
+    ({ data: inv, error } = await db.from('bracket_inventory')
+      .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
+               technician:technicians ( id, name )`)
+      .eq('business_id', bizId));
+  }
   if (error) throw error;
 
   // Ensure every active tech has an inventory row (create if missing)
@@ -3441,6 +3476,7 @@ async function bracketInventory(req, res, db, auth) {
       tilting: i.tilting_qty || 0,
       full_motion: i.full_motion_qty || 0,
       total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
+      wire_plate: i.wire_plate_qty || 0,
       updated_at: i.updated_at,
     })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
   });
@@ -3555,23 +3591,32 @@ async function bracketUpdate(req, res, db, auth, body) {
   const flat = (inv.flat_qty || 0) + (body.flat_delta || 0);
   const tilting = (inv.tilting_qty || 0) + (body.tilting_delta || 0);
   const fullMotion = (inv.full_motion_qty || 0) + (body.full_motion_delta || 0);
+  // Wire concealment plates (migration 0039). Only touch the column when a
+  // delta is supplied AND the column exists, so the action still works on a DB
+  // where 0039 hasn't run yet.
+  const wantsWirePlate = body.wire_plate_delta != null && body.wire_plate_delta !== 0;
+  const hasWirePlateCol = Object.prototype.hasOwnProperty.call(inv, 'wire_plate_qty');
+  const wirePlate = (inv.wire_plate_qty || 0) + (body.wire_plate_delta || 0);
 
   // Ensure no negative inventory
-  if (flat < 0 || tilting < 0 || fullMotion < 0) {
+  if (flat < 0 || tilting < 0 || fullMotion < 0 || (wantsWirePlate && wirePlate < 0)) {
     return res.status(400).json({ error: 'Insufficient inventory for this operation' });
   }
 
   // Update inventory
-  const { error: e1 } = await db.from('bracket_inventory').update({
+  const patch = {
     flat_qty: flat,
     tilting_qty: tilting,
     full_motion_qty: fullMotion,
-  }).eq('technician_id', techId).eq('business_id', bizId);
+  };
+  if (wantsWirePlate && hasWirePlateCol) patch.wire_plate_qty = wirePlate;
+  const { error: e1 } = await db.from('bracket_inventory').update(patch)
+    .eq('technician_id', techId).eq('business_id', bizId);
   if (e1) throw e1;
 
   // Log usage if applicable
-  if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta)) {
-    await db.from('bracket_usage_logs').insert({
+  if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta || wantsWirePlate)) {
+    const log = {
       business_id: bizId,
       booking_id: body.booking_id || null,
       technician_id: techId,
@@ -3580,7 +3625,9 @@ async function bracketUpdate(req, res, db, auth, body) {
       full_motion_used: Math.abs(body.full_motion_delta || 0),
       logged_by_kind: 'admin',
       notes: body.notes || null,
-    });
+    };
+    if (wantsWirePlate && hasWirePlateCol) log.wire_plate_used = Math.abs(body.wire_plate_delta || 0);
+    await db.from('bracket_usage_logs').insert(log);
   }
 
   return res.status(200).json({
@@ -3589,9 +3636,54 @@ async function bracketUpdate(req, res, db, auth, body) {
       flat_qty: flat,
       tilting_qty: tilting,
       full_motion_qty: fullMotion,
+      wire_plate_qty: hasWirePlateCol ? wirePlate : 0,
       total: flat + tilting + fullMotion,
     },
   });
+}
+
+// Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
+// the wall" service. Mirrors the same detection used in the tech app so admin-
+// completed jobs deduct identically.
+function detectWirePlateQty(lineItems) {
+  let n = 0;
+  for (const li of lineItems || []) {
+    const name = (li.name || '').toLowerCase();
+    if (/behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name)) {
+      n += Number(li.quantity) || 1;
+    }
+  }
+  return n;
+}
+
+// Subtract wire concealment plates from a tech's inventory (floor 0) and log it.
+// No-ops gracefully if migration 0039 isn't applied; never throws into the
+// completion path.
+async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) {
+  if (!qty || !techId) return;
+  let { data: inv, error } = await db.from('bracket_inventory')
+    .select('id, wire_plate_qty')
+    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+  if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
+  if (!inv) {
+    const { data: created } = await db.from('bracket_inventory')
+      .insert({ business_id: businessId, technician_id: techId, wire_plate_qty: 0 })
+      .select('id, wire_plate_qty').maybeSingle();
+    inv = created || { id: null, wire_plate_qty: 0 };
+  }
+  const nextQty = Math.max(0, (Number(inv.wire_plate_qty) || 0) - qty);
+  if (inv.id) {
+    await db.from('bracket_inventory')
+      .update({ wire_plate_qty: nextQty, updated_at: new Date().toISOString() })
+      .eq('id', inv.id);
+  }
+  try {
+    await db.from('bracket_usage_logs').insert({
+      business_id: businessId, booking_id: bookingId || null, technician_id: techId,
+      flat_used: 0, tilting_used: 0, full_motion_used: 0, wire_plate_used: qty,
+      logged_by_kind: 'admin', notes: 'Behind-the-wall wire concealment',
+    });
+  } catch (_) { /* usage log is best-effort */ }
 }
 
 // Parse Walmart email to create bracket purchase record

@@ -3105,6 +3105,31 @@ async function renderBrackets(){
     }
     html+=`</tbody></table></div>`;
 
+    // ── Wire Concealment Plates ─────────────────────────────────────────────
+    // A separate per-technician count, sourced from Amazon. Auto-decrements by 1
+    // whenever a tech completes a "Hide wires BEHIND the wall" job.
+    html+=`<div class="bracket-section">
+      <h3>Wire Concealment Plates <span style="font-weight:400;font-size:12px;color:var(--mute);">— from Amazon · −1 per "behind the wall" job</span></h3>
+      <table class="bracket-table">
+        <thead>
+          <tr>
+            <th>Technician</th>
+            <th>Plates on hand</th>
+            ${role==='owner'?'<th>Action</th>':''}
+          </tr>
+        </thead>
+        <tbody>`;
+    for(const tech of inv.inventory||[]){
+      const wp=tech.wire_plate||0;
+      const lowClass=wp<2?'low':'';
+      html+=`<tr>
+        <td>${esc(tech.technician_name)}</td>
+        <td class="bracket-qty"><strong class="${lowClass}">${wp}</strong></td>
+        ${role==='owner'?`<td><button class="seg-btn" onclick="openWirePlateEdit('${tech.technician_id}','${esc(tech.technician_name)}',${wp})">Edit</button></td>`:''}
+      </tr>`;
+    }
+    html+=`</tbody></table></div>`;
+
     // Orders split: active (incoming) shown up top; DELIVERED ones tucked into
     // a collapsed "archived" section below — findable but out of the way.
     const allOrders = purch.purchases || [];
@@ -3263,6 +3288,50 @@ async function saveBracketCount(techId, techName){
       }
     });
     toast('✓ Updated bracket count for '+techName);
+    closeBracketModal();
+    renderBrackets();
+  }catch(e){
+    toast('Error: '+e.message);
+  }
+}
+
+// Wire concealment plates — set a tech's plate count to an exact number.
+async function openWirePlateEdit(techId, techName, cur){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`
+    <div class="sheet">
+      <h2>Wire Plates: ${esc(techName)}</h2>
+      <p style="color:var(--mute);font-size:13px;margin:-4px 0 12px;">Currently <strong>${cur}</strong> on hand. Enter the new total they have.</p>
+      <label class="fld">Plates on hand</label>
+      <input type="number" id="wpQty" min="0" value="${cur}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
+        <button class="btn" onclick="saveWirePlateCount('${techId}','${esc(techName)}',${cur})" style="flex:1;">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeBracketModal(); });
+  window.bracketModal=modal;
+}
+
+async function saveWirePlateCount(techId, techName, cur){
+  const target=parseInt(document.getElementById('wpQty').value);
+  if(isNaN(target)||target<0){ toast('Enter a valid number'); return; }
+  const delta=target-cur;
+  if(delta===0){ closeBracketModal(); return; }
+  try{
+    await api('bracket_update',{
+      method:'POST',
+      body:{
+        business:current.slug,
+        technician_id:techId,
+        wire_plate_delta:delta,
+        action:'adjust',
+      }
+    });
+    toast('✓ Updated wire plates for '+techName);
     closeBracketModal();
     renderBrackets();
   }catch(e){
