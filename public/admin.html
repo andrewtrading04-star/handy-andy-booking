@@ -569,6 +569,7 @@
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
+      <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
@@ -882,6 +883,7 @@ const ICONS = {
   link:     {e:'🔗', f:'fa-solid fa-link'},
   estimate: {e:'🧾', f:'fa-solid fa-file-invoice-dollar'},
   analytics:{e:'📊', f:'fa-solid fa-chart-column'},
+  handyman:{e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
   webanalytics:{e:'🌐', f:'fa-solid fa-globe'},
 };
 function isDoms(){ return !!(current && current.slug==='doms'); }
@@ -998,6 +1000,9 @@ function enterApp(){
   if(navAna) navAna.style.display = '';
   const navWeb=document.getElementById('navWebAnalytics');
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
+  // Handyman Analytics: owner only (not techs/secretaries).
+  const navHandy=document.getElementById('navHandyman');
+  if(navHandy) navHandy.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
@@ -1084,7 +1089,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',webanalytics:'Website Analytics'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -1096,6 +1101,7 @@ function navTo(s){
     else if(s==='reviews') renderReviews();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
+    else if(s==='handyman') renderHandymanAnalytics();
     else if(s==='webanalytics') renderWebAnalytics();
     else if(s==='payroll') renderPayroll();
   }
@@ -1110,6 +1116,7 @@ function refreshCurrent(){
   else if(section==='reviews') renderReviews();
   else if(section==='gallery') renderGallery();
   else if(section==='analytics') renderAnalytics();
+  else if(section==='handyman') renderHandymanAnalytics();
   else if(section==='webanalytics') renderWebAnalytics();
   else if(section==='payroll') renderPayroll();
 }
@@ -1830,6 +1837,7 @@ const ANA_METRO_GROUPS = {
 };
 function anaCityMetro(city){ const lc=(city||'').toLowerCase(); for(const [m,cs] of Object.entries(ANA_METRO_GROUPS)){ if(cs.some(c=>lc===c||lc.includes(c))) return m; } return 'Other'; }
 let anaDays='today', anaCompareDays=null, anaCharts={}, anaLoading=false;
+let anaScope='booking';   // 'booking' (TV-mounting widget) | 'handyman' (estimate widget)
 
 function anaMoney(n){ if(n==null)return '—'; return '$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}); }
 function anaDur(s){ if(s==null)return '—'; if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; }
@@ -1852,7 +1860,10 @@ function anaDenverDayRange(offset){
   const to=new Date(anaDenverMidnightOf(anaDenverYmd(offset+1)).getTime()-1000); // 11:59:59 PM
   return {from:from.toISOString(),to:to.toISOString()};
 }
-function anaWidget(){ return current ? current.slug : 'doms'; }
+// The events `widget` tag to query. Handyman scope appends "-handyman" so it
+// reports on the estimate widget only; that variant has no remote ANA_ORIGIN, so
+// it's always served same-origin from this deployment's /api/analytics.
+function anaWidget(){ const slug = current ? current.slug : 'doms'; return anaScope==='handyman' ? slug+'-handyman' : slug; }
 // Where each business's booking-funnel analytics events live.
 //   ''           → this deployment's Supabase; we filter it by ?widget=<slug>.
 //   a full origin → that business's own deployment. Its /api/analytics is public
@@ -1875,15 +1886,24 @@ function anaUrl(mode){
   return anaBase()+'?'+anaWParam()+'days='+mode;
 }
 
-async function renderAnalytics(){
+// Handyman Analytics reuses the entire booking-analytics view, just scoped to the
+// "<slug>-handyman" widget (the estimate.html funnel). Owner-only (gated in nav).
+async function renderHandymanAnalytics(){ return renderAnalytics('handyman'); }
+
+async function renderAnalytics(scope){
+  anaScope = scope==='handyman' ? 'handyman' : 'booking';
+  const isHandy = anaScope==='handyman';
   const view=document.getElementById('view');
   const cmpBtnStyle='padding:12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;';
+  const headTitle = isHandy
+    ? `🛠️ Handyman Analytics${current?` · ${esc(current.name)}`:''}`
+    : `📊 ${esc(current?current.name:'Booking')} Analytics`;
   view.innerHTML=`
     <div class="ana">
-      <div id="emailQuotaWarning"></div>
+      ${isHandy?'':'<div id="emailQuotaWarning"></div>'}
       <div class="ana-head">
         <div>
-          <h1>📊 ${esc(current?current.name:'Booking')} Analytics</h1>
+          <h1>${headTitle}</h1>
           <div class="ana-sub" id="anaUpdated">Loading…</div>
         </div>
         <div class="ranges" id="anaRanges">
@@ -1930,18 +1950,20 @@ async function renderAnalytics(){
     loadAnalytics();
   }));
 
-  // Fetch and display email quota warning
-  try{
-    const quotaRes=await api('email_quota',{ params:{ business:current.slug }});
-    const quotaWarn=document.getElementById('emailQuotaWarning');
-    if(quotaWarn && quotaRes.warning){
-      quotaWarn.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:14px;color:#856404;">${esc(quotaRes.warning)}</div>`;
-    }
-  }catch(err){ console.warn('[email_quota]',err.message); }
+  // Fetch and display email quota warning (booking view only).
+  if(!isHandy){
+    try{
+      const quotaRes=await api('email_quota',{ params:{ business:current.slug }});
+      const quotaWarn=document.getElementById('emailQuotaWarning');
+      if(quotaWarn && quotaRes.warning){
+        quotaWarn.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:14px;color:#856404;">${esc(quotaRes.warning)}</div>`;
+      }
+    }catch(err){ console.warn('[email_quota]',err.message); }
+  }
 
   await loadAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
-  pollTimer=setInterval(()=>{ if(section==='analytics' && !anaLoading) loadAnalytics(); }, 30000);
+  pollTimer=setInterval(()=>{ if((section==='analytics'||section==='handyman') && !anaLoading) loadAnalytics(); }, 30000);
 }
 
 async function loadAnalytics(){

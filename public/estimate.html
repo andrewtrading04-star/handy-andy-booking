@@ -121,6 +121,46 @@ const state = {
   consent: true,
 };
 
+// ── Analytics tracking → /api/log-event ──────────────────────────────────────
+// Mirrors the TV-mounting booking widget, but tags events as "<slug>-handyman"
+// so the dashboard's Handyman Analytics page can report on this widget alone.
+const WIDGET = SLUG + '-handyman';
+function _uuid(){ try{ return crypto.randomUUID(); }catch(_){ return 'x'+Math.random().toString(36).slice(2)+Date.now().toString(36); } }
+let _vid=''; try{ _vid=localStorage.getItem('ha_vid')||''; if(!_vid){ _vid=_uuid(); localStorage.setItem('ha_vid',_vid); } }catch(_){ _vid=_uuid(); }
+const SESSION_ID = _vid + '.' + _uuid();
+const DEVICE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+const TRAFFIC_SOURCE = (function(){
+  try{
+    const utm = params.get('utm_source'); if(utm) return utm.slice(0,60);
+    if(document.referrer){
+      const h = new URL(document.referrer).hostname.replace(/^www\./,'');
+      if(h && h !== location.hostname.replace(/^www\./,'')) return h;
+    }
+  }catch(_){}
+  return 'direct';
+})();
+function logEvent(ev){
+  try{
+    fetch('/api/log-event',{
+      method:'POST', headers:{'Content-Type':'application/json'}, keepalive:true,
+      body: JSON.stringify({
+        session_id: SESSION_ID, widget: WIDGET,
+        event_type: ev.event_type, step_name: ev.step_name, value: ev.value,
+        device_type: DEVICE, traffic_source: TRAFFIC_SOURCE,
+        zip_code: (state.zip||'').trim() || undefined,
+        customer_name: ev.customer_name, error_message: ev.error_message,
+      }),
+    }).catch(()=>{});
+  }catch(_){}
+}
+const STEP_KEYS = ['service','describe','photo','times','contact'];
+let _lastTracked = -1;
+function trackStep(){
+  if(state.step === _lastTracked) return;
+  _lastTracked = state.step;
+  logEvent({ event_type:'step_view', step_name: STEP_KEYS[state.step] || ('step'+state.step), value: state.step });
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 (async function boot(){
   try{
@@ -147,6 +187,7 @@ function render(){
   else if(state.step===3) pad.innerHTML = stepTimes();
   else if(state.step===4) pad.innerHTML = stepContact();
   wire();
+  trackStep();
   postHeight();
 }
 
@@ -253,7 +294,9 @@ function wire(){
 
   if(state.step===0){
     document.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>{
-      state.serviceId=b.dataset.svc; state.serviceLabel=b.dataset.label; render();
+      state.serviceId=b.dataset.svc; state.serviceLabel=b.dataset.label;
+      logEvent({ event_type:'answer', step_name:'service:'+b.dataset.label });
+      render();
     });
   }
   if(state.step===1){
@@ -320,8 +363,10 @@ async function submit(){
     });
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||'Something went wrong. Please try again.');
+    logEvent({ event_type:'booking_confirmed', step_name:'contact', value:state.slots.length, customer_name:state.name.trim() });
     success();
   }catch(e){
+    logEvent({ event_type:'booking_failed', step_name:'contact', error_message:e.message });
     next.disabled=false; next.textContent='Submit request';
     showErr(e.message);
   }

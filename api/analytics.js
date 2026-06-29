@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 const TZ = 'America/Denver';
-const STEPS = [
+// The TV-mounting booking widget funnel.
+const BOOKING_STEPS = [
   { key: 'zip',       label: 'ZIP Check' },
   { key: 'frame_tv',  label: 'TV Type' },
   { key: 'size',      label: 'TV Size' },
@@ -16,15 +17,31 @@ const STEPS = [
   { key: 'slots',     label: 'Date & Time' },
   { key: 'customer',  label: 'Checkout' },
 ];
+// The handyman estimate widget funnel (public/estimate.html, 5 steps).
+const HANDYMAN_STEPS = [
+  { key: 'service',  label: 'Service' },
+  { key: 'describe', label: 'Describe Job' },
+  { key: 'photo',    label: 'Photo' },
+  { key: 'times',    label: 'Preferred Times' },
+  { key: 'contact',  label: 'Contact Info' },
+];
 // Legacy event step names that map onto a canonical step key
 const STEP_ALIAS = { zip_verify: 'zip' };
 
-const STEP_INDEX = {};
-STEPS.forEach((s, i) => { STEP_INDEX[s.key] = i; });
-function stepIndexOf(name) {
-  if (!name) return -1;
-  const k = STEP_ALIAS[name] || name;
-  return STEP_INDEX[k] ?? -1;
+// Build the per-request step config for a widget. A "-handyman" widget uses the
+// handyman funnel; everything else uses the booking funnel. Returns the step
+// list, an index lookup, and the index of the final step (set when a session
+// reaches price/booking).
+function stepConfigFor(widget) {
+  const STEPS = String(widget).endsWith('-handyman') ? HANDYMAN_STEPS : BOOKING_STEPS;
+  const index = {};
+  STEPS.forEach((s, i) => { index[s.key] = i; });
+  const stepIndexOf = (name) => {
+    if (!name) return -1;
+    const k = STEP_ALIAS[name] || name;
+    return index[k] ?? -1;
+  };
+  return { STEPS, stepIndexOf, lastStepIdx: STEPS.length - 1 };
 }
 
 function parseBrowser(ua) {
@@ -67,9 +84,11 @@ export default async function handler(req, res) {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
     const WIDGET = (req.query.widget || 'handy-andy').toString();
-    if (!['handy-andy', 'doms'].includes(WIDGET)) {
+    if (!['handy-andy', 'doms', 'handy-andy-handyman', 'doms-handyman'].includes(WIDGET)) {
       return res.status(400).json({ error: 'Invalid widget' });
     }
+    // Pick the funnel for this widget (booking vs handyman estimate).
+    const { STEPS, stepIndexOf, lastStepIdx } = stepConfigFor(WIDGET);
 
     // 'from'/'to' ISO params take priority (used for Denver calendar-day "Today"); else rolling 'days'.
     const days = Math.max(0, parseInt(req.query.days ?? '30', 10) || 0);
@@ -134,13 +153,13 @@ export default async function handler(req, res) {
         s.priceShown = true;
         const v = Number(e.value);
         if (!isNaN(v) && v > 0) s.lastPrice = v;
-        if (STEP_INDEX.customer > s.maxStep) s.maxStep = STEP_INDEX.customer;
+        if (lastStepIdx > s.maxStep) s.maxStep = lastStepIdx;
       } else if (t === 'booking_confirmed') {
         s.booked = true;
         s.bookedTs = ts;
         const v = Number(e.value);
         if (!isNaN(v) && v > 0) s.bookedValue = v;
-        if (STEP_INDEX.customer > s.maxStep) s.maxStep = STEP_INDEX.customer;
+        if (lastStepIdx > s.maxStep) s.maxStep = lastStepIdx;
       } else if (t === 'answer' && e.step_name) {
         s.answers.push(e.step_name);
       } else if (t === 'booking_failed' || t === 'error' || t === 'form_error') {
