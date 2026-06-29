@@ -243,6 +243,8 @@ export default async function handler(req, res) {
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
+      case 'google_reviews':       return await googleReviews(req, res, db, auth);
+      case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
@@ -2898,6 +2900,60 @@ async function reviews(req, res, db, auth) {
   }));
 
   return res.status(200).json({ reviews: formatted });
+}
+
+// ── Google Business Profile reviews ─────────────────────────────────────────
+// Reviews ingested from the Google review-notification emails (migration 0042).
+// Degrades to an empty list if the table isn't applied yet.
+async function googleReviews(req, res, db, auth) {
+  const biz = await resolveBusiness(db, auth, req.query.business || '');
+  const { data: rows, error } = await db.from('google_reviews')
+    .select(`id, reviewer_name, rating, review_text, review_date, seen, created_at, technician_id, booking_id,
+             technician:technicians ( id, name )`)
+    .eq('business_id', biz.id)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) {
+    if (/google_reviews/.test(error.message || '')) return res.status(200).json({ reviews: [] });
+    throw error;
+  }
+  return res.status(200).json({
+    reviews: (rows || []).map(r => ({
+      id: r.id,
+      reviewer_name: r.reviewer_name || 'A customer',
+      rating: r.rating,
+      review_text: r.review_text || '',
+      review_date: r.review_date,
+      created_at: r.created_at,
+      seen: !!r.seen,
+      technician_id: r.technician_id || null,
+      technician_name: r.technician?.name || null,
+      booking_id: r.booking_id || null,
+    })),
+  });
+}
+
+// Dismiss the "new Google review" banner (seen=true) or re-attribute the review
+// to a specific tech. Scoped to the caller's business.
+async function googleReviewUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const biz = await resolveBusiness(db, auth, body.business || '');
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const patch = {};
+  if (body.seen !== undefined) patch.seen = !!body.seen;
+  if (body.technician_id !== undefined) {
+    const tid = (body.technician_id || '').toString() || null;
+    if (tid) {
+      const { data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', biz.id).maybeSingle();
+      if (!t) return res.status(404).json({ error: 'Technician not found' });
+    }
+    patch.technician_id = tid;
+  }
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'nothing to update' });
+  const { error } = await db.from('google_reviews').update(patch).eq('id', id).eq('business_id', biz.id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // ── Bad-review alerts (1-star reviews in the last 24h) ──────────────────────

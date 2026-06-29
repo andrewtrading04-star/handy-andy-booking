@@ -29,6 +29,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseWalmartEmails } from './lib/walmart-parse.mjs';
 import { parseAmazonPlateEmail } from './lib/amazon-parse.mjs';
+import { parseGoogleReviewEmail } from './lib/google-review-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
@@ -110,6 +111,8 @@ const SEARCH_TERMS = [
   { from: 'walmart.com' }, { body: 'walmart' },
   { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
   { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
+  // Google Business Profile review notifications.
+  { from: 'businessprofile-noreply@google.com' }, { body: 'left a review for' },
 ];
 
 async function searchUids(client, since) {
@@ -135,7 +138,7 @@ async function scanMailbox({ user, pass }, todayISO) {
   // A dropped/timed-out socket emits an 'error' event; without a listener Node
   // crashes the whole process. Swallow it — per-mailbox failures are handled below.
   client.on('error', (e) => console.warn(`[bracket-sync] ${user} imap error: ${e.message}`));
-  const walmart = [], amazon = [];
+  const walmart = [], amazon = [], reviews = [];
   await client.connect();
   console.log(`[bracket-sync] Connected: ${user}`);
   try {
@@ -150,7 +153,7 @@ async function scanMailbox({ user, pass }, todayISO) {
     //     From: isn't amazon.com is still caught. Each parser then requires a
     //     real order number (and, for Amazon, a product match) to qualify.
     let uids = await searchUids(client, since);
-    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon }; }
+    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon, reviews }; }
     console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
 
     for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
@@ -158,6 +161,13 @@ async function scanMailbox({ user, pass }, todayISO) {
       try { parsed = await simpleParser(msg.source); }
       catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
       const email = { subject: parsed.subject || '', text: parsed.text || '', html: parsed.html || '', todayISO };
+
+      // Google Business Profile review notification.
+      const review = parseGoogleReviewEmail({ ...email, emailDateISO: parsed.date ? new Date(parsed.date).toISOString() : undefined });
+      if (review) {
+        console.log(`[bracket-sync] ${user}: google review ${review.business} ${review.rating}★ by ${review.reviewer_name}`);
+        reviews.push(review);
+      }
 
       // Walmart: one email can bundle several orders (a forwarded "conversation").
       for (const payload of parseWalmartEmails(email)) {
@@ -182,7 +192,7 @@ async function scanMailbox({ user, pass }, todayISO) {
     // the socket shut so it can't linger and fire a fatal timeout later.
     await client.logout().catch(() => { try { client.close(); } catch (_) {} });
   }
-  return { walmart, amazon };
+  return { walmart, amazon, reviews };
 }
 
 async function main() {
@@ -193,12 +203,13 @@ async function main() {
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Gather from every configured mailbox.
-  let allWalmart = [], allAmazon = [];
+  let allWalmart = [], allAmazon = [], allReviews = [];
   for (const box of boxes) {
     try {
-      const { walmart, amazon } = await scanMailbox(box, todayISO);
+      const { walmart, amazon, reviews } = await scanMailbox(box, todayISO);
       allWalmart = allWalmart.concat(walmart);
       allAmazon = allAmazon.concat(amazon);
+      allReviews = allReviews.concat(reviews || []);
     } catch (e) {
       // Surface Gmail's actual reason so a connect/login failure is diagnosable
       // (auth vs IMAP-disabled vs something else) instead of a bare "Command failed".
@@ -252,7 +263,24 @@ async function main() {
     }
   }
 
-  console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s) synced`);
+  // ── Google reviews ── dedupe by key (the same email can match two search terms).
+  const reviewByKey = new Map();
+  for (const r of allReviews) if (r && r.google_key && !reviewByKey.has(r.google_key)) reviewByKey.set(r.google_key, r);
+  const reviewList = [...reviewByKey.values()];
+  if (!reviewList.length) { console.log('[bracket-sync] No Google reviews found.'); }
+  else console.log(`[bracket-sync] ${reviewList.length} Google review(s) to sync`);
+  let reviewsSynced = 0;
+  for (const rev of reviewList) {
+    try {
+      const r = await syncTo('google_review_sync', rev);
+      console.log(`[bracket-sync] google review ${rev.reviewer_name} (${rev.rating}★): ${r.action || 'ok'}`);
+      reviewsSynced++;
+    } catch (e) {
+      console.error(`[bracket-sync] google review sync failed — ${e.message}`);
+    }
+  }
+
+  console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s), ${reviewsSynced}/${reviewList.length} review(s) synced`);
 }
 
 // Force exit once the work is done. A lingering IMAP socket (e.g. one left open

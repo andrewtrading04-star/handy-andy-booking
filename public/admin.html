@@ -403,6 +403,18 @@
   .bad-alert .ba-meta{color:#b4453f;font-size:12.5px;margin-top:3px;line-height:1.4;}
   .bad-alert .ba-arrow{color:#ef4444;font-weight:800;font-size:18px;flex-shrink:0;}
 
+  /* ── Good-review banner (new Google review) ────────────────────────────── */
+  .good-alerts{margin:14px 16px 0;display:flex;flex-direction:column;gap:9px;}
+  .good-alert{display:flex;align-items:center;gap:13px;background:#f0fdf4;border:1px solid #bbf7d0;
+    border-left:5px solid #22c55e;border-radius:12px;padding:13px 15px;box-shadow:0 2px 8px rgba(34,197,94,.10);}
+  .good-alert .ga-ico{font-size:20px;line-height:1;flex-shrink:0;}
+  .good-alert .ga-main{flex:1;min-width:0;}
+  .good-alert .ga-title{font-weight:800;color:#166534;font-size:14px;line-height:1.3;}
+  .good-alert .ga-meta{color:#15803d;font-size:12.5px;margin-top:3px;line-height:1.4;}
+  .good-alert .ga-x{background:none;border:none;color:#15803d;font-size:20px;line-height:1;cursor:pointer;flex-shrink:0;padding:0 4px;font-weight:700;}
+  /* "Left a Google review" pill */
+  .gpill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:#dcfce7;color:#166534;}
+
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
     background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.14), transparent 60%), var(--gnavy,#0b1f3a);
@@ -598,6 +610,7 @@
     </div>
 
     <div id="badAlerts" class="bad-alerts hidden"></div>
+    <div id="goodAlerts" class="good-alerts hidden"></div>
 
     <div id="greeting" class="greeting hidden"></div>
 
@@ -981,6 +994,7 @@ function logout(){
   if(alertTimer){ clearInterval(alertTimer); alertTimer=null; }
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
   const ba=document.getElementById('badAlerts'); if(ba){ ba.classList.add('hidden'); ba.innerHTML=''; }
+  const ga=document.getElementById('goodAlerts'); if(ga){ ga.classList.add('hidden'); ga.innerHTML=''; }
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
 }
@@ -1024,6 +1038,44 @@ function enterApp(){
 async function loadBadAlerts(){
   try{ const d=await api('bad_reviews'); renderBadAlerts(d.alerts||[]); }
   catch(e){ /* non-fatal: leave the banner as-is */ }
+  loadGoodAlerts();
+}
+// New Google reviews → a dismissible green banner at the top of the dashboard.
+let _googleReviewsCache=[];
+async function loadGoodAlerts(){
+  if(!current){ return; }
+  try{
+    const d=await api('google_reviews',{ params:{ business:current.slug }});
+    _googleReviewsCache=d.reviews||[];
+    renderGoodAlerts(_googleReviewsCache.filter(r=>!r.seen));
+  }catch(e){ /* table may not be migrated yet — non-fatal */ }
+}
+function renderGoodAlerts(unseen){
+  const el=document.getElementById('goodAlerts');
+  if(!el) return;
+  if(!unseen||!unseen.length){ el.classList.add('hidden'); el.innerHTML=''; return; }
+  el.innerHTML=unseen.map(r=>{
+    const who = r.technician_name ? esc(r.technician_name) : esc((current&&current.name)||'We');
+    const stars = '⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
+    const verb = r.technician_name ? 'just received' : 'just got';
+    const by = r.reviewer_name ? ` from ${esc(r.reviewer_name)}` : '';
+    return `<div class="good-alert" data-id="${esc(r.id)}">
+      <div class="ga-ico">🌟</div>
+      <div class="ga-main">
+        <div class="ga-title">${who} ${verb} a ${r.rating||5}-star Google review${by}</div>
+        <div class="ga-meta">${stars}${r.review_text?' · '+esc(r.review_text.slice(0,140)):''}</div>
+      </div>
+      <button class="ga-x" title="Dismiss" data-dismiss="${esc(r.id)}">×</button>
+    </div>`;
+  }).join('');
+  el.classList.remove('hidden');
+  el.querySelectorAll('[data-dismiss]').forEach(btn=>btn.addEventListener('click',async(e)=>{
+    e.stopPropagation();
+    const id=btn.dataset.dismiss;
+    try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id, seen:true }}); }catch(_){}
+    const row=_googleReviewsCache.find(r=>r.id===id); if(row) row.seen=true;
+    renderGoodAlerts(_googleReviewsCache.filter(r=>!r.seen));
+  }));
 }
 function renderBadAlerts(alerts){
   const el=document.getElementById('badAlerts');
@@ -1055,7 +1107,7 @@ async function openAlertJob(slug, id){
   // Switch context to the alert's business so the job modal (and its photo/note
   // loads, which use current.slug) resolve against the right business.
   if(biz && (!current || current.slug!==slug)){
-    current=biz; availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge();
+    current=biz; availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -1071,7 +1123,7 @@ function renderSwitcher(){
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
-    availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge();
+    availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
   }));
 }
 
@@ -2741,12 +2793,17 @@ async function renderReviews(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
   try{
-    const [d, rq]=await Promise.all([
+    const [d, rq, gr, tl]=await Promise.all([
       api('reviews',{ params:{ business:current.slug }}),
       api('review_requests',{ params:{ business:current.slug }}).catch(()=>({requests:[]})),
+      api('google_reviews',{ params:{ business:current.slug }}).catch(()=>({reviews:[]})),
+      api('technicians',{ params:{ business:current.slug }}).catch(()=>({technicians:[]})),
     ]);
     const reviews=d.reviews||[];
     const requests=rq.requests||[];
+    const gReviews=gr.reviews||[];
+    const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
+    const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
 
     // ── Review-request tracking: sent / opened / reviewed, with a resend button.
     const reqRows=requests.map(r=>{
@@ -2764,13 +2821,14 @@ async function renderReviews(){
       const reviewed = r.rating
         ? `<span style="${starp}">${'⭐'.repeat(r.rating)}</span>`
         : `<span style="${base}">No review yet</span>`;
+      const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
       const canResend = r.has_email;
       return `<div class="job">
         <div class="row">
           <div style="flex:1;min-width:0;">
             <div class="name">${esc(r.customer_name)}</div>
             <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
-            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${sent}${opened}${reviewed}</div>
+            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${sent}${opened}${reviewed}${gpill}</div>
           </div>
           <div style="text-align:right;white-space:nowrap;">
             ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
@@ -2791,16 +2849,41 @@ async function renderReviews(){
         </div>
       </div>`).join('');
 
+    const techOptsFor=(sel)=>`<option value="">— credit a tech —</option>`+revTechs.map(t=>`<option value="${esc(t.id)}" ${t.id===sel?'selected':''}>${esc(t.name)}</option>`).join('');
+    const gHtml=gReviews.map(r=>{
+      const stars='⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
+      const when=r.review_date||(r.created_at?new Date(r.created_at).toLocaleDateString():'');
+      const credit=role==='owner'
+        ? `<select data-gtech="${esc(r.id)}" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;">${techOptsFor(r.technician_id)}</select>`
+        : (r.technician_name?`<span class="meta">${esc(r.technician_name)}</span>`:'');
+      return `<div class="job">
+        <div class="row">
+          <div style="flex:1;min-width:0;">
+            <div class="name">${stars} <span class="gpill">Google</span></div>
+            <div class="meta">${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}</div>
+            <div class="meta" style="margin-top:8px;font-size:13px;line-height:1.5;">${r.review_text?esc(r.review_text):'<em style="color:var(--mute);">No text</em>'}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap;">${credit}</div>
+        </div>
+      </div>`;
+    }).join('');
+
     document.getElementById('revWrap').innerHTML=
-      `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">Review requests</div>`+
+      `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">⭐ Google reviews</div>`+
+      (gHtml||'<div class="empty">No Google reviews yet.</div>')+
+      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Review requests</div>`+
       (reqRows||'<div class="empty">No completed jobs yet.</div>')+
-      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received</div>`+
+      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received (in-app)</div>`+
       (revHtml||'<div class="empty">No reviews yet.</div>');
 
     document.querySelectorAll('#revWrap [data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
       btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
       try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend }}); toast('Review email sent ✓'); renderReviews(); }
       catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
+    }));
+    document.querySelectorAll('#revWrap [data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
+      try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
+      catch(e){ toast(e.message); }
     }));
   }catch(err){ const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }

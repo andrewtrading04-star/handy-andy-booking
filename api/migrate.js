@@ -338,6 +338,69 @@ async function wirePlateSync(req, res) {
   return res.status(200).json({ ok: true, order: amazon_order_num, results });
 }
 
+// Best-effort: credit a Google review to the tech who did a recent completed job
+// for a customer whose surname matches the reviewer. Conservative — only matches
+// on a (≥3 char) last name among the last 60 days of completed jobs, newest
+// first. Returns nulls when there's no confident match (the review still saves;
+// the owner can re-attribute in the dashboard).
+async function matchTechByReviewer(db, bizId, reviewerName) {
+  const out = { technician_id: null, booking_id: null };
+  const tokens = String(reviewerName || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const last = tokens[tokens.length - 1];
+  if (!last || last.length < 3) return out;
+  const sinceISO = new Date(Date.now() - 60 * 86400000).toISOString();
+  const { data: rows } = await db.from('bookings')
+    .select('id, technician_id, scheduled_at, customer:customers ( name )')
+    .eq('business_id', bizId).eq('status', 'completed')
+    .not('technician_id', 'is', null)
+    .gte('scheduled_at', sinceISO)
+    .order('scheduled_at', { ascending: false }).limit(200);
+  for (const b of (rows || [])) {
+    const ct = String(b.customer?.name || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (ct.length && ct[ct.length - 1] === last) {
+      return { technician_id: b.technician_id, booking_id: b.id };
+    }
+  }
+  return out;
+}
+
+// Store one Google Business Profile review. Idempotent on (business_id,
+// google_key): a re-scan of the same email is a no-op and never resurfaces a
+// dismissed banner. Auth checked by the caller.
+async function googleReviewSync(req, res) {
+  const body = req.body || {};
+  const slug = (body.business || '').toString().trim();
+  const google_key = (body.google_key || '').toString().trim();
+  const reviewer_name = (body.reviewer_name || '').toString().trim() || null;
+  const rating = Math.max(1, Math.min(5, parseInt(body.rating) || 0)) || null;
+  const review_text = (body.review_text || '').toString().trim() || null;
+  const review_date = body.review_date || null;
+  if (!slug || !google_key || !rating) return res.status(400).json({ error: 'business, google_key, rating required' });
+
+  const db = serviceClient();
+  const { data: biz } = await db.from('businesses').select('id, slug').eq('slug', slug).eq('active', true).maybeSingle();
+  if (!biz) return res.status(404).json({ error: `Unknown business "${slug}"` });
+
+  // Already stored? Keep it (preserves the seen flag + any manual re-attribution).
+  const { data: existing } = await db.from('google_reviews')
+    .select('id').eq('business_id', biz.id).eq('google_key', google_key).maybeSingle();
+  if (existing) return res.status(200).json({ ok: true, action: 'exists', id: existing.id });
+
+  const { technician_id, booking_id } = await matchTechByReviewer(db, biz.id, reviewer_name);
+
+  const { data: ins, error } = await db.from('google_reviews').insert({
+    business_id: biz.id, reviewer_name, rating, review_text, review_date,
+    google_key, technician_id, booking_id, seen: false,
+  }).select('id').maybeSingle();
+  if (error) {
+    // Unique race (another run inserted it) is fine.
+    if (/duplicate key|unique/i.test(error.message || '')) return res.status(200).json({ ok: true, action: 'exists' });
+    return res.status(500).json({ error: error.message });
+  }
+  console.log('[google_review_sync]', slug, reviewer_name, `${rating}★`, technician_id ? 'matched-tech' : 'no-match');
+  return res.status(200).json({ ok: true, action: 'created', id: ins?.id, matched: !!technician_id });
+}
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -459,6 +522,23 @@ export default async function handler(req, res) {
       return await wirePlateSync(req, res);
     } catch (e) {
       console.error('[wire_plate_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Google Business Profile review ingest. Called by the bracket-tracker Action
+  // after it parses review-notification emails. Secured by CRON_SECRET.
+  if (action === 'google_review_sync') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await googleReviewSync(req, res);
+    } catch (e) {
+      console.error('[google_review_sync]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
