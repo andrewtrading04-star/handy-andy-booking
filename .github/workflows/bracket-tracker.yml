@@ -8,12 +8,33 @@ name: Bracket inventory tracker
 on:
   schedule:
     - cron: '*/15 * * * *'   # every 15 minutes
-  workflow_dispatch: {}        # allow manual "Run workflow" from the Actions tab
+  workflow_dispatch:
+    inputs:
+      order:
+        description: 'Manually set status for this Walmart order # (optional)'
+        required: false
+        default: ''
+      status:
+        description: 'Status to set: in_route | delivered | canceled'
+        required: false
+        default: ''
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Manual status override (optional)
+        if: ${{ github.event.inputs.order != '' && github.event.inputs.status != '' }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Manually setting order ${{ github.event.inputs.order }} -> ${{ github.event.inputs.status }}"
+          curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?action=bracket_sync" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"walmart_order_num\":\"${{ github.event.inputs.order }}\",\"status\":\"${{ github.event.inputs.status }}\"}"
+          echo ""
+
       - name: Check out repository
         uses: actions/checkout@v4
 
