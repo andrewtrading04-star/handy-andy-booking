@@ -3105,56 +3105,60 @@ async function renderBrackets(){
     }
     html+=`</tbody></table></div>`;
 
+    // Orders split: active (incoming) shown up top; DELIVERED ones tucked into
+    // a collapsed "archived" section below — findable but out of the way.
+    const allOrders = purch.purchases || [];
+    const isDelivered = p => (p.status||'').toLowerCase()==='delivered';
+    const activeOrders = allOrders.filter(p=>!isDelivered(p));
+    const archivedOrders = allOrders.filter(isDelivered);
+
+    const orderHead = `<thead><tr>
+      <th>Technician</th><th>Order #</th><th>Flat</th><th>Tilting</th><th>Full Motion</th><th>Status</th><th>Date</th>
+    </tr></thead>`;
+
+    const bracketRow = (p) => {
+      const orderCell=p.order_url
+        ? `<a href="${esc(p.order_url)}" target="_blank" rel="noopener">${p.walmart_order_num?esc(p.walmart_order_num):'View order'} ↗</a>`
+        : (p.walmart_order_num?esc(p.walmart_order_num):'-');
+      const assigned=p.technician_name && p.technician_name!=='Unassigned';
+      const techCell=assigned
+        ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`
+        : (role==='owner'
+            ? `<button class="seg-btn" onclick="openAssignModal('${esc(p.id)}','${esc(p.walmart_order_num||'')}')">Assign tech ▾</button>`
+            : `<span style="color:var(--mute);">Unassigned</span>`);
+      const st=(p.status||'in_route').toLowerCase();
+      const statusCell=role==='owner'
+        ? `<select onchange="setBracketStatus('${esc(p.walmart_order_num||'')}','${esc(p.id)}',this.value)" title="Change delivery status" style="padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:#fff;">
+             <option value="in_route" ${(st==='in_route'||st==='ordered')?'selected':''}>🚚 In route</option>
+             <option value="delivered" ${st==='delivered'?'selected':''}>✓ Delivered</option>
+             <option value="canceled" ${(st==='canceled'||st==='cancelled')?'selected':''}>Canceled</option>
+           </select>`
+        : bracketStatusBadge(p.status);
+      return `<tr>
+        <td>${techCell}</td>
+        <td>${orderCell}</td>
+        <td class="bracket-qty">${p.flat_qty}</td>
+        <td class="bracket-qty">${p.tilting_qty}</td>
+        <td class="bracket-qty">${p.full_motion_qty}</td>
+        <td>${statusCell}</td>
+        <td>${p.order_date||'-'}</td>
+      </tr>`;
+    };
+
     html+=`<div class="bracket-section">
       <h3>Recent Walmart Orders</h3>
-      <table class="bracket-table">
-        <thead>
-          <tr>
-            <th>Technician</th>
-            <th>Order #</th>
-            <th>Flat</th>
-            <th>Tilting</th>
-            <th>Full Motion</th>
-            <th>Status</th>
-            <th>Date</th>
-          </tr>
-        </thead>
-        <tbody>`;
+      <table class="bracket-table">${orderHead}<tbody>${
+        activeOrders.length ? activeOrders.map(bracketRow).join('')
+        : `<tr><td colspan="7" style="text-align:center;color:var(--mute);">No active orders</td></tr>`
+      }</tbody></table>
+    </div>`;
 
-    if((purch.purchases||[]).length===0){
-      html+=`<tr><td colspan="7" style="text-align:center;color:var(--mute);">No orders yet</td></tr>`;
-    }else{
-      for(const p of purch.purchases){
-        const total=p.flat_qty+p.tilting_qty+p.full_motion_qty;
-        const orderCell=p.order_url
-          ? `<a href="${esc(p.order_url)}" target="_blank" rel="noopener">${p.walmart_order_num?esc(p.walmart_order_num):'View order'} ↗</a>`
-          : (p.walmart_order_num?esc(p.walmart_order_num):'-');
-        const assigned=p.technician_name && p.technician_name!=='Unassigned';
-        const techCell=assigned
-          ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`
-          : (role==='owner'
-              ? `<button class="seg-btn" onclick="openAssignModal('${esc(p.id)}','${esc(p.walmart_order_num||'')}')">Assign tech ▾</button>`
-              : `<span style="color:var(--mute);">Unassigned</span>`);
-        const st=(p.status||'in_route').toLowerCase();
-        const statusCell=role==='owner'
-          ? `<select onchange="setBracketStatus('${esc(p.walmart_order_num||'')}','${esc(p.id)}',this.value)" title="Change delivery status" style="padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:#fff;">
-               <option value="in_route" ${(st==='in_route'||st==='ordered')?'selected':''}>🚚 In route</option>
-               <option value="delivered" ${st==='delivered'?'selected':''}>✓ Delivered</option>
-               <option value="canceled" ${(st==='canceled'||st==='cancelled')?'selected':''}>Canceled</option>
-             </select>`
-          : bracketStatusBadge(p.status);
-        html+=`<tr>
-          <td>${techCell}</td>
-          <td>${orderCell}</td>
-          <td class="bracket-qty">${p.flat_qty}</td>
-          <td class="bracket-qty">${p.tilting_qty}</td>
-          <td class="bracket-qty">${p.full_motion_qty}</td>
-          <td>${statusCell}</td>
-          <td>${p.order_date||'-'}</td>
-        </tr>`;
-      }
+    if(archivedOrders.length){
+      html+=`<details class="bracket-section">
+        <summary style="cursor:pointer;font-weight:700;color:var(--mute);padding:4px 0;">✓ Delivered — archived (${archivedOrders.length}) <span style="font-weight:400;font-size:12px;">— click to view</span></summary>
+        <table class="bracket-table" style="margin-top:10px;">${orderHead}<tbody>${archivedOrders.map(bracketRow).join('')}</tbody></table>
+      </details>`;
     }
-    html+=`</tbody></table></div>`;
 
     // ── Just Delivered: brackets that arrived but aren't assigned to a tech yet.
     // Shown at the bottom as a highlighted alert with a one-click assign control.
