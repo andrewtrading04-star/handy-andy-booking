@@ -66,7 +66,10 @@ export function extractBrackets(text) {
 export function detectStatus(subject, text) {
   const s = ((subject || '') + ' ' + (text || '')).toLowerCase();
   if (/cancel(?:l?ed|lation)?\b/i.test(s)) return 'canceled';
-  if (/\bdelivered\b|has been delivered|was delivered|delivery complete/i.test(s)) return 'delivered';
+  // Walmart's delivery email: subject "Your package arrived", body "<driver>
+  // completed your delivery from store at …". Note "delivery order" (the
+  // confirmation) and "arrives" (an ETA) must NOT read as delivered.
+  if (/\bdelivered\b|has been delivered|was delivered|delivery complete|package (?:has )?arrived|completed your delivery/i.test(s)) return 'delivered';
   return 'in_route';
 }
 
