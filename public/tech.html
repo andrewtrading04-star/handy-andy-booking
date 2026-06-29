@@ -496,6 +496,7 @@ async function showDetail(id){
       <div class="card"><h3>Line Items</h3>
         <div id="liEditor"></div>
         <button class="btn ghost sm" id="liAdd" style="margin-top:8px;">+ Add line item</button>
+        <div id="liDiscount"></div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
           <button class="btn sm" id="liSave">Save</button>
         </div>
@@ -680,8 +681,13 @@ function mountTechLineItems(j, id){
   // Existing lines (already on the booking) show TEXT + remove only — techs don't
   // see the customer pricing on them. A line the tech ADDS gets a price field so
   // they can charge for on-site extras. `existing` marks which is which.
-  let rows=(j.line_items&&j.line_items.length)
-    ? j.line_items.map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
+  // Coupons/discounts never belong in the editable list — they show at the bottom
+  // (server already filters them out; this is a belt-and-suspenders guard).
+  const notCoupon=li=>!/^coupon\b/i.test(String(liName(li.name)||'').trim());
+  const seeded=(j.line_items&&j.line_items.length)
+    ? j.line_items.filter(notCoupon).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
+    : [];
+  let rows=seeded.length ? seeded
     : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal), existing:true }];
   const recalc=()=>{ if(!totalEl) return; const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
   const render=()=>{
@@ -699,6 +705,12 @@ function mountTechLineItems(j, id){
     recalc();
   };
   render();
+  // Coupons/discounts shown read-only at the bottom (not editable line items).
+  const disc=document.getElementById('liDiscount');
+  if(disc){
+    const ds=(j.discounts||[]).filter(d=>d&&Number(d.amount));
+    disc.innerHTML=ds.length?ds.map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);color:var(--green);font-weight:700;font-size:14px;"><span>${esc(liName(d.name))}</span><span>−${fmtUsd(Math.abs(Number(d.amount)))}</span></div>`).join(''):'';
+  }
   const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', price:0, existing:false }); render(); };
   const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
     const items=rows.map(r=>({ name:(r.name||'').trim(), price:Number(r.price)||0 })).filter(r=>r.name||r.price);

@@ -1013,9 +1013,16 @@ async function setAvailabilityException(req, res, db, auth, body) {
 // (to filter the view) and jobLineItemsSave (to preserve these when a tech edits
 // the visible work items, so techs can't touch fees/tips and the total stays right).
 const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
+// A coupon/discount line — by our own kind, OR by name for the paths that store
+// it as a generic line item (the Zenbooker custom_service flow doesn't carry our
+// 'kind', so a coupon lands as kind 'service' and would otherwise look editable).
+function isCouponLi(li) {
+  return ((li && li.kind) === 'coupon') || /^coupon\b/i.test(((li && li.name) || '').trim());
+}
 function isHiddenLi(li) {
   const kind = (li && li.kind) || 'service';
   if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
+  if (isCouponLi(li)) return true;   // keep coupons out of the tech's editable list
   return HIDDEN_LI.has(((li && li.name) || '').trim());
 }
 
@@ -1163,6 +1170,11 @@ function shapeJob(b, full = false, forTech = false) {
     out.maps_key = process.env.GOOGLE_MAPS_API_KEY || null;
     // For techs, only show work items; hide fees, tips, coupons, and dismount.
     out.line_items = (b.line_items || []).filter(li => forTech ? !isHiddenLi(li) : true);
+    // Coupons/discounts are pulled OUT of the editable list and sent separately so
+    // the app can show them on their own at the bottom (a tech can't edit/remove a
+    // discount). Amounts are negative (a price reduction).
+    out.discounts = (b.line_items || []).filter(isCouponLi)
+      .map(li => ({ name: li.name || 'Coupon', amount: Number(li.line_total) || 0 }));
     // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the
     // line-item editor can seed correctly: when a job has no visible work lines, the
     // starting line should be (price − hidden_total), not the whole price.
