@@ -27,13 +27,20 @@ jobs:
         if: ${{ github.event.inputs.order != '' && github.event.inputs.status != '' }}
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ORDERS: ${{ github.event.inputs.order }}
+          STATUS: ${{ github.event.inputs.status }}
         run: |
-          echo "Manually setting order ${{ github.event.inputs.order }} -> ${{ github.event.inputs.status }}"
-          curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?action=bracket_sync" \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            -H "Content-Type: application/json" \
-            -d "{\"walmart_order_num\":\"${{ github.event.inputs.order }}\",\"status\":\"${{ github.event.inputs.status }}\"}"
-          echo ""
+          IFS=',' read -ra LIST <<< "$ORDERS"
+          for o in "${LIST[@]}"; do
+            o="$(echo "$o" | xargs)"   # trim whitespace
+            [ -z "$o" ] && continue
+            echo "Setting $o -> $STATUS"
+            curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?action=bracket_sync" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"walmart_order_num\":\"$o\",\"status\":\"$STATUS\"}"
+            echo ""
+          done
 
       - name: Check out repository
         uses: actions/checkout@v4
