@@ -8,8 +8,58 @@
 // via scripts/import-zenbooker.mjs.
 import { serviceClient } from './supabase.js';
 import { signToken } from './auth.js';
+import { emailConfig, sendEmail } from './email.js';
+import { emailNotificationsOn } from './notify.js';
 
 function first(...vals) { for (const v of vals) if (v != null && v !== '') return v; return null; }
+function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// Owner heads-up: a short email to the owner whenever a CUSTOMER books through a
+// widget (source 'widget'). Best-effort — wrapped in try/catch so it can never
+// break a booking. Recipient defaults to Andrew; override with OWNER_NOTIFY_EMAIL.
+async function notifyOwnerNewBooking({ biz, ctx, booking_id, scheduled_at, price, providerName }) {
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig(ctx.businessSlug);
+    if (!cfg.apiKey) return;
+    const to = process.env.OWNER_NOTIFY_EMAIL || 'andrewtrading04@gmail.com';
+    const c = ctx.customer || {}, a = ctx.address || {};
+    const tz = biz.timezone || 'America/Denver';
+    const money = (n) => '$' + (Number(n) || 0).toFixed(2);
+    let when = '';
+    if (scheduled_at) {
+      try {
+        const d = new Date(scheduled_at);
+        const datePart = d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        let timePart = d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+        if (ctx.scheduled_end) timePart += ' – ' + new Date(ctx.scheduled_end).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+        when = `${datePart} · ${timePart}`;
+      } catch (_) { when = String(scheduled_at); }
+    }
+    const name = first(c.name, `${c.first_name || ''} ${c.last_name || ''}`.trim(), 'Customer');
+    const addr = [a.line1, a.city, a.state, a.postal_code].filter(Boolean).join(', ');
+    const rows = [
+      ['Company', biz.name || ctx.businessSlug],
+      ['Customer', name], ['Phone', c.phone], ['Email', c.email],
+      ['Address', addr], ['Service', ctx.service_name], ['When', when],
+      ['Technician', providerName || 'Unassigned'], ['Total', money(price)],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const items = (Array.isArray(ctx.line_items) ? ctx.line_items : []).filter(Boolean)
+      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(li.name || 'Item')}${(Number(li.quantity) || 1) > 1 ? ` ×${li.quantity}` : ''}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
+    const notes = ctx.customer_notes ? `<p style="margin:14px 0 0;"><b>Customer notes:</b> ${escHtml(ctx.customer_notes)}</p>` : '';
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 12px;">Someone just booked an appointment.</h2>
+      <table style="border-collapse:collapse;">${tbl}</table>
+      ${items ? `<h3 style="margin:16px 0 6px;font-size:14px;">Job</h3><table style="border-collapse:collapse;font-size:14px;">${items}</table>` : ''}
+      ${notes}
+      ${booking_id ? `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(booking_id)}</p>` : ''}
+    </div>`;
+    await sendEmail({ slug: ctx.businessSlug, to, subject: 'Someone just booked an appointment', html, replyTo: cfg.from });
+  } catch (e) {
+    console.warn('[mirror] owner notify non-fatal:', e.message);
+  }
+}
 
 export async function mirrorBooking(ctx = {}) {
   try {
@@ -17,7 +67,7 @@ export async function mirrorBooking(ctx = {}) {
     const db = serviceClient();
     const job = ctx.zbkJob || {};
 
-    const { data: biz } = await db.from('businesses').select('id').eq('slug', ctx.businessSlug).single();
+    const { data: biz } = await db.from('businesses').select('id, name, slug, timezone').eq('slug', ctx.businessSlug).single();
     if (!biz) return;
 
     // Service area from the Zenbooker territory.
@@ -165,6 +215,13 @@ export async function mirrorBooking(ctx = {}) {
       booking_id, business_id: biz.id, technician_id,
       status: bookingRow.status, note: `Mirrored from ${ctx.source || 'widget'} booking`,
     });
+
+    // Owner heads-up email on customer self-bookings (widget only — not office
+    // 'manual', imports, or warranty dispatches). Reaches here only on a NEW
+    // booking; the idempotency duplicate path returns earlier, so no double email.
+    if ((ctx.source || 'widget') === 'widget') {
+      await notifyOwnerNewBooking({ biz, ctx, booking_id, scheduled_at, price, providerName });
+    }
 
     // Native callers (e.g. the Doms widget) need the new row's id to confirm /
     // email the booking. Zenbooker callers ignore the return value.
