@@ -17,6 +17,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
+import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct } from './_lib/stripe.js';
@@ -1621,6 +1622,41 @@ async function bookingCreate(req, res, db, auth, body) {
     } catch (e) {
       console.error('[admin] confirmation email error:', e.message);
     }
+  }
+
+  // TEMPORARY owner heads-up: email the owner when a SECRETARY (Heather/Joey)
+  // books a job from the dashboard — NOT when the owner books one. Toggle off any
+  // time by setting NOTIFY_SECRETARY_BOOKINGS=0 in the environment. Best-effort.
+  if (auth.role !== 'owner' && process.env.NOTIFY_SECRETARY_BOOKINGS !== '0') {
+    try {
+      let techName = null;
+      const techIds = [technician_id, secondary_technician_id].filter(Boolean);
+      if (techIds.length) {
+        const { data: tns } = await db.from('technicians').select('id, name').in('id', techIds);
+        techName = (tns || []).map(t => t.name).filter(Boolean).join(' & ') || null;
+      }
+      const slotDef2 = SLOTS.find(s => s.key === body.scheduled_slot);
+      let scheduledEnd = null;
+      if (scheduled_at && slotDef2) {
+        const [sh, sm] = slotDef2.start.split(':').map(Number);
+        const [eh, em] = slotDef2.end.split(':').map(Number);
+        scheduledEnd = new Date(new Date(scheduled_at).getTime() + ((eh * 60 + em) - (sh * 60 + sm)) * 60000).toISOString();
+      }
+      const lineItems = (Array.isArray(body.selections) ? body.selections : []).map(s => ({
+        name: s.label || 'Option', quantity: Number(s.quantity) || 1,
+        line_total: (Number(s.price) || 0) * (Number(s.quantity) || 1),
+      }));
+      if (Number(body.tax) > 0) lineItems.push({ name: 'Tax (8.25%)', quantity: 1, line_total: Number(body.tax) });
+      await sendOwnerBookingAlert({
+        slug: biz.slug, businessName: biz.name, timezone: tz,
+        bookedBy: auth.name || 'Office',
+        customer: { name: c.name, phone: c.phone, email: c.email },
+        address: { line1: c.address_line1, city: c.city, state: c.state, zip: c.postal_code },
+        scheduledAt: scheduled_at, scheduledEnd,
+        technicianName: techName, price: Number(body.price) || 0,
+        lineItems, customerNotes: body.customer_notes || null, bookingId: bRow.id,
+      });
+    } catch (e) { console.warn('[admin] secretary booking alert non-fatal:', e.message); }
   }
 
   return res.status(200).json({ ok: true, id: bRow.id });
