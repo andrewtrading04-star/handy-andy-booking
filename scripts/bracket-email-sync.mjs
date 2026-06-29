@@ -199,7 +199,16 @@ async function main() {
       const { walmart, amazon } = await scanMailbox(box, todayISO);
       allWalmart = allWalmart.concat(walmart);
       allAmazon = allAmazon.concat(amazon);
-    } catch (e) { console.error(`[bracket-sync] mailbox ${box.user} failed: ${e.message}`); }
+    } catch (e) {
+      // Surface Gmail's actual reason so a connect/login failure is diagnosable
+      // (auth vs IMAP-disabled vs something else) instead of a bare "Command failed".
+      const detail = [
+        e.authenticationFailed ? 'AUTH_FAILED' : null,
+        e.serverResponseCode ? `code=${e.serverResponseCode}` : null,
+        e.responseText || e.response || null,
+      ].filter(Boolean).join(' | ');
+      console.error(`[bracket-sync] mailbox ${box.user} failed: ${e.message}${detail ? ' | ' + detail : ''}`);
+    }
   }
 
   // ── Walmart brackets ──
