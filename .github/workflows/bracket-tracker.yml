@@ -68,5 +68,7 @@ jobs:
           # Optional override for the Amazon product-match regex (set once the
           # exact plate product title is known, to keep matching strict).
           AMAZON_PLATE_MATCH:    ${{ secrets.AMAZON_PLATE_MATCH }}
+          # TEMP: trace Amazon quantity parsing (remove after diagnosing).
+          DEBUG_AMAZON:          '1'
           CRON_SECRET:           ${{ secrets.CRON_SECRET }}
         run: node scripts/bracket-email-sync.mjs
