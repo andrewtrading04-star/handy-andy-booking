@@ -254,6 +254,7 @@ export default async function handler(req, res) {
       case 'bracket_parse_email': return await bracketParseEmail(req, res, db, auth, body);
       case 'bracket_pending': return await bracketPending(req, res, db, auth);
       case 'bracket_assign': return await bracketAssign(req, res, db, auth, body);
+      case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
@@ -3447,23 +3448,42 @@ async function bracketInventory(req, res, db, auth) {
 
 // Get purchase history (Walmart orders)
 async function bracketPurchases(req, res, db, auth) {
+  // Brackets are a SHARED resource — every order is shown on BOTH platforms.
+  // Resolve the requested business only to enforce the token scope, then read
+  // across all active businesses and dedupe by Walmart order number (the sync
+  // mirrors each order to both businesses).
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
   const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
 
+  const { data: bizes } = await db.from('businesses').select('id, slug').eq('active', true);
+  const slugById = new Map((bizes || []).map(b => [b.id, b.slug]));
+  const ids = (bizes || []).map(b => b.id);
+
   const { data: purch, error } = await db.from('bracket_purchases')
-    .select(`id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at,
+    .select(`id, business_id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at,
              technician:technicians ( id, name )`)
-    .eq('business_id', bizId)
+    .in('business_id', ids)
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(limit * 2);
   if (error) throw error;
 
+  // Dedupe by order number. Prefer the ASSIGNED row (shows who has it); among
+  // unassigned rows prefer THIS platform's business so its Assign button works.
+  const score = (r) => (r.technician ? 2 : 0) + (r.business_id === biz.id ? 1 : 0);
+  const byOrder = new Map();
+  for (const p of (purch || [])) {
+    const key = p.walmart_order_num || p.id;
+    const cur = byOrder.get(key);
+    if (!cur || score(p) > score(cur)) byOrder.set(key, p);
+  }
+  const rows = [...byOrder.values()].slice(0, limit);
+
   return res.status(200).json({
-    purchases: (purch || []).map(p => ({
+    purchases: rows.map(p => ({
       id: p.id,
       walmart_order_num: p.walmart_order_num,
       technician_name: p.technician?.name || 'Unassigned',
+      business: slugById.get(p.business_id) || null,
       flat_qty: p.flat_qty || 0,
       tilting_qty: p.tilting_qty || 0,
       full_motion_qty: p.full_motion_qty || 0,
@@ -3475,6 +3495,28 @@ async function bracketPurchases(req, res, db, auth) {
       created_at: p.created_at,
     })),
   });
+}
+
+// Manually set an order's delivery status (in_route | delivered | canceled).
+// Applies to EVERY row of that Walmart order across businesses so both
+// platforms stay in sync. Owner-only.
+async function bracketSetStatus(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change bracket status.' });
+  const orderNum = (body.walmart_order_num || '').toString().trim();
+  const id = (body.id || '').toString().trim();
+  const status = (body.status || '').toString().trim();
+  if (!['in_route', 'delivered', 'canceled'].includes(status)) {
+    return res.status(400).json({ error: 'status must be in_route, delivered, or canceled' });
+  }
+  if (!orderNum && !id) return res.status(400).json({ error: 'walmart_order_num or id required' });
+
+  const patch = { status, delivered_date: status === 'delivered' ? new Date().toISOString().slice(0, 10) : null };
+  let q = db.from('bracket_purchases').update(patch);
+  q = orderNum ? q.eq('walmart_order_num', orderNum) : q.eq('id', id);
+  const { error } = await q;
+  if (error) throw error;
+  return res.status(200).json({ ok: true, status });
 }
 
 // Update bracket inventory (manual adjustment or usage logging)

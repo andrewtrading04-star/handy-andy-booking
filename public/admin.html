@@ -3045,6 +3045,15 @@ function openAssignModal(purchaseId, orderNum){
   window._assignModal=modal;
 }
 function closeAssignModal(){ if(window._assignModal){ window._assignModal.remove(); window._assignModal=null; } }
+// Manually set a Walmart order's delivery status (in_route/delivered/canceled).
+// Updates the order on BOTH platforms (keyed by order number).
+async function setBracketStatus(orderNum, id, status){
+  try{
+    await api('bracket_set_status',{ method:'POST', body:{ business:current.slug, walmart_order_num:orderNum, id, status }});
+    toast('Status updated');
+    renderBrackets();
+  }catch(e){ toast('Error: '+e.message); }
+}
 async function confirmAssign(purchaseId){
   const sel=document.getElementById('modalAssignTech'); const techId=sel?sel.value:'';
   if(!techId){ toast('Pick a technician first'); return; }
@@ -3122,17 +3131,25 @@ async function renderBrackets(){
           : (p.walmart_order_num?esc(p.walmart_order_num):'-');
         const assigned=p.technician_name && p.technician_name!=='Unassigned';
         const techCell=assigned
-          ? `<strong>${esc(p.technician_name)}</strong>`
+          ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`
           : (role==='owner'
               ? `<button class="seg-btn" onclick="openAssignModal('${esc(p.id)}','${esc(p.walmart_order_num||'')}')">Assign tech ▾</button>`
               : `<span style="color:var(--mute);">Unassigned</span>`);
+        const st=(p.status||'in_route').toLowerCase();
+        const statusCell=role==='owner'
+          ? `<select onchange="setBracketStatus('${esc(p.walmart_order_num||'')}','${esc(p.id)}',this.value)" title="Change delivery status" style="padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:#fff;">
+               <option value="in_route" ${(st==='in_route'||st==='ordered')?'selected':''}>🚚 In route</option>
+               <option value="delivered" ${st==='delivered'?'selected':''}>✓ Delivered</option>
+               <option value="canceled" ${(st==='canceled'||st==='cancelled')?'selected':''}>Canceled</option>
+             </select>`
+          : bracketStatusBadge(p.status);
         html+=`<tr>
           <td>${techCell}</td>
           <td>${orderCell}</td>
           <td class="bracket-qty">${p.flat_qty}</td>
           <td class="bracket-qty">${p.tilting_qty}</td>
           <td class="bracket-qty">${p.full_motion_qty}</td>
-          <td>${bracketStatusBadge(p.status)}</td>
+          <td>${statusCell}</td>
           <td>${p.order_date||'-'}</td>
         </tr>`;
       }
