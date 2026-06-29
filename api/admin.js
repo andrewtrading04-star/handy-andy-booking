@@ -254,6 +254,8 @@ export default async function handler(req, res) {
       case 'bracket_parse_email': return await bracketParseEmail(req, res, db, auth, body);
       case 'bracket_pending': return await bracketPending(req, res, db, auth);
       case 'bracket_assign': return await bracketAssign(req, res, db, auth, body);
+      case 'wire_plate_pending': return await wirePlatePending(req, res, db, auth);
+      case 'wire_plate_assign': return await wirePlateAssign(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -3897,4 +3899,91 @@ async function bracketAssign(req, res, db, auth, body) {
     technician_name: tech.name,
     assigned: { flat, tilting, full_motion, total: flat + tilting + full_motion },
   });
+}
+
+// Unassigned Amazon plate deliveries for this business (mirror of bracketPending).
+async function wirePlatePending(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data: pending, error } = await db.from('wire_plate_purchases')
+    .select('id, amazon_order_num, units, plates, status, order_date, delivered_date, order_url, created_at')
+    .eq('business_id', biz.id)
+    .is('technician_id', null)
+    .order('created_at', { ascending: false });
+  // Table arrives with migration 0040; degrade to empty if not applied yet.
+  if (error) {
+    if (/wire_plate_purchases/.test(error.message || '')) return res.status(200).json({ pending: [] });
+    throw error;
+  }
+  return res.status(200).json({
+    pending: (pending || []).map(p => ({
+      id: p.id,
+      amazon_order_num: p.amazon_order_num,
+      units: p.units || 0,
+      plates: p.plates || 0,
+      status: p.status || 'in_route',
+      order_date: p.order_date,
+      delivered_date: p.delivered_date,
+      order_url: p.order_url || null,
+      created_at: p.created_at,
+    })),
+  });
+}
+
+// Assign a pending Amazon plate delivery to a technician: stamp the purchase and
+// add its `plates` to that tech's wire_plate_qty. Owner-only.
+async function wirePlateAssign(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can assign plates.' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const bizId = biz.id;
+
+  const purchaseId = (body.purchase_id || '').toString().trim();
+  const techId = (body.technician_id || '').toString().trim();
+  if (!purchaseId || !techId) return res.status(400).json({ error: 'purchase_id and technician_id required' });
+
+  const { data: purchase, error: pErr } = await db.from('wire_plate_purchases')
+    .select('id, plates, technician_id, amazon_order_num')
+    .eq('id', purchaseId).eq('business_id', bizId).maybeSingle();
+  if (pErr && /wire_plate_purchases/.test(pErr.message || '')) {
+    return res.status(400).json({ error: "Plate tracking isn't set up yet (run migration 0040)." });
+  }
+  if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
+  if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
+
+  const { data: tech } = await db.from('technicians')
+    .select('id, name').eq('id', techId).eq('business_id', bizId).maybeSingle();
+  if (!tech) return res.status(404).json({ error: 'Technician not found' });
+
+  const plates = purchase.plates || 0;
+
+  const { error: stampErr } = await db.from('wire_plate_purchases')
+    .update({ technician_id: techId }).eq('id', purchaseId);
+  if (stampErr) throw stampErr;
+
+  // Drop the unassigned twin(s) of the same order mirrored to other businesses.
+  if (purchase.amazon_order_num) {
+    await db.from('wire_plate_purchases')
+      .delete()
+      .eq('amazon_order_num', purchase.amazon_order_num)
+      .is('technician_id', null)
+      .neq('business_id', bizId);
+  }
+
+  // Add plates to the tech's inventory (graceful if 0039 not applied).
+  let { data: inv, error: invErr } = await db.from('bracket_inventory')
+    .select('id, wire_plate_qty').eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+  if (invErr && /wire_plate_qty/.test(invErr.message || '')) {
+    return res.status(400).json({ error: "Plate inventory isn't set up yet (run migration 0039)." });
+  }
+  if (inv) {
+    const { error: upErr } = await db.from('bracket_inventory')
+      .update({ wire_plate_qty: (inv.wire_plate_qty || 0) + plates }).eq('id', inv.id);
+    if (upErr) throw upErr;
+  } else {
+    const { error: insErr } = await db.from('bracket_inventory')
+      .insert({ business_id: bizId, technician_id: techId, wire_plate_qty: plates });
+    if (insErr) throw insErr;
+  }
+
+  return res.status(200).json({ ok: true, technician_name: tech.name, assigned: { plates } });
 }

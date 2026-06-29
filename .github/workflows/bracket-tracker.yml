@@ -61,5 +61,12 @@ jobs:
           # Walmart orders actually arrive). Leave unset to scan only the primary.
           GMAIL_USER_2:          ${{ secrets.GMAIL_USER_2 }}
           GMAIL_APP_PASSWORD_2:  ${{ secrets.GMAIL_APP_PASSWORD_2 }}
+          # Optional third mailbox (e.g. houstonhandyandy@gmail.com, where the
+          # Amazon wire-concealment-plate orders arrive).
+          GMAIL_USER_3:          ${{ secrets.GMAIL_USER_3 }}
+          GMAIL_APP_PASSWORD_3:  ${{ secrets.GMAIL_APP_PASSWORD_3 }}
+          # Optional override for the Amazon product-match regex (set once the
+          # exact plate product title is known, to keep matching strict).
+          AMAZON_PLATE_MATCH:    ${{ secrets.AMAZON_PLATE_MATCH }}
           CRON_SECRET:           ${{ secrets.CRON_SECRET }}
         run: node scripts/bracket-email-sync.mjs

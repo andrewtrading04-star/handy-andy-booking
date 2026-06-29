@@ -28,6 +28,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseWalmartEmails } from './lib/walmart-parse.mjs';
+import { parseAmazonPlateEmail } from './lib/amazon-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
@@ -42,7 +43,29 @@ function mailboxes() {
     list.push({ user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
   if (process.env.GMAIL_USER_2 && process.env.GMAIL_APP_PASSWORD_2)
     list.push({ user: process.env.GMAIL_USER_2, pass: process.env.GMAIL_APP_PASSWORD_2 });
+  // Third mailbox (e.g. houstonhandyandy@gmail.com — where the Amazon wire-plate
+  // orders arrive). Scanned for both Walmart and Amazon emails like the others.
+  if (process.env.GMAIL_USER_3 && process.env.GMAIL_APP_PASSWORD_3)
+    list.push({ user: process.env.GMAIL_USER_3, pass: process.env.GMAIL_APP_PASSWORD_3 });
   return list;
+}
+
+// Merge multiple parsed Amazon plate emails for the SAME order (confirmation +
+// delivery, or the same order seen in two mailboxes). Keep the highest status
+// and the largest unit count.
+function mergePlatesByOrder(payloads) {
+  const byOrder = new Map();
+  for (const p of payloads) {
+    const cur = byOrder.get(p.amazon_order_num);
+    if (!cur) { byOrder.set(p.amazon_order_num, { ...p }); continue; }
+    cur.units  = Math.max(cur.units, p.units);
+    cur.plates = Math.max(cur.plates, p.plates);
+    if ((STATUS_RANK[p.status] ?? 0) > (STATUS_RANK[cur.status] ?? 0)) cur.status = p.status;
+    cur.order_url      = cur.order_url || p.order_url;
+    cur.delivered_date = cur.delivered_date || p.delivered_date;
+    if (p.order_date && (!cur.order_date || p.order_date < cur.order_date)) cur.order_date = p.order_date;
+  }
+  return [...byOrder.values()];
 }
 
 // Merge multiple parsed emails for the SAME order (e.g. a confirmation plus a
@@ -64,9 +87,9 @@ function mergeByOrder(payloads) {
   return [...byOrder.values()];
 }
 
-// POST one order to the bracket-sync endpoint.
-async function syncOrder(payload) {
-  const res = await fetch(`${VERCEL_URL}/api/migrate?action=bracket_sync`, {
+// POST one order to a sync endpoint (bracket_sync or wire_plate_sync).
+async function syncTo(action, payload) {
+  const res = await fetch(`${VERCEL_URL}/api/migrate?action=${action}`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CRON_SECRET}` },
     body:    JSON.stringify(payload),
@@ -75,53 +98,61 @@ async function syncOrder(payload) {
   if (!res.ok) throw new Error(`${res.status} ${JSON.stringify(json)}`);
   return json;
 }
+const syncOrder = (payload) => syncTo('bracket_sync', payload);
 
-// Scan one mailbox, returning every parsed Walmart order payload found.
+// Scan one mailbox, returning every parsed Walmart order AND Amazon plate order
+// payload found: { walmart: [...], amazon: [...] }.
 async function scanMailbox({ user, pass }, todayISO) {
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user, pass }, logger: false,
   });
-  const found = [];
+  const walmart = [], amazon = [];
   await client.connect();
   console.log(`[bracket-sync] Connected: ${user}`);
   try {
     await client.mailboxOpen('INBOX');
     const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-    // Walmart order emails, direct OR forwarded. Direct ones are from
-    // walmart.com; forwarded ones quote "...walmart.com" in the body. The
-    // parser then requires a real Walmart order number, filtering any noise.
+    // Walmart OR Amazon order emails, direct OR forwarded. Direct ones are from
+    // the vendor; forwarded ones quote the vendor name in the body. Each parser
+    // then requires a real order number (and, for Amazon, a product match) so
+    // unrelated emails are filtered out.
     let uids = await client.search(
-      { since, or: [ { from: 'walmart.com' }, { body: 'walmart' } ] },
+      { since, or: [ { from: 'walmart.com' }, { body: 'walmart' }, { from: 'amazon.com' }, { body: 'amazon' } ] },
       { uid: true }
     );
     if (!Array.isArray(uids)) uids = [];
-    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return found; }
+    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon }; }
     console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
 
     for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
       let parsed;
       try { parsed = await simpleParser(msg.source); }
       catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
-      // One email can bundle several orders (a forwarded "conversation").
-      const orders = parseWalmartEmails({
-        subject: parsed.subject || '',
-        text:    parsed.text || '',
-        html:    parsed.html || '',
-        todayISO,
-      });
-      for (const payload of orders) {
+      const email = { subject: parsed.subject || '', text: parsed.text || '', html: parsed.html || '', todayISO };
+
+      // Walmart: one email can bundle several orders (a forwarded "conversation").
+      for (const payload of parseWalmartEmails(email)) {
         console.log(
-          `[bracket-sync] ${user}: order=${payload.walmart_order_num} status=${payload.status} ` +
+          `[bracket-sync] ${user}: walmart order=${payload.walmart_order_num} status=${payload.status} ` +
           `flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
         );
-        found.push(payload);
+        walmart.push(payload);
+      }
+      // Amazon: strict — only fires on a real plate order (order # + product match).
+      const plate = parseAmazonPlateEmail(email);
+      if (plate) {
+        console.log(
+          `[bracket-sync] ${user}: amazon order=${plate.amazon_order_num} status=${plate.status} ` +
+          `units=${plate.units} plates=${plate.plates}`
+        );
+        amazon.push(plate);
       }
     }
   } finally {
     await client.logout().catch(() => {});
   }
-  return found;
+  return { walmart, amazon };
 }
 
 async function main() {
@@ -132,16 +163,19 @@ async function main() {
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Gather from every configured mailbox.
-  let all = [];
+  let allWalmart = [], allAmazon = [];
   for (const box of boxes) {
-    try { all = all.concat(await scanMailbox(box, todayISO)); }
-    catch (e) { console.error(`[bracket-sync] mailbox ${box.user} failed: ${e.message}`); }
+    try {
+      const { walmart, amazon } = await scanMailbox(box, todayISO);
+      allWalmart = allWalmart.concat(walmart);
+      allAmazon = allAmazon.concat(amazon);
+    } catch (e) { console.error(`[bracket-sync] mailbox ${box.user} failed: ${e.message}`); }
   }
 
-  const orders = mergeByOrder(all);
-  if (!orders.length) { console.log('[bracket-sync] No Walmart orders found — nothing to sync.'); return; }
-  console.log(`[bracket-sync] ${orders.length} distinct order(s) to sync`);
-
+  // ── Walmart brackets ──
+  const orders = mergeByOrder(allWalmart);
+  if (!orders.length) { console.log('[bracket-sync] No Walmart orders found.'); }
+  else console.log(`[bracket-sync] ${orders.length} distinct Walmart order(s) to sync`);
   let synced = 0;
   for (const order of orders) {
     // A brand-new order with no parsed quantities can't be created — skip it
@@ -159,7 +193,27 @@ async function main() {
       console.error(`[bracket-sync] ${order.walmart_order_num}: sync failed — ${e.message}`);
     }
   }
-  console.log(`[bracket-sync] Done — ${synced}/${orders.length} order(s) synced`);
+
+  // ── Amazon wire concealment plates ──
+  const plateOrders = mergePlatesByOrder(allAmazon);
+  if (!plateOrders.length) { console.log('[bracket-sync] No Amazon plate orders found.'); }
+  else console.log(`[bracket-sync] ${plateOrders.length} distinct Amazon plate order(s) to sync`);
+  let platesSynced = 0;
+  for (const order of plateOrders) {
+    if (order.plates <= 0 && order.status === 'in_route') {
+      console.log(`[bracket-sync] ${order.amazon_order_num}: no plate qty, skipping`);
+      continue;
+    }
+    try {
+      const r = await syncTo('wire_plate_sync', order);
+      console.log(`[bracket-sync] ${order.amazon_order_num}: ${JSON.stringify(r.results)}`);
+      platesSynced++;
+    } catch (e) {
+      console.error(`[bracket-sync] ${order.amazon_order_num}: plate sync failed — ${e.message}`);
+    }
+  }
+
+  console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s) synced`);
 }
 
 main().catch(e => { console.error('[bracket-sync] Fatal:', e); process.exit(1); });

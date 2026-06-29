@@ -200,6 +200,115 @@ async function bracketSync(req, res) {
   return res.status(200).json({ ok: true, order: walmart_order_num, results });
 }
 
+// One Amazon unit yields this many wire concealment plates (owner: "each 1
+// purchased supplies 5"). Authoritative server-side, so a stale client can't
+// inflate the count.
+const PLATES_PER_UNIT = parseInt(process.env.PLATES_PER_UNIT) || 5;
+
+// Adjust a tech's wire_plate_qty by a (possibly negative) delta, clamped at zero.
+// Used to self-heal when an already-assigned order's quantity is corrected from
+// a later email. Silently no-ops if migration 0039 isn't applied yet.
+async function adjustWirePlateInv(db, businessId, technicianId, delta) {
+  if (!delta) return;
+  const { data: inv, error } = await db.from('bracket_inventory')
+    .select('id, wire_plate_qty')
+    .eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
+  if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
+  if (!inv) {
+    await db.from('bracket_inventory').insert({
+      business_id: businessId, technician_id: technicianId, wire_plate_qty: Math.max(0, delta),
+    });
+    return;
+  }
+  await db.from('bracket_inventory')
+    .update({ wire_plate_qty: Math.max(0, (inv.wire_plate_qty || 0) + delta) })
+    .eq('id', inv.id);
+}
+
+// Sync one Amazon plate order into wire_plate_purchases. Same shape as
+// bracketSync: unassigned orders mirror to every active business (assignable
+// from either dashboard); once a tech is assigned, that business owns the row,
+// self-heals its plate count from the email, and unassigned twins are dropped.
+// Status only ever upgrades. Auth/method checked by the caller.
+async function wirePlateSync(req, res) {
+  const body = req.body || {};
+  const amazon_order_num = (body.amazon_order_num || '').toString().trim();
+  if (!amazon_order_num) return res.status(400).json({ error: 'amazon_order_num required' });
+
+  const units          = Math.max(0, parseInt(body.units) || 0);
+  const plates         = units > 0 ? units * PLATES_PER_UNIT : Math.max(0, parseInt(body.plates) || 0);
+  const rawStatus      = (body.status || 'in_route').toString();
+  const status         = Object.prototype.hasOwnProperty.call(BRACKET_STATUS_RANK, rawStatus) ? rawStatus : 'in_route';
+  const order_date     = body.order_date     || null;
+  const delivered_date = body.delivered_date || null;
+  const order_url      = body.order_url      || null;
+
+  const db = serviceClient();
+  const { data: businesses, error: bizErr } = await db.from('businesses').select('id, slug').eq('active', true);
+  if (bizErr) return res.status(500).json({ error: bizErr.message });
+  const slugOf = (id) => (businesses || []).find(b => b.id === id)?.slug || id;
+
+  const { data: rows, error: rowsErr } = await db.from('wire_plate_purchases')
+    .select('id, business_id, status, units, plates, order_url, technician_id')
+    .eq('amazon_order_num', amazon_order_num);
+  if (rowsErr) return res.status(500).json({ error: rowsErr.message });
+
+  const results = [];
+  const upgrades = (fromStatus) => (BRACKET_STATUS_RANK[status] ?? 0) > (BRACKET_STATUS_RANK[fromStatus] ?? 0);
+  const statusPatch = () => {
+    const p = { status };
+    if (status === 'delivered' && delivered_date) p.delivered_date = delivered_date;
+    return p;
+  };
+
+  const assignedRow = (rows || []).find(r => r.technician_id);
+  if (assignedRow) {
+    const patch = {};
+    if (upgrades(assignedRow.status)) Object.assign(patch, statusPatch());
+    if (order_url && !assignedRow.order_url) patch.order_url = order_url;
+    if (plates > 0 && assignedRow.plates !== plates) {
+      // Self-heal: move the tech's plate count by the difference.
+      await adjustWirePlateInv(db, assignedRow.business_id, assignedRow.technician_id, plates - (assignedRow.plates || 0));
+      patch.units = units; patch.plates = plates;
+    }
+    if (Object.keys(patch).length) {
+      const { error } = await db.from('wire_plate_purchases').update(patch).eq('id', assignedRow.id);
+      results.push({ business: slugOf(assignedRow.business_id), action: error ? 'update_failed' : 'updated_assigned', error: error?.message });
+    } else {
+      results.push({ business: slugOf(assignedRow.business_id), action: 'unchanged' });
+    }
+    for (const r of (rows || [])) {
+      if (r.id === assignedRow.id || r.technician_id) continue;
+      await db.from('wire_plate_purchases').delete().eq('id', r.id);
+      results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
+    }
+  } else {
+    const byBiz = new Map((rows || []).map(r => [r.business_id, r]));
+    for (const biz of (businesses || [])) {
+      const existing = byBiz.get(biz.id);
+      if (existing) {
+        const patch = {};
+        if (upgrades(existing.status)) Object.assign(patch, statusPatch());
+        if (order_url && !existing.order_url) patch.order_url = order_url;
+        if (plates > 0) { if (existing.units !== units) patch.units = units; if (existing.plates !== plates) patch.plates = plates; }
+        if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged' }); continue; }
+        const { error } = await db.from('wire_plate_purchases').update(patch).eq('id', existing.id);
+        results.push({ business: biz.slug, action: error ? 'update_failed' : 'updated', error: error?.message });
+      } else {
+        if (plates === 0) { results.push({ business: biz.slug, action: 'skipped', reason: 'no_qty_for_new_order' }); continue; }
+        const { error } = await db.from('wire_plate_purchases').insert({
+          business_id: biz.id, technician_id: null, amazon_order_num,
+          units, plates, status, order_date, delivered_date, order_url,
+        });
+        results.push({ business: biz.slug, action: error ? 'insert_failed' : 'created', error: error?.message });
+      }
+    }
+  }
+
+  console.log('[wire_plate_sync]', amazon_order_num, results.map(r => `${r.business}:${r.action}`).join(', '));
+  return res.status(200).json({ ok: true, order: amazon_order_num, results });
+}
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -302,6 +411,25 @@ export default async function handler(req, res) {
       return await bracketSync(req, res);
     } catch (e) {
       console.error('[bracket_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Amazon wire-concealment-plate order sync. Called by the bracket-tracker
+  // GitHub Action after it parses Amazon order emails. Mirrors bracket_sync.
+  // Secured by CRON_SECRET. POST JSON body:
+  //   { amazon_order_num, units, status, order_date, delivered_date, order_url }
+  if (action === 'wire_plate_sync') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await wirePlateSync(req, res);
+    } catch (e) {
+      console.error('[wire_plate_sync]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
