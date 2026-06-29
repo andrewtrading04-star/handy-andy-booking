@@ -414,7 +414,7 @@
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
-  .greet-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+  .greet-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;}
   .gstat{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
     border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;}
   .gstat-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.78;font-weight:700;}
@@ -432,7 +432,11 @@
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
     .greet-hi{font-size:18px;}
     .greet-line{font-size:12.5px;}
-    .gstat-v{font-size:18px;}
+    .greet-stats{gap:6px;}
+    .gstat{padding:8px 9px;}
+    .gstat-l{font-size:9px;}
+    .gstat-v{font-size:15px;}
+    .gstat-s{font-size:9.5px;}
   }
 
   /* ───────── Booking Analytics view (ported from /dashboard.html, scoped to .ana) ───────── */
@@ -3506,21 +3510,23 @@ function greetNoteHtml(){
     return `<div class="greet-note"><span class="gn-ic">⚠️</span><span>${esc(GREET_NOTE.text)}</span></div>`;
   }catch(e){ return ''; }
 }
-// Owner-only metrics strip: revenue (week/month) + profit (week/today).
+// Owner-only metrics strip — 2×3 grid:
+//   row 1 (revenue): this week | this month | avg ticket
+//   row 2 (profit):  this week | today      | net daily (both businesses combined)
+// Profit is owner-only and server-gated; "today" is always the current Denver
+// date regardless of which week is on the schedule. Net daily profit sums TODAY's
+// realized profit across every active business, so it reads the same on either.
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
-  // 2×2 grid:
-  //   top:    Revenue this week | Revenue this month   (relative to viewed week)
-  //   bottom: Profit this week  | Profit today         (today = real Denver day)
-  // Profit is owner-only and server-gated; "today" is always the current Denver
-  // date regardless of which week is on the schedule.
   const profitCards = pf ?
     `<div class="gstat"><span class="gstat-l">Profit this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>` : '';
+    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Net daily profit</span><span class="gstat-v" style="color:#4ade80;">${money(pf.net_daily||0)}</span><span class="gstat-s">Both companies combined</span></div>` : '';
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">Revenue this month</span><span class="gstat-v">${money(r.month||0)}</span></div>`+
+    `<div class="gstat"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money(r.avg_ticket||0)}</span><span class="gstat-s">per job this month</span></div>`+
     profitCards+
   `</div>`;
 }

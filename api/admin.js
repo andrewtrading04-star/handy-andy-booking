@@ -403,9 +403,13 @@ async function summary(req, res, db, auth) {
   if (e2) throw e2;
   const sum = (rows) => Math.round(rows.reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
   const inWindow = (rows, a, b) => rows.filter(r => { const t = new Date(r.scheduled_at); return t >= a && t < b; });
+  // Average ticket — mean price of COMPLETED jobs this month (revenue ÷ jobs).
+  const monthCompleted = inWindow(rangeJobs, monthStart, monthEnd).filter(r => r.status === 'completed');
+  const avgTicket = monthCompleted.length ? Math.round(sum(monthCompleted) / monthCompleted.length) : 0;
   const revenue = {
     week:  sum(inWindow(rangeJobs, weekStart, weekEnd)),
     month: sum(inWindow(rangeJobs, monthStart, monthEnd)),
+    avg_ticket: avgTicket,
   };
 
   // Technicians + live status.
@@ -444,6 +448,32 @@ async function summary(req, res, db, auth) {
     const pWeek  = await sumProfit(paidDoneWeek);
     const pToday = await sumProfit(paidDoneToday);
     profit = { week: Math.round(pWeek), today: Math.round(pToday) };
+
+    // Net daily profit — TODAY's realized profit across ALL active businesses,
+    // combined. It's a company-wide figure, so it reads the same on either
+    // dashboard. Reuse this business's already-fetched `today` rows; fetch the
+    // others by their own local day.
+    const { data: allBiz } = await db.from('businesses')
+      .select('id, slug, name, timezone').eq('active', true);
+    let net = 0;
+    for (const bb of (allBiz || [])) {
+      let rows;
+      if (bb.id === biz.id) {
+        rows = today;
+      } else {
+        const btz = bb.timezone || 'America/Denver';
+        const b0 = localDayStartUTC(btz, 0), b1 = localDayStartUTC(btz, 1);
+        ({ data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+          .eq('business_id', bb.id)
+          .gte('scheduled_at', b0.toISOString())
+          .lt('scheduled_at', b1.toISOString())));
+      }
+      const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
+      if (!paidDone.length) continue;
+      const e = await computeJobEconomics(db, bb, paidDone, true);
+      net += paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
+    }
+    profit.net_daily = Math.round(net);
   }
 
   return res.status(200).json({
