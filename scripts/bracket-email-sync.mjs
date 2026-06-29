@@ -106,6 +106,8 @@ async function scanMailbox({ user, pass }, todayISO) {
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user, pass }, logger: false,
+    // Don't let one slow/bad mailbox hang the whole run.
+    socketTimeout: 60000, greetingTimeout: 15000, connectionTimeout: 15000,
   });
   const walmart = [], amazon = [];
   await client.connect();
@@ -113,12 +115,20 @@ async function scanMailbox({ user, pass }, todayISO) {
   try {
     await client.mailboxOpen('INBOX');
     const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-    // Walmart OR Amazon order emails, direct OR forwarded. Direct ones are from
-    // the vendor; forwarded ones quote the vendor name in the body. Each parser
-    // then requires a real order number (and, for Amazon, a product match) so
-    // unrelated emails are filtered out.
+    // Targeted candidate search — keep the set SMALL so a busy business inbox
+    // doesn't pull hundreds of messages every run:
+    //   • Walmart: vendor sender OR "walmart" in the body (forwarded copies).
+    //   • Amazon:  only the order-flow senders (auto-confirm / ship-confirm /
+    //     order-update), NOT every email that mentions "amazon" (promos, etc.).
+    //     Plus the distinctive plate product phrases, so a FORWARDED order whose
+    //     From: isn't amazon.com is still caught. Each parser then requires a
+    //     real order number (and, for Amazon, a product match) to qualify.
     let uids = await client.search(
-      { since, or: [ { from: 'walmart.com' }, { body: 'walmart' }, { from: 'amazon.com' }, { body: 'amazon' } ] },
+      { since, or: [
+        { from: 'walmart.com' }, { body: 'walmart' },
+        { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
+        { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
+      ] },
       { uid: true }
     );
     if (!Array.isArray(uids)) uids = [];
