@@ -1215,21 +1215,46 @@ function renderInventory(data){
       <div style="font-weight:600;font-size:15px;">${esc(label)}</div>
       <div style="min-width:96px;text-align:center;font-size:18px;font-weight:800;">${qty}</div>
     </div>`;
+  const wp=Number(data.wire_plate)||0;
   v.innerHTML=`<div class="detail">
     <button class="back" id="invBack">‹ Today's jobs</button>
 
-    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Inventory</div>
-      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Your bracket counts on hand. The office manages these — let them know if a count looks off.</div></div>
+    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Inventory</div></div>
 
+    <div style="padding:0 2px 6px;"><div style="font-weight:800;font-size:15px;">Brackets</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:2px;">On hand. The office manages these — let them know if a count looks off.</div></div>
     <div class="card">
       ${row('Flat',flat)}
       ${row('Tilting',tilt)}
       ${row('Full Motion',fm)}
     </div>
 
+    <div style="padding:18px 2px 6px;"><div style="font-weight:800;font-size:15px;">Wire Concealment Plates</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:2px;">You manage these. They drop by 1 each time you finish a behind-the-wall wire job — fix the number here if it ever looks off.</div></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;">
+        <div style="font-weight:600;font-size:15px;">Plates on hand</div>
+        <input type="number" min="0" inputmode="numeric" id="wpQty" value="${wp}" style="width:96px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:10px;font-size:18px;font-weight:800;text-align:center;">
+      </div>
+      <button class="btn" id="wpSave" style="margin-top:8px;width:100%;">Save plate count</button>
+      <div id="wpMsg" class="sub" style="color:var(--mute);font-size:12px;text-align:center;margin-top:8px;"></div>
+    </div>
+
     <div style="height:40px;"></div>
   </div>`;
   document.getElementById('invBack').addEventListener('click',showJobs);
+  const wpSave=document.getElementById('wpSave');
+  wpSave.addEventListener('click',async()=>{
+    const target=Math.max(0,Math.floor(Number(document.getElementById('wpQty').value)||0));
+    wpSave.disabled=true; wpSave.textContent='Saving…';
+    try{
+      const r=await api('wire_plate_set',{method:'POST',body:{wire_plate:target}});
+      data.wire_plate=(r&&r.wire_plate!=null)?r.wire_plate:target;
+      toast('Plate count saved ✓');
+      const m=document.getElementById('wpMsg'); if(m) m.textContent='Saved';
+    }catch(e){ toast(e.message||'Could not save'); }
+    finally{ wpSave.disabled=false; wpSave.textContent='Save plate count'; }
+  });
 }
 
 // Lightbox close (tap backdrop or ×)

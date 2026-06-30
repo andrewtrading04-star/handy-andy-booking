@@ -141,6 +141,7 @@ export default async function handler(req, res) {
       case 'tech_reviews':     return await techReviews(req, res, db, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
+      case 'wire_plate_set': return await wirePlateSet(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -1437,11 +1438,16 @@ async function bracketInventorySet(req, res, db, auth, body) {
 }
 
 async function bracketInventory(req, res, db, auth) {
-  const { data: inv, error } = await db.from('bracket_inventory')
-    .select('flat_qty, tilting_qty, full_motion_qty, updated_at')
+  const sel = (withWp) => db.from('bracket_inventory')
+    .select(`flat_qty, tilting_qty, full_motion_qty, updated_at${withWp ? ', wire_plate_qty' : ''}`)
     .eq('technician_id', auth.tech_id)
     .eq('business_id', auth.business_id)
     .maybeSingle();
+  // wire_plate_qty arrives with migration 0039; degrade gracefully (plates -> 0)
+  // if the column isn't applied yet so the inventory view never hard-fails.
+  let { data: inv, error } = await sel(true);
+  let hasWp = true;
+  if (error && /wire_plate_qty/.test(error.message || '')) { hasWp = false; ({ data: inv, error } = await sel(false)); }
   if (error) throw error;
 
   const flat = inv?.flat_qty || 0;
@@ -1452,6 +1458,46 @@ async function bracketInventory(req, res, db, auth) {
     tilting,
     full_motion,
     total: flat + tilting + full_motion,
+    wire_plate: hasWp ? (inv?.wire_plate_qty || 0) : 0,
     updated_at: inv?.updated_at || null,
   });
+}
+
+// Tech sets their OWN wire-plate count (an exact number, up or down). Unlike
+// brackets (office-managed, read-only), techs manage their own plates — these
+// auto-decrement on behind-the-wall jobs, so a tech can correct a miscount.
+// Identity comes ONLY from the signed token (never the body); writes ONLY the
+// plate column so it can't disturb the office-managed bracket counts.
+async function wirePlateSet(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const target = Math.max(0, Math.floor(Number(body.wire_plate) || 0));
+  const now = new Date().toISOString();
+  try {
+    const { data: inv } = await db.from('bracket_inventory')
+      .select('id, wire_plate_qty').eq('technician_id', auth.tech_id).eq('business_id', auth.business_id).maybeSingle();
+    const before = inv?.wire_plate_qty || 0;
+    if (inv) {
+      const { error } = await db.from('bracket_inventory')
+        .update({ wire_plate_qty: target, updated_at: now }).eq('id', inv.id);
+      if (error) throw error;
+    } else {
+      const { error } = await db.from('bracket_inventory')
+        .insert({ business_id: auth.business_id, technician_id: auth.tech_id, wire_plate_qty: target });
+      if (error) throw error;
+    }
+    // Best-effort audit log; never blocks the save.
+    try {
+      await db.from('bracket_usage_logs').insert({
+        business_id: auth.business_id, technician_id: auth.tech_id,
+        wire_plate_used: Math.abs(target - before),
+        logged_by_kind: 'technician', notes: 'Tech manual plate count correction',
+      });
+    } catch (_) { /* logging is optional */ }
+    return res.status(200).json({ ok: true, wire_plate: target });
+  } catch (e) {
+    if (/wire_plate_qty/.test((e && e.message) || '')) {
+      return res.status(400).json({ error: 'Plate inventory needs the 0039 database update applied first.' });
+    }
+    throw e;
+  }
 }
