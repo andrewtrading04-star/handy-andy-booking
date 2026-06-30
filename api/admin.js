@@ -2244,7 +2244,7 @@ async function bookingPhotoSetStatus(req, res, db, auth, body) {
   const { data, error } = await db.from('booking_photos')
     .update({ status })
     .eq('id', body.photo_id).eq('business_id', biz.id)
-    .select('id, status').single();
+    .select('id, status').maybeSingle();   // 0 rows -> data:null (clean 404), not a PGRST116 throw
   if (error) {
     // CHECK violation (status_check) or missing column → the category migration
     // (0043) hasn't been applied to this database yet.

@@ -1873,8 +1873,9 @@ document.getElementById('custForm').addEventListener('submit',async e=>{
 });
 
 // ── Photo gallery (every job photo for this business) ───────────────────────
-// Photos belong to one of two groups: 'private' (default) or 'posted'. The two
-// tabs filter the gallery by group; each photo can be flipped between them.
+// Photos are triaged into four categories (New / To Post / Posted / Records).
+// Tabs filter the gallery by category; a per-photo "Move to" dropdown re-files
+// each one. New uploads default to 'new'; legacy 'private' photos fold into New.
 let galleryPhotos=[];
 let galleryGroup='new';
 // Photo categories (manual triage buckets). Order = the owner's pipeline.
