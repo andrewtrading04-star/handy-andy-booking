@@ -422,7 +422,10 @@ export function computeJobPay(job, techName) {
     // service-area surcharge pays the tech nothing here (the travel payout comes
     // separately from the zip tier) and the after-hours fee adds its $75 bonus
     // separately, so neither should be priced or flagged as an unmatched line.
-    if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /travel fee/i.test(name)
+    // ANY line whose name ends in "…Fee" (Processing/Setup/Rush/Trip/…) is a
+    // charge, never tech labor — so the custom-job hourly fallthrough below can't
+    // mistake it for a custom service and pay $65/hr against it.
+    if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /\bfee\b/i.test(name)
         || /service area surcharge/i.test(name) || /after.?hours/i.test(name)) continue;
 
     // Skip the two-person "lift help" marker — it's not a labor line to price.
@@ -640,6 +643,16 @@ function runSelfTests() {
   ] }), 'Kregg').pay, 200, 'other 60-69 (70) + custom 2h (130) = 200');
   // Non-clean price flags the inferred hours but still pays.
   eq(computeJobPay(job({ line_items: [{ name: 'Custom mount job', line_total: 200 }] }), 'Kregg').flags.length, 1, 'non-clean custom price flags hours');
+  // A fee that arrives as a plain 'service' line (not kind 'fee') must NOT be
+  // paid as custom labor — any "…Fee" name is skipped. Base 60 only, fee = $0.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Processing Fee', line_total: 42 },
+  ] }), 'Kregg').pay, 60, 'Processing Fee (service line) not paid as custom labor');
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Setup Fee', line_total: 50 },
+  ] }), 'Kregg').pay, 60, 'Setup Fee not paid as custom labor');
   // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
   // (210) + custom dry-erase 2h (130) + full-motion brackets ×3 ($0, not Juan) +
   // GDS sold ($0) + $50 travel = 390.
