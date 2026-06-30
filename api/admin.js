@@ -260,6 +260,7 @@ export default async function handler(req, res) {
       case 'wire_plate_pending': return await wirePlatePending(req, res, db, auth);
       case 'wire_plate_orders': return await wirePlateOrders(req, res, db, auth);
       case 'wire_plate_assign': return await wirePlateAssign(req, res, db, auth, body);
+      case 'wire_plate_remove': return await wirePlateRemove(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -4249,4 +4250,53 @@ async function wirePlateAssign(req, res, db, auth, body) {
     status: purchase.status,
     assigned: { plates: credit ? plates : 0 },
   });
+}
+
+// Owner-only: remove a wire-plate order from tracking (e.g. a phantom/duplicate
+// the email parser mis-created). Deletes every row for the order number across
+// businesses; if a row was already CREDITED to a tech, subtract those plates back
+// out of that tech's on-hand count so the inventory stays honest.
+async function wirePlateRemove(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can remove orders.' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const purchaseId = (body.purchase_id || '').toString().trim();
+  const orderNum   = (body.amazon_order_num || '').toString().trim();
+  if (!purchaseId && !orderNum) return res.status(400).json({ error: 'purchase_id or amazon_order_num required' });
+
+  // Resolve the order number (so we can clean up its twins in every business).
+  const cols = (withCredited) => `id, business_id, technician_id, plates, amazon_order_num${withCredited ? ', credited' : ''}`;
+  let hasCredited = true;
+  let on = orderNum;
+  if (!on && purchaseId) {
+    const { data: one } = await db.from('wire_plate_purchases').select('amazon_order_num').eq('id', purchaseId).maybeSingle();
+    on = one?.amazon_order_num || '';
+  }
+
+  // Gather every matching row (by order number when known, else the single id).
+  const fetchRows = async () => {
+    let q = db.from('wire_plate_purchases').select(cols(hasCredited));
+    q = on ? q.eq('amazon_order_num', on) : q.eq('id', purchaseId);
+    return q;
+  };
+  let { data: rows, error } = await fetchRows();
+  if (error && /credited/.test(error.message || '')) { hasCredited = false; ({ data: rows, error } = await fetchRows()); }
+  if (error && /wire_plate_purchases/.test(error.message || '')) return res.status(400).json({ error: "Plate tracking isn't set up yet." });
+  if (error) throw error;
+  if (!rows || !rows.length) return res.status(404).json({ error: 'Order not found' });
+
+  let removed = 0;
+  for (const r of rows) {
+    // Reverse any inventory credit so removing a counted order doesn't leave phantom plates.
+    if (hasCredited && r.credited && r.technician_id && (r.plates || 0) > 0) {
+      const { data: inv } = await db.from('bracket_inventory')
+        .select('id, wire_plate_qty').eq('technician_id', r.technician_id).eq('business_id', r.business_id).maybeSingle();
+      if (inv) await db.from('bracket_inventory')
+        .update({ wire_plate_qty: Math.max(0, (inv.wire_plate_qty || 0) - (r.plates || 0)) }).eq('id', inv.id);
+    }
+    const { error: delErr } = await db.from('wire_plate_purchases').delete().eq('id', r.id);
+    if (!delErr) removed++;
+  }
+  return res.status(200).json({ ok: true, removed, amazon_order_num: on || null });
 }

@@ -3291,7 +3291,7 @@ async function renderBrackets(){
         <td>${wpBadge(o)}</td>
         <td>${techCell}</td>
         <td>${orderCell}</td>
-        <td>${when||'-'}</td>
+        <td>${when||'-'}${role==='owner'?` <button class="seg-btn" title="Remove this order from tracking" onclick="removeWirePlateOrder('${esc(o.id)}','${esc(o.amazon_order_num||'')}')" style="margin-left:6px;color:#dc2626;border-color:#fecaca;padding:2px 7px;">✕</button>`:''}</td>
       </tr>`;
     }
     html+=`</tbody></table></div>`;
@@ -3412,6 +3412,14 @@ async function assignBracketDelivery(purchaseId){
 }
 
 // Assign a pending Amazon plate delivery to a technician (adds plates to them).
+async function removeWirePlateOrder(purchaseId, orderNum){
+  if(!confirm('Remove this Amazon plate order from tracking'+(orderNum?` (order ${orderNum})`:'')+'?\nThis deletes the order record; if it was already credited to a tech, those plates are subtracted back.')) return;
+  try{
+    const r=await api('wire_plate_remove',{ method:'POST', body:{ business:current.slug, purchase_id:purchaseId, amazon_order_num:orderNum }});
+    toast(`Removed ${r.removed||1} order record(s)`);
+    renderBrackets();
+  }catch(e){ toast('Error: '+e.message); }
+}
 async function assignWirePlateDelivery(purchaseId){
   const sel=document.getElementById('wpAssignTech_'+purchaseId);
   const techId=sel?sel.value:'';
