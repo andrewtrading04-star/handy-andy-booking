@@ -101,12 +101,14 @@ function shade(hex, amt) {
   return '#' + ch.map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
-// Tidy a line-item label for the customer receipt: drop the "TV Size:"/"TV Type:"
-// option-group prefix and shorten "Guaranteed Dismount Service" to "GDS".
+// Tidy a line-item label for the customer receipt: drop the option-group prefix
+// ("TV Size:", "Bracket:", "Fireplace:", "Wall Surface:", …) so it reads as the
+// bare option, and shorten "Guaranteed Dismount Service" to "GDS".
 function cleanLineLabel(name) {
   const s = String(name || '');
   if (/guaranteed\s+dismount/i.test(s)) return 'GDS';
-  return s.replace(/^\s*tv\s*(?:size|type)\s*:\s*/i, '').trim() || s;
+  const i = s.indexOf(':');
+  return (i > -1 ? s.slice(i + 1) : s).trim() || s;
 }
 // The default "TV Type: Regular TV" line is noise on the receipt — hide it.
 // Frame and other non-default TV types still show.

@@ -1552,13 +1552,14 @@ function openBooking(b){
 // with no line items (e.g. imported from Zenbooker) seeds a single line from its
 // current price so the money is always represented as an editable line.
 // Tidy a line-item label for DISPLAY only (the full original name is still what
-// gets saved, so payroll matching is unaffected): drop the "TV Size:"/"TV Type:"
-// option-group prefix and shorten the long Guaranteed Dismount label to "GDS".
+// gets saved, so payroll matching is unaffected): drop the option-group prefix
+// ("TV Size:", "Bracket:", "Fireplace:", "Wall Surface:", …) so the label reads
+// as the bare option, and shorten the long Guaranteed Dismount label to "GDS".
 function liCleanLabel(name){
-  let s=String(name||'');
+  const s=String(name||'');
   if(/guaranteed\s+dismount/i.test(s)) return 'GDS';
-  s=s.replace(/^\s*tv\s*size\s*:\s*/i,'').replace(/^\s*tv\s*type\s*:\s*/i,'');
-  return s.trim()||String(name||'');
+  const i=s.indexOf(':');
+  return (i>-1?s.slice(i+1):s).trim()||s;
 }
 // "TV Type: Regular TV" is the default for nearly every job — hide it from the
 // ticket. Frame (and any other non-default TV type) is still shown.
