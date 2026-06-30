@@ -472,6 +472,16 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: [{ kind: 'option', name: '60"–69"', line_total: 119 }] }), 'Juan').pay, 80, '60-69 Juan = 80');
   eq(computeJobPay(job({ line_items: [{ kind: 'option', name: '98"+', line_total: 229 }] }), 'Juan').pay, 130, '98+ Juan = 130');
 
+  // Juan's 70"-85" base premium: $90 (others $80). Locked from the Juliana Schmidt
+  // job — 70-85 TV + Outdoor/Stucco + Soundbar must total $90+$35+$35 for Juan.
+  const julianaItems = [
+    { name: '70"-85"', line_total: 149 },
+    { name: 'Outdoor/Stucco', line_total: 45 },
+    { name: 'Soundbar', line_total: 60 },
+  ];
+  eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 160, 'Juan 70-85 + outdoor + soundbar = 160');
+  eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 150, 'Other tech same job = 150 (80 base)');
+
   // Brackets: Other $0, Juan paid.
   eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Zach').pay, 50, 'tilting Other adds 0');
   eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Juan').pay, 85, 'tilting Juan adds 35');

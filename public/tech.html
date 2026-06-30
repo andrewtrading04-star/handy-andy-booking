@@ -496,7 +496,6 @@ async function showDetail(id){
       <div class="card"><h3>Line Items</h3>
         <div id="liEditor"></div>
         <button class="btn ghost sm" id="liAdd" style="margin-top:8px;">+ Add line item</button>
-        <div id="liDiscount"></div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
           <button class="btn sm" id="liSave">Save</button>
         </div>
@@ -540,6 +539,7 @@ async function showDetail(id){
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
         ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>`<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}</span><span>$${li.line_total}</span></div>`).join('')}</div>`:''}
+        ${(j.discounts&&j.discounts.length)?`<div style="margin-bottom:12px;">${j.discounts.filter(d=>Number(d.amount)).map(d=>`<div class="kv" style="display:flex;justify-content:space-between;color:var(--green);font-weight:700;"><span>${esc(liName(d.name))}</span><span>−$${Math.abs(Number(d.amount))}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
           <div><div class="sub" style="color:var(--mute);font-size:13px;">Total (incl. tax)</div><div style="font-weight:800;font-size:24px;">$${j.price}</div></div>
           <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${esc(j.payment_status)}</div></div>
@@ -705,12 +705,6 @@ function mountTechLineItems(j, id){
     recalc();
   };
   render();
-  // Coupons/discounts shown read-only at the bottom (not editable line items).
-  const disc=document.getElementById('liDiscount');
-  if(disc){
-    const ds=(j.discounts||[]).filter(d=>d&&Number(d.amount));
-    disc.innerHTML=ds.length?ds.map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);color:var(--green);font-weight:700;font-size:14px;"><span>${esc(liName(d.name))}</span><span>−${fmtUsd(Math.abs(Number(d.amount)))}</span></div>`).join(''):'';
-  }
   const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', price:0, existing:false }); render(); };
   const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
     const items=rows.map(r=>({ name:(r.name||'').trim(), price:Number(r.price)||0 })).filter(r=>r.name||r.price);
