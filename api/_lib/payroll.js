@@ -177,6 +177,14 @@ function keyOf(s) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+// Some stored labels bake the quantity into the name ("Full Motion ×3"). The
+// count is handled separately (payQty), so a trailing "×N" must be stripped
+// before the exact-key rate lookup, or a real bracket/add-on silently fails to
+// match. Only the × sign counts — a plain letter "x" (e.g. "Dry Erase Board
+// 4 x 6" dimensions) is left intact so genuine custom jobs aren't mangled.
+function stripQtySuffix(s) {
+  return String(s || '').replace(/\s*[×✕✖]\s*\d+\s*$/, '').trim();
+}
 
 function matchSize(name) {
   const n = String(name || '').toLowerCase();
@@ -198,9 +206,16 @@ function afterPrefix(name) {
   return tail;
 }
 function matchItem(name) {
-  const cands = [name];
-  const tail = afterPrefix(name);
-  if (tail) cands.push(tail);
+  // Try the full name and the part after a "Category:" prefix, each also with a
+  // baked-in "×N" quantity suffix stripped, so e.g. "Bracket: Full Motion ×3"
+  // still resolves to the 'full motion' rate.
+  const bases = [name, afterPrefix(name)].filter(Boolean);
+  const cands = [];
+  for (const b of bases) {
+    cands.push(b);
+    const s = stripQtySuffix(b);
+    if (s && s !== b) cands.push(s);
+  }
   for (const cand of cands) {
     const k = keyOf(cand);
     if (ITEM_RATES[k]) return { key: k, ...ITEM_RATES[k] };
@@ -665,6 +680,23 @@ function runSelfTests() {
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
   ] }), 'TK').pay, 390, 'Joseph job TK = 210 base + 130 custom + 50 travel = 390');
+  // Same job with the REAL stored names that bake "×3" into the label — the
+  // bracket/size lines must still match (not fall through to custom-hourly and
+  // overpay). Without the ×N-strip this paid $650 (Full Motion ×3 -> 4h custom).
+  eq(computeJobPay(job({ price: 1034, subtotal: 955, business_slug: 'doms', travel_payout: 50, line_items: [
+    { name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 },
+    { name: 'TV Size: 60–69 inch ×3', quantity: 3, unit_price: 135, line_total: 405 },
+    { name: 'Bracket: Full Motion ×3', quantity: 3, unit_price: 115, line_total: 345 },
+    { name: 'Fireplace: TV not over a fireplace ×3', quantity: 3, line_total: 0 },
+    { name: 'Wall Surface: Drywall ×3', quantity: 3, line_total: 0 },
+    { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
+    { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
+  ] }), 'TK').pay, 390, 'Joseph job with ×3-baked names still = 390, not 650');
+  // The bracket rate resolves through a baked-in "×3" suffix (Juan paid $60/bracket).
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"-69"', line_total: 119 },
+    { name: 'Bracket: Full Motion ×3', quantity: 3, unit_price: 115, line_total: 345 },
+  ] }), 'Juan').pay, 260, 'Juan 60-69 (80) + full motion ×3 ($60×3=180) via baked ×3 = 260');
 
   // Per-unit pay: 3 tilting brackets pay Juan 3 × $35 on top of the base.
   eq(computeJobPay(job({ line_items: [
