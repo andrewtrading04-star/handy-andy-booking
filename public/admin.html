@@ -3363,7 +3363,7 @@ async function renderBrackets(){
         <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
         <td class="bracket-qty"><strong class="${lowClass}">${total}</strong></td>
-        ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}')">Edit</button></td>`:''}
+        ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})">Edit</button></td>`:''}
       </tr>`;
     }
     html+=`</tbody></table></div>`;
@@ -3581,18 +3581,19 @@ async function assignWirePlateDelivery(purchaseId){
   }
 }
 
-async function openBracketEdit(techId, techName){
+async function openBracketEdit(techId, techName, flat, tilting, fullMotion){
   const modal=document.createElement('div');
   modal.className='modal';
   modal.innerHTML=`
     <div class="sheet">
-      <h2>Update Brackets: ${esc(techName)}</h2>
+      <h2>Set Brackets: ${esc(techName)}</h2>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin:-6px 0 12px;">Type the exact count on hand (this replaces the current number — up or down).</div>
       <label class="fld">Flat Brackets</label>
-      <input type="number" id="bracketFlat" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <input type="number" id="bracketFlat" min="0" value="${Number(flat)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
       <label class="fld">Tilting Brackets</label>
-      <input type="number" id="bracketTilting" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <input type="number" id="bracketTilting" min="0" value="${Number(tilting)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
       <label class="fld">Full Motion Brackets</label>
-      <input type="number" id="bracketFullMotion" min="0" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <input type="number" id="bracketFullMotion" min="0" value="${Number(fullMotion)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
       <div style="display:flex;gap:8px;margin-top:16px;">
         <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
         <button class="btn" onclick="saveBracketCount('${techId}','${esc(techName)}')" style="flex:1;">Save</button>
@@ -3618,10 +3619,8 @@ async function saveBracketCount(techId, techName){
       body:{
         business:current.slug,
         technician_id:techId,
-        flat_delta:flat,
-        tilting_delta:tilting,
-        full_motion_delta:fullMotion,
-        action:'adjust',
+        flat, tilting, full_motion:fullMotion,
+        action:'set',
       }
     });
     toast('✓ Updated bracket count for '+techName);

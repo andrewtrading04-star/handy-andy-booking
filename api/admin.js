@@ -3797,7 +3797,7 @@ async function bracketUpdate(req, res, db, auth, body) {
   const bizId = biz.id;
 
   const techId = (body.technician_id || '').toString();
-  const action = (body.action || 'adjust').toString(); // 'adjust' | 'usage'
+  const action = (body.action || 'adjust').toString(); // 'adjust' | 'set' | 'usage'
 
   if (!techId) return res.status(400).json({ error: 'technician_id required' });
 
@@ -3820,10 +3820,12 @@ async function bracketUpdate(req, res, db, auth, body) {
     inv = { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
   }
 
-  // Calculate new quantities
-  const flat = (inv.flat_qty || 0) + (body.flat_delta || 0);
-  const tilting = (inv.tilting_qty || 0) + (body.tilting_delta || 0);
-  const fullMotion = (inv.full_motion_qty || 0) + (body.full_motion_delta || 0);
+  // Calculate new quantities. 'set' writes the EXACT counts the owner typed (can
+  // go up or down); 'adjust'/'usage' apply a +/- delta to the current count.
+  const isSet = action === 'set';
+  const flat = isSet ? Math.max(0, Math.round(Number(body.flat) || 0)) : (inv.flat_qty || 0) + (body.flat_delta || 0);
+  const tilting = isSet ? Math.max(0, Math.round(Number(body.tilting) || 0)) : (inv.tilting_qty || 0) + (body.tilting_delta || 0);
+  const fullMotion = isSet ? Math.max(0, Math.round(Number(body.full_motion) || 0)) : (inv.full_motion_qty || 0) + (body.full_motion_delta || 0);
   // Wire concealment plates (migration 0039). Only touch the column when a
   // delta is supplied AND the column exists, so the action still works on a DB
   // where 0039 hasn't run yet.

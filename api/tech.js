@@ -1413,6 +1413,11 @@ async function techReviews(req, res, db, auth) {
 // from the signed token (never the request), so a tech can only edit their own row.
 async function bracketInventorySet(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // Bracket counts are now managed by the office only — techs can view but not
+  // edit their inventory. Reject any direct edit attempt (the tech UI no longer
+  // offers it; this closes the API path too).
+  return res.status(403).json({ error: 'Bracket inventory is managed by the office.' });
+  // eslint-disable-next-line no-unreachable
   const n = (v) => Math.max(0, Math.floor(Number(v) || 0));
   const flat = n(body.flat), tilting = n(body.tilting), full_motion = n(body.full_motion);
   const now = new Date().toISOString();

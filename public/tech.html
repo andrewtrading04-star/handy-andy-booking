@@ -1209,41 +1209,27 @@ async function showInventory(){
 function renderInventory(data){
   const v=document.getElementById('inventoryView');
   const flat=Number(data.flat)||0, tilt=Number(data.tilting)||0, fm=Number(data.full_motion)||0;
-  // TEMPORARY: techs can edit their own counts (office will take this back later).
-  const row=(label,id,qty)=>`
+  // Read-only: techs can SEE their counts but the office manages them.
+  const row=(label,qty)=>`
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);">
       <div style="font-weight:600;font-size:15px;">${esc(label)}</div>
-      <input type="number" min="0" inputmode="numeric" id="${id}" value="${qty}" style="width:96px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:10px;font-size:18px;font-weight:800;text-align:center;">
+      <div style="min-width:96px;text-align:center;font-size:18px;font-weight:800;">${qty}</div>
     </div>`;
   v.innerHTML=`<div class="detail">
     <button class="back" id="invBack">‹ Today's jobs</button>
 
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Inventory</div>
-      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Update your bracket counts</div></div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Your bracket counts on hand. The office manages these — let them know if a count looks off.</div></div>
 
     <div class="card">
-      ${row('Flat','invFlat',flat)}
-      ${row('Tilting','invTilt',tilt)}
-      ${row('Full Motion','invFm',fm)}
-      <button class="btn" id="invSave" style="margin-top:16px;width:100%;">Save counts</button>
-      <div id="invMsg" class="sub" style="color:var(--mute);font-size:12px;text-align:center;margin-top:8px;"></div>
+      ${row('Flat',flat)}
+      ${row('Tilting',tilt)}
+      ${row('Full Motion',fm)}
     </div>
 
     <div style="height:40px;"></div>
   </div>`;
   document.getElementById('invBack').addEventListener('click',showJobs);
-  const save=document.getElementById('invSave');
-  save.addEventListener('click',async()=>{
-    save.disabled=true; save.textContent='Saving…';
-    const body={
-      flat:document.getElementById('invFlat').value,
-      tilting:document.getElementById('invTilt').value,
-      full_motion:document.getElementById('invFm').value,
-    };
-    try{ await api('bracket_inventory_set',{method:'POST',body}); toast('Inventory saved ✓'); const m=document.getElementById('invMsg'); if(m) m.textContent='Saved'; }
-    catch(e){ toast(e.message); }
-    finally{ save.disabled=false; save.textContent='Save counts'; }
-  });
 }
 
 // Lightbox close (tap backdrop or ×)
