@@ -463,8 +463,12 @@ function sanitizeWorkLineItems(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map(it => {
     const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
-    const price = Math.round((Number(it && (it.price != null ? it.price : (it.line_total != null ? it.line_total : it.unit_price))) || 0) * 100) / 100;
-    return { name, quantity: 1, unit_price: price, line_total: price };
+    const qty = Math.max(1, Math.min(99, Math.round(Number(it && it.quantity) || 1)));
+    // Per-unit price: prefer an explicit unit_price; older clients send a flat
+    // `price`/`line_total` with no quantity, which we treat as the unit (qty 1).
+    const unit = Math.round((Number(it && (it.unit_price != null ? it.unit_price : (it.price != null ? it.price : it.line_total))) || 0) * 100) / 100;
+    const line_total = Math.round(unit * qty * 100) / 100;
+    return { name, quantity: qty, unit_price: unit, line_total };
   }).filter(it => it.name || it.unit_price);
 }
 

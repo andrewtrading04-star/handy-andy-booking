@@ -695,31 +695,39 @@ function mountTechLineItems(j, id){
   // Coupons and tax never belong in the editable list — they show in the Payment
   // section (server already filters them out; this is a belt-and-suspenders guard).
   const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n); };
-  const seeded=(j.line_items&&j.line_items.length)
-    ? j.line_items.filter(notHidden).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, qty:liDisplayQty(li), existing:true }))
-    : [];
+  // Row model: { name, unit (per-item price), qty, existing }. line total = unit×qty.
+  const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true }; };
+  const seeded=(j.line_items&&j.line_items.length) ? j.line_items.filter(notHidden).map(mkRow) : [];
   let rows=seeded.length ? seeded
-    : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal), existing:true }];
-  const recalc=()=>{ if(!totalEl) return; const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
+    : [{ name:j.service||'Service', unit:Math.max(0,(Number(j.price)||0)-hiddenTotal), qty:1, existing:true }];
+  const recalc=()=>{ if(!totalEl) return; const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*(Math.max(1,Math.round(Number(r.qty)||1))),0)+hiddenTotal; totalEl.textContent=fmtUsd(t); };
   const render=()=>{
     wrap.innerHTML=rows.map((r,i)=>{
+      const q=Math.max(1,Math.round(Number(r.qty)||1));
       const priceCell = r.existing ? '' :
-        `<div style="display:flex;align-items:center;gap:2px;flex:0 0 auto;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="price" value="${r.price}" style="width:78px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;text-align:right;"></div>`;
+        `<div style="display:flex;align-items:center;gap:2px;flex:0 0 auto;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" style="width:70px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;text-align:right;"></div>`;
+      const stepper = `<div style="display:flex;align-items:center;flex:0 0 auto;border:1px solid var(--line);border-radius:8px;overflow:hidden;">
+        <button type="button" data-qd="${i}" aria-label="Decrease quantity" style="width:34px;height:42px;background:var(--navy);color:var(--ink);border:none;font-size:22px;line-height:1;cursor:pointer;">−</button>
+        <span style="min-width:24px;text-align:center;font-weight:800;font-size:15px;color:var(--ink);">${q}</span>
+        <button type="button" data-qi="${i}" aria-label="Increase quantity" style="width:34px;height:42px;background:var(--navy);color:var(--ink);border:none;font-size:20px;line-height:1;cursor:pointer;">+</button>
+      </div>`;
       return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
       <input type="text" data-i="${i}" data-f="name" value="${esc(r.name)}" placeholder="Description" style="flex:1 1 auto;min-width:0;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;">
-      ${r.qty>1?`<strong style="flex:0 0 auto;color:var(--ink);white-space:nowrap;font-size:15px;">×${r.qty}</strong>`:''}
+      ${stepper}
       ${priceCell}
       <button type="button" class="btn ghost" data-del="${i}" title="Remove" aria-label="Remove line item" style="flex:0 0 auto;width:42px;height:42px;padding:0;border-radius:8px;font-size:20px;line-height:1;display:flex;align-items:center;justify-content:center;">×</button>
     </div>`;
     }).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
     wrap.querySelectorAll('input[data-f]').forEach(inp=>inp.addEventListener('input',()=>{ rows[+inp.dataset.i][inp.dataset.f]=inp.value; recalc(); }));
     wrap.querySelectorAll('button[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ rows.splice(+btn.dataset.del,1); render(); }));
+    wrap.querySelectorAll('button[data-qd]').forEach(b=>b.addEventListener('click',()=>{ const i=+b.dataset.qd; rows[i].qty=Math.max(1,(Math.round(Number(rows[i].qty)||1))-1); render(); }));
+    wrap.querySelectorAll('button[data-qi]').forEach(b=>b.addEventListener('click',()=>{ const i=+b.dataset.qi; rows[i].qty=Math.min(99,(Math.round(Number(rows[i].qty)||1))+1); render(); }));
     recalc();
   };
   render();
-  const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', price:0, existing:false }); render(); };
+  const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', unit:0, qty:1, existing:false }); render(); };
   const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
-    const items=rows.map(r=>({ name:(r.name||'').trim(), price:Number(r.price)||0 })).filter(r=>r.name||r.price);
+    const items=rows.map(r=>({ name:(r.name||'').trim(), quantity:Math.max(1,Math.round(Number(r.qty)||1)), unit_price:Number(r.unit)||0 })).filter(r=>r.name||r.unit_price);
     save.disabled=true;
     try{ await api('job_line_items_save',{method:'POST',body:{id,items}}); toast('Line items saved'); showDetail(id); }
     catch(e){ toast(e.message); save.disabled=false; }
