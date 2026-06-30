@@ -188,6 +188,18 @@ function matchItem(name) {
 
 const round0 = (n) => Math.floor(Number(n) || 0);   // drop cents to whole dollars
 
+// How many of a line item to PAY for (e.g. 3 tilting brackets -> pay 3). Prefer
+// the stored quantity; if that's 1 but the price is a clean multiple of the unit
+// price (some booking paths fold the count into the total), infer it. Mirrors the
+// app's display logic so pay and the customer charge always agree.
+function payQty(li) {
+  const q = Math.round(Number(li && li.quantity) || 0);
+  if (q > 1) return q;
+  const u = Number(li && li.unit_price) || 0, t = Number(li && li.line_total) || 0;
+  if (u > 0) { const r = t / u; if (Math.abs(r - Math.round(r)) < 0.02 && Math.round(r) > 1) return Math.round(r); }
+  return 1;
+}
+
 // Quantity on a dismount line: an explicit Nx / xN prefix in the label wins,
 // else the line's quantity field, else 1.
 function dismountQty(name, li) {
@@ -413,12 +425,13 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
-    // TV size = base pay.
+    // TV size = base pay (× quantity if the same size line covers several TVs).
     const sz = matchSize(name);
     if (sz) {
       sawSize = true;
-      const amt = rate(sz);
-      breakdown.push({ label: `TV base ${sz.label}`, amount: amt });
+      const n = payQty(li);
+      const amt = rate(sz) * n;
+      breakdown.push({ label: `TV base ${sz.label}${n > 1 ? ` ×${n}` : ''}`, amount: amt });
       pay += amt;
       continue;
     }
@@ -430,11 +443,12 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
-    // Known add-on / wire / surface / bracket.
+    // Known add-on / wire / surface / bracket — paid per unit (3 brackets -> ×3).
     const item = matchItem(name);
     if (item) {
-      const amt = rate(item);
-      if (amt) breakdown.push({ label: name, amount: amt });
+      const n = payQty(li);
+      const amt = rate(item) * n;
+      if (amt) breakdown.push({ label: `${name}${n > 1 ? ` ×${n}` : ''}`, amount: amt });
       pay += amt;
       continue;
     }
@@ -558,6 +572,17 @@ function runSelfTests() {
     { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
   ] }), 'Juan').pay, 430, 'mixed TV+handyman add-on (Juan) = 430, not 10h handyman');
+
+  // Per-unit pay: 3 tilting brackets pay Juan 3 × $35 on top of the base.
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"-69"', line_total: 119 },
+    { name: 'Tilting (recommended)', line_total: 180, quantity: 3, unit_price: 60 },
+  ] }), 'Juan').pay, 185, 'Juan 60-69 + 3× tilting = 80 + 105 = 185');
+  // Count inferred when the quantity is folded into the price (qty unset, 2× unit).
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Soundbar Installation', line_total: 70, unit_price: 35 },
+  ] }), 'Zach').pay, 130, 'other 33-59 + 2× soundbar (inferred) = 60 + 70 = 130');
 
   // Brackets: Other $0, Juan paid.
   eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Zach').pay, 50, 'tilting Other adds 0');
