@@ -1949,10 +1949,22 @@ function sanitizeBookingLineItems(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map(it => {
     const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
-    const price = Math.round((Number(it && (it.price != null ? it.price : (it.line_total != null ? it.line_total : it.unit_price))) || 0) * 100) / 100;
+    const qty = Math.min(99, Math.max(1, Math.round(Number(it && it.quantity) || 1)));
+    // Prefer an explicit per-item unit_price; otherwise derive it from a total
+    // (price / line_total) divided by the quantity. Backward-compatible with
+    // callers that only send a single total and no quantity (qty defaults to 1).
+    let unit;
+    if (it && it.unit_price != null && Number(it.unit_price) >= 0) {
+      unit = Number(it.unit_price);
+    } else {
+      const total = Number(it && (it.price != null ? it.price : it.line_total)) || 0;
+      unit = qty > 0 ? total / qty : total;
+    }
+    unit = Math.round(unit * 100) / 100;
+    const line_total = Math.round(unit * qty * 100) / 100;
     const kind = (it && it.kind) || 'service';
     const taxable = !(it && it.taxable === false);
-    return { name, quantity: 1, unit_price: price, line_total: price, kind, taxable };
+    return { name, quantity: qty, unit_price: unit, line_total, kind, taxable };
   }).filter(it => it.name || it.unit_price);
 }
 

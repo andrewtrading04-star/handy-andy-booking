@@ -1578,26 +1578,29 @@ function mountLineItemsEditor(b){
   let rows = has
     ? b.line_items.reduce((acc,li)=>{
         const lt=Number(li.line_total!=null?li.line_total:li.price)||0;
-        const unit=Number(li.price)||0;   // shaped 'price' is the unit price
+        let unit=Number(li.price)||0;   // shaped 'price' is the per-item price
         let qty=Math.round(Number(li.quantity)||0);
-        // Fall back to inferring the count from total ÷ unit when quantity is 1
-        // but the price is a clean multiple (some booking paths fold it in).
+        // Infer the count from total ÷ unit when quantity is 1 but the price is a
+        // clean multiple (some booking paths fold the count into the total).
         if(qty<=1 && unit>0){ const r=lt/unit; if(Math.abs(r-Math.round(r))<0.02 && Math.round(r)>1) qty=Math.round(r); }
+        if(qty<1) qty=1;
+        if(!unit) unit=qty>0?Math.round((lt/qty)*100)/100:lt;   // derive per-item price if missing
         const name=li.label||'';
         if(liIsDefaultType(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
-        acc.push({ name, display:liCleanLabel(name), price:lt, kind:li.kind||'service', qty:qty>1?qty:1 });
+        acc.push({ name, display:liCleanLabel(name), unit, qty, kind:li.kind||'service' });
         return acc;
       },[])
-    : [{ name:(b.service?.name)||'Service', display:(b.service?.name)||'Service', price:Number(b.price)||0, kind:'service', qty:1 }];
+    : [{ name:(b.service?.name)||'Service', display:(b.service?.name)||'Service', unit:Number(b.price)||0, qty:1, kind:'service' }];
   const wrap=document.getElementById('bkLineItems');
   const totalEl=document.getElementById('bkLiTotal');
   if(!wrap||!totalEl) return;
-  const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.price)||0),0); totalEl.textContent=money(Math.round(t*100)/100); };
+  const qOf=r=>Math.max(1,Math.min(99,Math.round(Number(r.qty)||1)));
+  const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*qOf(r),0); totalEl.textContent=money(Math.round(t*100)/100); };
   const render=()=>{
-    wrap.innerHTML=rows.map((r,i)=>`<div class="bk-li-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-      <input type="text" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
-      ${r.qty>1?`<span title="Quantity" style="font-weight:800;color:var(--ink);white-space:nowrap;font-size:14px;">×${r.qty}</span>`:''}
-      <div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="price" value="${r.price}" style="width:90px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>
+    wrap.innerHTML=rows.map((r,i)=>`<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+      <input type="text" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description" style="flex:1;min-width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+      <label title="Quantity" style="display:flex;align-items:center;gap:3px;color:var(--mute);font-weight:800;font-size:14px;">×<input type="number" min="1" max="99" step="1" inputmode="numeric" data-i="${i}" data-f="qty" value="${qOf(r)}" style="width:46px;padding:8px 4px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:center;color:var(--ink);"></label>
+      <div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each" style="width:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>
       <button type="button" class="btn ghost sm" data-del="${i}" title="Remove" style="padding:6px 10px;">×</button>
     </div>`).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
     wrap.querySelectorAll('input[data-f]').forEach(inp=>{
@@ -1606,7 +1609,7 @@ function mountLineItemsEditor(b){
         // Editing the name takes over the row: the typed text becomes both the
         // display AND what's saved (no longer a tidy-display of an original).
         if(f==='name'){ rows[i].name=inp.value; rows[i].display=inp.value; }
-        else rows[i][f]=inp.value;
+        else rows[i][f]=inp.value;   // qty / unit kept raw while typing; clamped on use + save
         recalc();
       });
     });
@@ -1616,26 +1619,30 @@ function mountLineItemsEditor(b){
     recalc();
   };
   render();
-  document.getElementById('bkLiAdd').onclick=()=>{ rows.push({ name:'', display:'', price:0, kind:'service' }); render(); };
+  document.getElementById('bkLiAdd').onclick=()=>{ rows.push({ name:'', display:'', unit:0, qty:1, kind:'service' }); render(); };
   document.getElementById('bkLiSave').onclick=async()=>{
     // Save the original (untidied) names + the hidden default-type lines, so the
     // stored ticket keeps its full labels (payroll/receipts) even though the
     // editor shows the short display versions.
-    const visible=rows.map(r=>({ name:(r.name||'').trim(), price:Number(r.price)||0, kind:r.kind||'service' }))
-                      .filter(r=>r.name||r.price);
+    const visible=rows.map(r=>({ name:(r.name||'').trim(), quantity:qOf(r), unit_price:Number(r.unit)||0, kind:r.kind||'service' }))
+                      .filter(r=>r.name||r.unit_price);
     const items=[...visible, ...hiddenItems];
     const btn=document.getElementById('bkLiSave'); btn.disabled=true;
     try{
       const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items }});
       // Reflect the saved state locally so the modal stays in sync, then refresh
       // the underlying schedule (prices/totals) without closing the modal.
-      b.line_items=items.map(it=>({ label:it.name, price:it.price, line_total:it.price, quantity:1, kind:it.kind }));
+      b.line_items=items.map(it=>{
+        const unit=it.unit_price!=null?Number(it.unit_price):(Number(it.price)||0);
+        const qty=Math.max(1,Math.round(Number(it.quantity)||1));
+        return { label:it.name, price:unit, line_total:Math.round(unit*qty*100)/100, quantity:qty, kind:it.kind };
+      });
       b.price=resp&&resp.price!=null?resp.price:b.price;
       hiddenItems=[];
       rows=b.line_items.reduce((acc,li)=>{
         const name=li.label||'';
         if(liIsDefaultType(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
-        acc.push({ name, display:liCleanLabel(name), price:li.price, kind:li.kind, qty:1 });
+        acc.push({ name, display:liCleanLabel(name), unit:Number(li.price)||0, qty:Math.max(1,Math.round(Number(li.quantity)||1)), kind:li.kind });
         return acc;
       },[]);
       render();
