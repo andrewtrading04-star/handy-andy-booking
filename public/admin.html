@@ -1559,7 +1559,11 @@ function liCleanLabel(name){
   const s=String(name||'');
   if(/guaranteed\s+dismount/i.test(s)) return 'GDS';
   const i=s.indexOf(':');
-  return (i>-1?s.slice(i+1):s).trim()||s;
+  let out=(i>-1?s.slice(i+1):s).trim()||s;
+  // Drop a trailing "×3" baked into the label — the qty shows as a separate
+  // badge. Only the × sign counts (not a letter "x", e.g. "4 x 6" dimensions).
+  out=out.replace(/\s*[×✕✖]\s*\d+\s*$/,'').trim()||out;
+  return out;
 }
 // "TV Type: Regular TV" is the default for nearly every job — hide it from the
 // ticket. Frame (and any other non-default TV type) is still shown.

@@ -283,7 +283,13 @@ function slotLabelHtml(s){
 function liName(name){
   const s=String(name||'');
   if(/guaranteed\s+dismount/i.test(s)) return 'GDS';
-  const i=s.indexOf(':'); return (i>-1?s.slice(i+1):s).trim()||s;
+  const i=s.indexOf(':');
+  let out=(i>-1?s.slice(i+1):s).trim()||s;
+  // Drop a trailing "×3" baked into the label — the count shows as a separate
+  // badge, so keeping it here would read "×3 ×3". Only the × sign (never a plain
+  // letter "x", e.g. "4 x 6" dimensions) is treated as a quantity marker.
+  out=out.replace(/\s*[×✕✖]\s*\d+\s*$/,'').trim()||out;
+  return out;
 }
 // How many of this line item to show (e.g. 2 tilting brackets). Prefer the stored
 // quantity; if that's 1 but the price is a clean multiple of the unit price (some

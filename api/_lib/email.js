@@ -108,7 +108,11 @@ function cleanLineLabel(name) {
   const s = String(name || '');
   if (/guaranteed\s+dismount/i.test(s)) return 'GDS';
   const i = s.indexOf(':');
-  return (i > -1 ? s.slice(i + 1) : s).trim() || s;
+  let out = (i > -1 ? s.slice(i + 1) : s).trim() || s;
+  // Drop a trailing "×3" baked into the label — the qty renders separately. Only
+  // the × sign counts (not a letter "x", e.g. "4 x 6" dimensions).
+  out = out.replace(/\s*[×✕✖]\s*\d+\s*$/, '').trim() || out;
+  return out;
 }
 // The default "TV Type: Regular TV" line is noise on the receipt — hide it.
 // Frame and other non-default TV types still show.
