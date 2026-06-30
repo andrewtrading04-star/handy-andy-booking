@@ -80,6 +80,10 @@ const ITEM_RATES = {
   // Add-ons (same for everyone).
   'samsung frame box':       { juan: 15, other: 15 },
   'samsung frame tv in box bracket': { juan: 15, other: 15 },
+  // Frame/Gallery TV in-box bracket choice (Samsung Frame, LG Gallery) -> $15.
+  'samsung frame lg gallery in box bracket': { juan: 15, other: 15 },
+  'samsung frame lg gallery':                { juan: 15, other: 15 },
+  'frame lg gallery in box bracket':         { juan: 15, other: 15 },
   'soundbar':                { juan: 35, other: 35 },
   'soundbar installation':   { juan: 35, other: 35 },
   'apple tv':                { juan: 15, other: 15 },
@@ -504,7 +508,8 @@ export function computeJobPay(job, techName) {
     if (item) {
       const n = payQty(li);
       const amt = rate(item) * n;
-      if (amt) breakdown.push({ label: `${name}${n > 1 ? ` ×${n}` : ''}`, amount: amt });
+      // Strip any baked-in "×N" from the label so it isn't doubled with the ×n we add.
+      if (amt) breakdown.push({ label: `${stripQtySuffix(name)}${n > 1 ? ` ×${n}` : ''}`, amount: amt });
       pay += amt;
       continue;
     }
@@ -512,9 +517,12 @@ export function computeJobPay(job, techName) {
     // Anything else that reached here with a real charge is a CUSTOM JOB (e.g.
     // "Mounting of Dry Erase Board"). All custom work is billed hourly at $85/hr
     // to the customer, so the tech earns $65/hr. Infer the hours from the line
-    // price ($170 -> 2h -> $130). Flag only when the price isn't a clean hourly
-    // multiple, so the inferred hours can be double-checked.
-    if (lt > 0) {
+    // price ($170 -> 2h -> $130). FLOOR: a custom job is at least one hour ($85),
+    // so anything under ~1 hour of billing is NOT a custom job — it's a small
+    // add-on we couldn't match. Flag those for review instead of paying a phantom
+    // hour (a $30 line must never pay $65). Flag, too, when the hours aren't a
+    // clean multiple so the inference can be double-checked.
+    if (lt >= 80) {
       const rawHours = lt / 85;
       const hours = Math.max(1, Math.round(rawHours));
       const amt = hours * 65;
@@ -523,6 +531,8 @@ export function computeJobPay(job, techName) {
       if (Math.abs(rawHours - hours) > 0.1) {
         flags.push(`Custom job "${name}" ($${round0(lt)}) — paid ${hours}h @ $65; verify the hours`);
       }
+    } else if (lt > 0) {
+      flags.push(`Unmatched line item "${name}" ($${round0(lt)}) — owner review (too small for a custom hour)`);
     }
   }
 
@@ -668,6 +678,17 @@ function runSelfTests() {
     { name: '33"–59"', line_total: 109 },
     { name: 'Setup Fee', line_total: 50 },
   ] }), 'Kregg').pay, 60, 'Setup Fee not paid as custom labor');
+  // Small unmatched line (< ~1 hr at $85) must NOT pay a phantom custom hour.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Mystery add-on', line_total: 30 },
+  ] }), 'Kregg').pay, 60, 'sub-$80 unmatched line pays $0 (not a phantom $65 hour)');
+  eq(computeJobPay(job({ line_items: [{ name: 'Mystery add-on', line_total: 30 }] }), 'Kregg').flags.length, 1, 'small unmatched line is flagged');
+  // Samsung Frame / LG Gallery in-box bracket resolves to $15 (×2 -> $30), not custom.
+  eq(computeJobPay(job({ line_items: [
+    { name: 'TV Size: 33"–59" ×2', line_total: 218, quantity: 2, unit_price: 109 },
+    { name: 'Bracket: Samsung Frame / LG Gallery (in-box bracket) ×2', line_total: 30, quantity: 2, unit_price: 15 },
+  ] }), 'Juan').pay, 150, 'Juan 2× 33-59 (120) + frame/gallery in-box ×2 ($15×2=30) = 150');
   // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
   // (210) + custom dry-erase 2h (130) + full-motion brackets ×3 ($0, not Juan) +
   // GDS sold ($0) + $50 travel = 390.
