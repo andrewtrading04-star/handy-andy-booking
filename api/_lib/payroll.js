@@ -164,12 +164,25 @@ function matchSize(name) {
   for (const r of TV_SIZE_RATES) if (r.test.test(n)) return r;
   return null;
 }
+// Some booking paths prefix a line item with its option group, e.g.
+// "Wall Surface: Outdoor/Stucco" or "Add-ons: Soundbar Installation". Match on the
+// part AFTER the prefix too, so the rate lookup isn't defeated by the category.
+function afterPrefix(name) {
+  const s = String(name || '');
+  const i = s.indexOf(':');
+  const tail = i > -1 ? s.slice(i + 1).trim() : '';
+  return tail;
+}
 function matchItem(name) {
-  const k = keyOf(name);
-  if (ITEM_RATES[k]) return { key: k, ...ITEM_RATES[k] };
-  // try the stripped variant too
-  const n = normalize(name);
-  if (ITEM_RATES[n]) return { key: n, ...ITEM_RATES[n] };
+  const cands = [name];
+  const tail = afterPrefix(name);
+  if (tail) cands.push(tail);
+  for (const cand of cands) {
+    const k = keyOf(cand);
+    if (ITEM_RATES[k]) return { key: k, ...ITEM_RATES[k] };
+    const n = normalize(cand);
+    if (ITEM_RATES[n]) return { key: n, ...ITEM_RATES[n] };
+  }
   return null;
 }
 
@@ -353,8 +366,13 @@ export function computeJobPay(job, techName) {
     const name = li.name || '';
     const lt = Number(li.line_total) || 0;
 
-    // Skip non-labor bookkeeping lines.
-    if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /travel fee/i.test(name)) continue;
+    // Skip non-labor bookkeeping lines. Includes fees that sometimes arrive as a
+    // plain 'service' line (Zenbooker custom_service) instead of kind 'fee' — the
+    // service-area surcharge pays the tech nothing here (the travel payout comes
+    // separately from the zip tier) and the after-hours fee adds its $75 bonus
+    // separately, so neither should be priced or flagged as an unmatched line.
+    if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /travel fee/i.test(name)
+        || /service area surcharge/i.test(name) || /after.?hours/i.test(name)) continue;
 
     // Skip the two-person "lift help" marker — it's not a labor line to price.
     // The $60 ($30/tech) bonus is added separately when the split runs.
@@ -482,12 +500,16 @@ function runSelfTests() {
 
   // Juan's 70"-85" base premium: $90 (others $80). Locked from the Juliana Schmidt
   // job — 70-85 TV + Outdoor/Stucco + Soundbar must total $90+$35+$35 for Juan.
+  // Real-world labels carry an option-group prefix ("Wall Surface:", "Add-ons:")
+  // and a service-area surcharge line — both must resolve cleanly, no review flags.
   const julianaItems = [
     { name: '70"-85"', line_total: 149 },
-    { name: 'Outdoor/Stucco', line_total: 45 },
-    { name: 'Soundbar', line_total: 60 },
+    { name: 'Wall Surface: Outdoor/Stucco', line_total: 45 },
+    { name: 'Add-ons: Soundbar Installation', line_total: 60 },
+    { name: 'Service area surcharge', line_total: 65 },
   ];
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 160, 'Juan 70-85 + outdoor + soundbar = 160');
+  eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').flags.length, 0, 'Juliana job: no unmatched/review flags');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 150, 'Other tech same job = 150 (80 base)');
   // The Juliana job is a flagged two-person lift (a 2nd tech is on the booking),
   // but Juan brings his wife → he is NOT split, still the full $160. A normal tech
