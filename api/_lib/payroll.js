@@ -22,10 +22,16 @@ export const PAY_DATE_OFFSET_DAYS = 9;    // days after the period-end Saturday
 
 // ── Tech classification ──────────────────────────────────────────────────────
 // Juan earns enhanced rates on base + brackets + wires + fireplace. Everyone
-// else ("Other Techs") earns the standard column. TK is a normal paid tech.
+// else ("Other Techs") earns the standard column — TK included for rates.
 // Evan is retired — never paid (callers should exclude; we also guard here).
 export function isJuan(techName) {
   return /\bjuan\b/i.test(String(techName || ''));
+}
+// Techs who work two-person jobs with their OWN helper (a spouse/partner who is
+// NOT a paid tech in the system): Juan and TK. They are NEVER split — each keeps
+// the full base/tips AND the entire $60 two-person add-on (not the $30 half).
+export function bringsOwnSecond(techName) {
+  return isJuan(techName) || /\btk\b/i.test(String(techName || ''));
 }
 export function isRetired(techName) {
   // Dismissed techs — never paid (rate sheet §10): Evan and Israel.
@@ -282,6 +288,7 @@ export function computeJobPay(job, techName) {
   const flags = [];
   const breakdown = [];
   const juan = isJuan(techName);
+  const ownHelper = bringsOwnSecond(techName);   // Juan or TK — never split, full $60
   const rate = (pair) => (juan ? pair.juan : pair.other);
 
   // Hard exclusions.
@@ -466,11 +473,11 @@ export function computeJobPay(job, techName) {
   }
 
   // ── Multi-tech handling: split base pay and tips 50/50, add $60 bonus if applicable.
-  // EXCEPTION (hard rule, per owner): Juan works two-person jobs with his wife, who
-  // is NOT a paid tech in the system. So Juan is NEVER split — he keeps the full
-  // base/tips and collects the ENTIRE $60 two-person add-on himself (handled in the
-  // single-tech branch below). Everyone else still splits 50/50.
-  if (multiTech.hasSecondTech && !juan) {
+  // EXCEPTION (hard rule, per owner): Juan and TK work two-person jobs with their
+  // OWN helper, who is NOT a paid tech in the system. So they are NEVER split — they
+  // keep the full base/tips and collect the ENTIRE $60 two-person add-on themselves
+  // (handled in the single-tech branch below). Everyone else still splits 50/50.
+  if (multiTech.hasSecondTech && !ownHelper) {
     // Split the base pay (everything before tips) 50/50.
     const newBreakdown = breakdown.map(item => ({
       ...item,
@@ -500,15 +507,15 @@ export function computeJobPay(job, techName) {
     flags.push(`Multi-tech job (split 50/50) — verify second tech assignment`);
     return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
-    // Single tech — OR Juan on a two-person job (never split; see exception above).
-    // Full tips + after-hours + travel. For Juan on a job where the customer PAID
-    // for the two-person option, he keeps the WHOLE $60 add-on (not the $30 half).
+    // Single tech — OR Juan/TK on a two-person job (never split; see exception above).
+    // Full tips + after-hours + travel. When the customer PAID for the two-person
+    // option, the own-helper tech keeps the WHOLE $60 add-on (not the $30 half).
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    const juanWholeBonus = (juan && multiTech.hasSecondTech && multiTech.secondTechBonus > 0) ? 60 : 0;
-    if (juanWholeBonus) breakdown.push({ label: 'Second person — Juan brings his own (full $60)', amount: juanWholeBonus });
+    const wholeBonus = (ownHelper && multiTech.hasSecondTech && multiTech.secondTechBonus > 0) ? 60 : 0;
+    if (wholeBonus) breakdown.push({ label: 'Second person — brings own helper (full $60)', amount: wholeBonus });
     if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     if (travelPayout) breakdown.push({ label: 'Travel payout', amount: travelPayout });
-    pay += tip + juanWholeBonus + afterHoursBonus + travelPayout;
+    pay += tip + wholeBonus + afterHoursBonus + travelPayout;
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 }
@@ -649,6 +656,16 @@ function runSelfTests() {
     { name: '98"+', line_total: 229 },
     { name: 'Second Technician', line_total: 70 }
   ] }), 'Kregg').pay, 115, 'Other tech two-person splits (130/2 + 40/2 + 30)');
+  // TK, like Juan, brings his own helper — NEVER split, keeps the full $60. Uses
+  // the standard rate column (not Juan's): 70-85 base 80 + full 60 = 140.
+  eq(computeJobPay(job({ line_items: [
+    { name: '70"-85"', line_total: 149 },
+    { name: 'Second Technician', line_total: 70 },
+  ] }), 'TK').pay, 140, 'TK two-person NOT split: 80 base + full 60 = 140');
+  eq(computeJobPay(job({ line_items: [
+    { name: '70"-85"', line_total: 149 },
+    { name: 'Second Technician', line_total: 70 },
+  ] }), 'Kregg').pay, 70, 'normal tech same job splits: 80/2 + 30 = 70');
 
   // After-hours 8 PM bonus (single tech).
   eq(computeJobPay(job({ line_items: [
