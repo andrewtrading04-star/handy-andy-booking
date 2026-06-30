@@ -1440,6 +1440,36 @@ function statusBadge(status){
   return `<span class="badge b-${s}">${s==='completed'?'Completed ✓':s.replace(/_/g,' ')}</span>`;
 }
 
+// True when a booking already carries a two-person / lift fee, so we never add a
+// second one. Matches the same wordings the payroll engine treats as a 2nd-tech
+// line (so the $30/tech bonus is already accounted for).
+function hasTwoPersonFee(b){
+  const re=/second\s*technician|two[\s-]?person|lifting\s*help|cannot\s*(?:help\s*)?lift|8[56]\s*inch(?:es)?\s*or\s*larger/i;
+  return (Array.isArray(b.line_items)?b.line_items:[]).some(li=>re.test(String((li&&(li.label||li.name))||'')));
+}
+// Add the $70 two-person fee to a booking's ticket and re-figure the tax, so the
+// customer is charged for the second tech and BOTH techs are paid correctly (the
+// "Second Technician" line is what triggers the payroll bonus). Tax is only
+// re-added if the booking already had a tax line (e.g. not a $0 Assurion job).
+async function addTwoPersonFee(b){
+  const src=Array.isArray(b.line_items)?b.line_items:[];
+  const isTax=li=>/^tax\b/i.test(String((li&&(li.label||li.name))||'').trim());
+  const hadTax=src.some(isTax);
+  const items=src.filter(li=>!isTax(li)).map(li=>({
+    name: li.label||li.name||'Item',
+    quantity: Math.max(1,Math.round(Number(li.quantity)||1)),
+    unit_price: Number(li.price)||0,   // shaped 'price' is the per-item price
+    kind: li.kind||'service',
+  }));
+  items.push({ name:'Second Technician', quantity:1, unit_price:70, kind:'fee' });
+  if(hadTax){
+    const base=items.reduce((s,it)=>s+(Number(it.unit_price)||0)*it.quantity,0);
+    items.push({ name:'Tax (8.25%)', quantity:1, unit_price:Math.round(base*TAX_RATE*100)/100, kind:'fee' });
+  }
+  const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items }});
+  if(resp&&resp.price!=null) b.price=resp.price;
+  b.line_items=items.map(it=>({ label:it.name, kind:it.kind, quantity:it.quantity, price:it.unit_price, line_total:Math.round(it.unit_price*it.quantity*100)/100 }));
+}
 // ── Booking detail modal ───────────────────────────────────────────────────
 function openBooking(b){
   const m=document.getElementById('bkModal');
@@ -1532,7 +1562,19 @@ function openBooking(b){
   m.onclick=e=>{ if(e.target===m) close(); };
   const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
-  const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', secondary_technician_id: sa.value||null }); close(); };
+  const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{
+    const secId=sa.value||null;
+    await updateBooking({ id:b.id, action:'assign', secondary_technician_id: secId });
+    // Adding a real 2nd tech to a job that has no two-person fee yet → offer to
+    // add it, so the customer is charged and BOTH techs are paid correctly.
+    if(secId && !hasTwoPersonFee(b)){
+      if(confirm('This is now a two-person job.\n\nAdd the $70 two-person fee to the customer’s bill? It charges for the second tech and pays BOTH techs correctly.\n\n(Tap Cancel to add the helper with no extra charge.)')){
+        try{ await addTwoPersonFee(b); toast('Two-person fee added — $70 + tax'); refreshCurrent(); }
+        catch(e){ toast(e.message||'Could not add the fee'); }
+      }
+    }
+    close();
+  };
   const cf=document.getElementById('bkConfirm'); if(cf) cf.onclick=async()=>{ await updateBooking({ id:b.id, action:'confirm' }); close(); };
   const rs=document.getElementById('bkResched'); if(rs) rs.onclick=()=>openReschedule(b, close);
   const cn=document.getElementById('bkCancel'); if(cn) cn.onclick=async()=>{ if(confirm('Cancel this booking? It will be removed from the schedule but kept under "Include canceled".')){ await updateBooking({ id:b.id, action:'cancel' }); close(); } };
