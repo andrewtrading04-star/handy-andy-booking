@@ -696,7 +696,7 @@ function mountTechLineItems(j, id){
   // section (server already filters them out; this is a belt-and-suspenders guard).
   const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n); };
   const seeded=(j.line_items&&j.line_items.length)
-    ? j.line_items.filter(notHidden).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
+    ? j.line_items.filter(notHidden).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, qty:liDisplayQty(li), existing:true }))
     : [];
   let rows=seeded.length ? seeded
     : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal), existing:true }];
@@ -707,6 +707,7 @@ function mountTechLineItems(j, id){
         `<div style="display:flex;align-items:center;gap:2px;flex:0 0 auto;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="price" value="${r.price}" style="width:78px;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;text-align:right;"></div>`;
       return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
       <input type="text" data-i="${i}" data-f="name" value="${esc(r.name)}" placeholder="Description" style="flex:1 1 auto;min-width:0;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:10px;border-radius:8px;font-size:15px;">
+      ${r.qty>1?`<strong style="flex:0 0 auto;color:var(--ink);white-space:nowrap;font-size:15px;">×${r.qty}</strong>`:''}
       ${priceCell}
       <button type="button" class="btn ghost" data-del="${i}" title="Remove" aria-label="Remove line item" style="flex:0 0 auto;width:42px;height:42px;padding:0;border-radius:8px;font-size:20px;line-height:1;display:flex;align-items:center;justify-content:center;">×</button>
     </div>`;

@@ -253,7 +253,13 @@ function detectSpecial(job) {
   if (has(/\btv\s*swap\b/)) return 'tv_swap';
   if (has(/\b(estimate|quote)\b/)) return 'estimate';
   if (has(/\bpre.?paid\b/)) return 'prepaid';
-  if (has(/\bhandyman\b/) || has(/\bhandyman labor\b/)) return 'handyman';
+  // Handyman is a PURE-handyman job only. A real TV-mounting job that merely has a
+  // "handyman labor" ADD-ON line (alongside TV sizes/brackets) must NOT be
+  // reclassified as handyman — doing so throws away the whole mounting breakdown
+  // and pays hours off the entire ticket. So only treat it as handyman when there
+  // is NO TV-size base line; otherwise the add-on is priced in the line walk below.
+  const hasTvBase = (job.line_items || []).some(li => matchSize(li.name));
+  if (!hasTvBase && (has(/\bhandyman\b/) || has(/\bhandyman labor\b/))) return 'handyman';
   return null;
 }
 
@@ -394,6 +400,19 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
+    // Handyman labor as an ADD-ON line on a mounting job: pay the tech $65/hr.
+    // Hours come from the label ("1 hour of Handyman Labor"); if unstated, infer
+    // from the line's own customer price at $85/hr. (A PURE handyman job never
+    // reaches here — it's handled by the special short-circuit above.)
+    if (/handyman/i.test(name)) {
+      const m = name.match(/(\d+(?:\.\d+)?)\s*hours?\b/i);
+      const hours = m ? parseFloat(m[1]) : Math.max(1, Math.round((lt || 0) / 85));
+      const amt = Math.round(hours * 65);
+      if (amt) breakdown.push({ label: `Handyman ${hours}h @ $65`, amount: amt });
+      pay += amt;
+      continue;
+    }
+
     // TV size = base pay.
     const sz = matchSize(name);
     if (sz) {
@@ -522,6 +541,23 @@ function runSelfTests() {
     { name: '70"-85"', line_total: 149 },
     { name: 'My TV is 70-85 inches and I cannot help lift it', line_total: 70 },
   ] }), 'Juan').pay, 150, 'Juan paid two-person: 90 base + full 60 = 150');
+
+  // Mixed job: TV mounting + a handyman ADD-ON line must NOT be reclassified as a
+  // pure handyman job (the Cecil Cofie bug — it paid $650 as "10h handyman" and
+  // wiped the whole mounting breakdown). Juan: 80+60+35+45+35+35 base + 75
+  // after-hours + 65 (1h handyman add-on) = 430.
+  eq(computeJobPay(job({ price: 891, subtotal: 823, line_items: [
+    { name: '60"-69"', line_total: 119 },
+    { name: '33"-59"', line_total: 109 },
+    { name: 'Tilting (recommended)', line_total: 120 },
+    { name: 'Yes, hide the wires BEHIND the wall', line_total: 150 },
+    { name: 'Soundbar Installation', line_total: 50 },
+    { name: 'LED Lights', line_total: 100 },
+    { name: '1 hour of Handyman Labor', line_total: 85 },
+    { name: 'Service area surcharge', line_total: 15, kind: 'fee' },
+    { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
+    { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
+  ] }), 'Juan').pay, 430, 'mixed TV+handyman add-on (Juan) = 430, not 10h handyman');
 
   // Brackets: Other $0, Juan paid.
   eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Zach').pay, 50, 'tilting Other adds 0');
