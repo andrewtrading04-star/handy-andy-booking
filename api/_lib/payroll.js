@@ -133,6 +133,24 @@ const ASSURION_RATES = {
   'frame tv': 75,
 };
 
+// ── Travel / service-area surcharge → tech payout ────────────────────────────
+// The customer's service-area surcharge is split: the business keeps part, the
+// tech earns the rest as a per-trip travel stipend (NOT split between two techs).
+// Mapping from the distance tiers (migration 0032): surcharge → tech payout.
+//   $15 → $10,  $65 → $50,  $100 → $75.
+// Derived straight from the surcharge line on the ticket so the tech always gets
+// their share even when the per-zip payout column was never configured.
+const TRAVEL_TIERS = [
+  { surcharge: 100, payout: 75 },
+  { surcharge: 65,  payout: 50 },
+  { surcharge: 15,  payout: 10 },
+];
+export function travelPayoutForSurcharge(amount) {
+  const a = Number(amount) || 0;
+  for (const t of TRAVEL_TIERS) if (a >= t.surcharge) return t.payout;
+  return 0;
+}
+
 // Job-number overrides from the rate sheet (zenbooker_job_number -> tech pay).
 export const CUSTOM_PAY = { '020989': 60, '690071': 50 };
 export const ASSURION_TOTAL = { '143430': 60, '708972': 60, '811856': 70 };
@@ -375,11 +393,19 @@ export function computeJobPay(job, techName) {
     }
   }
 
-  // ── Travel payout: the "$X paid to the tech" half of the per-zip travel tier
-  // (Denver/Houston/Austin #2–#4). Looked up from the booking's service-area tier
-  // by the caller and passed in as job.travel_payout. Treated like the after-hours
-  // bonus (a per-trip stipend), not split, so each tech on the trip earns it.
-  const travelPayout = Number(job.travel_payout) || 0;
+  // ── Travel payout: the tech's share of the service-area surcharge. Prefer the
+  // surcharge line actually on the ticket (source of truth — the customer paid $X
+  // surcharge, so the tech earns the matching tier: $65→$50, etc.), but never pay
+  // less than the per-zip payout the caller looked up (job.travel_payout). Treated
+  // like the after-hours bonus — a per-trip stipend, NOT split, so each tech on
+  // the trip earns it.
+  let travelPayout = Number(job.travel_payout) || 0;
+  for (const li of job.line_items || []) {
+    if (/service area surcharge/i.test(li.name || '')) {
+      travelPayout = Math.max(travelPayout, travelPayoutForSurcharge(li.line_total));
+      break;
+    }
+  }
 
 
   // ── Standard TV-mounting walk: base (by size) + each add-on line item.
@@ -553,14 +579,17 @@ function runSelfTests() {
     { name: 'Add-ons: Soundbar Installation', line_total: 60 },
     { name: 'Service area surcharge', line_total: 65 },
   ];
-  eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 160, 'Juan 70-85 + outdoor + soundbar = 160');
+  // Pay = base labor (160 Juan / 150 other) PLUS the tech's $50 travel share of
+  // the $65 service-area surcharge on the ticket. So 210 Juan / 200 other.
+  eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 210, 'Juan 70-85 + outdoor + soundbar (160) + $50 travel = 210');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').flags.length, 0, 'Juliana job: no unmatched/review flags');
-  eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 150, 'Other tech same job = 150 (80 base)');
+  eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 200, 'Other tech same job = 150 base + $50 travel = 200');
   // The Juliana job is a flagged two-person lift (a 2nd tech is on the booking),
-  // but Juan brings his wife → he is NOT split, still the full $160. A normal tech
-  // on the same two-person job would be halved.
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 160, 'Juan two-person job NOT split = 160');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 74, 'Other tech two-person job split = 74');
+  // but Juan brings his wife → he is NOT split, still the full $160 + $50 travel.
+  // A normal tech on the same two-person job has the BASE halved (74) but still
+  // earns the full $50 travel (not split) → 124.
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan two-person job NOT split = 160 + 50 travel = 210');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 124, 'Other tech two-person: 74 split base + 50 travel = 124');
   // Customer PAID for the two-person option ("cannot help lift" $70): Juan keeps
   // the WHOLE $60 add-on on top of his full base. 70-85 base 90 + 60 = 150.
   eq(computeJobPay(job({ line_items: [
@@ -571,7 +600,7 @@ function runSelfTests() {
   // Mixed job: TV mounting + a handyman ADD-ON line must NOT be reclassified as a
   // pure handyman job (the Cecil Cofie bug — it paid $650 as "10h handyman" and
   // wiped the whole mounting breakdown). Juan: 80+60+35+45+35+35 base + 75
-  // after-hours + 65 (1h handyman add-on) = 430.
+  // after-hours + 65 (1h handyman add-on) + 10 travel ($15 surcharge tier) = 440.
   eq(computeJobPay(job({ price: 891, subtotal: 823, line_items: [
     { name: '60"-69"', line_total: 119 },
     { name: '33"-59"', line_total: 109 },
@@ -583,7 +612,7 @@ function runSelfTests() {
     { name: 'Service area surcharge', line_total: 15, kind: 'fee' },
     { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
-  ] }), 'Juan').pay, 430, 'mixed TV+handyman add-on (Juan) = 430, not 10h handyman');
+  ] }), 'Juan').pay, 440, 'mixed TV+handyman add-on (Juan) = 440 (430 + $10 travel)');
 
   // Per-unit pay: 3 tilting brackets pay Juan 3 × $35 on top of the base.
   eq(computeJobPay(job({ line_items: [
@@ -684,6 +713,32 @@ function runSelfTests() {
     { name: '70"-85"', line_total: 149 },
     { name: 'Second Technician', line_total: 70 },
   ] }), 'Kregg').pay, 70, 'normal tech same job splits: 80/2 + 30 = 70');
+
+  // Service-area surcharge → tech travel payout, derived from the surcharge line
+  // (tiers 15/10, 65/50, 100/75) so the tech is paid even when the per-zip payout
+  // was never configured. Not split between two techs.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Service area surcharge', line_total: 65 },
+  ] }), 'Zach').pay, 110, 'surcharge $65 -> +$50 travel (60 base + 50)');
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Service area surcharge', line_total: 15 },
+  ] }), 'Zach').pay, 70, 'surcharge $15 -> +$10 travel');
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Service area surcharge', line_total: 100 },
+  ] }), 'Zach').pay, 135, 'surcharge $100 -> +$75 travel');
+  // TK's two-TV job: 60-69 + 33-59 + brick + outside wires + soundbar + $65
+  // surcharge. 70+60+25+15+35 = 205 labor + 50 travel = 255 (single tech, full).
+  eq(computeJobPay(job({ price: 471, subtotal: 435, business_slug: 'handy-andy', line_items: [
+    { name: '60"–69"', line_total: 135 },
+    { name: '33"–59"', line_total: 125 },
+    { name: 'Brick / Stone', line_total: 35 },
+    { name: 'Yes, hide the wires OUTSIDE the wall', line_total: 25 },
+    { name: 'Soundbar Installation', line_total: 50 },
+    { name: 'Service area surcharge', line_total: 65 },
+  ] }), 'TK').pay, 255, 'TK two-TV + $65 surcharge = 205 labor + 50 travel = 255');
 
   // After-hours 8 PM bonus (single tech).
   eq(computeJobPay(job({ line_items: [
