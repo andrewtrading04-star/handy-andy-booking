@@ -1034,10 +1034,16 @@ function isTaxLi(li) {
 function isFeeLi(li) {
   return /service area surcharge|after[\s-]?hours|travel fee/i.test(((li && li.name) || '').trim());
 }
+// The Guaranteed Dismount up-sell — a payment/warranty concern, not a task the
+// tech edits. Match by pattern (not an exact name) so a category prefix
+// ("Add-ons: Guaranteed Dismount Service") or a wording variant is still caught.
+function isDismountLi(li) {
+  return /guarante\w*\s+dismount|dismount\s+service/i.test(((li && li.name) || '').trim());
+}
 function isHiddenLi(li) {
   const kind = (li && li.kind) || 'service';
   if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
-  if (isCouponLi(li) || isTaxLi(li) || isFeeLi(li)) return true;   // coupons, tax & fees aren't editable work lines
+  if (isCouponLi(li) || isTaxLi(li) || isFeeLi(li) || isDismountLi(li)) return true;   // coupons, tax, fees & dismount up-sell aren't editable work lines
   return HIDDEN_LI.has(((li && li.name) || '').trim());
 }
 
@@ -1195,7 +1201,7 @@ function shapeJob(b, full = false, forTech = false) {
       .reduce((t, li) => t + (Number(li.line_total) || 0), 0) * 100) / 100;
     // Non-labor fees (surcharge / after-hours / travel), shown read-only in the
     // Payment section — the tech can't edit them or change a quantity.
-    const isAnyFee = li => isFeeLi(li) || (((li && li.kind) === 'fee') && !isTaxLi(li) && !isCouponLi(li) && !/\btip\b/i.test((li && li.name) || ''));
+    const isAnyFee = li => isFeeLi(li) || isDismountLi(li) || (((li && li.kind) === 'fee') && !isTaxLi(li) && !isCouponLi(li) && !/\btip\b/i.test((li && li.name) || ''));
     out.fees = (b.line_items || []).filter(li => isAnyFee(li) && (Number(li.line_total) || 0) !== 0)
       .map(li => ({ name: li.name || 'Fee', amount: Number(li.line_total) || 0 }));
     // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the
