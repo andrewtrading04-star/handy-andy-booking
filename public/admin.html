@@ -1544,8 +1544,16 @@ function openBooking(b){
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
   let rows = has
-    ? b.line_items.map(li=>({ name:li.label||'', price:Number(li.line_total!=null?li.line_total:li.price)||0, kind:li.kind||'service' }))
-    : [{ name:(b.service?.name)||'Service', price:Number(b.price)||0, kind:'service' }];
+    ? b.line_items.map(li=>{
+        const lt=Number(li.line_total!=null?li.line_total:li.price)||0;
+        const unit=Number(li.price)||0;   // shaped 'price' is the unit price
+        let qty=Math.round(Number(li.quantity)||0);
+        // Fall back to inferring the count from total ÷ unit when quantity is 1
+        // but the price is a clean multiple (some booking paths fold it in).
+        if(qty<=1 && unit>0){ const r=lt/unit; if(Math.abs(r-Math.round(r))<0.02 && Math.round(r)>1) qty=Math.round(r); }
+        return { name:li.label||'', price:lt, kind:li.kind||'service', qty:qty>1?qty:1 };
+      })
+    : [{ name:(b.service?.name)||'Service', price:Number(b.price)||0, kind:'service', qty:1 }];
   const wrap=document.getElementById('bkLineItems');
   const totalEl=document.getElementById('bkLiTotal');
   if(!wrap||!totalEl) return;
@@ -1553,6 +1561,7 @@ function mountLineItemsEditor(b){
   const render=()=>{
     wrap.innerHTML=rows.map((r,i)=>`<div class="bk-li-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
       <input type="text" data-i="${i}" data-f="name" value="${esc(r.name)}" placeholder="Description" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+      ${r.qty>1?`<span title="Quantity" style="font-weight:800;color:var(--ink);white-space:nowrap;font-size:14px;">×${r.qty}</span>`:''}
       <div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="price" value="${r.price}" style="width:90px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>
       <button type="button" class="btn ghost sm" data-del="${i}" title="Remove" style="padding:6px 10px;">×</button>
     </div>`).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
