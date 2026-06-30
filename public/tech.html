@@ -565,7 +565,7 @@ async function showDetail(id){
         ${(j.discounts&&j.discounts.length)?`<div style="margin-bottom:12px;">${j.discounts.filter(d=>Number(d.amount)).map(d=>`<div class="kv" style="display:flex;justify-content:space-between;color:var(--green);font-weight:700;"><span>${esc(liName(d.name))}</span><span>−$${Math.abs(Number(d.amount))}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
           <div><div class="sub" style="color:var(--mute);font-size:13px;">Total (incl. tax)</div><div style="font-weight:700;font-size:15px;">$${j.price}</div></div>
-          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:700;font-size:15px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${esc(j.payment_status)}</div></div>
+          <div style="text-align:right;"><div class="sub" style="color:var(--mute);font-size:13px;">Status</div><div style="font-weight:800;font-size:24px;${j.payment_status==='paid'?'color:#15803d;':j.payment_status==='refunded'?'color:#999;':''}">${esc(j.payment_status)}</div></div>
         </div>
         ${j.payment_status!=='paid'&&j.payment_status!=='refunded'?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
           <button class="btn sm" id="jobCharge">Charge card</button>
