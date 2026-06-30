@@ -1,8 +1,8 @@
 // Short "Someone just booked an appointment" heads-up email to the owner.
 // Used by the public booking widgets (via mirrorBooking) and by the dashboard
 // when a SECRETARY books a job. Best-effort: every send is wrapped so it can
-// never block or break a booking. Recipient defaults to Andrew; override with
-// the OWNER_NOTIFY_EMAIL env var.
+// never block or break a booking. Recipient defaults to contact@ihandyandy.com;
+// override with the OWNER_NOTIFY_EMAIL env var.
 import { emailConfig, sendEmail } from './email.js';
 import { emailNotificationsOn } from './notify.js';
 
@@ -13,7 +13,7 @@ export async function sendOwnerBookingAlert(d = {}) {
     if (!emailNotificationsOn()) return;
     const cfg = emailConfig(d.slug);
     if (!cfg.apiKey) return;
-    const to = process.env.OWNER_NOTIFY_EMAIL || 'andrewtrading04@gmail.com';
+    const to = process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com';
     const tz = d.timezone || 'America/Denver';
     const money = (n) => '$' + (Number(n) || 0).toFixed(2);
 
