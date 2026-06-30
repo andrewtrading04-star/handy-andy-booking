@@ -203,6 +203,23 @@ async function scanMailbox({ user, pass }, todayISO) {
 
 async function main() {
   if (!CRON_SECRET) { console.error('[bracket-sync] Missing CRON_SECRET'); process.exit(1); }
+
+  // One-off maintenance: delete specific Amazon plate orders (e.g. phantom rows
+  // a bad scan created). Triggered by setting PURGE_ORDERS to a comma-separated
+  // list of Amazon order numbers. Runs the purge and exits — no email scan.
+  if (process.env.PURGE_ORDERS && process.env.PURGE_ORDERS.trim()) {
+    const order_nums = process.env.PURGE_ORDERS.split(',').map(s => s.trim()).filter(Boolean);
+    console.log(`[bracket-sync] PURGE_ORDERS set — deleting ${order_nums.length} plate order(s): ${order_nums.join(', ')}`);
+    try {
+      const r = await syncTo('wire_plate_purge', { order_nums });
+      console.log(`[bracket-sync] purge result: ${JSON.stringify(r)}`);
+    } catch (e) {
+      console.error(`[bracket-sync] purge failed — ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   const boxes = mailboxes();
   if (!boxes.length) { console.error('[bracket-sync] No mailbox configured (set GMAIL_USER + GMAIL_APP_PASSWORD)'); process.exit(1); }
 

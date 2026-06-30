@@ -338,6 +338,42 @@ async function wirePlateSync(req, res) {
   return res.status(200).json({ ok: true, order: amazon_order_num, results });
 }
 
+// One-off maintenance: delete specific Amazon plate orders by order number(s).
+// Used to scrub phantom rows a bad email scan created. If a row was already
+// credited to a tech's on-hand count, the plates are subtracted back out before
+// the row is deleted, so inventory stays correct. Auth/method checked by caller.
+async function wirePlatePurge(req, res) {
+  const body = req.body || {};
+  let nums = body.order_nums;
+  if (typeof nums === 'string') nums = nums.split(',');
+  nums = (Array.isArray(nums) ? nums : []).map(s => String(s || '').trim()).filter(Boolean);
+  if (!nums.length) return res.status(400).json({ error: 'order_nums required (array or comma-separated string)' });
+
+  const db = serviceClient();
+
+  // `credited` arrives with migration 0041; degrade gracefully if not applied.
+  let hasCredited = true;
+  const sel = (withC) => db.from('wire_plate_purchases')
+    .select(`id, business_id, technician_id, plates, amazon_order_num${withC ? ', credited' : ''}`)
+    .in('amazon_order_num', nums);
+  let { data: rows, error } = await sel(true);
+  if (error && /credited/.test(error.message || '')) { hasCredited = false; ({ data: rows, error } = await sel(false)); }
+  if (error) return res.status(500).json({ error: String(error.message || error) });
+  rows = rows || [];
+
+  const results = [];
+  for (const r of rows) {
+    if (hasCredited && r.credited && r.technician_id && (r.plates || 0) > 0) {
+      await adjustWirePlateInv(db, r.business_id, r.technician_id, -(r.plates || 0));
+    }
+    const { error: delErr } = await db.from('wire_plate_purchases').delete().eq('id', r.id);
+    results.push({ order: r.amazon_order_num, action: delErr ? 'delete_failed' : 'deleted', error: delErr?.message });
+  }
+
+  console.log('[wire_plate_purge]', nums.join(','), `removed ${results.filter(r => r.action === 'deleted').length}/${rows.length}`);
+  return res.status(200).json({ ok: true, requested: nums, found: rows.length, removed: results.filter(r => r.action === 'deleted').length, results });
+}
+
 // Best-effort: credit a Google review to the tech who did a recent completed job
 // for a customer whose surname matches the reviewer. Conservative — only matches
 // on a (≥3 char) last name among the last 60 days of completed jobs, newest
@@ -522,6 +558,23 @@ export default async function handler(req, res) {
       return await wirePlateSync(req, res);
     } catch (e) {
       console.error('[wire_plate_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // One-off maintenance: delete specific Amazon plate orders (e.g. phantom rows a
+  // bad email scan created). Secured by CRON_SECRET. POST { order_nums: [...] }.
+  if (action === 'wire_plate_purge') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await wirePlatePurge(req, res);
+    } catch (e) {
+      console.error('[wire_plate_purge]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

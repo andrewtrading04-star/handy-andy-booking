@@ -18,6 +18,10 @@ on:
         description: 'Status to set: in_route | delivered | canceled'
         required: false
         default: ''
+      purge_orders:
+        description: 'Delete these Amazon plate order #s (comma-separated). Skips the email scan.'
+        required: false
+        default: ''
 
 jobs:
   sync:
@@ -69,4 +73,7 @@ jobs:
           # exact plate product title is known, to keep matching strict).
           AMAZON_PLATE_MATCH:    ${{ secrets.AMAZON_PLATE_MATCH }}
           CRON_SECRET:           ${{ secrets.CRON_SECRET }}
+          # One-off purge of phantom Amazon plate orders (manual dispatch only).
+          # When set, the script deletes these orders and skips the email scan.
+          PURGE_ORDERS:          ${{ github.event.inputs.purge_orders }}
         run: node scripts/bracket-email-sync.mjs
