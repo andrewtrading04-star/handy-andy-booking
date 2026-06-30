@@ -491,8 +491,21 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
-    // Unmatched, non-zero labor line -> flag for owner review (never silently $0).
-    if (lt > 0) flags.push(`Unmatched line item "${name}" ($${round0(lt)} to customer) — owner review`);
+    // Anything else that reached here with a real charge is a CUSTOM JOB (e.g.
+    // "Mounting of Dry Erase Board"). All custom work is billed hourly at $85/hr
+    // to the customer, so the tech earns $65/hr. Infer the hours from the line
+    // price ($170 -> 2h -> $130). Flag only when the price isn't a clean hourly
+    // multiple, so the inferred hours can be double-checked.
+    if (lt > 0) {
+      const rawHours = lt / 85;
+      const hours = Math.max(1, Math.round(rawHours));
+      const amt = hours * 65;
+      breakdown.push({ label: `Custom job ${hours}h @ $65`, amount: amt });
+      pay += amt;
+      if (Math.abs(rawHours - hours) > 0.1) {
+        flags.push(`Custom job "${name}" ($${round0(lt)}) — paid ${hours}h @ $65; verify the hours`);
+      }
+    }
   }
 
   // A TV-mounting job with no recognizable size base is suspicious.
@@ -613,6 +626,32 @@ function runSelfTests() {
     { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
   ] }), 'Juan').pay, 440, 'mixed TV+handyman add-on (Juan) = 440 (430 + $10 travel)');
+
+  // Custom jobs are hourly: $85/hr to the customer -> $65/hr to the tech. An
+  // unrecognized service line (e.g. "Mounting of Dry Erase Board") is paid by
+  // inferring hours from its price. $170 -> 2h -> $130. No review flag when the
+  // price is a clean hourly multiple.
+  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').pay, 130, 'custom job $170 -> 2h @ $65 = 130');
+  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').flags.length, 0, 'clean custom-hour multiple -> no flag');
+  // Custom line alongside a TV base: base + custom hours both pay.
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"-69"', line_total: 119 },
+    { name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 },
+  ] }), 'Kregg').pay, 200, 'other 60-69 (70) + custom 2h (130) = 200');
+  // Non-clean price flags the inferred hours but still pays.
+  eq(computeJobPay(job({ line_items: [{ name: 'Custom mount job', line_total: 200 }] }), 'Kregg').flags.length, 1, 'non-clean custom price flags hours');
+  // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
+  // (210) + custom dry-erase 2h (130) + full-motion brackets ×3 ($0, not Juan) +
+  // GDS sold ($0) + $50 travel = 390.
+  eq(computeJobPay(job({ price: 1034, subtotal: 955, business_slug: 'doms', travel_payout: 50, line_items: [
+    { name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 },
+    { name: 'TV Size: 60–69 inch', quantity: 3, unit_price: 135, line_total: 405 },
+    { name: 'Bracket: Full Motion', quantity: 3, unit_price: 115, line_total: 345 },
+    { name: 'Fireplace: TV not over a fireplace', quantity: 3, line_total: 0 },
+    { name: 'Wall Surface: Drywall', quantity: 3, line_total: 0 },
+    { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
+    { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
+  ] }), 'TK').pay, 390, 'Joseph job TK = 210 base + 130 custom + 50 travel = 390');
 
   // Per-unit pay: 3 tilting brackets pay Juan 3 × $35 on top of the base.
   eq(computeJobPay(job({ line_items: [
