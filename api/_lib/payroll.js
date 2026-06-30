@@ -406,13 +406,18 @@ export function computeJobPay(job, techName) {
     // Dismount pay (rate sheet §5):
     //  • Guaranteed Dismount SOLD (a charged line, per-unit lt > 0)     -> $0 (counts as sold)
     //  • Guaranteed Dismount REDEEMED ($0 standalone, per-unit lt <= 0) -> $60
-    //  • Plain dismount: per-unit customer charge > $60 -> $60, else $50
+    //  • Plain dismount CHARGED: per-unit customer charge > $60 -> $60, else $50
+    //  • Plain dismount NOT charged ($0): the customer DECLINED it (a widget
+    //    answer like "Dismount: No, I will handle it myself") -> $0. Never pay
+    //    for a dismount the customer didn't buy.
     //  • Quantity (Nx prefix or qty field) multiplies the per-unit pay.
     if (/dismount/i.test(name)) {
       const isGuaranteed = /guaranteed/i.test(name);
       const qty = dismountQty(name, li);
       const perUnit = lt / qty;
-      const unit = isGuaranteed ? (perUnit > 0 ? 0 : 60) : (perUnit > 60 ? 60 : 50);
+      const unit = isGuaranteed
+        ? (perUnit > 0 ? 0 : 60)
+        : (perUnit <= 0 ? 0 : (perUnit > 60 ? 60 : 50));
       const amt = unit * qty;
       if (amt) breakdown.push({ label: `${isGuaranteed ? 'Guaranteed Dismount' : 'Dismount'}${qty > 1 ? ` ×${qty}` : ''}`, amount: amt });
       pay += amt;
@@ -610,6 +615,19 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 0, 'GD sold -> 0');
   eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GD redeemed -> 60');
   eq(computeJobPay(job({ line_items: [{ name: 'Dismount x3', line_total: 170 }] }), 'Zach').pay, 150, 'dismount x3 $170 -> 3x$50=150');
+  // Declined dismount: a $0 "Dismount: No, I will handle" widget answer pays $0
+  // (the customer didn't buy a dismount — must not score a phantom $50).
+  eq(computeJobPay(job({ line_items: [{ name: 'Dismount: No, I will handle it myself', line_total: 0 }] }), 'Zach').pay, 0, 'declined dismount ($0) pays nothing');
+  // Gregory's real job: TV Dismount ($129) + 60-69" base + handyman add-on, with
+  // a separate declined-dismount $0 line that must NOT add $50. 60 + 70 + 65 = 195.
+  eq(computeJobPay(job({ price: 378, subtotal: 349, business_slug: 'handy-andy', line_items: [
+    { name: 'TV Dismount', line_total: 129 },
+    { name: 'TV Size: 60–69 inch', line_total: 135 },
+    { name: 'Bracket: I have my own mount', line_total: 0 },
+    { name: 'Dismount: No, I will handle', line_total: 0 },
+    { name: 'Add-ons: Handyman Labor', line_total: 85 },
+    { name: 'Tax (8.25%)', line_total: 28.79, kind: 'fee' },
+  ] }), 'Gregory').pay, 195, 'real dismount + base + handyman, declined $0 dismount ignored = 195');
 
   // TV swap flat.
   eq(computeJobPay(job({ service_name: 'TV Swap', line_items: [{ name: 'TV Swap', line_total: 120 }] }), 'Zach').pay, 60, 'tv swap flat 60');
