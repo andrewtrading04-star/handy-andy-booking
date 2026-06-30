@@ -2207,9 +2207,9 @@ async function photoGallery(req, res, db, auth) {
     .eq('business_id', biz.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
-  // Try selecting the photo group (status). If the 0026 migration hasn't been
+  // Try selecting the photo category (status). If the migration hasn't been
   // applied yet the column is missing — fall back and treat everything as
-  // 'private' so the gallery still loads.
+  // 'new' (the inbox) so the gallery still loads.
   let { data, error } = await sel(true);
   let hasStatus = true;
   if (error && /status/i.test(error.message || '')) {
@@ -2220,7 +2220,7 @@ async function photoGallery(req, res, db, auth) {
   const photos = (data || []).map(p => ({
     id: p.id, url: p.url, caption: p.caption, uploader_name: p.uploader_name, created_at: p.created_at,
     booking_id: p.booking_id,
-    status: hasStatus ? (p.status || 'private') : 'private',
+    status: hasStatus ? (p.status || 'new') : 'new',
     customer_name: p.booking?.customer?.name || 'Customer',
     technician_name: p.booking?.technician?.name || null,
     scheduled_at: p.booking?.scheduled_at || null,
@@ -2229,23 +2229,27 @@ async function photoGallery(req, res, db, auth) {
   return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit, status_supported: hasStatus });
 }
 
-// Move a photo between the Private and Posted groups. No-op-safe: validates the
-// target group and that the photo belongs to this business.
+// Move a photo between categories (New / To Post / Posted / Records). No-op-safe:
+// validates the target category and that the photo belongs to this business.
+// 'private' stays accepted so legacy photos can still be re-filed.
+const PHOTO_CATEGORIES = ['new', 'to_post', 'posted', 'records', 'private'];
 async function bookingPhotoSetStatus(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.photo_id) return res.status(400).json({ error: 'photo_id required' });
   const status = (body.status || '').toString();
-  if (status !== 'private' && status !== 'posted') {
-    return res.status(400).json({ error: "status must be 'private' or 'posted'" });
+  if (!PHOTO_CATEGORIES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${PHOTO_CATEGORIES.join(', ')}` });
   }
   const { data, error } = await db.from('booking_photos')
     .update({ status })
     .eq('id', body.photo_id).eq('business_id', biz.id)
     .select('id, status').single();
   if (error) {
+    // CHECK violation (status_check) or missing column → the category migration
+    // (0043) hasn't been applied to this database yet.
     if (/status/i.test(error.message || '')) {
-      return res.status(400).json({ error: 'Photo groups need the 0026 migration applied to the database first.' });
+      return res.status(400).json({ error: 'Photo categories need the 0043 database update applied first.' });
     }
     throw error;
   }

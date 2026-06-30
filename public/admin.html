@@ -362,6 +362,8 @@
   .gal-toggle{margin-top:8px;display:inline-block;background:var(--accent);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;}
   .gal-toggle.undo{background:#fff;color:var(--mute);border:1px solid var(--line);}
   .gal-toggle:hover{filter:brightness(1.04);}
+  .gal-movelbl{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--mute);font-weight:700;}
+  .gal-move{font-size:12px;font-weight:700;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);cursor:pointer;}
   .gal-item figcaption{padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--ink-2);}
   /* lightbox */
   .lightbox{position:fixed;inset:0;background:rgba(10,15,25,.92);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -1874,7 +1876,17 @@ document.getElementById('custForm').addEventListener('submit',async e=>{
 // Photos belong to one of two groups: 'private' (default) or 'posted'. The two
 // tabs filter the gallery by group; each photo can be flipped between them.
 let galleryPhotos=[];
-let galleryGroup='private';
+let galleryGroup='new';
+// Photo categories (manual triage buckets). Order = the owner's pipeline.
+// Legacy 'private' photos fold into the New inbox until re-filed.
+const PHOTO_CATS=[
+  {key:'new',     label:'New'},
+  {key:'to_post', label:'To Post'},
+  {key:'posted',  label:'Posted'},
+  {key:'records', label:'Records'},
+];
+function photoCat(p){ const s=(p&&p.status)||'new'; return (s==='to_post'||s==='posted'||s==='records')?s:'new'; }
+function photoCatLabel(k){ const c=PHOTO_CATS.find(x=>x.key===k); return c?c.label:'New'; }
 
 async function renderGallery(){
   const view=document.getElementById('view');
@@ -1889,29 +1901,28 @@ async function renderGallery(){
 function drawGallery(){
   const view=document.getElementById('view');
   if(!galleryPhotos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
-  const grp=p=>((p.status||'private')==='posted'?'posted':'private');
-  const priv=galleryPhotos.filter(p=>grp(p)==='private');
-  const posted=galleryPhotos.filter(p=>grp(p)==='posted');
-  const shown=galleryGroup==='posted'?posted:priv;
+  const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=0);
+  galleryPhotos.forEach(p=>{ counts[photoCat(p)]++; });
+  const shown=galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
   const card=p=>{
-    const isPosted=grp(p)==='posted';
+    const cur=photoCat(p);
+    const opts=PHOTO_CATS.map(c=>`<option value="${c.key}" ${c.key===cur?'selected':''}>${c.label}</option>`).join('');
     return `<figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
         <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
         <img src="${esc(p.url)}" loading="lazy" alt="job photo">
         <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
           <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span><br>
-          <button class="gal-toggle ${isPosted?'undo':''}" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" data-to="${isPosted?'private':'posted'}">${isPosted?'Make Private':'Post'}</button>
+          <label class="gal-movelbl">Move to <select class="gal-move" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}">${opts}</select></label>
         </figcaption>
       </figure>`;
   };
   view.innerHTML=`<div class="wrap">
     <div class="gal-tabs">
-      <button class="gal-tab ${galleryGroup==='private'?'on':''}" data-g="private">Private <span class="gal-count">${priv.length}</span></button>
-      <button class="gal-tab ${galleryGroup==='posted'?'on':''}" data-g="posted">Posted <span class="gal-count">${posted.length}</span></button>
+      ${PHOTO_CATS.map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
     </div>
     ${shown.length
       ? `<div class="gallery">${shown.map(card).join('')}</div>`
-      : `<div class="empty">No ${galleryGroup==='posted'?'posted':'private'} photos.</div>`}
+      : `<div class="empty">No photos in ${esc(photoCatLabel(galleryGroup))}.</div>`}
   </div>`;
   view.querySelectorAll('.gal-tab').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; drawGallery(); }));
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
@@ -1926,17 +1937,17 @@ function drawGallery(){
       drawGallery();
     }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
   }));
-  view.querySelectorAll('.gal-toggle').forEach(btn=>btn.addEventListener('click',async(e)=>{
+  view.querySelectorAll('.gal-move').forEach(sel=>sel.addEventListener('change',async(e)=>{
     e.stopPropagation();
-    const to=btn.dataset.to;
-    btn.disabled=true;
+    const to=sel.value, prev=galleryPhotos.find(p=>String(p.id)===String(sel.dataset.pid));
+    const before=prev?prev.status:'new';
+    sel.disabled=true;
     try{
-      await api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid, status:to }});
-      const ph=galleryPhotos.find(p=>String(p.id)===String(btn.dataset.pid));
-      if(ph) ph.status=to;
-      toast(to==='posted'?'Moved to Posted':'Moved to Private');
-      drawGallery();
-    }catch(err){ btn.disabled=false; toast(err.message||'Could not update photo'); }
+      await api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:sel.dataset.bid, photo_id:sel.dataset.pid, status:to }});
+      if(prev) prev.status=to;
+      toast('Moved to '+photoCatLabel(to));
+      drawGallery();   // photo leaves the current tab and appears under the target
+    }catch(err){ sel.disabled=false; if(prev) prev.status=before; sel.value=photoCat({status:before}); toast(err.message||'Could not move photo'); }
   }));
 }
 
