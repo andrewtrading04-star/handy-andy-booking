@@ -480,6 +480,18 @@ async function summary(req, res, db, auth) {
     profit.net_daily = Math.round(net);
   }
 
+  // Photos flagged "To Post" (the social-media queue) for this business. Safe
+  // even before the 0043 migration — the status column exists (0026); 'to_post'
+  // simply yields 0 until photos are categorized. Never let a photo-count hiccup
+  // break the whole dashboard summary.
+  let photosToPost = 0;
+  try {
+    const { count, error } = await db.from('booking_photos')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', biz.id).eq('status', 'to_post');
+    if (!error) photosToPost = count || 0;
+  } catch { /* status column absent or transient — treat as 0 */ }
+
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: tz },
     today: (today || []).map(shapeBooking),
@@ -489,6 +501,7 @@ async function summary(req, res, db, auth) {
     counts: {
       todayTotal: (today || []).length,
       unassigned: (today || []).filter(b => !b.technician_id && b.status !== 'cancelled').length,
+      photos_to_post: photosToPost,
     },
   });
 }

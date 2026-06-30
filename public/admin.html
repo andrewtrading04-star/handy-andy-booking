@@ -3630,6 +3630,7 @@ async function renderGreeting(){
     greetingData={
       jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
       estimates: newEst,
+      photosToPost: (s.counts && s.counts.photos_to_post) || 0,
       brackets: role==='owner' ? bracketPending.reduce((sum,p)=>sum+p.total,0) : 0,
       tz: (s.business && s.business.timezone) || tz(),
       revenue: s.revenue || null,
@@ -3670,26 +3671,34 @@ function paintGreeting(){
   const z=greetingData.tz||tz(), now=new Date();
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
-  const jobs=greetingData.jobs||0, est=greetingData.estimates||0;
+  const jobs=greetingData.jobs||0, est=greetingData.estimates||0, photos=greetingData.photosToPost||0;
   const hi = getTimeGreeting(userName, z);
-  const jobsTxt = jobs===0
-    ? 'You have <b>no jobs</b> scheduled today'
-    : `There ${jobs===1?'is':'are'} <b>${jobs}</b> job${jobs===1?'':'s'} on the schedule today`;
-  const estTxt = est===0
-    ? 'no estimates are waiting on a response'
-    : `you have <b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} a response`;
+  // "You have 3 jobs scheduled today, 1 estimate waiting on a response, and 4
+  // photos to post to social media." Each count handles zero + singular/plural,
+  // and the estimate/photo counts link to their section.
+  const jobsClause = jobs===0
+    ? `You have <b>no jobs</b> scheduled today`
+    : `You have <b>${jobs}</b> job${jobs===1?'':'s'} scheduled today`;
+  const estClause = est===0
+    ? `no estimates waiting on a response`
+    : `<b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> waiting on a response`;
+  const photoClause = photos===0
+    ? `no photos to post to social media`
+    : `<b>${photos}</b> <span class="greet-link" data-gophotos="1">photo${photos===1?'':'s'}</span> to post to social media`;
   const brackets = greetingData.brackets || 0;
   const bracketsTxt = brackets > 0
-    ? `, and <b>${brackets}</b> bracket${brackets===1?'':'s'} <span class="greet-link" data-gobrackets="1">pending assignment</span>`
+    ? `, plus <b>${brackets}</b> bracket${brackets===1?'':'s'} <span class="greet-link" data-gobrackets="1">pending assignment</span>`
     : '';
   el.innerHTML=
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
-    `<div class="greet-line">${jobsTxt}, and ${estTxt}${bracketsTxt}.</div>`+
+    `<div class="greet-line">${jobsClause}, ${estClause}, and ${photoClause}${bracketsTxt}.</div>`+
     greetStatsHtml()+
     greetNoteHtml();
   const estLink=el.querySelector('[data-goest]');
   if(estLink) estLink.addEventListener('click',()=>navTo('estimates'));
+  const photoLink=el.querySelector('[data-gophotos]');
+  if(photoLink) photoLink.addEventListener('click',()=>{ galleryGroup='to_post'; navTo('gallery'); });
   const bracketLink=el.querySelector('[data-gobrackets]');
   if(bracketLink) bracketLink.addEventListener('click',()=>navTo('brackets'));
 }
