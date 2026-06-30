@@ -2322,11 +2322,25 @@ async function customerUpdate(req, res, db, auth, body) {
 async function zipArea(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const postal = (req.query.postal_code || '').toString().trim();
-  if (!postal) return res.status(200).json({ service_area_id: null, name: null });
-  const { data } = await db.from('service_area_zips')
-    .select('service_area_id, service_area:service_areas ( name )')
-    .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle();
-  return res.status(200).json({ service_area_id: data?.service_area_id || null, name: data?.service_area?.name || null });
+  if (!postal) return res.status(200).json({ service_area_id: null, name: null, surcharge: 0 });
+  // Also return the per-zip surcharge so the manual New Booking form can auto-fill
+  // the Travel Fee the same way the public widget auto-applies it. Tolerate the
+  // surcharge column being absent on older DBs (degrade to 0).
+  let data = null;
+  ({ data } = await db.from('service_area_zips')
+    .select('service_area_id, surcharge, service_area:service_areas ( name )')
+    .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle()
+    .then(r => r, () => ({ data: null })));
+  if (!data) {
+    ({ data } = await db.from('service_area_zips')
+      .select('service_area_id, service_area:service_areas ( name )')
+      .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle());
+  }
+  return res.status(200).json({
+    service_area_id: data?.service_area_id || null,
+    name: data?.service_area?.name || null,
+    surcharge: Number(data?.surcharge) || 0,
+  });
 }
 
 async function technicians(req, res, db, auth) {

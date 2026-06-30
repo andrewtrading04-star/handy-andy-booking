@@ -673,7 +673,7 @@
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
       </div>
-      <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Add Additional Travel Fee ($)" inputmode="decimal">
+      <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
       <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
@@ -4330,12 +4330,24 @@ document.getElementById('nbTech').addEventListener('change',()=>{
   syncSecondTech();
   loadNbCalendar();
 });
+let nbAutoTravel='';   // last surcharge we auto-filled, so a manual override isn't clobbered
 document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
-  nbZipAreaId=null;
-  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; }catch(err){} }
+  nbZipAreaId=null; let surcharge=0;
+  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; surcharge=Number(a.surcharge)||0; }catch(err){} }
+  // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
+  // the public widget does — but only when the field is empty or still holds the
+  // value we last auto-filled, so a manual override is never overwritten.
+  const tf=document.getElementById('nbTravelFee');
+  if(surcharge>0 && (tf.value.trim()===''||tf.value.trim()===nbAutoTravel)){
+    tf.value=String(surcharge); nbAutoTravel=String(surcharge);
+    tf.title='Auto-filled from this zip’s service-area surcharge — you can change or clear it.';
+  } else if(surcharge===0 && tf.value.trim()===nbAutoTravel){
+    tf.value=''; nbAutoTravel='';
+  }
+  updateNbTotal();
   nbLoadPartnerTechs();   // repopulates both tech dropdowns via nbTechOptionsHtml
   // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
