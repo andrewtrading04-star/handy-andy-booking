@@ -220,6 +220,22 @@ async function main() {
     return;
   }
 
+  // One-off maintenance: add/re-tier a service-area zip. Triggered by setting
+  // ADD_ZIP to "zip,area,surcharge,payout" (e.g. "80027,Denver,65,50"). Runs the
+  // seed and exits — no email scan.
+  if (process.env.ADD_ZIP && process.env.ADD_ZIP.trim()) {
+    const [zip, area, surcharge, payout] = process.env.ADD_ZIP.split(',').map(s => s.trim());
+    console.log(`[bracket-sync] ADD_ZIP set — seeding ${zip} into ${area} (${surcharge}/${payout})`);
+    try {
+      const r = await syncTo('seed_zip', { zip, area, surcharge: Number(surcharge) || 0, payout: Number(payout) || 0 });
+      console.log(`[bracket-sync] seed_zip result: ${JSON.stringify(r)}`);
+    } catch (e) {
+      console.error(`[bracket-sync] seed_zip failed — ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   const boxes = mailboxes();
   if (!boxes.length) { console.error('[bracket-sync] No mailbox configured (set GMAIL_USER + GMAIL_APP_PASSWORD)'); process.exit(1); }
 

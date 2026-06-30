@@ -374,6 +374,39 @@ async function wirePlatePurge(req, res) {
   return res.status(200).json({ ok: true, requested: nums, found: rows.length, removed: results.filter(r => r.action === 'deleted').length, results });
 }
 
+// Add (or re-tier) one service-area zip across every business that serves the
+// named metro. Upserts on (business_id, postal_code) so a re-run just re-asserts
+// the surcharge/payout tier. POST { zip, area, surcharge, payout }. Auth/method
+// checked by the caller. Mirrors migration 0042's seed for live application.
+async function seedZip(req, res) {
+  const body = req.body || {};
+  const zip = String(body.zip || '').trim();
+  const area = String(body.area || '').trim();
+  const surcharge = Number(body.surcharge) || 0;
+  const payout = Number(body.payout) || 0;
+  if (!/^\d{5}$/.test(zip)) return res.status(400).json({ error: 'zip must be exactly 5 digits' });
+  if (!area) return res.status(400).json({ error: 'area (metro name, e.g. "Denver") required' });
+
+  const db = serviceClient();
+  const { data: areas, error: aErr } = await db.from('service_areas')
+    .select('id, business_id, name, business:businesses ( slug, active )')
+    .eq('name', area);
+  if (aErr) return res.status(500).json({ error: aErr.message });
+  const targets = (areas || []).filter(a => a.business && a.business.active !== false);
+  if (!targets.length) return res.status(404).json({ error: `No active business has a service area named "${area}"` });
+
+  const results = [];
+  for (const a of targets) {
+    const { error } = await db.from('service_area_zips').upsert(
+      { business_id: a.business_id, service_area_id: a.id, postal_code: zip, surcharge, tech_payout: payout },
+      { onConflict: 'business_id,postal_code' }
+    );
+    results.push({ slug: a.business.slug, area, action: error ? 'failed' : 'upserted', error: error && error.message });
+  }
+  console.log('[seed_zip]', zip, area, `${surcharge}/${payout}`, results.map(r => `${r.slug}:${r.action}`).join(', '));
+  return res.status(200).json({ ok: true, zip, area, surcharge, payout, results });
+}
+
 // Best-effort: credit a Google review to the tech who did a recent completed job
 // for a customer whose surname matches the reviewer. Conservative — only matches
 // on a (≥3 char) last name among the last 60 days of completed jobs, newest
@@ -575,6 +608,23 @@ export default async function handler(req, res) {
       return await wirePlatePurge(req, res);
     } catch (e) {
       console.error('[wire_plate_purge]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Add/re-tier a service-area zip live (mirror of migration 0042). Secured by
+  // CRON_SECRET. POST { zip, area, surcharge, payout }.
+  if (action === 'seed_zip') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await seedZip(req, res);
+    } catch (e) {
+      console.error('[seed_zip]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

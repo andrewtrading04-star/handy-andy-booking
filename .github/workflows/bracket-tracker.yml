@@ -22,6 +22,10 @@ on:
         description: 'Delete these Amazon plate order #s (comma-separated). Skips the email scan.'
         required: false
         default: ''
+      add_zip:
+        description: 'Add a service-area zip: "zip,area,surcharge,payout" (e.g. 80027,Denver,65,50). Skips the email scan.'
+        required: false
+        default: ''
 
 jobs:
   sync:
@@ -76,4 +80,7 @@ jobs:
           # One-off purge of phantom Amazon plate orders (manual dispatch only).
           # When set, the script deletes these orders and skips the email scan.
           PURGE_ORDERS:          ${{ github.event.inputs.purge_orders }}
+          # One-off add/re-tier of a service-area zip (manual dispatch only).
+          # "zip,area,surcharge,payout"; when set the script seeds it and skips the scan.
+          ADD_ZIP:               ${{ github.event.inputs.add_zip }}
         run: node scripts/bracket-email-sync.mjs
