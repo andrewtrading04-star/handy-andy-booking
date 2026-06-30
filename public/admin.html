@@ -1285,7 +1285,7 @@ function renderCalBody(){
 function evtCard(b){
   const xcoSecondary = b.secondary_technician?.cross_company;
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
-    <div class="evt-t"><span class="evt-time">${esc(fmtTimeRange(b)).replace(/\s*[–-]\s*/,'–')}</span><span class="evt-dur">${esc(fmtDuration(b))}</span></div>
+    <div class="evt-t"><span class="evt-time">${esc(fmtClock(b.scheduled_at))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price">${money(b.price)}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay (admin only)">${money(b.econ.tech_payout)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${(b.payment_status==='paid'||b.status==='completed')?`<span class="evt-pills">${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}${b.status==='completed'?'<span class="evt-complete">✓ COMPLETE</span>':''}</span>`:''}</div>
   </div>`;
@@ -1354,7 +1354,7 @@ function renderListView(dates){
       return `<div class="job evt-row${xcoSecondary?' xco-secondary':''}" data-id="${b.id}"><div class="row">
         <div><div class="name">${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}${xcoSecondary?` <span class="xco-secondary-tag">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
         <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
-        <div class="time">${esc(fmtTimeRange(b))}<br>${esc(fmtDuration(b))}</div></div>${listEcon(b)}</div>`;
+        <div class="time">${esc(fmtClock(b.scheduled_at))}</div></div>${listEcon(b)}</div>`;
     }).join('');
   });
   html+='</div>';
@@ -1458,7 +1458,7 @@ function openBooking(b){
   document.getElementById('bkBody').innerHTML=`
     <div class="bk-row"><span>${ic('customers')}</span><div>Booked by <strong>${esc(bookedBy)}</strong></div></div>
     ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}
-    <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
+    <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}</div></div>
     <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
     <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
     ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
