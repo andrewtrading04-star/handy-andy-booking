@@ -142,7 +142,20 @@ async function scanMailbox({ user, pass }, todayISO) {
   await client.connect();
   console.log(`[bracket-sync] Connected: ${user}`);
   try {
-    await client.mailboxOpen('INBOX');
+    // Scan Gmail's "All Mail" (everything except Spam/Trash), NOT just INBOX. The
+    // office routinely archives Walmart/Amazon order emails — and an order's
+    // CONFIRMATION (which carries the per-item quantities) is often archived before
+    // a run, while individual delivery emails can split a shipment and undercount.
+    // Scanning All Mail means every confirmation + delivery email for an order is
+    // seen and merged, so quantities and delivered status are always complete.
+    let box = 'INBOX';
+    try {
+      const boxes = await client.list();
+      const allMail = (boxes || []).find(m => m.specialUse === '\\All') || (boxes || []).find(m => /(^|\/)All Mail$/i.test(m.path));
+      if (allMail) box = allMail.path;
+    } catch (e) { console.warn(`[bracket-sync] ${user}: mailbox list failed, using INBOX: ${e.message}`); }
+    await client.mailboxOpen(box);
+    console.log(`[bracket-sync] ${user}: scanning "${box}"`);
     const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
     // Targeted candidate search — keep the set SMALL so a busy business inbox
     // doesn't pull hundreds of messages every run:
