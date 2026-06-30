@@ -1466,7 +1466,10 @@ function openBooking(b){
     '<option value="any">⭐ Auto-pick scheduled 2nd tech</option>', xcoSecondOpt,
     ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
-  const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);
+  // The 2nd-tech picker is available on ANY assignable booking — so the office can
+  // add a second tech after the fact (e.g. the customer changes their mind), not
+  // only on jobs that originally requested a two-person lift.
+  const showSecond=canAssign;
   document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}`;
   document.getElementById('bkBody').innerHTML=`
     <div class="bk-row"><span>${ic('customers')}</span><div>Booked by <strong>${esc(bookedBy)}</strong></div></div>

@@ -1032,7 +1032,7 @@ function isTaxLi(li) {
 // hours / travel. They arrive as kind 'service' via the Zenbooker path, so match
 // by name too. Shown read-only in the Payment section, not the editable list.
 function isFeeLi(li) {
-  return /service area surcharge|after[\s-]?hours|travel fee/i.test(((li && li.name) || '').trim());
+  return /service area surcharge|after[\s-]?hours|travel fee|service\s*minimum/i.test(((li && li.name) || '').trim());
 }
 // The Guaranteed Dismount up-sell — a payment/warranty concern, not a task the
 // tech edits. Match by pattern (not an exact name) so a category prefix
