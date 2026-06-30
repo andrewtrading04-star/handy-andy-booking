@@ -674,6 +674,7 @@
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
       </div>
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
+      <div id="nbConvertSummary" style="display:none;font-size:13px;color:var(--ink-2);padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
@@ -3037,6 +3038,7 @@ async function renderEstimates(){
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
+    document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
   }catch(err){ const w=document.getElementById('estWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
@@ -3086,6 +3088,7 @@ function estCard(e){
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        ${e.approved_at?`<button class="btn sm" data-est-convert="${e.id}" title="Create a booking from this approved estimate">→ Convert to job</button>`:''}
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
         ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
@@ -3094,6 +3097,21 @@ function estCard(e){
       </span>
     </div>
   </div>`;
+}
+
+// Convert an approved estimate into a booking: open the New Booking modal with
+// the customer details + the estimate's priced lines pre-loaded, so the office
+// just picks a date/time slot and a tech, then books.
+function convertEstimateToJob(id){
+  const e=estCache[id]; if(!e){ toast('Estimate not found — refresh and try again.'); return; }
+  const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(it.description||Number(it.unit_price)>0));
+  openNewBooking({
+    name: e.customer_name, phone: e.customer_phone, email: e.customer_email,
+    postal_code: e.customer_zip,
+    address_line1: e.customer_address||e.address_line1||'',
+    city: e.customer_city||'', state: e.customer_state||'',
+    line_items: lines,
+  });
 }
 
 // ── Estimate quote builder (line items) ──────────────────────────────────────
@@ -3894,6 +3912,7 @@ async function openNewBooking(prefill){
   document.getElementById('nbTravelFee').value='';
   document.getElementById('nbCustomLabel').value=''; document.getElementById('nbCustomPrice').value='';
   document.getElementById('nbTotalDisplay').textContent='';
+  nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
   document.getElementById('nbPaymentMethod').value='';
   document.getElementById('nbCardWrap').style.display='none';
   document.getElementById('nbDate').value='';
@@ -3950,9 +3969,29 @@ async function openNewBooking(prefill){
     set('nbCity', prefill.city);
     set('nbState', prefill.state);
     set('nbZip', prefill.postal_code);
+    // Converted from an estimate: carry its priced lines onto the booking. They
+    // ride along as line items (so the office just picks a date/slot + tech).
+    if(Array.isArray(prefill.line_items) && prefill.line_items.length){
+      nbConvertLines = prefill.line_items
+        .map(li=>({ label:(li.description||li.label||'Item').toString(), price:Number(li.unit_price!=null?li.unit_price:li.price)||0, quantity:Math.max(1,Math.round(Number(li.qty!=null?li.qty:li.quantity)||1)) }))
+        .filter(l=>l.label||l.price);
+      renderNbConvertSummary();
+    }
     // Resolve the zip's metro so the tech list filters + the calendar loads.
     if(prefill.postal_code){ const z=document.getElementById('nbZip'); if(z) z.dispatchEvent(new Event('change')); }
+    updateNbTotal();
   }
+}
+// Lines carried over when converting an approved estimate into a booking. Null
+// for a normal manual booking. Included in nbCollectSelections so they flow into
+// the total + the created job's line items.
+let nbConvertLines=null;
+function renderNbConvertSummary(){
+  const el=document.getElementById('nbConvertSummary'); if(!el) return;
+  if(!nbConvertLines || !nbConvertLines.length){ el.style.display='none'; el.innerHTML=''; return; }
+  const rows=nbConvertLines.map(l=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:1px 0;"><span>${l.quantity>1?`<b>×${l.quantity}</b> `:''}${esc(l.label)}</span><b>${money(l.price*l.quantity)}</b></div>`).join('');
+  el.innerHTML=`<div style="font-weight:800;color:#1d4ed8;margin-bottom:4px;">📋 From estimate — these lines will be added:</div>${rows}`;
+  el.style.display='';
 }
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
 // One idempotency key per new-booking attempt (set on modal open). Every submit
@@ -4799,6 +4838,8 @@ function nbCollectSelections(){
     }));
     return out;
   }
+  // Lines carried over from a converted estimate ride on every job type.
+  if(nbConvertLines) nbConvertLines.forEach(l=>out.push({option_id:null, label:l.label, price:l.price, quantity:l.quantity}));
   // Custom line item first, so it shows on every job type (TV or Handyman).
   const ci=nbCustomItem(); if(ci) out.push({option_id:null, label:ci.label, price:ci.price, quantity:1});
   // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
