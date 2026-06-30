@@ -276,7 +276,7 @@ function stepContact(){
     <label class="fld">Email</label>
     <input type="email" id="cemail" value="${esc(state.email)}" placeholder="you@email.com (optional)" autocomplete="email">
     <label class="fld">Zip code <span class="req">*</span></label>
-    <input type="text" id="czip" value="${esc(state.zip)}" placeholder="e.g. 80203" inputmode="numeric" maxlength="10" autocomplete="postal-code">
+    <input type="text" id="czip" value="${esc(state.zip)}" placeholder="e.g. 80203" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)" autocomplete="postal-code">
     <div class="consent">
       <input type="checkbox" id="consent" ${state.consent?'checked':''}>
       <label for="consent">Text me updates about this estimate (scheduling, confirmations). Msg &amp; data rates may apply. Reply STOP to opt out.</label>

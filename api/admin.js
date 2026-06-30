@@ -1504,6 +1504,10 @@ async function bookingCreate(req, res, db, auth, body) {
     tv_size_category: body.tv_size_category || null,
     sms_consent: !!body.sms_consent,
     idempotency_key: idempotencyKey,
+    // Who booked it, for the "Booked by" line on the job detail. Owner = "Admin";
+    // a secretary = their name (Heather / Joey). Widget bookings carry source
+    // 'widget' instead and are labeled "Booking widget" client-side.
+    metadata: { booked_by: auth.role === 'owner' ? 'Admin' : (auth.name || 'Office') },
   };
 
   // Some columns depend on later migrations (0014 sms_consent, 0019 lift cols).
@@ -2501,7 +2505,7 @@ function bookingSelect() {
   // secondary_technician_id) because bookings has TWO foreign keys to
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
-  const base = `id, status, source, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
+  const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
           address_line1, city, state, postal_code,
           business:businesses ( slug ),
@@ -2532,6 +2536,9 @@ function shapeBooking(b) {
     id: b.id,
     status: b.status,
     source: b.source,
+    // Who booked it: 'Admin' / 'Heather' / 'Joey' (stored at create), or null on
+    // older/widget bookings (the client falls back to source for "Booking widget").
+    booked_by: b.metadata?.booked_by || null,
     // Publishable key for the "Change card" UI, by the booking's business.
     stripe_pk: bookingStripePk(b.business?.slug || null),
     scheduled_at: b.scheduled_at,

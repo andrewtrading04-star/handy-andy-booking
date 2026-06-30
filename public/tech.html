@@ -539,6 +539,7 @@ async function showDetail(id){
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
         ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>`<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}</span><span>$${li.line_total}</span></div>`).join('')}</div>`:''}
+        ${j.tax?`<div class="kv" style="display:flex;justify-content:space-between;margin-bottom:12px;"><span style="color:var(--mute);">Tax</span><span>$${j.tax}</span></div>`:''}
         ${(j.discounts&&j.discounts.length)?`<div style="margin-bottom:12px;">${j.discounts.filter(d=>Number(d.amount)).map(d=>`<div class="kv" style="display:flex;justify-content:space-between;color:var(--green);font-weight:700;"><span>${esc(liName(d.name))}</span><span>−$${Math.abs(Number(d.amount))}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
           <div><div class="sub" style="color:var(--mute);font-size:13px;">Total (incl. tax)</div><div style="font-weight:800;font-size:24px;">$${j.price}</div></div>
@@ -681,11 +682,11 @@ function mountTechLineItems(j, id){
   // Existing lines (already on the booking) show TEXT + remove only — techs don't
   // see the customer pricing on them. A line the tech ADDS gets a price field so
   // they can charge for on-site extras. `existing` marks which is which.
-  // Coupons/discounts never belong in the editable list — they show at the bottom
-  // (server already filters them out; this is a belt-and-suspenders guard).
-  const notCoupon=li=>!/^coupon\b/i.test(String(liName(li.name)||'').trim());
+  // Coupons and tax never belong in the editable list — they show in the Payment
+  // section (server already filters them out; this is a belt-and-suspenders guard).
+  const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n); };
   const seeded=(j.line_items&&j.line_items.length)
-    ? j.line_items.filter(notCoupon).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
+    ? j.line_items.filter(notHidden).map(li=>({ name:liName(li.name)||'', price:Number(li.line_total!=null?li.line_total:li.unit_price)||0, existing:true }))
     : [];
   let rows=seeded.length ? seeded
     : [{ name:j.service||'Service', price:Math.max(0,(Number(j.price)||0)-hiddenTotal), existing:true }];

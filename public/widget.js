@@ -642,7 +642,7 @@
       <div style="text-align:center!important;">
         <h1 style="${S.h1};font-size:26px!important;text-align:center!important;">Do we service your area?</h1>
         <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see.</p>
-        <input type="text" id="ha-zip" style="${S.input}" placeholder="e.g. 77001" maxlength="5" inputmode="numeric">
+        <input type="text" id="ha-zip" style="${S.input}" placeholder="e.g. 77001" maxlength="5" inputmode="numeric" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)">
         <div style="text-align:center!important;">
           <button id="btn-zip" style="${S.btnPri};padding:12px 36px!important;font-size:16px!important;">Check Area →</button>
         </div>

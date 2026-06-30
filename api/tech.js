@@ -1019,10 +1019,15 @@ const HIDDEN_LI = new Set(['Guaranteed Dismount Service']);
 function isCouponLi(li) {
   return ((li && li.kind) === 'coupon') || /^coupon\b/i.test(((li && li.name) || '').trim());
 }
+// Sales tax — by name (covers the Zenbooker path where it lands as kind 'service'
+// instead of our 'fee'). Kept out of the tech's editable list; shown in Payment.
+function isTaxLi(li) {
+  return /^tax\b/i.test(((li && li.name) || '').trim());
+}
 function isHiddenLi(li) {
   const kind = (li && li.kind) || 'service';
   if (kind === 'fee' || kind === 'tip' || kind === 'coupon') return true;
-  if (isCouponLi(li)) return true;   // keep coupons out of the tech's editable list
+  if (isCouponLi(li) || isTaxLi(li)) return true;   // coupons & tax aren't editable work lines
   return HIDDEN_LI.has(((li && li.name) || '').trim());
 }
 
@@ -1175,6 +1180,9 @@ function shapeJob(b, full = false, forTech = false) {
     // discount). Amounts are negative (a price reduction).
     out.discounts = (b.line_items || []).filter(isCouponLi)
       .map(li => ({ name: li.name || 'Coupon', amount: Number(li.line_total) || 0 }));
+    // Sales tax, shown in the Payment section (never an editable line item).
+    out.tax = Math.round((b.line_items || []).filter(isTaxLi)
+      .reduce((t, li) => t + (Number(li.line_total) || 0), 0) * 100) / 100;
     // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the
     // line-item editor can seed correctly: when a job has no visible work lines, the
     // starting line should be (price − hidden_total), not the whole price.

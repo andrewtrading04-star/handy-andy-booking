@@ -132,6 +132,9 @@
   .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);line-height:1.3;}
   .evt-time{white-space:nowrap;}
   .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
+  /* Total ticket price (black) + total tech pay (smaller, blue, admin-only). */
+  .evt-price{font-weight:800;color:var(--ink);margin-left:4px;}
+  .evt-techpay{font-weight:700;font-size:11px;color:#2563eb;margin-left:3px;}
   .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
   .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
@@ -650,7 +653,7 @@
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
       <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP"></div>
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
@@ -757,7 +760,7 @@
       <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
       <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP"></div>
+      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Save changes</button>
         <button class="btn ghost" type="button" id="cuCancel">Cancel</button>
@@ -1284,7 +1287,7 @@ function evtCard(b){
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(fmtTimeRange(b)).replace(/\s*[–-]\s*/,'–')}</span><span class="evt-dur">${esc(fmtDuration(b))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
-    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-dur">${money(b.price)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${(b.payment_status==='paid'||b.status==='completed')?`<span class="evt-pills">${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}${b.status==='completed'?'<span class="evt-complete">✓ COMPLETE</span>':''}</span>`:''}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price">${money(b.price)}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay (admin only)">${money(b.econ.tech_payout)}</span>`:''}${b.photo_count?`<span class="evt-photo">📷 ${b.photo_count}</span>`:''}${(b.payment_status==='paid'||b.status==='completed')?`<span class="evt-pills">${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}${b.status==='completed'?'<span class="evt-complete">✓ COMPLETE</span>':''}</span>`:''}</div>
   </div>`;
 }
 function dayColumn(ds){
@@ -1429,6 +1432,9 @@ function openBooking(b){
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
   const canReopen=b.status==='completed';
+  // Who booked it: widget bookings are "Booking widget"; office bookings carry the
+  // booker's name (Admin / Heather / Joey). Older office bookings default to Admin.
+  const bookedBy = b.source==='widget' ? 'Booking widget' : (b.booked_by || 'Admin');
   // A cross-company job is assigned to a partner-company tech who isn't in our
   // own roster (techCache) — add them so the dropdown shows the right person.
   const xcoOpt=(b.cross_company && b.technician && !techCache.some(t=>t.id===b.technician_id))
@@ -1450,6 +1456,7 @@ function openBooking(b){
   const showSecond=canAssign && (b.needs_lifting || b.secondary_technician_id);
   document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}`;
   document.getElementById('bkBody').innerHTML=`
+    <div class="bk-row"><span>${ic('customers')}</span><div>Booked by <strong>${esc(bookedBy)}</strong></div></div>
     ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}${fmtDuration(b)?' · '+esc(fmtDuration(b)):''}</div></div>
     <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
