@@ -549,6 +549,7 @@ async function showDetail(id){
       ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
         ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>{const q=liDisplayQty(li);return `<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}${q>1?` <strong style="color:var(--ink);">×${q}</strong>`:''}</span><span>$${li.line_total}</span></div>`;}).join('')}</div>`:''}
+        ${(j.fees&&j.fees.length)?`<div style="margin-bottom:12px;">${j.fees.filter(f=>Number(f.amount)).map(f=>`<div class="kv" style="display:flex;justify-content:space-between;"><span style="color:var(--mute);">${esc(liName(f.name))}</span><span>$${f.amount}</span></div>`).join('')}</div>`:''}
         ${j.tax?`<div class="kv" style="display:flex;justify-content:space-between;margin-bottom:12px;"><span style="color:var(--mute);">Tax</span><span>$${j.tax}</span></div>`:''}
         ${(j.discounts&&j.discounts.length)?`<div style="margin-bottom:12px;">${j.discounts.filter(d=>Number(d.amount)).map(d=>`<div class="kv" style="display:flex;justify-content:space-between;color:var(--green);font-weight:700;"><span>${esc(liName(d.name))}</span><span>−$${Math.abs(Number(d.amount))}</span></div>`).join('')}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line);">
@@ -694,7 +695,7 @@ function mountTechLineItems(j, id){
   // they can charge for on-site extras. `existing` marks which is which.
   // Coupons and tax never belong in the editable list — they show in the Payment
   // section (server already filters them out; this is a belt-and-suspenders guard).
-  const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n); };
+  const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|travel fee/i.test(n); };
   // Row model: { name, unit (per-item price), qty, existing }. line total = unit×qty.
   const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true }; };
   const seeded=(j.line_items&&j.line_items.length) ? j.line_items.filter(notHidden).map(mkRow) : [];
