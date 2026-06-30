@@ -419,6 +419,14 @@
   .good-alert .ga-x{background:none;border:none;color:#15803d;font-size:20px;line-height:1;cursor:pointer;flex-shrink:0;padding:0 4px;font-weight:700;}
   /* "Left a Google review" pill */
   .gpill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:#dcfce7;color:#166534;}
+  /* ── Compact Google-review rows (tight list, not big cards) ─────────────── */
+  .greview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 11px;margin-bottom:7px;}
+  .greview-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+  .greview-stars{font-size:12px;white-space:nowrap;letter-spacing:-1px;}
+  .greview-who{color:var(--mute);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+  .greview-credit{margin-left:auto;flex:0 0 auto;}
+  .greview-credit select{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:150px;}
+  .greview-text{color:var(--ink-2);font-size:12.5px;line-height:1.4;margin-top:4px;}
 
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
@@ -2907,17 +2915,18 @@ async function renderReviews(){
       const stars='⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
       const when=r.review_date||(r.created_at?new Date(r.created_at).toLocaleDateString():'');
       const credit=role==='owner'
-        ? `<select data-gtech="${esc(r.id)}" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;">${techOptsFor(r.technician_id)}</select>`
+        ? `<select data-gtech="${esc(r.id)}">${techOptsFor(r.technician_id)}</select>`
         : (r.technician_name?`<span class="meta">${esc(r.technician_name)}</span>`:'');
-      return `<div class="job">
-        <div class="row">
-          <div style="flex:1;min-width:0;">
-            <div class="name">${stars} <span class="gpill">Google</span></div>
-            <div class="meta">${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}</div>
-            <div class="meta" style="margin-top:8px;font-size:13px;line-height:1.5;">${r.review_text?esc(r.review_text):'<em style="color:var(--mute);">No text</em>'}</div>
-          </div>
-          <div style="text-align:right;white-space:nowrap;">${credit}</div>
-        </div>
+      // Rating-only reviews carry no real text — keep them to a single tight row.
+      const ratingOnly=!r.review_text||/only left a rating/i.test(r.review_text);
+      const text=ratingOnly?'':`<div class="greview-text">${esc(r.review_text)}</div>`;
+      const who=`${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}`;
+      return `<div class="greview">
+        <div class="greview-top">
+          <span class="greview-stars">${stars}</span>
+          <span class="greview-who" title="${esc(who)}">${who}</span>
+          <span class="greview-credit">${credit}</span>
+        </div>${text}
       </div>`;
     }).join('');
 
