@@ -278,8 +278,13 @@ function slotLabelHtml(s){
   return s&&s.bonus ? `${base}<span class="slotbonus">+$${esc(s.bonus)} bonus</span>` : base;
 }
 // Strip the category prefix ("TV Size: ", "Bracket: ", "Fireplace: ", "Wall Surface: ", …)
-// so payment line items read as the bare option (e.g. "33-59 inch").
-function liName(name){ const s=String(name||''); const i=s.indexOf(':'); return (i>-1?s.slice(i+1):s).trim()||s; }
+// so payment line items read as the bare option (e.g. "33-59 inch"). The long
+// Guaranteed Dismount label collapses to "GDS".
+function liName(name){
+  const s=String(name||'');
+  if(/guaranteed\s+dismount/i.test(s)) return 'GDS';
+  const i=s.indexOf(':'); return (i>-1?s.slice(i+1):s).trim()||s;
+}
 // How many of this line item to show (e.g. 2 tilting brackets). Prefer the stored
 // quantity; if that's 1 but the price is a clean multiple of the unit price (some
 // booking paths fold the count into the total), infer the count from total ÷ unit.
@@ -695,7 +700,7 @@ function mountTechLineItems(j, id){
   // they can charge for on-site extras. `existing` marks which is which.
   // Coupons and tax never belong in the editable list — they show in the Payment
   // section (server already filters them out; this is a belt-and-suspenders guard).
-  const notHidden=li=>{ const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|travel fee/i.test(n) && !/guarante\w*\s+dismount|dismount\s+service/i.test(n); };
+  const notHidden=li=>{ const raw=String(li&&li.name||''); if(/^\s*tv\s*type\s*:\s*regular\b/i.test(raw)) return false; const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|travel fee/i.test(n) && !/guarante\w*\s+dismount|dismount\s+service/i.test(n); };
   // Row model: { name, unit (per-item price), qty, existing }. line total = unit×qty.
   const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true }; };
   const seeded=(j.line_items&&j.line_items.length) ? j.line_items.filter(notHidden).map(mkRow) : [];

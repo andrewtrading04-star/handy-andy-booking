@@ -101,6 +101,17 @@ function shade(hex, amt) {
   return '#' + ch.map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
+// Tidy a line-item label for the customer receipt: drop the "TV Size:"/"TV Type:"
+// option-group prefix and shorten "Guaranteed Dismount Service" to "GDS".
+function cleanLineLabel(name) {
+  const s = String(name || '');
+  if (/guaranteed\s+dismount/i.test(s)) return 'GDS';
+  return s.replace(/^\s*tv\s*(?:size|type)\s*:\s*/i, '').trim() || s;
+}
+// The default "TV Type: Regular TV" line is noise on the receipt — hide it.
+// Frame and other non-default TV types still show.
+function isDefaultTypeLabel(name) { return /^\s*tv\s*type\s*:\s*regular\b/i.test(String(name || '')); }
+
 // ── Branded booking-confirmation email ──────────────────────────────────────
 // `details` mirrors the booking summary the widget shows on the thank-you page:
 //   firstName, dateLong, timeWindow, serviceName,
@@ -134,11 +145,11 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
   // we never show a guessed number. Mirrors the thank-you page (tip is separate;
   // no tax line, to stay consistent with what the customer saw on screen).
   let priceBlock = '';
-  const lines = Array.isArray(details.lines) ? details.lines.filter(li => li && li.amount != null) : [];
+  const lines = Array.isArray(details.lines) ? details.lines.filter(li => li && li.amount != null && !isDefaultTypeLabel(li.label)) : [];
   if (lines.length && details.total != null) {
     const lineRows = lines.map(li => `
           <tr>
-            <td style="padding:7px 0;font-size:14px;color:#374151;">${esc(li.label)}${Number(li.qty) > 1 ? ` &times; ${Number(li.qty)}` : ''}</td>
+            <td style="padding:7px 0;font-size:14px;color:#374151;">${esc(cleanLineLabel(li.label))}${Number(li.qty) > 1 ? ` &times; ${Number(li.qty)}` : ''}</td>
             <td align="right" style="padding:7px 0;font-size:14px;color:#374151;white-space:nowrap;">${money(li.amount)}</td>
           </tr>`).join('');
     const tipRow = Number(details.tip) > 0 ? `
