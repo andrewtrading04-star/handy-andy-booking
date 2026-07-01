@@ -1545,9 +1545,12 @@ function openBooking(b){
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}</div></div>
     <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
     <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
-    ${b.address?`<div class="bk-row"><span>${ic('location')}</span><div>${esc(b.address)}</div></div>`:''}
-    ${b.customer?.phone?`<div class="bk-row"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
-    ${b.customer?.email?`<div class="bk-row"><span>${ic('email')}</span><div><a href="mailto:${esc(b.customer.email)}">${esc(b.customer.email)}</a></div></div>`:''}
+    <div class="bk-row" id="bkAddrRow"><span>${ic('location')}</span><div style="flex:1;display:flex;align-items:center;gap:8px;justify-content:space-between;">
+      <span>${b.address?esc(b.address):'<span style="color:var(--mute);">No address on file</span>'}</span>
+      <button type="button" class="btn ghost sm" id="bkContactEdit" title="Edit address, phone & email" style="padding:2px 8px;flex:0 0 auto;">✏️ Edit</button>
+    </div></div>
+    ${b.customer?.phone?`<div class="bk-row" id="bkPhoneRow"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    ${b.customer?.email?`<div class="bk-row" id="bkEmailRow"><span>${ic('email')}</span><div><a href="mailto:${esc(b.customer.email)}">${esc(b.customer.email)}</a></div></div>`:''}
     ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
@@ -1630,6 +1633,53 @@ function openBooking(b){
   document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
   document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
   mountLineItemsEditor(b);
+  const ce=document.getElementById('bkContactEdit'); if(ce) ce.onclick=()=>editBookingContact(b);
+}
+
+// Inline editor: fix a booking's SERVICE address + the customer's phone/email
+// after the job is booked. Address saves to the booking; phone/email to the
+// customer record. Available to any office user (owner / Joey / Heather).
+function editBookingContact(b){
+  const row=document.getElementById('bkAddrRow'); if(!row) return;
+  ['bkPhoneRow','bkEmailRow'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+  const cust=b.customer||{};
+  row.innerHTML=`<span>${ic('location')}</span><div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+    <input id="bkAddrL1" class="search" style="margin:0;" placeholder="Street address" value="${esc(b.address_line1||'')}">
+    <input id="bkAddrL2" class="search" style="margin:0;" placeholder="Apt / unit / suite (optional)" value="${esc(b.address_line2||'')}">
+    <div style="display:flex;gap:6px;">
+      <input id="bkAddrCity" class="search" style="margin:0;" placeholder="City" value="${esc(b.city||'')}">
+      <input id="bkAddrState" class="search" style="margin:0;max-width:56px;" placeholder="ST" maxlength="2" value="${esc(b.state||'')}">
+      <input id="bkAddrZip" class="search" style="margin:0;max-width:88px;" placeholder="ZIP" inputmode="numeric" maxlength="5" value="${esc(b.postal_code||'')}" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
+    </div>
+    <input id="bkAddrPhone" class="search" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(cust.phone||'')}">
+    <input id="bkAddrEmail" class="search" style="margin:0;" placeholder="Email" inputmode="email" value="${esc(cust.email||'')}">
+    <div style="display:flex;gap:6px;">
+      <button type="button" class="btn sm" id="bkAddrSave">Save</button>
+      <button type="button" class="btn ghost sm" id="bkAddrCancel">Cancel</button>
+    </div>
+  </div>`;
+  attachAddressAutocomplete(document.getElementById('bkAddrL1'), { city:'bkAddrCity', state:'bkAddrState', zip:'bkAddrZip' });
+  document.getElementById('bkAddrCancel').onclick=()=>openBooking(b);
+  document.getElementById('bkAddrSave').onclick=async()=>{
+    const val=id=>document.getElementById(id).value.trim();
+    const addr={ business:current.slug, id:b.id,
+      address_line1:val('bkAddrL1'), address_line2:val('bkAddrL2'),
+      city:val('bkAddrCity'), state:val('bkAddrState').toUpperCase(), postal_code:val('bkAddrZip') };
+    const phone=val('bkAddrPhone'), email=val('bkAddrEmail');
+    const btn=document.getElementById('bkAddrSave'); btn.disabled=true; btn.textContent='Saving…';
+    try{
+      const r=await api('booking_address_update',{ method:'POST', body:addr });
+      // Phone/email live on the customer record — only PATCH when they changed.
+      if(b.customer&&b.customer.id&&(phone!==(b.customer.phone||'')||email!==(b.customer.email||''))){
+        await api('customer_update',{ method:'POST', body:{ business:current.slug, id:b.customer.id, phone, email }});
+        b.customer.phone=phone; b.customer.email=email;
+      }
+      b.address_line1=addr.address_line1; b.address_line2=addr.address_line2; b.city=addr.city; b.state=addr.state; b.postal_code=addr.postal_code;
+      b.address=(r&&r.address)||[addr.address_line1,addr.city,addr.state,addr.postal_code].filter(Boolean).join(', ');
+      toast('Details updated ✓');
+      openBooking(b); refreshCurrent();
+    }catch(e){ toast(e.message); btn.disabled=false; btn.textContent='Save'; }
+  };
 }
 
 // ── Line-item editor (booking modal) ─────────────────────────────────────────

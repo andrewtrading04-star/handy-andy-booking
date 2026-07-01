@@ -220,6 +220,7 @@ export default async function handler(req, res) {
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
+      case 'booking_address_update': return await bookingAddressUpdate(req, res, db, auth, body);
       case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
       case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
@@ -2170,6 +2171,40 @@ async function bookingPayment(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, tip, payment_intent_id: pi.id });
 }
 
+// Edit a booking's SERVICE address after it's booked (office fixes a typo or the
+// customer moves the job). Re-derives the service area from the new zip so the
+// territory filter + travel payout stay correct. Available to any office user.
+async function bookingAddressUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const { data: existing } = await db.from('bookings')
+    .select('id, postal_code').eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Booking not found' });
+
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const patch = {
+    address_line1: str(body.address_line1) || null,
+    address_line2: str(body.address_line2) || null,
+    city: str(body.city) || null,
+    state: str(body.state).toUpperCase() || null,
+    postal_code: str(body.postal_code) || null,
+  };
+  // A new zip changes territory + travel tier — re-resolve the service area when
+  // the zip is one we serve; otherwise leave the existing area untouched.
+  if (patch.postal_code && patch.postal_code !== existing.postal_code) {
+    const areaId = await serviceAreaIdFromPostal(db, biz.id, patch.postal_code);
+    if (areaId) patch.service_area_id = areaId;
+  }
+
+  const { error } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
+  if (error) return res.status(500).json({ error: error.message });
+  const address = [patch.address_line1, patch.city, patch.state, patch.postal_code].filter(Boolean).join(', ');
+  return res.status(200).json({ ok: true, address, ...patch });
+}
+
 // ── Chargeback disputes (draft evidence from stored signatures, owner submits) ──
 // A booking's card can live in more than one Stripe account for a business
 // (Handy Andy: the legacy 'global' account AND its own; Doms: its own). Return
@@ -2772,7 +2807,7 @@ function bookingSelect() {
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
-          address_line1, city, state, postal_code,
+          address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
           technician:technicians!technician_id ( id, name, status, color, business_id, business:businesses ( name ) ),
@@ -2826,6 +2861,12 @@ function shapeBooking(b) {
     cross_company: !!(b.technician?.business_id && b.business_id && b.technician.business_id !== b.business_id),
     partner_company: b.technician?.business?.name || null,
     address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
+    // Raw address parts so the office can edit the service address after booking.
+    address_line1: b.address_line1 || '',
+    address_line2: b.address_line2 || '',
+    city: b.city || '',
+    state: b.state || '',
+    postal_code: b.postal_code || '',
     customer: b.customer || null,
     technician: b.technician ? { id: b.technician.id, name: b.technician.name, status: b.technician.status, color: b.technician.color } : null,
     // Second technician (large-TV lifts / cross-company helpers). Carries the
