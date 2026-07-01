@@ -894,8 +894,8 @@ function openChargeFlow(j){
           ${[20,30,50].map(p=>`<button class="btn ${tip===p?'':'ghost'}" data-tip="${p}" style="padding:20px 0;font-size:19px;">$${p}</button>`).join('')}
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
-          <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Custom amount" value="${(tip>0 && ![20,30,50].includes(tip))?tip:''}" style="flex:1;">
-          <button class="btn ghost" data-tip="0" style="white-space:nowrap;">No tip</button>
+          <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Custom tip" value="${(tip>0 && ![20,30,50].includes(tip))?tip:''}" style="flex:1;">
+          <button class="btn ghost" data-tip="0" style="white-space:nowrap;">Skip</button>
         </div>
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
