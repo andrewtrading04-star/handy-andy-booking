@@ -16,7 +16,8 @@ import { smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard } from './_lib/stripe.js';
+import { saveAuthorization } from './_lib/authorization.js';
 
 // Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
 // Handy Andy's account is the main account; Doms has its own. Publishable keys
@@ -761,8 +762,8 @@ async function jobPayment(req, res, db, auth, body) {
   // optimistically and drop it if the column is missing, so charging never
   // breaks on deploy order (absent -> undefined -> legacy slug behavior).
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, price, payment_status, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
-             business:businesses ( slug ),
+    .select(`id, business_id, price, tip, payment_status, scheduled_at, address_line1, city, state, postal_code, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             business:businesses ( slug, name ),
              customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
     .eq('id', id).maybeSingle();
   let { data: b, error } = await fetchMine(build);
@@ -795,8 +796,11 @@ async function jobPayment(req, res, db, auth, body) {
 
   if (act === 'charge') {
     if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
-    const dollars = Number(b.price) || 0;
-    if (dollars <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
+    const ticketAmount = Number(b.price) || 0;
+    if (ticketAmount <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
+    // Tip the customer added on the signature screen (0 if they skipped it).
+    const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+    const total = Math.round((ticketAmount + tip) * 100) / 100;
 
     let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
     let pmId = b.stripe_payment_method_id || null;
@@ -809,12 +813,17 @@ async function jobPayment(req, res, db, auth, body) {
     } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use "Mark paid (cash)" instead.' });
 
+    // Card brand/last4 for the receipt + dispute evidence (best-effort).
+    let card = { brand: null, last4: null };
+    try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+
     let pi;
     try {
       pi = await stripe('/payment_intents', { ...acct, body: {
-        amount: Math.round(dollars * 100), currency: 'usd',
+        amount: Math.round(total * 100), currency: 'usd',
         customer: custId, payment_method: pmId, off_session: true, confirm: true,
-        description: `Job ${id}`, metadata: { job_id: id },
+        description: `Job ${id}`, metadata: { job_id: id, tip: String(tip) },
+        receipt_email: (b.customer && b.customer.email) || undefined,
       }});
     } catch (e) {
       return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
@@ -822,12 +831,18 @@ async function jobPayment(req, res, db, auth, body) {
     if (pi.status !== 'succeeded') {
       return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
     }
+    const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
 
     await db.from('bookings').update({
-      payment_status: 'paid', paid_at: now, amount_paid: dollars,
+      payment_status: 'paid', paid_at: now, amount_paid: total, tip,
       stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
     }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, payment_intent_id: pi.id });
+
+    // Freeze the signed authorization as chargeback evidence. Best-effort: the
+    // money already moved, so a storage hiccup must never fail the charge.
+    await saveAuthorization(db, req, b, { businessId: b.business_id, total, ticketAmount, tip, card, pi, chargeId, body });
+
+    return res.status(200).json({ ok: true, payment_status: 'paid', amount: total, tip, payment_intent_id: pi.id });
   }
 
   return res.status(400).json({ error: `Unknown payment action "${act}"` });

@@ -20,7 +20,8 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
+import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
 // to expose). Handy Andy uses the main account; Doms uses its own.
@@ -222,6 +223,8 @@ export default async function handler(req, res) {
       case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
       case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
+      case 'disputes':          return await disputes(req, res, db, auth);
+      case 'dispute_submit':    return await disputeSubmit(req, res, db, auth, body);
       case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
       case 'booking_photo_add':    return await bookingPhotoAdd(req, res, db, auth, body);
       case 'booking_photo_delete': return await bookingPhotoDelete(req, res, db, auth, body);
@@ -2118,8 +2121,11 @@ async function bookingPayment(req, res, db, auth, body) {
   if (act !== 'charge') return res.status(400).json({ error: `Unknown payment action "${act}"` });
   if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured for this business. Use “Mark paid (cash)”.' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
-  const dollars = body.amount != null ? Number(body.amount) : Number(b.price);
-  if (!dollars || dollars <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
+  const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
+  if (!ticketAmount || ticketAmount <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
+  // Optional tip (e.g. the office runs the signed flow on a tablet too).
+  const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+  const dollars = Math.round((ticketAmount + tip) * 100) / 100;
 
   // Resolve a Stripe customer + payment method (stored first, else look up by email).
   let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
@@ -2133,12 +2139,17 @@ async function bookingPayment(req, res, db, auth, body) {
   } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use “Mark paid (cash)” instead.' });
 
+  // Card brand/last4 for the receipt + dispute evidence (best-effort).
+  let card = { brand: null, last4: null };
+  try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+
   let pi;
   try {
     pi = await stripe('/payment_intents', { ...acct, body: {
       amount: Math.round(dollars * 100), currency: 'usd',
       customer: custId, payment_method: pmId, off_session: true, confirm: true,
-      description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug },
+      description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug, tip: String(tip) },
+      receipt_email: (b.customer && b.customer.email) || undefined,
     }});
   } catch (e) {
     return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
@@ -2146,12 +2157,136 @@ async function bookingPayment(req, res, db, auth, body) {
   if (pi.status !== 'succeeded') {
     return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
   }
+  const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
 
   await db.from('bookings').update({
-    payment_status: 'paid', paid_at: now, amount_paid: dollars,
+    payment_status: 'paid', paid_at: now, amount_paid: dollars, tip,
     stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
   }).eq('id', id);
-  return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, payment_intent_id: pi.id });
+
+  // Freeze the authorization (signature is optional from the office). Best-effort.
+  await saveAuthorization(db, req, { ...b, business_id: biz.id }, { businessId: biz.id, total: dollars, ticketAmount, tip, card, pi, chargeId, body });
+
+  return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, tip, payment_intent_id: pi.id });
+}
+
+// ── Chargeback disputes (draft evidence from stored signatures, owner submits) ──
+// A booking's card can live in more than one Stripe account for a business
+// (Handy Andy: the legacy 'global' account AND its own; Doms: its own). Return
+// every account we might have charged in for this business.
+function candidateAccounts(slug) {
+  if (slug === 'doms') return ['doms'];
+  if (slug === 'handy-andy') return ['global', 'handy-andy'];
+  return ['global'];
+}
+
+async function fetchAsBase64(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const b = Buffer.from(await r.arrayBuffer());
+    return b.length ? b.toString('base64') : null;
+  } catch (_) { return null; }
+}
+
+// List open (needs-response) disputes across this business's Stripe account(s),
+// each matched to the signed authorization we stored so the office can see the
+// evidence we'll submit. No writes — this is the "inbox".
+async function disputes(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const accounts = candidateAccounts(biz.slug).filter(a => businessSecretKey({ account: a }));
+  if (!accounts.length) return res.status(200).json({ disputes: [], configured: false });
+
+  const raw = [];
+  for (const account of accounts) {
+    try { for (const d of await listOpenDisputes({ account })) raw.push({ d, account }); }
+    catch (_) { /* one account erroring must not hide the others */ }
+  }
+  if (!raw.length) return res.status(200).json({ disputes: [], configured: true });
+
+  const piOf = ({ d }) => d.payment_intent || (d.charge && d.charge.payment_intent) || null;
+  const pis = [...new Set(raw.map(piOf).filter(Boolean))];
+  const authByPi = new Map();
+  if (pis.length) {
+    const { data: auths } = await db.from('booking_authorizations')
+      .select('*').eq('business_id', biz.id).in('stripe_payment_intent_id', pis);
+    for (const a of auths || []) authByPi.set(a.stripe_payment_intent_id, a);
+  }
+
+  const out = [];
+  for (const item of raw) {
+    const { d, account } = item;
+    const pi = piOf(item);
+    const a0 = pi ? authByPi.get(pi) : null;
+    let photosCount = 0;
+    if (a0) {
+      const { count } = await db.from('booking_photos')
+        .select('id', { count: 'exact', head: true }).eq('booking_id', a0.booking_id);
+      photosCount = count || 0;
+    }
+    out.push({
+      id: d.id, account, amount: (d.amount || 0) / 100, currency: d.currency,
+      reason: d.reason, status: d.status,
+      due_by: (d.evidence_details && d.evidence_details.due_by) ? d.evidence_details.due_by * 1000 : null,
+      payment_intent: pi, matched: !!a0,
+      booking_id: a0 ? a0.booking_id : null,
+      customer_name: a0 ? a0.customer_name : null,
+      signed_at: a0 ? a0.signed_at : null,
+      signed_ip: a0 ? a0.signed_ip : null,
+      card_last4: a0 ? a0.card_last4 : null,
+      has_signature: !!(a0 && a0.signature_url),
+      signature_url: a0 ? a0.signature_url : null,
+      photos_count: photosCount,
+    });
+  }
+  // Soonest deadline first so the office answers the most urgent one next.
+  out.sort((x, y) => (x.due_by || Infinity) - (y.due_by || Infinity));
+  return res.status(200).json({ disputes: out, configured: true });
+}
+
+// Owner-only: assemble the evidence packet from our stored authorization + job
+// photos, upload the signature/photo to Stripe, and submit it for the dispute.
+async function disputeSubmit(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can submit dispute evidence.' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const disputeId = (body.dispute_id || '').toString();
+  const account = (body.account || '').toString();
+  const pi = (body.payment_intent || '').toString();
+  if (!disputeId || !account || !pi) return res.status(400).json({ error: 'dispute_id, account and payment_intent are required.' });
+  if (!candidateAccounts(biz.slug).includes(account)) return res.status(400).json({ error: 'That Stripe account is not owned by this business.' });
+
+  const { data: a0 } = await db.from('booking_authorizations')
+    .select('*').eq('business_id', biz.id).eq('stripe_payment_intent_id', pi).maybeSingle();
+  if (!a0) return res.status(404).json({ error: 'No signed authorization is stored for this charge — submit the evidence manually in Stripe.' });
+
+  const { data: booking } = await db.from('bookings')
+    .select('id, scheduled_at, address_line1, city, state, postal_code, customer:customers ( name, email )')
+    .eq('id', a0.booking_id).eq('business_id', biz.id).maybeSingle();
+  const { data: photos } = await db.from('booking_photos')
+    .select('url').eq('booking_id', a0.booking_id).eq('business_id', biz.id).order('created_at', { ascending: true }).limit(1);
+
+  const { evidence } = buildDisputeEvidence({ booking: booking || {}, auth: a0, customer: booking && booking.customer });
+  const sel = { account };
+
+  // The signature is the centerpiece evidence — upload it as customer_signature.
+  if (a0.signature_url) {
+    try {
+      const b64 = await fetchAsBase64(a0.signature_url);
+      if (b64) evidence.customer_signature = await stripeUploadFile({ dataBase64: b64, contentType: 'image/png', filename: 'signature.png', ...sel });
+    } catch (_) { /* fall back to text-only evidence */ }
+  }
+  // A completed-work photo backs "service provided".
+  if (photos && photos[0] && photos[0].url) {
+    try {
+      const b64 = await fetchAsBase64(photos[0].url);
+      if (b64) evidence.service_documentation = await stripeUploadFile({ dataBase64: b64, contentType: 'image/jpeg', filename: 'service.jpg', ...sel });
+    } catch (_) { /* optional */ }
+  }
+
+  try { await submitDisputeEvidence(disputeId, evidence, sel, true); }
+  catch (e) { return res.status(e.status || 400).json({ error: 'Stripe rejected the evidence: ' + e.message }); }
+  return res.status(200).json({ ok: true, submitted: true });
 }
 
 // ── Booking photos (view the tech's job photos; add/delete from the office) ──

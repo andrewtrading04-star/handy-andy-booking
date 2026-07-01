@@ -112,6 +112,52 @@ export async function defaultPaymentMethod(customerId, sel = null) {
   return (pms.data && pms.data[0] && pms.data[0].id) || null;
 }
 
+// Retrieve a payment method's card brand + last4 (for receipts + dispute
+// evidence). Best-effort — callers treat a throw as "unknown card".
+export async function retrieveCard(paymentMethodId, sel = null) {
+  const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
+  const pm = await stripe(`/payment_methods/${paymentMethodId}`, { method: 'GET', slug, account });
+  const c = pm && pm.card ? pm.card : {};
+  return { brand: c.brand || null, last4: c.last4 || null };
+}
+
+// Upload a file to Stripe (files.stripe.com, multipart) for dispute evidence.
+// `dataBase64` is raw base64 (no data: prefix). Returns the Stripe file id.
+export async function stripeUploadFile({ dataBase64, contentType = 'image/png', filename = 'evidence.png', purpose = 'dispute_evidence', account = null, slug = null }) {
+  const key = businessSecretKey({ account, slug });
+  if (!key) { const e = new Error('Payments are not configured on the server.'); e.status = 400; throw e; }
+  const bytes = Buffer.from(dataBase64, 'base64');
+  const fd = new FormData();
+  fd.append('purpose', purpose);
+  fd.append('file', new Blob([bytes], { type: contentType }), filename);
+  const res = await fetch('https://files.stripe.com/v1/files', {
+    method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error((data.error && data.error.message) || 'File upload failed'); e.status = res.status; throw e; }
+  return data.id;
+}
+
+// List disputes on an account that still need a response, newest first. Expands
+// the charge so we can recover the PaymentIntent id (older disputes only carry
+// the charge). Returns the raw Stripe dispute objects.
+export async function listOpenDisputes(sel = null, limit = 100) {
+  const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
+  const out = await stripe(`/disputes?limit=${Math.min(100, limit)}&expand[]=data.charge`, { method: 'GET', slug, account });
+  return (out.data || []).filter(d => d.status === 'needs_response' || d.status === 'warning_needs_response');
+}
+
+// Submit assembled evidence for a dispute. `evidence` is a flat object of the
+// Stripe evidence fields (customer_signature is a file id, etc.). Setting
+// submit=true finalizes it — after that Stripe won't accept further changes.
+export async function submitDisputeEvidence(disputeId, evidence, sel = null, submit = true) {
+  const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
+  // Drop empty fields so we never overwrite a good value with "".
+  const clean = {};
+  for (const [k, v] of Object.entries(evidence || {})) if (v !== undefined && v !== null && v !== '') clean[k] = v;
+  return stripe(`/disputes/${disputeId}`, { method: 'POST', slug, account, body: { evidence: clean, submit } });
+}
+
 // Save a card on file in a business's Stripe account: find/create the customer
 // by email, attach the payment method, and make it the default. Returns the
 // Stripe customer id. Used by the public Doms booking flow (and reusable by any

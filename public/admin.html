@@ -604,6 +604,7 @@
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="disputes" id="navDisputes"><span class="ic" data-ico="disputes">🛡️</span> Disputes <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
     </nav>
 
@@ -1040,6 +1041,8 @@ function enterApp(){
   if(navHandy) navHandy.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  const navDisp=document.getElementById('navDisputes');
+  if(navDisp) navDisp.style.display = role==='owner' ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
   // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
@@ -1162,7 +1165,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',disputes:'Disputes'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -1177,6 +1180,7 @@ function navTo(s){
     else if(s==='handyman') renderHandymanAnalytics();
     else if(s==='webanalytics') renderWebAnalytics();
     else if(s==='payroll') renderPayroll();
+    else if(s==='disputes') renderDisputes();
   }
 }
 function refreshCurrent(){
@@ -1192,6 +1196,7 @@ function refreshCurrent(){
   else if(section==='handyman') renderHandymanAnalytics();
   else if(section==='webanalytics') renderWebAnalytics();
   else if(section==='payroll') renderPayroll();
+  else if(section==='disputes') renderDisputes();
 }
 
 // Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
@@ -3018,6 +3023,80 @@ async function renderTechnicians(){
       }));
     });
   }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+
+// ── Chargeback disputes ─────────────────────────────────────────────────────
+// The "draft, you approve" inbox: we pull open disputes from Stripe, match each
+// to the signed authorization the tech captured, and let the owner submit that
+// evidence packet with one click.
+async function renderDisputes(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading disputes…</div></div>';
+  let d;
+  try{ d=await api('disputes',{ params:{ business:current.slug }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  const list=d.disputes||[];
+  const badge=document.getElementById('dispBadge');
+  if(badge){ if(list.length){ badge.textContent=list.length; badge.style.display=''; } else badge.style.display='none'; }
+
+  if(!d.configured){ view.innerHTML='<div class="wrap"><h2 style="margin:0 0 12px;">Disputes</h2><div class="empty">Payments aren’t configured for this business, so there are no Stripe disputes to show.</div></div>'; return; }
+  if(!list.length){ view.innerHTML='<div class="wrap"><h2 style="margin:0 0 12px;">Disputes</h2><div class="empty">🛡️ No open chargebacks. You’re all clear.</div></div>'; return; }
+
+  const fmt=n=>'$'+(Math.round((Number(n)||0)*100)/100).toFixed(2);
+  const reasonLabel=r=>({fraudulent:'Fraudulent',product_not_received:'Product not received',product_unacceptable:'Product unacceptable / not as described',unrecognized:'Unrecognized',duplicate:'Duplicate',subscription_canceled:'Subscription canceled',credit_not_processed:'Credit not processed',general:'General'})[r]||r||'—';
+  const daysLeft=due=>{ if(!due) return null; return Math.ceil((due-Date.now())/86400000); };
+
+  view.innerHTML=`<div class="wrap">
+    <h2 style="margin:0 0 4px;">Disputes</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:16px;">${list.length} open chargeback${list.length===1?'':'s'}. Review the evidence we captured at the job, then submit it to Stripe.</div>
+    <div id="dispList" style="display:flex;flex-direction:column;gap:14px;max-width:760px;"></div>
+  </div>`;
+  const wrap=document.getElementById('dispList');
+  wrap.innerHTML=list.map((x,i)=>{
+    const dl=daysLeft(x.due_by);
+    const dueTxt = x.due_by ? `${new Date(x.due_by).toLocaleDateString()}${dl!=null?` · ${dl} day${dl===1?'':'s'} left`:''}` : 'No deadline set';
+    const urgent = dl!=null && dl<=3;
+    const evidence = x.matched
+      ? `<div style="margin-top:10px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;">
+           <div style="font-weight:700;margin-bottom:8px;color:${x.has_signature?'var(--green)':'var(--amber)'};">${x.has_signature?'✓ Signed authorization on file':'Authorization on file (remote charge — no signature)'}</div>
+           <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mute);">
+             <span>Signed by <strong style="color:var(--ink);">${esc(x.customer_name||'—')}</strong></span>
+             ${x.signed_at?`<span>${new Date(x.signed_at).toLocaleString()}</span>`:''}
+             ${x.signed_ip?`<span>IP ${esc(x.signed_ip)}</span>`:''}
+             ${x.card_last4?`<span>Card ••${esc(x.card_last4)}</span>`:''}
+             <span>${x.photos_count} job photo${x.photos_count===1?'':'s'}</span>
+           </div>
+           ${x.signature_url?`<img src="${esc(x.signature_url)}" alt="signature" style="margin-top:10px;max-height:90px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;">`:''}
+         </div>`
+      : `<div style="margin-top:10px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c;font-size:13px;">
+           No signed authorization is stored for this charge (it may predate the signature system). Submit evidence manually in the Stripe dashboard.
+         </div>`;
+    return `<div style="background:var(--panel);border:1px solid ${urgent?'var(--amber)':'var(--line)'};border-radius:12px;padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:800;font-size:18px;color:var(--ink);">${fmt(x.amount)} <span style="font-size:13px;font-weight:600;color:var(--mute);">disputed</span></div>
+          <div style="font-size:13px;color:var(--mute);margin-top:2px;">Reason: <strong style="color:var(--ink);">${esc(reasonLabel(x.reason))}</strong></div>
+        </div>
+        <div style="text-align:right;font-size:13px;${urgent?'color:#b45309;font-weight:700;':'color:var(--mute);'}">Respond by<br>${esc(dueTxt)}</div>
+      </div>
+      ${evidence}
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button class="btn" data-submit="${i}" ${x.matched?'':'disabled style="opacity:.5;"'}>Submit evidence to Stripe</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  wrap.querySelectorAll('[data-submit]').forEach(btn=>btn.onclick=async()=>{
+    const x=list[+btn.dataset.submit];
+    if(!x||!x.matched) return;
+    if(!confirm(`Submit the signed authorization + job photos to Stripe for this ${fmt(x.amount)} dispute?\n\nOnce submitted, the evidence is final and can't be changed.`)) return;
+    btn.disabled=true; btn.textContent='Submitting…';
+    try{
+      await api('dispute_submit',{ method:'POST', body:{ business:current.slug, dispute_id:x.id, account:x.account, payment_intent:x.payment_intent }});
+      toast('Evidence submitted to Stripe ✓');
+      renderDisputes();
+    }catch(e){ toast(e.message); btn.disabled=false; btn.textContent='Submit evidence to Stripe'; }
+  });
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
