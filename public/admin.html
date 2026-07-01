@@ -276,11 +276,11 @@
 
   /* modals */
   .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
-  /* Google Places autocomplete dropdown — must float above the modal */
-  .pac-container{z-index:100000!important;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,50,.28);font-family:inherit;}
-  /* If Google ever fails to load an icon/logo, never show a broken-image box. */
-  .pac-container img{display:none!important;}
-  .pac-item{padding:6px 12px;font-size:13.5px;cursor:pointer;}
+  /* Our own address-suggestion dropdown — floats above the modal, positioned in JS */
+  .addr-ac{position:fixed;z-index:100000;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 40px rgba(20,30,50,.28);overflow:hidden;max-height:260px;overflow-y:auto;}
+  .addr-ac-item{padding:9px 12px;font-size:13.5px;cursor:pointer;color:var(--ink);border-bottom:1px solid #f1f3f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .addr-ac-item:last-child{border-bottom:0;}
+  .addr-ac-item.on,.addr-ac-item:hover{background:#eff6ff;}
   .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:calc(100vh - 68px);overflow-y:auto;box-shadow:0 24px 60px rgba(20,30,50,.22);}
   .sheet h2{font-size:17px;margin-bottom:14px;}
   #nbForm{width:100%;min-width:0;}
@@ -669,7 +669,7 @@
     <form id="nbForm" style="display:grid;gap:10px;">
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
-      <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
+      <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address…">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
@@ -777,7 +777,7 @@
       <input type="hidden" id="cuId">
       <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
-      <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
+      <input class="search" style="margin:0" id="cuAddr" placeholder="Start typing an address…">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Save changes</button>
@@ -1898,64 +1898,72 @@ async function renderCustomers(){
 }
 
 let custCache={}, custReload=null;
-// ── Address autocomplete (Google Places) ─────────────────────────────────────
-// Reuses the Street-View Maps key (sent in appConfig.maps_key). Loads the Places
-// library once, lazily. Degrades SILENTLY to a plain text field if the key is
-// absent or the script fails to load — so a missing key never breaks the form.
-let _gmapsPromise=null, _gmapsAuthFailed=false;
-// Google calls this globally when the key is rejected (API not enabled, referrer
-// blocked, billing off). The failure is ASYNC — it happens after Autocomplete is
-// already built — so we latch a flag and tear down any dropdown Google injected.
-window.gm_authFailure=function(){
-  _gmapsAuthFailed=true;
-  document.querySelectorAll('.pac-container').forEach(el=>el.remove());
-};
-function loadGoogleMaps(){
-  if(_gmapsPromise) return _gmapsPromise;
-  const key=appConfig&&appConfig.maps_key;
-  if(!key){ _gmapsPromise=Promise.reject(new Error('no maps key')); return _gmapsPromise; }
-  _gmapsPromise=new Promise((resolve,reject)=>{
-    if(window.google&&window.google.maps&&window.google.maps.places) return resolve();
-    const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=places';
-    s.async=true; s.onload=()=>resolve(); s.onerror=()=>reject(new Error('maps load failed'));
-    document.head.appendChild(s);
-  });
-  return _gmapsPromise;
+// ── Address autocomplete (our own dropdown, server-backed) ───────────────────
+// We do NOT load Google's browser widget (it injects broken UI when the key
+// isn't perfectly provisioned). Instead the input queries OUR server
+// (?action=places_autocomplete / place_details), which proxies Google Places
+// with the key kept server-side, and we render our own suggestion list. On pick
+// we fill street + the city/state/zip inputs named in `fields` and fire a change
+// on the zip so downstream logic (metro filter, surcharge) still runs. If the
+// key/API isn't set up, the server returns an empty list and this is a no-op —
+// the field simply behaves as a plain text box. Nothing can break the form.
+function _acSessionToken(){
+  // Cheap random session token to group keystrokes + the details call (billing).
+  return 'xxxxxxxxyxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);});
 }
-// Attach Google Places autocomplete to a street-address input. On pick it fills
-// the street field + the city/state/zip inputs named in `fields`, and fires a
-// change on the zip so downstream logic (metro filter, surcharge) still runs.
-async function attachAddressAutocomplete(input, fields){
+function attachAddressAutocomplete(input, fields){
   fields=fields||{};
   if(!input || input.dataset.acOn) return;
-  // HARD OFF. Google's Autocomplete widget renders broken UI over the address
-  // field when the Maps key isn't fully provisioned (Maps JS + Places API +
-  // referrer allow-list + billing), which it wasn't. Until that setup is
-  // verified end-to-end, the address field stays a plain, reliable text box.
-  // Flip DISABLE_ADDRESS_AC to false (and set MAPS_AUTOCOMPLETE=1) to re-enable.
-  const DISABLE_ADDRESS_AC = true;
-  if(DISABLE_ADDRESS_AC) return;
-  if(!(appConfig&&appConfig.maps_autocomplete) || _gmapsAuthFailed) return;
-  try{ await loadGoogleMaps(); }catch(e){ return; }   // no key / load failed -> plain field
-  if(_gmapsAuthFailed) return;
-  const P=window.google&&window.google.maps&&window.google.maps.places;
-  if(!P||!P.Autocomplete) return;
   input.dataset.acOn='1';
-  const ac=new P.Autocomplete(input,{ types:['address'], componentRestrictions:{country:'us'}, fields:['address_components'] });
-  ac.addListener('place_changed',()=>{
-    const p=ac.getPlace(); if(!p||!p.address_components) return;
-    const get=(type,short)=>{ const c=p.address_components.find(x=>x.types.includes(type)); return c?(short?c.short_name:c.long_name):''; };
-    const street=[get('street_number'),get('route')].filter(Boolean).join(' ');
-    if(street) input.value=street;
-    const set=(id,v)=>{ if(!id||!v) return; const el=document.getElementById(id); if(el) el.value=v; };
-    set(fields.city, get('locality')||get('sublocality')||get('postal_town'));
-    set(fields.state, get('administrative_area_level_1',true));
-    set(fields.zip, get('postal_code'));
-    if(fields.zip){ const z=document.getElementById(fields.zip); if(z) z.dispatchEvent(new Event('change')); }
+  input.setAttribute('autocomplete','off');
+  let box=null, items=[], active=-1, session=_acSessionToken(), seq=0, lastQ='';
+  const close=()=>{ if(box){ box.remove(); box=null; } items=[]; active=-1; };
+  const place=()=>{ if(!box) return; const r=input.getBoundingClientRect();
+    box.style.left=r.left+'px'; box.style.top=(r.bottom+2)+'px'; box.style.width=r.width+'px'; };
+  const open=()=>{ if(box) return; box=document.createElement('div'); box.className='addr-ac';
+    document.body.appendChild(box); place(); };
+  const render=()=>{ if(!box) return;
+    box.innerHTML=items.map((p,i)=>`<div class="addr-ac-item${i===active?' on':''}" data-i="${i}">${esc(p.description)}</div>`).join('');
+    box.querySelectorAll('.addr-ac-item').forEach(el=>{
+      el.addEventListener('mousedown',ev=>{ ev.preventDefault(); choose(parseInt(el.dataset.i,10)); });
+    });
+  };
+  async function choose(i){ const p=items[i]; if(!p) return; close();
+    input.value=p.description;
+    try{
+      const d=await api('place_details',{ params:{ place_id:p.place_id, session } });
+      const a=d&&d.address; if(a){
+        if(a.street) input.value=a.street;
+        const set=(id,v)=>{ if(!id||v==null||v==='') return; const el=document.getElementById(id); if(el) el.value=v; };
+        set(fields.city,a.city); set(fields.state,a.state); set(fields.zip,a.zip);
+        if(fields.zip){ const z=document.getElementById(fields.zip); if(z) z.dispatchEvent(new Event('change')); }
+      }
+    }catch(e){/* leave the typed/description text as-is */}
+    session=_acSessionToken();   // new billing session after a completed pick
+  }
+  let timer=null;
+  const query=()=>{ const q=input.value.trim();
+    if(q.length<3){ close(); return; }
+    if(q===lastQ) return; lastQ=q;
+    const mine=++seq;
+    api('places_autocomplete',{ params:{ input:q, session } }).then(d=>{
+      if(mine!==seq) return;                       // a newer keystroke already fired
+      items=(d&&d.predictions)||[]; active=-1;
+      if(!items.length){ close(); return; }
+      open(); render();
+    }).catch(()=>close());
+  };
+  input.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(query,180); });
+  input.addEventListener('keydown',e=>{
+    if(!box||!items.length){ if(e.key==='Enter'&&box) e.preventDefault(); return; }
+    if(e.key==='ArrowDown'){ e.preventDefault(); active=(active+1)%items.length; render(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); active=(active-1+items.length)%items.length; render(); }
+    else if(e.key==='Enter'){ e.preventDefault(); choose(active>=0?active:0); }
+    else if(e.key==='Escape'){ close(); }
   });
-  // Enter to choose a suggestion must not submit the surrounding form.
-  input.addEventListener('keydown',e=>{ if(e.key==='Enter'){ const pac=document.querySelector('.pac-container'); if(pac&&pac.offsetParent!==null) e.preventDefault(); } });
+  input.addEventListener('blur',()=>setTimeout(close,150));
+  window.addEventListener('scroll',place,true);
+  window.addEventListener('resize',place);
 }
 function openCustomerEdit(id){
   const c=custCache[id]; if(!c) return;

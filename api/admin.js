@@ -263,6 +263,8 @@ export default async function handler(req, res) {
       case 'wire_plate_remove': return await wirePlateRemove(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
+      case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
+      case 'place_details':       return await placeDetails(req, res, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -2365,6 +2367,78 @@ async function zipArea(req, res, db, auth) {
     name: data?.service_area?.name || null,
     surcharge: Number(data?.surcharge) || 0,
   });
+}
+
+// ── Address autocomplete (server-side proxy to Google Places) ────────────────
+// The dashboard draws its OWN suggestion dropdown; these two endpoints are the
+// only thing that talks to Google. Keeping the key server-side means: no key in
+// the browser, no HTTP-referrer allow-list to maintain, no Maps JavaScript API,
+// and — crucially — Google can never inject broken UI into the page (the failure
+// mode that broke the old in-browser widget). Requirement on the key: the
+// "Places API" enabled with billing on. If the key is missing or Google rejects
+// the request, we return an empty list and the field stays a plain text box.
+async function placesAutocomplete(req, res, auth) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const input = (req.query.input || (req.body && req.body.input) || '').toString().trim();
+  const token = (req.query.session || (req.body && req.body.session) || '').toString().trim();
+  if (!key || input.length < 3) return res.status(200).json({ predictions: [] });
+  const u = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
+  u.searchParams.set('input', input);
+  u.searchParams.set('key', key);
+  u.searchParams.set('types', 'address');
+  u.searchParams.set('components', 'country:us');
+  if (token) u.searchParams.set('sessiontoken', token);
+  try {
+    const r = await fetch(u.toString());
+    const j = await r.json();
+    if (j.status && j.status !== 'OK' && j.status !== 'ZERO_RESULTS') {
+      console.warn('[places] autocomplete', j.status, j.error_message || '');
+      return res.status(200).json({ predictions: [], status: j.status });
+    }
+    const predictions = (j.predictions || []).slice(0, 5).map(p => ({
+      description: p.description, place_id: p.place_id,
+    }));
+    return res.status(200).json({ predictions });
+  } catch (e) {
+    console.error('[places] autocomplete failed:', e.message);
+    return res.status(200).json({ predictions: [] });
+  }
+}
+
+async function placeDetails(req, res, auth) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const placeId = (req.query.place_id || (req.body && req.body.place_id) || '').toString().trim();
+  const token = (req.query.session || (req.body && req.body.session) || '').toString().trim();
+  if (!key || !placeId) return res.status(200).json({ address: null });
+  const u = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+  u.searchParams.set('place_id', placeId);
+  u.searchParams.set('key', key);
+  u.searchParams.set('fields', 'address_component');
+  if (token) u.searchParams.set('sessiontoken', token);
+  try {
+    const r = await fetch(u.toString());
+    const j = await r.json();
+    if (j.status !== 'OK') {
+      console.warn('[places] details', j.status, j.error_message || '');
+      return res.status(200).json({ address: null, status: j.status });
+    }
+    const comps = j.result?.address_components || [];
+    const get = (type, short) => {
+      const c = comps.find(x => (x.types || []).includes(type));
+      return c ? (short ? c.short_name : c.long_name) : '';
+    };
+    const street = [get('street_number'), get('route')].filter(Boolean).join(' ');
+    const address = {
+      street,
+      city: get('locality') || get('sublocality') || get('postal_town') || get('administrative_area_level_2'),
+      state: get('administrative_area_level_1', true),
+      zip: get('postal_code'),
+    };
+    return res.status(200).json({ address });
+  } catch (e) {
+    console.error('[places] details failed:', e.message);
+    return res.status(200).json({ address: null });
+  }
 }
 
 async function technicians(req, res, db, auth) {
