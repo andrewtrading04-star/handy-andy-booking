@@ -1545,8 +1545,8 @@ function openBooking(b){
     <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTime(b.scheduled_at))}</div></div>
     <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
     <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
-    <div class="bk-row" id="bkAddrRow"><span>${ic('location')}</span><div style="flex:1;display:flex;align-items:center;gap:8px;justify-content:space-between;">
-      <span>${b.address?esc(b.address):'<span style="color:var(--mute);">No address on file</span>'}</span>
+    <div class="bk-row" id="bkAddrRow"><span>${ic('location')}</span><div style="flex:1;display:flex;align-items:center;gap:8px;">
+      <span style="flex:1;min-width:0;">${b.address?esc(b.address):'<span style="color:var(--mute);">No address on file</span>'}</span>
       <button type="button" class="btn ghost sm" id="bkContactEdit" title="Edit address, phone & email" style="padding:2px 8px;flex:0 0 auto;">✏️ Edit</button>
     </div></div>
     ${b.customer?.phone?`<div class="bk-row" id="bkPhoneRow"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
@@ -1581,6 +1581,7 @@ function openBooking(b){
         <button class="btn ghost sm" id="bkCardCancel">Cancel</button>
       </div>
     </div>
+    <div id="bkAuthWrap"></div>
     <div class="bk-sec"><div class="bk-sec-h">Line items</div>
       <div id="bkLineItems"></div>
       <button type="button" class="btn ghost sm" id="bkLiAdd" style="margin-top:8px;">+ Add line item</button>
@@ -1629,6 +1630,7 @@ function openBooking(b){
   // Photos + notes (loaded async; they don't refresh the whole list on change).
   loadBookingPhotos(b.id);
   loadBookingNotes(b.id);
+  loadBookingAuthorization(b.id);
   document.getElementById('bkAddPhoto').onclick=()=>document.getElementById('bkPhotoInput').click();
   document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
   document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
@@ -1949,6 +1951,33 @@ async function updateBooking(payload){
   try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
   catch(err){ toast(err.message); }
 }
+// Show the signed authorization captured at charge time (signature image, tip,
+// total, signer, time, IP) so the office can see the chargeback evidence on file.
+async function loadBookingAuthorization(id){
+  const wrap=document.getElementById('bkAuthWrap'); if(!wrap) return;
+  wrap.innerHTML='';
+  let d; try{ d=await api('booking_authorization',{ params:{ business:current.slug, id }}); }catch(_){ return; }
+  const a=d&&d.authorization;
+  if(!a){
+    if(d&&d.table_missing) wrap.innerHTML=`<div class="bk-sec"><div class="bk-sec-h">Signed authorization</div><div class="sub" style="font-size:13px;color:var(--mute);">Signature capture isn’t switched on yet — run migration 0046 in Supabase and future charges will store the signed authorization here.</div></div>`;
+    return; // table exists but this booking has no authorization → show nothing
+  }
+  const m2=n=>'$'+(Math.round((Number(n)||0)*100)/100).toFixed(2);
+  wrap.innerHTML=`<div class="bk-sec"><div class="bk-sec-h">Signed authorization</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mute);margin-bottom:8px;">
+      <span>Signed by <strong style="color:var(--ink);">${esc(a.customer_name||'—')}</strong></span>
+      ${a.signed_at?`<span>${new Date(a.signed_at).toLocaleString()}</span>`:''}
+      ${a.card_last4?`<span>${esc(a.card_brand||'card')} ••${esc(a.card_last4)}</span>`:''}
+      ${a.signed_ip?`<span>IP ${esc(a.signed_ip)}</span>`:''}
+    </div>
+    <div style="font-size:14px;margin-bottom:8px;color:var(--ink);">${m2(a.ticket_amount)} service${Number(a.tip)>0?` + ${m2(a.tip)} tip`:''} = <strong>${m2(a.amount)}</strong></div>
+    ${a.signature_url
+      ? `<img src="${esc(a.signature_url)}" alt="signature" style="max-height:130px;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px;display:block;">`
+      : '<div class="sub" style="font-size:13px;color:var(--mute);">Charged without a signature (phone order).</div>'}
+    ${a.terms_text?`<details style="margin-top:8px;"><summary style="cursor:pointer;color:var(--mute);font-size:13px;">View signed terms</summary><div style="white-space:pre-wrap;font-size:12px;color:var(--mute);margin-top:6px;line-height:1.5;">${esc(a.terms_text)}</div></details>`:''}
+  </div>`;
+}
+
 async function paymentAction(id, action, amount){
   try{
     await api('booking_payment',{ method:'POST', body:{ business:current.slug, id, action, amount }});

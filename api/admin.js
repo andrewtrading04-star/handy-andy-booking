@@ -221,6 +221,7 @@ export default async function handler(req, res) {
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
       case 'booking_update':    return await bookingUpdate(req, res, db, auth, body);
       case 'booking_address_update': return await bookingAddressUpdate(req, res, db, auth, body);
+      case 'booking_authorization': return await bookingAuthorization(req, res, db, auth);
       case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
       case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
@@ -2203,6 +2204,27 @@ async function bookingAddressUpdate(req, res, db, auth, body) {
   if (error) return res.status(500).json({ error: error.message });
   const address = [patch.address_line1, patch.city, patch.state, patch.postal_code].filter(Boolean).join(', ');
   return res.status(200).json({ ok: true, address, ...patch });
+}
+
+// Fetch the signed authorization stored for a booking (the tech/office charge
+// flow captures the signature + tip + terms + signing IP/time). Returns the most
+// recent one. Degrades cleanly before migration 0046 is applied.
+async function bookingAuthorization(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const cols = 'id, signature_url, customer_name, card_brand, card_last4, amount, ticket_amount, tip, terms_text, terms_version, signed_ip, signed_user_agent, signed_at, created_at';
+  const { data, error } = await db.from('booking_authorizations')
+    .select(cols).eq('business_id', biz.id).eq('booking_id', id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) {
+    // Table not created yet (migration 0046 not applied) — say so, don't 500.
+    if (/relation|does not exist|booking_authorizations/i.test(error.message || '')) {
+      return res.status(200).json({ authorization: null, table_missing: true });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+  return res.status(200).json({ authorization: data || null });
 }
 
 // ── Chargeback disputes (draft evidence from stored signatures, owner submits) ──
