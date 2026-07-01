@@ -1260,8 +1260,36 @@ function renderSidebarFilters(){
 
 let jobSearchQuery = '', jobSearchShowCanceled = false;
 
+// ── Territory by technician (owner's rule, Handy Andy) ───────────────────────
+// A job's territory follows the TECH doing it, not the customer's zip:
+//   Kregg / Steve -> Denver   ·   Juan -> Houston   ·   Zach -> Austin
+// Matched on the tech's first name (so "Steve"/"Steven", "Zach"/"Zachary" all
+// work). Doms is a single Houston territory and hides the filter entirely, so it
+// keeps the zip-based area. Any Handy Andy tech not in the map falls back to the
+// booking's zip-derived service area.
+const HA_TECH_TERRITORY = { kregg:'denver', steve:'denver', juan:'houston', zach:'austin' };
+function areaIdByName(name){
+  if(!name) return null;
+  const a=areaCache.find(x=>String(x.name||'').trim().toLowerCase()===String(name).trim().toLowerCase());
+  return a?a.id:null;
+}
+function jobTerritoryAreaId(b){
+  if(!(current && current.slug==='doms')){
+    const tname=(b.technician && b.technician.name) ||
+      (b.technician_id && (techCache.find(t=>t.id===b.technician_id)||{}).name) || '';
+    const words=String(tname).toLowerCase().split(/\s+/).filter(Boolean);
+    for(const key in HA_TECH_TERRITORY){
+      if(words.some(w=>w.startsWith(key))){
+        const id=areaIdByName(HA_TECH_TERRITORY[key]);
+        if(id) return id;
+      }
+    }
+  }
+  return b.service_area_id||null;   // unassigned / unmapped tech -> zip-based area
+}
+
 function passFilters(b){
-  if(filterArea && b.service_area_id!==filterArea) return false;
+  if(filterArea && jobTerritoryAreaId(b)!==filterArea) return false;
   if(filterTech==='unassigned'){ if(b.technician_id) return false; }
   else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
 
