@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { serviceClientPublic } from './_lib/supabase.js';
 
 const TZ = 'America/Denver';
 // The TV-mounting booking widget funnel.
@@ -78,10 +78,12 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
   try {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return res.status(500).json({ error: 'Missing Supabase credentials' });
     }
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+    // Service-role (public schema): reads the analytics `events` table after RLS
+    // is FORCED on it. This endpoint is server-side only; the key never ships.
+    const supabase = serviceClientPublic();
 
     const WIDGET = (req.query.widget || 'handy-andy').toString();
     if (!['handy-andy', 'doms', 'handy-andy-handyman', 'doms-handyman'].includes(WIDGET)) {

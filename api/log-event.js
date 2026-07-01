@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { serviceClientPublic } from './_lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,14 +16,13 @@ export default async function handler(req, res) {
   const widgetTag = WIDGETS.includes(widget) ? widget : 'handy-andy';
 
   try {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return res.status(500).json({ error: 'Missing Supabase credentials' });
     }
 
-    const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY
-    );
+    // Service-role (public schema) so the analytics `events` table can have RLS
+    // FORCED on — the public anon key must never touch it directly.
+    const supabase = serviceClientPublic();
 
     const row = {
       session_id,
