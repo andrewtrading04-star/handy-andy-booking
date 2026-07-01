@@ -278,6 +278,8 @@
   .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
   /* Google Places autocomplete dropdown — must float above the modal */
   .pac-container{z-index:100000!important;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,50,.28);font-family:inherit;}
+  /* If Google ever fails to load an icon/logo, never show a broken-image box. */
+  .pac-container img{display:none!important;}
   .pac-item{padding:6px 12px;font-size:13.5px;cursor:pointer;}
   .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:calc(100vh - 68px);overflow-y:auto;box-shadow:0 24px 60px rgba(20,30,50,.22);}
   .sheet h2{font-size:17px;margin-bottom:14px;}
@@ -1900,7 +1902,14 @@ let custCache={}, custReload=null;
 // Reuses the Street-View Maps key (sent in appConfig.maps_key). Loads the Places
 // library once, lazily. Degrades SILENTLY to a plain text field if the key is
 // absent or the script fails to load — so a missing key never breaks the form.
-let _gmapsPromise=null;
+let _gmapsPromise=null, _gmapsAuthFailed=false;
+// Google calls this globally when the key is rejected (API not enabled, referrer
+// blocked, billing off). The failure is ASYNC — it happens after Autocomplete is
+// already built — so we latch a flag and tear down any dropdown Google injected.
+window.gm_authFailure=function(){
+  _gmapsAuthFailed=true;
+  document.querySelectorAll('.pac-container').forEach(el=>el.remove());
+};
 function loadGoogleMaps(){
   if(_gmapsPromise) return _gmapsPromise;
   const key=appConfig&&appConfig.maps_key;
@@ -1920,7 +1929,12 @@ function loadGoogleMaps(){
 async function attachAddressAutocomplete(input, fields){
   fields=fields||{};
   if(!input || input.dataset.acOn) return;
+  // OFF unless the server confirms the Maps key has the right APIs enabled
+  // (MAPS_AUTOCOMPLETE=1). Until then the field stays a plain, reliable text box
+  // instead of Google rendering a broken dropdown over it.
+  if(!(appConfig&&appConfig.maps_autocomplete) || _gmapsAuthFailed) return;
   try{ await loadGoogleMaps(); }catch(e){ return; }   // no key / load failed -> plain field
+  if(_gmapsAuthFailed) return;
   const P=window.google&&window.google.maps&&window.google.maps.places;
   if(!P||!P.Autocomplete) return;
   input.dataset.acOn='1';

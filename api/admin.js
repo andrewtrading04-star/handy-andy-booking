@@ -320,6 +320,11 @@ async function login(req, res, body) {
     email: !!process.env.RESEND_API_KEY,
     sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
+    // Address autocomplete stays OFF until the Maps key is confirmed to have the
+    // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel
+    // once those are on; otherwise Google's client renders a broken dropdown over
+    // the address field. With it off, the field is a plain, reliable text input.
+    maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
   return res.status(200).json({ token, role, scope, name, config, businesses: businesses || [] });
 }
@@ -341,6 +346,11 @@ async function sessionStatus(req, res) {
     email: !!process.env.RESEND_API_KEY,
     sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
+    // Address autocomplete stays OFF until the Maps key is confirmed to have the
+    // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel
+    // once those are on; otherwise Google's client renders a broken dropdown over
+    // the address field. With it off, the field is a plain, reliable text input.
+    maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
   return res.status(200).json({
     token: getBearer(req), role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
