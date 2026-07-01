@@ -276,6 +276,9 @@
 
   /* modals */
   .modal{position:fixed;inset:0;background:rgba(20,28,44,.45);z-index:60;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 14px;}
+  /* Google Places autocomplete dropdown — must float above the modal */
+  .pac-container{z-index:100000!important;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,50,.28);font-family:inherit;}
+  .pac-item{padding:6px 12px;font-size:13.5px;cursor:pointer;}
   .sheet{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;width:100%;max-width:460px;max-height:calc(100vh - 68px);overflow-y:auto;box-shadow:0 24px 60px rgba(20,30,50,.22);}
   .sheet h2{font-size:17px;margin-bottom:14px;}
   #nbForm{width:100%;min-width:0;}
@@ -664,7 +667,7 @@
     <form id="nbForm" style="display:grid;gap:10px;">
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
-      <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
+      <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address…">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
@@ -772,7 +775,7 @@
       <input type="hidden" id="cuId">
       <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
-      <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
+      <input class="search" style="margin:0" id="cuAddr" placeholder="Start typing an address…">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Save changes</button>
@@ -1893,6 +1896,49 @@ async function renderCustomers(){
 }
 
 let custCache={}, custReload=null;
+// ── Address autocomplete (Google Places) ─────────────────────────────────────
+// Reuses the Street-View Maps key (sent in appConfig.maps_key). Loads the Places
+// library once, lazily. Degrades SILENTLY to a plain text field if the key is
+// absent or the script fails to load — so a missing key never breaks the form.
+let _gmapsPromise=null;
+function loadGoogleMaps(){
+  if(_gmapsPromise) return _gmapsPromise;
+  const key=appConfig&&appConfig.maps_key;
+  if(!key){ _gmapsPromise=Promise.reject(new Error('no maps key')); return _gmapsPromise; }
+  _gmapsPromise=new Promise((resolve,reject)=>{
+    if(window.google&&window.google.maps&&window.google.maps.places) return resolve();
+    const s=document.createElement('script');
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=places';
+    s.async=true; s.onload=()=>resolve(); s.onerror=()=>reject(new Error('maps load failed'));
+    document.head.appendChild(s);
+  });
+  return _gmapsPromise;
+}
+// Attach Google Places autocomplete to a street-address input. On pick it fills
+// the street field + the city/state/zip inputs named in `fields`, and fires a
+// change on the zip so downstream logic (metro filter, surcharge) still runs.
+async function attachAddressAutocomplete(input, fields){
+  fields=fields||{};
+  if(!input || input.dataset.acOn) return;
+  try{ await loadGoogleMaps(); }catch(e){ return; }   // no key / load failed -> plain field
+  const P=window.google&&window.google.maps&&window.google.maps.places;
+  if(!P||!P.Autocomplete) return;
+  input.dataset.acOn='1';
+  const ac=new P.Autocomplete(input,{ types:['address'], componentRestrictions:{country:'us'}, fields:['address_components'] });
+  ac.addListener('place_changed',()=>{
+    const p=ac.getPlace(); if(!p||!p.address_components) return;
+    const get=(type,short)=>{ const c=p.address_components.find(x=>x.types.includes(type)); return c?(short?c.short_name:c.long_name):''; };
+    const street=[get('street_number'),get('route')].filter(Boolean).join(' ');
+    if(street) input.value=street;
+    const set=(id,v)=>{ if(!id||!v) return; const el=document.getElementById(id); if(el) el.value=v; };
+    set(fields.city, get('locality')||get('sublocality')||get('postal_town'));
+    set(fields.state, get('administrative_area_level_1',true));
+    set(fields.zip, get('postal_code'));
+    if(fields.zip){ const z=document.getElementById(fields.zip); if(z) z.dispatchEvent(new Event('change')); }
+  });
+  // Enter to choose a suggestion must not submit the surrounding form.
+  input.addEventListener('keydown',e=>{ if(e.key==='Enter'){ const pac=document.querySelector('.pac-container'); if(pac&&pac.offsetParent!==null) e.preventDefault(); } });
+}
 function openCustomerEdit(id){
   const c=custCache[id]; if(!c) return;
   document.getElementById('cuId').value=c.id;
@@ -1905,6 +1951,7 @@ function openCustomerEdit(id){
   document.getElementById('cuZip').value=c.postal_code||'';
   document.getElementById('cuErr').textContent='';
   document.getElementById('custModal').classList.remove('hidden');
+  attachAddressAutocomplete(document.getElementById('cuAddr'), { city:'cuCity', state:'cuState', zip:'cuZip' });
 }
 document.getElementById('cuCancel').addEventListener('click',()=>document.getElementById('custModal').classList.add('hidden'));
 document.getElementById('custModal').addEventListener('click',e=>{ if(e.target.id==='custModal') document.getElementById('custModal').classList.add('hidden'); });
@@ -4002,6 +4049,7 @@ async function openNewBooking(prefill){
     loadNbCalendar();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
   modal.classList.remove('hidden');
+  attachAddressAutocomplete(document.getElementById('nbAddr'), { city:'nbCity', state:'nbState', zip:'nbZip' });
   // Pre-fill an existing customer's details (from the Customers tab "Create
   // Appointment" button) so the office doesn't re-enter them.
   if(prefill){

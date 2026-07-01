@@ -319,6 +319,7 @@ async function login(req, res, body) {
   const config = {
     email: !!process.env.RESEND_API_KEY,
     sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+    maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
   };
   return res.status(200).json({ token, role, scope, name, config, businesses: businesses || [] });
 }
@@ -339,6 +340,7 @@ async function sessionStatus(req, res) {
   const config = {
     email: !!process.env.RESEND_API_KEY,
     sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+    maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
   };
   return res.status(200).json({
     token: getBearer(req), role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
