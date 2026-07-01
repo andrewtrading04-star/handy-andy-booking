@@ -854,11 +854,15 @@ function fmtMoney(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2)
 function openChargeFlow(j){
   const base=Number(j.price)||0;
   if(base<=0){ toast('This job has no price to charge.'); return; }
-  let tip=0, step=1;
+  let tip=0, step=1, sigData=null, signerName=(j.customer&&j.customer.name)||'';
   const custName=(j.customer&&j.customer.name)||'';
   const bizName=j.company_name||(j.business&&j.business.name)||'the company';
   const lines=(j.line_items||[]).filter(li=>Number(li.line_total)>0);
   const total=()=>Math.round((base+tip)*100)/100;
+  // Shown at signing — the tip is chosen AFTER, so the customer authorizes the
+  // service amount "plus any gratuity I add".
+  const authLine=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file for the services above (${fmtMoney(base)} service) plus any gratuity I add on the next screen. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
+  // Stored at charge time — records the actual final total including the tip.
   const termsFor=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${fmtMoney(total())} for the services above (${fmtMoney(base)} service${tip>0?` + ${fmtMoney(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
 
   const ov=document.createElement('div');
@@ -882,9 +886,28 @@ function openChargeFlow(j){
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
         <button class="btn ghost" data-x>Cancel</button>
-        <button class="btn" data-next style="flex:1;">Continue to tip →</button>
+        <button class="btn" data-next style="flex:1;">Continue to signature →</button>
       </div>`;
     } else if(step===2){
+      ov.innerHTML=`
+      <div style="padding:22px;overflow:auto;flex:1;">
+        <h2 style="margin:0 0 4px;font-size:22px;">Authorize payment</h2>
+        <div style="font-size:24px;font-weight:800;margin:6px 0 14px;">${fmtMoney(base)} <span style="font-size:13px;color:var(--mute);font-weight:600;">+ tip next</span></div>
+        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(authLine(signerName))}</div>
+        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
+        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:120px;overflow:auto;white-space:pre-wrap;">${esc(REFUND_POLICY)}</div>
+        <input id="cfName" type="text" placeholder="Type full name" value="${esc(signerName)}" style="margin-bottom:12px;">
+        <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Sign below to authorize</div>
+        <div style="position:relative;">
+          <canvas id="cfSig" style="width:100%;height:190px;background:#fff;border-radius:10px;touch-action:none;display:block;"></canvas>
+          <button id="cfClear" class="btn ghost" style="position:absolute;top:8px;right:8px;padding:6px 12px;font-size:13px;">Clear</button>
+        </div>
+      </div>
+      <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
+        <button class="btn ghost" data-back>← Back</button>
+        <button class="btn" id="cfSignNext" style="flex:1;opacity:.5;" disabled>Continue to tip →</button>
+      </div>`;
+    } else {
       ov.innerHTML=`
       <div style="padding:22px;overflow:auto;flex:1;text-align:center;">
         <h2 style="margin:18px 0 4px;font-size:22px;">Add a tip?</h2>
@@ -900,26 +923,7 @@ function openChargeFlow(j){
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
         <button class="btn ghost" data-back>← Back</button>
-        <button class="btn" data-next style="flex:1;">Continue →</button>
-      </div>`;
-    } else {
-      ov.innerHTML=`
-      <div style="padding:22px;overflow:auto;flex:1;">
-        <h2 style="margin:0 0 4px;font-size:22px;">Authorize payment</h2>
-        <div style="font-size:32px;font-weight:800;margin:6px 0 14px;">${fmtMoney(total())}${tip>0?` <span style="font-size:14px;color:var(--mute);font-weight:600;">(incl. ${fmtMoney(tip)} tip)</span>`:''}</div>
-        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(termsFor(custName))}</div>
-        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
-        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:120px;overflow:auto;white-space:pre-wrap;">${esc(REFUND_POLICY)}</div>
-        <input id="cfName" type="text" placeholder="Type full name" value="${esc(custName)}" style="margin-bottom:12px;">
-        <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Sign below to authorize</div>
-        <div style="position:relative;">
-          <canvas id="cfSig" style="width:100%;height:190px;background:#fff;border-radius:10px;touch-action:none;display:block;"></canvas>
-          <button id="cfClear" class="btn ghost" style="position:absolute;top:8px;right:8px;padding:6px 12px;font-size:13px;">Clear</button>
-        </div>
-      </div>
-      <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-back>← Back</button>
-        <button class="btn" id="cfCharge" style="flex:1;opacity:.5;" disabled>Charge ${fmtMoney(total())}</button>
+        <button class="btn" id="cfCharge" style="flex:1;">Charge ${fmtMoney(total())}</button>
       </div>`;
     }
     wire();
@@ -931,38 +935,42 @@ function openChargeFlow(j){
     const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step++; render(); };
     ov.querySelectorAll('[data-tip]').forEach(b=>b.onclick=()=>{ tip=Number(b.dataset.tip)||0; render(); });
     const cust=ov.querySelector('#cfCustom');
-    if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=fmtMoney(total()); };
-    if(step===3) setupSign();
+    if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=fmtMoney(total()); const cb=ov.querySelector('#cfCharge'); if(cb) cb.textContent='Charge '+fmtMoney(total()); };
+    const charge=ov.querySelector('#cfCharge'); if(charge) charge.onclick=()=>submit();
+    if(step===2) setupSign();
+  }
+
+  async function submit(){
+    const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; }
+    const nm=signerName;
+    try{
+      await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
+        signature:sigData||undefined, customer_name:nm,
+        terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+REFUND_POLICY, terms_version:TERMS_VERSION,
+        snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
+      done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
+      setTimeout(()=>showDetail(j.id),400);
+    }catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); } }
   }
 
   function setupSign(){
     const cv=ov.querySelector('#cfSig'); if(!cv) return;
-    const btn=ov.querySelector('#cfCharge'), clr=ov.querySelector('#cfClear'), nameEl=ov.querySelector('#cfName');
+    const nextBtn=ov.querySelector('#cfSignNext'), clr=ov.querySelector('#cfClear'), nameEl=ov.querySelector('#cfName');
     const ctx=cv.getContext('2d');
     const rect=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
     cv.width=Math.round(rect.width*dpr); cv.height=Math.round(rect.height*dpr);
     ctx.scale(dpr,dpr); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111';
     let drawing=false, inked=false, lx=0, ly=0;
     const pos=e=>{ const r=cv.getBoundingClientRect(); return [(e.clientX)-r.left,(e.clientY)-r.top]; };
-    const enable=()=>{ if(btn){ btn.disabled=false; btn.style.opacity='1'; } };
+    const enable=()=>{ if(nextBtn){ nextBtn.disabled=false; nextBtn.style.opacity='1'; } };
+    // Returning from the tip step? Redraw the signature already captured.
+    if(sigData){ const img=new Image(); img.onload=()=>{ try{ ctx.drawImage(img,0,0,cv.width/dpr,cv.height/dpr); }catch(_){} }; img.src=sigData; inked=true; enable(); }
     cv.addEventListener('pointerdown',e=>{ e.preventDefault(); drawing=true; [lx,ly]=pos(e); try{cv.setPointerCapture(e.pointerId);}catch(_){}; });
     cv.addEventListener('pointermove',e=>{ if(!drawing) return; e.preventDefault(); const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.stroke(); [lx,ly]=[x,y]; inked=true; enable(); });
     const stop=()=>{ drawing=false; };
     cv.addEventListener('pointerup',stop); cv.addEventListener('pointercancel',stop); cv.addEventListener('pointerleave',stop);
-    if(clr) clr.onclick=()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked=false; if(btn){ btn.disabled=true; btn.style.opacity='.5'; } };
-    if(btn) btn.onclick=async()=>{
-      if(!inked){ toast('Please sign first.'); return; }
-      const nm=(nameEl&&nameEl.value.trim())||custName||'';
-      btn.disabled=true; btn.textContent='Charging…';
-      try{
-        await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
-          signature:cv.toDataURL('image/png'), customer_name:nm,
-          terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+REFUND_POLICY, terms_version:TERMS_VERSION,
-          snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
-        done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
-        setTimeout(()=>showDetail(j.id),400);
-      }catch(e){ toast(e.message); btn.disabled=false; btn.style.opacity='1'; btn.textContent='Charge '+fmtMoney(total()); }
-    };
+    if(clr) clr.onclick=()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked=false; sigData=null; if(nextBtn){ nextBtn.disabled=true; nextBtn.style.opacity='.5'; } };
+    if(nextBtn) nextBtn.onclick=()=>{ if(!inked){ toast('Please sign first.'); return; } signerName=(nameEl&&nameEl.value.trim())||custName||''; sigData=cv.toDataURL('image/png'); step=3; render(); };
   }
 
   render();

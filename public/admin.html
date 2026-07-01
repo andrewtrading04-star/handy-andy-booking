@@ -1973,12 +1973,15 @@ const CHARGE_REFUND_POLICY=[
 function openChargeFlowAdmin(b){
   const base=Number(b.price)||0;
   if(base<=0){ toast('This booking has no price to charge.'); return; }
-  let tip=0, step=1;
+  let tip=0, step=1, sigData=null, signerName=(b.customer&&b.customer.name)||'';
   const custName=(b.customer&&b.customer.name)||'';
   const bizName=(current&&current.name)||'the company';
   const lines=(b.line_items||[]).filter(li=>Number(li.line_total)>0 && !liIsDefaultType(li.label||li.name||''));
   const total=()=>Math.round((base+tip)*100)/100;
-  const authLine=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${money(total())} for the services above (${money(base)} service${tip>0?` + ${money(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
+  // Shown at signing (tip comes after) — authorizes the service "plus any gratuity".
+  const authLine=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file for the services above (${money(base)} service) plus any gratuity I add on the next screen. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
+  // Stored at charge time — the actual final total including the tip.
+  const termsFor=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${money(total())} for the services above (${money(base)} service${tip>0?` + ${money(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
 
   const ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;z-index:10000;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;';
@@ -1999,9 +2002,31 @@ function openChargeFlowAdmin(b){
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);max-width:520px;margin:0 auto;width:100%;box-sizing:border-box;">
         <button class="btn ghost" data-x>Cancel</button>
-        <button class="btn" data-next style="flex:1;">Continue to tip →</button>
+        <button class="btn" data-next style="flex:1;">Continue to signature →</button>
       </div>`;
     } else if(step===2){
+      ov.innerHTML=`
+      <div style="padding:22px;max-width:520px;margin:0 auto;width:100%;overflow:auto;flex:1;box-sizing:border-box;">
+        <h2 style="margin:0 0 4px;">Authorize payment</h2>
+        <div style="font-size:24px;font-weight:800;margin:6px 0 14px;">${money(base)} <span style="font-size:13px;color:var(--mute);font-weight:600;">+ tip next</span></div>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(authLine(signerName))}</div>
+        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:110px;overflow:auto;white-space:pre-wrap;">${esc(CHARGE_REFUND_POLICY)}</div>
+        <input id="cfName" class="search" style="margin:0 0 12px;" placeholder="Type full name" value="${esc(signerName)}">
+        <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Customer signs below</div>
+        <div style="position:relative;">
+          <canvas id="cfSig" style="width:100%;height:180px;background:#fff;border:1px solid var(--line);border-radius:10px;touch-action:none;display:block;"></canvas>
+          <button id="cfClear" class="btn ghost sm" style="position:absolute;top:8px;right:8px;">Clear</button>
+        </div>
+      </div>
+      <div style="padding:16px;border-top:1px solid var(--line);max-width:520px;margin:0 auto;width:100%;box-sizing:border-box;">
+        <div style="display:flex;gap:10px;">
+          <button class="btn ghost" data-back>← Back</button>
+          <button class="btn" id="cfSignNext" style="flex:1;opacity:.5;" disabled>Continue to tip →</button>
+        </div>
+        <button class="btn ghost sm" id="cfNoSig" style="width:100%;margin-top:8px;color:var(--mute);">Skip signature (phone order)</button>
+      </div>`;
+    } else {
       ov.innerHTML=`
       <div style="padding:22px;max-width:520px;margin:0 auto;width:100%;overflow:auto;flex:1;text-align:center;box-sizing:border-box;">
         <h2 style="margin:18px 0 4px;">Add a tip?</h2>
@@ -2017,29 +2042,7 @@ function openChargeFlowAdmin(b){
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);max-width:520px;margin:0 auto;width:100%;box-sizing:border-box;">
         <button class="btn ghost" data-back>← Back</button>
-        <button class="btn" data-next style="flex:1;">Continue →</button>
-      </div>`;
-    } else {
-      ov.innerHTML=`
-      <div style="padding:22px;max-width:520px;margin:0 auto;width:100%;overflow:auto;flex:1;box-sizing:border-box;">
-        <h2 style="margin:0 0 4px;">Authorize payment</h2>
-        <div style="font-size:30px;font-weight:800;margin:6px 0 14px;">${money(total())}${tip>0?` <span style="font-size:14px;color:var(--mute);font-weight:600;">(incl. ${money(tip)} tip)</span>`:''}</div>
-        <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(authLine(custName))}</div>
-        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
-        <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:110px;overflow:auto;white-space:pre-wrap;">${esc(CHARGE_REFUND_POLICY)}</div>
-        <input id="cfName" class="search" style="margin:0 0 12px;" placeholder="Type full name" value="${esc(custName)}">
-        <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Customer signs below</div>
-        <div style="position:relative;">
-          <canvas id="cfSig" style="width:100%;height:180px;background:#fff;border:1px solid var(--line);border-radius:10px;touch-action:none;display:block;"></canvas>
-          <button id="cfClear" class="btn ghost sm" style="position:absolute;top:8px;right:8px;">Clear</button>
-        </div>
-      </div>
-      <div style="padding:16px;border-top:1px solid var(--line);max-width:520px;margin:0 auto;width:100%;box-sizing:border-box;">
-        <div style="display:flex;gap:10px;">
-          <button class="btn ghost" data-back>← Back</button>
-          <button class="btn" id="cfCharge" style="flex:1;opacity:.5;" disabled>Charge ${money(total())}</button>
-        </div>
-        <button class="btn ghost sm" id="cfNoSig" style="width:100%;margin-top:8px;color:var(--mute);">Charge without signature (phone order)</button>
+        <button class="btn" id="cfCharge" style="flex:1;">Charge ${money(total())}</button>
       </div>`;
     }
     wire();
@@ -2049,41 +2052,42 @@ function openChargeFlowAdmin(b){
     const back=ov.querySelector('[data-back]'); if(back) back.onclick=()=>{ step--; render(); };
     const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step++; render(); };
     ov.querySelectorAll('[data-tip]').forEach(bn=>bn.onclick=()=>{ tip=Number(bn.dataset.tip)||0; render(); });
-    const cust=ov.querySelector('#cfCustom'); if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=money(total()); };
-    if(step===3) setupSign();
+    const cust=ov.querySelector('#cfCustom'); if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=money(total()); const cb=ov.querySelector('#cfCharge'); if(cb) cb.textContent='Charge '+money(total()); };
+    const charge=ov.querySelector('#cfCharge'); if(charge) charge.onclick=()=>submit();
+    if(step===2) setupSign();
   }
-  async function submit(signatureDataUrl){
-    const nameEl=ov.querySelector('#cfName'); const nm=(nameEl&&nameEl.value.trim())||custName||'';
-    const btn=ov.querySelector('#cfCharge'), nob=ov.querySelector('#cfNoSig');
-    if(btn) btn.disabled=true; if(nob) nob.disabled=true;
+  async function submit(){
+    const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; }
+    const nm=signerName;
     try{
       await api('booking_payment',{ method:'POST', body:{ business:current.slug, id:b.id, action:'charge', amount:base, tip,
-        signature:signatureDataUrl||undefined, customer_name:nm,
-        terms_text:authLine(nm)+'\n\nRefund & Cancellation Policy:\n'+CHARGE_REFUND_POLICY, terms_version:CHARGE_TERMS_VERSION,
+        signature:sigData||undefined, customer_name:nm,
+        terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+CHARGE_REFUND_POLICY, terms_version:CHARGE_TERMS_VERSION,
         snapshot:{ line_items:b.line_items||[], ticket_amount:base, tip, total:total() } }});
       done();
       const m=document.getElementById('bkModal'); if(m) m.classList.add('hidden');
       toast('Charged '+money(total())+' — receipt sent ✓');
       refreshCurrent();
-    }catch(e){ toast(e.message); if(btn) btn.disabled=false; if(nob) nob.disabled=false; }
+    }catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+money(total()); } }
   }
   function setupSign(){
     const cv=ov.querySelector('#cfSig'); if(!cv) return;
-    const btn=ov.querySelector('#cfCharge'), clr=ov.querySelector('#cfClear'), nob=ov.querySelector('#cfNoSig');
+    const nextBtn=ov.querySelector('#cfSignNext'), clr=ov.querySelector('#cfClear'), nameEl=ov.querySelector('#cfName'), nob=ov.querySelector('#cfNoSig');
     const ctx=cv.getContext('2d');
     const rect=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
     cv.width=Math.round(rect.width*dpr); cv.height=Math.round(rect.height*dpr);
     ctx.scale(dpr,dpr); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111';
     let drawing=false, inked=false, lx=0, ly=0;
     const pos=e=>{ const r=cv.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; };
-    const enable=()=>{ if(btn){ btn.disabled=false; btn.style.opacity='1'; } };
+    const enable=()=>{ if(nextBtn){ nextBtn.disabled=false; nextBtn.style.opacity='1'; } };
+    if(sigData){ const img=new Image(); img.onload=()=>{ try{ ctx.drawImage(img,0,0,cv.width/dpr,cv.height/dpr); }catch(_){} }; img.src=sigData; inked=true; enable(); }
     cv.addEventListener('pointerdown',e=>{ e.preventDefault(); drawing=true; [lx,ly]=pos(e); try{cv.setPointerCapture(e.pointerId);}catch(_){}; });
     cv.addEventListener('pointermove',e=>{ if(!drawing) return; e.preventDefault(); const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.stroke(); [lx,ly]=[x,y]; inked=true; enable(); });
     const stop=()=>{ drawing=false; };
     cv.addEventListener('pointerup',stop); cv.addEventListener('pointercancel',stop); cv.addEventListener('pointerleave',stop);
-    if(clr) clr.onclick=()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked=false; if(btn){ btn.disabled=true; btn.style.opacity='.5'; } };
-    if(btn) btn.onclick=()=>{ if(!inked){ toast('Please sign first.'); return; } submit(cv.toDataURL('image/png')); };
-    if(nob) nob.onclick=()=>{ if(confirm('Charge without a signature? Use this only for phone orders where the customer isn’t present.\n\nA signed authorization is much stronger if the charge is ever disputed.')) submit(null); };
+    if(clr) clr.onclick=()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked=false; sigData=null; if(nextBtn){ nextBtn.disabled=true; nextBtn.style.opacity='.5'; } };
+    if(nextBtn) nextBtn.onclick=()=>{ if(!inked){ toast('Please sign first.'); return; } signerName=(nameEl&&nameEl.value.trim())||custName||''; sigData=cv.toDataURL('image/png'); step=3; render(); };
+    if(nob) nob.onclick=()=>{ if(confirm('Skip the signature? Use this only for phone orders where the customer isn’t present.\n\nA signed authorization is much stronger if the charge is ever disputed.')){ signerName=(nameEl&&nameEl.value.trim())||custName||''; sigData=null; step=3; render(); } };
   }
   render();
 }
