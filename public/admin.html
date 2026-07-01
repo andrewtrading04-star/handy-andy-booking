@@ -669,7 +669,7 @@
     <form id="nbForm" style="display:grid;gap:10px;">
       <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
-      <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address…">
+      <input class="search" style="margin:0" id="nbAddr" placeholder="Street address">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
@@ -777,7 +777,7 @@
       <input type="hidden" id="cuId">
       <input class="search" style="margin:0" id="cuName" placeholder="Customer name *">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuPhone" placeholder="Phone"><input class="search" style="margin:0" id="cuEmail" placeholder="Email"></div>
-      <input class="search" style="margin:0" id="cuAddr" placeholder="Start typing an address…">
+      <input class="search" style="margin:0" id="cuAddr" placeholder="Street address">
       <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="cuCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="cuState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="cuZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Save changes</button>
@@ -1929,9 +1929,13 @@ function loadGoogleMaps(){
 async function attachAddressAutocomplete(input, fields){
   fields=fields||{};
   if(!input || input.dataset.acOn) return;
-  // OFF unless the server confirms the Maps key has the right APIs enabled
-  // (MAPS_AUTOCOMPLETE=1). Until then the field stays a plain, reliable text box
-  // instead of Google rendering a broken dropdown over it.
+  // HARD OFF. Google's Autocomplete widget renders broken UI over the address
+  // field when the Maps key isn't fully provisioned (Maps JS + Places API +
+  // referrer allow-list + billing), which it wasn't. Until that setup is
+  // verified end-to-end, the address field stays a plain, reliable text box.
+  // Flip DISABLE_ADDRESS_AC to false (and set MAPS_AUTOCOMPLETE=1) to re-enable.
+  const DISABLE_ADDRESS_AC = true;
+  if(DISABLE_ADDRESS_AC) return;
   if(!(appConfig&&appConfig.maps_autocomplete) || _gmapsAuthFailed) return;
   try{ await loadGoogleMaps(); }catch(e){ return; }   // no key / load failed -> plain field
   if(_gmapsAuthFailed) return;
