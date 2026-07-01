@@ -209,6 +209,18 @@ function afterPrefix(name) {
   const tail = i > -1 ? s.slice(i + 1).trim() : '';
   return tail;
 }
+// Frame/Gallery TVs (Samsung Frame, LG Gallery) mount on the bracket that ships
+// IN THE BOX. Per owner (HARD RULE): this pays the tech a flat $15 on EVERY job,
+// EVERY location, EVERY tech — regardless of how the line is worded ("Use the
+// bracket in the box", "I will be using the bracket that comes in the box",
+// "Samsung Frame / LG Gallery (in-box bracket)"). "In the box" or a Frame/Gallery
+// name is enough; we don't rely on an exact label match.
+function isFrameInBoxBracket(name) {
+  const n = String(name || '').toLowerCase();
+  if (/\b(samsung\s*frame|lg\s*gallery|frame\s*\/?\s*gallery)\b/.test(n)) return true;
+  // "…bracket…in the box…" (or "in box"), in either order.
+  return /bracket/.test(n) && /\bin\b[\s\S]{0,6}\bbox\b/.test(n);
+}
 function matchItem(name) {
   // Try the full name and the part after a "Category:" prefix, each also with a
   // baked-in "×N" quantity suffix stripped, so e.g. "Bracket: Full Motion ×3"
@@ -226,6 +238,8 @@ function matchItem(name) {
     const n = normalize(cand);
     if (ITEM_RATES[n]) return { key: n, ...ITEM_RATES[n] };
   }
+  // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
+  if (isFrameInBoxBracket(name)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   return null;
 }
 
@@ -689,6 +703,24 @@ function runSelfTests() {
     { name: 'TV Size: 33"–59" ×2', line_total: 218, quantity: 2, unit_price: 109 },
     { name: 'Bracket: Samsung Frame / LG Gallery (in-box bracket) ×2', line_total: 30, quantity: 2, unit_price: 15 },
   ] }), 'Juan').pay, 150, 'Juan 2× 33-59 (120) + frame/gallery in-box ×2 ($15×2=30) = 150');
+  // Frame-TV in-box bracket is a flat $15 to every tech, worded any which way
+  // (owner hard rule). The real TK job from the screenshot: 2× 33-59 base (120) +
+  // "Use the bracket in the box (Samsung Frame…)" ($15) + behind wall (35) +
+  // outside wall (15) = 185.
+  eq(computeJobPay(job({ line_items: [
+    { name: 'TV Size: 33"–59" ×2', line_total: 218, quantity: 2, unit_price: 109 },
+    { name: 'Use the bracket in the box (Samsung Frame / LG Gallery)', line_total: 0 },
+    { name: 'Yes, hide the wires BEHIND the wall', line_total: 60 },
+    { name: 'Yes, hide the wires OUTSIDE the wall', line_total: 25 },
+  ] }), 'TK').pay, 185, 'TK Frame job: 120 base + 15 frame bracket + 35 + 15 = 185');
+  // The $15 fires no matter the wording, and for any tech.
+  eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 },
+    { name: 'I will be using the bracket that comes in the box (Samsung Frame TV)', line_total: 0 }] }), 'Kregg').pay, 75, 'frame in-box bracket ($15) any wording = 60 + 15');
+  eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 },
+    { name: 'Bracket: Samsung Frame / LG Gallery (in-box bracket)', line_total: 0 }] }), 'Juan').pay, 75, 'frame bracket Juan too = 60 + 15');
+  eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 },
+    { name: 'Use the bracket in the box', line_total: 0 }] }), 'Zach').pay, 75, 'bare "use the bracket in the box" = 60 + 15');
+
   // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
   // (210) + custom dry-erase 2h (130) + full-motion brackets ×3 ($0, not Juan) +
   // GDS sold ($0) + $50 travel = 390.
