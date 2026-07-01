@@ -839,6 +839,17 @@ async function paymentAction(jobId,action){
 // signature + tip + accepted terms are POSTed with the charge and frozen as
 // dispute evidence server-side. Degrades safely: a cancel just closes it.
 const TERMS_VERSION='2026-07-01';
+// Refund & cancellation policy shown on the signature screen and frozen into the
+// signed terms as chargeback evidence. Edit the numbers here (cancellation
+// window, trip fee, guarantee period, refund window) to change the policy.
+const REFUND_POLICY=[
+  '1. Cancellations & rescheduling: You may cancel or reschedule at no charge up to 24 hours before your appointment. Cancellations inside 24 hours, or if our technician cannot access the property at the scheduled time, may incur a trip fee of up to $50.',
+  '2. Payment: Payment is due upon completion of service. By signing, you confirm the work was completed to your satisfaction; charges for completed labor are final.',
+  '3. Workmanship guarantee: If a mount we installed fails due to our workmanship within 30 days, we will return and correct it at no charge. This does not cover customer-supplied brackets or hardware, pre-existing wall or structural conditions, or damage from later modifications.',
+  '4. Refund requests: If you are not satisfied, contact us within 3 days and we will first work to make it right. Any refund is limited to the labor performed and excludes brackets or materials already installed and any travel or trip fees.',
+  '5. Not covered: We are not responsible for pre-existing wall damage, concealed wiring or piping, or the structural integrity of walls. Customer-supplied equipment is installed at the customer’s risk.',
+  '6. Disputes: Please raise any concern with us directly before contacting your bank. Charges for services rendered and accepted are supported by your signed authorization.',
+].join('\n\n');
 function fmtMoney(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2); }
 function openChargeFlow(j){
   const base=Number(j.price)||0;
@@ -896,7 +907,9 @@ function openChargeFlow(j){
       <div style="padding:22px;overflow:auto;flex:1;">
         <h2 style="margin:0 0 4px;font-size:22px;">Authorize payment</h2>
         <div style="font-size:32px;font-weight:800;margin:6px 0 14px;">${fmtMoney(total())}${tip>0?` <span style="font-size:14px;color:var(--mute);font-weight:600;">(incl. ${fmtMoney(tip)} tip)</span>`:''}</div>
-        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:12px;">${esc(termsFor(custName))}</div>
+        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(termsFor(custName))}</div>
+        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
+        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:120px;overflow:auto;white-space:pre-wrap;">${esc(REFUND_POLICY)}</div>
         <input id="cfName" type="text" placeholder="Type full name" value="${esc(custName)}" style="margin-bottom:12px;">
         <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Sign below to authorize</div>
         <div style="position:relative;">
@@ -944,7 +957,7 @@ function openChargeFlow(j){
       try{
         await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
           signature:cv.toDataURL('image/png'), customer_name:nm,
-          terms_text:termsFor(nm), terms_version:TERMS_VERSION,
+          terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+REFUND_POLICY, terms_version:TERMS_VERSION,
           snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
         done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
         setTimeout(()=>showDetail(j.id),400);
