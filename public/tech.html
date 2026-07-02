@@ -289,7 +289,16 @@ function liName(name){
   // badge, so keeping it here would read "×3 ×3". Only the × sign (never a plain
   // letter "x", e.g. "4 x 6" dimensions) is treated as a quantity marker.
   out=out.replace(/\s*[×✕✖]\s*\d+\s*$/,'').trim()||out;
-  return out;
+  return liRelabel(out);
+}
+// Friendly display labels for verbose widget answers. Both the old and new
+// wordings are payroll-safe ("Customer supplied bracket" = $0; "…help lift" is a
+// one-person signal), so persisting the tidy label on save is harmless.
+function liRelabel(t){
+  const n=String(t).toLowerCase();
+  if(/\bmy own\b[^]*bracket|own mounting bracket|customer supplied bracket/.test(n)) return 'Customer supplied bracket';
+  if(/\bhelp\s+lift\b/.test(n) && !/\bcannot\b|can'?t/.test(n)) return 'Customer will help lift';
+  return t;
 }
 // How many of this line item to show (e.g. 2 tilting brackets). Prefer the stored
 // quantity; if that's 1 but the price is a clean multiple of the unit price (some
@@ -706,7 +715,7 @@ function mountTechLineItems(j, id){
   // they can charge for on-site extras. `existing` marks which is which.
   // Coupons and tax never belong in the editable list — they show in the Payment
   // section (server already filters them out; this is a belt-and-suspenders guard).
-  const notHidden=li=>{ const raw=String(li&&li.name||''); if(/^\s*tv\s*type\s*:\s*regular\b/i.test(raw)) return false; const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|travel fee|service\s*minimum/i.test(n) && !/guarante\w*\s+dismount|dismount\s+service/i.test(n); };
+  const notHidden=li=>{ const raw=String(li&&li.name||''); if(/^\s*tv\s*type\s*:\s*regular\b/i.test(raw)) return false; if(/\btv removal\b/i.test(raw)) return false; const n=String(liName(li.name)||'').trim(); return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|travel fee|service\s*minimum/i.test(n) && !/guarante\w*\s+dismount|dismount\s+service/i.test(n); };
   // Row model: { name, unit (per-item price), qty, existing }. line total = unit×qty.
   const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true }; };
   const seeded=(j.line_items&&j.line_items.length) ? j.line_items.filter(notHidden).map(mkRow) : [];

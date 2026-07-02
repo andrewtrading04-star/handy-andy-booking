@@ -1056,7 +1056,10 @@ function isFeeLi(li) {
 // tech edits. Match by pattern (not an exact name) so a category prefix
 // ("Add-ons: Guaranteed Dismount Service") or a wording variant is still caught.
 function isDismountLi(li) {
-  return /guarante\w*\s+dismount|dismount\s+service/i.test(((li && li.name) || '').trim());
+  // Guaranteed-dismount up-sell AND the dismount question's answers ("No, I will
+  // handle TV removal myself") — dismount lives in the payment/dismount context,
+  // not the editable work lines, so we preserve these instead of deleting on save.
+  return /guarante\w*\s+dismount|dismount\s+service|\btv removal\b/i.test(((li && li.name) || '').trim());
 }
 function isHiddenLi(li) {
   const kind = (li && li.kind) || 'service';

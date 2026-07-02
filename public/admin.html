@@ -1701,12 +1701,26 @@ function liCleanLabel(name){
   // Drop a trailing "×3" baked into the label — the qty shows as a separate
   // badge. Only the × sign counts (not a letter "x", e.g. "4 x 6" dimensions).
   out=out.replace(/\s*[×✕✖]\s*\d+\s*$/,'').trim()||out;
-  return out;
+  return liRelabel(out);
+}
+// Friendly display labels for verbose widget answers (display only — the stored
+// name stays raw for payroll/receipts).
+function liRelabel(t){
+  const n=String(t).toLowerCase();
+  if(/\bmy own\b[^]*bracket|own mounting bracket|customer supplied bracket/.test(n)) return 'Customer supplied bracket';
+  if(/\bhelp\s+lift\b/.test(n) && !/\bcannot\b|can'?t/.test(n)) return 'Customer will help lift';
+  return t;
 }
 // "TV Type: Regular TV" is the default for nearly every job — hide it from the
 // ticket. Frame (and any other non-default TV type) is still shown.
 function liIsDefaultType(name){
   return /^\s*tv\s*type\s*:\s*regular\b/i.test(String(name||''));
+}
+// The dismount question's answer ("No, I will handle TV removal myself") belongs
+// in the payment/dismount context, not the editable work lines — hide it from the
+// editor but keep it on the ticket (preserved via hiddenItems on save).
+function liIsDismountAnswer(name){
+  return /\btv removal\b/i.test(String(name||''));
 }
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
@@ -1722,7 +1736,7 @@ function mountLineItemsEditor(b){
         if(qty<1) qty=1;
         if(!unit) unit=qty>0?Math.round((lt/qty)*100)/100:lt;   // derive per-item price if missing
         const name=li.label||'';
-        if(liIsDefaultType(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
         acc.push({ name, display:liCleanLabel(name), unit, qty, kind:li.kind||'service' });
         return acc;
       },[])
@@ -1777,7 +1791,7 @@ function mountLineItemsEditor(b){
       hiddenItems=[];
       rows=b.line_items.reduce((acc,li)=>{
         const name=li.label||'';
-        if(liIsDefaultType(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
         acc.push({ name, display:liCleanLabel(name), unit:Number(li.price)||0, qty:Math.max(1,Math.round(Number(li.quantity)||1)), kind:li.kind });
         return acc;
       },[]);

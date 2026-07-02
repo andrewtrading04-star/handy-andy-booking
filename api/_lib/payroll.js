@@ -324,7 +324,9 @@ function isOnePersonJob(job) {
   return (job.line_items || []).some(li => {
     const n = String(li.name || '').toLowerCase();
     if (/\bcannot\b|can\s*['’]?t\b/.test(n)) return false;   // "cannot / can't help lift" = two-person
-    return /\bi\s+can\s+(?:help\s+)?lift/.test(n) || /\bcan\s+help\s+lift/.test(n) || /\bunder\s*70\b/.test(n);
+    // Any "help lift" / "can lift" / "under 70" answer — covers the raw widget
+    // wording ("…I can help lift it") AND the friendly label ("Customer will help lift").
+    return /\bhelp\s+lift\b/.test(n) || /\bcan\s+lift\b/.test(n) || /\bunder\s*70\b/.test(n);
   });
 }
 
@@ -696,6 +698,17 @@ function runSelfTests() {
   eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 90, 'Saner: "I can help lift" forces one-person — lead keeps full 90 even with a helper attached');
   eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 0, 'Saner: an attached helper earns $0 on this one-person job');
   eq(computeJobPay(job({ ...saner }), 'Steve').flags.length, 0, 'Saner solo: no review flags');
+  // The friendly relabels are payroll-safe: "Customer supplied bracket" = $0, and
+  // "Customer will help lift" is still detected as a one-person job.
+  eq(computeJobPay(job({ line_items: [
+    { name: '70"–85"', line_total: 149 },
+    { name: 'Customer supplied bracket', line_total: 0 },
+    { name: 'Customer will help lift', line_total: 0 },
+  ], second_tech: true }), 'Steve').pay, 80, 'relabeled one-person job: lead full 80, never split');
+  eq(computeJobPay(job({ line_items: [
+    { name: '70"–85"', line_total: 149 },
+    { name: 'Customer supplied bracket', line_total: 0 },
+  ] }), 'Juan').pay, 90, 'Customer supplied bracket pays $0 (Juan base 90)');
 
   // Mixed job: TV mounting + a handyman ADD-ON line must NOT be reclassified as a
   // pure handyman job (the Cecil Cofie bug — it paid $650 as "10h handyman" and
