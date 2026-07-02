@@ -147,6 +147,11 @@
   /* Cross-company secondary technician booking (partner tech helping with large lift) */
   .evt.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;box-shadow:0 0 0 1px rgba(255,179,102,.3) inset;}
   body.doms .evt.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;box-shadow:0 0 0 1px rgba(77,141,255,.3) inset;}
+  /* Overdue: a job unpaid for 48h+ lights up red (pulsing) — overrides the status border. */
+  .evt.overdue{border:1.5px solid var(--red);border-left:3px solid var(--red);background:#fef2f2;animation:evtPulse 1.8s ease-in-out infinite;}
+  @keyframes evtPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0);}50%{box-shadow:0 0 0 4px rgba(239,68,68,.22);}}
+  @media (prefers-reduced-motion:reduce){ .evt.overdue{animation:none;box-shadow:0 0 0 3px rgba(239,68,68,.18);} }
+  .evt-overdue{font-size:9.5px;font-weight:800;color:#fff;background:#ef4444;border-radius:999px;padding:1px 7px;white-space:nowrap;}
   .xco-secondary-tag{display:inline-block;font-size:10px;font-weight:800;background:#ffb366;color:#7a4620;padding:2px 6px;border-radius:4px;margin-left:4px;}
   body.doms .xco-secondary-tag{background:#4d8dff;color:#fff;}
   .job.xco-secondary .xco-secondary-tag{background:#ffb366;color:#7a4620;}
@@ -1337,12 +1342,29 @@ function renderCalBody(){
 }
 
 // ── Jobs view ──────────────────────────────────────────────────────────────
+// A job counts as "overdue" when it was scheduled 48h+ ago, still isn't paid
+// (or refunded), has a real balance (price > 0), and wasn't cancelled/no-showed.
+function isOverdueUnpaid(b){
+  const ps=b.payment_status||'unpaid';
+  if(ps==='paid'||ps==='refunded') return false;
+  if(b.status==='cancelled'||b.status==='no_show') return false;
+  if(!(Number(b.price)>0)) return false;
+  const t=new Date(b.scheduled_at).getTime();
+  return !!t && (Date.now()-t) > 48*3600*1000;
+}
 function evtCard(b){
   const xcoSecondary = b.secondary_technician?.cross_company;
-  return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}" data-id="${b.id}">
+  const overdue = isOverdueUnpaid(b);
+  const odDays = overdue ? Math.floor((Date.now()-new Date(b.scheduled_at).getTime())/86400000) : 0;
+  const pills=[];
+  if(b.payment_status==='paid') pills.push('<span class="evt-paid">✓ PAID</span>');
+  if(b.status==='completed') pills.push('<span class="evt-complete">✓ COMPLETE</span>');
+  if(overdue) pills.push(`<span class="evt-overdue" title="Unpaid ${odDays} day${odDays===1?'':'s'} — payment overdue">⚠ UNPAID · ${odDays}d</span>`);
+  const pillsHtml = pills.length ? `<span class="evt-pills">${pills.join('')}</span>` : '';
+  return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(fmtClock(b.scheduled_at))}</span></div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
-    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price">${money(b.price)}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay (admin only)">${money(b.econ.tech_payout)}</span>`:''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${(b.payment_status==='paid'||b.status==='completed')?`<span class="evt-pills">${b.payment_status==='paid'?'<span class="evt-paid">✓ PAID</span>':''}${b.status==='completed'?'<span class="evt-complete">✓ COMPLETE</span>':''}</span>`:''}</div>
+    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price">${money(b.price)}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay (admin only)">${money(b.econ.tech_payout)}</span>`:''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${pillsHtml}</div>
   </div>`;
 }
 function dayColumn(ds){
