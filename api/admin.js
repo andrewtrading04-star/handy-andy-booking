@@ -500,6 +500,34 @@ async function summary(req, res, db, auth) {
     }
     profit.week_by_slug = weekBySlug;
 
+    // Per-business AVG TICKET: a 7-day daily sparkline + this-week vs last-week %
+    // change. Completed jobs only; empty days are null (skipped in the line).
+    const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const dayWins = [];
+    for (let i = 6; i >= 0; i--) dayWins.push([localDayStartUTC(tz, -i), localDayStartUTC(tz, -i + 1)]);
+    const atStart = new Date(Math.min(lastWeekStart.getTime(), dayWins[0][0].getTime()));
+    const atEnd = new Date(Math.max(weekEnd.getTime(), localDayStartUTC(tz, 1).getTime()));
+    const avgBySlug = {};
+    for (const bb of (allBiz || [])) {
+      const { data: rows } = await db.from('bookings')
+        .select('price, scheduled_at')
+        .eq('business_id', bb.id)
+        .gte('scheduled_at', atStart.toISOString())
+        .lt('scheduled_at', atEnd.toISOString())
+        .eq('status', 'completed');
+      const avgIn = (a, b) => {
+        const r = (rows || []).filter(x => { const t = new Date(x.scheduled_at); return t >= a && t < b; });
+        if (!r.length) return null;   // empty day/week — ignored
+        return Math.round(r.reduce((n, x) => n + Number(x.price || 0), 0) / r.length);
+      };
+      const spark = dayWins.map(([d0, d1]) => avgIn(d0, d1));
+      const wk = avgIn(weekStart, weekEnd);
+      const lw = avgIn(lastWeekStart, weekStart);
+      const pct = (wk != null && lw != null && lw > 0) ? Math.round(((wk - lw) / lw) * 100) : null;
+      avgBySlug[bb.slug] = { spark, week: wk, last_week: lw, pct };
+    }
+    profit.avg_by_slug = avgBySlug;
+
     // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
     // ALL active businesses, each measured in its OWN local day.
     const netDailyFor = async (offset) => {

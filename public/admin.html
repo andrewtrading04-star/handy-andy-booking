@@ -4245,6 +4245,38 @@ function greetNoteHtml(){
 // Profit is owner-only and server-gated; "today" is always the current Denver
 // date regardless of which week is on the schedule. Net daily profit sums TODAY's
 // realized profit across every active business, so it reads the same on either.
+// Build an SVG polyline path from values; nulls BREAK the line (empty days are
+// skipped). Shared min/max lets two series share one vertical scale.
+function sparkD(vals, w, h, min, max){
+  const n=vals.length; const span=(max-min)||1, pad=3; let d='', pen=false;
+  for(let i=0;i<n;i++){ const v=vals[i]; if(v==null){ pen=false; continue; }
+    const x=n>1?(i/(n-1))*w:w/2;
+    const y=h-pad-((v-min)/span)*(h-2*pad);
+    d+=(pen?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '; pen=true; }
+  return d.trim();
+}
+// Redesigned "Avg ticket" box: a 7-day daily sparkline (Dom's blue / Handy Andy
+// orange) plus this-week-vs-last-week % change per company (green up / red down).
+function avgTicketBoxHtml(pf, r){
+  const abs = pf && pf.avg_by_slug;
+  if(!abs) return `<div class="gstat"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money((r&&r.avg_ticket)||0)}</span><span class="gstat-s">per job this month</span></div>`;
+  const doms=abs.doms||{}, ha=abs['handy-andy']||{};
+  const pts=[...(doms.spark||[]),...(ha.spark||[])].filter(v=>v!=null);
+  const min=pts.length?Math.min(...pts):0, max=pts.length?Math.max(...pts):1;
+  const svg = pts.length
+    ? `<svg viewBox="0 0 100 26" preserveAspectRatio="none" style="width:100%;height:26px;margin:3px 0;display:block;overflow:visible;">`+
+        `<path d="${sparkD(doms.spark||[],100,26,min,max)}" fill="none" stroke="#60a5fa" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`+
+        `<path d="${sparkD(ha.spark||[],100,26,min,max)}" fill="none" stroke="#FF8A5C" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`+
+      `</svg>`
+    : `<div class="gstat-s" style="margin:4px 0;">No completed jobs in the last 7 days.</div>`;
+  const row=(label,color,d)=>{
+    const pct=(d&&d.pct);
+    const p = (pct==null) ? `<span style="opacity:.45;">—</span>`
+      : `<span style="color:${pct>=0?'#4ade80':'#f87171'};font-weight:800;">${pct>=0?'▲':'▼'}${Math.abs(pct)}%</span>`;
+    return `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.55;"><span style="color:${color};font-weight:800;">${esc(label)}</span><span style="font-weight:800;margin-left:auto;">${money((d&&d.week)||0)}</span>${p}</div>`;
+  };
+  return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span>${svg}${row("Dom's","#60a5fa",doms)}${row('Handy Andy','#FF8A5C',ha)}</div>`;
+}
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
@@ -4268,7 +4300,7 @@ function greetStatsHtml(){
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">Revenue this month</span><span class="gstat-v">${money(r.month||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money(r.avg_ticket||0)}</span><span class="gstat-s">per job this month</span></div>`+
+    avgTicketBoxHtml(pf, r)+
     profitCards+
   `</div>`;
 }
