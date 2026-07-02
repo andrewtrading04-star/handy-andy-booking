@@ -802,7 +802,10 @@ async function jobPayment(req, res, db, auth, body) {
   }
 
   if (act === 'charge') {
-    if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
+    if (!stripeConfigured(acct)) {
+      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} -> payments NOT configured for this account`);
+      return res.status(400).json({ error: `Card payments aren't set up on the server for ${b.business?.name || slug || 'this business'}. Take cash and tap "Mark paid (cash)".` });
+    }
     const ticketAmount = Number(b.price) || 0;
     if (ticketAmount <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
     // Tip the customer added on the signature screen (0 if they skipped it).
@@ -817,8 +820,14 @@ async function jobPayment(req, res, db, auth, body) {
         custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
       }
       if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
-    } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
-    if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use "Mark paid (cash)" instead.' });
+    } catch (e) {
+      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> card lookup failed: ${e.message}`);
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+    if (!custId || !pmId) {
+      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> no card on file (customer=${!!custId} paymentMethod=${!!pmId})`);
+      return res.status(400).json({ error: 'No card on file for this customer. Take cash and tap "Mark paid (cash)".' });
+    }
 
     // Card brand/last4 for the receipt + dispute evidence (best-effort).
     let card = { brand: null, last4: null };

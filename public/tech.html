@@ -979,7 +979,28 @@ function openChargeFlow(j){
         snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
       done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
       setTimeout(()=>showDetail(j.id),400);
-    }catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); } }
+    }catch(e){ chargeError(e.message||'Charge failed'); if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); } }
+  }
+
+  // A charge failure used to flash a 2.4s toast that was easy to miss — the tech
+  // just saw the button snap back and read it as "stuck". Show a persistent,
+  // obvious banner with the reason, and (when there's no card to charge) a
+  // one-tap "Take cash — mark paid" so the job can still close in the field.
+  async function markPaidCash(){
+    try{ await api('job_payment',{method:'POST',body:{ id:j.id, action:'mark_paid' }});
+      done(); toast('Marked paid (cash) ✓'); setTimeout(()=>showDetail(j.id),400);
+    }catch(e){ toast(e.message||'Could not mark paid'); }
+  }
+  function chargeError(msg){
+    const host=ov.querySelector('div[style*="flex:1"]'); if(!host) { toast(msg); return; }
+    let box=ov.querySelector('#cfErr');
+    if(!box){ box=document.createElement('div'); box.id='cfErr'; host.insertBefore(box, host.firstChild); }
+    const noCard=/no card on file|mark paid|not set up|aren't set up/i.test(msg);
+    box.innerHTML=`<div style="background:#3a1414;border:1px solid #7f1d1d;color:#fecaca;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5;margin-bottom:14px;text-align:left;">
+        <div style="font-weight:800;margin-bottom:3px;">Card was NOT charged</div>${esc(msg)}</div>`
+      + (noCard?`<button id="cfCash" class="btn" style="width:100%;margin-bottom:14px;background:#16a34a;">Take cash — mark paid ✓</button>`:'');
+    const cash=ov.querySelector('#cfCash'); if(cash) cash.onclick=markPaidCash;
+    toast(msg);
   }
 
   function setupSign(){
