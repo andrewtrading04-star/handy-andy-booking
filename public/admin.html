@@ -4513,6 +4513,11 @@ async function openNewBooking(prefill){
       return a.localeCompare(b);
     });
     if(isHandyAndy) cats.push('Assurion');
+    // Guaranteed Dismount Service — a free "remove one TV" booking that pays the
+    // tech $60 (redeemed GDS). Bottom of the list for BOTH businesses. Links to the
+    // TV-mounting service row (a dismount is a TV job); the price is $0.
+    cats.push('Guaranteed Dismount Service');
+    nbGdsServiceId = (nbServices.find(s=>s.category==='TV Mounting')||{}).id || null;
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     renderNbServices('');
@@ -4694,6 +4699,13 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
     return;
   }
 
+  if(cat==='Guaranteed Dismount Service'){
+    nbGdsActive=true;
+    nbServiceId=nbGdsServiceId;   // link to the TV-mounting service row
+    renderGdsStep();
+    return;
+  }
+
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
     if(tvMountService){
@@ -4704,6 +4716,21 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
     }
   }
 });
+
+// Guaranteed Dismount Service step: a free "remove one TV" booking. The only
+// field is the phone number the customer used (for tracking the redemption).
+function renderGdsStep(){
+  const steps=document.getElementById('nbSteps');
+  if(!steps) return;
+  steps.innerHTML=
+    `<div class="nb-step-t">Guaranteed Dismount Service</div>`+
+    `<div class="nb-hint">Free — the tech removes one TV. $0 to the customer; the technician is paid $60.</div>`+
+    `<div style="margin-top:12px;">`+
+      `<label style="display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">What phone number did the customer use?</label>`+
+      `<input class="search" style="margin:0;" id="nbGdsPhone" inputmode="tel" autocomplete="off" placeholder="Phone the customer used">`+
+    `</div>`;
+  updateNbTotal();
+}
 
 // ── Second technician (driven by the selected TV size) ───────────────────────
 // Whether a 2nd technician is needed is decided by the chosen TV size:
@@ -5028,8 +5055,9 @@ const ASSURION_GROUPS = [
 ];
 const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
+let nbGdsActive=false, nbGdsServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -5397,6 +5425,9 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 });
 function nbCollectSelections(){
   const out=[];
+  // Guaranteed Dismount: a single $0 line — the payroll engine reads this as a
+  // redeemed GDS and pays the tech $60.
+  if(nbGdsActive){ return [{option_id:null, label:'Guaranteed Dismount Service', price:0, quantity:1}]; }
   // Assurion: one line per selected service, priced at Steve's payout. The
   // customer is charged $0 (handled at submit); these amounts feed his pay.
   if(nbAssurionActive){
@@ -5451,6 +5482,14 @@ function nbBuildNotes(assurion, selections, payout){
   if(!assurion) return userNotes||null;
   const lines=selections.map(s=>`${s.label.replace(/^Assurion:\s*/,'')} — $${s.price}`).join('\n');
   let note=`Assurion job\n${lines}\n\nTech pay: $${payout}`;
+  if(userNotes) note=`${userNotes}\n\n${note}`;
+  return note;
+}
+// Notes for a Guaranteed Dismount booking — records the phone the customer used
+// so the redemption can be traced back to the original purchase.
+function nbBuildGdsNotes(phone){
+  const userNotes=document.getElementById('nbNotes').value.trim();
+  let note=`Guaranteed Dismount Service (free)\nPhone customer used: ${phone||'—'}`;
   if(userNotes) note=`${userNotes}\n\n${note}`;
   return note;
 }
@@ -5550,11 +5589,14 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // Assurion jobs: customer charged $0, Steve auto-assigned, payout recorded in
   // the notes so the payroll engine matches it ("Assurion … Tech pay: $X").
   const assurion=nbAssurionActive;
+  const gds=nbGdsActive;
+  const gdsPhone=gds?(document.getElementById('nbGdsPhone').value||'').trim():'';
+  if(gds && !gdsPhone){ err.textContent='Enter the phone number the customer used.'; return; }
   const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
   if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
-  const travelFee=assurion?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
+  const travelFee=(assurion||gds)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
   const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
   const tax=assurion?0:Math.round(subtotal*TAX_RATE*100)/100;
@@ -5563,11 +5605,11 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const prim = assurion
     ? { id:(nbSteveTechId||'any'), pool:'own' }
     : (nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' });
-  const paymentMethod=assurion?'':document.getElementById('nbPaymentMethod').value;
+  const paymentMethod=(assurion||gds)?'':document.getElementById('nbPaymentMethod').value;
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
-  if(!email){ err.textContent='Email is required for booking confirmation'; return; }
+  if(!email && !gds){ err.textContent='Email is required for booking confirmation'; return; }
 
   // TV mounting (the main paid service) requires a credit card on file — cash and
   // quote are not allowed for these jobs. Card details are validated below.
@@ -5582,11 +5624,11 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // it optional. The second tech may be "any" (auto-picked server-side) or come
   // from the other company. Validate BEFORE tokenizing a card so we never charge
   // then fail.
-  const secondMode=assurion?'none':nbSecondTechMode();
+  const secondMode=(assurion||gds)?'none':nbSecondTechMode();
   // Juan/Zach bring their own second person (off-schedule), so no roster second
   // tech is chosen or required — but the two-person fee still rides on the line
   // items, so the customer is charged the same.
-  const ownSecond=!assurion && nbPrimaryBringsOwnSecond();
+  const ownSecond=!assurion && !gds && nbPrimaryBringsOwnSecond();
   const sec=(secondMode!=='none' && !ownSecond) ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
   // Either tech may be "any" — the server resolves "any + any" to two distinct
   // people. Only reject a missing second tech, or the same concrete person twice.
@@ -5638,7 +5680,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       subtotal,
       tax,
       price: totalPrice,
-      notes: nbBuildNotes(assurion, selections, assurionPayout),
+      notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
       payment_method: paymentMethod || null,
       payment_method_id: paymentMethodId,
       sms_consent: document.getElementById('nbSmsConsent').checked,
