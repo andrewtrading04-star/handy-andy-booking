@@ -37,17 +37,31 @@ const LOOKBACK_DAYS = parseInt(process.env.LOOKBACK_DAYS) || 45;
 
 const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
-// Mailboxes to scan: primary + optional secondary.
+// Mailboxes to scan: the primary (GMAIL_USER) plus every numbered mailbox
+// (GMAIL_USER_2, _3, _4, …) that has both a user and an app password set.
+// Numbered slots are discovered dynamically so adding another Gmail account is
+// just a matter of setting two more secrets — no code change here.
+//
+// Current layout (see scripts/lib/gmb-locations.mjs for the review inboxes):
+//   GMAIL_USER    primary forwarder
+//   GMAIL_USER_2  domstvmounting@gmail.com   (Dom's reviews + Walmart orders)
+//   GMAIL_USER_3  houstonhandyandy@gmail.com (Amazon wire-plate orders)
+//   GMAIL_USER_4  houstonmainbusiness@gmail.com   (HA Houston #1 + #2 reviews)
+//   GMAIL_USER_5  denvermainbusiness@gmail.com    (HA Denver #1 reviews)
+//   GMAIL_USER_6  denverinstallpros@gmail.com     (HA Denver #2 reviews)
+//   GMAIL_USER_7  austinmainbusiness@gmail.com    (HA Austin reviews)
+// Every mailbox is scanned for Walmart, Amazon AND Google-review emails alike,
+// so a review inbox that never sees an order simply yields reviews only.
 function mailboxes() {
   const list = [];
   if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
     list.push({ user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
-  if (process.env.GMAIL_USER_2 && process.env.GMAIL_APP_PASSWORD_2)
-    list.push({ user: process.env.GMAIL_USER_2, pass: process.env.GMAIL_APP_PASSWORD_2 });
-  // Third mailbox (e.g. houstonhandyandy@gmail.com — where the Amazon wire-plate
-  // orders arrive). Scanned for both Walmart and Amazon emails like the others.
-  if (process.env.GMAIL_USER_3 && process.env.GMAIL_APP_PASSWORD_3)
-    list.push({ user: process.env.GMAIL_USER_3, pass: process.env.GMAIL_APP_PASSWORD_3 });
+  // Scan a generous range of numbered slots; unset ones are skipped.
+  for (let i = 2; i <= 12; i++) {
+    const user = process.env[`GMAIL_USER_${i}`];
+    const pass = process.env[`GMAIL_APP_PASSWORD_${i}`];
+    if (user && pass) list.push({ user, pass });
+  }
   return list;
 }
 

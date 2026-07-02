@@ -73,6 +73,22 @@ jobs:
           # Amazon wire-concealment-plate orders arrive).
           GMAIL_USER_3:          ${{ secrets.GMAIL_USER_3 }}
           GMAIL_APP_PASSWORD_3:  ${{ secrets.GMAIL_APP_PASSWORD_3 }}
+          # Handy Andy Google-review notification inboxes (see
+          # scripts/lib/gmb-locations.mjs). Each holds the "you just received a
+          # Google review" emails for one or more HA listings; scanning them is
+          # how HA reviews flow into google_reviews, exactly like Dom's do.
+          #   _4 houstonmainbusiness@gmail.com  (Houston #1 + #2)
+          #   _5 denvermainbusiness@gmail.com   (Denver #1)
+          #   _6 denverinstallpros@gmail.com    (Denver #2)
+          #   _7 austinmainbusiness@gmail.com   (Austin)
+          GMAIL_USER_4:          ${{ secrets.GMAIL_USER_4 }}
+          GMAIL_APP_PASSWORD_4:  ${{ secrets.GMAIL_APP_PASSWORD_4 }}
+          GMAIL_USER_5:          ${{ secrets.GMAIL_USER_5 }}
+          GMAIL_APP_PASSWORD_5:  ${{ secrets.GMAIL_APP_PASSWORD_5 }}
+          GMAIL_USER_6:          ${{ secrets.GMAIL_USER_6 }}
+          GMAIL_APP_PASSWORD_6:  ${{ secrets.GMAIL_APP_PASSWORD_6 }}
+          GMAIL_USER_7:          ${{ secrets.GMAIL_USER_7 }}
+          GMAIL_APP_PASSWORD_7:  ${{ secrets.GMAIL_APP_PASSWORD_7 }}
           # Optional override for the Amazon product-match regex (set once the
           # exact plate product title is known, to keep matching strict).
           AMAZON_PLATE_MATCH:    ${{ secrets.AMAZON_PLATE_MATCH }}
