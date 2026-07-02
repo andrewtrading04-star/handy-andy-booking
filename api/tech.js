@@ -449,8 +449,10 @@ async function job(req, res, db, auth) {
       business_slug: data.business?.slug || '',
       line_items: data.line_items || [],
       travel_payout: travelMap.get(String(data.postal_code || '')) || 0,
-      // A second assigned tech splits the job 50/50 even without a "lift help" line.
+      // A second tech is on the job. It only SPLITS 50/50 when the customer booked a
+      // two-person job; on a one-person job the lead keeps full pay and the helper $0.
       second_tech: !!data.secondary_technician_id,
+      is_secondary: data.secondary_technician_id === auth.tech_id && data.technician_id !== auth.tech_id,
     }, viewerName);
     shaped.tech_pay = Math.round(Number(pay.pay) || 0);
   } catch (e) { shaped.tech_pay = null; }

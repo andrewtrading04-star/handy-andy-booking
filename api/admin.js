@@ -3898,8 +3898,11 @@ async function payroll(req, res, db, auth) {
         business_slug: biz.slug,
         line_items: b.line_items || [],
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
-        // Two techs on the job -> split 50/50 even without a "lift help" line.
+        // A 2nd tech is on the job — but it only SPLITS 50/50 when the customer
+        // booked a two-person job. On a one-person job the lead keeps full pay and
+        // the assigned helper earns $0.
         second_tech: (jobTechs[b.id] || []).length > 1,
+        is_secondary: techId === b.secondary_technician_id && techId !== b.technician_id,
       }, techPayroll[techId].name);
 
       const jobBase = {

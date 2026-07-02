@@ -314,6 +314,20 @@ function detectMultiTech(job) {
   return { hasSecondTech: false, secondTechBonus: 0 };
 }
 
+// Explicit ONE-PERSON signal from the booking. When the customer says they can
+// handle the lift themselves ("My TV is 70-85 inches and I CAN help lift it",
+// "under 70 inches", "I can lift it"), the job is a single-tech job — full stop.
+// This HARD-OVERRIDES any two-person split so a solo job is never halved, even if
+// a helper was mistakenly attached to it. Lines that say "cannot" are excluded
+// (those are the real two-person jobs, caught by SECOND_TECH_RE above).
+function isOnePersonJob(job) {
+  return (job.line_items || []).some(li => {
+    const n = String(li.name || '').toLowerCase();
+    if (/\bcannot\b|can\s*['’]?t\b/.test(n)) return false;   // "cannot / can't help lift" = two-person
+    return /\bi\s+can\s+(?:help\s+)?lift/.test(n) || /\bcan\s+help\s+lift/.test(n) || /\bunder\s*70\b/.test(n);
+  });
+}
+
 // ── Special-service detection ────────────────────────────────────────────────
 function detectSpecial(job) {
   const svc = String(job.service_name || '').toLowerCase();
@@ -411,11 +425,17 @@ export function computeJobPay(job, techName) {
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 
-  // ── Detect multi-tech: when a two-person "lift help" line item is present, OR
-  // the caller tells us a second technician is assigned to the job. Either way the
-  // job's pay is computed then split 50/50 between the two techs.
+  // ── Multi-tech: a job's base splits 50/50 ONLY when the customer actually booked
+  // a two-person job — a "lift help"/two-person-fee line, an 86"+ TV, etc. That's
+  // what detectMultiTech reads from the line items. Merely ASSIGNING a helper to a
+  // normal one-person job must NOT halve the base: the lead keeps the full base and
+  // the assigned helper earns $0 for that job (handled just below).
   const multiTech = detectMultiTech(job);
-  if (job.second_tech) multiTech.hasSecondTech = true;
+  const onePerson = isOnePersonJob(job);           // customer said they can do it solo
+  // A one-person answer HARD-OVERRIDES any two-person signal: the job never splits.
+  const paidTwoPerson = multiTech.hasSecondTech && !onePerson;   // customer booked/paid two-person
+  const helperAssigned = !!job.second_tech;        // a 2nd tech is on the job (assignment)
+  const isHelper = !!job.is_secondary;             // the tech being computed is that helper
 
   // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
   let afterHoursBonus = 0;
@@ -563,7 +583,15 @@ export function computeJobPay(job, techName) {
   // OWN helper, who is NOT a paid tech in the system. So they are NEVER split — they
   // keep the full base/tips and collect the ENTIRE $60 two-person add-on themselves
   // (handled in the single-tech branch below). Everyone else still splits 50/50.
-  if (multiTech.hasSecondTech && !ownHelper) {
+  //
+  // A helper assigned to a job the customer can do solo (no two-person booking)
+  // earns $0 for it — the lead keeps the FULL base (never halved for a one-person
+  // job). Own-helper techs (Juan/TK) never fall in here.
+  if (helperAssigned && !paidTwoPerson && isHelper && !ownHelper) {
+    breakdown.push({ label: 'Assigned as helper — one-person job (lead keeps full pay)', amount: 0 });
+    return { pay: 0, breakdown, flags: ['Helper on a one-person job — paid $0'], state: state === 'partial' ? 'partial' : 'paid' };
+  }
+  if (paidTwoPerson && !ownHelper) {
     // Split the base pay (everything before tips) 50/50.
     const newBreakdown = breakdown.map(item => ({
       ...item,
@@ -597,7 +625,7 @@ export function computeJobPay(job, techName) {
     // Full tips + after-hours + travel. When the customer PAID for the two-person
     // option, the own-helper tech keeps the WHOLE $60 add-on (not the $30 half).
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    const wholeBonus = (ownHelper && multiTech.hasSecondTech && multiTech.secondTechBonus > 0) ? 60 : 0;
+    const wholeBonus = (ownHelper && paidTwoPerson && multiTech.secondTechBonus > 0) ? 60 : 0;
     if (wholeBonus) breakdown.push({ label: 'Second person — brings own helper (full $60)', amount: wholeBonus });
     if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     if (travelPayout) breakdown.push({ label: 'Travel payout', amount: travelPayout });
@@ -639,18 +667,35 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 210, 'Juan 70-85 + outdoor + soundbar (160) + $50 travel = 210');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').flags.length, 0, 'Juliana job: no unmatched/review flags');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 200, 'Other tech same job = 150 base + $50 travel = 200');
-  // The Juliana job is a flagged two-person lift (a 2nd tech is on the booking),
-  // but Juan brings his wife → he is NOT split, still the full $160 + $50 travel.
-  // A normal tech on the same two-person job has the BASE halved (74) but still
-  // earns the full $50 travel (not split) → 124.
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan two-person job NOT split = 160 + 50 travel = 210');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 124, 'Other tech two-person: 74 split base + 50 travel = 124');
+  // A helper merely ASSIGNED to this job (the customer did NOT book a two-person
+  // lift) must NOT halve anyone: the lead keeps the full base + travel, and the
+  // assigned helper earns $0 for a one-person job. (Juan never splits regardless.)
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan, helper attached, not a paid two-person job = full 160 + 50 travel = 210');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 200, 'Lead, helper attached (one-person job) = full 150 + 50 travel = 200, NOT halved');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 0, 'Assigned helper on a one-person job = $0');
   // Customer PAID for the two-person option ("cannot help lift" $70): Juan keeps
   // the WHOLE $60 add-on on top of his full base. 70-85 base 90 + 60 = 150.
   eq(computeJobPay(job({ line_items: [
     { name: '70"-85"', line_total: 149 },
     { name: 'My TV is 70-85 inches and I cannot help lift it', line_total: 70 },
   ] }), 'Juan').pay, 150, 'Juan paid two-person: 90 base + full 60 = 150');
+
+  // ── Saner job (real, reported): 70-85 base + own bracket + "I CAN help lift it".
+  // This is a ONE-PERSON job → full base, and it must NEVER split, even if a helper
+  // is somehow attached. Denver zip → +$10 travel. The customer's "I can help lift"
+  // answer is the hard one-person signal.
+  const saner = { travel_payout: 10, line_items: [
+    { name: '70"–85"', line_total: 149 },
+    { name: 'I have my own mounting bracket', line_total: 0 },
+    { name: 'TV not over a fireplace', line_total: 0 },
+    { name: 'Drywall', line_total: 0 },
+    { name: 'My TV is 70-85 inches and I can help lift it', line_total: 0 },
+    { name: 'No, I will handle TV removal myself', line_total: 0 },
+  ] };
+  eq(computeJobPay(job({ ...saner }), 'Steve').pay, 90, 'Saner solo: 80 base + 10 travel = 90');
+  eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 90, 'Saner: "I can help lift" forces one-person — lead keeps full 90 even with a helper attached');
+  eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 0, 'Saner: an attached helper earns $0 on this one-person job');
+  eq(computeJobPay(job({ ...saner }), 'Steve').flags.length, 0, 'Saner solo: no review flags');
 
   // Mixed job: TV mounting + a handyman ADD-ON line must NOT be reclassified as a
   // pure handyman job (the Cecil Cofie bug — it paid $650 as "10h handyman" and
