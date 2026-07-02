@@ -238,6 +238,11 @@ function matchItem(name) {
     const n = normalize(cand);
     if (ITEM_RATES[n]) return { key: n, ...ITEM_RATES[n] };
   }
+  // Dry erase / white board mounting: ONE hour of labor each → $65 per board (all
+  // techs), multiplied by the quantity in the line walk. These are priced per-board
+  // to the customer, so the generic $85/hr custom-hourly inference over-counts
+  // (5 boards @ $170 would read as 10 hrs). Pin it to 1 hr each.
+  if (/dry\s*erase\s*board/i.test(name)) return { key: 'dry erase board', juan: 65, other: 65 };
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
   if (isFrameInBoxBracket(name)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   return null;
@@ -727,17 +732,24 @@ function runSelfTests() {
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
   ] }), 'Juan').pay, 440, 'mixed TV+handyman add-on (Juan) = 440 (430 + $10 travel)');
 
-  // Custom jobs are hourly: $85/hr to the customer -> $65/hr to the tech. An
-  // unrecognized service line (e.g. "Mounting of Dry Erase Board") is paid by
-  // inferring hours from its price. $170 -> 2h -> $130. No review flag when the
-  // price is a clean hourly multiple.
-  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').pay, 130, 'custom job $170 -> 2h @ $65 = 130');
-  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').flags.length, 0, 'clean custom-hour multiple -> no flag');
-  // Custom line alongside a TV base: base + custom hours both pay.
+  // Dry erase / white board mounting: 1 hour each -> $65 per board (all techs),
+  // multiplied by the quantity — NOT inferred from the per-board price. One board.
+  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').pay, 65, 'dry erase board: 1 board @ $65 = 65 (not price-inferred)');
+  eq(computeJobPay(job({ line_items: [{ name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 }] }), 'Kregg').flags.length, 0, 'dry erase board: matched item, no flag');
+  // FIVE dry erase boards -> 5 hrs -> 5 × $65 = $325 (the reported job).
+  eq(computeJobPay(job({ line_items: [
+    { name: 'Mounting of Dry Erase Board 4 x 6', quantity: 5, unit_price: 170, line_total: 850 },
+    { name: 'TV Size: 60–69 inch', quantity: 3, unit_price: 135, line_total: 405 },
+    { name: 'Bracket: Full Motion', quantity: 3, unit_price: 115, line_total: 345 },
+    { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
+    { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
+  ], business_slug: 'doms', travel_payout: 50 }), 'Steve').pay, 585, 'reported job: 5×$65 boards (325) + 3×60-69 (210) + full motion $0 + $50 travel = 585');
+  // Dry erase board alongside a TV base: base + 1 board both pay.
   eq(computeJobPay(job({ line_items: [
     { name: '60"-69"', line_total: 119 },
     { name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 },
-  ] }), 'Kregg').pay, 200, 'other 60-69 (70) + custom 2h (130) = 200');
+  ] }), 'Kregg').pay, 135, 'other 60-69 (70) + 1 dry erase board (65) = 135');
+  // A genuinely unrecognized custom line is still billed hourly ($85/hr -> $65/hr).
   // Non-clean price flags the inferred hours but still pays.
   eq(computeJobPay(job({ line_items: [{ name: 'Custom mount job', line_total: 200 }] }), 'Kregg').flags.length, 1, 'non-clean custom price flags hours');
   // A fee that arrives as a plain 'service' line (not kind 'fee') must NOT be
@@ -780,8 +792,8 @@ function runSelfTests() {
     { name: 'Use the bracket in the box', line_total: 0 }] }), 'Zach').pay, 75, 'bare "use the bracket in the box" = 60 + 15');
 
   // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
-  // (210) + custom dry-erase 2h (130) + full-motion brackets ×3 ($0, not Juan) +
-  // GDS sold ($0) + $50 travel = 390.
+  // (210) + 1 dry-erase board (65) + full-motion brackets ×3 ($0, not Juan) +
+  // GDS sold ($0) + $50 travel = 325.
   eq(computeJobPay(job({ price: 1034, subtotal: 955, business_slug: 'doms', travel_payout: 50, line_items: [
     { name: 'Mounting of Dry Erase Board 4 x 6', line_total: 170 },
     { name: 'TV Size: 60–69 inch', quantity: 3, unit_price: 135, line_total: 405 },
@@ -790,7 +802,7 @@ function runSelfTests() {
     { name: 'Wall Surface: Drywall', quantity: 3, line_total: 0 },
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
-  ] }), 'TK').pay, 390, 'Joseph job TK = 210 base + 130 custom + 50 travel = 390');
+  ] }), 'TK').pay, 325, 'Joseph job TK = 210 base + 65 board + 50 travel = 325');
   // Same job with the REAL stored names that bake "×3" into the label — the
   // bracket/size lines must still match (not fall through to custom-hourly and
   // overpay). Without the ×N-strip this paid $650 (Full Motion ×3 -> 4h custom).
@@ -802,7 +814,7 @@ function runSelfTests() {
     { name: 'Wall Surface: Drywall ×3', quantity: 3, line_total: 0 },
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
-  ] }), 'TK').pay, 390, 'Joseph job with ×3-baked names still = 390, not 650');
+  ] }), 'TK').pay, 325, 'Joseph job with ×3-baked names still = 325, not 650');
   // The bracket rate resolves through a baked-in "×3" suffix (Juan paid $60/bracket).
   eq(computeJobPay(job({ line_items: [
     { name: '60"-69"', line_total: 119 },
