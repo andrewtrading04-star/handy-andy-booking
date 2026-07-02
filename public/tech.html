@@ -887,7 +887,7 @@ function fmtMoney(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2)
 function openChargeFlow(j){
   const base=Number(j.price)||0;
   if(base<=0){ toast('This job has no price to charge.'); return; }
-  let tip=0, step=1, sigData=null, signerName=(j.customer&&j.customer.name)||'';
+  let tip=0, step=1, sigData=null, signerName=(j.customer&&j.customer.name)||'', customMode=false, charging=false;
   const custName=(j.customer&&j.customer.name)||'';
   const bizName=j.company_name||(j.business&&j.business.name)||'the company';
   const lines=(j.line_items||[]).filter(li=>Number(li.line_total)>0);
@@ -898,11 +898,44 @@ function openChargeFlow(j){
   // Stored at charge time — records the actual final total including the tip.
   const termsFor=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${fmtMoney(total())} for the services above (${fmtMoney(base)} service${tip>0?` + ${fmtMoney(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
 
+  // Charge-flow styles, injected once: force-landscape for the signature + tip
+  // steps (wide signing strip / big tip buttons) and the POS-style tip grid.
+  if(!document.getElementById('cfStyle')){
+    const st=document.createElement('style'); st.id='cfStyle';
+    st.textContent=`
+      .cf-ov{position:fixed;inset:0;z-index:9999;background:var(--navy);color:var(--ink);display:flex;flex-direction:column;}
+      .cf-ov.cf-land{inset:auto;top:0;left:0;width:100vh;height:100vw;transform-origin:top left;transform:translate(100vw,0) rotate(90deg);}
+      .cf-tipcol{display:flex;flex-direction:column;gap:11px;max-width:560px;margin:0 auto;width:100%;}
+      .cf-tiprow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+      .cf-preset{background:var(--orange);color:#fff;border:none;border-radius:12px;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-family:inherit;cursor:pointer;}
+      .cf-preset:active{filter:brightness(1.12);}
+      .cf-preset .amt{font-size:28px;font-weight:800;line-height:1;}
+      .cf-preset .sub{font-size:12px;color:rgba(255,255,255,.82);font-weight:600;}
+      .cf-bar{background:var(--orange);color:#fff;border:none;border-radius:12px;min-height:50px;font-size:16px;font-weight:700;width:100%;font-family:inherit;cursor:pointer;}
+      .cf-bar:active{filter:brightness(1.12);}
+      .cf-backx{position:absolute;top:12px;left:12px;background:transparent;border:none;color:var(--mute);font-size:24px;font-weight:800;padding:6px 12px;cursor:pointer;z-index:2;}
+    `;
+    document.head.appendChild(st);
+  }
+
   const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;z-index:9999;background:var(--navy);color:var(--ink);display:flex;flex-direction:column;';
+  ov.className='cf-ov';
   document.body.appendChild(ov);
   document.body.style.overflow='hidden';
-  const done=()=>{ document.body.style.overflow=''; ov.remove(); };
+
+  // Force the signature + tip steps to landscape so the customer gets a wide
+  // signing strip and big tip targets. Only rotate when the phone is held
+  // PORTRAIT — if it's already turned landscape we leave it (no double-rotate).
+  const mq=window.matchMedia('(orientation: portrait)');
+  const onOrient=()=>{ if(step===2||step===3) render(); };
+  if(mq.addEventListener) mq.addEventListener('change',onOrient); else if(mq.addListener) mq.addListener(onOrient);
+  const applyOrient=()=>{ ov.classList.toggle('cf-land', (step===2||step===3) && mq.matches); };
+
+  const done=()=>{
+    document.body.style.overflow='';
+    if(mq.removeEventListener) mq.removeEventListener('change',onOrient); else if(mq.removeListener) mq.removeListener(onOrient);
+    ov.remove();
+  };
 
   const ticketRows=()=> lines.map(li=>{const q=liDisplayQty(li);return `<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>${esc(liName(li.name))}${q>1?` ×${q}`:''}</span><span>${fmtMoney(li.line_total)}</span></div>`;}).join('');
 
@@ -940,39 +973,62 @@ function openChargeFlow(j){
         <button class="btn ghost" data-back style="flex:1;">← Back</button>
         <button class="btn" id="cfSignNext" style="flex:2;opacity:.5;" disabled>Continue to tip →</button>
       </div>`;
-    } else {
+    } else if(customMode){
+      // Custom-tip entry: type an amount, then confirm the charge.
       ov.innerHTML=`
-      <div style="padding:22px;overflow:auto;flex:1;text-align:center;">
-        <h2 style="margin:18px 0 4px;font-size:22px;">Add a tip?</h2>
-        <div style="color:var(--mute);margin-bottom:6px;font-size:14px;">100% goes to your technician</div>
-        <div id="cfTotal" style="font-size:36px;font-weight:800;margin:16px 0;">${fmtMoney(total())}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;">
-          ${[20,30,50].map(p=>`<button class="btn ${tip===p?'':'ghost'}" data-tip="${p}" style="padding:20px 0;font-size:19px;">$${p}</button>`).join('')}
-        </div>
-        <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Custom tip amount" value="${(tip>0 && ![20,30,50].includes(tip))?tip:''}" style="width:100%;text-align:center;color:#fff;margin-bottom:10px;">
-        <button class="btn ghost" data-tip="0" style="width:100%;">Skip tip</button>
+      <div style="padding:22px;overflow:auto;flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center;position:relative;">
+        <button class="cf-backx" data-tipgrid>←</button>
+        <h2 style="margin:0 0 4px;font-size:22px;">Custom tip</h2>
+        <div style="color:var(--mute);font-size:13px;margin-bottom:16px;">100% goes to your technician</div>
+        <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Enter tip amount" value="${(tip>0)?tip:''}" style="width:100%;max-width:320px;margin:0 auto;text-align:center;color:#fff;font-size:26px;">
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-back style="flex:1;">← Back</button>
+        <button class="btn ghost" data-tipgrid style="flex:1;">← Back</button>
         <button class="btn" id="cfCharge" style="flex:2;white-space:nowrap;">Charge ${fmtMoney(total())}</button>
       </div>`;
+    } else {
+      // Tip — POS layout: three preset squares, then Custom, then No tip. Tapping
+      // any option finalizes the charge (the customer already reviewed + signed).
+      ov.innerHTML=`
+      <div style="padding:20px;overflow:auto;flex:1;display:flex;flex-direction:column;justify-content:center;position:relative;">
+        <button class="cf-backx" data-back>←</button>
+        <div style="text-align:center;margin-bottom:16px;">
+          <h2 style="margin:0 0 4px;font-size:23px;">Add a tip?</h2>
+          <div style="color:var(--mute);font-size:13px;">100% goes to your technician</div>
+        </div>
+        <div class="cf-tipcol">
+          <div class="cf-tiprow">
+            ${[20,30,50].map(p=>`<button class="cf-preset" data-tip="${p}"><span class="amt">$${p}</span><span class="sub">Total ${fmtMoney(base+p)}</span></button>`).join('')}
+          </div>
+          <button class="cf-bar" data-custom>Custom</button>
+          <button class="cf-bar" data-notip>No tip</button>
+        </div>
+      </div>`;
     }
+    applyOrient();
     wire();
   }
 
   function wire(){
     const x=ov.querySelector('[data-x]'); if(x) x.onclick=done;
-    const back=ov.querySelector('[data-back]'); if(back) back.onclick=()=>{ step--; render(); };
+    // Back: step 2 → step 1, or the tip grid's ← → step 2. Always leaves custom mode.
+    ov.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>{ step--; customMode=false; render(); });
     const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step++; render(); };
-    ov.querySelectorAll('[data-tip]').forEach(b=>b.onclick=()=>{ tip=Number(b.dataset.tip)||0; render(); });
+    // Preset tip squares — tapping charges immediately (POS-style).
+    ov.querySelectorAll('[data-tip]').forEach(b=>b.onclick=()=>{ tip=Number(b.dataset.tip)||0; submit(); });
+    const notip=ov.querySelector('[data-notip]'); if(notip) notip.onclick=()=>{ tip=0; submit(); };
+    const openCustom=ov.querySelector('[data-custom]'); if(openCustom) openCustom.onclick=()=>{ customMode=true; render(); };
+    ov.querySelectorAll('[data-tipgrid]').forEach(b=>b.onclick=()=>{ customMode=false; render(); });
     const cust=ov.querySelector('#cfCustom');
-    if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=fmtMoney(total()); const cb=ov.querySelector('#cfCharge'); if(cb) cb.textContent='Charge '+fmtMoney(total()); };
+    if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const cb=ov.querySelector('#cfCharge'); if(cb) cb.textContent='Charge '+fmtMoney(total()); };
     const charge=ov.querySelector('#cfCharge'); if(charge) charge.onclick=()=>submit();
     if(step===2) setupSign();
   }
 
   async function submit(){
-    const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; }
+    if(charging) return; charging=true;               // guard against a double-tap double-charge
+    ov.style.pointerEvents='none';
+    const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; } else toast('Charging…');
     const nm=signerName;
     try{
       await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
@@ -981,7 +1037,11 @@ function openChargeFlow(j){
         snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
       done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
       setTimeout(()=>showDetail(j.id),400);
-    }catch(e){ chargeError(e.message||'Charge failed'); if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); } }
+    }catch(e){
+      charging=false; ov.style.pointerEvents='';
+      chargeError(e.message||'Charge failed');
+      if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); }
+    }
   }
 
   // A charge failure used to flash a 2.4s toast that was easy to miss — the tech
@@ -1009,11 +1069,18 @@ function openChargeFlow(j){
     const cv=ov.querySelector('#cfSig'); if(!cv) return;
     const nextBtn=ov.querySelector('#cfSignNext'), clr=ov.querySelector('#cfClear'), nameEl=ov.querySelector('#cfName');
     const ctx=cv.getContext('2d');
-    const rect=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
-    cv.width=Math.round(rect.width*dpr); cv.height=Math.round(rect.height*dpr);
+    const dpr=window.devicePixelRatio||1;
+    // When the overlay is force-rotated 90° CW (portrait phone), the canvas is
+    // visually sideways. Size the backing store from the LAYOUT box (offsetWidth/
+    // Height — transform-invariant), not the on-screen bounding rect, and map
+    // pointer coords back into the canvas's local space.
+    const rotated=ov.classList.contains('cf-land');
+    const CW=cv.offsetWidth||cv.getBoundingClientRect().width, CH=cv.offsetHeight||cv.getBoundingClientRect().height;
+    cv.width=Math.round(CW*dpr); cv.height=Math.round(CH*dpr);
     ctx.scale(dpr,dpr); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111';
     let drawing=false, inked=false, lx=0, ly=0;
-    const pos=e=>{ const r=cv.getBoundingClientRect(); return [(e.clientX)-r.left,(e.clientY)-r.top]; };
+    const pos=e=>{ const r=cv.getBoundingClientRect();
+      return rotated ? [e.clientY-r.top, r.right-e.clientX] : [e.clientX-r.left, e.clientY-r.top]; };
     const enable=()=>{ if(nextBtn){ nextBtn.disabled=false; nextBtn.style.opacity='1'; } };
     // Returning from the tip step? Redraw the signature already captured.
     if(sigData){ const img=new Image(); img.onload=()=>{ try{ ctx.drawImage(img,0,0,cv.width/dpr,cv.height/dpr); }catch(_){} }; img.src=sigData; inked=true; enable(); }
