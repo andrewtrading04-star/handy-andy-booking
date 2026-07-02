@@ -4170,6 +4170,7 @@ function getTimeGreeting(name, tz) {
   return `Good ${timeOfDay}.`;
 }
 let netDailyView='today';   // 'today' | 'yesterday' for the Net Daily Profit card
+let profitView='today';     // 'today' | 'yesterday' for the Profit card
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
@@ -4210,6 +4211,14 @@ function paintGreeting(){
     const vEl=document.getElementById('ndpVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-ndp]').forEach(b=>b.classList.toggle('on', b.dataset.ndp===netDailyView));
   }));
+  // Profit card Today/Yesterday toggle (this business).
+  el.querySelectorAll('[data-pv]').forEach(btn=>btn.addEventListener('click',()=>{
+    profitView=btn.dataset.pv;
+    const pf=(greetingData&&greetingData.profit)||{};
+    const v=profitView==='yesterday'?(pf.yesterday||0):(pf.today||0);
+    const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(v);
+    el.querySelectorAll('[data-pv]').forEach(b=>b.classList.toggle('on', b.dataset.pv===profitView));
+  }));
   const estLink=el.querySelector('[data-goest]');
   if(estLink) estLink.addEventListener('click',()=>navTo('estimates'));
   const photoLink=el.querySelector('[data-gophotos]');
@@ -4240,9 +4249,12 @@ function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
   const ndpVal = netDailyView==='yesterday' ? ((pf&&pf.net_daily_yesterday)||0) : ((pf&&pf.net_daily)||0);
+  const profitVal = profitView==='yesterday' ? ((pf&&pf.yesterday)||0) : ((pf&&pf.today)||0);
   const profitCards = pf ?
     `<div class="gstat"><span class="gstat-l">Profit this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
+    `<div class="gstat"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span class="gstat-l">Profit</span>`+
+      `<div class="ndp-seg"><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div></div>`+
+      `<span class="gstat-v" id="pfVal" style="color:#4ade80;">${money(profitVal)}</span></div>`+
     `<div class="gstat"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span class="gstat-l">Net daily profit</span>`+
       `<div class="ndp-seg"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div></div>`+
       `<span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span><span class="gstat-s">Both companies combined</span></div>` : '';

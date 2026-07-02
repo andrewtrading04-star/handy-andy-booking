@@ -470,7 +470,14 @@ async function summary(req, res, db, auth) {
 
     const pWeek  = await sumProfit(paidDoneWeek);
     const pToday = await sumProfit(paidDoneToday);
-    profit = { week: Math.round(pWeek), today: Math.round(pToday) };
+    // Profit yesterday (this business) — powers the Profit box's Today/Yesterday toggle.
+    const yStart = localDayStartUTC(tz, -1);
+    const { data: yRows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+      .eq('business_id', biz.id)
+      .gte('scheduled_at', yStart.toISOString())
+      .lt('scheduled_at', todayStart.toISOString()));
+    const pYesterday = await sumProfit(earned(yRows));
+    profit = { week: Math.round(pWeek), today: Math.round(pToday), yesterday: Math.round(pYesterday) };
 
     // Net daily profit — TODAY's realized profit across ALL active businesses,
     // combined. It's a company-wide figure, so it reads the same on either
