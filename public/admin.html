@@ -459,8 +459,10 @@
   .gstat-s{font-size:11px;opacity:.82;}
   .gstat-s.up{color:#5ef0a0;opacity:1;}
   .gstat-s.down{color:#ff9b9b;opacity:1;}
-  /* Plain revenue/predicted boxes: keep the figure on one line and let it (and
-     the label) shrink to fit the box on small screens instead of clipping. */
+  /* Plain revenue/predicted boxes: center the label+figure vertically so the
+     sparse content fills the (equal-height) box instead of floating at the top,
+     and keep the figure on one line. */
+  .gstat-rev{justify-content:center;}
   .gstat-rev .gstat-v{white-space:nowrap;font-variant-numeric:tabular-nums;}
   /* Today/Yesterday toggle inside the Net Daily Profit stat card */
   .ndp-seg{display:inline-flex;background:rgba(0,0,0,.28);border-radius:8px;padding:2px;}
@@ -481,11 +483,10 @@
     .gstat-l{font-size:9px;}
     .gstat-v{font-size:15px;}
     .gstat-s{font-size:9.5px;}
-    /* Revenue/predicted boxes: smaller figure + tighter label so the whole
-       thing fits the narrow 2-up box on phones. */
-    .gstat-rev .gstat-v{font-size:13px;letter-spacing:-.02em;}
-    .gstat-rev .gstat-l{font-size:8.5px;line-height:1.2;}
-    .gstat-rev .gstat-s{font-size:8.5px;line-height:1.25;}
+    /* Revenue/predicted boxes: same figure size as the others (not shrunk),
+       just kept on one line and vertically centered (see .gstat-rev above). */
+    .gstat-rev .gstat-v{font-size:15px;letter-spacing:-.01em;}
+    .gstat-rev .gstat-s{line-height:1.25;}
   }
 
   /* ───────── Booking Analytics view (ported from /dashboard.html, scoped to .ana) ───────── */
