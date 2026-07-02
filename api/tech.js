@@ -434,6 +434,7 @@ async function job(req, res, db, auth) {
   // projected as completed+paid so an in-progress job still shows what it'll
   // earn. Each tech sees only their own number (their name drives the rate).
   shaped.tech_pay = null;
+  shaped.travel_bonus = 0;
   try {
     const viewerName = (data.technician_id === auth.tech_id)
       ? (data.technician?.name || null)
@@ -455,6 +456,10 @@ async function job(req, res, db, auth) {
       is_secondary: data.secondary_technician_id === auth.tech_id && data.technician_id !== auth.tech_id,
     }, viewerName);
     shaped.tech_pay = Math.round(Number(pay.pay) || 0);
+    // Surface the travel bonus (the tech's share of the service-area surcharge) so
+    // it shows as its own pay line — the tech sees the extra they earn for the drive.
+    const tb = (pay.breakdown || []).find(x => /travel/i.test(x.label || ''));
+    shaped.travel_bonus = tb ? Math.round(Number(tb.amount) || 0) : 0;
   } catch (e) { shaped.tech_pay = null; }
 
   return res.status(200).json({ job: shaped });
