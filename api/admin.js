@@ -485,6 +485,21 @@ async function summary(req, res, db, auth) {
     // others by their own local day.
     const { data: allBiz } = await db.from('businesses')
       .select('id, slug, name, timezone').eq('active', true);
+
+    // Per-business profit THIS WEEK (for the split "Profit this week" box). Same
+    // viewed-week window for every company; realized profit only (completed+paid).
+    const weekBySlug = {};
+    for (const bb of (allBiz || [])) {
+      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', bb.id)
+        .gte('scheduled_at', weekStart.toISOString())
+        .lt('scheduled_at', weekEnd.toISOString()));
+      const paid = earned(rows);
+      const e = await computeJobEconomics(db, bb, paid, true);
+      weekBySlug[bb.slug] = Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0));
+    }
+    profit.week_by_slug = weekBySlug;
+
     // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
     // ALL active businesses, each measured in its OWN local day.
     const netDailyFor = async (offset) => {
