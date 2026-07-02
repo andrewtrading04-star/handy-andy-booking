@@ -459,6 +459,9 @@
   .gstat-s{font-size:11px;opacity:.82;}
   .gstat-s.up{color:#5ef0a0;opacity:1;}
   .gstat-s.down{color:#ff9b9b;opacity:1;}
+  /* Plain revenue/predicted boxes: keep the figure on one line and let it (and
+     the label) shrink to fit the box on small screens instead of clipping. */
+  .gstat-rev .gstat-v{white-space:nowrap;font-variant-numeric:tabular-nums;}
   /* Today/Yesterday toggle inside the Net Daily Profit stat card */
   .ndp-seg{display:inline-flex;background:rgba(0,0,0,.28);border-radius:8px;padding:2px;}
   .ndp-seg button{border:none;background:transparent;color:rgba(255,255,255,.72);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;cursor:pointer;}
@@ -478,6 +481,11 @@
     .gstat-l{font-size:9px;}
     .gstat-v{font-size:15px;}
     .gstat-s{font-size:9.5px;}
+    /* Revenue/predicted boxes: smaller figure + tighter label so the whole
+       thing fits the narrow 2-up box on phones. */
+    .gstat-rev .gstat-v{font-size:13px;letter-spacing:-.02em;}
+    .gstat-rev .gstat-l{font-size:8.5px;line-height:1.2;}
+    .gstat-rev .gstat-s{font-size:8.5px;line-height:1.25;}
   }
 
   /* ───────── Booking Analytics view (ported from /dashboard.html, scoped to .ana) ───────── */
@@ -4320,8 +4328,8 @@ function greetStatsHtml(){
       `<div class="ndp-seg"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div></div>`+
       `<span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span><span class="gstat-s">Both companies combined</span></div>` : '';
   return `<div class="greet-stats">`+
-    `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Revenue this month</span><span class="gstat-v">${money(r.month||0)}</span></div>`+
+    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
+    `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span></div>`+
     avgTicketBoxHtml(pf, r)+
     profitCards+
   `</div>`;

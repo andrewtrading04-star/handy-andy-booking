@@ -479,6 +479,16 @@ async function summary(req, res, db, auth) {
     const pYesterday = await sumProfit(earned(yRows));
     profit = { week: Math.round(pWeek), today: Math.round(pToday), yesterday: Math.round(pYesterday) };
 
+    // Predicted income this week — projected profit if EVERY job scheduled this
+    // week (any active status) were completed AND paid. Unlike `week` (realized:
+    // completed+paid only), this includes upcoming/unpaid jobs, so it grows the
+    // moment a job is added to the week's schedule. Per the viewed business.
+    const weekAllJobs = (pjobs || []).filter(b => {
+      const t = new Date(b.scheduled_at);
+      return t >= weekStart && t < weekEnd && ACTIVE_STATUSES.includes(b.status);
+    });
+    profit.week_predicted = Math.round(await sumProfit(weekAllJobs));
+
     // Net daily profit — TODAY's realized profit across ALL active businesses,
     // combined. It's a company-wide figure, so it reads the same on either
     // dashboard. Reuse this business's already-fetched `today` rows; fetch the
