@@ -557,6 +557,7 @@ async function showDetail(id){
 
       <div class="card">
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
+        ${photoGuideHtml()}
         <div class="photogrid" id="photoGrid">${photoThumbs(curPhotos)}</div>
         <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
         <button class="btn ghost" id="addPhoto" style="margin-top:10px;">${ic('camera')} Add Photo</button>
@@ -760,6 +761,21 @@ function mountTechLineItems(j, id){
 }
 
 // ── Photos ──────────────────────────────────────────────────────────────────
+// Photo-quality coaching shown on every job's Photos card. Goal: social-media-
+// grade shots — plastic off, area tidy, and our branded screen projected on the
+// TV. The video is per-business (Handy Andy vs Dom's) so the right logo shows.
+function photoGuideHtml(){
+  const url = isDoms()
+    ? 'https://youtu.be/FPZ_sz59Vkg?si=qqtxMzUlWuzPKzU7'
+    : 'https://youtu.be/GvTppkdlEr8?si=bq6x8xzJB-q79hsv';
+  return `<div style="margin:2px 0 12px;padding:12px 14px;border:1px solid var(--orange);border-radius:12px;background:rgba(255,255,255,.04);">
+    <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📸 Make it social-media ready</div>
+    <div style="font-size:13px;color:var(--ink);line-height:1.5;margin-bottom:9px;">These photos go on our social media — let's make them look pro. Before you shoot:</div>
+    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ Project our branded screen on the TV ↓</div>
+    <a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Play branded TV screen</a>
+    <div style="font-size:11.5px;color:var(--mute);margin-top:8px;line-height:1.5;">Tip: shoot straight-on in good light — get the whole TV plus a little wall around it.</div>
+  </div>`;
+}
 function photoThumbs(photos){
   if(!photos.length) return '<div class="sub" style="color:var(--mute);font-size:13px;padding:6px 0;">No photos yet.</div>';
   return photos.map(p=>`<div class="thumb"><img src="${esc(p.url)}" data-full="${esc(p.url)}" alt="job photo"><button class="thumbdel" data-pid="${p.id}" title="Delete">×</button></div>`).join('');
