@@ -4243,7 +4243,7 @@ function greetStatsHtml(){
   const profitCards = pf ?
     `<div class="gstat"><span class="gstat-l">Profit this week</span><span class="gstat-v" style="color:#4ade80;">${money(pf.week||0)}</span></div>`+
     `<div class="gstat"><span class="gstat-l">Profit today</span><span class="gstat-v" style="color:#4ade80;">${money(pf.today||0)}</span></div>`+
-    `<div class="gstat"><span class="gstat-l">Net daily profit</span><span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span>`+
+    `<div class="gstat"><span class="gstat-l">Net daily profit</span><span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span><span class="gstat-s">Both companies combined</span>`+
       `<div class="ndp-seg" style="margin-top:5px;align-self:flex-start;"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div></div>` : '';
   return `<div class="greet-stats">`+
     `<div class="gstat"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
