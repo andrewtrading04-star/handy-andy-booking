@@ -691,7 +691,12 @@ async function computeJobEconomics(db, biz, rows, includePay) {
       for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
       // Bracket hardware the business bought (skipped when Juan supplies his own).
       const bracketCost = bracketHardwareCost(b.line_items, techNames.some(isJuan));
-      econ.tech_payout = Math.round(payout);
+      // Tips are 100% the tech's and pass straight through (customer -> tech), so
+      // they RAISE the tech's payout but never touch business profit — profit is
+      // computed from the service price and base pay only, with the tip excluded
+      // on both sides.
+      const tip = Number(b.tip) || 0;
+      econ.tech_payout = Math.round(payout + tip);
       econ.bracket_cost = Math.round(bracketCost);
       econ.profit = Math.round(cost - payout - bracketCost);
       econ.assigned = techNames.length > 0;
@@ -2883,7 +2888,7 @@ function bookingSelect() {
   // secondary_technician_id) because bookings has TWO foreign keys to
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
-  const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, payment_status, paid_at,
+  const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
@@ -2923,6 +2928,9 @@ function shapeBooking(b) {
     scheduled_end: b.scheduled_end,
     duration_minutes: b.duration_minutes,
     price: b.price,
+    // Gratuity the customer added at charge time (100% to the tech). Kept so the
+    // schedule card can show the true total the customer paid (price + tip).
+    tip: b.tip,
     payment_status: b.payment_status,
     paid_at: b.paid_at,
     notes: b.notes,
