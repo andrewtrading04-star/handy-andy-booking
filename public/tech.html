@@ -529,11 +529,11 @@ async function showDetail(id){
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
           <button class="btn sm" id="liSave">Save</button>
         </div>
-        ${j.travel_bonus?`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
-          <span>Travel bonus <span style="color:var(--mute);font-weight:400;font-size:12px;">— extra pay for the drive</span></span>
+        ${j.travel_bonus?`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;">
+          <span>Travel bonus</span>
           <span style="color:var(--green);font-weight:700;">+${fmtUsd(j.travel_bonus)}</span>
         </div>`:''}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:800;font-size:15px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:800;font-size:16px;">
           <span>Technicians Total Pay</span>
           <span style="color:var(--green);">${j.tech_pay!=null?fmtUsd(j.tech_pay):'—'}</span>
         </div>
