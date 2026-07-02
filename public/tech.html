@@ -533,6 +533,10 @@ async function showDetail(id){
           <span>Travel bonus</span>
           <span style="color:var(--green);font-weight:700;">+${fmtUsd(j.travel_bonus)}</span>
         </div>`:''}
+        ${j.tip_pay?`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;">
+          <span>Tip (100% yours)</span>
+          <span style="color:var(--green);font-weight:700;">+${fmtUsd(j.tip_pay)}</span>
+        </div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:800;font-size:16px;">
           <span>Technicians Total Pay</span>
           <span style="color:var(--green);">${j.tech_pay!=null?fmtUsd(j.tech_pay):'—'}</span>
@@ -914,8 +918,8 @@ function openChargeFlow(j){
         </div>
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-x>Cancel</button>
-        <button class="btn" data-next style="flex:1;">Continue to signature →</button>
+        <button class="btn ghost" data-x style="flex:1;">Cancel</button>
+        <button class="btn" data-next style="flex:2;">Continue to signature →</button>
       </div>`;
     } else if(step===2){
       ov.innerHTML=`
@@ -933,8 +937,8 @@ function openChargeFlow(j){
         </div>
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-back>← Back</button>
-        <button class="btn" id="cfSignNext" style="flex:1;opacity:.5;" disabled>Continue to tip →</button>
+        <button class="btn ghost" data-back style="flex:1;">← Back</button>
+        <button class="btn" id="cfSignNext" style="flex:2;opacity:.5;" disabled>Continue to tip →</button>
       </div>`;
     } else {
       ov.innerHTML=`
@@ -945,14 +949,12 @@ function openChargeFlow(j){
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;">
           ${[20,30,50].map(p=>`<button class="btn ${tip===p?'':'ghost'}" data-tip="${p}" style="padding:20px 0;font-size:19px;">$${p}</button>`).join('')}
         </div>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Custom tip" value="${(tip>0 && ![20,30,50].includes(tip))?tip:''}" style="flex:1;">
-          <button class="btn ghost" data-tip="0" style="white-space:nowrap;">Skip</button>
-        </div>
+        <input id="cfCustom" type="number" inputmode="decimal" min="0" placeholder="Custom tip amount" value="${(tip>0 && ![20,30,50].includes(tip))?tip:''}" style="width:100%;text-align:center;color:#fff;margin-bottom:10px;">
+        <button class="btn ghost" data-tip="0" style="width:100%;">Skip tip</button>
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-back>← Back</button>
-        <button class="btn" id="cfCharge" style="flex:1;">Charge ${fmtMoney(total())}</button>
+        <button class="btn ghost" data-back style="flex:1;">← Back</button>
+        <button class="btn" id="cfCharge" style="flex:2;white-space:nowrap;">Charge ${fmtMoney(total())}</button>
       </div>`;
     }
     wire();

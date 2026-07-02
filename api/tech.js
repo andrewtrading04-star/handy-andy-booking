@@ -374,7 +374,7 @@ async function job(req, res, db, auth) {
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
              review_rating, review_text, reviewed_at, business_id, technician_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
-             payment_status, paid_at, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+             payment_status, paid_at, tip, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
              business:businesses ( name, slug ),
@@ -444,6 +444,9 @@ async function job(req, res, db, auth) {
       status: 'completed',
       payment_status: 'paid',
       price: data.price,
+      // The tip the customer added at charge time (stored on the booking, not as a
+      // line item) is 100% the tech's — include it so their shown pay reflects it.
+      tip: data.tip,
       notes: data.notes,
       customer_notes: data.customer_notes,
       service_name: data.service?.name || '',
@@ -460,6 +463,9 @@ async function job(req, res, db, auth) {
     // it shows as its own pay line — the tech sees the extra they earn for the drive.
     const tb = (pay.breakdown || []).find(x => /travel/i.test(x.label || ''));
     shaped.travel_bonus = tb ? Math.round(Number(tb.amount) || 0) : 0;
+    // Surface the tip as its own pay line too (100% to the tech).
+    const tp = (pay.breakdown || []).find(x => /\btip\b/i.test(x.label || ''));
+    shaped.tip_pay = tp ? Math.round(Number(tp.amount) || 0) : 0;
   } catch (e) { shaped.tech_pay = null; }
 
   return res.status(200).json({ job: shaped });
