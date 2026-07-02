@@ -4664,7 +4664,7 @@ function nbPopulateSecondTechs(){
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
   // TV Mounting auto-picks its service; Assurion uses its own multi-select UI.
-  if(!category || category==='TV Mounting' || category==='Assurion'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  if(!category || category==='TV Mounting' || category==='Assurion' || category==='Guaranteed Dismount Service'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
   svcDiv.innerHTML='<option value="">— Task —</option>'+
