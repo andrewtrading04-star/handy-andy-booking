@@ -453,7 +453,7 @@
   .greet-link:hover{opacity:.85;}
   .greet-stats{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:1fr;gap:10px;margin-top:14px;}
   .gstat{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
-    border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;}
+    border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;}
   .gstat-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.78;font-weight:700;}
   .gstat-v{font-size:20px;font-weight:800;line-height:1.1;}
   .gstat-s{font-size:11px;opacity:.82;}
@@ -473,7 +473,7 @@
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
     .greet-hi{font-size:18px;}
     .greet-line{font-size:12.5px;}
-    .greet-stats{gap:6px;}
+    .greet-stats{grid-template-columns:repeat(2,1fr);gap:6px;}
     .gstat{padding:8px 9px;}
     .gstat-l{font-size:9px;}
     .gstat-v{font-size:15px;}
