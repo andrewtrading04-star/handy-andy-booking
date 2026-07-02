@@ -478,25 +478,31 @@ async function summary(req, res, db, auth) {
     // others by their own local day.
     const { data: allBiz } = await db.from('businesses')
       .select('id, slug, name, timezone').eq('active', true);
-    let net = 0;
-    for (const bb of (allBiz || [])) {
-      let rows;
-      if (bb.id === biz.id) {
-        rows = today;
-      } else {
-        const btz = bb.timezone || 'America/Denver';
-        const b0 = localDayStartUTC(btz, 0), b1 = localDayStartUTC(btz, 1);
-        ({ data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
-          .eq('business_id', bb.id)
-          .gte('scheduled_at', b0.toISOString())
-          .lt('scheduled_at', b1.toISOString())));
+    // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
+    // ALL active businesses, each measured in its OWN local day.
+    const netDailyFor = async (offset) => {
+      let net = 0;
+      for (const bb of (allBiz || [])) {
+        let rows;
+        if (offset === 0 && bb.id === biz.id) {
+          rows = today;   // reuse this business's already-fetched today rows
+        } else {
+          const btz = bb.timezone || 'America/Denver';
+          const d0 = localDayStartUTC(btz, offset), d1 = localDayStartUTC(btz, offset + 1);
+          ({ data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+            .eq('business_id', bb.id)
+            .gte('scheduled_at', d0.toISOString())
+            .lt('scheduled_at', d1.toISOString())));
+        }
+        const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
+        if (!paidDone.length) continue;
+        const e = await computeJobEconomics(db, bb, paidDone, true);
+        net += paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
       }
-      const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
-      if (!paidDone.length) continue;
-      const e = await computeJobEconomics(db, bb, paidDone, true);
-      net += paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
-    }
-    profit.net_daily = Math.round(net);
+      return Math.round(net);
+    };
+    profit.net_daily = await netDailyFor(0);
+    profit.net_daily_yesterday = await netDailyFor(-1);
   }
 
   // Photos flagged "To Post" (the social-media queue) for this business. Safe
