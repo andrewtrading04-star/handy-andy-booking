@@ -198,6 +198,20 @@ function matchSize(name) {
   // options ("70\"-85\"", "33\"-59\"") never say "my tv is" / "lift" / "help" / "larger".
   if (/my tv is|\b(?:lift|help|larger)\b/i.test(n)) return null;
   for (const r of TV_SIZE_RATES) if (r.test.test(n)) return r;
+  // A bare inch value ('75"', '75 inch') — some bookings store the exact size
+  // instead of the range. Map the number to the bracket it belongs to so it still
+  // pays the correct base (a 75" TV is the 70"–84" bracket), never the custom
+  // hourly fallback.
+  const bare = n.match(/^\s*(\d{2,3})\s*(?:"|inch(?:es)?|in|”|″)?\s*$/);
+  if (bare) {
+    const v = parseInt(bare[1], 10);
+    if (v <= 32) return TV_SIZE_RATES[0];
+    if (v <= 59) return TV_SIZE_RATES[1];
+    if (v <= 69) return TV_SIZE_RATES[2];
+    if (v <= 84) return TV_SIZE_RATES[3];
+    if (v <= 97) return TV_SIZE_RATES[4];
+    return TV_SIZE_RATES[5];
+  }
   return null;
 }
 // Some booking paths prefix a line item with its option group, e.g.
@@ -652,6 +666,17 @@ function runSelfTests() {
     else console.log(`✓ ${msg}`);
   };
   const job = (over) => ({ status: 'completed', payment_status: 'paid', price: 200, line_items: [], ...over });
+
+  // A bare inch size ('75"') maps to its bracket (70"–84" -> other 80), not the
+  // custom-hourly fallback. Jarret Blaze job: 75" + Samsung Frame in-box bracket.
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: '75"', line_total: 109 },
+    { name: 'I will be using the bracket that comes in the box (Samsung Frame TV)', line_total: 25 },
+    { name: 'Tax (8.25%)', line_total: 11.06, kind: 'fee' },
+  ] }), 'Zach').pay, 95, "bare 75\" = 70-84 base (80) + frame bracket (15) = 95");
+  eq(computeJobPay(job({ line_items: [{ name: '75"', line_total: 109 }] }), 'Zach').flags.length, 0, 'bare 75" size: no review flags');
+  eq(computeJobPay(job({ line_items: [{ name: '55"', line_total: 100 }] }), 'Kregg').pay, 60, 'bare 55" = 33-59 base = 60');
+  eq(computeJobPay(job({ line_items: [{ name: '90"', line_total: 200 }] }), 'Kregg').pay, 110, 'bare 90" = 85-97 base = 110');
 
   // Base by size, non-Juan vs Juan.
   eq(computeJobPay(job({ line_items: [{ kind: 'option', name: '33"–59"', line_total: 109 }] }), 'Kregg').pay, 60, '50in non-Juan base = 60');

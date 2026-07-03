@@ -1742,6 +1742,20 @@ function liCleanLabel(name){
 // name stays raw for payroll/receipts).
 function liRelabel(t){
   const n=String(t).toLowerCase();
+  // A bare TV size ('75"') -> the size bracket it belongs to, so it reads as the
+  // range (70"-84") instead of a raw number.
+  const bare=n.match(/^\s*(\d{2,3})\s*(?:"|inch(?:es)?|in|”|″)?\s*$/);
+  if(bare){ const v=parseInt(bare[1],10);
+    if(v<=32) return '32" & under';
+    if(v<=59) return '33"-59"';
+    if(v<=69) return '60"-69"';
+    if(v<=84) return '70"-84"';
+    if(v<=97) return '85"-97"';
+    return '98"+'; }
+  // Frame/Gallery in-box bracket -> short brand label.
+  if(/samsung\s*frame/.test(n)) return 'Samsung Frame TV';
+  if(/lg\s*gallery/.test(n)) return 'LG Gallery TV';
+  if(/(bracket[^]*in[^]*the?\s*box|in[^]*the?\s*box[^]*bracket|frame\s*\/?\s*gallery)/.test(n)) return 'Frame TV';
   if(/\bmy own\b[^]*bracket|own mounting bracket|customer supplied bracket/.test(n)) return 'Customer supplied bracket';
   if(/\bhelp\s+lift\b/.test(n) && !/\bcannot\b|can'?t/.test(n)) return 'Customer will help lift';
   return t;
