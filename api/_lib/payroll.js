@@ -259,6 +259,16 @@ function matchItem(name) {
   if (/dry\s*erase\s*board/i.test(name)) return { key: 'dry erase board', juan: 65, other: 65 };
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
   if (isFrameInBoxBracket(name)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
+  // Wire/cord concealment worded outside the standard keys ("Hide Cords in Wall",
+  // "Cords in the wall"). In/behind the wall pays the behind-wall rate ($45/$35);
+  // an explicit "outside" pays the outside rate ($15). The exact-key lookups above
+  // already caught "hide the wires behind/outside the wall"; this covers "cords"
+  // and other phrasings so wire work is never dropped to an unmatched flag.
+  if (/\b(cord|wire)s?\b/i.test(name) && /\bwall\b/i.test(name)) {
+    return /\boutside\b/i.test(name)
+      ? { key: 'outside wall wires', juan: 15, other: 15 }
+      : { key: 'behind wall wires', juan: 45, other: 35 };
+  }
   return null;
 }
 
@@ -789,6 +799,21 @@ function runSelfTests() {
     { name: '60"–69"', line_total: 119 },
     { name: 'Service minimum', line_total: 20 },
   ] }), 'Kregg').flags.length, 0, 'Service minimum: no review flag');
+
+  // "Hide Cords in Wall" (and other cord/wire-in-wall phrasings) pays the
+  // behind-wall wire rate ($35 other / $45 Juan), never an unmatched flag. Ella
+  // job (Gregory, Doms): dismount 60 + 60-69 base 70 + 1h handyman 65 + hide
+  // cords 35 + $75 travel = 305.
+  eq(computeJobPay(job({ business_slug: 'doms', travel_payout: 75, line_items: [
+    { name: 'Dismount', line_total: 80 },
+    { name: '60"–69"', line_total: 119 },
+    { name: '1 hour of Handyman Labor', line_total: 85 },
+    { name: 'Hide Cords in Wall', line_total: 75 },
+    { name: 'Service area surcharge', line_total: 100, kind: 'fee' },
+  ] }), 'Gregory').pay, 305, 'Ella job: 60+70+65+35 hide-cords +75 travel = 305, no flag');
+  eq(computeJobPay(job({ line_items: [{ name: 'Hide Cords in Wall', line_total: 75 }] }), 'Gregory').flags.length, 0, 'Hide Cords in Wall: no review flag');
+  eq(computeJobPay(job({ line_items: [{ name: 'Hide Cords Outside the Wall', line_total: 40 }] }), 'Kregg').pay, 15, 'Hide Cords Outside the Wall = $15');
+  eq(computeJobPay(job({ line_items: [{ name: '60"–69"', line_total: 119 }, { name: 'Hide Cords in Wall', line_total: 75 }] }), 'Juan').pay, 125, 'Juan: 60-69 (80) + cords in wall (45) = 125');
 
   // A fee that arrives as a plain 'service' line (not kind 'fee') must NOT be
   // paid as custom labor — any "…Fee" name is skipped. Base 60 only, fee = $0.
