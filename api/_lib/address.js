@@ -11,6 +11,19 @@
 // both "full address in line1" and "clean street in line1" render correctly.
 // ============================================================================
 
+// Does this string plausibly look like a street address (vs. an email, a phone
+// number, or blank)? A real service address has a street NUMBER and a street
+// NAME, and never contains "@". Prevents the "customer typed their email in the
+// Street Address box" bug that leaves a job with no findable location.
+export function isLikelyStreetAddress(s) {
+  const a = String(s || '').trim();
+  if (a.length < 5) return false;
+  if (/@/.test(a)) return false;        // an email address
+  if (!/[a-z]/i.test(a)) return false;  // no street name (e.g. a bare phone number)
+  if (!/\d/.test(a)) return false;      // no street number
+  return true;
+}
+
 export function formatAddress(b) {
   if (!b) return '';
   const esc = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -5,6 +5,60 @@ import { serviceClient } from './_lib/supabase.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
+import { isLikelyStreetAddress } from './_lib/address.js';
+
+const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
+
+// Public Google Places proxy for the booking widget's address autocomplete (the
+// admin's places endpoint requires a login). No auth: it only reads address
+// suggestions. Lives here to stay under Vercel's function cap.
+async function placesAutocompletePublic(req, res) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const input = ((req.query || {}).input || '').toString().trim();
+  const token = ((req.query || {}).session || '').toString().trim();
+  if (!key || input.length < 3) return res.status(200).json({ predictions: [] });
+  try {
+    const u = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
+    u.searchParams.set('input', input);
+    u.searchParams.set('key', key);
+    u.searchParams.set('types', 'address');
+    u.searchParams.set('components', 'country:us');
+    if (token) u.searchParams.set('sessiontoken', token);
+    const j = await (await fetch(u.toString())).json();
+    const predictions = (j.predictions || []).slice(0, 5).map(p => ({ description: p.description, place_id: p.place_id }));
+    return res.status(200).json({ predictions });
+  } catch (e) {
+    console.warn('[book] places autocomplete failed:', e.message);
+    return res.status(200).json({ predictions: [] });
+  }
+}
+// Resolve a place_id to its parts: { line1 (street # + name), city, state, zip }.
+async function placeDetailsPublic(req, res) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const placeId = ((req.query || {}).place_id || '').toString().trim();
+  const token = ((req.query || {}).session || '').toString().trim();
+  if (!key || !placeId) return res.status(200).json({ address: null });
+  try {
+    const u = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+    u.searchParams.set('place_id', placeId);
+    u.searchParams.set('key', key);
+    u.searchParams.set('fields', 'address_component');
+    if (token) u.searchParams.set('sessiontoken', token);
+    const j = await (await fetch(u.toString())).json();
+    if (j.status !== 'OK') return res.status(200).json({ address: null });
+    const comps = j.result?.address_components || [];
+    const get = (type, short) => { const c = comps.find(x => (x.types || []).includes(type)); return c ? (short ? c.short_name : c.long_name) : ''; };
+    return res.status(200).json({ address: {
+      line1: [get('street_number'), get('route')].filter(Boolean).join(' '),
+      city:  get('locality') || get('sublocality') || get('postal_town') || '',
+      state: get('administrative_area_level_1', true) || '',
+      zip:   get('postal_code') || '',
+    } });
+  } catch (e) {
+    console.warn('[book] place details failed:', e.message);
+    return res.status(200).json({ address: null });
+  }
+}
 
 // 1×1 transparent GIF for review-email open tracking.
 const TRACKING_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -161,7 +215,7 @@ async function bookDoms(req, res) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
-  if (!customer.address) return res.status(400).json({ error: 'customer.address required' });
+  if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
   const parsed = parseSlotId(b.selectedSlot);
   if (!parsed || parsed.businessSlug !== 'doms') {
@@ -345,7 +399,7 @@ async function bookHandyAndy(req, res) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
-  if (!customer.address) return res.status(400).json({ error: 'customer.address required' });
+  if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
   const parsed = parseSlotId(b.selectedSlot);
   if (!parsed || parsed.businessSlug !== 'handy-andy') {
@@ -555,6 +609,9 @@ export default async function handler(req, res) {
   // stay under Vercel's 12-function Hobby cap.
   if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'review_open') return serveReviewPixel(req, res);
+  // Public address-autocomplete proxy for the booking widget.
+  if (req.method === 'GET' && (req.query || {}).action === 'places_autocomplete') return placesAutocompletePublic(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'place_details') return placeDetailsPublic(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.
@@ -574,7 +631,7 @@ export default async function handler(req, res) {
   if (!service_id)        return res.status(400).json({ error: 'service_id required' });
   if (!customer?.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer?.phone)   return res.status(400).json({ error: 'customer.phone required' });
-  if (!customer?.address) return res.status(400).json({ error: 'customer.address required' });
+  if (!isLikelyStreetAddress(customer?.address)) return res.status(400).json({ error: BAD_ADDRESS });
   if (!selectedSlot) {
     return res.status(400).json({ error: 'selectedSlot required for a booking' });
   }

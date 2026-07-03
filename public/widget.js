@@ -1183,7 +1183,48 @@
     const captureName=()=>{ if(fnEl)customer.first_name=fnEl.value.trim(); if(lnEl)customer.last_name=lnEl.value.trim(); if(customer.first_name||customer.last_name) logEvent('answer','customer_name'); };
     if(fnEl)fnEl.addEventListener('blur',captureName);
     if(lnEl)lnEl.addEventListener('blur',captureName);
+    attachAddrAutocomplete(root);
     // Card inputs replaced by Stripe Elements — no manual binding needed
+  }
+
+  // Google Places autocomplete on the Street Address field, via the public proxy
+  // in api/book.js. Guides the customer to a real, verified address (so they
+  // can't drop their email/phone in the box) and fills the street line on select.
+  function attachAddrAutocomplete(root){
+    const input=root.querySelector('#c-ad'); if(!input||input._acWired)return; input._acWired=true;
+    const box=document.createElement('div'); box.style.cssText='position:relative!important;width:100%!important;';
+    const list=document.createElement('div');
+    list.style.cssText='display:none;position:absolute!important;left:0;right:0;top:2px;z-index:1000000!important;background:#18181c!important;border:1px solid #3f3f46!important;border-radius:8px!important;overflow:hidden!important;box-shadow:0 8px 24px rgba(0,0,0,0.5)!important;';
+    input.parentNode.insertBefore(box,input.nextSibling); box.appendChild(list);
+    let session=Math.random().toString(36).slice(2)+Date.now().toString(36), timer=null;
+    const hide=()=>{ list.style.display='none'; list.innerHTML=''; };
+    const pick=async(pred)=>{
+      hide();
+      try{
+        const dj=await (await fetch(API_BASE+'/book?action=place_details&place_id='+encodeURIComponent(pred.place_id)+'&session='+session)).json();
+        session=Math.random().toString(36).slice(2)+Date.now().toString(36);
+        const a=dj&&dj.address;
+        const v=(a&&a.line1)?a.line1:pred.description;
+        input.value=v; customer.address=v;
+      }catch(_){ input.value=pred.description; customer.address=pred.description; }
+    };
+    const search=async(q)=>{
+      try{
+        const j=await (await fetch(API_BASE+'/book?action=places_autocomplete&input='+encodeURIComponent(q)+'&session='+session)).json();
+        const preds=(j&&j.predictions)||[];
+        if(!preds.length){ hide(); return; }
+        list.innerHTML=preds.map((p,i)=>'<div data-i="'+i+'" style="padding:11px 12px!important;font-size:14px!important;color:#e4e4e7!important;cursor:pointer!important;border-bottom:1px solid #27272a!important;">'+String(p.description).replace(/</g,'&lt;')+'</div>').join('');
+        list.style.display='block';
+        list.querySelectorAll('[data-i]').forEach(el=>el.addEventListener('mousedown',e=>{ e.preventDefault(); pick(preds[+el.dataset.i]); }));
+      }catch(_){ hide(); }
+    };
+    input.addEventListener('input',()=>{
+      customer.address=input.value; const q=input.value.trim();
+      clearTimeout(timer);
+      if(q.length<3){ hide(); return; }
+      timer=setTimeout(()=>search(q),250);
+    });
+    input.addEventListener('blur',()=>setTimeout(hide,150));
   }
 
   // ─── Navigation ───────────────────────────────────────────────────────────
@@ -1273,6 +1314,7 @@
     if(!customer.email){logEvent('form_error','customer',null,'missing email');return alert('Please enter your email address.');}
     if(!customer.phone){logEvent('form_error','customer',null,'missing phone');return alert('Please enter your phone number.');}
     if(!customer.address){logEvent('form_error','customer',null,'missing address');return alert('Please enter your street address.');}
+    if(/@/.test(customer.address)||!/\d/.test(customer.address)||customer.address.length<5){logEvent('form_error','customer',null,'invalid address');return alert('Please enter a valid street address with a house number — not an email or phone number.');}
     if(couponCode&&!(couponCode in COUPONS)){logEvent('form_error','customer',null,'invalid coupon: '+couponCode);return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');}
     if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
     if(couponCode)logEvent('answer','coupon:'+couponCode);
