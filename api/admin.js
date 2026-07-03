@@ -89,6 +89,35 @@ async function serviceAreaIdFromPostal(db, businessId, postalCode) {
   return data?.service_area_id || null;
 }
 
+// The timezone of a service area (its metro), or `fallbackTz` if none. Handy
+// Andy spans Mountain (Denver) and Central (Houston/Austin), so a job's SLOT
+// time must be anchored/stored/displayed in its metro's tz — never the single
+// business tz — or an 8am Central slot drifts by an hour.
+async function areaTimezone(db, serviceAreaId, fallbackTz) {
+  if (!serviceAreaId) return fallbackTz;
+  try {
+    const { data } = await db.from('service_areas').select('timezone').eq('id', serviceAreaId).maybeSingle();
+    return data?.timezone || fallbackTz;
+  } catch { return fallbackTz; }
+}
+
+// The fixed slot label for an instant, rendered in a given (metro) timezone and
+// snapped to the slot it falls in — so every location reads the same fixed slots
+// (8:00 AM, 11:00 AM, 2:00 PM, 5:00 PM, 8:00 PM) regardless of the viewer's tz.
+function slotTimeLabel(tz, iso) {
+  if (!iso || !tz) return null;
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(iso)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    const mins = ((p.hour === '24' ? 0 : Number(p.hour)) * 60) + Number(p.minute);
+    const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+    const to12 = (s) => { let [h, m] = s.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${String(m).padStart(2, '0')} ${ap}`; };
+    for (const s of SLOTS) if (mins >= toMin(s.start) && mins < toMin(s.end)) return to12(s.start);
+    for (const s of SLOTS) if (toMin(s.start) === mins) return to12(s.start);
+    return new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+  } catch { return null; }
+}
+
 // Build a Map(postal_code -> tech_payout) for a business, for payroll's travel
 // payout. One batched read; returns an empty Map if the tech_payout column isn't
 // applied yet (migration 0032) so payroll never breaks waiting on a migration.
@@ -610,7 +639,11 @@ async function calendar(req, res, db, auth) {
   const { data: techs } = await db.from('technicians')
     .select('id, name, status, color, active').eq('business_id', biz.id).eq('active', true).order('name');
   const { data: areas } = await db.from('service_areas')
-    .select('id, name, state').eq('business_id', biz.id).eq('active', true).order('name');
+    .select('id, name, state, timezone').eq('business_id', biz.id).eq('active', true).order('name');
+  // Metro tz per area, so each job's slot renders in its own timezone (Central
+  // for Houston/Austin) instead of the single business (Mountain) clock.
+  const areaTzById = {};
+  for (const a of (areas || [])) areaTzById[a.id] = a.timezone;
 
   // Job economics for the List view. Everyone (owner + secretary) gets the
   // service category, cost to customer, and paid status. Tech payout and profit
@@ -623,6 +656,7 @@ async function calendar(req, res, db, auth) {
   const bookings = (bk || []).map(b => {
     const s = shapeBooking(b);
     if (econById[b.id]) s.econ = econById[b.id];
+    s.slot_time = slotTimeLabel(areaTzById[b.service_area_id] || biz.timezone || 'America/Denver', b.scheduled_at);
     return s;
   });
 
@@ -1014,7 +1048,11 @@ async function availableSlots(req, res, db, auth) {
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
-  const tz = biz.timezone || 'America/Denver';
+  // Slots + occupancy are computed in the customer's METRO timezone (from the
+  // zip), so a Central booking's slots line up with how its jobs are stored —
+  // not the single business (Mountain) clock.
+  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+  const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
   // Each technician can come from a different company pool: pool drives the
   // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
   const ridPrimary = await rosterBizId(db, biz, (req.query.pool || '').toString());
@@ -1023,12 +1061,9 @@ async function availableSlots(req, res, db, auth) {
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
 
-  // For cross-company secondary tech selection, look up the service area
-  // from the postal code so secondary techs match the customer's location.
-  let serviceAreaId = null;
-  if (wantPair && techId2 === 'any') {
-    serviceAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
-  }
+  // For cross-company secondary tech selection, match techs to the customer's
+  // service area (already resolved from the postal code above).
+  const serviceAreaId = (wantPair && techId2 === 'any') ? bookingAreaId : null;
 
   let keys;
   if (!wantPair) {
@@ -1491,10 +1526,17 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
 
+  // This booking's METRO timezone (Central for Houston/Austin), resolved from the
+  // customer's zip → service area. ALL of this booking's time math is anchored
+  // here — the slot's wall-clock time, availability picks, and the confirmation's
+  // displayed time — never the single business tz, so a Central 8am slot is truly
+  // stored and shown as 8am Central. Also stamps service_area_id on the booking.
+  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, c.postal_code);
+  const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
+
   // Convert scheduled_date + scheduled_slot to scheduled_at timestamp. The slot
-  // start is a LOCAL wall-clock time in the business timezone, so anchor it to
-  // local midnight (as UTC) and add the slot offset — never store it as raw UTC.
-  const tz = biz.timezone || 'America/Denver';
+  // start is a LOCAL wall-clock time in the metro timezone, so anchor it to local
+  // midnight (as UTC) and add the slot offset — never store it as raw UTC.
   let scheduled_at = body.scheduled_at || null;
   if (body.scheduled_date && body.scheduled_slot) {
     const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
@@ -1595,6 +1637,7 @@ async function bookingCreate(req, res, db, auth, body) {
     technician_id: technician_id || null,
     secondary_technician_id: secondary_technician_id || null,
     service_id: body.service_id || null,
+    service_area_id: bookingAreaId || null,
     status, source: 'manual',
     scheduled_at,
     subtotal: Number(body.subtotal) || 0,
@@ -1853,10 +1896,10 @@ async function bookingUpdate(req, res, db, auth, body) {
       patch.status = newStatus = 'cancelled'; patch.cancelled_at = now; break;
     case 'reschedule': {
       // Preferred path: a calendar date + one of the fixed slots. Convert it to a
-      // timestamp server-side in the business timezone (same logic as new
+      // timestamp server-side in the booking's METRO timezone (same logic as new
       // bookings) and derive scheduled_end from the slot, so the calendar shows
       // the right time range. Falls back to a raw scheduled_at if one is passed.
-      const rtz = biz.timezone || 'America/Denver';
+      const rtz = await areaTimezone(db, await serviceAreaIdFromPostal(db, biz.id, existing.postal_code), biz.timezone || 'America/Denver');
       if (body.scheduled_date && body.scheduled_slot) {
         const slotDef = SLOTS.find(s => s.key === body.scheduled_slot);
         if (!slotDef) return res.status(400).json({ error: 'Invalid time slot' });
