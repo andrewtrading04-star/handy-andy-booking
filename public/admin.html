@@ -235,6 +235,42 @@
   .nb-min-warn a{color:inherit;font-weight:800;text-decoration:underline;cursor:pointer;margin-left:2px;}
   .nb-min-warn.floored{background:#fef2f2;border-color:#fecaca;color:#b91c1c;}
   .nb-min-warn.waived{background:#fff7ed;border-color:#fed7aa;color:#9a3412;}
+  /* ── Review Calls (Joey) ── */
+  .rc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+  .rc-title{font-size:20px;font-weight:800;margin:0;}
+  .rc-sub{font-size:13.5px;color:var(--mute);margin-top:4px;max-width:64ch;line-height:1.5;}
+  .rc-seg{display:inline-flex;background:var(--line2);border-radius:10px;padding:3px;gap:2px;flex:none;}
+  .rc-seg-btn{border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:700;color:var(--mute);padding:7px 12px;border-radius:8px;cursor:pointer;}
+  .rc-seg-btn.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+  .rc-script{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:13px 15px;margin-bottom:14px;}
+  .rc-script-h{font-size:12.5px;font-weight:800;color:#9a3412;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;}
+  .rc-script-h span{font-weight:600;text-transform:none;letter-spacing:0;color:#c2703a;}
+  .rc-script-b{font-size:14px;color:#7c2d12;line-height:1.55;}
+  .rc-count{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:10px;}
+  .rc-card{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;flex-wrap:wrap;}
+  .rc-main{flex:1;min-width:220px;}
+  .rc-name{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .rc-biz{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:2px 8px;border-radius:999px;}
+  .rc-biz.ha{background:#fff0e8;color:#c2410c;}
+  .rc-biz.doms{background:#e8f0ff;color:#1d4ed8;}
+  .rc-meta{font-size:13px;color:var(--mute);margin-top:3px;}
+  .rc-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .rc-badge{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;}
+  .rc-badge.blue{background:#e0edff;color:#1d4ed8;}
+  .rc-badge.gray{background:var(--line2);color:var(--mute);}
+  .rc-badge.red{background:#fee2e2;color:#b91c1c;}
+  .rc-badge.amber{background:#fef3c7;color:#92400e;}
+  .rc-actions{display:flex;flex-direction:column;gap:9px;align-items:stretch;min-width:236px;}
+  .rc-call{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#16a34a;color:#fff;font-weight:800;font-size:15px;padding:11px 16px;border-radius:10px;text-decoration:none;}
+  .rc-call:hover{background:#15803d;}
+  .rc-call.disabled{background:var(--line2);color:var(--mute);cursor:default;}
+  .rc-btn-row{display:flex;flex-wrap:wrap;gap:6px;}
+  .rc-btn{border:1px solid var(--line);background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:var(--ink-2);padding:8px 10px;border-radius:8px;cursor:pointer;}
+  .rc-btn:hover{border-color:var(--mute);}
+  .rc-btn.green{border-color:#86efac;background:#dcfce7;color:#15803d;}
+  .rc-btn.red{border-color:#fecaca;background:#fef2f2;color:#b91c1c;}
+  .rc-btn.ghost{border-style:dashed;color:var(--mute);}
+  @media(max-width:640px){ .rc-card{flex-direction:column;align-items:stretch;} .rc-actions{min-width:0;} }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
   .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
@@ -661,6 +697,7 @@
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
+      <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
@@ -1248,7 +1285,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
@@ -1258,6 +1295,7 @@ function navTo(s){
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
+    else if(s==='reviewcalls') renderReviewCalls();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
     else if(s==='handyman') renderHandymanAnalytics();
@@ -3470,6 +3508,104 @@ async function renderDisputes(){
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
+// ── Review Calls — Joey's daily review-outreach queue ────────────────────────
+let _rcDays=1, _rcData=[];
+const RC_SCRIPT = "Hi, this is [name] with Handy Andy — just calling to make sure everything went well with your installation. Is there anything else we can help with? … Great! One more thing — we also do handyman work: hanging curtains, mounting shelves, furniture assembly, small repairs — so keep us in mind. And if you have a minute, a quick Google review would mean a lot; I can text or email you the link right now.";
+function rcRel(iso){
+  if(!iso) return '';
+  const a=new Date(iso); a.setHours(0,0,0,0);
+  const b=new Date(); b.setHours(0,0,0,0);
+  const days=Math.round((b-a)/86400000);
+  if(days===0) return 'today';
+  if(days===1) return 'yesterday';
+  if(days>1 && days<7) return days+' days ago';
+  return new Date(iso).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+}
+function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Not interested',do_not_contact:'Do not contact'})[s]||s; }
+async function renderReviewCalls(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
+  try{
+    const d=await api('review_calls',{ params:{ days:_rcDays }});
+    _rcData=d.calls||[];
+    paintReviewCalls();
+  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+function paintReviewCalls(){
+  const view=document.getElementById('view'); if(!view) return;
+  const rows=_rcData||[];
+  const toCall=rows.filter(r=>!r.call_status).length;
+  const inProg=rows.filter(r=>r.call_status).length;
+  const seg=(v,l)=>`<button class="rc-seg-btn${_rcDays===v?' on':''}" data-rcdays="${v}">${l}</button>`;
+  const cards=rows.length ? rows.map(rcCard).join('')
+    : `<div class="empty" style="padding:34px 12px;">🎉 Nobody to call for this window — everyone has left a review or been handled.</div>`;
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head">
+      <div><h2 class="rc-title">📞 Review Calls</h2>
+        <div class="rc-sub">Customers from <b>both companies</b> who finished a job and haven't left a Google review yet. Call, thank them, invite a review — anyone who reviews drops off automatically.</div>
+      </div>
+      <div class="rc-seg">${seg(1,'Yesterday')}${seg(3,'Last 3 days')}${seg(7,'Last 7 days')}</div>
+    </div>
+    <div class="rc-script">
+      <div class="rc-script-h">📋 Script <span>— tweak as you go</span></div>
+      <div class="rc-script-b">“${esc(RC_SCRIPT)}”</div>
+    </div>
+    <div class="rc-count">${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}</div>
+    <div id="rcList">${cards}</div>
+  </div>`;
+  view.querySelectorAll('[data-rcdays]').forEach(b=>b.addEventListener('click',()=>{ _rcDays=+b.dataset.rcdays; renderReviewCalls(); }));
+  view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz)));
+  const badge=document.getElementById('rcBadge');
+  if(badge){ if(toCall>0){ badge.textContent=toCall; badge.style.display=''; } else badge.style.display='none'; }
+}
+function rcCard(r){
+  const biz = r.business_slug==='doms' ? `<span class="rc-biz doms">Dom's</span>` : `<span class="rc-biz ha">Handy Andy</span>`;
+  const badges=[];
+  if(r.email_opened) badges.push(`<span class="rc-badge blue">✉️ opened email</span>`);
+  else if(r.email_count>0) badges.push(`<span class="rc-badge gray">✉️ email sent</span>`);
+  if(r.rating && r.rating<4) badges.push(`<span class="rc-badge red">⚠ left ${r.rating}★ private feedback — handle gently</span>`);
+  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at))}`:''}</span>`);
+  const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
+  const callBtn=tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`;
+  const resend=(r.has_email && r.has_review_link)
+    ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
+  return `<div class="rc-card">
+    <div class="rc-main">
+      <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
+      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · completed ${esc(rcRel(r.completed_at))}</div>
+      <div class="rc-badges">${badges.join('')}</div>
+    </div>
+    <div class="rc-actions">
+      ${callBtn}
+      <div class="rc-btn-row">
+        <button class="rc-btn green" data-rc-act="reviewed" data-rc-id="${r.id}">✅ Got review</button>
+        <button class="rc-btn" data-rc-act="called" data-rc-id="${r.id}">🗣 Spoke</button>
+        <button class="rc-btn" data-rc-act="voicemail" data-rc-id="${r.id}">📭 Voicemail</button>
+        <button class="rc-btn" data-rc-act="callback" data-rc-id="${r.id}">🔁 Call back</button>
+        <button class="rc-btn red" data-rc-act="do_not_contact" data-rc-id="${r.id}">🚫 Don't contact</button>
+      </div>
+      ${resend}
+    </div>
+  </div>`;
+}
+async function rcAction(id, act, biz){
+  if(act==='resend'){
+    try{ await api('review_resend',{ method:'POST', body:{ business:biz, id }}); toast('Review email re-sent ✓'); }
+    catch(e){ toast(e.message); }
+    return;
+  }
+  try{
+    await api('review_call_log',{ method:'POST', body:{ id, status:act }});
+    const item=_rcData.find(x=>x.id===id);
+    if(item){
+      if(act==='reviewed'||act==='do_not_contact'){ _rcData=_rcData.filter(x=>x.id!==id); }
+      else { item.call_status=act; item.call_at=new Date().toISOString(); item.call_by=(typeof userName!=='undefined'?userName:null)||null; }
+    }
+    paintReviewCalls();
+    toast(act==='reviewed'?'Marked as reviewed 🎉':(act==='do_not_contact'?'Removed from list':'Saved ✓'));
+  }catch(e){ toast(e.message); }
+}
+
 async function renderReviews(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';

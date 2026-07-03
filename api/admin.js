@@ -278,6 +278,8 @@ export default async function handler(req, res) {
       case 'reviews':           return await reviews(req, res, db, auth);
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
+      case 'review_calls':      return await reviewCalls(req, res, db, auth);
+      case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'google_reviews':       return await googleReviews(req, res, db, auth);
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
@@ -3367,6 +3369,104 @@ async function reviewResend(req, res, db, auth, body) {
     await db.from('bookings').update({ review_email_sent_at: now, review_email_count: next }).eq('id', id);
   } catch (e) { /* column absent — metadata already updated above */ }
 
+  return res.status(200).json({ ok: true });
+}
+
+// ── Review-call queue (Joey's daily outreach) ────────────────────────────────
+// Cross-business: the customers from BOTH companies who completed a job in the
+// last `days` days (default 1 = yesterday), haven't left a Google review
+// (review_rating >= 4 means the email filter routed them to Google → excluded),
+// and haven't been resolved (marked reviewed / do-not-contact). Available to any
+// signed-in office user — this is a calling tool, so it deliberately spans both
+// businesses regardless of the secretary's normal single-business scope.
+const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact'];
+const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact'];
+async function reviewCalls(req, res, db, auth) {
+  const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
+  const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+
+  const callCols = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
+  const selFor = (cc) => `id, completed_at, scheduled_at, review_rating, reviewed_at,
+      review_email_opened_at, review_email_count, review_token, ${cc}
+      customer:customers ( name, phone, email ),
+      technician:technicians!technician_id ( name ),
+      service:services ( name )`;
+
+  const out = [];
+  for (const b of (bizs || [])) {
+    const tz = b.timezone || 'America/Denver';
+    const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
+    const winEnd = localDayStartUTC(tz, 0);          // start of today — give them the day of the job to review first
+    const run = (cc) => db.from('bookings').select(selFor(cc))
+      .eq('business_id', b.id).eq('status', 'completed')
+      .gte('completed_at', winStart.toISOString()).lt('completed_at', winEnd.toISOString())
+      .order('completed_at', { ascending: false }).limit(500);
+    let { data, error } = await run(callCols);
+    if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
+    if (error) { console.warn('[review_calls]', b.slug, error.message); continue; }
+    for (const row of (data || [])) {
+      if (Number(row.review_rating) >= 4) continue;                          // already routed to Google
+      if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey
+      out.push({
+        id: row.id,
+        business_slug: b.slug,
+        business_name: b.name,
+        customer_name: row.customer?.name || '—',
+        phone: row.customer?.phone || null,
+        has_email: !!row.customer?.email,
+        technician_name: row.technician?.name || '—',
+        service_name: row.service?.name || 'Service',
+        completed_at: row.completed_at || row.scheduled_at || null,
+        email_opened: !!row.review_email_opened_at,
+        email_count: row.review_email_count || 0,
+        rating: row.review_rating || null,          // 1–3 = they gave us negative feedback (handle with care)
+        has_review_link: !!row.review_token,
+        call_status: row.review_call_status || null,
+        call_at: row.review_call_at || null,
+        call_by: row.review_call_by || null,
+        call_notes: row.review_call_notes || null,
+      });
+    }
+  }
+  // Not-yet-called first, then most-recently-completed first.
+  out.sort((a, c) => {
+    const au = a.call_status ? 1 : 0, cu = c.call_status ? 1 : 0;
+    if (au !== cu) return au - cu;
+    return new Date(c.completed_at || 0) - new Date(a.completed_at || 0);
+  });
+  return res.status(200).json({
+    calls: out,
+    counts: {
+      total: out.length,
+      to_call: out.filter(x => !x.call_status).length,
+      called: out.filter(x => x.call_status).length,
+    },
+  });
+}
+
+// Log the outcome of a review call (Joey). Cross-business: resolve by id.
+async function reviewCallLog(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body && body.id;
+  const status = ((body && body.status) || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (status && !REVIEW_CALL_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  const { data: bk } = await db.from('bookings').select('id').eq('id', id).maybeSingle();
+  if (!bk) return res.status(404).json({ error: 'Booking not found' });
+
+  const patch = {
+    review_call_status: status || null,
+    review_call_at: status ? new Date().toISOString() : null,
+    review_call_by: status ? displayNameFor(auth.scope) : null,
+  };
+  if (typeof body.notes === 'string') patch.review_call_notes = body.notes.trim().slice(0, 500) || null;
+
+  let { error } = await db.from('bookings').update(patch).eq('id', id);
+  if (error && /review_call_/.test(error.message || '')) {
+    return res.status(503).json({ error: 'The review-call queue needs a quick database update (migration 0049) before outcomes can be saved.' });
+  }
+  if (error) throw error;
   return res.status(200).json({ ok: true });
 }
 
