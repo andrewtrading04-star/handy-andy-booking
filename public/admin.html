@@ -231,6 +231,10 @@
   .seg-btn{background:#fff;border:1px solid var(--line);color:var(--ink-2);padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;}
   .seg-btn.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
   .est-card .est-desc{margin-top:8px;font-size:14px;line-height:1.55;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+  .nb-min-warn{padding:9px 12px;border-radius:8px;border:1px solid;font-size:12.5px;font-weight:600;margin-top:4px;line-height:1.45;}
+  .nb-min-warn a{color:inherit;font-weight:800;text-decoration:underline;cursor:pointer;margin-left:2px;}
+  .nb-min-warn.floored{background:#fef2f2;border-color:#fecaca;color:#b91c1c;}
+  .nb-min-warn.waived{background:#fff7ed;border-color:#fed7aa;color:#9a3412;}
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
   .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
@@ -740,6 +744,7 @@
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
       <div id="nbConvertSummary" style="display:none;font-size:13px;color:var(--ink-2);padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
+      <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
         <label id="nbSecondTechLabel" style="display:block;font-size:13px;font-weight:700;color:var(--ink-2);margin:8px 0 6px;">Second technician</label>
@@ -4594,6 +4599,8 @@ async function openNewBooking(prefill){
   nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
   document.getElementById('nbUpsellPanel').classList.add('hidden');   // collapse the add-ons popover
   nbUpsSel={}; nbUpsCustom=[]; document.getElementById('nbUpsCustom').innerHTML='';
+  nbAreaName=''; nbMinWaived=false;                                   // reset branch-minimum state
+  { const w=document.getElementById('nbMinWarn'); if(w){ w.style.display='none'; w.innerHTML=''; } }
   document.getElementById('nbPaymentMethod').value='';
   document.getElementById('nbCardWrap').style.display='none';
   document.getElementById('nbDate').value='';
@@ -4693,6 +4700,8 @@ let nbOwnTechs=[], nbPartner=null;
 // Service area (metro) of the entered zip, so the tech dropdowns show ONLY the
 // techs who cover that metro (e.g. 80123 -> Kregg & Steve). Null = show everyone.
 let nbZipAreaId=null;
+let nbAreaName='';        // metro name of the entered zip (Denver / Austin / Houston)
+let nbMinWaived=false;    // office chose to send below the branch minimum anyway
 // Restrict the OWN roster to the entered zip's metro. Falls back to the full
 // roster if no zip is set or none of our techs are tagged to that metro (so the
 // dropdown is never empty due to missing area data).
@@ -5090,8 +5099,8 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
-  nbZipAreaId=null; let surcharge=0;
-  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; surcharge=Number(a.surcharge)||0; }catch(err){} }
+  nbZipAreaId=null; nbAreaName=''; let surcharge=0;
+  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; }catch(err){} }
   // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
   // the public widget does — but only when the field is empty or still holds the
   // value we last auto-filled, so a manual override is never overwritten.
@@ -5538,6 +5547,31 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     renderNbSteps();
   }
 });
+// ── Branch service minimum ───────────────────────────────────────────────────
+// Minimum job price by business + metro, mirroring the online booking widget
+// (Austin is cheaper). The office New Booking never enforced this, so a sub-$139
+// job like a $99 32" mount could be created and sent. We now top up to the floor
+// (waivable) and warn. Change a number here to change that branch's minimum.
+const NB_MINIMUMS = {
+  'handy-andy': { austin: 119, default: 139 },   // matches the customer booking widget
+  'doms':       { default: 139 },                 // Denver-based (assumed same as HA Denver)
+};
+function nbCurrentMinimum(){
+  const m = NB_MINIMUMS[(current&&current.slug)] || {};
+  if(/austin/i.test(nbAreaName||'') && m.austin!=null) return m.austin;
+  return (m.default!=null) ? m.default : 0;
+}
+// Top-up needed to reach the branch minimum for a set of raw (pre-top-up)
+// selections. GDS / Assurion are $0 flows and handyman has its own 2-hr min, so
+// they're exempt; a waiver or an empty cart also yields no top-up.
+function nbMinimumTopUp(rawSelections){
+  if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbMinWaived) return 0;
+  const min=nbCurrentMinimum(); if(!(min>0)) return 0;
+  const sum=(rawSelections||[]).reduce((s,x)=>s+x.price*x.quantity,0);
+  if(!(sum>0) || sum>=min) return 0;
+  return Math.round((min-sum)*100)/100;
+}
+function nbToggleMinWaive(){ nbMinWaived=!nbMinWaived; updateNbTotal(); }
 function nbCollectSelections(){
   const out=[];
   // Guaranteed Dismount: a single $0 line — the payroll engine reads this as a
@@ -5573,10 +5607,14 @@ function nbCollectSelections(){
       out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct});
     } } });
   });
+  // Enforce the branch service minimum by topping up to the floor (waivable).
+  const _topup=nbMinimumTopUp(out);
+  if(_topup>0) out.push({option_id:null, label:'Service minimum', price:_topup, quantity:1});
   return out;
 }
 const TAX_RATE = 0.0825;
 function updateNbTotal(){
+  const warn=document.getElementById('nbMinWarn'); if(warn) warn.style.display='none';
   const selections=nbCollectSelections();
   const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
   // Assurion: customer pays $0; the total shown is Steve's payout.
@@ -5589,6 +5627,26 @@ function updateNbTotal(){
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
   document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+  renderNbMinWarn(selections);
+}
+// Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,
+// noting the auto-added top-up, with a Waive/Apply toggle.
+function renderNbMinWarn(selections){
+  const warn=document.getElementById('nbMinWarn'); if(!warn) return;
+  const min=nbCurrentMinimum();
+  const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum').reduce((s,x)=>s+x.price*x.quantity,0);
+  const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && rawSum>0 && min>0;
+  if(!applies || rawSum>=min){ warn.style.display='none'; warn.innerHTML=''; return; }
+  const metro=nbAreaName?esc(nbAreaName)+' ':'';
+  const topup=Math.round((min-rawSum)*100)/100;
+  if(nbMinWaived){
+    warn.className='nb-min-warn waived';
+    warn.innerHTML=`⚠️ Below the $${min} ${metro}minimum — <b>waived</b>. <a onclick="nbToggleMinWaive()">Apply minimum</a>`;
+  } else {
+    warn.className='nb-min-warn floored';
+    warn.innerHTML=`⚠️ Below the $${min} ${metro}minimum — added a <b>$${topup} Service minimum</b> line. <a onclick="nbToggleMinWaive()">Waive</a>`;
+  }
+  warn.style.display='';
 }
 // Build the booking notes. For Assurion, embed the payout breakdown in the
 // format the payroll engine reads ("Assurion … Tech pay: $X").
