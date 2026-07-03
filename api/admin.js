@@ -3380,15 +3380,18 @@ async function reviewResend(req, res, db, auth, body) {
 // reviewed / do-not-contact). Available to any
 // signed-in office user — this is a calling tool, so it deliberately spans both
 // businesses regardless of the secretary's normal single-business scope.
-const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact'];
-const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact'];
+const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint'];
+// Statuses that resolve a customer OFF the queue: they promised a review, raised
+// a complaint (handled + logged), or asked not to be contacted. 'voicemail' /
+// 'callback' stay on the list so Joey tries again. ('reviewed' kept for old data.)
+const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact', 'promised_review', 'complaint'];
 async function reviewCalls(req, res, db, auth) {
   const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
 
   const callCols = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
   const selFor = (cc) => `id, completed_at, scheduled_at, review_rating, reviewed_at,
-      review_email_opened_at, review_email_count, review_token, ${cc}
+      review_email_opened_at, review_email_count, review_token, line_items, ${cc}
       customer:customers ( name, phone, email ),
       technician:technicians!technician_id ( name ),
       service:services ( name )`;
@@ -3420,6 +3423,10 @@ async function reviewCalls(req, res, db, auth) {
         has_email: !!row.customer?.email,
         technician_name: row.technician?.name || '—',
         service_name: row.service?.name || 'Service',
+        // What they bought — so Joey can reference it on the call.
+        line_items: (Array.isArray(row.line_items) ? row.line_items : [])
+          .filter(li => li && (li.name || li.description))
+          .map(li => ({ name: String(li.name || li.description), qty: Number(li.quantity || li.qty) || 1, price: Number(li.line_total != null ? li.line_total : li.unit_price) || 0 })),
         completed_at: row.completed_at || row.scheduled_at || null,
         email_opened: !!row.review_email_opened_at,
         email_count: row.review_email_count || 0,
