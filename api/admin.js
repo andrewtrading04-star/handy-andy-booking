@@ -3374,9 +3374,10 @@ async function reviewResend(req, res, db, auth, body) {
 
 // ── Review-call queue (Joey's daily outreach) ────────────────────────────────
 // Cross-business: the customers from BOTH companies who completed a job in the
-// last `days` days (default 1 = yesterday), haven't left a Google review
-// (review_rating >= 4 means the email filter routed them to Google → excluded),
-// and haven't been resolved (marked reviewed / do-not-contact). Available to any
+// last `days` days (default 1 = yesterday), haven't left us ANY star rating in
+// the CRM (review_rating / reviewed_at both null — covers both the 4–5★ that go
+// to Google and the 1–3★ private feedback), and haven't been resolved (marked
+// reviewed / do-not-contact). Available to any
 // signed-in office user — this is a calling tool, so it deliberately spans both
 // businesses regardless of the secretary's normal single-business scope.
 const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact'];
@@ -3405,7 +3406,10 @@ async function reviewCalls(req, res, db, auth) {
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
     if (error) { console.warn('[review_calls]', b.slug, error.message); continue; }
     for (const row of (data || [])) {
-      if (Number(row.review_rating) >= 4) continue;                          // already routed to Google
+      // Skip anyone who already left us a star rating in the CRM at all — whether
+      // it went to Google (4–5★) or was captured as private feedback (1–3★). They
+      // responded, so there's no review to chase.
+      if (row.review_rating != null || row.reviewed_at != null) continue;
       if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey
       out.push({
         id: row.id,
