@@ -256,7 +256,7 @@ async function jobs(req, res, db, auth) {
   // tech — show in their own app. No question about who they're working for.
   const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes,
-             address_line1, address_line2, city, state, postal_code, lat, lng, business_id,
+             address_line1, address_line2, city, state, postal_code, lat, lng, business_id, service_area_id,
              customer:customers ( name, phone ),
              service:services ( name ),
              business:businesses ( name, timezone ),
@@ -268,14 +268,16 @@ async function jobs(req, res, db, auth) {
   const { data, error } = await fetchMine(build);
   if (error) throw error;
 
-  // Attach the business-timezone calendar date so the app groups jobs by the
-  // SAME day the dashboard does — using each job's OWN business tz so a
-  // cross-company job lands on the right day. Flag cross-company jobs + the
-  // company they're for so the app can make it unmistakable.
+  // Each job renders in its OWN metro (service-area) timezone, so a Central job
+  // (Houston/Austin) shows its real slot time instead of the business's Mountain
+  // clock. Batch-load the area timezones, then group the day + label the slot in
+  // that tz. Flag cross-company jobs + the company they're for.
+  const tzById = await areaTzMap(db, (data || []).map(b => b.service_area_id));
   const jobs = (data || []).map(b => {
     const j = shapeJob(b);
-    const jbtz = b.business?.timezone || tz;
-    j.local_date = localDateInTz(jbtz, j.scheduled_at);
+    const jtz = tzById[b.service_area_id] || b.business?.timezone || tz;
+    j.local_date = localDateInTz(jtz, j.scheduled_at);
+    j.slot_time = slotTimeLabel(jtz, j.scheduled_at);
     j.cross_company = !!(b.business_id && b.business_id !== auth.business_id);
     j.company_name = b.business?.name || null;
     return j;
@@ -289,6 +291,40 @@ function localDateInTz(tz, iso) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date(iso));
+}
+
+// The fixed slot label for a job, rendered in the job's OWN metro (service-area)
+// timezone. Handy Andy spans Mountain (Denver) and Central (Houston/Austin), so
+// formatting an 8am-Central job in the single business tz wrongly shows 7am. We
+// read the job's local wall-clock time in the area tz, snap it to the slot it
+// falls in, and return that slot's start label — so every location reads the
+// same fixed slots (8:00 AM, 11:00 AM, 2:00 PM, 5:00 PM, 8:00 PM) no matter the
+// tech's or customer's timezone. Falls back to the exact local time off-slot.
+function slotTimeLabel(areaTz, iso) {
+  if (!iso || !areaTz) return null;
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: areaTz, hour12: false, hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(iso)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    const mins = ((p.hour === '24' ? 0 : Number(p.hour)) * 60) + Number(p.minute);
+    const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+    const to12 = (s) => { let [h, m] = s.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${String(m).padStart(2, '0')} ${ap}`; };
+    for (const s of SLOTS) if (mins >= toMin(s.start) && mins < toMin(s.end)) return to12(s.start);
+    for (const s of SLOTS) if (toMin(s.start) === mins) return to12(s.start);
+    return new Intl.DateTimeFormat('en-US', { timeZone: areaTz, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+  } catch { return null; }
+}
+
+// One batched Map(service_area_id -> timezone) for the given ids, so each job can
+// render in its own metro's timezone without a per-row query or a fragile embed.
+async function areaTzMap(db, ids) {
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  const out = {};
+  if (!uniq.length) return out;
+  try {
+    const { data } = await db.from('service_areas').select('id, timezone').in('id', uniq);
+    for (const a of (data || [])) out[a.id] = a.timezone;
+  } catch { /* fall back to business tz per job */ }
+  return out;
 }
 
 // Diagnostic: surfaces who the token says we are vs. what bookings actually
@@ -372,12 +408,12 @@ async function job(req, res, db, auth) {
   // The secondary embed is dropped on deployments predating migration 0019.
   const build = () => scopeMine(db.from('bookings')
     .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
-             review_rating, review_text, reviewed_at, business_id, technician_id,
+             review_rating, review_text, reviewed_at, business_id, technician_id, service_area_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, tip, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( name, phone, email ),
              service:services ( name ),
-             business:businesses ( name, slug ),
+             business:businesses ( name, slug, timezone ),
              technician:technicians!technician_id ( name ),${techHasSecondCol ? `
              secondary_technician_id,
              secondary_technician:technicians!secondary_technician_id ( name ),` : ''}
@@ -389,6 +425,13 @@ async function job(req, res, db, auth) {
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
   shaped.company_name = data.business?.name || null;
+  // Slot time in the job's OWN metro timezone (service area), so a Central job
+  // reads its true slot (e.g. 8:00 AM) instead of the business's Mountain clock.
+  {
+    const jtz = (await areaTzMap(db, [data.service_area_id]))[data.service_area_id]
+      || data.business?.timezone || 'America/Denver';
+    shaped.slot_time = slotTimeLabel(jtz, data.scheduled_at);
+  }
   // Publishable key so the tech app can collect/replace the card on file.
   shaped.stripe_pk = jobStripePk(data.business?.slug || null);
   // The OTHER technician on a two-person job (the partner the viewer works

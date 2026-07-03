@@ -462,7 +462,7 @@ function renderDay(){
   list.innerHTML = jobs.length ? jobs.map(j=>`
     <div class="jobc${j.cross_company?' xco':''}" data-id="${j.id}">
       ${j.cross_company?`<div class="xco-tag">⚠ FOR ${esc((j.company_name||'OTHER COMPANY').toUpperCase())}</div>`:''}
-      <div class="t">${fmtTime(j.scheduled_at)}</div>
+      <div class="t">${esc(j.slot_time||fmtTime(j.scheduled_at))}</div>
       <div class="n">${esc(j.customer_name)}</div>
       <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
       ${statusBadge(j.status)}
@@ -507,7 +507,7 @@ async function showDetail(id){
         <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}.</div>
       </div>`:''}
       <div class="card">
-        <h3>${fmtTime(j.scheduled_at)} · ${statusBadge(j.status)}</h3>
+        <h3>${esc(j.slot_time||fmtTime(j.scheduled_at))} · ${statusBadge(j.status)}</h3>
         <div class="big-name">${esc(j.customer_name)}</div>
         <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
