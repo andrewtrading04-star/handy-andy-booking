@@ -20,7 +20,7 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
-import { formatAddress } from './_lib/address.js';
+import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 
@@ -607,9 +607,33 @@ async function summary(req, res, db, auth) {
     if (!error) photosToPost = count || 0;
   } catch { /* status column absent or transient — treat as 0 */ }
 
+  // ── Critical alerts: upcoming, not-yet-completed jobs with NO usable street
+  // address (missing, or an email/phone typed into the address box). The tech
+  // can't find the house, so the office must call the customer. Auto-clears once
+  // the job is completed (excluded below) or the address is fixed.
+  const ALERT_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress'];
+  let address_alerts = [];
+  try {
+    const { data: aRows } = await db.from('bookings')
+      .select('id, scheduled_at, address_line1, service_area_id, customer:customers ( name, phone )')
+      .eq('business_id', biz.id)
+      .gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
+      .in('status', ALERT_STATUSES)
+      .order('scheduled_at', { ascending: true }).limit(300);
+    for (const b of (aRows || [])) {
+      if (isLikelyStreetAddress(b.address_line1)) continue;
+      const atz = await areaTimezone(db, b.service_area_id, tz);
+      const d = new Date(b.scheduled_at);
+      const day = new Intl.DateTimeFormat('en-US', { timeZone: atz, weekday: 'short', month: 'short', day: 'numeric' }).format(d);
+      const time = slotTimeLabel(atz, b.scheduled_at) || new Intl.DateTimeFormat('en-US', { timeZone: atz, hour: 'numeric', minute: '2-digit' }).format(d);
+      address_alerts.push({ id: b.id, name: b.customer?.name || 'Customer', phone: b.customer?.phone || null, when: `${day}, ${time}` });
+    }
+  } catch (e) { console.warn('[admin] address alerts failed:', e.message); }
+
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: tz },
     today: (today || []).map(shapeBooking),
+    address_alerts,
     revenue,
     profit,
     technicians: techs || [],

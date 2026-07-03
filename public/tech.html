@@ -54,6 +54,13 @@
   /* A gap ABOVE the header box (page background shows through) so it isn't
      jammed against the top edge / status bar. */
   #jobsView{padding-top:calc(18px + env(safe-area-inset-top, 0px));}
+  /* Critical field alert (e.g. a job with no address on file) — impossible to miss. */
+  .crit-alert{background:#b91c1c;border:2px solid #ff6b6b;border-radius:12px;padding:14px 16px;margin:0 0 12px;color:#fff;animation:critpulse 1.4s ease-in-out infinite;}
+  .crit-alert .ca-h{font-size:12px;font-weight:900;letter-spacing:.09em;text-transform:uppercase;display:flex;align-items:center;gap:7px;margin-bottom:5px;opacity:.95;}
+  .crit-alert .ca-b{font-size:15.5px;font-weight:800;line-height:1.4;}
+  .crit-alert a.ca-call{display:inline-block;margin-top:11px;background:#fff;color:#b91c1c;font-weight:900;text-decoration:none;padding:10px 18px;border-radius:9px;font-size:15px;}
+  @keyframes critpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55);}50%{box-shadow:0 0 0 9px rgba(239,68,68,0);}}
+  @media(prefers-reduced-motion:reduce){.crit-alert{animation:none;}}
   .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:16px 18px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
   .hdr .name{font-weight:800;font-size:17px;}
   .hdr .sub{font-size:12px;color:var(--mute);}
@@ -184,6 +191,7 @@
         <button id="logout">Log out</button>
       </div>
     </div>
+    <div id="critAlert"></div>
     <div id="techNotice" class="tech-notice hidden"></div>
     <div class="weekbar">
       <div class="weekbar-top">
@@ -469,7 +477,21 @@ function markSelected(){
   document.querySelectorAll('#weekGrid .daycell').forEach(c=>c.classList.toggle('sel',c.dataset.date===scheduleDate));
 }
 
+// Critical alert: any of the tech's active jobs with no address on file. Shown at
+// the very top of the jobs view; clears automatically when the job is completed
+// (or the office fixes the address). Scans the whole loaded week, not just the
+// selected day, so it's visible no matter which day is open.
+function renderCritAlerts(){
+  const box=document.getElementById('critAlert'); if(!box) return;
+  const bad=(weekJobs||[]).filter(j=>j.address_missing && j.status!=='completed' && j.status!=='cancelled');
+  box.innerHTML=bad.map(j=>`<div class="crit-alert">
+    <div class="ca-h">⚠ Attention — action needed</div>
+    <div class="ca-b">${esc(j.customer_name||'Customer')} for ${esc(j.slot_time||fmtTime(j.scheduled_at))} has no address on file. Call the customer immediately to get the address.</div>
+    ${j.customer_phone?`<a class="ca-call" href="tel:${esc(j.customer_phone)}">📞 Call ${esc(j.customer_phone)}</a>`:''}
+  </div>`).join('');
+}
 function renderDay(){
+  renderCritAlerts();
   const isToday=scheduleDate===todayStr();
   const dLabel=fmtDs(scheduleDate,{weekday:'short',month:'short',day:'numeric'});
   const jobs=weekJobs.filter(j=>jobLocalDate(j)===scheduleDate);

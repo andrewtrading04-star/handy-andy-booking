@@ -29,7 +29,7 @@ function jobStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
-import { formatAddress } from './_lib/address.js';
+import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
@@ -1249,6 +1249,9 @@ function classifyServiceCat(b) {
 
 function shapeJob(b, full = false, forTech = false) {
   const address = formatAddress(b);
+  // No usable street address on file (missing, or an email/phone in the box) —
+  // drives the critical "call the customer for the address" alert.
+  const addressMissing = !isLikelyStreetAddress(b.address_line1);
   // Show the service CATEGORY the tech recognizes — "TV Mounting", "Handyman",
   // or "Assurion" — never the generic linked-service name "Service".
   const serviceName = classifyServiceCat(b);
@@ -1261,6 +1264,7 @@ function shapeJob(b, full = false, forTech = false) {
     customer_phone: b.customer?.phone || null,
     service: serviceName,
     address,
+    address_missing: addressMissing,
     customer_notes: b.customer_notes || null,
     maps_url: address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null,
     lat: b.lat || null,
