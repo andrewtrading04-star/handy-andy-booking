@@ -3713,25 +3713,20 @@ async function estimateCreate(req, res, db, auth, body) {
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
   if (!customer_name || !customer_email) return res.status(400).json({ error: 'Customer name and email required' });
 
-  // Build a description from the selections (services + options) and a parallel
-  // set of priced line items, so the estimate carries a real quote the office
-  // can later refine on the Estimates tab.
+  // Turn the selections into priced line items — these ARE the estimate detail.
   let description = '';
   let line_items = [];
   if (selections && Array.isArray(selections)) {
-    const items = selections
-      .map(s => {
-        const qty = s.quantity > 1 ? `(×${s.quantity}) ` : '';
-        return `${qty}${s.label}${s.price ? ` — $${s.price.toFixed(2)}` : ''}`;
-      });
-    description = items.join(', ');
     line_items = sanitizeLineItems(selections.map(s => ({
       description: s.label,
       qty: s.quantity || 1,
       unit_price: s.price || 0,
     })));
   }
-  description = description || 'Estimate for services requested';
+  // Don't also store a comma-joined dump of the selections as the description —
+  // it just duplicated the line items on the estimate card. Only keep a
+  // description when there are no line items to show instead.
+  if (!line_items.length) description = 'Estimate for services requested';
 
   // Recommended add-ons the office attached in the "Send Estimate" popover. These
   // ride on the estimate so the customer can toggle them on the approve page.

@@ -3673,7 +3673,7 @@ function estCard(e){
       <div style="flex:1;min-width:0;">
         <div class="name">${esc(e.service_label||'Estimate request')}</div>
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
-        <div class="est-desc">${esc(e.description||'')}</div>
+        ${hasQuote ? '' : `<div class="est-desc">${esc(e.description||'')}</div>`}
         ${slotChips}
         ${quote}
         ${approved}
