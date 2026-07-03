@@ -27,7 +27,7 @@ jobs:
           FORCE: ${{ github.event.inputs.force }}
         run: |
           Q="action=daily_digest"
-          [ -n "$FORCE" ] && Q="$Q&force=1"
+          if [ -n "$FORCE" ]; then Q="$Q&force=1"; fi
           curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?$Q" \
             -H "Authorization: Bearer $CRON_SECRET"
           echo ""
