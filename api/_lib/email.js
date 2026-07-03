@@ -615,6 +615,19 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
   const taxAmt = Math.round(subtotal * taxRate * 100) / 100;
   const total = Math.round((subtotal + taxAmt) * 100) / 100;
 
+  // Recommended add-ons the office attached. Email can't do live totals reliably,
+  // so we render a non-interactive teaser and drive the tap to the approve page,
+  // where the customer toggles what they want and the total updates live.
+  const upsells = (Array.isArray(details.upsells) ? details.upsells : [])
+    .map(u => ({
+      description: String((u && u.description) || '').trim(),
+      unit_price: Number(u && u.unit_price) || 0,
+      qty: Number(u && u.qty) || 1,
+      blurb: String((u && u.blurb) || '').trim(),
+    }))
+    .filter(u => u.description);
+  const hasUpsells = upsells.length > 0 && !!approveUrl;
+
   const subject = `Your ${b.name} Estimate`;
 
   const serviceRow = serviceLabel
@@ -692,6 +705,21 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
           </table>
         </td></tr>
 
+        ${hasUpsells ? `
+        <!-- Recommended add-ons teaser -->
+        <tr><td style="padding:6px 28px 4px;">
+          <div style="font-size:13px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:${accent};margin:0 0 10px;">Recommended for your job</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${tintBg};border:1px solid #eef0f2;border-radius:12px;">
+            <tr><td style="padding:14px 16px;">
+              ${upsells.map(u => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+                <td style="padding:5px 0;font-size:14px;color:#11181c;font-weight:700;">${esc(u.description)}${u.blurb ? `<div style="font-size:12.5px;color:#5b6470;font-weight:500;margin-top:2px;">${esc(u.blurb)}</div>` : ''}</td>
+                <td style="padding:5px 0;font-size:14px;color:${accent};font-weight:800;text-align:right;white-space:nowrap;vertical-align:top;">+${money(u.unit_price)}</td>
+              </tr></table>`).join('')}
+            </td></tr>
+          </table>
+          <div style="font-size:13px;color:#5b6470;line-height:1.6;margin-top:10px;">Choose the ones you'd like on the next screen — your total updates as you pick.</div>
+        </td></tr>` : ''}
+
         <!-- Next steps -->
         <tr><td style="padding:18px 28px 22px;">
           <div style="font-size:14px;color:#3a4453;line-height:1.6;">A member of our team will reach out shortly to finalize the details and get you scheduled. If you have any questions, just reply to this email.</div>
@@ -700,8 +728,8 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
         <!-- Approve CTA -->
         <tr><td style="padding:0 28px 30px;">
           <div style="text-align:center;">
-            <a href="${esc(approveUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:16px;font-weight:800;padding:15px 42px;border-radius:10px;letter-spacing:.3px;">&#10003; I approve this estimate</a>
-            <div style="font-size:12px;color:#9ca3af;line-height:1.6;margin-top:11px;">Click above to let us know you'd like to move forward with this quote.</div>
+            <a href="${esc(approveUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:16px;font-weight:800;padding:15px 42px;border-radius:10px;letter-spacing:.3px;">${hasUpsells ? 'Review &amp; choose your estimate &rarr;' : '&#10003; I approve this estimate'}</a>
+            <div style="font-size:12px;color:#9ca3af;line-height:1.6;margin-top:11px;">${hasUpsells ? 'Pick any upgrades you want and approve — takes about a minute.' : 'Click above to let us know you\'d like to move forward with this quote.'}</div>
           </div>
         </td></tr>` : ''}
 

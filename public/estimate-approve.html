@@ -13,40 +13,78 @@
     --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
     --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
     --accent:#2563eb;            /* set per-brand at runtime */
-    --green:#22c55e; --red:#ef4444;
+    --accent-soft:#eef4ff;
+    --green:#22c55e; --green-ink:#15803d; --green-soft:#e8f8ee; --red:#ef4444;
     --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
     --fs-h1:clamp(24px,5.5vw,32px); --fs-h2:21px;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;letter-spacing:-.01em;}
-  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:100%;max-width:480px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px;letter-spacing:-.01em;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:30px 26px;width:100%;max-width:500px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;position:relative;margin:12px 0;}
   h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.12;margin-bottom:8px;}
   .hl{color:var(--accent);}
   .sub{color:var(--mute);font-size:15px;margin-bottom:8px;line-height:1.55;}
+  .tabnums{font-variant-numeric:tabular-nums;}
 
-  /* ── Quote card ── */
-  .quote{margin:22px 0 8px;background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:18px;text-align:left;}
-  .quote .svc{font-size:15px;font-weight:800;color:var(--ink);margin-bottom:10px;}
+  /* ── Quote card (locked base) ── */
+  .quote{margin:20px 0 6px;background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:16px 18px;text-align:left;}
+  .quote .svc{font-size:15px;font-weight:800;color:var(--ink);margin-bottom:8px;}
+  .qhdr{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;}
   .qline{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--ink-2);padding:9px 0;border-bottom:1px solid var(--line2);}
+  .qline:last-child{border-bottom:none;}
   .qline b{color:var(--ink);font-weight:700;white-space:nowrap;}
-  .qsub{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--mute);padding:7px 0 0;}
-  .qtotal{display:flex;justify-content:space-between;gap:12px;font-size:16px;font-weight:800;color:var(--ink);margin-top:12px;padding-top:12px;border-top:1px solid var(--line2);}
-  .qtotal .amt{color:var(--accent);}
-  .qnote{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:12px;}
+  .qnote{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:10px;}
 
-  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:15px 24px;font-size:16px;font-weight:800;cursor:pointer;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;margin-top:18px;letter-spacing:.2px;}
+  /* ── Recommended add-ons ── */
+  .addons{margin:22px 0 6px;text-align:left;}
+  .addons-h{font-size:16px;font-weight:800;letter-spacing:-.01em;margin-bottom:2px;}
+  .addons-p{font-size:13px;color:var(--mute);margin-bottom:14px;line-height:1.5;}
+  .ucards{display:flex;flex-direction:column;gap:11px;}
+  .ucard{position:relative;border:1.5px solid var(--line);border-radius:14px;padding:14px 15px;cursor:pointer;background:var(--panel);transition:border-color .14s,background .14s,box-shadow .14s;-webkit-tap-highlight-color:transparent;}
+  .ucard:hover{border-color:#c9cfda;}
+  .ucard.on{border-color:var(--accent);background:var(--accent-soft);}
+  .ucard .urow{display:flex;align-items:flex-start;gap:13px;}
+  .uswitch{flex:none;width:46px;height:28px;border-radius:999px;background:#cfd4dd;position:relative;transition:background .16s;margin-top:2px;}
+  .ucard.on .uswitch{background:var(--accent);}
+  .uswitch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .16s;}
+  .ucard.on .uswitch::after{left:21px;}
+  .umid{flex:1;min-width:0;}
+  .un{font-weight:800;font-size:15.5px;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.25;}
+  .ubadge{font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--green-soft);color:var(--green-ink);white-space:nowrap;}
+  .ub{color:var(--ink-2);font-size:13px;margin-top:4px;line-height:1.45;}
+  .up{font-weight:800;font-size:16px;color:var(--ink);white-space:nowrap;}
+  .ucard.on .up{color:var(--accent);}
+  .ucard.on .up::before{content:"+ ";}
+  .uadded{position:absolute;top:-9px;right:14px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:var(--accent);color:#fff;padding:3px 9px;border-radius:999px;opacity:0;transform:scale(.8);transition:opacity .16s,transform .16s;}
+  .ucard.on .uadded{opacity:1;transform:scale(1);}
+
+  /* ── Summary + approve ── */
+  .summary{margin-top:20px;text-align:left;border-top:1px solid var(--line2);padding-top:16px;}
+  .sline{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--ink-2);padding:3px 0;}
+  .sline .sv{font-weight:700;color:var(--ink);}
+  .sline.added{color:var(--green-ink);font-weight:700;}
+  .sline.added .sv{color:var(--green-ink);}
+  .sline.grand{font-size:18px;font-weight:800;color:var(--ink);margin-top:8px;padding-top:11px;border-top:1px solid var(--line2);}
+  .sline.grand .sv{color:var(--accent);font-size:20px;}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:16px 24px;font-size:16.5px;font-weight:800;cursor:pointer;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;margin-top:16px;letter-spacing:.2px;transition:filter .15s;}
   .btn:hover{filter:brightness(.96);}
   .btn:disabled{opacity:.6;cursor:default;}
+  .fine{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:11px;text-align:center;}
 
   .state{display:none;}
   .state.show{display:block;}
   .check{width:64px;height:64px;border-radius:50%;background:color-mix(in srgb,var(--green) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:var(--green);}
   .state h2{font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;margin-bottom:8px;}
   .state p{color:var(--mute);font-size:14px;line-height:1.55;}
+  .recap{margin:18px auto 0;max-width:340px;text-align:left;background:#f9fafb;border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+  .recap .rr{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--ink-2);padding:4px 0;}
+  .recap .rr.g{font-weight:800;color:var(--ink);border-top:1px solid var(--line2);margin-top:6px;padding-top:9px;font-size:15px;}
+  .recap .rr.g .amt{color:var(--accent);}
   .error{display:none;color:var(--red);font-size:14px;margin-top:18px;font-weight:600;}
   .error.show{display:block;}
   .muted{color:var(--mute);font-size:14px;}
   #loading{color:var(--mute);font-size:15px;padding:24px 0;}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
 </style>
 </head>
 <body>
@@ -56,17 +94,21 @@
 
   <!-- Review + approve -->
   <div class="state" id="approveSection">
-    <h1>Approve your <span class="hl">estimate</span></h1>
-    <p class="sub" id="approveSub">Here's the quote from our team. Tap the button to approve it.</p>
+    <h1>Your <span class="hl">estimate</span></h1>
+    <p class="sub" id="approveSub">Here's your quote. Add any upgrades you'd like, then approve.</p>
     <div id="quoteBox"></div>
-    <button class="btn" id="approveBtn">&#10003; I approve this estimate</button>
+    <div id="addonsBox"></div>
+    <div id="summaryBox"></div>
+    <button class="btn" id="approveBtn">&#10003; Approve</button>
+    <div class="fine">This is an estimate, not a final invoice. Final pricing is confirmed on-site.</div>
   </div>
 
   <!-- Success -->
   <div class="state" id="doneSection">
     <div class="check">&#10003;</div>
-    <h2 id="doneTitle">Thank you — you're approved!</h2>
+    <h2 id="doneTitle">You're all set!</h2>
     <p id="doneMsg">We've let our team know you'd like to move forward. We'll be in touch shortly to get you scheduled.</p>
+    <div id="doneRecap"></div>
   </div>
 
   <!-- Already approved -->
@@ -74,6 +116,7 @@
     <div class="check">&#10003;</div>
     <h2>You've already approved this estimate</h2>
     <p id="alreadyMsg">Thanks! Our team has it and will reach out to get you scheduled.</p>
+    <div id="alreadyRecap"></div>
   </div>
 
   <div class="error" id="errorBox"></div>
@@ -89,37 +132,114 @@ const token = new URLSearchParams(location.search).get('token');
 const $ = (id) => document.getElementById(id);
 let saving = false;
 
+// Loaded estimate + live selection state
+let INFO = null;
+let UPSELLS = [];            // [{id,description,qty,unit_price,badge,blurb,default_on}]
+let accepted = new Set();    // ids the customer currently wants
+let baseSubtotal = 0;
+let taxRate = 0;
+
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function money(n){ return '$' + (Math.round((Number(n)||0)*100)/100).toFixed(2); }
 function applyBrand(slug){
   const brand = BRANDS[slug] || BRANDS['handy-andy'];
   document.documentElement.style.setProperty('--accent', brand.accent);
+  // brand-tinted soft background for selected cards
+  const soft = (slug==='doms') ? '#eef4ff' : '#fff2ec';
+  document.documentElement.style.setProperty('--accent-soft', soft);
 }
 function show(id){ ['approveSection','doneSection','alreadySection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
 function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
 
+// ── Base quote (locked) ──
 function renderQuote(info){
   const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)) : [];
-  const t = info.totals || { subtotal:0, tax:0, total:0 };
-  const rate = Number(info.tax_rate)||0;
   const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
   let body;
   if (items.length){
     const rows = items.map(it=>{
       const qty=Number(it.qty)||0; const lt=qty*(Number(it.unit_price)||0);
       const q = qty&&qty!==1 ? `<b>×${esc(qty)}</b> ` : '';
-      return `<div class="qline"><span>${q}${esc(it.description||'Item')}</span><b>${money(lt)}</b></div>`;
+      return `<div class="qline"><span>${q}${esc(it.description||'Item')}</span><b class="tabnums">${money(lt)}</b></div>`;
     }).join('');
-    const taxRows = rate>0
-      ? `<div class="qsub"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`+
-        `<div class="qsub"><span>Tax (${(rate*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span>${money(t.tax)}</span></div>`
-      : '';
-    body = `${rows}${taxRows}<div class="qtotal"><span>Estimated total</span><span class="amt">${money(t.total)}</span></div>`+
-      `<div class="qnote">This is an estimate, not a final invoice. Final pricing may vary based on on-site conditions.</div>`;
+    body = `<div class="qhdr">Your quote</div>${rows}`;
   } else {
     body = `<div class="muted" style="white-space:pre-wrap;">${esc(info.description||'Details of your estimate request.')}</div>`;
   }
   $('quoteBox').innerHTML = `<div class="quote">${svc}${body}</div>`;
+}
+
+// ── Recommended add-ons (tappable) ──
+function renderAddons(){
+  if (!UPSELLS.length){ $('addonsBox').innerHTML=''; return; }
+  const cards = UPSELLS.map(u=>{
+    const on = accepted.has(u.id);
+    const badge = u.badge ? `<span class="ubadge">${esc(u.badge)}</span>` : '';
+    const blurb = u.blurb ? `<div class="ub">${esc(u.blurb)}</div>` : '';
+    const qtyTxt = Number(u.qty)>1 ? ` <span style="font-weight:600;color:var(--mute);">×${esc(u.qty)}</span>` : '';
+    return `<div class="ucard${on?' on':''}" data-uid="${esc(u.id)}" role="button" tabindex="0" aria-pressed="${on}">
+      <span class="uadded">Added &#10003;</span>
+      <div class="urow">
+        <span class="uswitch" aria-hidden="true"></span>
+        <span class="umid">
+          <span class="un">${esc(u.description)}${badge}</span>
+          ${blurb}
+        </span>
+        <span class="up tabnums">${money(Number(u.unit_price)*(Number(u.qty)||1))}${qtyTxt}</span>
+      </div>
+    </div>`;
+  }).join('');
+  $('addonsBox').innerHTML = `<div class="addons">
+    <div class="addons-h">Recommended for your job</div>
+    <div class="addons-p">Tap to add. Nothing's locked in until you approve.</div>
+    <div class="ucards">${cards}</div>
+  </div>`;
+  $('addonsBox').querySelectorAll('.ucard').forEach(c=>{
+    const toggle=()=>toggleUpsell(c.dataset.uid);
+    c.addEventListener('click', toggle);
+    c.addEventListener('keydown', e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); toggle(); } });
+  });
+}
+function toggleUpsell(id){
+  if (accepted.has(id)) accepted.delete(id); else accepted.add(id);
+  renderAddons(); renderSummary();
+}
+
+// ── Live summary + dynamic approve button ──
+function addedTotal(){
+  let a=0;
+  UPSELLS.forEach(u=>{ if(accepted.has(u.id)) a += (Number(u.unit_price)||0)*(Number(u.qty)||1); });
+  return Math.round(a*100)/100;
+}
+function grandTotal(){
+  const sub = baseSubtotal + addedTotal();
+  const tax = Math.round(sub*taxRate*100)/100;
+  return Math.round((sub+tax)*100)/100;
+}
+function renderSummary(){
+  const add = addedTotal();
+  const total = grandTotal();
+  const rate = taxRate;
+  const taxAmt = Math.round((baseSubtotal+add)*rate*100)/100;
+  let html = `<div class="summary">
+    <div class="sline"><span>Base quote</span><span class="sv tabnums">${money(baseSubtotal)}</span></div>`;
+  if (UPSELLS.length){
+    html += `<div class="sline${add>0?' added':''}"><span>Upgrades added</span><span class="sv tabnums">${money(add)}</span></div>`;
+  }
+  if (rate>0){
+    html += `<div class="sline"><span>Tax (${(rate*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span class="sv tabnums">${money(taxAmt)}</span></div>`;
+  }
+  html += `<div class="sline grand"><span>Estimated total</span><span class="sv tabnums">${money(total)}</span></div></div>`;
+  $('summaryBox').innerHTML = html;
+  $('approveBtn').innerHTML = `&#10003; Approve — <span class="tabnums" style="margin-left:2px;">${money(total)}</span>`;
+}
+
+// ── Confirmation recap (accepted add-ons + total) ──
+function recapHtml(acceptedList, total){
+  const rows = (acceptedList||[]).map(u=>`<div class="rr"><span>+ ${esc(u.description)}</span><span class="tabnums">${money(Number(u.unit_price)*(Number(u.qty)||1))}</span></div>`).join('');
+  const totalRow = total!=null ? `<div class="rr g"><span>Approved total</span><span class="amt tabnums">${money(total)}</span></div>` : '';
+  if (!rows && !totalRow) return '';
+  return `<div class="recap"><div class="rr"><span>Base install &amp; quote</span><span class="tabnums">${money(baseSubtotal)}</span></div>${rows}${totalRow}</div>`;
 }
 
 async function load(){
@@ -128,10 +248,28 @@ async function load(){
     const res = await fetch(`${API}?action=estimate_approve_info&token=${encodeURIComponent(token)}`);
     const data = await res.json();
     if (!res.ok){ showError(data.error || 'We could not load this estimate.'); return; }
+    INFO = data;
     applyBrand(data.business_slug);
+    taxRate = Number(data.tax_rate)||0;
+    const items = Array.isArray(data.line_items) ? data.line_items : [];
+    baseSubtotal = Math.round(items.reduce((t,it)=>t+(Number(it.qty)||0)*(Number(it.unit_price)||0),0)*100)/100;
+    UPSELLS = Array.isArray(data.upsells) ? data.upsells : [];
     $('loading').style.display='none';
-    if (data.already_approved){ show('alreadySection'); return; }
+
+    if (data.already_approved){
+      // Show what they previously chose, priced from the server's record.
+      const ids = new Set(Array.isArray(data.accepted_ids) ? data.accepted_ids : []);
+      const chosen = UPSELLS.filter(u=>ids.has(u.id));
+      $('alreadyRecap').innerHTML = recapHtml(chosen, data.approved_total);
+      show('alreadySection');
+      return;
+    }
+
+    // Seed the selection from the office's pre-selected (default_on) add-ons.
+    accepted = new Set(UPSELLS.filter(u=>u.default_on).map(u=>u.id));
     renderQuote(data);
+    renderAddons();
+    renderSummary();
     show('approveSection');
   }catch(e){ showError('Network error. Please try again.'); }
 }
@@ -140,23 +278,33 @@ $('approveBtn').addEventListener('click', async ()=>{
   if (saving) return;
   saving = true;
   const btn = $('approveBtn');
+  const prev = btn.innerHTML;
   btn.disabled = true; btn.textContent = 'Approving…';
   try{
     const res = await fetch(`${API}?action=estimate_approve`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token, accepted_ids: Array.from(accepted) }),
     });
     const data = await res.json();
     if (!res.ok){
-      btn.disabled=false; btn.innerHTML='&#10003; I approve this estimate'; saving=false;
+      btn.disabled=false; btn.innerHTML=prev; saving=false;
       showError(data.error || 'We could not record your approval. Please try again.');
       return;
     }
-    if (data.already){ show('alreadySection'); return; }
+    const chosen = Array.isArray(data.accepted) ? data.accepted : [];
+    const total = data.approved_total != null ? data.approved_total : grandTotal();
+    if (data.already){
+      $('alreadyRecap').innerHTML = recapHtml(chosen, total);
+      show('alreadySection'); return;
+    }
+    $('doneMsg').textContent = chosen.length
+      ? `We'll schedule your job plus ${chosen.length} upgrade${chosen.length>1?'s':''}. We'll be in touch shortly to lock in a time.`
+      : `We've let our team know you'd like to move forward. We'll be in touch shortly to get you scheduled.`;
+    $('doneRecap').innerHTML = recapHtml(chosen, total);
     show('doneSection');
   }catch(e){
-    btn.disabled=false; btn.innerHTML='&#10003; I approve this estimate'; saving=false;
+    btn.disabled=false; btn.innerHTML=prev; saving=false;
     showError('Network error. Please try again.');
   }
 });

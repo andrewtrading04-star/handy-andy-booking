@@ -3487,7 +3487,7 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, approved_at, created_at';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -3534,13 +3534,26 @@ async function estimateUpdate(req, res, db, auth, body) {
   if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
   if (typeof body.description === 'string') patch.description = body.description.trim();
   if (Array.isArray(body.line_items)) patch.line_items = sanitizeLineItems(body.line_items);
+  if (Array.isArray(body.upsells)) patch.upsells = sanitizeUpsells(body.upsells);
   if (body.tax_rate !== undefined) patch.tax_rate = normalizeTaxRate(body.tax_rate);
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
 
-  // line_items / tax_rate come from a not-yet-applied migration on some
-  // databases. If the missing column is one of those, surface a clear message
-  // instead of a 500 so the office knows to apply migration 0028.
-  let { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  // line_items / tax_rate / upsells come from not-yet-applied migrations on some
+  // databases. If the missing column is one of those, drop it and retry so the
+  // rest of the update still lands (upsells silently no-ops until 0048 is applied).
+  const stripAndRetry = async () => {
+    let { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+    for (let i = 0; error && i < 3; i++) {
+      const col = missingColumn(error.message);
+      if (!col || !(col in patch)) break;
+      console.warn(`[estimate_update] '${col}' column missing, retrying without it`);
+      delete patch[col];
+      if (!Object.keys(patch).length) return { error: null };
+      ({ error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id));
+    }
+    return { error };
+  };
+  let { error } = await stripAndRetry();
   if (error && ['line_items', 'tax_rate'].includes(missingColumn(error.message))) {
     return res.status(503).json({ error: 'The quote builder needs a quick database update (migration 0028) before it can save. Please apply it and try again.' });
   }
@@ -3580,6 +3593,49 @@ function sanitizeLineItems(items) {
       return { description, qty, unit_price };
     })
     .filter(it => it.description || it.unit_price > 0);
+}
+
+// Normalize the recommended-add-on menu the office attaches to an estimate.
+// Stored shape: { id, description, qty, unit_price, tech_pay, badge, blurb, default_on }.
+// - id: a short stable key so the customer's selection can be matched back to the
+//   server's stored price (client prices are never trusted on approval).
+// - tech_pay: OFFICE-ONLY — carried through to convert-to-job/payroll, never sent
+//   to the public approve page.
+// Caps the list and clamps every number so a bad client can't bloat or mis-price a row.
+function sanitizeUpsells(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .slice(0, 30)
+    .map((it, i) => {
+      const description = String((it && it.description) || '').trim().slice(0, 160);
+      let id = String((it && it.id) || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+      if (!id) id = 'u' + i;
+      let qty = Number(it && it.qty);
+      let unit_price = Number(it && it.unit_price);
+      let tech_pay = Number(it && it.tech_pay);
+      if (!Number.isFinite(qty) || qty <= 0) qty = 1;
+      if (!Number.isFinite(unit_price) || unit_price < 0) unit_price = 0;
+      if (!Number.isFinite(tech_pay) || tech_pay < 0) tech_pay = 0;
+      qty = Math.round(qty * 100) / 100;
+      unit_price = Math.round(unit_price * 100) / 100;
+      tech_pay = Math.round(tech_pay * 100) / 100;
+      const badge = String((it && it.badge) || '').trim().slice(0, 40);
+      const blurb = String((it && it.blurb) || '').trim().slice(0, 240);
+      const default_on = !!(it && it.default_on);
+      return { id, description, qty, unit_price, tech_pay, badge, blurb, default_on };
+    })
+    .filter(it => it.description)
+    // de-dupe ids so the customer's selection always maps to exactly one price
+    .filter(it => { if (seen.has(it.id)) return false; seen.add(it.id); return true; });
+}
+
+// Public-safe view of the upsell menu for the approve page: drops tech_pay so the
+// customer never sees our cost/margin.
+function publicUpsells(items) {
+  return (Array.isArray(items) ? items : []).map(u => ({
+    id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price,
+    badge: u.badge || '', blurb: u.blurb || '', default_on: !!u.default_on,
+  }));
 }
 
 // Fetch one estimate by id, tolerating the quote columns (line_items, tax_rate)
@@ -3677,9 +3733,13 @@ async function estimateCreate(req, res, db, auth, body) {
   }
   description = description || 'Estimate for services requested';
 
-  // Create the estimate record. insertResilientEstimate() tolerates the
-  // line_items column being absent (migration 0028 not yet applied) by dropping
-  // it and retrying, so an estimate is never lost to schema drift.
+  // Recommended add-ons the office attached in the "Send Estimate" popover. These
+  // ride on the estimate so the customer can toggle them on the approve page.
+  const upsells = sanitizeUpsells(body.upsells);
+
+  // Create the estimate record. insertResilientEstimate() tolerates a column
+  // being absent (line_items before 0028, upsells before 0048) by dropping it
+  // and retrying, so an estimate is never lost to schema drift.
   const { data: est, error: createErr } = await insertEstimateResilient(db, {
     business_id: biz.id,
     customer_name: customer_name.trim(),
@@ -3688,6 +3748,7 @@ async function estimateCreate(req, res, db, auth, body) {
     service_label: service_label || 'Custom Estimate',
     description,
     line_items,
+    upsells,
     status: 'new',
     sms_consent: body.sms_consent !== false,
     source: 'manual',
@@ -3714,7 +3775,7 @@ async function estimateCreate(req, res, db, auth, body) {
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: est.id }, 7776000);
   const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl },
+    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl, upsells: publicUpsells(upsells) },
     brandFor(biz.slug)
   );
 
@@ -3770,7 +3831,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.id) return res.status(400).json({ error: 'id required' });
 
-  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_email, service_label, description');
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_email, service_label, description, upsells');
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available for this estimate.' });
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
@@ -3788,7 +3849,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000); // 90 days
   const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl },
+    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl, upsells: publicUpsells(est.upsells) },
     brandFor(biz.slug)
   );
 
@@ -3818,9 +3879,9 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, customer_name, service_label, description, line_items, tax_rate, approved_at';
+  let cols = 'id, business_id, customer_name, service_label, description, line_items, tax_rate, approved_at, upsells, accepted_upsells, approved_total';
   let data, error;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
     if (!error) break;
     const col = missingColumn(error.message);
@@ -3832,6 +3893,9 @@ async function fetchEstimateAnyBiz(db, id) {
   if (!Array.isArray(data.line_items)) data.line_items = [];
   if (data.tax_rate == null) data.tax_rate = 0;
   if (!('approved_at' in data)) data.approved_at = null;
+  if (!Array.isArray(data.upsells)) data.upsells = [];
+  if (!Array.isArray(data.accepted_upsells)) data.accepted_upsells = null;
+  if (!('approved_total' in data)) data.approved_total = null;
   const { data: biz } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
   data.business = biz || null;
   return data;
@@ -3848,6 +3912,10 @@ async function estimateApproveInfo(req, res, body) {
 
   const items = Array.isArray(est.line_items) ? est.line_items : [];
   const totals = quoteTotals(items, est.tax_rate);
+  // Public-safe upsell menu (no tech_pay). If already approved, echo back the
+  // customer's own selection so a reopened link shows what they chose.
+  const menu = publicUpsells(est.upsells);
+  const acceptedIds = Array.isArray(est.accepted_upsells) ? est.accepted_upsells.map(u => u && u.id) : null;
   return res.status(200).json({
     business_slug: est.business?.slug || 'handy-andy',
     business_name: est.business?.name || 'Handy Andy',
@@ -3857,9 +3925,20 @@ async function estimateApproveInfo(req, res, body) {
     line_items: items,
     tax_rate: Number(est.tax_rate) || 0,
     totals,
+    upsells: menu,
+    accepted_ids: acceptedIds,        // non-null once the customer has approved
+    approved_total: est.approved_total != null ? Number(est.approved_total) : null,
     already_approved: !!est.approved_at,
     approved_at: est.approved_at || null,
   });
+}
+
+// Turn accepted upsells into priced line-item rows so quoteTotals() can fold
+// them into the base quote (customer price × qty, tax applied to the combined sum).
+function upsellsAsLineItems(accepted) {
+  return (Array.isArray(accepted) ? accepted : []).map(u => ({
+    description: u.description, qty: u.qty, unit_price: u.unit_price,
+  }));
 }
 
 async function estimateApprove(req, res, body) {
@@ -3869,31 +3948,58 @@ async function estimateApprove(req, res, body) {
   if (!id) return res.status(401).json({ error: 'This approval link is invalid or has expired.' });
 
   const db = serviceClient();
-  const { data: est, error } = await db.from('estimates')
-    .select('id, approved_at, business:businesses(slug, name)')
-    .eq('id', id).maybeSingle();
-  if (error) {
-    if (missingColumn(error.message) === 'approved_at') {
-      return res.status(503).json({ error: 'Approvals need a quick database update (migration 0030) before they can be recorded.' });
-    }
-    throw error;
-  }
+  const est = await fetchEstimateAnyBiz(db, id);   // tolerates un-applied migrations; loads line_items, tax_rate, upsells, …
   if (!est) return res.status(404).json({ error: 'Estimate not found.' });
-
   const businessName = est.business?.name || 'Handy Andy';
+
+  // Idempotent: first approval wins. A reopened link returns the stored selection
+  // rather than overwriting it.
   if (est.approved_at) {
-    return res.status(200).json({ ok: true, already: true, approved_at: est.approved_at, business_name: businessName });
+    const acceptedIds = Array.isArray(est.accepted_upsells) ? est.accepted_upsells.map(u => u && u.id) : [];
+    return res.status(200).json({
+      ok: true, already: true, approved_at: est.approved_at, business_name: businessName,
+      accepted: publicUpsells(est.accepted_upsells || []),
+      accepted_ids: acceptedIds,
+      approved_total: est.approved_total != null ? Number(est.approved_total) : null,
+    });
   }
+
+  // SERVER-AUTHORITATIVE: the client only tells us WHICH add-ons it accepted (ids).
+  // We intersect with the stored menu and re-price from our own record — a client
+  // can never inject an item or change a price.
+  const requested = Array.isArray(body && body.accepted_ids) ? body.accepted_ids.map(x => String(x)) : [];
+  const reqSet = new Set(requested);
+  const menu = Array.isArray(est.upsells) ? est.upsells : [];
+  const accepted = menu.filter(u => u && reqSet.has(String(u.id)))
+    .map(u => ({ id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price, tech_pay: u.tech_pay || 0 }));
+
+  const baseItems = Array.isArray(est.line_items) ? est.line_items : [];
+  const combined = baseItems.concat(upsellsAsLineItems(accepted));
+  const totals = quoteTotals(combined, est.tax_rate);
 
   const now = new Date().toISOString();
-  const { error: uErr } = await db.from('estimates').update({ approved_at: now }).eq('id', est.id);
-  if (uErr) {
-    if (missingColumn(uErr.message) === 'approved_at') {
+  const patch = { approved_at: now, accepted_upsells: accepted, approved_total: totals.total };
+  // Strip columns the schema doesn't have yet (0048 not applied) and retry, so an
+  // approval is always recorded even if only approved_at exists.
+  let error;
+  for (let i = 0; i < 4; i++) {
+    ({ error } = await db.from('estimates').update(patch).eq('id', est.id));
+    if (!error) break;
+    const col = missingColumn(error.message);
+    if (col === 'approved_at') {
       return res.status(503).json({ error: 'Approvals need a quick database update (migration 0030) before they can be recorded.' });
     }
-    throw uErr;
+    if (col && (col in patch)) { console.warn(`[estimate_approve] '${col}' column missing, retrying without it`); delete patch[col]; continue; }
+    break;
   }
-  return res.status(200).json({ ok: true, approved_at: now, business_name: businessName });
+  if (error) throw error;
+
+  return res.status(200).json({
+    ok: true, approved_at: now, business_name: businessName,
+    accepted: publicUpsells(accepted),
+    accepted_ids: accepted.map(u => u.id),
+    approved_total: totals.total,
+  });
 }
 
 // Get email quota from Resend for the current business
