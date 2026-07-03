@@ -10,6 +10,10 @@ function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c =
 
 export async function sendOwnerBookingAlert(d = {}) {
   try {
+    // Per-booking alerts are OFF by default — replaced by the ONE 8 PM Denver
+    // daily digest (api/migrate?action=daily_digest). Set PER_BOOKING_ALERTS=1
+    // in the environment to bring the old per-booking emails back.
+    if (process.env.PER_BOOKING_ALERTS !== '1') return;
     if (!emailNotificationsOn()) return;
     const cfg = emailConfig(d.slug);
     if (!cfg.apiKey) return;

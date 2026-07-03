@@ -7,6 +7,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
+import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -550,6 +551,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[send_reminders]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Daily booking digest — ONE 8 PM Denver email summarizing every appointment
+  // booked today (replaces the per-booking alerts). Secured by CRON_SECRET. The
+  // GitHub Action fires at 02:00 + 03:00 UTC; the handler only sends at 8 PM
+  // Denver, so exactly one run mails year-round.  &force=1 bypass the clock,
+  // &dry=1 count without sending.
+  if (action === 'daily_digest') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const force = req.query.force === '1' || req.query.force === 'true';
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const out = await sendDailyBookingDigest({ force, dryRun });
+      return res.status(200).json({ ok: true, ...out });
+    } catch (e) {
+      console.error('[daily_digest]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

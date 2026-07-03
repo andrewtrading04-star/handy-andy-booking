@@ -1,0 +1,33 @@
+name: Daily booking digest
+
+# ONE nightly summary email of every appointment booked that day (replaces the
+# per-booking "someone just booked" alerts). Fires at BOTH 02:00 and 03:00 UTC;
+# the endpoint only sends when it's 8 PM in Denver, so exactly one run mails —
+# correct across the MDT/MST daylight-saving shift.
+#   02:00 UTC = 8 PM MDT (summer)   03:00 UTC = 8 PM MST (winter)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Send now regardless of the hour (1 = yes)'
+        required: false
+        default: ''
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send the daily booking digest
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          Q="action=daily_digest"
+          [ -n "$FORCE" ] && Q="$Q&force=1"
+          curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?$Q" \
+            -H "Authorization: Bearer $CRON_SECRET"
+          echo ""
