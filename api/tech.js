@@ -1287,7 +1287,12 @@ function shapeJob(b, full = false, forTech = false) {
     // Non-labor fees (surcharge / after-hours / travel), shown read-only in the
     // Payment section — the tech can't edit them or change a quantity.
     const isAnyFee = li => isFeeLi(li) || isDismountLi(li) || (((li && li.kind) === 'fee') && !isTaxLi(li) && !isCouponLi(li) && !/\btip\b/i.test((li && li.name) || ''));
-    out.fees = (b.line_items || []).filter(li => isAnyFee(li) && (Number(li.line_total) || 0) !== 0)
+    // The travel fee / service-area surcharge is HIDDEN from the tech's Payment
+    // view: the owner keeps part of it, so the tech shouldn't see the
+    // customer-facing amount. It still rides in the total (price) — just not
+    // itemized here. (After-hours and other fees stay visible.)
+    const isTravelFee = li => /service area surcharge|travel\s*fee/i.test((li && li.name) || '');
+    out.fees = (b.line_items || []).filter(li => isAnyFee(li) && !(forTech && isTravelFee(li)) && (Number(li.line_total) || 0) !== 0)
       .map(li => ({ name: li.name || 'Fee', amount: Number(li.line_total) || 0 }));
     // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the
     // line-item editor can seed correctly: when a job has no visible work lines, the
