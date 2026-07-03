@@ -3514,7 +3514,7 @@ async function renderDisputes(){
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
 // ── Review Calls — Joey's daily review-outreach queue ────────────────────────
-let _rcDays=1, _rcData=[], _rcComplaintFor=null, _rcComplaintText='';
+let _rcDays=1, _rcData=[], _rcComplaintFor=null, _rcComplaintText='', _rcWarning=null;
 const RC_SCRIPT = "Hi, this is Joey with [Business name] — just calling to make sure everything went well with your installation. Is there anything else we can help with? … Great! One more thing — we also do handyman work: hanging curtains, mounting shelves, furniture assembly, small repairs — so keep us in mind. And if you have a minute, a quick Google review would mean a lot; I can text or email you the link right now.";
 function rcRel(iso){
   if(!iso) return '';
@@ -3533,6 +3533,7 @@ async function renderReviewCalls(){
   try{
     const d=await api('review_calls',{ params:{ days:_rcDays }});
     _rcData=d.calls||[];
+    _rcWarning=d.warning||null;
     paintReviewCalls();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
@@ -3555,6 +3556,7 @@ function paintReviewCalls(){
       <div class="rc-script-h">📋 Script <span>— say the company shown on each card</span></div>
       <div class="rc-script-b">“${esc(RC_SCRIPT)}”</div>
     </div>
+    ${_rcWarning?`<div class="nb-min-warn floored" style="margin-bottom:12px;">⚠ Couldn't load part of the list — ${esc(_rcWarning)}</div>`:''}
     <div class="rc-count">${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}</div>
     <div id="rcList">${cards}</div>
   </div>`;

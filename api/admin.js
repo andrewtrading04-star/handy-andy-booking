@@ -3390,13 +3390,17 @@ async function reviewCalls(req, res, db, auth) {
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
 
   const callCols = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
+  // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
+  // column) — it must be embedded as a relation, exactly like bookingSelect().
   const selFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
-      review_email_opened_at, review_email_count, review_token, line_items, ${cc}
+      review_email_opened_at, review_email_count, review_token, ${cc}
       customer:customers ( name, phone, email ),
       technician:technicians!technician_id ( name ),
-      service:services ( name )`;
+      service:services ( id, name ),
+      line_items:booking_line_items ( name, quantity, unit_price, line_total )`;
 
   const out = [];
+  const warnings = [];
   for (const b of (bizs || [])) {
     const tz = b.timezone || 'America/Denver';
     const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
@@ -3412,7 +3416,7 @@ async function reviewCalls(req, res, db, auth) {
       .order('scheduled_at', { ascending: false }).limit(500);
     let { data, error } = await run(callCols);
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
-    if (error) { console.warn('[review_calls]', b.slug, error.message); continue; }
+    if (error) { console.warn('[review_calls]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
     for (const row of (data || [])) {
       // Skip anyone who already left us a rating through our review filter:
       // reviewed_at is stamped whenever a customer submits ANY 1–5★ (Google-routed
@@ -3455,6 +3459,7 @@ async function reviewCalls(req, res, db, auth) {
   });
   return res.status(200).json({
     calls: out,
+    warning: warnings.length ? warnings.join(' · ') : null,
     counts: {
       total: out.length,
       to_call: out.filter(x => !x.call_status).length,
