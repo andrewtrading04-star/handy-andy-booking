@@ -3373,11 +3373,11 @@ async function reviewResend(req, res, db, auth, body) {
 }
 
 // ── Review-call queue (Joey's daily outreach) ────────────────────────────────
-// Cross-business: the customers from BOTH companies who completed a job in the
-// last `days` days (default 1 = yesterday), haven't left us ANY star rating in
-// the CRM (review_rating / reviewed_at both null — covers both the 4–5★ that go
-// to Google and the 1–3★ private feedback), and haven't been resolved (marked
-// reviewed / do-not-contact). Available to any
+// Cross-business: customers from BOTH companies who had a non-cancelled job on
+// the schedule in the last `days` days (default 1 = yesterday, by scheduled_at so
+// imported / not-yet-marked-done jobs still count), haven't submitted a review
+// through our filter (reviewed_at null) and aren't a Google 4–5★, and haven't
+// been resolved (promised / complaint / do-not-contact). Available to any
 // signed-in office user — this is a calling tool, so it deliberately spans both
 // businesses regardless of the secretary's normal single-business scope.
 const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint'];
@@ -3390,7 +3390,7 @@ async function reviewCalls(req, res, db, auth) {
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
 
   const callCols = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
-  const selFor = (cc) => `id, completed_at, scheduled_at, review_rating, reviewed_at,
+  const selFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
       review_email_opened_at, review_email_count, review_token, line_items, ${cc}
       customer:customers ( name, phone, email ),
       technician:technicians!technician_id ( name ),
@@ -3401,18 +3401,25 @@ async function reviewCalls(req, res, db, auth) {
     const tz = b.timezone || 'America/Denver';
     const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
     const winEnd = localDayStartUTC(tz, 0);          // start of today — give them the day of the job to review first
+    // Base the window on scheduled_at (ALWAYS set) rather than completed_at — the
+    // latter is null for imported jobs and for any job the tech didn't tap
+    // "complete" on. Include every non-cancelled booking that was on the schedule
+    // that day: a job scheduled yesterday happened, whether or not it's marked done.
     const run = (cc) => db.from('bookings').select(selFor(cc))
-      .eq('business_id', b.id).eq('status', 'completed')
-      .gte('completed_at', winStart.toISOString()).lt('completed_at', winEnd.toISOString())
-      .order('completed_at', { ascending: false }).limit(500);
+      .eq('business_id', b.id)
+      .in('status', ['confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'])
+      .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString())
+      .order('scheduled_at', { ascending: false }).limit(500);
     let { data, error } = await run(callCols);
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
     if (error) { console.warn('[review_calls]', b.slug, error.message); continue; }
     for (const row of (data || [])) {
-      // Skip anyone who already left us a star rating in the CRM at all — whether
-      // it went to Google (4–5★) or was captured as private feedback (1–3★). They
-      // responded, so there's no review to chase.
-      if (row.review_rating != null || row.reviewed_at != null) continue;
+      // Skip anyone who already left us a rating through our review filter:
+      // reviewed_at is stamped whenever a customer submits ANY 1–5★ (Google-routed
+      // 4–5★ or private 1–3★), so it's the precise "they rated us in the CRM"
+      // signal. Plus a >= 4 backstop. A job that merely carries a stale imported
+      // rating (no submission → no reviewed_at) stays callable.
+      if (row.reviewed_at != null || Number(row.review_rating) >= 4) continue;
       if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey
       out.push({
         id: row.id,
@@ -3427,7 +3434,8 @@ async function reviewCalls(req, res, db, auth) {
         line_items: (Array.isArray(row.line_items) ? row.line_items : [])
           .filter(li => li && (li.name || li.description))
           .map(li => ({ name: String(li.name || li.description), qty: Number(li.quantity || li.qty) || 1, price: Number(li.line_total != null ? li.line_total : li.unit_price) || 0 })),
-        completed_at: row.completed_at || row.scheduled_at || null,
+        when: row.scheduled_at || row.completed_at || null,
+        is_completed: row.status === 'completed',
         email_opened: !!row.review_email_opened_at,
         email_count: row.review_email_count || 0,
         rating: row.review_rating || null,          // 1–3 = they gave us negative feedback (handle with care)
@@ -3443,7 +3451,7 @@ async function reviewCalls(req, res, db, auth) {
   out.sort((a, c) => {
     const au = a.call_status ? 1 : 0, cu = c.call_status ? 1 : 0;
     if (au !== cu) return au - cu;
-    return new Date(c.completed_at || 0) - new Date(a.completed_at || 0);
+    return new Date(c.when || 0) - new Date(a.when || 0);
   });
   return res.status(200).json({
     calls: out,
