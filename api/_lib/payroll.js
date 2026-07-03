@@ -500,7 +500,8 @@ export function computeJobPay(job, techName) {
     // charge, never tech labor — so the custom-job hourly fallthrough below can't
     // mistake it for a custom service and pay $65/hr against it.
     if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /\bfee\b/i.test(name)
-        || /service area surcharge/i.test(name) || /after.?hours/i.test(name)) continue;
+        || /service area surcharge/i.test(name) || /after.?hours/i.test(name)
+        || /service\s*minimum/i.test(name)) continue;   // a minimum-charge floor, not tech labor
 
     // Skip the two-person "lift help" marker — it's not a labor line to price.
     // The $60 ($30/tech) bonus is added separately when the split runs.
@@ -777,6 +778,18 @@ function runSelfTests() {
   // A genuinely unrecognized custom line is still billed hourly ($85/hr -> $65/hr).
   // Non-clean price flags the inferred hours but still pays.
   eq(computeJobPay(job({ line_items: [{ name: 'Custom mount job', line_total: 200 }] }), 'Kregg').flags.length, 1, 'non-clean custom price flags hours');
+  // "Service minimum" is a customer minimum-charge floor, NOT tech labor — it's
+  // skipped (paid $0, no review flag), even though $20 is under the custom-hour
+  // floor. Paul Mathis job: 60-69 base (70) + $50 tip = 120, no flags.
+  eq(computeJobPay(job({ tip: 50, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Service minimum', line_total: 20 },
+  ] }), 'Kregg').pay, 120, 'Service minimum skipped: 70 base + 50 tip = 120');
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Service minimum', line_total: 20 },
+  ] }), 'Kregg').flags.length, 0, 'Service minimum: no review flag');
+
   // A fee that arrives as a plain 'service' line (not kind 'fee') must NOT be
   // paid as custom labor — any "…Fee" name is skipped. Base 60 only, fee = $0.
   eq(computeJobPay(job({ line_items: [
