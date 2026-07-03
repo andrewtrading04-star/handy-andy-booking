@@ -29,6 +29,7 @@ function jobStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
+import { formatAddress } from './_lib/address.js';
 
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
@@ -1247,7 +1248,7 @@ function classifyServiceCat(b) {
 }
 
 function shapeJob(b, full = false, forTech = false) {
-  const address = [b.address_line1, b.address_line2, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
+  const address = formatAddress(b);
   // Show the service CATEGORY the tech recognizes — "TV Mounting", "Handyman",
   // or "Assurion" — never the generic linked-service name "Service".
   const serviceName = classifyServiceCat(b);

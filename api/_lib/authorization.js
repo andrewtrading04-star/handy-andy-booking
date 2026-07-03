@@ -14,6 +14,7 @@
 // Pure-ish: only touches Supabase (storage + one insert) and never Stripe.
 // ============================================================================
 import { uploadImage } from './storage.js';
+import { formatAddress } from './address.js';
 
 export const TERMS_VERSION = '2026-07-01';
 
@@ -111,7 +112,7 @@ export function buildDisputeEvidence({ booking, auth, customer }) {
     customer_name: auth?.customer_name || customer?.name || undefined,
     customer_email_address: customer?.email || undefined,
     customer_purchase_ip: auth?.signed_ip || undefined,
-    billing_address: [booking?.address_line1, booking?.city, booking?.state, booking?.postal_code].filter(Boolean).join(', ') || undefined,
+    billing_address: formatAddress(booking) || undefined,
     product_description: itemList ? `In-home service: ${itemList}` : 'In-home TV mounting / handyman service',
     service_date: booking?.scheduled_at ? new Date(booking.scheduled_at).toISOString().slice(0, 10) : undefined,
     uncategorized_text: narrative,

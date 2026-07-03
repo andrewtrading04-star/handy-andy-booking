@@ -20,6 +20,7 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
+import { formatAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 
@@ -2999,7 +3000,7 @@ function shapeBooking(b) {
     // partner_company is that tech's company name (e.g. "Doms") for a clear tag.
     cross_company: !!(b.technician?.business_id && b.business_id && b.technician.business_id !== b.business_id),
     partner_company: b.technician?.business?.name || null,
-    address: [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', '),
+    address: formatAddress(b),
     // Raw address parts so the office can edit the service address after booking.
     address_line1: b.address_line1 || '',
     address_line2: b.address_line2 || '',
