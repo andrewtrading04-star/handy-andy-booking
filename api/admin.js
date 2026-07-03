@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
+import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -229,6 +229,7 @@ export default async function handler(req, res) {
     if (action === 'review') return await review(req, res, body);
     if (action === 'estimate_approve') return await estimateApprove(req, res, body);
     if (action === 'estimate_approve_info') return await estimateApproveInfo(req, res, body);
+    if (action === 'estimate_slots') return await estimateSlots(req, res);
     if (action === 'session_status') return await sessionStatus(req, res);
 
     // Everything below requires a valid admin token.
@@ -3712,6 +3713,8 @@ async function estimateCreate(req, res, db, auth, body) {
 
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
   if (!customer_name || !customer_email) return res.status(400).json({ error: 'Customer name and email required' });
+  // Keep the zip so the approve page can show real availability for the right metro.
+  const customer_zip = (body.postal_code || body.customer_zip || '').toString().replace(/\D/g, '').slice(0, 5) || null;
 
   // Turn the selections into priced line items — these ARE the estimate detail.
   let description = '';
@@ -3740,6 +3743,7 @@ async function estimateCreate(req, res, db, auth, body) {
     customer_name: customer_name.trim(),
     customer_phone: customer_phone ? customer_phone.trim() : null,
     customer_email: customer_email.trim(),
+    customer_zip,
     service_label: service_label || 'Custom Estimate',
     description,
     line_items,
@@ -3874,7 +3878,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, customer_name, service_label, description, line_items, tax_rate, approved_at, upsells, accepted_upsells, approved_total';
+  let cols = 'id, business_id, customer_name, customer_zip, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -3894,6 +3898,40 @@ async function fetchEstimateAnyBiz(db, id) {
   const { data: biz } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
   data.business = biz || null;
   return data;
+}
+
+// Normalize the customer's preferred appointment times to { date, slot_key, label }.
+// Mirrors the widget estimate-request shape (api/estimate.js); caps at 5.
+function sanitizePreferredSlots(raw) {
+  return (Array.isArray(raw) ? raw : []).slice(0, 5).map(s => ({
+    date: (s && s.date) ? String(s.date).slice(0, 10) : null,
+    slot_key: (s && s.slot_key) ? String(s.slot_key).slice(0, 8) : null,
+    label: (s && s.label) ? String(s.label).slice(0, 80) : null,
+  })).filter(s => s.date && s.slot_key);
+}
+
+// Public (token-gated) real availability for the estimate approve page, so the
+// customer can pick preferred appointment times that reflect actual open slots.
+// Resolves the estimate's metro from its zip (Handy Andy spans metros); falls
+// back to all techs when the zip isn't known so slots still show.
+async function estimateSlots(req, res) {
+  const token = (req.query.token || (req.body && req.body.token) || '').toString();
+  const id = approveTokenEstimateId(token);
+  if (!id) return res.status(401).json({ error: 'This link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const est = await fetchEstimateAnyBiz(db, id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+  const slug = est.business?.slug || 'handy-andy';
+  const serviceAreaId = await serviceAreaIdFromPostal(db, est.business_id, est.customer_zip);
+  try {
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId });
+    return res.status(200).json({ days: result.days || [], timezone: result.timezone || 'America/Denver' });
+  } catch (e) {
+    console.warn('[estimate_slots] availability lookup failed:', e.message);
+    return res.status(200).json({ days: [], timezone: 'America/Denver' });
+  }
 }
 
 async function estimateApproveInfo(req, res, body) {
@@ -3974,6 +4012,11 @@ async function estimateApprove(req, res, body) {
 
   const now = new Date().toISOString();
   const patch = { approved_at: now, accepted_upsells: accepted, approved_total: totals.total };
+  // The customer's preferred appointment times, picked on the approve page from
+  // real availability. Saved into preferred_slots so the office sees them on the
+  // estimate card. Only overwrite when the customer actually chose some.
+  const prefSlots = sanitizePreferredSlots(body && body.selected_slots);
+  if (prefSlots.length) patch.preferred_slots = prefSlots;
   // Strip columns the schema doesn't have yet (0048 not applied) and retry, so an
   // approval is always recorded even if only approved_at exists.
   let error;

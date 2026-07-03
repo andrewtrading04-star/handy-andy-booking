@@ -58,6 +58,36 @@
   .uadded{position:absolute;top:-9px;right:14px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:var(--accent);color:#fff;padding:3px 9px;border-radius:999px;opacity:0;transform:scale(.8);transition:opacity .16s,transform .16s;}
   .ucard.on .uadded{opacity:1;transform:scale(1);}
 
+  /* ── Availability picker ── */
+  .avail{margin:22px 0 6px;text-align:left;}
+  .avail-h{font-size:16px;font-weight:800;letter-spacing:-.01em;margin-bottom:2px;}
+  .avail-p{font-size:13px;color:var(--mute);margin-bottom:14px;line-height:1.5;}
+  .dates{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
+  .datepill{flex:0 0 auto;min-width:58px;border:1.5px solid var(--line);border-radius:12px;background:var(--panel);
+    padding:9px 8px;text-align:center;cursor:pointer;transition:border-color .14s,background .14s;-webkit-tap-highlight-color:transparent;}
+  .datepill.on{border-color:var(--accent);background:var(--accent-soft);}
+  .datepill .dow{font-size:11px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;}
+  .datepill.on .dow{color:var(--accent);}
+  .datepill .dnum{font-size:18px;font-weight:800;color:var(--ink);line-height:1.2;}
+  .datepill .mon{font-size:10.5px;font-weight:600;color:var(--mute);text-transform:uppercase;}
+  .slots{display:grid;grid-template-columns:1fr;gap:9px;margin-top:14px;}
+  @media(min-width:420px){.slots{grid-template-columns:1fr 1fr;}}
+  .slotbtn{border:1.5px solid var(--line);border-radius:12px;background:var(--panel);padding:13px 12px;cursor:pointer;
+    font-size:14.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;justify-content:space-between;gap:8px;
+    transition:border-color .14s,background .14s;-webkit-tap-highlight-color:transparent;}
+  .slotbtn:hover{border-color:#c9cfda;}
+  .slotbtn.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+  .slotbtn .tick{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;
+    font-size:12px;font-weight:900;color:#fff;transition:.14s;}
+  .slotbtn.on .tick{background:var(--accent);border-color:var(--accent);}
+  .picks{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .picks-lbl{font-size:13px;font-weight:800;color:var(--green-ink);}
+  .pickchip{font-size:12.5px;font-weight:700;background:var(--green-soft);color:var(--green-ink);border-radius:999px;
+    padding:5px 11px;display:inline-flex;align-items:center;gap:7px;}
+  .pickchip button{background:none;border:none;color:var(--green-ink);font-size:15px;line-height:1;cursor:pointer;padding:0;font-weight:800;}
+  .avail-hint{font-size:12.5px;color:var(--mute);margin-top:10px;}
+  .avail-empty{font-size:13px;color:var(--mute);background:#f9fafb;border:1px solid var(--line);border-radius:12px;padding:14px 16px;line-height:1.5;}
+
   /* ── Summary + approve ── */
   .summary{margin-top:20px;text-align:left;border-top:1px solid var(--line2);padding-top:16px;}
   .sline{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--ink-2);padding:3px 0;}
@@ -98,6 +128,7 @@
     <p class="sub" id="approveSub">Here's your quote. Add any upgrades you'd like, then approve.</p>
     <div id="quoteBox"></div>
     <div id="addonsBox"></div>
+    <div id="availBox"></div>
     <div id="summaryBox"></div>
     <button class="btn" id="approveBtn">&#10003; Approve</button>
     <div class="fine">This is an estimate, not a final invoice. Final pricing is confirmed on-site.</div>
@@ -242,6 +273,66 @@ function recapHtml(acceptedList, total){
   return `<div class="recap"><div class="rr"><span>Base install &amp; quote</span><span class="tabnums">${money(baseSubtotal)}</span></div>${rows}${totalRow}</div>`;
 }
 
+// ── Availability picker (real open slots) ──
+let AVAIL_DAYS=[], availTz='', selectedDate=null, pickedSlots=[];
+function whenLabel(p){
+  try{ const dt=new Date(p.date+'T12:00:00');
+    return dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · '+(p.label||p.slot_key); }
+  catch(e){ return (p.date||'')+' '+(p.label||''); }
+}
+async function loadAvail(){
+  try{
+    const res = await fetch(`${API}?action=estimate_slots&token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+    if (!res.ok) return;
+    AVAIL_DAYS = (Array.isArray(data.days)?data.days:[]).filter(d=>d.timeslots && d.timeslots.length).slice(0,45);
+    availTz = data.timezone || '';
+    if (!AVAIL_DAYS.length){
+      $('availBox').innerHTML = `<div class="avail"><div class="avail-h">Preferred times</div><div class="avail-empty">We'll reach out to find a time that works for you.</div></div>`;
+      return;
+    }
+    selectedDate = AVAIL_DAYS[0].date;
+    renderAvail();
+  }catch(e){ /* non-fatal — approval still works without a time pick */ }
+}
+function toggleSlot(slot_key, label){
+  const idx = pickedSlots.findIndex(p=>p.date===selectedDate && p.slot_key===slot_key);
+  if (idx>=0){ pickedSlots.splice(idx,1); }
+  else { if (pickedSlots.length>=3){ renderAvail(); return; } pickedSlots.push({ date:selectedDate, slot_key, label }); }
+  renderAvail();
+}
+function renderAvail(){
+  const box = $('availBox');
+  if (!AVAIL_DAYS.length){ box.innerHTML=''; return; }
+  const datesHtml = AVAIL_DAYS.map(d=>{
+    const dt=new Date(d.date+'T12:00:00');
+    const dow=dt.toLocaleDateString('en-US',{weekday:'short'});
+    const dnum=dt.toLocaleDateString('en-US',{day:'numeric'});
+    const mon=dt.toLocaleDateString('en-US',{month:'short'});
+    return `<div class="datepill${d.date===selectedDate?' on':''}" data-date="${d.date}"><div class="dow">${dow}</div><div class="dnum">${dnum}</div><div class="mon">${mon}</div></div>`;
+  }).join('');
+  const day = AVAIL_DAYS.find(d=>d.date===selectedDate);
+  const slotsHtml = (day?day.timeslots:[]).map(s=>{
+    const on = pickedSlots.some(p=>p.date===selectedDate && p.slot_key===s.slot_key);
+    const lbl = s.formatted || s.label || s.slot_key;
+    return `<button type="button" class="slotbtn${on?' on':''}" data-slot="${esc(s.slot_key)}" data-label="${esc(lbl)}"><span>${esc(lbl)}</span><span class="tick">${on?'&#10003;':''}</span></button>`;
+  }).join('');
+  const picksHtml = pickedSlots.length
+    ? `<div class="picks"><span class="picks-lbl">Your picks:</span>${pickedSlots.map((p,i)=>`<span class="pickchip">${esc(whenLabel(p))}<button data-rm="${i}" aria-label="remove">&times;</button></span>`).join('')}</div>`
+    : '';
+  box.innerHTML = `<div class="avail">
+    <div class="avail-h">Pick a few times that work for you</div>
+    <div class="avail-p">Tap up to 3 — we'll confirm one of them with you.</div>
+    <div class="dates">${datesHtml}</div>
+    <div class="slots">${slotsHtml}</div>
+    ${picksHtml}
+    <div class="avail-hint">${pickedSlots.length>=3?"That's the max — remove one to swap it.":'Optional, but it helps us get you scheduled faster.'}</div>
+  </div>`;
+  box.querySelectorAll('.datepill').forEach(el=>el.addEventListener('click',()=>{ selectedDate=el.dataset.date; renderAvail(); }));
+  box.querySelectorAll('.slotbtn').forEach(el=>el.addEventListener('click',()=>toggleSlot(el.dataset.slot, el.dataset.label)));
+  box.querySelectorAll('.pickchip button[data-rm]').forEach(b=>b.addEventListener('click',()=>{ pickedSlots.splice(+b.dataset.rm,1); renderAvail(); }));
+}
+
 async function load(){
   if (!token){ showError('This approval link is missing its token. Please use the button in your estimate email.'); return; }
   try{
@@ -271,6 +362,7 @@ async function load(){
     renderAddons();
     renderSummary();
     show('approveSection');
+    loadAvail();   // fetch real open slots and render the time picker
   }catch(e){ showError('Network error. Please try again.'); }
 }
 
@@ -284,7 +376,7 @@ $('approveBtn').addEventListener('click', async ()=>{
     const res = await fetch(`${API}?action=estimate_approve`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token, accepted_ids: Array.from(accepted) }),
+      body: JSON.stringify({ token, accepted_ids: Array.from(accepted), selected_slots: pickedSlots }),
     });
     const data = await res.json();
     if (!res.ok){
@@ -301,7 +393,10 @@ $('approveBtn').addEventListener('click', async ()=>{
     $('doneMsg').textContent = chosen.length
       ? `We'll schedule your job plus ${chosen.length} upgrade${chosen.length>1?'s':''}. We'll be in touch shortly to lock in a time.`
       : `We've let our team know you'd like to move forward. We'll be in touch shortly to get you scheduled.`;
-    $('doneRecap').innerHTML = recapHtml(chosen, total);
+    const timesHtml = pickedSlots.length
+      ? `<div class="recap" style="margin-top:12px;"><div class="rr" style="font-weight:800;color:var(--ink);">Your preferred times</div>${pickedSlots.map(p=>`<div class="rr"><span>&#128197; ${esc(whenLabel(p))}</span></div>`).join('')}</div>`
+      : '';
+    $('doneRecap').innerHTML = recapHtml(chosen, total) + timesHtml;
     show('doneSection');
   }catch(e){
     btn.disabled=false; btn.innerHTML=prev; saving=false;

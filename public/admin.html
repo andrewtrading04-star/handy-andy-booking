@@ -231,7 +231,8 @@
   .seg-btn{background:#fff;border:1px solid var(--line);color:var(--ink-2);padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;}
   .seg-btn.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
   .est-card .est-desc{margin-top:8px;font-size:14px;line-height:1.55;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
-  .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
+  .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
   .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
   .est-thumb{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;}
   .est-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);align-items:center;}
@@ -3638,7 +3639,7 @@ function estCard(e){
   const email=e.customer_email?` · ${esc(e.customer_email)}`:'';
   const zip=e.customer_zip?` · ZIP ${esc(e.customer_zip)}`:'';
   const slots=Array.isArray(e.preferred_slots)?e.preferred_slots:[];
-  const slotChips=slots.length?`<div class="est-slots">${slots.map(s=>
+  const slotChips=slots.length?`<div class="est-slots"><span class="est-slots-lbl">🗓 Customer's preferred times:</span>${slots.map(s=>
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
   const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
   const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
@@ -5677,6 +5678,7 @@ async function sendEstimateFromBooking(upsells){
       customer_name: name,
       customer_phone: phone,
       customer_email: email,
+      postal_code: document.getElementById('nbZip').value.trim(),
       selections,
       upsells: Array.isArray(upsells)?upsells:[],
       service_label: document.getElementById('nbService')?.value ?
