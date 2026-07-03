@@ -5698,26 +5698,79 @@ async function sendEstimateFromBooking(upsells){
 // Catalog of add-ons the office can attach to an estimate. `price` is what the
 // customer sees; `tech` is the tech's pay (office-only, shown as margin). `jobs`
 // controls which job types surface it; `defOn` pre-selects it for that job type.
+// Prices MIRROR the real booking option prices in the database (migrations 0003
+// Handy Andy / 0008 Dom's) so an add-on costs the customer the same whether it's
+// picked in New Booking or accepted from an estimate. `tech` is the tech's pay
+// (owner-only display); the bracket upgrade is generated dynamically (see
+// nbBracketUpsell) off the customer's currently-selected bracket, not from here.
 const NB_UPSELL_CATALOG=[
-  {id:'gds',     name:'Guaranteed Dismount Service',       price:60, tech:60, badge:'Recommended', jobs:['tv'], defOn:true,
-    blurb:'We safely remove your current TV so nothing gets scratched or dropped.'},
-  {id:'inwall',  name:'In-Wall Wire Concealment',          price:75, tech:35, badge:'Most popular', jobs:['tv'], defOn:true,
+  {id:'gds',     name:'Guaranteed Dismount Service', price:35, tech:60, badge:'Recommended', jobs:['tv'], defOn:true,
+    blurb:'We come back and remove your TV for FREE!'},
+  {id:'inwall',  name:'In-Wall Wire Concealment',    price:75, tech:35, badge:'Most popular', jobs:['tv'], defOn:true,
     blurb:'Hide the cords inside the wall for a clean, floating look.'},
-  {id:'outwall', name:'Outside Wire Concealment',          price:40, tech:15, badge:'', jobs:['tv'], defOn:false,
+  {id:'outwall', name:'Outside Wire Concealment',    price:25, tech:15, badge:'', jobs:['tv'], defOn:false,
     blurb:'A paintable channel hides the cords on brick or tricky walls.'},
-  {id:'soundbar',name:'Soundbar Mount',                    price:35, tech:20, badge:'', jobs:['tv'], defOn:false,
+  {id:'soundbar',name:'Soundbar Mount',              price:50, tech:35, badge:'', jobs:['tv'], defOn:false,
     blurb:'Mount your soundbar flush under the TV while we’re on the wall.'},
-  {id:'mantel',  name:'Mantel Mount (motorized pull-down)',price:195,tech:110,badge:'Best for fireplaces', jobs:['tv'], defOn:false,
-    blurb:'Pull the TV down to eye level over the fireplace, then push it back up.'},
-  {id:'bracket', name:'Tilt / Full-Motion Bracket Upgrade',price:60, tech:25, badge:'', jobs:['tv'], defOn:false,
-    blurb:'Angle the screen to kill glare from windows and lights.'},
-  {id:'surge',   name:'Surge Protector',                   price:30, tech:10, badge:'', jobs:['tv','handyman'], defOn:false,
-    blurb:'Protect your new setup from power spikes.'},
-  {id:'handyhr', name:'Extra Handyman Hour',               price:85, tech:65, badge:'', jobs:['handyman'], defOn:false,
-    blurb:'Knock out one more to-do on your list while we’re already there.'},
+  {id:'led',     name:'LED Lights',                  price:50, tech:35, badge:'', jobs:['tv'], defOn:false,
+    blurb:'Backlighting behind your TV for a soft, cinematic glow.'},
+  {id:'handyhr', name:'Handyman Labor',              price:85, tech:65, badge:'', jobs:['tv','handyman'], defOn:false,
+    blurb:'Hanging curtains, building furniture etc.'},
 ];
+// If one of these already appears in the base quote, don't recommend it again.
+// Patterns match the New Booking selection labels (see nbCollectSelections).
+const NB_BASE_PRESENCE={
+  gds:      /guaranteed\s+dismount/i,
+  inwall:   /hide\s+wires\s+behind\s+the\s+wall|oneconnect/i,
+  outwall:  /hide\s+wires\s+outside\s+the\s+wall/i,
+  soundbar: /soundbar/i,
+  led:      /\bled\b/i,
+  handyhr:  /handyman\s+labor/i,
+};
 let nbUpsSel={};        // id -> true
 let nbUpsCustom=[];     // [{id,name,price}]
+
+// ── Context-aware bracket upgrade ────────────────────────────────────────────
+// If the customer's base quote has a FLAT bracket, recommend upgrading to
+// Tilting; if TILTING, recommend Full-Motion; if FULL-MOTION (or own/Frame
+// bracket), recommend nothing. The customer upcharge is the exact price
+// difference between their bracket and the next tier (same size class), read
+// live from the bracket option group — so it's correct per business and TV size.
+function nbClassifyBracket(label){
+  const l=String(label||'').toLowerCase();
+  let tier=null;
+  if(/full\s*motion/.test(l)) tier='full';
+  else if(/tilt/.test(l))     tier='tilt';
+  else if(/flat/.test(l))     tier='flat';
+  else return null;                       // own bracket / Frame in-box / mantel → no upgrade
+  return { tier, sizeClass: /85|100|\bxl\b/.test(l) ? 'xl' : 'std' };
+}
+function nbSelectedOptionId(g){
+  const m=nbQty[g.id]; if(!m) return null;
+  const k=Object.keys(m).find(id=>m[id]>0);
+  return k||null;
+}
+function nbBracketUpsell(){
+  if(!Array.isArray(nbOptionGroups)) return null;
+  const g=nbOptionGroups.find(x=>x.key==='bracket'); if(!g) return null;
+  const oid=nbSelectedOptionId(g); if(!oid) return null;
+  const cur=(g.options||[]).find(o=>o.id===oid); if(!cur) return null;
+  const cc=nbClassifyBracket(cur.label); if(!cc) return null;
+  const next={flat:'tilt', tilt:'full', full:null}[cc.tier];
+  if(!next) return null;                  // already full-motion → recommend neither
+  const target=(g.options||[]).find(o=>{ const t=nbClassifyBracket(o.label); return t && t.tier===next && t.sizeClass===cc.sizeClass; });
+  if(!target) return null;
+  const delta=Math.round((Number(target.price)||0)-(Number(cur.price)||0));
+  if(delta<=0) return null;               // no upcharge → nothing to sell
+  return {
+    id:'bracket',
+    name: next==='tilt' ? 'Upgrade to a Tilting Bracket' : 'Upgrade to a Full-Motion Bracket',
+    price: delta, tech: 0, badge:'', jobs:['tv'], defOn:false,
+    blurb: next==='tilt'
+      ? 'Tilt the screen down to cut glare — great for a higher mount.'
+      : 'Swing the TV out and angle it anywhere in the room.'
+  };
+}
 
 function nbUpsJobType(){
   if(typeof nbHandymanActive!=='undefined' && nbHandymanActive) return 'handyman';
@@ -5726,9 +5779,15 @@ function nbUpsJobType(){
 }
 function nbUpsShown(){
   const jt=nbUpsJobType();
-  // For a generic/custom job show the universal (surge) + the TV set is hidden;
-  // TV jobs get the TV set, handyman jobs get the handyman set — always + 'all'.
-  return NB_UPSELL_CATALOG.filter(c=>c.jobs.includes(jt) || (jt==='other' && c.jobs.length>1));
+  // Whatever's already in the base quote shouldn't be recommended again.
+  const baseLabels=nbCollectSelections().map(s=>s.label||'');
+  const already=id=>{ const rx=NB_BASE_PRESENCE[id]; return rx ? baseLabels.some(l=>rx.test(l)) : false; };
+  let list=NB_UPSELL_CATALOG
+    .filter(c=>c.jobs.includes(jt) || (jt==='other' && c.jobs.length>1))
+    .filter(c=>!already(c.id));
+  // Context-aware bracket upgrade (flat→tilting→full-motion), TV jobs only.
+  if(jt==='tv'){ const b=nbBracketUpsell(); if(b) list.push(b); }
+  return list;
 }
 function toggleNbUpsellPanel(){
   const panel=document.getElementById('nbUpsellPanel');
@@ -5747,15 +5806,24 @@ function toggleNbUpsellPanel(){
 }
 function renderNbUpsChips(){
   const box=document.getElementById('nbUpsChips');
-  box.innerHTML=nbUpsShown().map(c=>{
+  const shown=nbUpsShown();
+  if(!shown.length){
+    box.innerHTML=`<div style="text-align:center;color:var(--mute);font-size:13px;padding:14px 8px;">No add-ons to recommend for this job — the customer's quote already covers everything.</div>`;
+    updateNbUpsProjection();
+    return;
+  }
+  box.innerHTML=shown.map(c=>{
     const on=nbUpsSel[c.id];
     const margin=c.price-c.tech;
+    const marginTxt=margin<0?`-$${Math.abs(margin)}`:`$${margin}`;
     const badge=c.badge?`<span class="badge">${esc(c.badge)}</span>`:'';
+    // Owner (Andrew) only — secretaries (Heather/Joey) never see tech pay/margin.
+    const marginLine=role==='owner'?`<span class="margin">tech $${c.tech} · margin ${marginTxt}</span>`:'';
     return `<button type="button" class="nb-ups-chip${on?' on':''}" data-uid="${c.id}">
       <span class="box">${on?'✓':''}</span>
       <span class="mid">
         <span class="cn">${esc(c.name)} ${badge}</span>
-        <span class="margin">tech $${c.tech} · margin $${margin}</span>
+        ${marginLine}
       </span>
       <span class="price">$${c.price}</span>
     </button>`;
