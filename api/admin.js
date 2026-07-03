@@ -437,24 +437,30 @@ async function summary(req, res, db, auth) {
   const rangeStart = weekStart < monthStart ? weekStart : monthStart;
   const rangeEnd = weekEnd > monthEnd ? weekEnd : monthEnd;
 
-  // Today's jobs — for the "jobs scheduled today" line + counts. Always the real
-  // today, regardless of which week is being viewed.
-  const { data: today, error: e1 } = await fetchBookingRows(sel => db.from('bookings')
-    .select(sel)
-    .eq('business_id', biz.id)
-    .gte('scheduled_at', todayStart.toISOString())
-    .lt('scheduled_at', tomorrow.toISOString())
-    .order('scheduled_at', { ascending: true }));
-  if (e1) throw e1;
+  // One parallel wave for the always-needed reads: today's jobs (for the "jobs
+  // scheduled today" line + counts), the week/month revenue range, and the tech
+  // roster — three sequential round-trips collapsed into one.
+  const [
+    { data: today, error: e1 },
+    { data: rangeJobs, error: e2 },
+    { data: techs, error: e3 },
+  ] = await Promise.all([
+    fetchBookingRows(sel => db.from('bookings').select(sel)
+      .eq('business_id', biz.id)
+      .gte('scheduled_at', todayStart.toISOString())
+      .lt('scheduled_at', tomorrow.toISOString())
+      .order('scheduled_at', { ascending: true })),
+    db.from('bookings').select('price, scheduled_at, status')
+      .eq('business_id', biz.id)
+      .gte('scheduled_at', rangeStart.toISOString())
+      .lt('scheduled_at', rangeEnd.toISOString())
+      .in('status', ACTIVE_STATUSES),
+    db.from('technicians').select('id, name, phone, status, active')
+      .eq('business_id', biz.id).eq('active', true).order('name'),
+  ]);
+  if (e1) throw e1; if (e2) throw e2; if (e3) throw e3;
 
   // Revenue across the viewed week's union range, bucketed into week + month.
-  const { data: rangeJobs, error: e2 } = await db.from('bookings')
-    .select('price, scheduled_at, status')
-    .eq('business_id', biz.id)
-    .gte('scheduled_at', rangeStart.toISOString())
-    .lt('scheduled_at', rangeEnd.toISOString())
-    .in('status', ACTIVE_STATUSES);
-  if (e2) throw e2;
   const sum = (rows) => Math.round(rows.reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
   const inWindow = (rows, a, b) => rows.filter(r => { const t = new Date(r.scheduled_at); return t >= a && t < b; });
   // Average ticket — mean price of COMPLETED jobs this month (revenue ÷ jobs).
@@ -466,12 +472,6 @@ async function summary(req, res, db, auth) {
     avg_ticket: avgTicket,
   };
 
-  // Technicians + live status.
-  const { data: techs, error: e3 } = await db.from('technicians')
-    .select('id, name, phone, status, active')
-    .eq('business_id', biz.id).eq('active', true).order('name');
-  if (e3) throw e3;
-
   // Owner-only: REALIZED profit (revenue − tech payout − bracket cost) for the
   // viewed week and for TODAY (the real current Denver day, independent of the
   // viewed week). Only money actually earned counts — a job contributes once it
@@ -479,79 +479,70 @@ async function summary(req, res, db, auth) {
   // margin data: gated on owner; never even computed for secretaries/techs.
   let profit = null;
   if (auth.role === 'owner') {
-    const { data: pjobs } = await fetchBookingRows(sel => db.from('bookings')
-      .select(sel)
-      .eq('business_id', biz.id)
-      .gte('scheduled_at', rangeStart.toISOString())
-      .lt('scheduled_at', rangeEnd.toISOString())
-      .order('scheduled_at', { ascending: true }));
+    // One parallel wave for every owner-only read: this business's week/month
+    // jobs, yesterday's jobs, the business list, and this business's travel-payout
+    // map (fetched ONCE and shared across all the economics below).
+    const yStart = localDayStartUTC(tz, -1);
+    const [{ data: pjobs }, { data: yRows }, { data: allBiz }, travelBiz] = await Promise.all([
+      fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', biz.id)
+        .gte('scheduled_at', rangeStart.toISOString())
+        .lt('scheduled_at', rangeEnd.toISOString())
+        .order('scheduled_at', { ascending: true })),
+      fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', biz.id)
+        .gte('scheduled_at', yStart.toISOString())
+        .lt('scheduled_at', todayStart.toISOString())),
+      db.from('businesses').select('id, slug, name, timezone').eq('active', true),
+      travelPayoutMap(db, biz.id),
+    ]);
 
     const earned = (rows) => (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    // Profit for a set of THIS business's rows — economics computed in memory,
+    // reusing the already-fetched travel-payout map so there's no extra query.
     const sumProfit = async (rows) => {
-      const e = await computeJobEconomics(db, biz, rows, true);
+      const e = await computeJobEconomics(db, biz, rows, true, travelBiz);
       return rows.reduce((n, b) => n + (Number(e[b.id]?.profit) || 0), 0);
     };
+    // Per-business travel-payout map cache (this business already fetched), so the
+    // cross-business loops never refetch the same map.
+    const travelCache = new Map([[biz.id, travelBiz]]);
+    const travelMapFor = async (bb) => {
+      if (travelCache.has(bb.id)) return travelCache.get(bb.id);
+      const m = await travelPayoutMap(db, bb.id);
+      travelCache.set(bb.id, m);
+      return m;
+    };
 
-    // Profit this week — completed+paid jobs scheduled within the viewed week.
-    const paidDoneWeek = earned(pjobs).filter(b => {
-      const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd;
-    });
-    // Profit today — completed+paid jobs on the real current Denver day.
+    // Row sets (pure filters over the already-fetched jobs — no queries).
+    const paidDoneWeek = earned(pjobs).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
     const paidDoneToday = earned(today);
-
-    const pWeek  = await sumProfit(paidDoneWeek);
-    const pToday = await sumProfit(paidDoneToday);
-    // Profit yesterday (this business) — powers the Profit box's Today/Yesterday toggle.
-    const yStart = localDayStartUTC(tz, -1);
-    const { data: yRows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
-      .eq('business_id', biz.id)
-      .gte('scheduled_at', yStart.toISOString())
-      .lt('scheduled_at', todayStart.toISOString()));
-    const pYesterday = await sumProfit(earned(yRows));
-    profit = { week: Math.round(pWeek), today: Math.round(pToday), yesterday: Math.round(pYesterday) };
-
-    // Predicted income this week — projected profit if EVERY job scheduled this
-    // week (any active status) were completed AND paid. Unlike `week` (realized:
-    // completed+paid only), this includes upcoming/unpaid jobs, so it grows the
-    // moment a job is added to the week's schedule. Per the viewed business.
     const weekAllJobs = (pjobs || []).filter(b => {
       const t = new Date(b.scheduled_at);
       return t >= weekStart && t < weekEnd && ACTIVE_STATUSES.includes(b.status);
     });
-    profit.week_predicted = Math.round(await sumProfit(weekAllJobs));
 
-    // Net daily profit — TODAY's realized profit across ALL active businesses,
-    // combined. It's a company-wide figure, so it reads the same on either
-    // dashboard. Reuse this business's already-fetched `today` rows; fetch the
-    // others by their own local day.
-    const { data: allBiz } = await db.from('businesses')
-      .select('id, slug, name, timezone').eq('active', true);
-
-    // Per-business profit THIS WEEK (for the split "Profit this week" box). Same
-    // viewed-week window for every company; realized profit only (completed+paid).
-    const weekBySlug = {};
-    for (const bb of (allBiz || [])) {
-      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
-        .eq('business_id', bb.id)
-        .gte('scheduled_at', weekStart.toISOString())
-        .lt('scheduled_at', weekEnd.toISOString()));
-      const paid = earned(rows);
-      const e = await computeJobEconomics(db, bb, paid, true);
-      weekBySlug[bb.slug] = Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0));
-    }
-    profit.week_by_slug = weekBySlug;
-
-    // Per-business AVG TICKET: a 7-day daily sparkline + this-week vs last-week %
-    // change. Completed jobs only; empty days are null (skipped in the line).
+    // Sparkline windows for the per-business avg-ticket box (pure).
     const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
     const dayWins = [];
     for (let i = 6; i >= 0; i--) dayWins.push([localDayStartUTC(tz, -i), localDayStartUTC(tz, -i + 1)]);
     const atStart = new Date(Math.min(lastWeekStart.getTime(), dayWins[0][0].getTime()));
     const atEnd = new Date(Math.max(weekEnd.getTime(), localDayStartUTC(tz, 1).getTime()));
-    const avgBySlug = {};
-    for (const bb of (allBiz || [])) {
-      const { data: rows } = await db.from('bookings')
-        .select('price, scheduled_at')
+
+    // Per-business realized profit THIS WEEK (parallel across businesses).
+    const weekBySlugP = Promise.all((allBiz || []).map(async (bb) => {
+      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', bb.id)
+        .gte('scheduled_at', weekStart.toISOString())
+        .lt('scheduled_at', weekEnd.toISOString()));
+      const paid = earned(rows);
+      const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
+      return [bb.slug, Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
+    }));
+
+    // Per-business AVG TICKET sparkline + this-week vs last-week % (parallel).
+    const avgBySlugP = Promise.all((allBiz || []).map(async (bb) => {
+      const { data: rows } = await db.from('bookings').select('price, scheduled_at')
         .eq('business_id', bb.id)
         .gte('scheduled_at', atStart.toISOString())
         .lt('scheduled_at', atEnd.toISOString())
@@ -565,15 +556,13 @@ async function summary(req, res, db, auth) {
       const wk = avgIn(weekStart, weekEnd);
       const lw = avgIn(lastWeekStart, weekStart);
       const pct = (wk != null && lw != null && lw > 0) ? Math.round(((wk - lw) / lw) * 100) : null;
-      avgBySlug[bb.slug] = { spark, week: wk, last_week: lw, pct };
-    }
-    profit.avg_by_slug = avgBySlug;
+      return [bb.slug, { spark, week: wk, last_week: lw, pct }];
+    }));
 
     // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
-    // ALL active businesses, each measured in its OWN local day.
+    // ALL active businesses (each in its OWN local day), parallel across businesses.
     const netDailyFor = async (offset) => {
-      let net = 0;
-      for (const bb of (allBiz || [])) {
+      const parts = await Promise.all((allBiz || []).map(async (bb) => {
         let rows;
         if (offset === 0 && bb.id === biz.id) {
           rows = today;   // reuse this business's already-fetched today rows
@@ -586,50 +575,80 @@ async function summary(req, res, db, auth) {
             .lt('scheduled_at', d1.toISOString())));
         }
         const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
-        if (!paidDone.length) continue;
-        const e = await computeJobEconomics(db, bb, paidDone, true);
-        net += paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
-      }
-      return Math.round(net);
+        if (!paidDone.length) return 0;
+        const e = await computeJobEconomics(db, bb, paidDone, true, await travelMapFor(bb));
+        return paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
+      }));
+      return Math.round(parts.reduce((a, b) => a + b, 0));
     };
-    profit.net_daily = await netDailyFor(0);
-    profit.net_daily_yesterday = await netDailyFor(-1);
+
+    // All of the above are independent — resolve them concurrently.
+    const [pWeek, pToday, pYesterday, pPredicted, weekBySlug, avgBySlug, net_daily, net_daily_yesterday] = await Promise.all([
+      sumProfit(paidDoneWeek),
+      sumProfit(paidDoneToday),
+      sumProfit(earned(yRows)),
+      sumProfit(weekAllJobs),
+      weekBySlugP,
+      avgBySlugP,
+      netDailyFor(0),
+      netDailyFor(-1),
+    ]);
+
+    profit = {
+      week: Math.round(pWeek),
+      today: Math.round(pToday),
+      yesterday: Math.round(pYesterday),
+      week_predicted: Math.round(pPredicted),
+      week_by_slug: Object.fromEntries(weekBySlug),
+      avg_by_slug: Object.fromEntries(avgBySlug),
+      net_daily,
+      net_daily_yesterday,
+    };
   }
 
-  // Photos flagged "To Post" (the social-media queue) for this business. Safe
-  // even before the 0043 migration — the status column exists (0026); 'to_post'
-  // simply yields 0 until photos are categorized. Never let a photo-count hiccup
-  // break the whole dashboard summary.
-  let photosToPost = 0;
-  try {
-    const { count, error } = await db.from('booking_photos')
-      .select('id', { count: 'exact', head: true })
-      .eq('business_id', biz.id).eq('status', 'to_post');
-    if (!error) photosToPost = count || 0;
-  } catch { /* status column absent or transient — treat as 0 */ }
-
-  // ── Critical alerts: upcoming, not-yet-completed jobs with NO usable street
-  // address (missing, or an email/phone typed into the address box). The tech
-  // can't find the house, so the office must call the customer. Auto-clears once
-  // the job is completed (excluded below) or the address is fixed.
-  const ALERT_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress'];
-  let address_alerts = [];
-  try {
-    const { data: aRows } = await db.from('bookings')
-      .select('id, scheduled_at, address_line1, service_area_id, customer:customers ( name, phone )')
-      .eq('business_id', biz.id)
-      .gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
-      .in('status', ALERT_STATUSES)
-      .order('scheduled_at', { ascending: true }).limit(300);
-    for (const b of (aRows || [])) {
-      if (isLikelyStreetAddress(b.address_line1)) continue;
-      const atz = await areaTimezone(db, b.service_area_id, tz);
-      const d = new Date(b.scheduled_at);
-      const day = new Intl.DateTimeFormat('en-US', { timeZone: atz, weekday: 'short', month: 'short', day: 'numeric' }).format(d);
-      const time = slotTimeLabel(atz, b.scheduled_at) || new Intl.DateTimeFormat('en-US', { timeZone: atz, hour: 'numeric', minute: '2-digit' }).format(d);
-      address_alerts.push({ id: b.id, name: b.customer?.name || 'Customer', phone: b.customer?.phone || null, when: `${day}, ${time}` });
-    }
-  } catch (e) { console.warn('[admin] address alerts failed:', e.message); }
+  // Photos "To Post" + address alerts are independent — fetch them concurrently.
+  const [photosToPost, address_alerts] = await Promise.all([
+    // Photos flagged "To Post" (the social-media queue) for this business. Safe
+    // even before the 0043 migration — the status column exists (0026); 'to_post'
+    // simply yields 0 until photos are categorized. Never let a photo-count hiccup
+    // break the whole dashboard summary.
+    (async () => {
+      try {
+        const { count, error } = await db.from('booking_photos')
+          .select('id', { count: 'exact', head: true })
+          .eq('business_id', biz.id).eq('status', 'to_post');
+        return error ? 0 : (count || 0);
+      } catch { return 0; }
+    })(),
+    // ── Critical alerts: upcoming, not-yet-completed jobs with NO usable street
+    // address (missing, or an email/phone typed into the address box). The tech
+    // can't find the house, so the office must call the customer. Auto-clears once
+    // the job is completed (excluded below) or the address is fixed.
+    (async () => {
+      const ALERT_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress'];
+      const out = [];
+      try {
+        const { data: aRows } = await db.from('bookings')
+          .select('id, scheduled_at, address_line1, service_area_id, customer:customers ( name, phone )')
+          .eq('business_id', biz.id)
+          .gte('scheduled_at', localDayStartUTC(tz, 0).toISOString())
+          .in('status', ALERT_STATUSES)
+          .order('scheduled_at', { ascending: true }).limit(300);
+        // Resolve each DISTINCT service-area timezone once (was a query per row).
+        const tzCache = new Map();
+        const tzFor = async (id) => { const k = String(id || ''); if (tzCache.has(k)) return tzCache.get(k); const v = await areaTimezone(db, id, tz); tzCache.set(k, v); return v; };
+        for (const b of (aRows || [])) {
+          if (isLikelyStreetAddress(b.address_line1)) continue;
+          const atz = await tzFor(b.service_area_id);
+          const d = new Date(b.scheduled_at);
+          const day = new Intl.DateTimeFormat('en-US', { timeZone: atz, weekday: 'short', month: 'short', day: 'numeric' }).format(d);
+          const time = slotTimeLabel(atz, b.scheduled_at) || new Intl.DateTimeFormat('en-US', { timeZone: atz, hour: 'numeric', minute: '2-digit' }).format(d);
+          out.push({ id: b.id, name: b.customer?.name || 'Customer', phone: b.customer?.phone || null, when: `${day}, ${time}` });
+        }
+      } catch (e) { console.warn('[admin] address alerts failed:', e.message); }
+      return out;
+    })(),
+  ]);
 
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: tz },
@@ -732,8 +751,10 @@ function bracketHardwareCost(lineItems, hasJuan) {
   return total;
 }
 
-async function computeJobEconomics(db, biz, rows, includePay) {
-  const travelPayoutByZip = includePay ? await travelPayoutMap(db, biz.id) : null;
+async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) {
+  // Callers that compute economics for many row sets of the SAME business pass a
+  // pre-fetched travel-payout map so we don't re-query it every time.
+  const travelPayoutByZip = includePay ? (travelMap || await travelPayoutMap(db, biz.id)) : null;
   const out = {};
   for (const b of rows) {
     const cost = Number(b.price) || 0;
