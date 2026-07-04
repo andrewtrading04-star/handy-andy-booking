@@ -3626,6 +3626,20 @@ function paintReviewCalls(){
   const badge=document.getElementById('rcBadge');
   if(badge){ if(toCall>0){ badge.textContent=toCall; badge.style.display=''; } else badge.style.display='none'; }
 }
+// What to show in a review-call card's 🛒 summary: the actual work Joey can
+// reference on the call — TV sizes, handyman, Assurion, and priced add-ons
+// (soundbar, wire concealment, LED, dismount…). Everything else is noise: tax
+// and fees, plus the $0 configuration answers (TV type "Regular TV", bracket
+// choice, fireplace/surface/lifting answers) that clutter the line with no
+// meaning for the call.
+function rcRelevantItem(li){
+  if(!li) return false;
+  const n=String(li.name||'').toLowerCase();
+  if(/\btax\b|\btip\b|\bcoupon\b|\bfee\b|service area surcharge|service\s*minimum|after.?hours/.test(n)) return false;
+  if(tvSizeIndex(li.name)>=0) return true;               // TV size — always
+  if(/handyman|assurion/.test(n)) return true;           // handyman / Assurion — always
+  return Number(li.price)>0;                             // priced add-ons; drops $0 config lines
+}
 function rcCard(r){
   const biz = r.business_slug==='doms' ? `<span class="rc-biz doms">Dom's</span>` : `<span class="rc-biz ha">Handy Andy</span>`;
   const badges=[];
@@ -3637,8 +3651,10 @@ function rcCard(r){
   const callBtn=tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`;
   const resend=(r.has_email && r.has_review_link)
     ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
-  // What the customer purchased, so Joey can reference it on the call.
-  const items=Array.isArray(r.line_items)?r.line_items:[];
+  // What the customer purchased, so Joey can reference it on the call — filtered
+  // to the real work (TVs, handyman, Assurion, priced add-ons); tax and $0 config
+  // answers are dropped as noise.
+  const items=(Array.isArray(r.line_items)?r.line_items:[]).filter(rcRelevantItem);
   const itemsRow=items.length
     ? `<div class="rc-items">🛒 ${items.slice(0,8).map(li=>esc(liCleanLabel(li.name))+(li.qty>1?` ×${li.qty}`:'')).join(' · ')}${items.length>8?' …':''}</div>` : '';
   // Middle of the card is either the outcome buttons or (if selected) the complaint note form.
