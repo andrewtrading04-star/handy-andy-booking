@@ -4714,7 +4714,9 @@ function greetStatsHtml(){
       `<div class="ndp-seg"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div>`+
       `<span class="gstat-s" style="margin-top:1px;">Both companies combined</span></div>` : '';
   return `<div class="greet-stats">`+
-    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span></div>`+
+    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span>`+
+      (r.payouts ? `<span class="gstat-s" style="margin-top:2px;">${money(r.payouts.total)} upcoming payout</span>` : '')+
+    `</div>`+
     `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span></div>`+
     avgTicketBoxHtml(pf, r)+
     profitCards+

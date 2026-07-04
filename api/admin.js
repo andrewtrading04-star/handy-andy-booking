@@ -22,7 +22,7 @@ import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, upcomingPayoutBySlug } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
@@ -557,6 +557,21 @@ async function summary(req, res, db, auth) {
       net_daily,
       net_daily_yesterday,
     };
+
+    // Upcoming Stripe payout across BOTH businesses — the "Expected <date>" figure
+    // from each Stripe account's Payouts box, combined. Owner-only + best-effort:
+    // a Stripe hiccup leaves it null and the Revenue box simply omits the line.
+    try {
+      const pay = await upcomingPayoutBySlug(['handy-andy', 'doms']);
+      const ha = pay['handy-andy'], dm = pay['doms'];
+      if (ha != null || dm != null) {
+        revenue.payouts = {
+          total: (Number(ha) || 0) + (Number(dm) || 0),
+          handy_andy: ha,
+          doms: dm,
+        };
+      }
+    } catch (e) { console.warn('[admin] payout summary failed:', e.message); }
   }
 
   // Photos "To Post" + address alerts are independent — fetch them concurrently.
