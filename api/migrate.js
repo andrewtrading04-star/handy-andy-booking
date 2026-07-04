@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
+import { businessSecretKey } from './_lib/stripe.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -476,6 +477,35 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const action = (req.query.action || '').toString();
+
+  // TEMP payout diagnostic — token-gated; remove after reading live Stripe data.
+  // Dumps each account's balance (available/pending) + recent payout objects so
+  // we can build the Revenue-box figure to match Stripe's "Expected" number.
+  if (action === 'diag_payout') {
+    if ((req.query.t || '') !== 'a9a9ac01bbde1977f47345ca67301f44e67125675a888c1e') {
+      return res.status(401).json({ error: 'nope' });
+    }
+    const out = {};
+    for (const slug of ['handy-andy', 'doms']) {
+      const key = businessSecretKey({ slug });
+      if (!key) { out[slug] = { configured: false }; continue; }
+      const call = async (p) => {
+        const r = await fetch('https://api.stripe.com/v1' + p, { headers: { Authorization: `Bearer ${key}` } });
+        return { http: r.status, body: await r.json().catch(() => ({})) };
+      };
+      try {
+        const bal = await call('/balance');
+        const pos = await call('/payouts?limit=6');
+        out[slug] = {
+          available: (bal.body.available || []).map(a => ({ c: a.currency, amount: a.amount })),
+          pending: (bal.body.pending || []).map(a => ({ c: a.currency, amount: a.amount })),
+          payouts: (pos.body.data || []).map(p => ({ status: p.status, amount: p.amount, arrival_date: p.arrival_date, automatic: p.automatic })),
+          payouts_error: pos.body.error ? pos.body.error.message : undefined,
+        };
+      } catch (e) { out[slug] = { error: e.message }; }
+    }
+    return res.status(200).json(out);
+  }
 
   // One-time Doms Zenbooker import. Secured by IMPORT_SECRET (so it can be
   // triggered from a browser URL), NOT the admin bearer token.
