@@ -529,7 +529,12 @@
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
-  .greet-stats{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:1fr;gap:10px;margin-top:14px;}
+  /* Row 1 (revenue/predicted/avg-ticket) stays equal-height, sized by the chart;
+     row 2 (the profit trio) sizes to its OWN, shorter content instead of being
+     stretched up to match the chart. */
+  .greet-stats{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:auto;gap:10px;margin-top:14px;}
+  .greet-stats > .gstat:nth-child(-n+3){height:100%;}
+  .greet-stats > .gstat:nth-child(n+4){padding-top:9px;padding-bottom:9px;}
   .gstat{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);
     border-radius:11px;padding:12px 11px;display:flex;flex-direction:column;gap:5px;min-width:0;overflow:hidden;}
   .gstat-l{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;opacity:.74;font-weight:800;}
