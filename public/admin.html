@@ -548,6 +548,10 @@
   .ndp-seg button.on{background:var(--gaccent,#FF6B35);color:#fff;}
   .gstat-link{cursor:pointer;transition:background .15s;}
   .gstat-link:hover{background:rgba(255,255,255,.18);}
+  .greet-calls{display:inline-flex;align-items:center;gap:9px;background:#fff;color:#0A1628;font-weight:800;font-size:15px;padding:10px 15px;border-radius:12px;margin:10px 0 4px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22);}
+  .greet-calls .gc-n{color:#16a34a;font-size:17px;font-weight:900;white-space:nowrap;}
+  .greet-calls .gc-cta{font-size:12.5px;font-weight:700;color:#2563eb;margin-left:2px;}
+  .greet-calls:hover{background:#f4f7fb;}
   /* Temporary note inside the greeting banner (auto-expires) */
   /* Critical alert (e.g. a job with no address) — impossible to miss, all roles. */
   .crit-alert{background:#b91c1c;border:2px solid #ff6b6b;border-radius:12px;padding:14px 16px;margin:0 0 14px;color:#fff;animation:critpulse 1.4s ease-in-out infinite;}
@@ -4412,12 +4416,14 @@ async function renderGreeting(){
     const reqs=[
       api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }}),
       refreshEstimateBadge(),
+      // How many review calls Joey has to make (cross-business, yesterday's jobs).
+      api('review_calls',{ params:{ days:1 }}).catch(()=>({counts:{}})),
     ];
     // Owner: also check for pending brackets
     if(role==='owner'){
       reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
     }
-    const [s,newEst,...rest]=await Promise.all(reqs);
+    const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
@@ -4430,8 +4436,10 @@ async function renderGreeting(){
       revenue: s.revenue || null,
       profit: s.profit || null,
       addressAlerts: s.address_alerts || [],
+      reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
     };
     paintGreeting();
+    { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
     if(section==='schedule') el.classList.remove('hidden');
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
@@ -4501,6 +4509,7 @@ function paintGreeting(){
   el.innerHTML=
     addressAlertHtml()+
     `<div class="greet-hi">${hi}</div>`+
+    phoneCallsHtml()+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
     `<div class="greet-line">${jobsClause}, ${estClause}, and ${photoClause}${bracketsTxt}.</div>`+
     greetStatsHtml()+
@@ -4521,6 +4530,8 @@ function paintGreeting(){
     const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-pv]').forEach(b=>b.classList.toggle('on', b.dataset.pv===profitView));
   }));
+  const callsLink=el.querySelector('[data-gocalls]');
+  if(callsLink) callsLink.addEventListener('click',()=>navTo('reviewcalls'));
   const estLink=el.querySelector('[data-goest]');
   if(estLink) estLink.addEventListener('click',()=>navTo('estimates'));
   const photoLink=el.querySelector('[data-gophotos]');
@@ -4532,6 +4543,13 @@ function paintGreeting(){
 // passes. Set to a { for, text, expires } object to show one; null = no note.
 // NOTE: `expires` must be an exact 24h-out timestamp from when it goes live, or
 // it will linger past the "disappears in 24 hours" promise in the text.
+// "N phone calls to make" — Joey's review-call queue count, prominent at the top
+// of the dashboard. Clickable → the Review Calls tab. Hidden at zero.
+function phoneCallsHtml(){
+  const n=(greetingData&&greetingData.reviewCalls)||0;
+  if(!n) return '';
+  return `<div class="greet-calls" data-gocalls="1"><span class="gc-n">📞 ${n}</span> phone call${n===1?'':'s'} to make <span class="gc-cta">Open Review Calls →</span></div>`;
+}
 const GREET_NOTE = null;
 function greetNoteHtml(){
   try{
