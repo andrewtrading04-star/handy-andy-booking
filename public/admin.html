@@ -4557,37 +4557,55 @@ function greetNoteHtml(){
 // Profit is owner-only and server-gated; "today" is always the current Denver
 // date regardless of which week is on the schedule. Net daily profit sums TODAY's
 // realized profit across every active business, so it reads the same on either.
-// Build an SVG polyline path from values; nulls BREAK the line (empty days are
-// skipped). Shared min/max lets two series share one vertical scale.
-function sparkD(vals, w, h, min, max){
-  const n=vals.length; const span=(max-min)||1, pad=3; let d='', pen=false;
-  for(let i=0;i<n;i++){ const v=vals[i]; if(v==null){ pen=false; continue; }
-    const x=n>1?(i/(n-1))*w:w/2;
-    const y=h-pad-((v-min)/span)*(h-2*pad);
-    d+=(pen?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '; pen=true; }
-  return d.trim();
+// 7-day avg-ticket chart shared by both businesses: two lines on ONE vertical
+// scale (Dom's blue / Handy Andy orange), a dot per day, a faint $ min/max scale,
+// weekday labels, and each business's current weekly figure printed at its line's
+// end. Fixed height so it can't balloon on wide screens — the line stretches
+// horizontally (non-scaling stroke) while the dots/labels are HTML positioned by
+// percentage, so nothing ever distorts. spark[0..6] runs oldest→today.
+function avgTicketChart(series, mn, mx){
+  const H=72, padY=12, GUT=44, n=7;
+  const yPx=v=>padY+(H-2*padY)*(1-(v-mn)/(mx-mn));
+  const WD=['S','M','T','W','T','F','S'], now=new Date(), days=[];
+  for(let i=0;i<n;i++){ const d=new Date(now); d.setDate(now.getDate()-(n-1-i)); days.push(WD[d.getDay()]); }
+  const path=sp=>{ let d='',pen=false; (sp||[]).forEach((v,i)=>{ if(v==null){pen=false;return;}
+    const x=(i/(n-1))*100, y=yPx(v); d+=(pen?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '; pen=true; }); return d.trim(); };
+  const lines=series.map(s=>{ const p=path(s.d.spark); return p?`<path d="${p}" fill="none" stroke="${s.color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`:''; }).join('');
+  const dots=series.map(s=>(s.d.spark||[]).map((v,i)=> v==null?'':`<span style="position:absolute;left:${(i/(n-1)*100).toFixed(2)}%;top:${yPx(v).toFixed(1)}px;width:${i===n-1?'7':'5'}px;height:${i===n-1?'7':'5'}px;background:${s.color};border-radius:50%;transform:translate(-50%,-50%);"></span>`).join('')).join('');
+  const ends=series.map(s=>{ const sp=s.d.spark||[]; let li=-1; for(let i=n-1;i>=0;i--){ if(sp[i]!=null){li=i;break;} }
+    if(li<0) return null; return {color:s.color, y:yPx(sp[li]), val:(s.d.week!=null?s.d.week:sp[li])}; }).filter(Boolean);
+  if(ends.length===2 && Math.abs(ends[0].y-ends[1].y)<13){ const m=(ends[0].y+ends[1].y)/2, hi=ends[0].y<=ends[1].y?0:1; ends[hi].y=m-7; ends[1-hi].y=m+7; }
+  const endLbl=ends.map(e=>`<span style="position:absolute;right:2px;top:${e.y.toFixed(1)}px;transform:translateY(-50%);color:${e.color};font-size:12px;font-weight:800;letter-spacing:-.02em;">${money(e.val)}</span>`).join('');
+  const dayRow=days.map((d,i)=>`<span style="position:absolute;left:${(i/(n-1)*100).toFixed(2)}%;transform:translateX(-50%);">${d}</span>`).join('');
+  return `<div style="position:relative;height:${H}px;margin:4px 0 0;font-variant-numeric:tabular-nums;">`+
+      `<div style="position:absolute;left:0;top:0;right:${GUT}px;bottom:0;">`+
+        `<svg viewBox="0 0 100 ${H}" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;">`+
+          `<line x1="0" y1="${padY}" x2="100" y2="${padY}" stroke="#fff" stroke-opacity=".12" vector-effect="non-scaling-stroke"/>`+
+          `<line x1="0" y1="${H-padY}" x2="100" y2="${H-padY}" stroke="#fff" stroke-opacity=".12" vector-effect="non-scaling-stroke"/>`+
+          lines+
+        `</svg>`+
+        `<span style="position:absolute;left:1px;top:${padY}px;transform:translateY(-50%);font-size:8px;opacity:.5;">${money(mx)}</span>`+
+        `<span style="position:absolute;left:1px;top:${H-padY}px;transform:translateY(-50%);font-size:8px;opacity:.5;">${money(mn)}</span>`+
+        dots+
+      `</div>`+
+      endLbl+
+    `</div>`+
+    `<div style="position:relative;height:11px;margin:1px ${GUT}px 0 0;font-size:8px;opacity:.5;">${dayRow}</div>`;
 }
-// Redesigned "Avg ticket" box: a 7-day daily sparkline (Dom's blue / Handy Andy
-// orange) plus this-week-vs-last-week % change per company (green up / red down).
+// "Avg ticket" box: the 7-day chart above, plus a per-business legend line with
+// this-week average and the week-over-week % change (green up / red down).
 function avgTicketBoxHtml(pf, r){
   const abs = pf && pf.avg_by_slug;
   if(!abs) return `<div class="gstat"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money((r&&r.avg_ticket)||0)}</span><span class="gstat-s">per job this month</span></div>`;
   const doms=abs.doms||{}, ha=abs['handy-andy']||{};
   const pts=[...(doms.spark||[]),...(ha.spark||[])].filter(v=>v!=null);
-  const min=pts.length?Math.min(...pts):0, max=pts.length?Math.max(...pts):1;
-  const svg = pts.length
-    ? `<svg viewBox="0 0 100 26" preserveAspectRatio="none" style="width:100%;height:26px;margin:3px 0;display:block;overflow:visible;">`+
-        `<path d="${sparkD(doms.spark||[],100,26,min,max)}" fill="none" stroke="#60a5fa" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`+
-        `<path d="${sparkD(ha.spark||[],100,26,min,max)}" fill="none" stroke="#FF8A5C" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`+
-      `</svg>`
-    : `<div class="gstat-s" style="margin:4px 0;">No completed jobs in the last 7 days.</div>`;
-  const row=(label,color,d)=>{
-    const pct=(d&&d.pct);
-    const p = (pct==null) ? `<span style="opacity:.45;">—</span>`
-      : `<span style="color:${pct>=0?'#4ade80':'#f87171'};font-weight:800;">${pct>=0?'▲':'▼'}${Math.abs(pct)}%</span>`;
-    return `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.55;"><span style="color:${color};font-weight:800;">${esc(label)}</span><span style="font-weight:800;margin-left:auto;">${money((d&&d.week)||0)}</span>${p}</div>`;
-  };
-  return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span>${svg}${row("Dom's","#60a5fa",doms)}${row('Handy Andy','#FF8A5C',ha)}</div>`;
+  if(!pts.length) return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span><div class="gstat-s" style="margin:4px 0;">No completed jobs in the last 7 days.</div></div>`;
+  let mn=Math.min(...pts), mx=Math.max(...pts); if(mx===mn){ mx+=1; mn-=1; }
+  const chartSeries=[{label:"Dom's",color:'#60a5fa',d:doms},{label:'Handy Andy',color:'#FF8A5C',d:ha}];
+  const row=(s)=>{ const pct=s.d&&s.d.pct;
+    const p=(pct==null)?`<span style="opacity:.45;font-weight:700;">no change</span>`:`<span style="color:${pct>=0?'#4ade80':'#f87171'};font-weight:800;">${pct>=0?'▲':'▼'}${Math.abs(pct)}% vs last wk</span>`;
+    return `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.55;"><span style="color:${s.color};font-weight:800;">${esc(s.label)}</span><span style="margin-left:auto;">${p}</span></div>`; };
+  return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span>${avgTicketChart(chartSeries, mn, mx)}${chartSeries.map(row).join('')}</div>`;
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
