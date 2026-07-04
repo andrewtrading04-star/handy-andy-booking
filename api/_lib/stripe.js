@@ -158,29 +158,31 @@ export async function submitDisputeEvidence(disputeId, evidence, sel = null, sub
   return stripe(`/disputes/${disputeId}`, { method: 'POST', slug, account, body: { evidence: clean, submit } });
 }
 
-// Upcoming Stripe payout per business — the "Expected <date>" figure shown in the
-// Stripe dashboard's Payouts box. Sums payouts still on their way to the bank
-// (status pending + in_transit) for each slug's account. Amounts are cents in
-// Stripe; we return whole dollars. Best-effort: a Stripe hiccup or missing key
-// yields null for that business (caller hides the line) rather than throwing, so
-// the dashboard never breaks over a payout read. A week has only a handful of
-// payouts, so one page (limit=100) per status is plenty.
+// Upcoming Stripe payout per business — the SINGLE "Expected <date>" figure shown
+// in the Stripe dashboard's Payouts box (e.g. "$14,512.37 Expected Jul 7"). That
+// is the one next payout still heading to the bank, NOT a sum of history.
+//
+// Stripe returns payouts newest-first, so we take the most recent payout whose
+// status is pending or in_transit and use THAT one payout's amount. We filter
+// client-side (never trust the amount to a server-side status query) and never
+// add payouts together, so the number always matches what Stripe shows. Amounts
+// are cents in Stripe; we return whole dollars. Best-effort: a Stripe hiccup or
+// missing key yields null for that business (the caller hides the line) rather
+// than throwing, so the dashboard never breaks over a payout read.
 export async function upcomingPayoutBySlug(slugs) {
   const out = {};
   for (const slug of slugs || []) {
     const key = businessSecretKey({ slug });
     if (!key) { out[slug] = null; continue; }
     try {
-      let cents = 0;
-      for (const status of ['pending', 'in_transit']) {
-        const res = await fetch(`${STRIPE_API}/payouts?status=${status}&limit=100`, {
-          headers: { Authorization: `Bearer ${key}` },
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) { console.warn('[stripe payouts]', slug, (data && data.error && data.error.message) || res.status); continue; }
-        for (const p of (data.data || [])) cents += Number(p.amount || 0);
-      }
-      out[slug] = Math.round(cents) / 100;
+      const res = await fetch(`${STRIPE_API}/payouts?limit=10`, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { console.warn('[stripe payouts]', slug, (data && data.error && data.error.message) || res.status); out[slug] = null; continue; }
+      // Newest payout that hasn't landed yet = the "Expected" one. One payout, not a sum.
+      const next = (data.data || []).find(p => p.status === 'pending' || p.status === 'in_transit');
+      out[slug] = next ? Math.round(Number(next.amount || 0)) / 100 : 0;
     } catch (e) {
       console.warn('[stripe payouts]', slug, e.message);
       out[slug] = null;
