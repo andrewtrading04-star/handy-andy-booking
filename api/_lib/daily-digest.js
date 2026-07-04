@@ -35,15 +35,27 @@ function fmtWhen(iso, tz) {
 export async function sendDailyBookingDigest({ force = false, dryRun = false } = {}) {
   try {
     const hour = denverHour();
-    if (!force && hour !== 20) return { skipped: 'not 8 PM Denver', denverHour: hour };
+    // Which Denver day's digest is due right now? Robust to GitHub-cron delays,
+    // which routinely slip an on-time 02:00/03:00 UTC run by hours (that's why an
+    // exact "hour === 20" gate silently missed some nights): send tonight's from
+    // 8 PM on, and if a run only lands after midnight, still send YESTERDAY's as a
+    // catch-up. The Resend idempotency key (below) keys on the evening being
+    // summarized, so the extra hourly attempts deliver exactly one email per day.
+    let offset;
+    if (force) offset = 0;
+    else if (hour >= 20) offset = 0;        // this evening (8 PM–midnight Denver)
+    else if (hour < 8)   offset = -1;       // overnight — catch up a delayed run
+    else return { skipped: `not evening (Denver hour ${hour})`, denverHour: hour };
+
     if (!emailNotificationsOn()) return { skipped: 'notifications off' };
     const cfg = emailConfig('handy-andy');
     if (!cfg.apiKey) return { skipped: 'no email API key' };
     const to = process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com';
 
     const db = serviceClient();
-    const start = localDayStartUTC(DIGEST_TZ, 0);   // 00:00 Denver today (UTC)
-    const end   = localDayStartUTC(DIGEST_TZ, 1);   // 00:00 Denver tomorrow (UTC)
+    const start = localDayStartUTC(DIGEST_TZ, offset);       // 00:00 Denver of the target day
+    const end   = localDayStartUTC(DIGEST_TZ, offset + 1);   // 00:00 Denver the next day
+    const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: DIGEST_TZ }).format(start); // YYYY-MM-DD of target day
 
     // Everything BOOKED (created) during today's Denver day, any business, minus
     // cancellations.
@@ -77,7 +89,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false } =
 
     const money = (n) => '$' + (Number(n) || 0).toFixed(2);
     const total = bookings.reduce((s, b) => s + (Number(b.price) || 0), 0);
-    const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: DIGEST_TZ, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date());
+    const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: DIGEST_TZ, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(start);
 
     const rowsHtml = bookings.map(b => {
       const addr = [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
@@ -113,8 +125,9 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false } =
       slug: 'handy-andy', to,
       subject: `Daily booking summary — ${bookings.length} new appointment${bookings.length === 1 ? '' : 's'}`,
       html, replyTo: cfg.from,
+      idempotencyKey: `daily-digest-${dayKey}`,   // exactly one delivery per Denver day
     });
-    return { sent: true, count: bookings.length, to };
+    return { sent: true, count: bookings.length, to, dayKey };
   } catch (e) {
     console.warn('[daily-digest] non-fatal:', e.message);
     return { sent: false, error: e.message };

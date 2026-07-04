@@ -1,15 +1,16 @@
 name: Daily booking digest
 
 # ONE nightly summary email of every appointment booked that day (replaces the
-# per-booking "someone just booked" alerts). Fires at BOTH 02:00 and 03:00 UTC;
-# the endpoint only sends when it's 8 PM in Denver, so exactly one run mails —
-# correct across the MDT/MST daylight-saving shift.
-#   02:00 UTC = 8 PM MDT (summer)   03:00 UTC = 8 PM MST (winter)
+# per-booking "someone just booked" alerts). Runs HOURLY — GitHub's scheduled
+# runs are best-effort and routinely slip by hours, and a fixed 02:00/03:00 UTC
+# pair missed the 8 PM Denver window on late nights (no email at all). The
+# endpoint sends once/day: tonight's from 8 PM Denver on, with an overnight
+# catch-up if every evening run was delayed, and a Resend idempotency key so the
+# many hourly attempts deliver exactly one email — correct across MDT/MST.
 
 on:
   schedule:
-    - cron: '0 2 * * *'
-    - cron: '0 3 * * *'
+    - cron: '0 * * * *'   # every hour (UTC); the endpoint gates + dedupes
   workflow_dispatch:
     inputs:
       force:
@@ -28,6 +29,6 @@ jobs:
         run: |
           Q="action=daily_digest"
           if [ -n "$FORCE" ]; then Q="$Q&force=1"; fi
-          curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?$Q" \
+          curl -fsS --retry 3 --retry-delay 5 -X POST "https://handy-andy-booking.vercel.app/api/migrate?$Q" \
             -H "Authorization: Bearer $CRON_SECRET"
           echo ""

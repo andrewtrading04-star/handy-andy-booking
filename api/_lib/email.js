@@ -36,7 +36,7 @@ export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['hand
 // Returns { sent, skipped?, id?, error? } and never throws unless throwOnError.
 // `emailNotificationsOn()` is the email kill switch — while it is off, sends are
 // skipped (and logged) so nothing goes out before the accounts are approved.
-export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false }) {
+export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false, idempotencyKey = null }) {
   if (!emailNotificationsOn()) {
     console.log(`[email] notifications off; not sending "${subject}" to ${to}`);
     return { sent: false, skipped: 'notifications_off' };
@@ -51,10 +51,16 @@ export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError
   const payload = { from, to, subject, html };
   if (replyTo) payload.reply_to = replyTo;
 
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  // Resend dedupes POSTs that carry the same Idempotency-Key for 24h — so a job
+  // that legitimately fires more than once (e.g. a delay-tolerant hourly cron)
+  // delivers exactly one email.
+  if (idempotencyKey) headers['Idempotency-Key'] = String(idempotencyKey).slice(0, 256);
+
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
