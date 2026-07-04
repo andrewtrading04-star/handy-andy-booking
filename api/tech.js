@@ -13,6 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { smsNotificationsOn } from './_lib/notify.js';
+import { toE164, sendSMS } from './_lib/sms.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
@@ -60,43 +61,8 @@ async function fetchMine(build) {
   return r;
 }
 
-// ── SMS Helper ──────────────────────────────────────────────────────────────
-// Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
-function toE164(raw) {
-  if (!raw) return null;
-  let s = String(raw).trim();
-  if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
-  const d = s.replace(/\D/g, '');
-  if (d.length === 10) return `+1${d}`;
-  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
-  return d ? `+${d}` : null;
-}
-
-async function sendSMS(phoneNumber, message) {
-  if (!smsNotificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
-    console.warn('[SMS] Twilio not configured; message not sent:', message);
-    return;
-  }
-  const to = toE164(phoneNumber);
-  if (!to) { console.warn('[SMS] Unusable phone, not sent:', phoneNumber); return; }
-  const formData = new URLSearchParams();
-  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
-  formData.append('To', to);
-  formData.append('Body', message);
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-  try {
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
-      method: 'POST',
-      headers: { 'Authorization': `Basic ${auth}` },
-      body: formData,
-    });
-    if (!res.ok) { const t = await res.text().catch(()=> ''); throw new Error(`Twilio ${res.status}: ${t.slice(0,300)}`); }
-    console.log('[SMS] Sent to', to.slice(-4));
-  } catch (e) {
-    console.error('[SMS]', e.message);
-  }
-}
+// SMS sending (toE164 + sendSMS) now lives in ./_lib/sms.js — provider-agnostic
+// (SimpleTexting with Twilio fallback), still gated by smsNotificationsOn().
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.

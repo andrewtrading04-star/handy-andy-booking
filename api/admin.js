@@ -16,6 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
+import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
@@ -136,56 +137,6 @@ async function travelPayoutMap(db, businessId) {
 
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
-function toE164(raw) {
-  if (!raw) return null;
-  let s = String(raw).trim();
-  if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
-  const d = s.replace(/\D/g, '');
-  if (d.length === 10) return `+1${d}`;
-  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
-  return d ? `+${d}` : null;
-}
-
-// Low-level SMS send that REPORTS its outcome instead of swallowing it.
-// Returns { ok:true } or { ok:false, skipped?, error? } so callers that need to
-// tell the user why a text didn't go out (e.g. the Estimates tab) can surface a
-// real reason. `skipped` is a config/precondition miss; `error` is a live
-// Twilio failure (the message string is safe to show).
-async function sendSMSResult(phoneNumber, message) {
-  if (!smsNotificationsOn()) return { ok: false, skipped: 'notifications_off' };
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
-    return { ok: false, skipped: 'not_configured' };
-  }
-  const to = toE164(phoneNumber);
-  if (!to) return { ok: false, skipped: 'bad_phone' };
-  const formData = new URLSearchParams();
-  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
-  formData.append('To', to);
-  formData.append('Body', message);
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-  try {
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
-      method: 'POST',
-      headers: { 'Authorization': `Basic ${auth}` },
-      body: formData,
-    });
-    if (!res.ok) { const t = await res.text().catch(()=> ''); return { ok: false, error: `Twilio ${res.status}: ${t.slice(0,300)}` }; }
-    console.log('[SMS] Sent to', to.slice(-4));
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-// Fire-and-forget SMS for internal notifications (tech assigned, etc.). Keeps
-// the original swallow-and-log behavior so existing callers are unaffected.
-async function sendSMS(phoneNumber, message) {
-  const r = await sendSMSResult(phoneNumber, message);
-  if (r.ok) return;
-  if (r.error) console.error('[SMS]', r.error);
-  else console.warn(`[SMS] not sent (${r.skipped}):`, message);
-}
-
 // Display label for an internal note/photo authored from the dashboard.
 function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
 
@@ -358,7 +309,7 @@ async function login(req, res, body) {
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
   const config = {
     email: !!process.env.RESEND_API_KEY,
-    sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+    sms: smsConfigured(),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
     // Address autocomplete stays OFF until the Maps key is confirmed to have the
     // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel
@@ -384,7 +335,7 @@ async function sessionStatus(req, res) {
 
   const config = {
     email: !!process.env.RESEND_API_KEY,
-    sms: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER),
+    sms: smsConfigured(),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
     // Address autocomplete stays OFF until the Maps key is confirmed to have the
     // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel

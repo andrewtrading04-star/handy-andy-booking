@@ -12,6 +12,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
+import { sendSMS } from './_lib/sms.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
 
@@ -45,16 +46,8 @@ async function insertResilient(db, table, row, returning = 'id') {
   return { data: null, error: new Error(`insert into ${table} failed after stripping unknown columns`) };
 }
 
-// ── Twilio SMS (same shape as admin.js / tech.js) ────────────────────────────
-function toE164(raw) {
-  if (!raw) return null;
-  let s = String(raw).trim();
-  if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
-  const d = s.replace(/\D/g, '');
-  if (d.length === 10) return `+1${d}`;
-  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
-  return d ? `+${d}` : null;
-}
+// SMS sending (sendSMS) now lives in ./_lib/sms.js — provider-agnostic
+// (SimpleTexting with Twilio fallback), still gated by smsNotificationsOn().
 
 // Format a US phone number as "(222) 222-2222" for storage/display. Strips a
 // leading country code; leaves anything that isn't a 10-digit US number as-is
@@ -67,27 +60,6 @@ function formatPhoneUS(raw) {
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
-async function sendSMS(phoneNumber, message) {
-  if (!smsNotificationsOn()) { console.log('[SMS] notifications disabled; not sent:', message); return; }
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
-    console.warn('[SMS] Twilio not configured; message not sent:', message);
-    return;
-  }
-  const to = toE164(phoneNumber);
-  if (!to) { console.warn('[SMS] Unusable phone, not sent:', phoneNumber); return; }
-  const formData = new URLSearchParams();
-  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
-  formData.append('To', to);
-  formData.append('Body', message);
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-  try {
-    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
-      method: 'POST', headers: { Authorization: `Basic ${auth}` }, body: formData,
-    });
-    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`Twilio ${r.status}: ${t.slice(0, 300)}`); }
-    console.log('[SMS] estimate alert sent to', to.slice(-4));
-  } catch (e) { console.error('[SMS]', e.message); }
-}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
