@@ -941,7 +941,6 @@ function openChargeFlow(j){
     const st=document.createElement('style'); st.id='cfStyle';
     st.textContent=`
       .cf-ov{position:fixed;inset:0;z-index:9999;background:var(--navy);color:var(--ink);display:flex;flex-direction:column;}
-      .cf-ov.cf-land{inset:auto;top:0;left:0;width:100vh;height:100vw;transform-origin:top left;transform:translate(100vw,0) rotate(90deg);}
       .cf-tipcol{display:flex;flex-direction:column;gap:11px;max-width:560px;margin:0 auto;width:100%;}
       .cf-tiprow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
       .cf-preset{background:var(--orange);color:#fff;border:none;border-radius:12px;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-family:inherit;cursor:pointer;}
@@ -960,17 +959,8 @@ function openChargeFlow(j){
   document.body.appendChild(ov);
   document.body.style.overflow='hidden';
 
-  // Force the signature + tip steps to landscape so the customer gets a wide
-  // signing strip and big tip targets. Only rotate when the phone is held
-  // PORTRAIT — if it's already turned landscape we leave it (no double-rotate).
-  const mq=window.matchMedia('(orientation: portrait)');
-  const onOrient=()=>{ if(step===2||step===3) render(); };
-  if(mq.addEventListener) mq.addEventListener('change',onOrient); else if(mq.addListener) mq.addListener(onOrient);
-  const applyOrient=()=>{ ov.classList.toggle('cf-land', (step===2||step===3) && mq.matches); };
-
   const done=()=>{
     document.body.style.overflow='';
-    if(mq.removeEventListener) mq.removeEventListener('change',onOrient); else if(mq.removeListener) mq.removeListener(onOrient);
     ov.remove();
   };
 
@@ -992,23 +982,38 @@ function openChargeFlow(j){
         <button class="btn" data-next style="flex:2;">Continue to signature →</button>
       </div>`;
     } else if(step===2){
+      // Signing screen: fixed, NON-scrolling flex column so nothing scrolls under
+      // the finger. Name field is pinned above the canvas (always visible), and the
+      // canvas fills the remaining height — so touching it only ever draws, never
+      // fights a scroll region. Full legal text lives behind "View Terms" (still
+      // captured server-side at charge time regardless of what's shown here).
       ov.innerHTML=`
-      <div style="padding:22px;overflow:auto;flex:1;">
-        <h2 style="margin:0 0 4px;font-size:22px;">Authorize payment</h2>
-        <div style="font-size:24px;font-weight:800;margin:6px 0 14px;">${fmtMoney(base)} <span style="font-size:13px;color:var(--mute);font-weight:600;">+ tip next</span></div>
-        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.5px;color:var(--mute);line-height:1.55;margin-bottom:8px;">${esc(authLine(signerName))}</div>
-        <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 4px;">Refund &amp; Cancellation Policy</div>
-        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11.5px;color:var(--mute);line-height:1.5;margin-bottom:12px;max-height:120px;overflow:auto;white-space:pre-wrap;">${esc(REFUND_POLICY)}</div>
-        <input id="cfName" type="text" placeholder="Type full name" value="${esc(signerName)}" style="margin-bottom:12px;">
-        <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">Sign below to authorize</div>
-        <div style="position:relative;">
-          <canvas id="cfSig" style="width:100%;height:190px;background:#fff;border-radius:10px;touch-action:none;display:block;"></canvas>
-          <button id="cfClear" class="btn ghost" style="position:absolute;top:8px;right:8px;padding:6px 12px;font-size:13px;">Clear</button>
-        </div>
+      <div style="padding:16px 20px 0;flex:none;">
+        <h2 style="margin:0 0 2px;font-size:21px;">Authorize payment</h2>
+        <div style="font-size:23px;font-weight:800;margin-bottom:10px;">${fmtMoney(base)} <span style="font-size:13px;color:var(--mute);font-weight:600;">+ tip next</span></div>
+        <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12px;color:var(--mute);line-height:1.5;">${esc(authLine(signerName))}</div>
+        <button id="cfTermsOpen" type="button" class="btn ghost" style="width:100%;margin-top:8px;padding:9px;font-size:13px;">View Terms &amp; Refund Policy</button>
+        <input id="cfName" type="text" placeholder="Type full name" value="${esc(signerName)}" style="margin-top:10px;">
+        <div style="color:var(--mute);font-size:13px;margin:10px 2px 6px;">Sign below to authorize</div>
       </div>
-      <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
+      <div style="flex:1;min-height:130px;position:relative;padding:0 20px 8px;">
+        <canvas id="cfSig" style="width:100%;height:100%;background:#fff;border-radius:10px;touch-action:none;display:block;"></canvas>
+        <button id="cfClear" class="btn ghost" style="position:absolute;top:8px;right:28px;padding:6px 12px;font-size:13px;">Clear</button>
+      </div>
+      <div style="padding:14px 20px;display:flex;gap:10px;border-top:1px solid var(--line);flex:none;">
         <button class="btn ghost" data-back style="flex:1;">← Back</button>
         <button class="btn" id="cfSignNext" style="flex:2;opacity:.5;" disabled>Continue to tip →</button>
+      </div>
+      <div id="cfTerms" style="position:absolute;inset:0;background:var(--navy);display:none;flex-direction:column;z-index:5;">
+        <div style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);flex:none;">
+          <h2 style="margin:0;font-size:18px;">Terms &amp; Refund Policy</h2>
+          <button id="cfTermsClose" type="button" class="btn" style="padding:7px 16px;">Done</button>
+        </div>
+        <div style="flex:1;overflow:auto;padding:18px 20px;">
+          <div style="font-size:13px;color:var(--mute);line-height:1.55;margin-bottom:16px;">${esc(authLine(signerName))}</div>
+          <div style="color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:0 0 6px;">Refund &amp; Cancellation Policy</div>
+          <div style="font-size:13px;color:var(--ink);line-height:1.6;white-space:pre-wrap;">${esc(REFUND_POLICY)}</div>
+        </div>
       </div>`;
     } else if(customMode){
       // Custom-tip entry: type an amount, then confirm the charge.
@@ -1042,7 +1047,6 @@ function openChargeFlow(j){
         </div>
       </div>`;
     }
-    applyOrient();
     wire();
   }
 
@@ -1105,19 +1109,20 @@ function openChargeFlow(j){
   function setupSign(){
     const cv=ov.querySelector('#cfSig'); if(!cv) return;
     const nextBtn=ov.querySelector('#cfSignNext'), clr=ov.querySelector('#cfClear'), nameEl=ov.querySelector('#cfName');
+    // "View Terms" panel: slides over the signing screen so the full legal text is
+    // reachable without making the signing screen itself scroll.
+    const termsOpen=ov.querySelector('#cfTermsOpen'), termsPanel=ov.querySelector('#cfTerms'), termsClose=ov.querySelector('#cfTermsClose');
+    if(termsOpen&&termsPanel) termsOpen.onclick=()=>{ termsPanel.style.display='flex'; };
+    if(termsClose&&termsPanel) termsClose.onclick=()=>{ termsPanel.style.display='none'; };
     const ctx=cv.getContext('2d');
     const dpr=window.devicePixelRatio||1;
-    // When the overlay is force-rotated 90° CW (portrait phone), the canvas is
-    // visually sideways. Size the backing store from the LAYOUT box (offsetWidth/
-    // Height — transform-invariant), not the on-screen bounding rect, and map
-    // pointer coords back into the canvas's local space.
-    const rotated=ov.classList.contains('cf-land');
+    // Canvas is upright and fills its flex cell — size the backing store from the
+    // laid-out box and map pointer coords straight through (no rotation math).
     const CW=cv.offsetWidth||cv.getBoundingClientRect().width, CH=cv.offsetHeight||cv.getBoundingClientRect().height;
     cv.width=Math.round(CW*dpr); cv.height=Math.round(CH*dpr);
     ctx.scale(dpr,dpr); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111';
     let drawing=false, inked=false, lx=0, ly=0;
-    const pos=e=>{ const r=cv.getBoundingClientRect();
-      return rotated ? [e.clientY-r.top, r.right-e.clientX] : [e.clientX-r.left, e.clientY-r.top]; };
+    const pos=e=>{ const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
     const enable=()=>{ if(nextBtn){ nextBtn.disabled=false; nextBtn.style.opacity='1'; } };
     // Returning from the tip step? Redraw the signature already captured.
     if(sigData){ const img=new Image(); img.onload=()=>{ try{ ctx.drawImage(img,0,0,cv.width/dpr,cv.height/dpr); }catch(_){} }; img.src=sigData; inked=true; enable(); }
