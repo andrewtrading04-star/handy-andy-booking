@@ -280,12 +280,12 @@
           title:'What size is your TV?', subtitle:'Tap + to add each TV you want mounted.',
           type:'qty_multi', required:true,
           options:[
-            {id:'1724797765604x727281068776260100',label:'32" Or Less',price:89, sizecat:'small'},
-            {id:'1724797765604x481821025163112770',label:'33"-59"',    price:99, sizecat:'small'},
-            {id:'1724797765604x438257538375731460',label:'60"-69"',    price:109,sizecat:'small'},
-            {id:'1724797765604x518845267466906000',label:'70"-84"',    price:139,sizecat:'medium'},
-            {id:'1724797765604x143841244367788560',label:'85"-97"',    price:169,sizecat:'large'},
-            {id:'1729568390396x482351028241694700',label:'98+',        price:219,sizecat:'xlarge'},
+            {id:'1724797765604x727281068776260100',label:'32" Or Less',price:99, sizecat:'small'},
+            {id:'1724797765604x481821025163112770',label:'33"-59"',    price:109, sizecat:'small'},
+            {id:'1724797765604x438257538375731460',label:'60"-69"',    price:119,sizecat:'small'},
+            {id:'1724797765604x518845267466906000',label:'70"-84"',    price:149,sizecat:'medium'},
+            {id:'1724797765604x143841244367788560',label:'85"-97"',    price:179,sizecat:'large'},
+            {id:'1729568390396x482351028241694700',label:'98+',        price:229,sizecat:'xlarge'},
           ]
         },
         {
@@ -295,7 +295,7 @@
           options:[
             {id:'1724797766027x710120034063080800',label:'I have my own bracket',          price:0,  forSize:'any'},
             {id:'1724797766027x695942754553271000',label:'Flat',                           price:35, forSize:'standard'},
-            {id:'1724797766027x943964834449722200',label:'Tilting (recommended)',          price:46, forSize:'standard'},
+            {id:'1724797766027x943964834449722200',label:'Tilting (recommended)',          price:50, forSize:'standard'},
             {id:'1724797766027x264025092172061950',label:'Full Motion',                   price:85, forSize:'standard'},
             {id:'1776229836315x648480753516806100',label:'85"-100" TV Flat Bracket',      price:90, forSize:'xl'},
             {id:'1776229850923x848868840944959500',label:'85"-100" TV Tilting Bracket',   price:110,forSize:'xl'},
@@ -331,7 +331,7 @@
           type:'qty_multi', required:false,
           options:[
             {id:'1724797766922x649390430397306400',label:'Yes, hide the wires BEHIND the wall',      price:65,needsDrywall:true},
-            {id:'1724797766922x870013576516632800',label:'Yes, hide the wires OUTSIDE the wall',     price:25},
+            {id:'1724797766922x870013576516632800',label:'Yes, hide the wires OUTSIDE the wall',     price:30},
             {id:'1724797766922x460684749103141800',label:'My wall already has a plug behind the TV', price:0, hideForFrame:true},
             {id:'1724797766922x646841379925741600',label:'I want my wires to hang under the TV',     price:0},
           ]
