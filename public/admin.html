@@ -4715,7 +4715,16 @@ function greetStatsHtml(){
       `<span class="gstat-s" style="margin-top:1px;">Both companies combined</span></div>` : '';
   return `<div class="greet-stats">`+
     `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span>`+
-      (r.payouts ? `<span class="gstat-s" style="margin-top:2px;">${money(r.payouts.total)} upcoming payout</span>` : '')+
+      (r.payouts ? (
+        `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
+        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Upcoming payout · ${money(r.payouts.total)}</span>`+
+        `<div style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
+          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Dom's</div>`+
+            `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;">${r.payouts.doms!=null?money(r.payouts.doms):'—'}</div></div>`+
+          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Handy Andy</div>`+
+            `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;">${r.payouts.handy_andy!=null?money(r.payouts.handy_andy):'—'}</div></div>`+
+        `</div>`
+      ) : '')+
     `</div>`+
     `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span></div>`+
     avgTicketBoxHtml(pf, r)+
