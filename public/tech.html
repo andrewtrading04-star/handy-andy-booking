@@ -637,7 +637,6 @@ async function showDetail(id){
             <button class="btn ghost sm" id="cardCancel">Cancel</button>
           </div>
         </div>`:''}
-        ${j.payment_status==='paid'?`<button class="btn ghost sm" id="jobRefund">Refund</button>`:''}
       </div>`:''}
     </div>
     ${ next ? (needsPhotos
@@ -684,7 +683,7 @@ async function showDetail(id){
     // Payment handlers
     const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=()=>openChargeFlow(j);
     const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
-    const jr=document.getElementById('jobRefund'); if(jr) jr.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(j.id,'refund'); } };
+    // Refunds are office-only — techs have no refund control (removed by owner request).
 
     // Change / add card on file (customer wants to pay with a different card).
     const jcc=document.getElementById('jobChangeCard');

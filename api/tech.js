@@ -843,12 +843,11 @@ async function jobPayment(req, res, db, auth, body) {
     return res.status(200).json({ ok: true, payment_status: 'unpaid' });
   }
 
+  // Refunds are office-only. Techs must never issue refunds (owner request), so
+  // the field app has no refund button and the API rejects the action outright —
+  // defense in depth in case an old client or crafted request still sends it.
   if (act === 'refund') {
-    if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this job to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, ...acct }); }
-    catch (e) { return res.status(e.status || 402).json({ error: 'Refund failed: ' + e.message }); }
-    await db.from('bookings').update({ payment_status: 'refunded', paid_at: null }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'refunded' });
+    return res.status(403).json({ error: 'Refunds are handled by the office, not the field app.' });
   }
 
   if (act === 'charge') {
