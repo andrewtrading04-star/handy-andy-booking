@@ -32,7 +32,7 @@ function fmtWhen(iso, tz) {
   } catch { return String(iso); }
 }
 
-export async function sendDailyBookingDigest({ force = false, dryRun = false } = {}) {
+export async function sendDailyBookingDigest({ force = false, dryRun = false, offset: forceOffset = null } = {}) {
   try {
     const hour = denverHour();
     // Which Denver day's digest is due right now? Robust to GitHub-cron delays,
@@ -41,8 +41,11 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false } =
     // 8 PM on, and if a run only lands after midnight, still send YESTERDAY's as a
     // catch-up. The Resend idempotency key (below) keys on the evening being
     // summarized, so the extra hourly attempts deliver exactly one email per day.
+    // An explicit `offset` (0 = today, -1 = yesterday, …) backfills a specific day
+    // on demand, bypassing the clock — used to re-send a digest that was missed.
     let offset;
-    if (force) offset = 0;
+    if (Number.isFinite(forceOffset)) offset = forceOffset;
+    else if (force) offset = 0;
     else if (hour >= 20) offset = 0;        // this evening (8 PM–midnight Denver)
     else if (hour < 8)   offset = -1;       // overnight — catch up a delayed run
     else return { skipped: `not evening (Denver hour ${hour})`, denverHour: hour };

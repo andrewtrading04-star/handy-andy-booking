@@ -17,6 +17,10 @@ on:
         description: 'Send now regardless of the hour (1 = yes)'
         required: false
         default: ''
+      offset:
+        description: 'Backfill a specific day: 0 = today, -1 = yesterday, -2 = two days ago…'
+        required: false
+        default: ''
 
 jobs:
   digest:
@@ -26,9 +30,11 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           FORCE: ${{ github.event.inputs.force }}
+          OFFSET: ${{ github.event.inputs.offset }}
         run: |
           Q="action=daily_digest"
           if [ -n "$FORCE" ]; then Q="$Q&force=1"; fi
+          if [ -n "$OFFSET" ]; then Q="$Q&offset=$OFFSET"; fi
           curl -fsS --retry 3 --retry-delay 5 -X POST "https://handy-andy-booking.vercel.app/api/migrate?$Q" \
             -H "Authorization: Bearer $CRON_SECRET"
           echo ""

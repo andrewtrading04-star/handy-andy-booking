@@ -569,7 +569,11 @@ export default async function handler(req, res) {
     try {
       const force = req.query.force === '1' || req.query.force === 'true';
       const dryRun = req.query.dry === '1' || req.query.dry === 'true';
-      const out = await sendDailyBookingDigest({ force, dryRun });
+      // Optional &offset=N (0=today, -1=yesterday…) to backfill a specific missed
+      // day, bypassing the 8 PM clock.
+      const offset = (req.query.offset != null && req.query.offset !== '')
+        ? parseInt(req.query.offset, 10) : null;
+      const out = await sendDailyBookingDigest({ force, dryRun, offset });
       return res.status(200).json({ ok: true, ...out });
     } catch (e) {
       console.error('[daily_digest]', (e && e.stack) || e);
