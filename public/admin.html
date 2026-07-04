@@ -1882,6 +1882,33 @@ function liIsDefaultType(name){
 function liIsDismountAnswer(name){
   return /\btv removal\b/i.test(String(name||''));
 }
+// Canonical TV-size brackets — the SINGLE place the office edits a TV size, so the
+// stored label, the customer price, and the tech's base pay can never drift apart.
+// This matters because the payroll engine keys tech pay off the size LABEL, so a
+// mislabeled size silently mis-pays the tech (the bug this picker prevents).
+// `price` mirrors the booking widget (public/widget.js — Denver & Austin share the
+// same size prices); `base`/`baseJuan` mirror payroll.js TV_SIZE_RATES. Keep all
+// three in sync if the rate sheet or widget prices change.
+const TV_SIZES = [
+  { label:'32" Or Less', price:99,  base:50,  baseJuan:50,  test:/\b32\b|less|under/i },
+  { label:'33"-59"',     price:109, base:60,  baseJuan:60,  test:/33.*59/ },
+  { label:'60"-69"',     price:119, base:70,  baseJuan:80,  test:/60.*69/ },
+  { label:'70"-84"',     price:149, base:80,  baseJuan:90,  test:/70.*8[45]/ },
+  { label:'85"-97"',     price:179, base:110, baseJuan:110, test:/8[56].*97/ },
+  { label:'98"+',        price:229, base:130, baseJuan:130, test:/(?:^|\D)98/ },
+];
+// Which bracket a line-item label is, or -1 if it isn't a TV-size line. Mirrors
+// payroll.js matchSize (incl. the bare-inch case: "75\"" -> 70"-84"). Lifting-help
+// answers ("My TV is 70-85 inches…") embed a range but are NOT a size selection.
+function tvSizeIndex(name){
+  const n=String(name||'').toLowerCase();
+  if(/my tv is|\b(?:lift|help|larger)\b/.test(n)) return -1;
+  for(let i=0;i<TV_SIZES.length;i++) if(TV_SIZES[i].test.test(n)) return i;
+  const bare=n.match(/^\s*(\d{2,3})\s*(?:"|inch(?:es)?|in|”|″)?\s*$/);
+  if(bare){ const v=parseInt(bare[1],10);
+    if(v<=32) return 0; if(v<=59) return 1; if(v<=69) return 2; if(v<=84) return 3; if(v<=97) return 4; return 5; }
+  return -1;
+}
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
   let hiddenItems=[];   // default "TV Type: Regular TV" lines — kept in the data, hidden from the editor
@@ -1906,13 +1933,37 @@ function mountLineItemsEditor(b){
   if(!wrap||!totalEl) return;
   const qOf=r=>Math.max(1,Math.min(99,Math.round(Number(r.qty)||1)));
   const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*qOf(r),0); totalEl.textContent=money(Math.round(t*100)/100); };
+  const owner = role==='owner';
+  const jobIsJuan = /\bjuan\b/i.test((b.technician&&b.technician.name)||'');
+  const baseFor = si => jobIsJuan ? TV_SIZES[si].baseJuan : TV_SIZES[si].base;
   const render=()=>{
-    wrap.innerHTML=rows.map((r,i)=>`<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-      <input type="text" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description" style="flex:1;min-width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
-      <label title="Quantity" style="display:flex;align-items:center;gap:3px;color:var(--mute);font-weight:800;font-size:14px;">×<input type="number" min="1" max="99" step="1" inputmode="numeric" data-i="${i}" data-f="qty" value="${qOf(r)}" style="width:46px;padding:8px 4px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:center;color:var(--ink);"></label>
-      <div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each" style="width:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>
-      <button type="button" class="btn ghost sm" data-del="${i}" title="Remove" style="padding:6px 10px;">×</button>
-    </div>`).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
+    let sizeBase = 0;
+    const qtyIn=(i,r)=>`<label title="Quantity" style="display:flex;align-items:center;gap:3px;color:var(--mute);font-weight:800;font-size:14px;">×<input type="number" min="1" max="99" step="1" inputmode="numeric" data-i="${i}" data-f="qty" value="${qOf(r)}" style="width:46px;padding:8px 4px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:center;color:var(--ink);"></label>`;
+    const priceIn=(i,r)=>`<div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each" style="width:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>`;
+    const delBtn=i=>`<button type="button" class="btn ghost sm" data-del="${i}" title="Remove" style="padding:6px 10px;">×</button>`;
+    const rowHtml=rows.map((r,i)=>{
+      const si=tvSizeIndex(r.name);
+      if(si>=0){
+        // TV-size line: a dropdown that sets the canonical label AND the price
+        // together, so the tech's pay (keyed off the label) can't drift from the
+        // charge. The tech-base chip is owner-only (secretaries never see pay).
+        sizeBase += baseFor(si)*qOf(r);
+        const opts=TV_SIZES.map((s,k)=>`<option value="${k}"${k===si?' selected':''}>${esc(s.label)}</option>`).join('');
+        const chip = owner ? `<span title="Tech base pay for this TV size" style="font-size:11.5px;color:var(--accent);font-weight:800;white-space:nowrap;">base ${money(baseFor(si))}</span>` : '';
+        return `<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <select data-i="${i}" data-f="size" title="TV size" style="flex:1;min-width:118px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);font-weight:700;">${opts}</select>
+          ${chip}${qtyIn(i,r)}${priceIn(i,r)}${delBtn(i)}
+        </div>`;
+      }
+      return `<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <input type="text" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description" style="flex:1;min-width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+        ${qtyIn(i,r)}${priceIn(i,r)}${delBtn(i)}
+      </div>`;
+    }).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
+    const baseSummary = (owner && sizeBase>0)
+      ? `<div style="font-size:12px;color:var(--mute);margin-top:2px;line-height:1.5;">Tech base from TV size${rows.filter(r=>tvSizeIndex(r.name)>=0).length>1?'s':''}: <b style="color:var(--accent);">${money(sizeBase)}</b> — full pay (brackets, wires, travel, tips) recalculates when you save.</div>`
+      : '';
+    wrap.innerHTML=rowHtml + baseSummary;
     wrap.querySelectorAll('input[data-f]').forEach(inp=>{
       inp.addEventListener('input',()=>{
         const i=+inp.dataset.i, f=inp.dataset.f;
@@ -1921,6 +1972,16 @@ function mountLineItemsEditor(b){
         if(f==='name'){ rows[i].name=inp.value; rows[i].display=inp.value; }
         else rows[i][f]=inp.value;   // qty / unit kept raw while typing; clamped on use + save
         recalc();
+      });
+    });
+    // Size dropdown: set label (always) + price (Handy Andy's shared size price),
+    // then re-render so the base chip and totals update live.
+    wrap.querySelectorAll('select[data-f="size"]').forEach(sel=>{
+      sel.addEventListener('change',()=>{
+        const i=+sel.dataset.i, s=TV_SIZES[+sel.value]; if(!s) return;
+        rows[i].name=s.label; rows[i].display=s.label;
+        if(current && current.slug==='handy-andy') rows[i].unit=s.price;
+        render(); recalc();
       });
     });
     wrap.querySelectorAll('button[data-del]').forEach(btn=>{
