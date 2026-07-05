@@ -34,7 +34,7 @@ begin
   update businesses set name='Gold Coast TV Mounting', url='https://goldcoasttv.example.com',   support_email='office@goldcoasttv.example.com',   support_phone='(312) 555-0177', timezone='America/Chicago' where slug='doms';
 
   -- Owner + secretary display names
-  update staff_users set name='Alex Carter' where role='owner';
+  update staff_users set name='Trenton Maddox' where role='owner';
   update staff_users s set name='Sam Rivera' from businesses bz where s.business_id=bz.id and bz.slug='handy-andy' and s.role<>'owner';
   update staff_users s set name='Jordan Lee' from businesses bz where s.business_id=bz.id and bz.slug='doms'       and s.role<>'owner';
 
@@ -96,7 +96,7 @@ begin
 
     -- Bookings across -14 … +14 days
     for d in -14..14 loop
-      for j in 1..(1+floor(random()*3)::int) loop
+      for j in 1..(3+floor(random()*3)::int) loop   -- 3-5 jobs every day
         cid := cust_ids[1+floor(random()*array_length(cust_ids,1))::int];
         tid := tech_ids[1+floor(random()*array_length(tech_ids,1))::int];
         sched := date_trunc('day', now()) + (d||' days')::interval + ((9+floor(random()*8))||' hours')::interval;
