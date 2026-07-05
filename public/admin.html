@@ -352,6 +352,11 @@
   .es-ups-def input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer;}
   .es-ups-rm{background:none;border:none;color:var(--mute);font-size:16px;cursor:pointer;padding:4px;line-height:1;}
   .es-ups-rm:hover{color:#dc2626;}
+  /* One-tap common add-ons */
+  .es-ups-presets{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px;}
+  .es-ups-chip{background:var(--accent-soft);color:var(--accent);border:1px solid transparent;border-radius:999px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
+  .es-ups-chip:hover{border-color:var(--accent);}
+  .es-ups-chip .p{opacity:.65;font-weight:800;margin-left:4px;}
   .es-quote-sub{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mute);padding:1px 0;}
   .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
@@ -953,6 +958,7 @@
     <div class="es-sub-row"><span>Subtotal</span><span id="esSubtotal">$0.00</span></div>
     <div class="es-total-row"><span>Estimated total</span><span class="amt" id="esTotal">$0.00</span></div>
     <label class="fld" style="margin-top:16px;">Recommended Add-ons <span style="text-transform:none;font-weight:500;color:var(--mute);">(optional — the customer taps to accept or decline each on their approval page)</span></label>
+    <div class="es-ups-presets" id="esUpsPresets"></div>
     <div class="es-ups-head"><span>Add-on</span><span>Price</span><span>Pre-select</span><span></span></div>
     <div class="es-ups" id="esUpsells"></div>
     <button class="btn ghost sm" type="button" id="esAddUpsell">+ Add add-on</button>
@@ -4047,6 +4053,31 @@ function esAddUpsRow(u){
   wrap.insertAdjacentHTML('beforeend',esUpsRow(u));
   wrap.lastElementChild.querySelector('.es-ups-rm').addEventListener('click',ev=>ev.target.closest('[data-ups]').remove());
 }
+// One-tap common add-ons — real services + prices from the booking widget's
+// catalog, so the office picks instead of retyping. A chip pre-fills an editable
+// row; the office can still change the price, toggle pre-select, or remove it.
+const EST_UPSELL_PRESETS = [
+  { description:'Soundbar installation',                 unit_price:50 },
+  { description:'Hide wires behind the wall (in-wall)',  unit_price:75 },
+  { description:'Hide wires outside the wall (cord cover)', unit_price:25 },
+  { description:'LED accent lights behind TV',           unit_price:50 },
+  { description:'Install shelf under TV',                unit_price:45 },
+  { description:'Dismount & haul away old TV',           unit_price:35 },
+  { description:'Mount above fireplace',                 unit_price:30 },
+];
+function renderUpsellPresets(){
+  const box=document.getElementById('esUpsPresets'); if(!box) return;
+  box.innerHTML=EST_UPSELL_PRESETS.map((p,i)=>
+    `<button type="button" class="es-ups-chip" data-preset="${i}" title="Add to the recommended add-ons">+ ${esc(p.description)}<span class="p">${money2(p.unit_price)}</span></button>`).join('');
+  box.querySelectorAll('[data-preset]').forEach(btn=>btn.addEventListener('click',()=>{
+    const p=EST_UPSELL_PRESETS[+btn.dataset.preset];
+    // Don't add the same add-on twice.
+    const exists=[...document.querySelectorAll('#esUpsells .es-ups-desc')]
+      .some(inp=>inp.value.trim().toLowerCase()===p.description.toLowerCase());
+    if(exists){ toast('Already added'); return; }
+    esAddUpsRow({ description:p.description, unit_price:p.unit_price });
+  }));
+}
 function openEstimateEdit(id){
   const e=estCache[id]; if(!e) return;
   document.getElementById('esId').value=e.id;
@@ -4063,7 +4094,8 @@ function openEstimateEdit(id){
   const lines=Array.isArray(e.line_items)?e.line_items:[];
   if(lines.length) lines.forEach(it=>esAddLineRow(it));
   else esAddLineRow({ qty:1 });
-  // Recommended add-ons (optional; empty section until the office adds some).
+  // Recommended add-ons: one-tap common services + any already on this estimate.
+  renderUpsellPresets();
   const upsWrap=document.getElementById('esUpsells'); upsWrap.innerHTML='';
   (Array.isArray(e.upsells)?e.upsells:[]).forEach(u=>esAddUpsRow(u));
   esRecalcTotal();
