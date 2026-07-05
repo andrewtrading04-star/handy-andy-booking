@@ -556,10 +556,13 @@ export default async function handler(req, res) {
   }
 
   // Daily booking digest — ONE 8 PM Denver email summarizing every appointment
-  // booked today (replaces the per-booking alerts). Secured by CRON_SECRET. The
-  // GitHub Action fires at 02:00 + 03:00 UTC; the handler only sends at 8 PM
-  // Denver, so exactly one run mails year-round.  &force=1 bypass the clock,
-  // &dry=1 count without sending.
+  // booked today (replaces the per-booking alerts). Secured by CRON_SECRET.
+  // Triggered by a Vercel Cron at 03:00 UTC (reliable; = 8–9 PM Denver year-round)
+  // PLUS the hourly GitHub Action as a backup. The handler only sends inside the
+  // 8 PM–midnight Denver window (with an overnight catch-up) and dedupes with a
+  // Resend idempotency key, so exactly one email goes out per day regardless of
+  // how many triggers fire.  &force=1 bypass the clock, &offset=N backfill a
+  // specific day, &dry=1 count without sending.
   if (action === 'daily_digest') {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });

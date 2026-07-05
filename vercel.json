@@ -2,7 +2,8 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "crons": [
-    { "path": "/api/migrate?action=send_reminders", "schedule": "0 15 * * *" }
+    { "path": "/api/migrate?action=send_reminders", "schedule": "0 15 * * *" },
+    { "path": "/api/migrate?action=daily_digest", "schedule": "0 3 * * *" }
   ],
   "rewrites": [
     { "source": "/handy-andy", "destination": "/admin.html" },
