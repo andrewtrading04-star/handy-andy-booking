@@ -814,8 +814,8 @@ function photoGuideHtml(){
   return `<div style="margin:2px 0 12px;padding:12px 14px;border:1px solid var(--orange);border-radius:12px;background:rgba(255,255,255,.04);">
     <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📸 Take a photo of your work</div>
     <div style="font-size:13px;color:var(--ink);line-height:1.5;margin-bottom:9px;">Sometimes these photos go on our social media. Before you shoot please:</div>
-    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ If possible, project the logo on the screen ↓</div>
-    <a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Open logo on YouTube</a>
+    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame${(tech&&tech.demo)?'':'<br>✅ If possible, project the logo on the screen ↓'}</div>
+    ${(tech&&tech.demo)?'':`<a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Open logo on YouTube</a>`}
   </div>`;
 }
 function photoThumbs(photos){

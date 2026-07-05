@@ -1007,6 +1007,9 @@ let role = lsGet('ha_admin_role') || '';
 let userName = lsGet('ha_admin_name') || '';
 let appConfig = lsJSON('ha_admin_config', {}); // { email, sms } outbound channels
 let businesses = lsJSON('ha_admin_biz', []);
+// Display name for a business slug, sourced from the loaded businesses (DB), so
+// UI never hardcodes a brand — correct for every business including white-label.
+const bizName = slug => (businesses.find(b=>b.slug===slug)||{}).name || slug;
 let current = null;            // current business object
 let greetingData = null;       // { jobs, estimates, tz } for the schedule greeting
 let greetingClock = null;      // interval handle for the live greeting clock
@@ -3666,7 +3669,7 @@ function rcRelevantItem(li){
   return Number(li.price)>0;                             // priced add-ons; drops $0 config lines
 }
 function rcCard(r){
-  const biz = r.business_slug==='doms' ? `<span class="rc-biz doms">Dom's</span>` : `<span class="rc-biz ha">Handy Andy</span>`;
+  const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizName(r.business_slug))}</span>`;
   const badges=[];
   if(r.email_opened) badges.push(`<span class="rc-badge blue">✉️ opened email</span>`);
   else if(r.email_count>0) badges.push(`<span class="rc-badge gray">✉️ email sent</span>`);
@@ -4075,6 +4078,7 @@ const EST_UPSELL_PRESETS = [
 function renderUpsellPresets(){
   const box=document.getElementById('esUpsPresets'); if(!box) return;
   box.innerHTML=EST_UPSELL_PRESETS.map((p,i)=>
+    (appConfig.demo && /dismount/i.test(p.description)) ? '' :   // GDS / dismount hidden in demo
     `<button type="button" class="es-ups-chip" data-preset="${i}" title="Add to the recommended add-ons">+ ${esc(p.description)}<span class="p">${money2(p.unit_price)}</span></button>`).join('');
   box.querySelectorAll('[data-preset]').forEach(btn=>btn.addEventListener('click',()=>{
     const p=EST_UPSELL_PRESETS[+btn.dataset.preset];
@@ -4767,7 +4771,7 @@ function avgTicketBoxHtml(pf, r){
   const pts=[...(doms.spark||[]),...(ha.spark||[])].filter(v=>v!=null);
   if(!pts.length) return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span><div class="gstat-s" style="margin:4px 0;">No completed jobs in the last 7 days.</div></div>`;
   let mn=Math.min(...pts), mx=Math.max(...pts); if(mx===mn){ mx+=1; mn-=1; }
-  const chartSeries=[{label:"Dom's",color:'#60a5fa',d:doms},{label:'Handy Andy',color:'#FF8A5C',d:ha}];
+  const chartSeries=[{label:bizName('doms'),color:'#60a5fa',d:doms},{label:bizName('handy-andy'),color:'#FF8A5C',d:ha}];
   const row=(s)=>{ const pct=s.d&&s.d.pct;
     const p=(pct==null)?`<span style="opacity:.45;font-weight:700;">no change</span>`:`<span style="color:${pct>=0?'#4ade80':'#f87171'};font-weight:800;">${pct>=0?'▲':'▼'}${Math.abs(pct)}% vs last wk</span>`;
     return `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.55;"><span style="color:${s.color};font-weight:800;">${esc(s.label)}</span><span style="margin-left:auto;">${p}</span></div>`; };
@@ -4785,8 +4789,8 @@ function greetStatsHtml(){
       `<span class="gstat-l">Profit this week</span>`+
       `<span class="gstat-v" style="color:#4ade80;">${money(wTotal)}</span>`+
       `<div style="display:flex;gap:18px;justify-content:center;margin-top:1px;">`+
-        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Dom's</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#60a5fa;">${money(wDoms)}</div></div>`+
-        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Handy Andy</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#FF8A5C;">${money(wHA)}</div></div>`+
+        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizName('doms'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#60a5fa;">${money(wDoms)}</div></div>`+
+        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizName('handy-andy'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#FF8A5C;">${money(wHA)}</div></div>`+
       `</div></div>`+
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Profit</span>`+
@@ -4803,9 +4807,9 @@ function greetStatsHtml(){
         `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
         `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Upcoming payout · ${money(r.payouts.total)}</span>`+
         `<div style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
-          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Dom's</div>`+
+          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizName('doms'))}</div>`+
             `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;">${r.payouts.doms!=null?money(r.payouts.doms):'—'}</div></div>`+
-          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">Handy Andy</div>`+
+          `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizName('handy-andy'))}</div>`+
             `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;">${r.payouts.handy_andy!=null?money(r.payouts.handy_andy):'—'}</div></div>`+
         `</div>`
       ) : '')+
@@ -5007,11 +5011,11 @@ async function openNewBooking(prefill){
       if(bIdx>=0) return 1;
       return a.localeCompare(b);
     });
-    if(isHandyAndy) cats.push('Assurion');
+    if(isHandyAndy && !appConfig.demo) cats.push('Assurion');   // hidden in demo
     // Guaranteed Dismount Service — a free "remove one TV" booking that pays the
     // tech $60 (redeemed GDS). Bottom of the list for BOTH businesses. Links to the
-    // TV-mounting service row (a dismount is a TV job); the price is $0.
-    cats.push('Guaranteed Dismount Service');
+    // TV-mounting service row (a dismount is a TV job); the price is $0. Hidden in demo.
+    if(!appConfig.demo) cats.push('Guaranteed Dismount Service');
     nbGdsServiceId = (nbServices.find(s=>s.category==='TV Mounting')||{}).id || null;
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -6216,6 +6220,7 @@ function nbUpsShown(){
   const baseLabels=nbCollectSelections().map(s=>s.label||'');
   const already=id=>{ const rx=NB_BASE_PRESENCE[id]; return rx ? baseLabels.some(l=>rx.test(l)) : false; };
   let list=NB_UPSELL_CATALOG
+    .filter(c=>!(appConfig.demo && c.id==='gds'))   // Guaranteed Dismount Service hidden in demo
     .filter(c=>c.jobs.includes(jt) || (jt==='other' && c.jobs.length>1))
     .filter(c=>!already(c.id));
   // Context-aware bracket upgrade (flat→tilting→full-motion), TV jobs only.
@@ -6448,13 +6453,17 @@ function teamFromUrl(){
 function brandLogin(){
   const t=teamFromUrl(); if(!t) return;
   const b=TEAM_BRAND[t];
-  const h=document.querySelector('#login h1'); const sub=document.querySelector('#login .sub');
-  if(h) h.innerHTML=`${esc(b.label)} <span class="hl">Schedule</span>`;
-  if(sub) sub.textContent='Sign in to your dashboard';
-  document.title=`${b.label} · Schedule`;
+  const sub=document.querySelector('#login .sub'); if(sub) sub.textContent='Sign in to your dashboard';
   const root=document.documentElement;
   root.style.setProperty('--accent', b.accent);
   if(t==='doms') document.body.classList.add('doms');
+  // Never hardcode the brand name here (pre-auth). Show a neutral "Schedule"
+  // placeholder, then source the real display name from the server so it's
+  // correct for every business including white-label/demo deployments.
+  const apply=(name)=>{ const h=document.querySelector('#login h1'); if(h) h.innerHTML=`${name?esc(name)+' ':''}<span class="hl">Schedule</span>`; document.title=`${name?name+' · ':''}Schedule`; };
+  apply('');
+  fetch(`/api/estimate?action=services&business=${encodeURIComponent(t)}`)
+    .then(r=>r.json()).then(d=>{ if(d&&d.business&&d.business.name) apply(d.business.name); }).catch(()=>{});
 }
 brandLogin();
 

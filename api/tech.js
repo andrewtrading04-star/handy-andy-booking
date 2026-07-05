@@ -13,6 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { smsNotificationsOn } from './_lib/notify.js';
+import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS } from './_lib/sms.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
@@ -159,7 +160,7 @@ async function login(req, res, body) {
   } catch { /* slug/tz are cosmetic — ignore lookup failures */ }
   return res.status(200).json({
     token,
-    technician: { id: tech.id, name: tech.name, status: tech.status, slug, tz },
+    technician: { id: tech.id, name: tech.name, status: tech.status, slug, tz, demo: demoMode() },
   });
 }
 
