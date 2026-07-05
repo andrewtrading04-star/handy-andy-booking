@@ -11,6 +11,7 @@
 //   SimpleTexting (preferred):  SIMPLETEXTING_API_KEY, SIMPLETEXTING_FROM
 //   Twilio (fallback):          TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
 import { smsNotificationsOn } from './notify.js';
+import { demoMode } from './demo.js';
 
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which both providers require.
 export function toE164(raw) {
@@ -33,7 +34,7 @@ function twilioConfigured() {
 // True when SOME SMS provider is wired up. The dashboard uses this to show/hide
 // the Send SMS buttons (independent of the on/off switch).
 export function smsConfigured() {
-  return simpleTextingConfigured() || twilioConfigured();
+  return demoMode() || simpleTextingConfigured() || twilioConfigured();
 }
 
 // SimpleTexting API v2 — single outbound message. The endpoint + body live here
@@ -85,6 +86,8 @@ async function sendViaTwilio(to, message) {
 // reason. `skipped` is a config/precondition miss; `error` is a live provider
 // failure (the message string is safe to show).
 export async function sendSMSResult(phoneNumber, message) {
+  // Demo mode: pretend the text sent (no provider call, nothing delivered).
+  if (demoMode()) { console.log('[sms:demo] pretend-sent to', String(phoneNumber).slice(-4)); return { ok: true, demo: true }; }
   if (!smsNotificationsOn()) return { ok: false, skipped: 'notifications_off' };
   const to = toE164(phoneNumber);
   if (!to) return { ok: false, skipped: 'bad_phone' };

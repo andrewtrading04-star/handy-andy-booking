@@ -16,6 +16,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
+import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
@@ -308,8 +309,9 @@ async function login(req, res, body) {
   // Tell the dashboard which outbound channels are wired up so it can show or
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
   const config = {
-    email: !!process.env.RESEND_API_KEY,
+    email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
+    demo: demoMode(),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
     // Address autocomplete stays OFF until the Maps key is confirmed to have the
     // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel
@@ -334,8 +336,9 @@ async function sessionStatus(req, res) {
   if (error) throw error;
 
   const config = {
-    email: !!process.env.RESEND_API_KEY,
+    email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
+    demo: demoMode(),
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,   // powers address autocomplete
     // Address autocomplete stays OFF until the Maps key is confirmed to have the
     // Maps JavaScript API + Places API enabled. Set MAPS_AUTOCOMPLETE=1 in Vercel

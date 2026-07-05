@@ -357,6 +357,9 @@
   .es-ups-chip{background:var(--accent-soft);color:var(--accent);border:1px solid transparent;border-radius:999px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
   .es-ups-chip:hover{border-color:var(--accent);}
   .es-ups-chip .p{opacity:.65;font-weight:800;margin-left:4px;}
+  /* Demo/sandbox badge — fixed, unobtrusive, only shown when the server reports demo mode */
+  .demo-banner{position:fixed;left:12px;bottom:12px;z-index:9999;background:#111827;color:#fff;font-size:12px;font-weight:600;padding:8px 14px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.32);max-width:min(92vw,430px);line-height:1.35;}
+  .demo-banner b{color:#fbbf24;letter-spacing:.06em;}
   .es-quote-sub{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mute);padding:1px 0;}
   .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
@@ -975,6 +978,9 @@
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
+<!-- Demo/sandbox badge (shown only when the server reports demo mode) -->
+<div id="demoBanner" class="demo-banner hidden"><b>DEMO</b> · Sample data — no real payments, texts, or emails are sent.</div>
+
 <script>
 const API = '/api/admin';
 // ── Bulletproof localStorage bootstrap ───────────────────────────────────────
@@ -1145,6 +1151,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
     token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    document.getElementById('demoBanner')?.classList.toggle('hidden', !(appConfig&&appConfig.demo));
     lsSet('ha_admin_token',token);
     lsSet('ha_admin_role',role);
     lsSet('ha_admin_name',userName);
@@ -6414,6 +6421,7 @@ async function tryAutoLogin(){
   try{
     const d = await api('session_status');
     token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    document.getElementById('demoBanner')?.classList.toggle('hidden', !(appConfig&&appConfig.demo));
     lsSet('ha_admin_token',token);
     lsSet('ha_admin_role',role);
     lsSet('ha_admin_name',userName);

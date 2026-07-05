@@ -4,6 +4,7 @@
 // a low-level send wrapper (gated by the notifications master switch), and the
 // branded booking-confirmation template.
 import { emailNotificationsOn } from './notify.js';
+import { demoMode } from './demo.js';
 
 // ── Per-business Resend config ──────────────────────────────────────────────
 // Each business may use its own Resend account — the free tier allows one
@@ -37,6 +38,11 @@ export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['hand
 // `emailNotificationsOn()` is the email kill switch — while it is off, sends are
 // skipped (and logged) so nothing goes out before the accounts are approved.
 export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false, idempotencyKey = null }) {
+  // Demo mode: pretend the email went out (no Resend call, nothing delivered).
+  if (demoMode()) {
+    console.log(`[email:demo] pretend-sent "${subject}" to ${to}`);
+    return { sent: true, id: 'demo_email', demo: true };
+  }
   if (!emailNotificationsOn()) {
     console.log(`[email] notifications off; not sending "${subject}" to ${to}`);
     return { sent: false, skipped: 'notifications_off' };

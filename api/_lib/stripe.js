@@ -6,6 +6,8 @@
 // are flattened to metadata[key]=value. Errors throw with a friendly .message
 // and the HTTP .status so callers can surface them directly.
 
+import { demoMode, demoStripeResponse } from './demo.js';
+
 const STRIPE_API = 'https://api.stripe.com/v1';
 
 // Stripe accounts, by explicit account name. Each business with its own Stripe
@@ -39,7 +41,7 @@ function selToAccount(sel) {
 function envNameFor(sel) { return ACCOUNT_KEY_ENV[selToAccount(sel)]; }
 
 export function stripeConfigured(sel) {
-  return !!process.env[envNameFor(sel)];
+  return demoMode() || !!process.env[envNameFor(sel)];
 }
 
 // The raw secret key for a selector (null if unconfigured). Exported for the few
@@ -76,6 +78,8 @@ function toForm(obj) {
 // `account` (explicit) or `slug` (legacy) selects the Stripe account; omit both
 // for the global account.
 export async function stripe(path, { method = 'POST', body = null, slug = null, account = null } = {}) {
+  // Demo mode: return a believable fake instead of calling Stripe.
+  if (demoMode()) return demoStripeResponse(path, method, body);
   const res = await fetch(STRIPE_API + path, {
     method,
     headers: { Authorization: `Bearer ${secretKey({ account, slug })}`, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -124,6 +128,7 @@ export async function retrieveCard(paymentMethodId, sel = null) {
 // Upload a file to Stripe (files.stripe.com, multipart) for dispute evidence.
 // `dataBase64` is raw base64 (no data: prefix). Returns the Stripe file id.
 export async function stripeUploadFile({ dataBase64, contentType = 'image/png', filename = 'evidence.png', purpose = 'dispute_evidence', account = null, slug = null }) {
+  if (demoMode()) return 'file_demo';
   const key = businessSecretKey({ account, slug });
   if (!key) { const e = new Error('Payments are not configured on the server.'); e.status = 400; throw e; }
   const bytes = Buffer.from(dataBase64, 'base64');
@@ -171,6 +176,13 @@ export async function submitDisputeEvidence(disputeId, evidence, sel = null, sub
 // yields null for that business (the caller hides the line) rather than throwing,
 // so the dashboard never breaks over a payout read.
 export async function upcomingPayoutBySlug(slugs) {
+  // Demo mode: fixed fake "next payout" per business so the Revenue box populates.
+  if (demoMode()) {
+    const fake = { 'handy-andy': 8214.50, doms: 5390.75 };
+    const out = {};
+    for (const slug of slugs || []) out[slug] = fake[slug] != null ? fake[slug] : 4250.00;
+    return out;
+  }
   const out = {};
   for (const slug of slugs || []) {
     const key = businessSecretKey({ slug });
