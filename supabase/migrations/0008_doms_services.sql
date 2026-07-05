@@ -87,7 +87,7 @@ select g.business_id, g.id, v.label, v.price, v.zbk, v.ord
 from service_option_groups g
 join services s on s.id = g.service_id
 join businesses b on b.id = s.business_id
-cross join (values
+join (values
   -- size
   ('size', '32" Or Less',                                          95.00::numeric, '1764781594789x318721355074764800', 1),
   ('size', '33"-59"',                                            125.00,           '1764781624346x760390952972976100', 2),
@@ -154,7 +154,7 @@ select g.business_id, g.id, v.label, v.price, v.zbk, v.ord
 from service_option_groups g
 join services s on s.id = g.service_id
 join businesses b on b.id = s.business_id
-cross join (values
+join (values
   ('quantity', '1 Ring doorbell',                             0.00::numeric, '1772710220631x545902833582903040', 1),
   ('quantity', '2 Ring doorbells',                          119.00,          '1772710220714x371504513018741100', 2),
   ('quantity', '3 Ring doorbells',                          238.00,          '1772710220774x125326891867570060', 3),
