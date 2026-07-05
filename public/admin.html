@@ -373,7 +373,20 @@
   .bracket-table td{padding:12px;border-bottom:1px solid var(--line2);font-size:13px;}
   .bracket-table tr:hover{background:var(--line2);}
   .bracket-qty{font-weight:600;color:var(--ink);text-align:center;}
-  .bracket-qty.low{color:#dc2626;}
+  .bracket-qty.low,.bracket-qty .low{color:#dc2626;}
+  .bracket-qty.warn,.bracket-qty .warn{color:#b45309;}
+  /* Low-stock "Reorder" chip shown inline next to a count that has crossed the
+     threshold (≤2 brackets = red, ≤3 wire plates = amber). Owner clicks to add
+     stock via the same Edit modal; secretaries see a static "Low" tag. */
+  .inv-chip{display:inline-flex;align-items:center;gap:4px;margin-left:8px;vertical-align:middle;
+    font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:2px 8px;border-radius:7px;
+    background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;cursor:pointer;white-space:nowrap;}
+  .inv-chip:hover{background:#fecaca;}
+  .inv-chip.amber{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+  .inv-chip.amber:hover{background:#fde68a;}
+  .inv-chip.static{cursor:default;}
+  .inv-chip.static:hover{background:#fee2e2;}
+  .inv-chip.amber.static:hover{background:#fef3c7;}
   .bracket-section{margin-bottom:28px;}
   .bracket-section h3{font-size:16px;font-weight:700;color:var(--ink);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line);}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.25);z-index:80;}
@@ -574,6 +587,13 @@
   .ndp-seg button.on{background:var(--gaccent,#FF6B35);color:#fff;}
   .gstat-link{cursor:pointer;transition:background .15s;}
   .gstat-link:hover{background:rgba(255,255,255,.18);}
+  /* Low-stock warning line inside the Predicted-income box (sits below the figure
+     on the dark navy hero). Clickable → jumps to Bracket Inventory. */
+  .gstat-warn{margin-top:10px;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:800;
+    letter-spacing:.01em;padding:5px 11px;border-radius:8px;background:rgba(239,68,68,.22);
+    border:1px solid rgba(255,120,120,.55);color:#ffdada;cursor:pointer;white-space:normal;text-align:center;
+    max-width:100%;transition:background .15s;}
+  .gstat-warn:hover{background:rgba(239,68,68,.34);}
   /* Temporary note inside the greeting banner (auto-expires) */
   /* Critical alert (e.g. a job with no address) — impossible to miss, all roles. */
   .crit-alert{background:#b91c1c;border:2px solid #ff6b6b;border-radius:12px;padding:14px 16px;margin:0 0 14px;color:#fff;animation:critpulse 1.4s ease-in-out infinite;}
@@ -4254,13 +4274,17 @@ async function renderBrackets(){
 
     for(const tech of inv.inventory||[]){
       const total=tech.flat+tech.tilting+tech.full_motion;
-      const lowClass=total<3?'low':'';
+      const bLow=invLowBrackets(tech);
+      const lowClass=bLow?'low':'';
+      const bChip=bLow?(role==='owner'
+        ? `<span class="inv-chip" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})" title="Add bracket stock for ${esc(tech.technician_name)}">⚠ Reorder</span>`
+        : `<span class="inv-chip static">⚠ Low</span>`):'';
       html+=`<tr>
         <td>${esc(tech.technician_name)}</td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.flat}</span></td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
         <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
-        <td class="bracket-qty"><strong class="${lowClass}">${total}</strong></td>
+        <td class="bracket-qty"><strong class="${lowClass}">${total}</strong>${bChip}</td>
         ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})">Edit</button></td>`:''}
       </tr>`;
     }
@@ -4283,10 +4307,14 @@ async function renderBrackets(){
         <tbody>`;
     for(const tech of inv.inventory||[]){
       const wp=tech.wire_plate||0;
-      const lowClass=wp<2?'low':'';
+      const pLow=invLowPlates(tech);
+      const warnClass=pLow?'warn':'';
+      const pChip=pLow?(role==='owner'
+        ? `<span class="inv-chip amber" onclick="openWirePlateEdit('${tech.technician_id}','${esc(tech.technician_name)}',${wp})" title="Add plate stock for ${esc(tech.technician_name)}">⚠ Reorder</span>`
+        : `<span class="inv-chip amber static">⚠ Low</span>`):'';
       html+=`<tr>
         <td>${esc(tech.technician_name)}</td>
-        <td class="bracket-qty"><strong class="${lowClass}">${wp}</strong></td>
+        <td class="bracket-qty"><strong class="${warnClass}">${wp}</strong>${pChip}</td>
         ${role==='owner'?`<td><button class="seg-btn" onclick="openWirePlateEdit('${tech.technician_id}','${esc(tech.technician_name)}',${wp})">Edit</button></td>`:''}
       </tr>`;
     }
@@ -4577,6 +4605,19 @@ async function saveWirePlateCount(techId, techName, cur){
 // Fetches today's job count + open estimates for the active business, then keeps
 // a live clock ticking. Data refreshes on navigation/switch; the clock re-paints
 // the time every 15s without re-fetching.
+// ── Low-stock thresholds (single source of truth) ───────────────────────────
+// A tech is "low" at 2 brackets or fewer, or 3 wire-concealment plates or fewer.
+// Used by both the Bracket Inventory chips and the Predicted-income warning so
+// the two never disagree.
+const LOW_BRACKETS_MAX=2, LOW_PLATES_MAX=3;
+function invBracketTotal(t){ return (t.flat||0)+(t.tilting||0)+(t.full_motion||0); }
+function invLowBrackets(t){ return invBracketTotal(t)<=LOW_BRACKETS_MAX; }
+function invLowPlates(t){ return (t.wire_plate||0)<=LOW_PLATES_MAX; }
+function invIsLow(t){ return invLowBrackets(t)||invLowPlates(t); }
+function lowStockCount(inv){ return (inv||[]).filter(invIsLow).length; }
+// Jump to the Bracket Inventory section (reuses the sidebar nav button).
+function goToBrackets(){ const b=document.querySelector('[data-nav="brackets"]'); if(b) b.click(); }
+
 async function renderGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !current){ if(el) el.classList.add('hidden'); return; }
@@ -4588,12 +4629,15 @@ async function renderGreeting(){
       // How many review calls Joey has to make (cross-business, yesterday's jobs).
       api('review_calls',{ params:{ days:1 }}).catch(()=>({counts:{}})),
     ];
-    // Owner: also check for pending brackets
+    // Owner: also check for pending brackets + current per-tech stock levels
+    // (the stock feeds the low-stock warning in the Predicted-income box).
     if(role==='owner'){
       reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
+      reqs.push(api('bracket_inventory',{ params:{ business:current.slug }}).catch(()=>({inventory:[]})));
     }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
+    const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
@@ -4606,6 +4650,7 @@ async function renderGreeting(){
       profit: s.profit || null,
       addressAlerts: s.address_alerts || [],
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
+      lowStockTechs: lowStockCount(bracketInv),
     };
     paintGreeting();
     { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
@@ -4816,7 +4861,9 @@ function greetStatsHtml(){
         `</div>`
       ) : '')+
     `</div>`+
-    `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span></div>`+
+    `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span>`+
+      ((greetingData.lowStockTechs||0)>0 ? `<div class="gstat-warn" onclick="goToBrackets()" title="View bracket inventory">⚠ ${greetingData.lowStockTechs} tech${greetingData.lowStockTechs>1?'s':''} low on stock</div>` : '')+
+    `</div>`+
     avgTicketBoxHtml(pf, r)+
     profitCards+
   `</div>`;
