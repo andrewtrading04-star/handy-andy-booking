@@ -318,7 +318,7 @@ async function importCustomers(maps, custCache) {
 
 // ── Pass 2: jobs in the date window (+ any customer embedded on the job) ─────
 async function importJobs(maps, custCache) {
-  let scanned = 0, imported = 0, skippedFuture = 0, skippedNoBiz = 0, firstLogged = false;
+  let scanned = 0, imported = 0, skippedFuture = 0, skippedNoBiz = 0, skippedTerminal = 0, firstLogged = false;
   console.log(`• Pass 2/2 — jobs ${SINCE} → ${UNTIL} (inclusive) …`);
   const base = `/v1/jobs?start_date_after=${SINCE}&start_date_before=${UNTIL}`;
   for await (const job of paginate(base)) {
@@ -364,6 +364,24 @@ async function importJobs(maps, custCache) {
     if (!booking.zenbooker_job_id) { continue; }
     if (DRY) { imported++; continue; }
 
+    // Never let a reconcile run move a booking BACKWARD. The CRM is the source of
+    // truth for completion; the live Zenbooker job status lags (a CRM-only
+    // complete never syncs back). Re-importing would downgrade status, null
+    // completed_at, revert payment_status (dropping it from the profit boxes),
+    // and replace metadata (wiping metadata.review_email_sent_at → a duplicate
+    // review email). Leave any CRM-terminal booking untouched.
+    try {
+      const { data: prev } = await db.from('bookings')
+        .select('id, status, completed_at')
+        .eq('business_id', route.business_id)
+        .eq('zenbooker_job_id', booking.zenbooker_job_id)
+        .maybeSingle();
+      if (prev && (['completed', 'cancelled', 'no_show'].includes(prev.status) || prev.completed_at)) {
+        skippedTerminal++;
+        continue;
+      }
+    } catch (e) { /* best-effort: fall through to the normal upsert */ }
+
     try {
       const { data: bRow, error: bErr } = await db.from('bookings')
         .upsert(booking, { onConflict: 'business_id,zenbooker_job_id', ignoreDuplicates: false })
@@ -377,8 +395,8 @@ async function importJobs(maps, custCache) {
       if (imported % 50 === 0) console.log(`    …${imported} jobs`);
     } catch (e) { console.warn('  booking upsert:', e.message); }
   }
-  console.log(`  jobs imported: ${imported} (scanned ${scanned}, skipped future ${skippedFuture}, no-business ${skippedNoBiz})`);
-  return { scanned, imported, skippedFuture, skippedNoBiz };
+  console.log(`  jobs imported: ${imported} (scanned ${scanned}, skipped future ${skippedFuture}, no-business ${skippedNoBiz}, kept-CRM-complete ${skippedTerminal})`);
+  return { scanned, imported, skippedFuture, skippedNoBiz, skippedTerminal };
 }
 
 async function main() {

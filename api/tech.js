@@ -667,7 +667,11 @@ async function status(req, res, db, auth, body) {
           const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
           if (emailResult.sent) {
             const nowIso = new Date().toISOString();
-            const newMeta = { ...(existing.metadata || {}), review_email_sent_at: nowIso };
+            // Re-read current metadata (not the start-of-request snapshot) so this
+            // write doesn't clobber the wire_plate_deducted_at stamp written earlier
+            // in this same completion. Mirrors the admin.js completion path.
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            const newMeta = { ...(cur?.metadata || existing.metadata || {}), review_email_sent_at: nowIso };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
             await db.from('bookings').update({ review_email_sent_at: nowIso, review_email_count: 1 }).eq('id', id);
             console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);

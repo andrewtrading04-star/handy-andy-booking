@@ -115,7 +115,23 @@ export async function mirrorBooking(ctx = {}) {
       metadata: { mirrored_at: new Date().toISOString(), source: ctx.source || 'widget' },
     };
     let booking_id = null;
+    let hadReviewToken = false;
     if (bookingRow.zenbooker_job_id) {
+      // Never let a re-mirror move a booking BACKWARD. If a row already exists for
+      // this zenbooker_job_id and the CRM has advanced it, don't downgrade status
+      // or replace metadata (which would wipe review_email_sent_at).
+      const { data: prev } = await db.from('bookings')
+        .select('id, status, completed_at, metadata, review_token')
+        .eq('business_id', biz.id).eq('zenbooker_job_id', bookingRow.zenbooker_job_id).maybeSingle();
+      if (prev && (['completed', 'cancelled', 'no_show'].includes(prev.status) || prev.completed_at)) {
+        // Terminal in the CRM — leave the booking exactly as-is.
+        return { booking_id: prev.id, customer_id, business_id: biz.id, technician_id };
+      }
+      if (prev) {
+        delete bookingRow.status;                                              // keep the CRM's in-progress status
+        bookingRow.metadata = { ...(prev.metadata || {}), ...bookingRow.metadata }; // merge, preserve prior stamps
+        hadReviewToken = !!prev.review_token;
+      }
       const { data } = await db.from('bookings')
         .upsert(bookingRow, { onConflict: 'business_id,zenbooker_job_id' }).select('id').single();
       booking_id = data?.id || null;
@@ -145,9 +161,13 @@ export async function mirrorBooking(ctx = {}) {
     }
     if (!booking_id) return;
 
-    // Generate review token with the now-known booking_id (30-day TTL: 2592000 seconds)
-    const reviewToken = signToken({ booking_id }, 2592000);
-    await db.from('bookings').update({ review_token: reviewToken }).eq('id', booking_id);
+    // Generate a review token with the now-known booking_id (30-day TTL: 2592000
+    // seconds) — but only if the booking doesn't already have one, so a re-mirror
+    // never invalidates a review link that was already emailed to the customer.
+    if (!hadReviewToken) {
+      const reviewToken = signToken({ booking_id }, 2592000);
+      await db.from('bookings').update({ review_token: reviewToken }).eq('id', booking_id);
+    }
 
     // Line items (replace any prior mirror for this booking).
     const lines = Array.isArray(ctx.line_items) ? ctx.line_items.filter(Boolean) : [];

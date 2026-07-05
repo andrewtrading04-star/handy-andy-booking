@@ -264,7 +264,7 @@ async function processJobsPage(db, ctx, page, cache, cutoffMs, result) {
   }
 
   // Map jobs -> booking rows + remember line items.
-  const bookingRows = [];
+  let bookingRows = [];
   const linesByJobId = new Map();
   for (const job of jobs) {
     const emb = job.customer || {};
@@ -276,6 +276,27 @@ async function processJobsPage(db, ctx, page, cache, cutoffMs, result) {
     bookingRows.push(booking);
     linesByJobId.set(booking.zenbooker_job_id, rawLines);
   }
+  if (!bookingRows.length) return;
+
+  // Never let an import move a booking BACKWARD. Drop any job the CRM has already
+  // advanced to a terminal state (its live Zenbooker status lags a CRM-only
+  // complete); re-importing would downgrade status/payment_status, null
+  // completed_at, and replace metadata (wiping review_email_sent_at).
+  try {
+    const jobIds = bookingRows.map(r => r.zenbooker_job_id).filter(Boolean);
+    if (jobIds.length) {
+      const { data: prev } = await db.from('bookings')
+        .select('zenbooker_job_id, status, completed_at')
+        .eq('business_id', business_id).in('zenbooker_job_id', jobIds);
+      const terminal = new Set((prev || [])
+        .filter(p => ['completed', 'cancelled', 'no_show'].includes(p.status) || p.completed_at)
+        .map(p => p.zenbooker_job_id));
+      if (terminal.size) {
+        result.jobs.skipped += terminal.size;
+        bookingRows = bookingRows.filter(r => !terminal.has(r.zenbooker_job_id));
+      }
+    }
+  } catch (e) { /* best-effort: fall through to the normal upsert */ }
   if (!bookingRows.length) return;
 
   // Upsert this page's bookings, collect ids.
