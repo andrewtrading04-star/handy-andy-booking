@@ -477,21 +477,6 @@ export default async function handler(req, res) {
 
   const action = (req.query.action || '').toString();
 
-  // TEMP probe — token-gated; remove after confirming the estimates.upsells column
-  // (migration 0048) exists on this database.
-  if (action === 'diag_upsells') {
-    if ((req.query.t || '') !== 'a9a9ac01bbde1977f47345ca67301f44e67125675a888c1e') {
-      return res.status(401).json({ error: 'nope' });
-    }
-    const db = serviceClient();
-    const probe = await db.from('estimates').select('id, upsells, accepted_upsells, approved_total').limit(1);
-    return res.status(200).json({
-      column_present: !probe.error,
-      error: probe.error ? probe.error.message : null,
-      sample_rows: probe.error ? null : (probe.data || []).length,
-    });
-  }
-
   // One-time Doms Zenbooker import. Secured by IMPORT_SECRET (so it can be
   // triggered from a browser URL), NOT the admin bearer token.
   //
