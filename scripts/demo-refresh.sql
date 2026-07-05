@@ -80,6 +80,30 @@ begin
   end loop;
 end $$;
 
+-- ── 3) Move the overdue red-glow job from Jun 2 → Jul 2 ─────────────────────
+do $$
+declare bz uuid; c uuid; t uuid; s uuid; a uuid; bk uuid;
+begin
+  select id into bz from businesses where slug='handy-andy';
+  select id into c  from customers      where business_id=bz order by random() limit 1;
+  select id into t  from technicians    where business_id=bz and active=true limit 1;
+  select id into s  from services        where business_id=bz limit 1;
+  select id into a  from service_areas   where business_id=bz order by random() limit 1;
+  -- remove the old Jun 2 job and any existing Jul 2 one (re-runnable)
+  delete from bookings where business_id=bz and status='in_progress' and payment_status='unpaid'
+    and scheduled_at::date in (date '2026-07-02', date '2026-06-02');
+  insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
+         status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
+         payment_status, address_line1, city, state, postal_code)
+  select bz, c, t, s, a, 'in_progress'::booking_status, 'manual'::booking_source,
+         timestamptz '2026-07-02 14:00-07', timestamptz '2026-07-02 15:30-07', 90, 149, 149,
+         'unpaid'::payment_status, cu.address_line1, cu.city, cu.state, cu.postal_code
+  from customers cu where cu.id=c
+  returning id into bk;
+  insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
+    values (bk, bz, 'service', 'TV Size: 70"-84"', 1, 149, 149);
+end $$;
+
 -- Verify:
 --   select distinct name from services order by 1;              -- no brand names
 --   select scheduled_at::date, count(*) from bookings

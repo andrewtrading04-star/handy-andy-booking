@@ -3689,7 +3689,7 @@ end $$;
 --   from public.events where session_id like 'demo-%' group by 1;
 
 -- ============================================================================
--- One OVERDUE, not-completed job on Jun 2 (unpaid 48h+) → glows red on schedule.
+-- One OVERDUE, not-completed job on Jul 2 (unpaid 48h+) → glows red on schedule.
 -- ============================================================================
 do $$
 declare bz uuid; c uuid; t uuid; s uuid; a uuid; bk uuid;
@@ -3699,14 +3699,14 @@ begin
   select id into t  from technicians    where business_id=bz and active=true limit 1;
   select id into s  from services        where business_id=bz limit 1;
   select id into a  from service_areas   where business_id=bz order by random() limit 1;
-  -- clear any prior demo overdue job first (re-runnable)
+  -- clear any prior demo overdue job first (re-runnable; also removes the old Jun 2 one)
   delete from bookings where business_id=bz and status='in_progress' and payment_status='unpaid'
-    and scheduled_at::date = date '2026-06-02';
+    and scheduled_at::date in (date '2026-07-02', date '2026-06-02');
   insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
          status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
          payment_status, address_line1, city, state, postal_code)
   select bz, c, t, s, a, 'in_progress'::booking_status, 'manual'::booking_source,
-         timestamptz '2026-06-02 14:00-07', timestamptz '2026-06-02 15:30-07', 90, 149, 149,
+         timestamptz '2026-07-02 14:00-07', timestamptz '2026-07-02 15:30-07', 90, 149, 149,
          'unpaid'::payment_status, cu.address_line1, cu.city, cu.state, cu.postal_code
   from customers cu where cu.id=c
   returning id into bk;
