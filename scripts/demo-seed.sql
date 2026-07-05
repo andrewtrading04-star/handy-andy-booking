@@ -158,6 +158,11 @@ delete from service_options o using service_option_groups g where o.group_id=g.i
 delete from service_option_groups where key='dismount';
 delete from service_options o using service_option_groups g join services s on s.id=g.service_id where o.group_id=g.id and (s.name ilike '%asurion%' or coalesce(s.category,'') ilike '%asurion%');
 delete from services where name ilike '%dismount%' or name ilike '%asurion%' or coalesce(category,'') ilike '%asurion%';
+-- De-brand service names so nothing shows "Dom's / Handy Andy / <biz> TV Mounting"
+-- (these surface in Review Calls via row.service.name). Give them a generic label.
+update services set name='TV Installation'
+  where name ilike '%tv mounting%' or name ilike '%handy andy%' or name ilike '%dom''s%'
+     or name ilike '%doms%' or name ilike '%camelback%' or name ilike '%gold coast%';
 
 -- ===================== technician availability =====================
 -- ============================================================================
@@ -214,10 +219,11 @@ declare
   addon_labels text[]    := array['Soundbar installation','Hide wires behind the wall (in-wall)','LED accent lights behind TV'];
   addon_prices numeric[] := array[50,75,50];
   wk_sunday date := current_date - extract(dow from current_date)::int;  -- Sunday of current week
-  k int; j2 int; si int; ai int; sched timestamptz; price numeric;
+  ntech int; dd int; j2 int; si int; ai int; sched timestamptz; price numeric; day_date date;
 begin
   for b in select id, slug from businesses where slug in ('handy-andy','doms') loop
     select array_agg(id) into tech_ids from technicians where business_id=b.id and active=true;
+    ntech := coalesce(array_length(tech_ids,1),0);
     select id into svc_id from services where business_id=b.id limit 1;
     -- re-runnable: clear any completed jobs already sitting in the current week
     delete from booking_line_items li using bookings bk
@@ -225,15 +231,19 @@ begin
         and bk.scheduled_at >= wk_sunday::timestamptz;
     delete from bookings
       where business_id=b.id and status='completed' and scheduled_at >= wk_sunday::timestamptz;
-    for k in 1..coalesce(array_length(tech_ids,1),0) loop
-      tid := tech_ids[k];
-      for j2 in 1..3 loop   -- several completed+paid jobs per tech today → rich, schedule-matching payroll
+    if ntech = 0 then continue; end if;
+    -- spread a few completed+paid jobs across EVERY day of the current Sun–Sat week
+    -- (full week, not just "so far") so the Payroll page looks full on any view day.
+    for dd in 0..6 loop
+      day_date := wk_sunday + dd;
+      for j2 in 1..(3 + (dd % 2)) loop   -- 3–4 jobs each day, rotating techs → schedule-matching payroll
+        tid := tech_ids[1 + ((dd*3 + j2) % ntech)];
         select id into cid from customers      where business_id=b.id order by random() limit 1;
         select id into area_id from service_areas where business_id=b.id order by random() limit 1;
-        si := 1 + ((k+j2) % array_length(size_labels,1));
-        ai := 1 + ((k+j2) % array_length(addon_labels,1));
+        si := 1 + ((dd+j2) % array_length(size_labels,1));
+        ai := 1 + ((dd+j2) % array_length(addon_labels,1));
         price := size_prices[si] + addon_prices[ai];
-        sched := current_date::timestamptz + ((8 + ((k*3+j2) % 10))||' hours')::interval;
+        sched := day_date::timestamptz + ((8 + (j2*2))||' hours')::interval;
         insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
                status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
                payment_status, address_line1, city, state, postal_code, completed_at)
