@@ -211,10 +211,10 @@ declare
   tech_ids uuid[]; svc_id uuid; area_id uuid; cid uuid; tid uuid; bk_id uuid;
   size_labels  text[]    := array['33"-59"','60"-69"','70"-84"','85"-97"'];
   size_prices  numeric[] := array[109,119,149,179];
-  addon_labels text[]    := array['Soundbar installation','Hide wires behind the wall (in-wall)','Dismount & haul away old TV'];
-  addon_prices numeric[] := array[50,75,35];
+  addon_labels text[]    := array['Soundbar installation','Hide wires behind the wall (in-wall)','LED accent lights behind TV'];
+  addon_prices numeric[] := array[50,75,50];
   wk_sunday date := current_date - extract(dow from current_date)::int;  -- Sunday of current week
-  k int; si int; ai int; sched timestamptz; price numeric;
+  k int; j2 int; si int; ai int; sched timestamptz; price numeric;
 begin
   for b in select id, slug from businesses where slug in ('handy-andy','doms') loop
     select array_agg(id) into tech_ids from technicians where business_id=b.id and active=true;
@@ -227,24 +227,26 @@ begin
       where business_id=b.id and status='completed' and scheduled_at >= wk_sunday::timestamptz;
     for k in 1..coalesce(array_length(tech_ids,1),0) loop
       tid := tech_ids[k];
-      select id into cid from customers      where business_id=b.id order by random() limit 1;
-      select id into area_id from service_areas where business_id=b.id order by random() limit 1;
-      si := 1 + ((k-1) % array_length(size_labels,1));
-      ai := 1 + ((k-1) % array_length(addon_labels,1));
-      price := size_prices[si] + addon_prices[ai];
-      sched := wk_sunday::timestamptz + interval '10 hours' + (k || ' hours')::interval;
-      insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
-             status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
-             payment_status, address_line1, city, state, postal_code, completed_at)
-      select b.id, cid, tid, svc_id, area_id, 'completed'::booking_status, 'widget'::booking_source,
-             sched, sched + interval '90 minutes', 90, price, price, 'paid'::payment_status,
-             c.address_line1, c.city, c.state, c.postal_code, sched + interval '90 minutes'
-      from customers c where c.id=cid
-      returning id into bk_id;
-      insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
-        values (bk_id, b.id, 'service', 'TV Size: '||size_labels[si], 1, size_prices[si], size_prices[si]);
-      insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
-        values (bk_id, b.id, 'addon', addon_labels[ai], 1, addon_prices[ai], addon_prices[ai]);
+      for j2 in 1..3 loop   -- several completed+paid jobs per tech today → rich, schedule-matching payroll
+        select id into cid from customers      where business_id=b.id order by random() limit 1;
+        select id into area_id from service_areas where business_id=b.id order by random() limit 1;
+        si := 1 + ((k+j2) % array_length(size_labels,1));
+        ai := 1 + ((k+j2) % array_length(addon_labels,1));
+        price := size_prices[si] + addon_prices[ai];
+        sched := current_date::timestamptz + ((8 + ((k*3+j2) % 10))||' hours')::interval;
+        insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
+               status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
+               payment_status, address_line1, city, state, postal_code, completed_at)
+        select b.id, cid, tid, svc_id, area_id, 'completed'::booking_status, 'widget'::booking_source,
+               sched, sched + interval '90 minutes', 90, price, price, 'paid'::payment_status,
+               c.address_line1, c.city, c.state, c.postal_code, sched + interval '90 minutes'
+        from customers c where c.id=cid
+        returning id into bk_id;
+        insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
+          values (bk_id, b.id, 'service', 'TV Size: '||size_labels[si], 1, size_prices[si], size_prices[si]);
+        insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
+          values (bk_id, b.id, 'addon', addon_labels[ai], 1, addon_prices[ai], addon_prices[ai]);
+      end loop;
     end loop;
   end loop;
 end $$;
@@ -530,3 +532,80 @@ end $$;
 --   select widget, count(distinct session_id) sessions,
 --          count(*) filter (where event_type='booking_confirmed') bookings
 --   from public.events where session_id like 'demo-%' group by 1;
+
+-- ============================================================================
+-- One OVERDUE, not-completed job on Jun 2 (unpaid 48h+) → glows red on schedule.
+-- ============================================================================
+do $$
+declare bz uuid; c uuid; t uuid; s uuid; a uuid; bk uuid;
+begin
+  select id into bz from businesses where slug='handy-andy';
+  select id into c  from customers      where business_id=bz order by random() limit 1;
+  select id into t  from technicians    where business_id=bz and active=true limit 1;
+  select id into s  from services        where business_id=bz limit 1;
+  select id into a  from service_areas   where business_id=bz order by random() limit 1;
+  -- clear any prior demo overdue job first (re-runnable)
+  delete from bookings where business_id=bz and status='in_progress' and payment_status='unpaid'
+    and scheduled_at::date = date '2026-06-02';
+  insert into bookings (business_id, customer_id, technician_id, service_id, service_area_id,
+         status, source, scheduled_at, scheduled_end, duration_minutes, subtotal, price,
+         payment_status, address_line1, city, state, postal_code)
+  select bz, c, t, s, a, 'in_progress'::booking_status, 'manual'::booking_source,
+         timestamptz '2026-06-02 14:00-07', timestamptz '2026-06-02 15:30-07', 90, 149, 149,
+         'unpaid'::payment_status, cu.address_line1, cu.city, cu.state, cu.postal_code
+  from customers cu where cu.id=c
+  returning id into bk;
+  insert into booking_line_items (booking_id, business_id, kind, name, quantity, unit_price, line_total)
+    values (bk, bz, 'service', 'TV Size: 70"-84"', 1, 149, 149);
+end $$;
+
+-- ============================================================================
+-- Handyman estimate-widget analytics (5-step funnel) for the -handyman widgets.
+-- Idempotent: cleaned by the 'demo-%' delete in the analytics block above.
+-- ============================================================================
+do $$
+declare
+  w text; widgets text[] := array['handy-andy-handyman','doms-handyman'];
+  steps text[] := array['service','describe','photo','times','contact'];
+  cont numeric[] := array[0.80,0.72,0.86,0.80];
+  cities_ha text[] := array['Phoenix','Scottsdale','Tempe']; cities_gc text[] := array['Chicago','Evanston'];
+  srcs text[] := array['google','direct','facebook','yelp.com','google','nextdoor.com','google','instagram'];
+  firsts text[] := array['Emma','Liam','Olivia','Noah','Ava','Mason','Mia','Owen','Zoe','Caleb','Harper','Leo'];
+  lasts text[] := array['Nguyen','Patel','Kim','Reyes','Chen','Meyer','Cross','Lane','Frost','Wade','Hale','Pope'];
+  d int; n int; s int; k int; reached int; vid text; sess text; base_ts timestamptz; ev_ts timestamptz;
+  dev text; src text; city text; st text; cust text;
+begin
+  for w in select unnest(widgets) loop
+    if w like 'handy-andy%' then st:='AZ'; else st:='IL'; end if;
+    for d in 1..21 loop
+      n := 3 + floor(random()*5)::int;
+      for s in 1..n loop
+        vid := 'demo-'||left(replace(w,'-',''),4)||substr(md5(random()::text),1,8);
+        sess := vid||'.'||substr(md5(random()::text),1,8);
+        base_ts := date_trunc('day', now()) - (d||' days')::interval + ((9+floor(random()*10))||' hours')::interval;
+        dev := case when random()<0.6 then 'mobile' else 'desktop' end;
+        src := srcs[1+floor(random()*array_length(srcs,1))::int];
+        if w like 'handy-andy%' then city:=cities_ha[1+floor(random()*3)::int]; else city:=cities_gc[1+floor(random()*2)::int]; end if;
+        reached := 0; for k in 1..4 loop exit when random()>cont[k]; reached:=k; end loop;
+        ev_ts := base_ts;
+        insert into public.events(session_id,event_type,step_name,value,device_type,traffic_source,city,state,widget,created_at)
+          values(sess,'step_view','service',0,dev,src,city,st,w,ev_ts);
+        for k in 1..reached loop
+          ev_ts := ev_ts + ((20+floor(random()*60))||' seconds')::interval;
+          insert into public.events(session_id,event_type,step_name,value,device_type,traffic_source,city,state,widget,created_at)
+            values(sess,'step_view',steps[k+1],k,dev,src,city,st,w,ev_ts);
+        end loop;
+        if reached>=4 then
+          cust := firsts[1+floor(random()*array_length(firsts,1))::int]||' '||lasts[1+floor(random()*array_length(lasts,1))::int];
+          ev_ts := ev_ts + interval '25 seconds';
+          insert into public.events(session_id,event_type,step_name,value,device_type,traffic_source,city,state,widget,customer_name,created_at)
+            values(sess,'price_displayed','contact',0,dev,src,city,st,w,cust,ev_ts);
+          if random()<0.5 then
+            insert into public.events(session_id,event_type,step_name,value,device_type,traffic_source,city,state,widget,customer_name,created_at)
+              values(sess,'booking_confirmed','contact',0,dev,src,city,st,w,cust,ev_ts+interval '30 seconds');
+          end if;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+end $$;

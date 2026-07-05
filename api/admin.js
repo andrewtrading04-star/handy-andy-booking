@@ -304,7 +304,12 @@ async function login(req, res, body) {
   const { data: businesses, error } = await q;
   if (error) throw error;
 
-  const name = displayNameFor(scope);
+  let name = displayNameFor(scope);
+  // Demo: source the owner's greeting name from the DB (seeded) so it's driven by
+  // data, not an env var. Production keeps the env-configured name.
+  if (scope === 'all' && demoMode()) {
+    try { const { data: o } = await db.from('staff_users').select('name').eq('role', 'owner').limit(1).maybeSingle(); if (o && o.name) name = o.name; } catch { /* fall back to env */ }
+  }
   const token = signToken({ kind: 'admin', role, scope, name });
   // Tell the dashboard which outbound channels are wired up so it can show or
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
