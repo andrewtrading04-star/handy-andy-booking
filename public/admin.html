@@ -340,6 +340,18 @@
   .es-sub-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ink-2);margin:6px 0 0;padding:0 12px;}
   .es-total-row{display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:800;color:var(--ink);margin:8px 0 4px;padding:10px 12px;background:var(--accent-soft);border-radius:10px;}
   .es-total-row .amt{color:var(--accent);}
+  /* Recommended add-ons (upsells) editor — same table feel as line items */
+  .es-ups{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
+  .es-ups-head{display:grid;grid-template-columns:1fr 84px 64px 30px;gap:6px;font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:6px 0 4px;}
+  .es-ups-head span:nth-child(2){text-align:right;}
+  .es-ups-head span:nth-child(3){text-align:center;}
+  .es-ups-row{display:grid;grid-template-columns:1fr 84px 64px 30px;gap:6px;align-items:center;}
+  .es-ups-row .search{margin:0;}
+  .es-ups-row .es-ups-price{text-align:right;}
+  .es-ups-def{display:flex;justify-content:center;align-items:center;}
+  .es-ups-def input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer;}
+  .es-ups-rm{background:none;border:none;color:var(--mute);font-size:16px;cursor:pointer;padding:4px;line-height:1;}
+  .es-ups-rm:hover{color:#dc2626;}
   .es-quote-sub{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mute);padding:1px 0;}
   .pay{font-size:11px;font-weight:700;padding:2px 8px;border-radius:14px;text-transform:capitalize;}
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
@@ -940,6 +952,10 @@
     </div>
     <div class="es-sub-row"><span>Subtotal</span><span id="esSubtotal">$0.00</span></div>
     <div class="es-total-row"><span>Estimated total</span><span class="amt" id="esTotal">$0.00</span></div>
+    <label class="fld" style="margin-top:16px;">Recommended Add-ons <span style="text-transform:none;font-weight:500;color:var(--mute);">(optional — the customer taps to accept or decline each on their approval page)</span></label>
+    <div class="es-ups-head"><span>Add-on</span><span>Price</span><span>Pre-select</span><span></span></div>
+    <div class="es-ups" id="esUpsells"></div>
+    <button class="btn ghost sm" type="button" id="esAddUpsell">+ Add add-on</button>
     <label class="fld" style="margin-top:14px;">Internal Notes <span style="text-transform:none;font-weight:500;color:var(--mute);">(office only, not sent)</span></label>
     <textarea class="search" id="esNotes" placeholder="Private notes" style="min-height:48px;resize:vertical;"></textarea>
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
@@ -3997,6 +4013,40 @@ function esAddLineRow(it){
   wrap.insertAdjacentHTML('beforeend',esLineRow(it));
   esWireLineRow(wrap.lastElementChild);
 }
+// ── Recommended add-ons (upsells) — optional items the customer accepts/declines
+// on the interactive approve page. We send { id, description, unit_price, qty,
+// default_on }; the server fills tech_pay/badge/blurb and re-prices at approval.
+// The existing id is preserved on edit so a customer's in-progress selection
+// keeps mapping to the same add-on.
+function esUpsRow(u){
+  u=u||{};
+  const d=esc(u.description||'');
+  const p=(u.unit_price!=null&&u.unit_price!=='')?esc(String(u.unit_price)):'';
+  const on=u.default_on?' checked':'';
+  return `<div class="es-ups-row" data-ups data-uid="${esc(u.id||'')}">
+    <input class="search es-ups-desc" placeholder="e.g. Cord concealment kit" value="${d}">
+    <input class="search es-ups-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" value="${p}">
+    <label class="es-ups-def" title="Start this add-on pre-selected on the customer's page"><input type="checkbox" class="es-ups-defon"${on}></label>
+    <button class="es-ups-rm" type="button" title="Remove">✕</button>
+  </div>`;
+}
+function esReadUpsells(){
+  return [...document.querySelectorAll('#esUpsells [data-ups]')].map(row=>{
+    const u={
+      description: row.querySelector('.es-ups-desc').value.trim(),
+      unit_price: parseFloat(row.querySelector('.es-ups-price').value)||0,
+      qty: 1,
+      default_on: row.querySelector('.es-ups-defon').checked,
+    };
+    const id=(row.dataset.uid||'').trim(); if(id) u.id=id;
+    return u;
+  }).filter(u=>u.description);
+}
+function esAddUpsRow(u){
+  const wrap=document.getElementById('esUpsells');
+  wrap.insertAdjacentHTML('beforeend',esUpsRow(u));
+  wrap.lastElementChild.querySelector('.es-ups-rm').addEventListener('click',ev=>ev.target.closest('[data-ups]').remove());
+}
 function openEstimateEdit(id){
   const e=estCache[id]; if(!e) return;
   document.getElementById('esId').value=e.id;
@@ -4013,11 +4063,15 @@ function openEstimateEdit(id){
   const lines=Array.isArray(e.line_items)?e.line_items:[];
   if(lines.length) lines.forEach(it=>esAddLineRow(it));
   else esAddLineRow({ qty:1 });
+  // Recommended add-ons (optional; empty section until the office adds some).
+  const upsWrap=document.getElementById('esUpsells'); upsWrap.innerHTML='';
+  (Array.isArray(e.upsells)?e.upsells:[]).forEach(u=>esAddUpsRow(u));
   esRecalcTotal();
   document.getElementById('estModal').classList.remove('hidden');
 }
 function closeEstimateEdit(){ document.getElementById('estModal').classList.add('hidden'); }
 document.getElementById('esAddLine').addEventListener('click',()=>esAddLineRow({ qty:1 }));
+document.getElementById('esAddUpsell').addEventListener('click',()=>esAddUpsRow({}));
 document.getElementById('esTaxOn').addEventListener('change',esRecalcTotal);
 document.getElementById('esCancel').addEventListener('click',closeEstimateEdit);
 document.getElementById('estModal').addEventListener('click',e=>{ if(e.target.id==='estModal') closeEstimateEdit(); });
@@ -4034,6 +4088,7 @@ document.getElementById('esSave').addEventListener('click',async()=>{
       notes: document.getElementById('esNotes').value.trim(),
       line_items: esReadLines(),
       tax_rate: esCurrentTaxRate(),
+      upsells: esReadUpsells(),
     }});
     toast('Quote saved ✓');
     closeEstimateEdit();
