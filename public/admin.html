@@ -164,6 +164,16 @@
   .dayempty{height:6px;}
 
   /* availability board (technician × day, with time-slot pills) */
+  /* Business toggle pills — view your own company's availability, or check another's */
+  .avb-bizbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:16px 18px 0;max-width:1100px;}
+  .avb-bizpill{background:#fff;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:13px;padding:8px 14px;border-radius:999px;cursor:pointer;transition:background .12s,border-color .12s;}
+  .avb-bizpill:hover{border-color:var(--accent);}
+  .avb-bizpill.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .avb-bizpill .avb-own{font-weight:600;opacity:.7;font-size:11px;}
+  .avb-bizpill.on .avb-own{opacity:.85;}
+  .avb-viewing{font-size:12px;font-weight:700;color:var(--amber,#b45309);background:rgba(255,176,32,.14);padding:5px 10px;border-radius:8px;}
+  .avb-tech.ro{cursor:default;}
+  .avb-tech.ro:hover{background:#fff;}
   .avb-wrap{padding:16px 18px;max-width:1100px;}
   .avb-legend{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px;font-size:12.5px;color:var(--ink-2);font-weight:600;}
   .avb-leg-item{display:inline-flex;align-items:center;gap:7px;}
@@ -1100,6 +1110,7 @@ let techCache = [];
 let areaCache = [];
 let calBookings = [];
 let availData = null;          // { slug, slots, days, technicians, recurringSet, exMap }
+let availViewSlug = null;      // which business the Availability tab is viewing (defaults to your own)
 
 const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
@@ -1365,7 +1376,7 @@ async function openAlertJob(slug, id){
   // Switch context to the alert's business so the job modal (and its photo/note
   // loads, which use current.slug) resolve against the right business.
   if(biz && (!current || current.slug!==slug)){
-    current=biz; availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
+    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -1381,7 +1392,7 @@ function renderSwitcher(){
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
-    availData=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
+    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
   }));
 }
 
@@ -1670,18 +1681,35 @@ function renderListView(dates){
 // ── Availability view (all techs, who's free per day/slot) ─────────────────
 async function renderAvailabilityGrid(dates){
   const view=document.getElementById('view');
-  if(!availData || availData.slug!==current.slug){
+  // Default the Availability tab to YOUR OWN business; the toggle can switch it
+  // to another company to check their coverage (read-only).
+  if(!availViewSlug) availViewSlug=current.slug;
+  if(!availData || availData.slug!==availViewSlug){
     view.innerHTML='<div class="empty">Loading…</div>';
     try{
-      const d=await api('availability_overview',{ params:{ business: current.slug }});
-      availData={ slug:current.slug, slots:d.slots, days:d.days, technicians:d.technicians||[],
+      const d=await api('availability_overview',{ params:{ business: availViewSlug }});
+      availData={ slug:availViewSlug, slots:d.slots, days:d.days, technicians:d.technicians||[],
+        businesses:d.businesses||[],
         recurringSet:new Set((d.availability||[]).map(a=>`${a.technician_id}:${a.day_of_week}:${a.slot_key}`)),
         exMap:Object.fromEntries((d.exceptions||[]).map(e=>[`${e.technician_id}:${e.date}:${e.slot_key}`, e.is_available])),
         bookedSet:new Set((d.bookings||[]).map(b=>`${b.technician_id}:${b.date}:${b.slot_key}`)) };
     }catch(err){ view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
   }
   const techs=availData.technicians, slots=availData.slots;
-  if(!techs.length){ view.innerHTML='<div class="empty">No active technicians yet. Add a technician to set their availability.</div>'; return; }
+  // Business toggle pills — only when there's more than one company to view. Your
+  // own business is marked so it's clear when you're peeking at another's.
+  const bizList=availData.businesses||[];
+  const togglePills = bizList.length>1
+    ? `<div class="avb-bizbar">${bizList.map(b=>{
+        const on=b.slug===availViewSlug, own=b.slug===current.slug;
+        return `<button class="avb-bizpill${on?' on':''}" data-bizslug="${esc(b.slug)}">${esc(b.name)}${own?' <span class="avb-own">(yours)</span>':''}</button>`;
+      }).join('')}${availViewSlug!==current.slug?`<span class="avb-viewing">Viewing another company — read-only</span>`:''}</div>`
+    : '';
+  const bindBizPills=()=>view.querySelectorAll('.avb-bizpill').forEach(el=>el.addEventListener('click',()=>{
+    if(el.dataset.bizslug===availViewSlug) return;
+    availViewSlug=el.dataset.bizslug; availData=null; renderCalBody();
+  }));
+  if(!techs.length){ view.innerHTML=togglePills+'<div class="empty">No active technicians for this company.</div>'; bindBizPills(); return; }
   // Available = scheduled (recurring weekly, then any one-time exception for the
   // exact date) AND not already booked for that slot. A slot the tech has a job
   // in is NOT available. Returns { on, exc }.
@@ -1693,17 +1721,18 @@ async function renderAvailabilityGrid(dates){
     return { on, exc };
   };
 
-  let html='<div class="avb-wrap">';
+  const readOnly = availViewSlug!==current.slug;   // another company's board — view only
+  let html=togglePills+'<div class="avb-wrap">';
   html+=`<div class="avb-legend">`+
     `<span class="avb-leg-item"><span class="avpill on" style="background:var(--accent)">8a</span> Available</span>`+
     `<span class="avb-leg-item"><span class="avpill on exc" style="background:var(--accent)">8a</span> One-time change</span>`+
-    `<span class="avb-leg-hint">Tap a technician to edit their schedule</span>`+
+    `<span class="avb-leg-hint">${readOnly?'Read-only — switch back to your company to edit':'Tap a technician to edit their schedule'}</span>`+
   `</div>`;
   html+='<div class="avb-scroll"><div class="availboard">';
   html+='<div class="avb-cell avb-head avb-corner">Technician</div>';
   dates.forEach(ds=>{ const h=colHeadLabel(ds); html+=`<div class="avb-cell avb-head${ds===todayStr()?' today':''}">${h.dow}<span class="avb-md">${esc(h.md)}</span></div>`; });
   techs.forEach(t=>{
-    html+=`<div class="avb-cell avb-tech" data-tech="${t.id}" data-name="${esc(t.name)}" role="button" tabindex="0" title="Edit ${esc(t.name)}'s schedule">`+
+    html+=`<div class="avb-cell avb-tech${readOnly?' ro':''}" data-tech="${t.id}" data-name="${esc(t.name)}"${readOnly?'':` role="button" tabindex="0" title="Edit ${esc(t.name)}'s schedule"`}>`+
       `${avatar(t)}<span class="avb-tname">${esc(t.name)}</span></div>`;
     dates.forEach(ds=>{
       const today=ds===todayStr(); let pills='', anyOn=false;
@@ -1716,7 +1745,10 @@ async function renderAvailabilityGrid(dates){
   });
   html+='</div></div></div>';
   view.innerHTML=html;
-  view.querySelectorAll('.avb-tech').forEach(el=>{
+  bindBizPills();
+  // Editing a schedule is only allowed on YOUR OWN company's board — another
+  // company's board is read-only (no edit clicks bound).
+  if(!readOnly) view.querySelectorAll('.avb-tech').forEach(el=>{
     const go=()=>openAvailability(el.dataset.tech, el.dataset.name);
     el.addEventListener('click',go);
     el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });

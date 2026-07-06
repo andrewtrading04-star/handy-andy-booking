@@ -784,7 +784,19 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
 // All techs' weekly availability + upcoming exceptions for one business, so the
 // calendar's "Availability" view can show who's free per day/slot.
 async function availabilityOverview(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  // Cross-business by design: any signed-in office user can VIEW another
+  // business's availability (who's free per slot) to coordinate coverage — the
+  // same non-sensitive occupancy data already exposed when assigning a
+  // cross-company second tech. No pay or customer data is returned here.
+  // (Mirrors reviewCalls, which spans both businesses regardless of scope.) The
+  // secretary's own business is the default; the toggle just switches the view.
+  const slug = (req.query.business || '').toString();
+  if (!slug) return res.status(400).json({ error: 'business is required' });
+  const { data: allBiz } = await db.from('businesses')
+    .select('id, slug, name, timezone').eq('active', true).order('name');
+  const biz = (allBiz || []).find(b => b.slug === slug);
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+  const bizList = (allBiz || []).map(b => ({ slug: b.slug, name: b.name }));
   const { data: techs } = await db.from('technicians')
     .select('id, name, color').eq('business_id', biz.id).eq('active', true).order('name');
   const ids = (techs || []).map(t => t.id);
@@ -843,7 +855,7 @@ async function availabilityOverview(req, res, db, auth) {
     }
     bookings = occRows;
   }
-  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions, bookings });
+  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions, bookings, businesses: bizList, business: { slug: biz.slug, name: biz.name } });
 }
 
 // ── Bookings list ────────────────────────────────────────────────────────────
