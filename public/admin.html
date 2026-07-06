@@ -470,6 +470,19 @@
   .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
   .bk-assign{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);}
   .bk-assign select{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;}
+  /* Extra time slots (big jobs) */
+  .bk-slots{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
+  .bk-slotchips{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+  .bk-slotchip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);}
+  .bk-slotchip .t{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--mute);}
+  .bk-slotchip.main{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;}
+  .bk-slotchip.main .t{color:#3b6fd4;}
+  .bk-slotchip.added{border-color:#bbf7d0;background:#f0fdf4;color:#166534;}
+  .bk-slotchip.added .t{color:#3f9d5f;}
+  .bk-slotchip .x{cursor:pointer;font-weight:800;opacity:.65;margin-left:1px;}
+  .bk-slotchip .x:hover{opacity:1;color:#b91c1c;}
+  .bk-slotadd{background:#fff;border:1px dashed #93c5fd;border-radius:9px;padding:6px 10px;font-size:12.5px;font-weight:700;color:var(--accent);cursor:pointer;}
+  .evt-multi{font-size:10px;font-weight:800;color:#3b6fd4;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:1px 5px;margin-left:5px;white-space:nowrap;}
 
   /* photos + notes (modal sections) */
   .bk-sec{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
@@ -1571,7 +1584,7 @@ function evtCard(b){
   if(overdue) pills.push(`<span class="evt-overdue" title="Unpaid ${odDays} day${odDays===1?'':'s'} — payment overdue">⚠ UNPAID · ${odDays}d</span>`);
   const pillsHtml = pills.length ? `<span class="evt-pills">${pills.join('')}</span>` : '';
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
-    <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span></div>
+    <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}</div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`:''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${pillsHtml}</div>
   </div>`;
@@ -1744,6 +1757,44 @@ async function addTwoPersonFee(b){
   b.line_items=items.map(it=>({ label:it.name, kind:it.kind, quantity:it.quantity, price:it.unit_price, line_total:Math.round(it.unit_price*it.quantity*100)/100 }));
 }
 // ── Booking detail modal ───────────────────────────────────────────────────
+// ── Extra time slots for a big job (add/remove) ─────────────────────────────
+// Reserves additional fixed slots so the tech isn't double-booked into them. The
+// server validates each added slot is actually free for the job's tech(s) that day.
+async function renderBkSlots(b){
+  const el=document.getElementById('bkSlots'); if(!el) return;
+  const canEdit=!['cancelled','completed','no_show'].includes(b.status);
+  el.innerHTML=`<div class="bk-sec-h" style="margin-bottom:8px;">Time slots</div><div class="sub" style="font-size:12.5px;color:var(--mute);">Loading…</div>`;
+  let d;
+  try{ d=await api('booking_slots',{ params:{ business:current.slug, id:b.id }}); }
+  catch(err){ el.innerHTML=''; return; }   // e.g. migration not applied yet → hide the feature
+  const labelOf=k=>((d.slots||[]).find(s=>s.slot_key===k)||{}).label||k;
+  const chips=[`<span class="bk-slotchip main">${esc(labelOf(d.main_slot))}<span class="t">main</span></span>`];
+  for(const k of (d.extra_slots||[])){
+    chips.push(`<span class="bk-slotchip added">${esc(labelOf(k))}<span class="t">added</span>${canEdit?`<span class="x" data-rem="${esc(k)}" title="Remove this slot">✕</span>`:''}</span>`);
+  }
+  let addHtml='';
+  if(canEdit && (d.addable||[]).length){
+    addHtml=`<select class="bk-slotadd" id="bkSlotAdd"><option value="">+ Add time slot…</option>${d.addable.map(s=>`<option value="${esc(s.slot_key)}">${esc(s.label)}</option>`).join('')}</select>`;
+  } else if(canEdit){
+    addHtml=`<span class="sub" style="font-size:12px;color:var(--mute);align-self:center;">No other free slots this day</span>`;
+  }
+  el.innerHTML=`<div class="bk-sec-h" style="margin-bottom:8px;">Time slots <span style="font-weight:400;font-size:12px;color:var(--mute);">— reserve extra time for a big job</span></div>
+    <div class="bk-slotchips">${chips.join('')}${addHtml}</div>`;
+  el.querySelectorAll('[data-rem]').forEach(x=>x.addEventListener('click',()=>setBkSlots(b,(d.extra_slots||[]).filter(k=>k!==x.dataset.rem))));
+  const sel=document.getElementById('bkSlotAdd');
+  if(sel) sel.addEventListener('change',()=>{ if(sel.value) setBkSlots(b,[...(d.extra_slots||[]),sel.value]); });
+}
+async function setBkSlots(b, slots){
+  const el=document.getElementById('bkSlots'); if(el) el.style.opacity='.5';
+  try{
+    const r=await api('booking_slots',{ method:'POST', body:{ business:current.slug, id:b.id, slots }});
+    b.extra_slots=r.extra_slots||[];
+    toast('Time slots updated');
+    await renderBkSlots(b);
+    availData=null; renderSchedule(true);   // refresh the grid + cards so the reservation shows
+  }catch(err){ toast(err.message||'Could not update slots'); if(el) el.style.opacity=''; }
+}
+
 function openBooking(b){
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
@@ -1791,6 +1842,7 @@ function openBooking(b){
     ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
     ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-row"><span>🔧</span><div><strong>Two-person lift</strong>${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</div></div>`:''}
     ${b.secondary_technician?`<div class="bk-row"><span>${ic('customers')}</span><div>2nd tech: <strong>${esc(b.secondary_technician.name)}</strong>${b.secondary_technician.cross_company?` <span class="evt-xco" title="From the partner company — the customer never sees this">${esc(b.secondary_technician.company||'PARTNER')}</span>`:''}</div></div>`:''}
+    <div class="bk-slots" id="bkSlots"></div>
     <div class="bk-actions">
       ${canAssign?`<label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>`:''}
       ${showSecond?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}
@@ -1837,6 +1889,7 @@ function openBooking(b){
   const close=()=>m.classList.add('hidden');
   document.getElementById('bkClose').onclick=close;
   m.onclick=e=>{ if(e.target===m) close(); };
+  renderBkSlots(b);   // populate the "Time slots" section (add/remove extra slots)
   const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
   const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{

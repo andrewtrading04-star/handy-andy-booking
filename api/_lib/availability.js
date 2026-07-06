@@ -15,6 +15,14 @@ export const SLOTS = [
 
 export const SLOT_KEYS = new Set(SLOTS.map(s => s.key));
 
+// extra_slots (migration 0052): a big job reserves additional slots. Read them
+// optimistically and fall back if the column isn't applied yet (mirror of the
+// admin.js pattern) so availability never breaks while the migration lands.
+let _extraCol = true;
+const esCol2 = () => (_extraCol ? ', extra_slots' : '');
+const esOf2 = (b) => (_extraCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
+const _isExtraErr = (e) => /extra_slots/.test((e && e.message) || '');
+
 // Sunday-first to match JS Date.getDay().
 export const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -222,15 +230,26 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
     // fallback, or a pre-0019 DB errors on BOTH attempts and no slot ever reads
     // as booked (→ overbooking). Matches admin.js's conditional-select pattern.
     let q = db.from('bookings')
-      .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
+      .select((withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at') + esCol2())
       .neq('status', 'cancelled').not('scheduled_at', 'is', null)
       .gte('scheduled_at', winStart).lt('scheduled_at', winEnd);
     return withSecond
       ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
       : q.in('technician_id', techIds);
   };
-  let { data: bk, error: bkErr } = await runB(true);
-  if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) ({ data: bk } = await runB(false));
+  // Degrade for either missing column (pre-0019 secondary_technician_id, pre-0052
+  // extra_slots). PostgREST names one missing column at a time, so flip the flag it
+  // names and retry until the select is clean (max 2 flips) — never leaving the
+  // booked set empty (which would overbook the widget).
+  let withSecond = true;
+  let { data: bk, error: bkErr } = await runB(withSecond);
+  for (let i = 0; i < 2 && bkErr; i++) {
+    let changed = false;
+    if (_isExtraErr(bkErr)) { _extraCol = false; changed = true; }
+    if (/secondary_technician_id/.test(bkErr.message || '')) { withSecond = false; changed = true; }
+    if (!changed) break;
+    ({ data: bk, error: bkErr } = await runB(withSecond));
+  }
   const techIdSet = new Set(techIds);
   const booked = new Set();
   // Jobs already booked per tech per day: `${techId}:${date}` -> count. Used to
@@ -240,9 +259,12 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
     const slotKey = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     if (!slotKey) continue;
     const dateStr = localDateStr(tz, b.scheduled_at);
+    const extra = esOf2(b);
     for (const tid of [b.technician_id, b.secondary_technician_id]) {
       if (tid && techIdSet.has(tid)) {
         booked.add(`${tid}:${dateStr}:${slotKey}`);
+        for (const sk of extra) booked.add(`${tid}:${dateStr}:${sk}`);   // extra slots busy, same job
+        // Cap counts JOBS, not slots — one big job over 2 slots is still one job.
         dayCount.set(`${tid}:${dateStr}`, (dayCount.get(`${tid}:${dateStr}`) || 0) + 1);
       }
     }
@@ -293,7 +315,7 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
   const dayStart = localDateStartUTC(tz, dateStr).toISOString();
   const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
   const run = (withSecond) => {
-    let q = db.from('bookings').select('scheduled_at')
+    let q = db.from('bookings').select('scheduled_at' + esCol2())
       .neq('status', 'cancelled').not('scheduled_at', 'is', null)
       .gte('scheduled_at', dayStart).lt('scheduled_at', dayEnd);
     return withSecond
@@ -301,9 +323,18 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
       : q.eq('technician_id', techId);
   };
   let { data, error } = await run(_liftOne);
-  if (error && /secondary_technician_id/.test(error.message || '')) { _liftOne = false; ({ data } = await run(false)); }
+  for (let i = 0; i < 2 && error; i++) {
+    let changed = false;
+    if (_isExtraErr(error)) { _extraCol = false; changed = true; }
+    if (/secondary_technician_id/.test(error.message || '')) { _liftOne = false; changed = true; }
+    if (!changed) break;
+    ({ data, error } = await run(_liftOne));
+  }
   const taken = new Set();
-  for (const b of (data || [])) { const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)); if (k) taken.add(k); }
+  for (const b of (data || [])) {
+    const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)); if (k) taken.add(k);
+    for (const sk of esOf2(b)) taken.add(sk);
+  }
   return taken;
 }
 

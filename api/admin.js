@@ -21,7 +21,7 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, upcomingPayoutBySlug } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -206,6 +206,7 @@ export default async function handler(req, res) {
       case 'booking_address_update': return await bookingAddressUpdate(req, res, db, auth, body);
       case 'booking_authorization': return await bookingAuthorization(req, res, db, auth);
       case 'booking_line_items_save': return await bookingLineItemsSave(req, res, db, auth, body);
+      case 'booking_slots':        return await bookingSlots(req, res, db, auth, body);
       case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
       case 'disputes':          return await disputes(req, res, db, auth);
@@ -806,7 +807,7 @@ async function availabilityOverview(req, res, db, auth) {
     const idList = ids.join(',');
     const runBk = (withSecond) => {
       let q = db.from('bookings')
-        .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
+        .select((withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at') + esCol())
         .neq('status', 'cancelled').not('scheduled_at', 'is', null)
         .order('scheduled_at', { ascending: true }).limit(2000);
       return withSecond
@@ -814,9 +815,10 @@ async function availabilityOverview(req, res, db, auth) {
         : q.in('technician_id', ids);
     };
     let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
-    if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) {
-      bookingLiftCols = false;
-      ({ data: bk } = await runBk(false));
+    if (bkErr && (/secondary_technician_id/.test(bkErr.message || '') || isExtraSlotsErr(bkErr))) {
+      if (/secondary_technician_id/.test(bkErr.message || '')) bookingLiftCols = false;
+      if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
+      ({ data: bk } = await runBk(bookingLiftCols));
     }
     const idSet = new Set(ids);
     const occRows = [];
@@ -824,9 +826,13 @@ async function availabilityOverview(req, res, db, auth) {
       const slot_key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
       if (!slot_key) continue;
       const date = localDateStr(tz, b.scheduled_at);
-      if (idSet.has(b.technician_id)) occRows.push({ technician_id: b.technician_id, date, slot_key });
-      if (b.secondary_technician_id && idSet.has(b.secondary_technician_id))
-        occRows.push({ technician_id: b.secondary_technician_id, date, slot_key });
+      // Each slot the job holds (main + any extra) is a busy row for its tech(s).
+      const keys = [slot_key, ...esOf(b)];
+      for (const k of keys) {
+        if (idSet.has(b.technician_id)) occRows.push({ technician_id: b.technician_id, date, slot_key: k });
+        if (b.secondary_technician_id && idSet.has(b.secondary_technician_id))
+          occRows.push({ technician_id: b.secondary_technician_id, date, slot_key: k });
+      }
     }
     bookings = occRows;
   }
@@ -867,6 +873,66 @@ async function bookings(req, res, db, auth) {
   const { data, error } = await fetchBookingRows(makeQ);
   if (error) throw error;
   return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
+}
+
+// ── Extra time slots on a booking (big jobs) ─────────────────────────────────
+// GET  -> { main_slot, extra_slots, addable:[{slot_key,label}], date }
+// POST { slots:[...] } -> validate each is free for the job's tech(s) that day
+//        (not the main slot, not booked by another job) and set extra_slots.
+// The occupancy readers (office availability, the widget, auto-assign, the grid)
+// all treat extra_slots as busy, so this reserves the slot without a phantom row.
+async function bookingSlots(req, res, db, auth, body) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business || (body && body.business)); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || (body && body.id) || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const { data: b, error } = await db.from('bookings')
+    .select(`id, scheduled_at, technician_id, secondary_technician_id, service_area_id, status${esCol()}`)
+    .eq('business_id', biz.id).eq('id', id).maybeSingle();
+  if (error && isExtraSlotsErr(error)) { extraSlotsCol = false; return res.status(400).json({ error: 'Extra time slots need migration 0052 applied first.' }); }
+  if (error) throw error;
+  if (!b) return res.status(404).json({ error: 'Job not found' });
+  if (!b.scheduled_at) return res.status(400).json({ error: 'Give this job a date and time first, then add extra slots.' });
+
+  const tz = await areaTimezone(db, b.service_area_id, biz.timezone || 'America/Denver');
+  const dateStr = localDateStr(tz, b.scheduled_at);
+  const mainSlot = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+  const current = esOf(b);
+
+  // Slots already taken by OTHER bookings for either tech on this date (this job excluded).
+  const techIds = [b.technician_id, b.secondary_technician_id].filter(Boolean);
+  const takenByOthers = new Set();
+  for (const tid of techIds) {
+    const s = await bookedSlotKeysForTech(db, biz.id, tid, dateStr, tz, id);
+    for (const k of s) takenByOthers.add(k);
+  }
+
+  if (req.method !== 'POST') {
+    const addable = SLOTS
+      .filter(s => s.key !== mainSlot && !current.includes(s.key) && !takenByOthers.has(s.key))
+      .map(s => ({ slot_key: s.key, label: s.label }));
+    return res.status(200).json({
+      id, date: dateStr, main_slot: mainSlot, extra_slots: current,
+      slots: SLOTS.map(s => ({ slot_key: s.key, label: s.label })),
+      addable,
+    });
+  }
+
+  if (!extraSlotsCol) return res.status(400).json({ error: 'Extra time slots need migration 0052 applied first.' });
+  const requested = Array.isArray(body && body.slots) ? body.slots.map(String) : [];
+  const clean = [];
+  for (const sk of requested) {
+    if (!SLOT_KEYS.has(sk)) return res.status(400).json({ error: `Invalid time slot: ${sk}` });
+    if (sk === mainSlot) continue;                       // the main slot is implied, never an extra
+    if (takenByOthers.has(sk)) {
+      const lab = (SLOTS.find(s => s.key === sk) || {}).label || sk;
+      return res.status(409).json({ error: `${lab} is already booked for this technician — can't add it.` });
+    }
+    if (!clean.includes(sk)) clean.push(sk);
+  }
+  const { error: uErr } = await db.from('bookings').update({ extra_slots: clean }).eq('id', id).eq('business_id', biz.id);
+  if (uErr) throw uErr;
+  return res.status(200).json({ ok: true, id, extra_slots: clean });
 }
 
 // ── Services (for the New Booking form) ──────────────────────────────────────
@@ -1152,7 +1218,7 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
   // second job could be stacked onto a tech who's already someone's second tech.
   const run = (withSecond) => {
     let q = db.from('bookings')
-      .select('id, scheduled_at')
+      .select(`id, scheduled_at${esCol()}`)
       .neq('status', 'cancelled')
       .not('scheduled_at', 'is', null)
       .gte('scheduled_at', dayStart.toISOString())
@@ -1163,16 +1229,19 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
     if (excludeId) q = q.neq('id', excludeId);
     return q;
   };
-  // Drop the secondary leg on databases predating migration 0019 (column absent).
+  // Drop the secondary leg on databases predating migration 0019 (column absent);
+  // drop extra_slots on DBs predating migration 0052 — same graceful degrade.
   let { data, error } = await run(bookingLiftCols);
-  if (error && /secondary_technician_id/.test(error.message || '')) {
-    bookingLiftCols = false;
-    ({ data, error } = await run(false));
+  if (error && (/secondary_technician_id/.test(error.message || '') || isExtraSlotsErr(error))) {
+    if (/secondary_technician_id/.test(error.message || '')) bookingLiftCols = false;
+    if (isExtraSlotsErr(error)) extraSlotsCol = false;
+    ({ data, error } = await run(bookingLiftCols));
   }
   const taken = new Set();
   for (const b of (data || [])) {
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     if (key) taken.add(key);
+    for (const sk of esOf(b)) taken.add(sk);   // a big job's extra slots are busy too
   }
   return taken;
 }
@@ -1390,7 +1459,7 @@ async function availableDates(req, res, db, auth) {
   const tidList = techIds.join(',');
   const runBk = (withSecond) => {
     let q = db.from('bookings')
-      .select(withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at')
+      .select((withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at') + esCol())
       .neq('status', 'cancelled').not('scheduled_at', 'is', null)
       .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString());
     return withSecond
@@ -1398,9 +1467,10 @@ async function availableDates(req, res, db, auth) {
       : q.in('technician_id', techIds);
   };
   let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
-  if (bkErr && /secondary_technician_id/.test(bkErr.message || '')) {
-    bookingLiftCols = false;
-    ({ data: bk } = await runBk(false));
+  if (bkErr && (/secondary_technician_id/.test(bkErr.message || '') || isExtraSlotsErr(bkErr))) {
+    if (/secondary_technician_id/.test(bkErr.message || '')) bookingLiftCols = false;
+    if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
+    ({ data: bk } = await runBk(bookingLiftCols));
   }
   const techIdSet = new Set(techIds);
   const occ = {};   // `${techId}:${date}` -> Set(slot_key)
@@ -1409,8 +1479,10 @@ async function availableDates(req, res, db, auth) {
     const date = localDateStr(tz, b.scheduled_at);
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     if (!key) continue;
-    if (techIdSet.has(b.technician_id)) addOcc(b.technician_id, date, key);
-    if (b.secondary_technician_id && techIdSet.has(b.secondary_technician_id)) addOcc(b.secondary_technician_id, date, key);
+    for (const k of [key, ...esOf(b)]) {   // main slot + any extra slots this job holds
+      if (techIdSet.has(b.technician_id)) addOcc(b.technician_id, date, k);
+      if (b.secondary_technician_id && techIdSet.has(b.secondary_technician_id)) addOcc(b.secondary_technician_id, date, k);
+    }
   }
 
   // Compute one tech's free slot set for a given date (recurring ± exceptions − booked).
@@ -1937,6 +2009,9 @@ async function bookingUpdate(req, res, db, auth, body) {
       } else {
         return res.status(400).json({ error: 'scheduled_at (or scheduled_date + scheduled_slot) required' });
       }
+      // A big job's extra slots were reserved for the OLD time — drop them on a
+      // reschedule so they can't silently land on another job at the new time.
+      if (extraSlotsCol) patch.extra_slots = [];
       break;
     }
     case 'assign':
@@ -1944,6 +2019,9 @@ async function bookingUpdate(req, res, db, auth, body) {
       // doesn't wipe the primary (and vice-versa). Skip the secondary if the DB
       // hasn't been migrated for it yet.
       if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
+      // Changing the PRIMARY tech moves the reserved extra slots to a different
+      // person — drop them so they must be re-added (and re-validated) for the new tech.
+      if (body.technician_id !== undefined && (body.technician_id || null) !== (existing.technician_id || null) && extraSlotsCol) patch.extra_slots = [];
       if (body.secondary_technician_id !== undefined && bookingLiftCols) {
         let sec = body.secondary_technician_id || null;
         // 'any' → resolve to the scheduled default (Handy Andy first for Dom's).
@@ -2959,13 +3037,20 @@ async function techAvailabilityExceptionSet(req, res, db, auth, body) {
 // DB doesn't have them, flip this flag off and the reads fall back gracefully so
 // the dashboard never goes down waiting on a migration.
 let bookingLiftCols = true;
+// extra_slots (migration 0052) — same optimistic pattern. When the column isn't
+// applied yet, flip off and every occupancy read omits it (a booking then blocks
+// only its main slot, never breaking the schedule while the migration lands).
+let extraSlotsCol = true;
+const esCol = () => (extraSlotsCol ? ', extra_slots' : '');            // append to a raw select
+const esOf = (b) => (extraSlotsCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
+const isExtraSlotsErr = (e) => /extra_slots/.test((e && e.message) || '');
 function bookingSelect() {
   // The technician embeds are disambiguated by FK column (technician_id /
   // secondary_technician_id) because bookings has TWO foreign keys to
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id,
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id${esCol()},
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
@@ -2983,8 +3068,9 @@ function bookingSelect() {
 // makeQuery receives the select string and returns a fresh (awaitable) query.
 async function fetchBookingRows(makeQuery) {
   let { data, error } = await makeQuery(bookingSelect());
-  if (error && /secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) {
-    bookingLiftCols = false;
+  if (error && (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '') || isExtraSlotsErr(error))) {
+    if (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) bookingLiftCols = false;
+    if (isExtraSlotsErr(error)) extraSlotsCol = false;
     ({ data, error } = await makeQuery(bookingSelect()));
   }
   return { data, error };
@@ -3003,6 +3089,9 @@ function shapeBooking(b) {
     scheduled_at: b.scheduled_at,
     scheduled_end: b.scheduled_end,
     duration_minutes: b.duration_minutes,
+    // Additional slot keys this big job reserves (migration 0052). The main slot
+    // comes from scheduled_at; these are the extra ones the office blocked.
+    extra_slots: esOf(b),
     price: b.price,
     // Gratuity the customer added at charge time (100% to the tech). Kept so the
     // schedule card can show the true total the customer paid (price + tip).
