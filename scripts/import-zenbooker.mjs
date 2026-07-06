@@ -218,6 +218,22 @@ function mapBooking(job, ctx, customer_id) {
   const rawStatus = (pick(job, 'status', 'state') || '').toLowerCase();
   const inv = job.invoice || job.payment || {};
 
+  // A real TV-size selection ALWAYS carries a price ($99+). A $0 line whose name
+  // is a bare size bracket ("32\" Or Less", "33-59 inch", …) is a phantom — a
+  // stray/duplicate size the Zenbooker form recorded but never charged. Left in,
+  // it makes a 1-TV job read as a 2-TV job (the Jennifer Groves bug) and skews
+  // per-tech pay. Drop only those; real $0 answer lines (fireplace / wall /
+  // "…I can help lift it") are full sentences and are kept.
+  const isPhantomZeroSize = (s) => {
+    const total = Number(pick(s, 'total', 'line_total', 'amount', 'price') || 0);
+    const unit  = Number(pick(s, 'unit_price', 'price', 'amount', 'rate') || 0);
+    if (total !== 0 || unit !== 0) return false;
+    const n = String(pick(s, 'name', 'title', 'description') || '').trim().toLowerCase();
+    if (/my tv is|lift|help|larger|fireplace|dismount|bracket|surface|wire/.test(n)) return false;
+    return /^(?:tv\s*size[:\s-]*)?(?:32"?\s*(?:or\s*)?(?:less|under)|\d{2,3}"?\s*[-–]\s*\d{2,3}"?|\d{2,3}"?\s*\+?)\s*(?:inch(?:es)?)?"?$/.test(n);
+  };
+  const usableServices = (Array.isArray(services) ? services : []).filter(s => !isPhantomZeroSize(s));
+
   return {
     booking: {
       business_id: ctx.business_id,
@@ -254,7 +270,7 @@ function mapBooking(job, ctx, customer_id) {
         invoice_url: pick(inv, 'url', 'hosted_url', 'pdf_url') || null,
       },
     },
-    lines: (Array.isArray(services) ? services : []).map(s => ({
+    lines: usableServices.map(s => ({
       kind: 'service',
       name: pick(s, 'name', 'title', 'description') || 'Service',
       description: pick(s, 'description'),
