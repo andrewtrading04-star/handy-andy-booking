@@ -1579,7 +1579,7 @@ async function saveCardOnFile(pmId, cust, slug = null) {
   if (!ar.ok) throw new Error(pm?.error?.message || 'Attach failed');
   const db = new URLSearchParams(); db.set('invoice_settings[default_payment_method]', pmId);
   await fetch(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
-  return { customerId, pmId };
+  return { customerId, pmId, brand: pm?.card?.brand || null, last4: pm?.card?.last4 || null };
 }
 
 // ── Create a manual / phone booking ──────────────────────────────────────────
@@ -3249,6 +3249,14 @@ async function reviewCheck(req, res, body) {
 
   if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
 
+  // Reaching this page means the customer CLICKED the review link in the email —
+  // that proves they opened it, even when the tracking pixel was blocked (Gmail/
+  // Outlook proxy or strip images, so the pixel often never fires). Backfill the
+  // open time if it's still null. Best-effort; never block the page load.
+  db.from('bookings').update({ review_email_opened_at: new Date().toISOString() })
+    .eq('id', booking.id).is('review_email_opened_at', null)
+    .then(() => {}, () => {});
+
   const slug = booking.business?.slug || 'handy-andy';
   const reviewUrl = resolveGoogleReviewUrl({
     slug,
@@ -3303,6 +3311,13 @@ async function reviewSubmit(req, res, body) {
   }).eq('id', booking.id);
 
   if (uErr) throw uErr;
+
+  // Submitting a review is proof the customer opened the email — backfill the
+  // open time if the tracking pixel never fired (blocked/proxied images), so a
+  // real review can never read "email not opened". Best-effort.
+  db.from('bookings').update({ review_email_opened_at: now })
+    .eq('id', booking.id).is('review_email_opened_at', null)
+    .then(() => {}, () => {});
 
   // Send email if rating ≤ 4 and feedback exists
   if (rating <= 4 && feedback && booking.business?.feedback_email) {
@@ -4105,7 +4120,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, customer_name, customer_zip, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
+  let cols = 'id, business_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -4176,10 +4191,19 @@ async function estimateApproveInfo(req, res, body) {
   // customer's own selection so a reopened link shows what they chose.
   const menu = publicUpsells(est.upsells);
   const acceptedIds = Array.isArray(est.accepted_upsells) ? est.accepted_upsells.map(u => u && u.id) : null;
+  const slug = est.business?.slug || 'handy-andy';
   return res.status(200).json({
-    business_slug: est.business?.slug || 'handy-andy',
+    business_slug: slug,
     business_name: est.business?.name || 'Handy Andy',
     customer_name: est.customer_name || '',
+    customer_phone: est.customer_phone || '',
+    customer_zip: est.customer_zip || '',
+    customer_address: est.customer_address || '',
+    customer_city: est.customer_city || '',
+    customer_state: est.customer_state || '',
+    // Publishable key so the approve page can collect a card to hold on file
+    // (tokenized client-side; only the business's secret key can charge it).
+    stripe_pk: bookingStripePk(slug),
     service_label: est.service_label || '',
     description: est.description || '',
     line_items: items,
@@ -4237,8 +4261,41 @@ async function estimateApprove(req, res, body) {
   const combined = baseItems.concat(upsellsAsLineItems(accepted));
   const totals = quoteTotals(combined, est.tax_rate);
 
+  // ── Card + address are REQUIRED to approve (so the office can book) ──────────
+  // The customer must give us a card to hold on file and their service address.
+  const addr = (body && body.address) || {};
+  const line1 = String(addr.line1 || '').trim();
+  const city = String(addr.city || '').trim();
+  const stateAbbr = String(addr.state || '').trim();
+  const zip = String(addr.zip || est.customer_zip || '').trim();
+  const pmId = String((body && body.payment_method_id) || '').trim();
+  const custName = String((body && body.customer_name) || est.customer_name || '').trim();
+  const custPhone = String((body && body.customer_phone) || est.customer_phone || '').trim();
+  const custEmail = est.customer_email || null;
+  if (!line1 || !city || !stateAbbr || !zip) {
+    return res.status(400).json({ error: 'Please enter your full service address (street, city, state, ZIP) to approve.' });
+  }
+  if (!pmId) {
+    return res.status(400).json({ error: 'Please add a card to hold on file to approve.' });
+  }
+  // Save the card on file in the business's Stripe account (tokenized client-side).
+  let card = null;
+  try {
+    card = await saveCardOnFile(pmId, { name: custName, email: custEmail, phone: custPhone }, est.business?.slug || null);
+  } catch (e) {
+    return res.status(402).json({ error: `We couldn't save that card: ${e.message}. Please check the number and try again.` });
+  }
+  if (!card || !card.customerId) {
+    return res.status(402).json({ error: 'Card entry is not set up for this business yet — please contact us to book.' });
+  }
+
   const now = new Date().toISOString();
-  const patch = { approved_at: now, accepted_upsells: accepted, approved_total: totals.total };
+  const patch = {
+    approved_at: now, accepted_upsells: accepted, approved_total: totals.total,
+    customer_name: custName || est.customer_name, customer_phone: custPhone || est.customer_phone,
+    customer_address: line1, customer_city: city, customer_state: stateAbbr, customer_zip: zip,
+    stripe_customer_id: card.customerId, card_brand: card.brand, card_last4: card.last4,
+  };
   // The customer's preferred appointment times, picked on the approve page from
   // real availability. Saved into preferred_slots so the office sees them on the
   // estimate card. Only overwrite when the customer actually chose some.
