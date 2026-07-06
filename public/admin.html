@@ -4715,7 +4715,10 @@ async function saveWirePlateCount(techId, techName, cur){
 const LOW_BRACKETS_MAX=2, LOW_PLATES_MAX=3;
 function invBracketTotal(t){ return (t.flat||0)+(t.tilting||0)+(t.full_motion||0); }
 function invLowBrackets(t){ return invBracketTotal(t)<=LOW_BRACKETS_MAX; }
-function invLowPlates(t){ return (t.wire_plate||0)<=LOW_PLATES_MAX; }
+// Juan is excluded from wire-concealment (plate) low-stock warnings, per owner —
+// his plate stock isn't tracked for reorders for now. His brackets still count.
+function invIgnorePlates(t){ return /\bjuan\b/i.test(t.technician_name||''); }
+function invLowPlates(t){ return !invIgnorePlates(t) && (t.wire_plate||0)<=LOW_PLATES_MAX; }
 function invIsLow(t){ return invLowBrackets(t)||invLowPlates(t); }
 function lowStockCount(inv){ return (inv||[]).filter(invIsLow).length; }
 // Jump to the Bracket Inventory section (reuses the sidebar nav button).
