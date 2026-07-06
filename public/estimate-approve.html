@@ -136,6 +136,45 @@
     <div class="fine">This is an estimate, not a final invoice. Final pricing is confirmed on-site.</div>
   </div>
 
+  <!-- Confirm details: card on file + service address (required to book) -->
+  <div class="state" id="detailsSection">
+    <h1>Almost <span class="hl">there</span></h1>
+    <p class="sub">Confirm your details and add a card to hold your appointment. Your card is saved securely — you're not charged now.</p>
+    <div id="detailsForm" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;">
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <label class="dlbl">Full name</label>
+        <input id="fName" class="dinput" type="text" autocomplete="name" placeholder="Your name">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <label class="dlbl">Phone</label>
+        <input id="fPhone" class="dinput" type="tel" autocomplete="tel" placeholder="(555) 123-4567">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <label class="dlbl">Service address</label>
+        <input id="fLine1" class="dinput" type="text" autocomplete="address-line1" placeholder="Street address">
+      </div>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:2;display:flex;flex-direction:column;gap:5px;"><label class="dlbl">City</label><input id="fCity" class="dinput" type="text" autocomplete="address-level2" placeholder="City"></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:5px;"><label class="dlbl">State</label><input id="fState" class="dinput" type="text" autocomplete="address-level1" placeholder="TX" maxlength="2" style="text-transform:uppercase;"></div>
+        <div style="flex:1.2;display:flex;flex-direction:column;gap:5px;"><label class="dlbl">ZIP</label><input id="fZip" class="dinput" type="text" inputmode="numeric" autocomplete="postal-code" placeholder="ZIP" maxlength="10"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <label class="dlbl">Card to hold on file</label>
+        <div id="cardEl" class="dinput" style="padding:14px 13px;"></div>
+        <div class="dhint">🔒 Held securely, not charged now. Final price is confirmed on-site.</div>
+      </div>
+      <div id="detailsErr" style="color:#dc2626;font-size:13.5px;min-height:18px;font-weight:600;"></div>
+      <button class="btn" id="confirmBtn">&#10003; Confirm &amp; Approve</button>
+      <button type="button" id="detailsBack" style="background:none;border:none;color:var(--mute);font-size:14px;cursor:pointer;padding:4px;">‹ Back</button>
+    </div>
+  </div>
+  <style>
+    .dlbl{font-size:12.5px;font-weight:700;color:var(--mute);letter-spacing:.02em;}
+    .dinput{width:100%;background:var(--panel,#fff);border:1.5px solid var(--line);border-radius:11px;padding:13px 13px;font-size:16px;color:var(--ink);box-sizing:border-box;outline:none;transition:border-color .14s;}
+    .dinput:focus{border-color:var(--accent);}
+    .dhint{font-size:12px;color:var(--mute);}
+  </style>
+
   <!-- Success -->
   <div class="state" id="doneSection">
     <div class="check">&#10003;</div>
@@ -155,6 +194,7 @@
   <div class="error" id="errorBox"></div>
 </div>
 
+<script src="https://js.stripe.com/v3/"></script>
 <script>
 const API = '/api/admin';
 const BRANDS = {
@@ -181,7 +221,7 @@ function applyBrand(slug){
   const soft = (slug==='doms') ? '#eef4ff' : '#fff2ec';
   document.documentElement.style.setProperty('--accent-soft', soft);
 }
-function show(id){ ['approveSection','doneSection','alreadySection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
+function show(id){ ['approveSection','detailsSection','doneSection','alreadySection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
 function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
 
 // ── Base quote (locked) ──
@@ -368,33 +408,73 @@ async function load(){
   }catch(e){ showError('Network error. Please try again.'); }
 }
 
-$('approveBtn').addEventListener('click', async ()=>{
+// ── Stripe card element (set up when the customer advances to the details step) ─
+let stripe=null, cardElement=null, cardReady=false;
+function initCard(){
+  if (cardReady) return;
+  const pk = INFO && INFO.stripe_pk;
+  const errEl = $('detailsErr');
+  if (!window.Stripe || !pk){
+    if (errEl) errEl.textContent = "Card entry isn't available right now — please contact us to book.";
+    return;
+  }
+  try{ stripe = window.Stripe(pk); }catch(e){ if(errEl) errEl.textContent='Could not start secure card entry.'; return; }
+  const style = { base:{ fontSize:'16px', color:'#1a1a1a', '::placeholder':{ color:'#9aa1ac' } } };
+  cardElement = stripe.elements().create('card', { style, hidePostalCode:false });
+  cardElement.mount('#cardEl');
+  cardReady = true;
+}
+
+// "Approve" no longer submits — it advances to the details step (card + address),
+// which are required before we record the approval and can book the job.
+$('approveBtn').addEventListener('click', ()=>{
+  // Prefill from what we already know about the customer.
+  $('fName').value  = (INFO && INFO.customer_name)  || '';
+  $('fPhone').value = (INFO && INFO.customer_phone) || '';
+  $('fLine1').value = (INFO && INFO.customer_address)|| '';
+  $('fCity').value  = (INFO && INFO.customer_city)  || '';
+  $('fState').value = (INFO && INFO.customer_state) || '';
+  $('fZip').value   = (INFO && INFO.customer_zip)   || '';
+  show('detailsSection');
+  initCard();
+});
+$('detailsBack').addEventListener('click', ()=>{ $('detailsErr').textContent=''; show('approveSection'); });
+
+$('confirmBtn').addEventListener('click', async ()=>{
   if (saving) return;
+  const errEl = $('detailsErr'); errEl.textContent='';
+  const name=$('fName').value.trim(), phone=$('fPhone').value.trim();
+  const line1=$('fLine1').value.trim(), city=$('fCity').value.trim();
+  const stateAbbr=$('fState').value.trim(), zip=$('fZip').value.trim();
+  if (!name){ errEl.textContent='Please enter your name.'; return; }
+  if (!line1 || !city || !stateAbbr || !zip){ errEl.textContent='Please enter your full service address.'; return; }
+  if (!cardReady || !stripe || !cardElement){ errEl.textContent="Card entry isn't ready — please wait a moment and try again."; return; }
   saving = true;
-  const btn = $('approveBtn');
-  const prev = btn.innerHTML;
-  btn.disabled = true; btn.textContent = 'Approving…';
+  const btn = $('confirmBtn'); const prev = btn.innerHTML;
+  btn.disabled = true; btn.textContent = 'Saving…';
   try{
+    // Tokenize the card client-side (only the business's secret key can charge it).
+    const { paymentMethod, error } = await stripe.createPaymentMethod({ type:'card', card:cardElement });
+    if (error){ errEl.textContent = error.message; btn.disabled=false; btn.innerHTML=prev; saving=false; return; }
     const res = await fetch(`${API}?action=estimate_approve`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token, accepted_ids: Array.from(accepted), selected_slots: pickedSlots }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        token, accepted_ids: Array.from(accepted), selected_slots: pickedSlots,
+        customer_name:name, customer_phone:phone,
+        address:{ line1, city, state:stateAbbr, zip },
+        payment_method_id: paymentMethod.id,
+      }),
     });
     const data = await res.json();
     if (!res.ok){
       btn.disabled=false; btn.innerHTML=prev; saving=false;
-      showError(data.error || 'We could not record your approval. Please try again.');
+      errEl.textContent = data.error || 'We could not record your approval. Please try again.';
       return;
     }
     const chosen = Array.isArray(data.accepted) ? data.accepted : [];
     const total = data.approved_total != null ? data.approved_total : grandTotal();
-    if (data.already){
-      $('alreadyRecap').innerHTML = recapHtml(chosen, total);
-      show('alreadySection'); return;
-    }
-    $('doneMsg').textContent = chosen.length
-      ? `We'll schedule your job plus ${chosen.length} upgrade${chosen.length>1?'s':''}. We'll be in touch shortly to lock in a time.`
-      : `We've let our team know you'd like to move forward. We'll be in touch shortly to get you scheduled.`;
+    if (data.already){ $('alreadyRecap').innerHTML = recapHtml(chosen, total); show('alreadySection'); return; }
+    $('doneMsg').textContent = `You're approved and your card is on file. We'll be in touch shortly to lock in your time.`;
     const timesHtml = pickedSlots.length
       ? `<div class="recap" style="margin-top:12px;"><div class="rr" style="font-weight:800;color:var(--ink);">Your preferred times</div>${pickedSlots.map(p=>`<div class="rr"><span>&#128197; ${esc(whenLabel(p))}</span></div>`).join('')}</div>`
       : '';
@@ -402,7 +482,7 @@ $('approveBtn').addEventListener('click', async ()=>{
     show('doneSection');
   }catch(e){
     btn.disabled=false; btn.innerHTML=prev; saving=false;
-    showError('Network error. Please try again.');
+    errEl.textContent='Network error. Please try again.';
   }
 });
 
