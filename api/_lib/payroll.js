@@ -273,6 +273,7 @@ function matchItem(name) {
 }
 
 const round0 = (n) => Math.floor(Number(n) || 0);   // drop cents to whole dollars
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;   // keep cents (split pay)
 
 // How many of a line item to PAY for (e.g. 3 tilting brackets -> pay 3). Prefer
 // the stored quantity; if that's 1 but the price is a clean multiple of the unit
@@ -614,25 +615,20 @@ export function computeJobPay(job, techName) {
   //   • After-hours ($75) and travel-tier payouts are per-trip stipends — NOT
   //     split; each tech on the trip earns the full amount.
   if (twoTechs) {
-    // Split the base pay (everything walked so far) 50/50. Halve the TOTAL once
-    // (not each line item) so per-line rounding can't drift the pay off the true
-    // half — e.g. base 80+35+35 = 150 → 75, not 74/76.
+    // The WHOLE tech-pay pool splits evenly: all base labor + the $60 second-tech
+    // add-on + tips, divided by two. Split to the CENT — e.g. 70 + 80 + 35 + 60 =
+    // 245 → $122.50 each (not $122 or $123). Per-trip stipends (after-hours,
+    // travel) are NOT split; each tech on the trip earns the full amount.
     let baseTotal = 0;
     for (const item of breakdown) baseTotal += item.amount;
-    const basePay = round0(baseTotal / 2);
-    const newBreakdown = breakdown.map(item => ({ ...item, amount: round0(item.amount / 2) }));
-    // Split tips 50/50.
-    const tippay = tip ? round0(tip / 2) : 0;
-    if (tippay) newBreakdown.push({ label: 'Tip (50%)', amount: tippay });
-    // Second-tech $60 add-on splits $30 each.
-    const bonusHalf = feeBonus ? round0(feeBonus / 2) : 0;
-    if (bonusHalf) newBreakdown.push({ label: 'Second Technician bonus (½ of $60)', amount: bonusHalf });
-    // Per-trip stipends — full amount to each tech.
+    const pool = baseTotal + feeBonus + tip;
+    const share = round2(pool / 2);
+    const newBreakdown = [{ label: `½ of job tech pay ($${round2(pool)} ÷ 2)`, amount: share }];
     if (afterHoursBonus) newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     if (travelPayout) newBreakdown.push({ label: 'Travel payout', amount: travelPayout });
-    const finalPay = basePay + tippay + bonusHalf + afterHoursBonus + travelPayout;
-    flags.push('Two-tech job — base split 50/50');
-    return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
+    const finalPay = share + afterHoursBonus + travelPayout;
+    flags.push('Two-tech job — tech pay split 50/50');
+    return { pay: round2(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
     // Single tech (or Juan/TK with their own helper) — full base + tips, plus the
     // whole $60 when a "Second Technician" line is present.
@@ -709,26 +705,37 @@ function runSelfTests() {
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
   ] }), 'Kregg').pay, 130, 'Solo + Second Technician line: 70 base + full 60 = 130');
-  // TWO techs + a "Second Technician" line: base splits 50/50 AND the $60 splits
-  // $30/$30 — each tech gets half base + $30. (Renita Knight job: Kregg + Steve,
-  // 70-85 base ×? -> base 220, each 110 + 30 = 140.)
+  // TWO techs + a "Second Technician" line: the WHOLE pool (base + $60) splits
+  // evenly. base 70 + 60 = 130 -> $65 each.
   eq(computeJobPay(job({ second_tech: true, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
-  ] }), 'Kregg').pay, 65, 'Two techs + Second Technician: base 70 split = 35 + $30 bonus = 65');
+  ] }), 'Kregg').pay, 65, 'Two techs + Second Technician: (70 + 60) ÷ 2 = 65');
   eq(computeJobPay(job({ second_tech: true, is_secondary: true, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
-  ] }), 'Steve').pay, 65, 'Second of two techs: same split = 35 base + $30 bonus = 65');
-  // Two 70-85 legs (base 80 each = 160) + Second Technician line, split between
-  // Kregg + Steve: each = 80 (half of 160) + $30 bonus = 110. Both techs equal.
+  ] }), 'Steve').pay, 65, 'Second of two techs: (70 + 60) ÷ 2 = 65');
+  // ── Renita Knight (real, owner's worked example) ───────────────────────────
+  // 60-69 ($70) + 70-85 ($80) + Soundbar ($35) + Second Technician ($70 line ->
+  // $60 add-on) = $245 pool. TWO techs -> $122.50 EACH (split to the cent, not
+  // floored to $122 or rounded to $123). This is the canonical two-tech case.
+  const renita = { second_tech: true, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: '70"–85"', line_total: 149 },
+    { name: 'Soundbar Installation', line_total: 60 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] };
+  eq(computeJobPay(job({ ...renita }), 'Kregg').pay, 122.5, 'Renita: Kregg = (70+80+35+60=245) ÷ 2 = 122.50');
+  eq(computeJobPay(job({ ...renita, is_secondary: true }), 'Steve').pay, 122.5, 'Renita: Steve = 245 ÷ 2 = 122.50');
+  // Two 70-85 legs (base 80 each = 160) + Second Technician ($60): pool 220,
+  // split between Kregg + Steve -> 110 each.
   const twoLeg = { second_tech: true, line_items: [
     { name: '70"–85"', line_total: 149 },
     { name: '70"–85"', line_total: 149 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
   ] };
-  eq(computeJobPay(job({ ...twoLeg }), 'Kregg').pay, 110, 'Two techs, base 160 split (80) + $30 bonus = 110');
-  eq(computeJobPay(job({ ...twoLeg, is_secondary: true }), 'Steve').pay, 110, 'Second tech: same split = 80 + $30 bonus = 110');
+  eq(computeJobPay(job({ ...twoLeg }), 'Kregg').pay, 110, 'Two techs: (160 + 60) ÷ 2 = 110');
+  eq(computeJobPay(job({ ...twoLeg, is_secondary: true }), 'Steve').pay, 110, 'Second tech: (160 + 60) ÷ 2 = 110');
 
   // ── Saner job (real, reported): 70-85 base + own bracket. Solo tech gets the
   // full base; Denver zip → +$10 travel.

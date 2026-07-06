@@ -477,7 +477,9 @@ async function job(req, res, db, auth) {
       second_tech: !!data.secondary_technician_id,
       is_secondary: data.secondary_technician_id === auth.tech_id && data.technician_id !== auth.tech_id,
     }, viewerName);
-    shaped.tech_pay = Math.round(Number(pay.pay) || 0);
+    // Keep cents — a two-tech split can be a half-dollar (e.g. $122.50), so don't
+    // round it away to $122/$123.
+    shaped.tech_pay = Math.round((Number(pay.pay) || 0) * 100) / 100;
     // Surface the travel bonus (the tech's share of the service-area surcharge) so
     // it shows as its own pay line — the tech sees the extra they earn for the drive.
     const tb = (pay.breakdown || []).find(x => /travel/i.test(x.label || ''));
