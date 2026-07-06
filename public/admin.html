@@ -412,6 +412,7 @@
   .nb-ziprow #nbZip{max-width:132px;font-size:18px;font-weight:800;letter-spacing:.08em;text-align:center;}
   .nb-zip-area{font-size:13px;font-weight:700;min-height:1em;}
   .nb-zip-area.ok{color:#15803d;}
+  .nb-zip-area.muted{color:var(--mute);font-weight:600;}
   .nb-zip-area.bad{color:#b91c1c;}
   .nb-lead-hint{font-size:12px;color:var(--mute);line-height:1.45;}
   .nb-cust{border:1px solid var(--line);border-radius:11px;padding:2px 12px;background:#fff;}
@@ -5581,7 +5582,7 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
     if(zr){
       if(!postal){ zr.textContent=''; zr.className='nb-zip-area'; }
       else if(nbZipAreaId){ zr.textContent=`✓ ${nbAreaName||'In service area'}${surcharge>0?` · travel fee $${surcharge}`:' · no travel fee'}`; zr.className='nb-zip-area ok'; }
-      else if(postal.length===5){ zr.textContent='Not in a service area'; zr.className='nb-zip-area bad'; }
+      else if(postal.length===5){ zr.textContent='New area — booking is fine; add a travel fee below if needed'; zr.className='nb-zip-area muted'; }
       else { zr.textContent=''; zr.className='nb-zip-area'; }
     } }
   // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
