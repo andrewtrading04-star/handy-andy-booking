@@ -29,8 +29,7 @@ export async function sendOwnerBookingAlert(d = {}) {
     if (slug === 'handy-andy') {
       recipients.add(process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
     } else if (slug === 'doms') {
-      const joey = process.env.DOMS_SECRETARY_EMAIL || '';   // set to Joey's email
-      if (joey) recipients.add(joey);
+      recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
     }
     recipients.delete('');
     if (!recipients.size) return;
