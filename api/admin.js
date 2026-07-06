@@ -756,7 +756,14 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
         second_tech: techNames.length > 1,
       };
       let payout = 0;
-      for (const tn of techNames) payout += Number(computeJobPay(projJob, tn).pay) || 0;
+      // techNames[0] is the lead, [1] the secondary. Tell the engine which one is
+      // the helper (is_secondary) so a two-tech job isn't DOUBLE-paid: the base
+      // splits 50/50 on a real two-person job, or the assigned helper earns $0 on a
+      // one-person job — matching what the tech app / payroll actually pay. Without
+      // this, both techs were computed as full-pay leads, so profit read far too low.
+      for (let i = 0; i < techNames.length; i++) {
+        payout += Number(computeJobPay({ ...projJob, is_secondary: i > 0 }, techNames[i]).pay) || 0;
+      }
       // Bracket hardware the business bought (skipped when Juan supplies his own).
       const bracketCost = bracketHardwareCost(b.line_items, techNames.some(isJuan));
       // Tips are 100% the tech's and pass straight through (customer -> tech), so
