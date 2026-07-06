@@ -10,14 +10,31 @@ function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c =
 
 export async function sendOwnerBookingAlert(d = {}) {
   try {
-    // Per-booking alerts are OFF by default — replaced by the ONE 8 PM Denver
-    // daily digest (api/migrate?action=daily_digest). Set PER_BOOKING_ALERTS=1
-    // in the environment to bring the old per-booking emails back.
-    if (process.env.PER_BOOKING_ALERTS !== '1') return;
     if (!emailNotificationsOn()) return;
     const cfg = emailConfig(d.slug);
     if (!cfg.apiKey) return;
-    const to = process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com';
+
+    // Recipients for the per-booking "someone just booked" email:
+    //   • The OWNER only when PER_BOOKING_ALERTS=1 (they otherwise get the ONE
+    //     8 PM Denver daily digest instead of 10-15 emails/day).
+    //   • The business's SECRETARY, ALWAYS — Heather runs Handy Andy, Joey runs
+    //     Doms, and they asked to be told on every booking. Emails are per-business
+    //     (Heather gets Handy Andy bookings, Joey gets Doms) and override via
+    //     HANDY_ANDY_SECRETARY_EMAIL / DOMS_SECRETARY_EMAIL.
+    const recipients = new Set();
+    if (process.env.PER_BOOKING_ALERTS === '1') {
+      recipients.add(process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com');
+    }
+    const slug = String(d.slug || '').toLowerCase();
+    if (slug === 'handy-andy') {
+      recipients.add(process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
+    } else if (slug === 'doms') {
+      const joey = process.env.DOMS_SECRETARY_EMAIL || '';   // set to Joey's email
+      if (joey) recipients.add(joey);
+    }
+    recipients.delete('');
+    if (!recipients.size) return;
+
     const tz = d.timezone || 'America/Denver';
     const money = (n) => '$' + (Number(n) || 0).toFixed(2);
 
@@ -57,7 +74,9 @@ export async function sendOwnerBookingAlert(d = {}) {
       ${notes}
       ${d.bookingId ? `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(d.bookingId)}</p>` : ''}
     </div>`;
-    await sendEmail({ slug: d.slug, to, subject: 'Someone just booked an appointment', html, replyTo: cfg.from });
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: 'Someone just booked an appointment', html, replyTo: cfg.from });
+    }
   } catch (e) {
     console.warn('[owner-notify] non-fatal:', e.message);
   }
