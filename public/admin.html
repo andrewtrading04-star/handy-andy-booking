@@ -405,6 +405,22 @@
   #nbSteps:empty{display:none;}
   .nb-step-t{font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
   .nb-hint{font-size:13px;color:var(--ink-2);font-style:italic;}
+  /* New Booking: ZIP-first lead block + last-step collapsible customer details */
+  .nb-ziplead{background:#f6f8fb;border:1px solid var(--line);border-radius:11px;padding:12px 13px;display:grid;gap:7px;}
+  .nb-lead-lab{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-2);}
+  .nb-ziprow{display:flex;gap:12px;align-items:center;}
+  .nb-ziprow #nbZip{max-width:132px;font-size:18px;font-weight:800;letter-spacing:.08em;text-align:center;}
+  .nb-zip-area{font-size:13px;font-weight:700;min-height:1em;}
+  .nb-zip-area.ok{color:#15803d;}
+  .nb-zip-area.bad{color:#b91c1c;}
+  .nb-lead-hint{font-size:12px;color:var(--mute);line-height:1.45;}
+  .nb-cust{border:1px solid var(--line);border-radius:11px;padding:2px 12px;background:#fff;}
+  .nb-cust>summary{cursor:pointer;font-size:13.5px;font-weight:700;color:var(--ink);padding:10px 2px;list-style:none;display:flex;align-items:center;gap:8px;}
+  .nb-cust>summary::-webkit-details-marker{display:none;}
+  .nb-cust>summary::before{content:"\25B8";color:var(--mute);font-size:12px;transition:transform .15s;}
+  .nb-cust[open]>summary::before{transform:rotate(90deg);}
+  .nb-cust-tag{font-size:11px;font-weight:600;color:var(--mute);}
+  .nb-cust-body{display:grid;gap:10px;padding:2px 0 12px;}
   .nb-opts{display:grid;gap:6px;}
   .nb-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;text-align:left;width:100%;}
   .nb-opt:hover{border-color:var(--accent);}
@@ -818,10 +834,15 @@
   <div class="sheet">
     <h2>New Booking</h2>
     <form id="nbForm" style="display:grid;gap:10px;">
-      <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
-      <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address…">
-      <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"><input class="search" style="margin:0;max-width:90px" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
+      <!-- ① Qualify the caller by ZIP first — check the service area & price before collecting any details. -->
+      <div class="nb-ziplead">
+        <label class="nb-lead-lab" for="nbZip">Customer ZIP</label>
+        <div class="nb-ziprow">
+          <input class="search" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
+          <div id="nbZipArea" class="nb-zip-area"></div>
+        </div>
+        <div class="nb-lead-hint">Start with the ZIP to check the area &amp; price. Collect the customer's name &amp; address at the end — no need for a full address to quote.</div>
+      </div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
@@ -870,6 +891,16 @@
         <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
         <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment</label>
       </div>
+      <!-- ③ Customer details — collected LAST, once the customer agrees on price + time. -->
+      <details id="nbCustDetails" class="nb-cust">
+        <summary class="nb-cust-sum">Customer details <span class="nb-cust-tag">name · phone · email · address</span></summary>
+        <div class="nb-cust-body">
+          <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
+          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
+          <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address… (optional — type a ZIP to use ZIP only)">
+          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"></div>
+        </div>
+      </details>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
         <button class="btn ghost" type="button" id="nbSendEstimate">Send estimate</button>
@@ -2461,6 +2492,14 @@ function attachAddressAutocomplete(input, fields){
     });
   };
   async function choose(i){ const p=items[i]; if(!p) return; close();
+    if(p.__zip){
+      // Bare-ZIP pick: clear the street, set the ZIP field, and resolve its area
+      // (fires the nbZip 'change' handler → service area + travel fee + techs).
+      input.value='';
+      const z=fields.zip && document.getElementById(fields.zip);
+      if(z){ z.value=p.__zip; z.dispatchEvent(new Event('change')); }
+      return;
+    }
     input.value=p.description;
     try{
       const d=await api('place_details',{ params:{ place_id:p.place_id, session } });
@@ -2477,13 +2516,19 @@ function attachAddressAutocomplete(input, fields){
   const query=()=>{ const q=input.value.trim();
     if(q.length<3){ close(); return; }
     if(q===lastQ) return; lastQ=q;
+    // A bare 5-digit ZIP gets a "use ZIP only" option so a caller can be qualified
+    // by ZIP without a street address (offered even if Places returns nothing).
+    const zipItem = /^\d{5}$/.test(q) ? { __zip:q, description:`Use ZIP ${q} only (no street address)` } : null;
     const mine=++seq;
     api('places_autocomplete',{ params:{ input:q, session } }).then(d=>{
       if(mine!==seq) return;                       // a newer keystroke already fired
-      items=(d&&d.predictions)||[]; active=-1;
+      items=(d&&d.predictions)||[]; if(zipItem) items=[zipItem, ...items]; active=-1;
       if(!items.length){ close(); return; }
       open(); render();
-    }).catch(()=>close());
+    }).catch(()=>{
+      if(mine!==seq) return;
+      if(zipItem){ items=[zipItem]; active=-1; open(); render(); } else close();
+    });
   };
   input.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(query,180); });
   input.addEventListener('keydown',e=>{
@@ -5033,6 +5078,8 @@ async function openNewBooking(prefill){
   document.getElementById('nbCalWrap').style.display='none';
   nbCalMonth=new Date(); nbCalMonth.setDate(1);
   nbZipAreaId=null;   // no zip yet -> all techs until a metro is resolved
+  { const zr=document.getElementById('nbZipArea'); if(zr){ zr.textContent=''; zr.className='nb-zip-area'; } }
+  { const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=false; }   // ZIP first; details collected last
   try{
     const [svc, tech] = await Promise.all([
       api('services',{ params:{ business:current.slug }}),
@@ -5099,6 +5146,8 @@ async function openNewBooking(prefill){
     }
     // Resolve the zip's metro so the tech list filters + the calendar loads.
     if(prefill.postal_code){ const z=document.getElementById('nbZip'); if(z) z.dispatchEvent(new Event('change')); }
+    // We already have the customer — expand the details so they're visible/editable.
+    if(prefill.name||prefill.phone||prefill.email){ const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=true; }
     updateNbTotal();
   }
 }
@@ -5527,6 +5576,14 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   const postal=document.getElementById('nbZip').value.trim();
   nbZipAreaId=null; nbAreaName=''; let surcharge=0;
   if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; }catch(err){} }
+  // Show a live service-area / travel-fee readout next to the ZIP.
+  { const zr=document.getElementById('nbZipArea');
+    if(zr){
+      if(!postal){ zr.textContent=''; zr.className='nb-zip-area'; }
+      else if(nbZipAreaId){ zr.textContent=`✓ ${nbAreaName||'In service area'}${surcharge>0?` · travel fee $${surcharge}`:' · no travel fee'}`; zr.className='nb-zip-area ok'; }
+      else if(postal.length===5){ zr.textContent='Not in a service area'; zr.className='nb-zip-area bad'; }
+      else { zr.textContent=''; zr.className='nb-zip-area'; }
+    } }
   // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
   // the public widget does — but only when the field is empty or still holds the
   // value we last auto-filled, so a manual override is never overwritten.
@@ -6357,7 +6414,9 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const err=document.getElementById('nbErr'); err.textContent='';
   const name=document.getElementById('nbName').value.trim();
   const phone=document.getElementById('nbPhone').value.trim();
-  if(!name && !phone){ err.textContent='Name or phone required'; return; }
+  // Any customer-field problem must reveal the (collapsed) Customer details section.
+  const openCust=()=>{ const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=true; };
+  if(!name && !phone){ openCust(); err.textContent='Name or phone required'; return; }
   const date=document.getElementById('nbDate').value;
   if(!date){ err.textContent='Date required'; return; }
   if(!nbSelectedSlot){ err.textContent='Time slot required'; return; }
@@ -6385,7 +6444,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
-  if(!email && !gds){ err.textContent='Email is required for booking confirmation'; return; }
+  if(!email && !gds){ openCust(); err.textContent='Email is required for booking confirmation'; return; }
 
   // TV mounting (the main paid service) requires a credit card on file — cash and
   // quote are not allowed for these jobs. Card details are validated below.
@@ -6423,7 +6482,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
 
   if(paymentMethod==='card'){
-    if(!email){ err.textContent='Email is required to save a card on file'; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
+    if(!email){ openCust(); err.textContent='Email is required to save a card on file'; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
     try{
       await ensureNbStripe();
       const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
