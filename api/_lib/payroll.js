@@ -548,12 +548,14 @@ export function computeJobPay(job, techName) {
     const sz = matchSize(name);
     if (sz) {
       // A real TV mount is ALWAYS charged (the size carries a price). A size line
-      // charged $0 is a phantom — a stray/duplicate size the booking form or a
-      // Zenbooker import recorded but never billed (the "32\" Or Less $0" bug).
-      // Never pay a tech for a TV the customer wasn't charged for; skip it so it
-      // doesn't inflate the base (and don't mark sawSize, so a real size still
-      // drives the "no size base" check).
-      if (lt <= 0 && (Number(li.unit_price) || 0) <= 0) {
+      // whose CHARGE is $0 (line_total <= 0) is a phantom — a stray/duplicate size
+      // the booking form or a Zenbooker import recorded but never billed (the
+      // "32\" Or Less $0" bug). The charge (line_total) is the source of truth: a
+      // phantom can still carry a stale unit_price (e.g. 99 with quantity 0), so
+      // key off line_total alone. Never pay a tech for a TV the customer wasn't
+      // charged for; skip it so it doesn't inflate the base (and don't mark
+      // sawSize, so a real size still drives the "no size base" check).
+      if (lt <= 0) {
         flags.push(`Ignored $0 size line "${name}" — not a charged TV (phantom/duplicate)`);
         continue;
       }
