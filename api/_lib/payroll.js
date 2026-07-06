@@ -547,6 +547,16 @@ export function computeJobPay(job, techName) {
     // TV size = base pay (× quantity if the same size line covers several TVs).
     const sz = matchSize(name);
     if (sz) {
+      // A real TV mount is ALWAYS charged (the size carries a price). A size line
+      // charged $0 is a phantom — a stray/duplicate size the booking form or a
+      // Zenbooker import recorded but never billed (the "32\" Or Less $0" bug).
+      // Never pay a tech for a TV the customer wasn't charged for; skip it so it
+      // doesn't inflate the base (and don't mark sawSize, so a real size still
+      // drives the "no size base" check).
+      if (lt <= 0 && (Number(li.unit_price) || 0) <= 0) {
+        flags.push(`Ignored $0 size line "${name}" — not a charged TV (phantom/duplicate)`);
+        continue;
+      }
       sawSize = true;
       const n = payQty(li);
       const amt = rate(sz) * n;
@@ -673,6 +683,17 @@ function runSelfTests() {
   // Juan's 70"-85" base premium: $90 (others $80). Locked from the Juliana Schmidt
   // job — 70-85 TV + Outdoor/Stucco + Soundbar must total $90+$35+$35 for Juan.
   // Real-world labels carry an option-group prefix ("Wall Surface:", "Add-ons:")
+  // A $0 size line is a phantom (stray/duplicate size that was never charged —
+  // the Jennifer Graves / Zenbooker-import bug). It must NOT be paid as a TV base:
+  // Frame bracket ($15) + real 33-59 ($60) = $75; the $0 "32 Or Less" pays nothing.
+  eq(computeJobPay(job({ line_items: [
+    { name: 'Bracket: I will be using the bracket that comes in the box (Samsung Frame TV)', line_total: 30 },
+    { name: 'TV Size: 33"-59"', line_total: 109 },
+    { name: 'TV Size: 32" Or Less', line_total: 0, unit_price: 0 },
+  ] }), 'Juan').pay, 75, 'phantom $0 size line is ignored (Jennifer Graves): 15 + 60 = 75, not 125');
+  // A REAL 32" TV (charged $99) still pays its $50 base — only $0 sizes are skipped.
+  eq(computeJobPay(job({ line_items: [{ name: 'TV Size: 32" Or Less', line_total: 99, unit_price: 99 }] }), 'Kregg').pay, 50, 'real (charged) 32" size still pays $50');
+
   // and a service-area surcharge line — both must resolve cleanly, no review flags.
   const julianaItems = [
     { name: '70"-85"', line_total: 149 },
