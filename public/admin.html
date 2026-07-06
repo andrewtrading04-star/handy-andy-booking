@@ -4425,6 +4425,42 @@ async function renderBrackets(){
     }
     html+=`</tbody></table></div>`;
 
+    // ── Brackets In Route ───────────────────────────────────────────────────
+    // Brackets that are ordered but not yet delivered (status = in_route). Same
+    // shape as the inventory count — quantity by type — so you can see what's
+    // coming before it lands. Aggregated per technician (Unassigned until it's
+    // assigned to someone on delivery).
+    {
+      const inRoute=(pend&&pend.purchases||[]).filter(p=>{ const s=(p.status||'in_route').toLowerCase(); return s==='in_route'||s==='ordered'; });
+      const byTech={};
+      for(const p of inRoute){
+        const k=p.technician_name||'Unassigned';
+        if(!byTech[k]) byTech[k]={flat:0,tilting:0,full_motion:0};
+        byTech[k].flat+=p.flat_qty||0; byTech[k].tilting+=p.tilting_qty||0; byTech[k].full_motion+=p.full_motion_qty||0;
+      }
+      const rows=Object.entries(byTech).filter(([,q])=>q.flat||q.tilting||q.full_motion);
+      html+=`<div class="bracket-section">
+        <h3>🚚 Brackets In Route <span style="font-weight:400;font-size:12px;color:var(--mute);">— ordered, not yet delivered</span></h3>
+        <table class="bracket-table">
+          <thead><tr><th>Technician</th><th>Flat</th><th>Tilting</th><th>Full Motion</th><th>Total</th></tr></thead>
+          <tbody>`;
+      if(!rows.length){
+        html+=`<tr><td colspan="5" style="text-align:center;color:var(--mute);">No brackets in route</td></tr>`;
+      } else {
+        for(const [name,q] of rows){
+          const total=q.flat+q.tilting+q.full_motion;
+          html+=`<tr>
+            <td>${esc(name)}</td>
+            <td class="bracket-qty">${q.flat}</td>
+            <td class="bracket-qty">${q.tilting}</td>
+            <td class="bracket-qty">${q.full_motion}</td>
+            <td class="bracket-qty"><strong>${total}</strong></td>
+          </tr>`;
+        }
+      }
+      html+=`</tbody></table></div>`;
+    }
+
     // ── Wire Concealment Plates ─────────────────────────────────────────────
     // A separate per-technician count, sourced from Amazon. Auto-decrements by 1
     // whenever a tech completes a "Hide wires BEHIND the wall" job.
