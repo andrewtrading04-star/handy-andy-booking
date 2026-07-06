@@ -715,18 +715,24 @@ function runSelfTests() {
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
   ] }), 'Steve').pay, 65, 'Second of two techs: (70 + 60) ÷ 2 = 65');
-  // ── Renita Knight (real, owner's worked example) ───────────────────────────
-  // 60-69 ($70) + 70-85 ($80) + Soundbar ($35) + Second Technician ($70 line ->
-  // $60 add-on) = $245 pool. TWO techs -> $122.50 EACH (split to the cent, not
-  // floored to $122 or rounded to $123). This is the canonical two-tech case.
+  // ── Renita Knight (real, owner-confirmed) ──────────────────────────────────
+  // 60-69 ($70) + 70-85 ($80) + Soundbar ×2 ($35×2=$70) + Second Technician ($70
+  // line -> $60 add-on) = $280 pool. TWO techs (Kregg + Steve) -> $140 EACH.
   const renita = { second_tech: true, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: '70"–85"', line_total: 149 },
+    { name: 'Soundbar Installation', quantity: 2, unit_price: 60, line_total: 120 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] };
+  eq(computeJobPay(job({ ...renita }), 'Kregg').pay, 140, 'Renita: Kregg = (70+80+70+60=280) ÷ 2 = 140');
+  eq(computeJobPay(job({ ...renita, is_secondary: true }), 'Steve').pay, 140, 'Renita: Steve = 280 ÷ 2 = 140');
+  // The cent-split path still holds for an odd pool (single soundbar = $245).
+  eq(computeJobPay(job({ ...renita, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: '70"–85"', line_total: 149 },
     { name: 'Soundbar Installation', line_total: 60 },
     { name: 'Second Technician', line_total: 70, kind: 'fee' },
-  ] };
-  eq(computeJobPay(job({ ...renita }), 'Kregg').pay, 122.5, 'Renita: Kregg = (70+80+35+60=245) ÷ 2 = 122.50');
-  eq(computeJobPay(job({ ...renita, is_secondary: true }), 'Steve').pay, 122.5, 'Renita: Steve = 245 ÷ 2 = 122.50');
+  ] }), 'Kregg').pay, 122.5, 'Odd pool ($245) still splits to the cent = 122.50');
   // Two 70-85 legs (base 80 each = 160) + Second Technician ($60): pool 220,
   // split between Kregg + Steve -> 110 each.
   const twoLeg = { second_tech: true, line_items: [
