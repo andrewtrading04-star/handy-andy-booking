@@ -1440,8 +1440,15 @@ async function techPayroll(req, res, db, auth) {
   }
   const techName = techRow?.name || '';
   const businessSlug = techRow?.businesses?.slug || '';
-  const manualPay = (techRow?.manual_pay_amount != null || techRow?.manual_pay_date)
-    ? { amount: techRow.manual_pay_amount != null ? Number(techRow.manual_pay_amount) : null, date: techRow.manual_pay_date || null }
+  // Owner-set expected pay belongs to ONE deposit (a Monday). It must show ONLY on
+  // the week whose pay date is that Monday — otherwise a tech sees the same money
+  // on every week they scroll to, including weeks they never worked and weeks
+  // before this system existed. The deposit's work week is the one ending
+  // PAY_DATE_OFFSET_DAYS before manual_pay_date, so surface it only when this
+  // week's pay date equals manual_pay_date.
+  const payDateForWeek = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
+  const manualPay = (techRow?.manual_pay_date && techRow.manual_pay_date === payDateForWeek && techRow?.manual_pay_amount != null)
+    ? { amount: Number(techRow.manual_pay_amount), date: techRow.manual_pay_date }
     : null;
 
   // Completed jobs for this tech in the week, with everything the engine needs.
