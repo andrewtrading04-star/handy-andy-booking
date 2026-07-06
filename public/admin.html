@@ -102,6 +102,10 @@
   .av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:800;flex-shrink:0;letter-spacing:.3px;}
   .av.sm{width:20px;height:20px;font-size:9px;}
   .av.av-un{background:#c4ccd6;color:#fff;}
+  /* Two techs on one job: overlap their bubbles so both initials show at a glance. */
+  .av-stack{display:inline-flex;align-items:center;flex-shrink:0;}
+  .av-stack .av{border:2px solid var(--card,#fff);box-sizing:content-box;}
+  .av-stack .av:not(:first-child){margin-left:-9px;}
 
   /* ───────── Main / calendar ───────── */
   .main{flex:1;min-width:0;display:flex;flex-direction:column;}
@@ -1586,7 +1590,7 @@ function evtCard(b){
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}</div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
-    <div class="evt-b">${avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`:''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${pillsHtml}</div>
+    <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?`<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`:''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${pillsHtml}</div>
   </div>`;
 }
 function dayColumn(ds){

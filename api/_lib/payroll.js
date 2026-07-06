@@ -325,7 +325,7 @@ function tipFor(job) {
 // widget options ("…I cannot help lift it", "My TV is 85 inches or larger").
 // NOTE: "…I CAN help lift it" must NOT match — the negative lookalike is excluded
 // by requiring "cannot" in the lift branch.
-const SECOND_TECH_RE = /second\s*technician|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
+const SECOND_TECH_RE = /(?:second|2nd)\s*tech(?:nician)?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
 
 // ── Multi-tech detection (when a two-person "lift help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.
@@ -341,22 +341,6 @@ function detectMultiTech(job) {
     }
   }
   return { hasSecondTech: false, secondTechBonus: 0 };
-}
-
-// Explicit ONE-PERSON signal from the booking. When the customer says they can
-// handle the lift themselves ("My TV is 70-85 inches and I CAN help lift it",
-// "under 70 inches", "I can lift it"), the job is a single-tech job — full stop.
-// This HARD-OVERRIDES any two-person split so a solo job is never halved, even if
-// a helper was mistakenly attached to it. Lines that say "cannot" are excluded
-// (those are the real two-person jobs, caught by SECOND_TECH_RE above).
-function isOnePersonJob(job) {
-  return (job.line_items || []).some(li => {
-    const n = String(li.name || '').toLowerCase();
-    if (/\bcannot\b|can\s*['’]?t\b/.test(n)) return false;   // "cannot / can't help lift" = two-person
-    // Any "help lift" / "can lift" / "under 70" answer — covers the raw widget
-    // wording ("…I can help lift it") AND the friendly label ("Customer will help lift").
-    return /\bhelp\s+lift\b/.test(n) || /\bcan\s+lift\b/.test(n) || /\bunder\s*70\b/.test(n);
-  });
 }
 
 // ── Special-service detection ────────────────────────────────────────────────
@@ -461,12 +445,16 @@ export function computeJobPay(job, techName) {
   // what detectMultiTech reads from the line items. Merely ASSIGNING a helper to a
   // normal one-person job must NOT halve the base: the lead keeps the full base and
   // the assigned helper earns $0 for that job (handled just below).
-  const multiTech = detectMultiTech(job);
-  const onePerson = isOnePersonJob(job);           // customer said they can do it solo
-  // A one-person answer HARD-OVERRIDES any two-person signal: the job never splits.
-  const paidTwoPerson = multiTech.hasSecondTech && !onePerson;   // customer booked/paid two-person
-  const helperAssigned = !!job.second_tech;        // a 2nd tech is on the job (assignment)
-  const isHelper = !!job.is_secondary;             // the tech being computed is that helper
+  const multiTech = detectMultiTech(job);          // "Second Technician" ($70) fee line present?
+  // Owner rules for the second tech:
+  //   • TWO real system techs on the job  -> split the tech pay 50/50.
+  //   • ONE tech on the job               -> that tech keeps ALL the pay.
+  //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay
+  //     (so $30 each on a split, or the whole $60 to a solo tech).
+  //   • Juan/TK bring their OWN off-system helper, so they never split — twoTechs is
+  //     false for them and they keep the full base + the whole $60.
+  const twoTechs = !!job.second_tech && !ownHelper;
+  const feeBonus = multiTech.secondTechBonus > 0 ? 60 : 0;
 
   // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
   let afterHoursBonus = 0;
@@ -614,58 +602,45 @@ export function computeJobPay(job, techName) {
     flags.push('No TV size base detected — owner review');
   }
 
-  // ── Multi-tech handling: split base pay and tips 50/50, add $60 bonus if applicable.
-  // EXCEPTION (hard rule, per owner): Juan and TK work two-person jobs with their
-  // OWN helper, who is NOT a paid tech in the system. So they are NEVER split — they
-  // keep the full base/tips and collect the ENTIRE $60 two-person add-on themselves
-  // (handled in the single-tech branch below). Everyone else still splits 50/50.
-  //
-  // A helper assigned to a job the customer can do solo (no two-person booking)
-  // earns $0 for it — the lead keeps the FULL base (never halved for a one-person
-  // job). Own-helper techs (Juan/TK) never fall in here.
-  if (helperAssigned && !paidTwoPerson && isHelper && !ownHelper) {
-    breakdown.push({ label: 'Assigned as helper — one-person job (lead keeps full pay)', amount: 0 });
-    return { pay: 0, breakdown, flags: ['Helper on a one-person job — paid $0'], state: state === 'partial' ? 'partial' : 'paid' };
-  }
-  if (paidTwoPerson && !ownHelper) {
-    // Split the base pay (everything before tips) 50/50.
-    const newBreakdown = breakdown.map(item => ({
-      ...item,
-      amount: round0(item.amount / 2)
-    }));
-    // Re-sum to get the halved base.
-    let basePay = 0;
-    for (const item of newBreakdown) {
-      basePay += item.amount;
-    }
+  // ── Second-tech pay rules (per owner) ────────────────────────────────────────
+  //   • TWO real system techs on the job  -> split base + tips 50/50 (each half).
+  //   • ONE tech on the job               -> that tech keeps ALL the base + tips.
+  //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay.
+  //       - two techs: $30 to each (the $60 splits with the base)
+  //       - one tech:  the whole $60 to that tech
+  //   • EXCEPTION: Juan/TK bring their OWN off-system helper (not a paid system
+  //     tech), so they are NEVER split — twoTechs is false for them and they keep
+  //     the full base/tips plus the whole $60.
+  //   • After-hours ($75) and travel-tier payouts are per-trip stipends — NOT
+  //     split; each tech on the trip earns the full amount.
+  if (twoTechs) {
+    // Split the base pay (everything walked so far) 50/50. Halve the TOTAL once
+    // (not each line item) so per-line rounding can't drift the pay off the true
+    // half — e.g. base 80+35+35 = 150 → 75, not 74/76.
+    let baseTotal = 0;
+    for (const item of breakdown) baseTotal += item.amount;
+    const basePay = round0(baseTotal / 2);
+    const newBreakdown = breakdown.map(item => ({ ...item, amount: round0(item.amount / 2) }));
     // Split tips 50/50.
     const tippay = tip ? round0(tip / 2) : 0;
     if (tippay) newBreakdown.push({ label: 'Tip (50%)', amount: tippay });
-    // Add the second-tech bonus.
-    if (multiTech.secondTechBonus) {
-      newBreakdown.push({ label: 'Second Technician bonus', amount: multiTech.secondTechBonus });
-    }
-    // Add after-hours bonus (8 PM jobs).
-    if (afterHoursBonus) {
-      newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
-    }
-    // Travel-tier payout (not split — each tech on the trip earns it).
-    if (travelPayout) {
-      newBreakdown.push({ label: 'Travel payout', amount: travelPayout });
-    }
-    const finalPay = basePay + tippay + multiTech.secondTechBonus + afterHoursBonus + travelPayout;
-    flags.push(`Multi-tech job (split 50/50) — verify second tech assignment`);
+    // Second-tech $60 add-on splits $30 each.
+    const bonusHalf = feeBonus ? round0(feeBonus / 2) : 0;
+    if (bonusHalf) newBreakdown.push({ label: 'Second Technician bonus (½ of $60)', amount: bonusHalf });
+    // Per-trip stipends — full amount to each tech.
+    if (afterHoursBonus) newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
+    if (travelPayout) newBreakdown.push({ label: 'Travel payout', amount: travelPayout });
+    const finalPay = basePay + tippay + bonusHalf + afterHoursBonus + travelPayout;
+    flags.push('Two-tech job — base split 50/50');
     return { pay: round0(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
-    // Single tech — OR Juan/TK on a two-person job (never split; see exception above).
-    // Full tips + after-hours + travel. When the customer PAID for the two-person
-    // option, the own-helper tech keeps the WHOLE $60 add-on (not the $30 half).
+    // Single tech (or Juan/TK with their own helper) — full base + tips, plus the
+    // whole $60 when a "Second Technician" line is present.
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    const wholeBonus = (ownHelper && paidTwoPerson && multiTech.secondTechBonus > 0) ? 60 : 0;
-    if (wholeBonus) breakdown.push({ label: 'Second person — brings own helper (full $60)', amount: wholeBonus });
+    if (feeBonus) breakdown.push({ label: 'Second Technician bonus ($60)', amount: feeBonus });
     if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     if (travelPayout) breakdown.push({ label: 'Travel payout', amount: travelPayout });
-    pay += tip + wholeBonus + afterHoursBonus + travelPayout;
+    pay += tip + feeBonus + afterHoursBonus + travelPayout;
     return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   }
 }
@@ -714,12 +689,13 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').pay, 210, 'Juan 70-85 + outdoor + soundbar (160) + $50 travel = 210');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Juan').flags.length, 0, 'Juliana job: no unmatched/review flags');
   eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 200, 'Other tech same job = 150 base + $50 travel = 200');
-  // A helper merely ASSIGNED to this job (the customer did NOT book a two-person
-  // lift) must NOT halve anyone: the lead keeps the full base + travel, and the
-  // assigned helper earns $0 for a one-person job. (Juan never splits regardless.)
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan, helper attached, not a paid two-person job = full 160 + 50 travel = 210');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 200, 'Lead, helper attached (one-person job) = full 150 + 50 travel = 200, NOT halved');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 0, 'Assigned helper on a one-person job = $0');
+  // TWO real system techs on the job -> base splits 50/50 (owner rule: 2 techs
+  // selected = split the tech pay). Travel is a per-trip stipend, NOT split — each
+  // tech earns the full $50. Juan brings his OWN off-system helper, so he never
+  // splits: he keeps the full base + full travel.
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan (own helper) never splits = full 160 + 50 travel = 210');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 125, 'Two techs: base 150 split = 75 + full 50 travel = 125');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 125, 'Second of two techs earns the same split = 75 + 50 travel = 125');
   // Customer PAID for the two-person option ("cannot help lift" $70): Juan keeps
   // the WHOLE $60 add-on on top of his full base. 70-85 base 90 + 60 = 150.
   eq(computeJobPay(job({ line_items: [
@@ -727,10 +703,35 @@ function runSelfTests() {
     { name: 'My TV is 70-85 inches and I cannot help lift it', line_total: 70 },
   ] }), 'Juan').pay, 150, 'Juan paid two-person: 90 base + full 60 = 150');
 
-  // ── Saner job (real, reported): 70-85 base + own bracket + "I CAN help lift it".
-  // This is a ONE-PERSON job → full base, and it must NEVER split, even if a helper
-  // is somehow attached. Denver zip → +$10 travel. The customer's "I can help lift"
-  // answer is the hard one-person signal.
+  // ── Second-technician ($70) line + owner's split rules ─────────────────────
+  // A SOLO tech with a "Second Technician" line keeps the whole $60 add-on.
+  eq(computeJobPay(job({ line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] }), 'Kregg').pay, 130, 'Solo + Second Technician line: 70 base + full 60 = 130');
+  // TWO techs + a "Second Technician" line: base splits 50/50 AND the $60 splits
+  // $30/$30 — each tech gets half base + $30. (Renita Knight job: Kregg + Steve,
+  // 70-85 base ×? -> base 220, each 110 + 30 = 140.)
+  eq(computeJobPay(job({ second_tech: true, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] }), 'Kregg').pay, 65, 'Two techs + Second Technician: base 70 split = 35 + $30 bonus = 65');
+  eq(computeJobPay(job({ second_tech: true, is_secondary: true, line_items: [
+    { name: '60"–69"', line_total: 119 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] }), 'Steve').pay, 65, 'Second of two techs: same split = 35 base + $30 bonus = 65');
+  // Two 70-85 legs (base 80 each = 160) + Second Technician line, split between
+  // Kregg + Steve: each = 80 (half of 160) + $30 bonus = 110. Both techs equal.
+  const twoLeg = { second_tech: true, line_items: [
+    { name: '70"–85"', line_total: 149 },
+    { name: '70"–85"', line_total: 149 },
+    { name: 'Second Technician', line_total: 70, kind: 'fee' },
+  ] };
+  eq(computeJobPay(job({ ...twoLeg }), 'Kregg').pay, 110, 'Two techs, base 160 split (80) + $30 bonus = 110');
+  eq(computeJobPay(job({ ...twoLeg, is_secondary: true }), 'Steve').pay, 110, 'Second tech: same split = 80 + $30 bonus = 110');
+
+  // ── Saner job (real, reported): 70-85 base + own bracket. Solo tech gets the
+  // full base; Denver zip → +$10 travel.
   const saner = { travel_payout: 10, line_items: [
     { name: '70"–85"', line_total: 149 },
     { name: 'I have my own mounting bracket', line_total: 0 },
@@ -740,16 +741,17 @@ function runSelfTests() {
     { name: 'No, I will handle TV removal myself', line_total: 0 },
   ] };
   eq(computeJobPay(job({ ...saner }), 'Steve').pay, 90, 'Saner solo: 80 base + 10 travel = 90');
-  eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 90, 'Saner: "I can help lift" forces one-person — lead keeps full 90 even with a helper attached');
-  eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 0, 'Saner: an attached helper earns $0 on this one-person job');
+  // When a SECOND real tech is assigned, the base splits 50/50 (owner rule).
+  // Travel is per-trip — each tech keeps the full $10.
+  eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 50, 'Saner two techs: base 80 split = 40 + full 10 travel = 50');
+  eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 50, 'Saner second tech: same split = 40 + 10 travel = 50');
   eq(computeJobPay(job({ ...saner }), 'Steve').flags.length, 0, 'Saner solo: no review flags');
-  // The friendly relabels are payroll-safe: "Customer supplied bracket" = $0, and
-  // "Customer will help lift" is still detected as a one-person job.
+  // Two techs split the base; a solo tech keeps it whole.
   eq(computeJobPay(job({ line_items: [
     { name: '70"–85"', line_total: 149 },
     { name: 'Customer supplied bracket', line_total: 0 },
     { name: 'Customer will help lift', line_total: 0 },
-  ], second_tech: true }), 'Steve').pay, 80, 'relabeled one-person job: lead full 80, never split');
+  ], second_tech: true }), 'Steve').pay, 40, 'two techs: base 80 split = 40 each');
   eq(computeJobPay(job({ line_items: [
     { name: '70"–85"', line_total: 149 },
     { name: 'Customer supplied bracket', line_total: 0 },
@@ -947,23 +949,24 @@ function runSelfTests() {
   // Job-number override.
   eq(computeJobPay(job({ zenbooker_job_number: '020989', line_items: [] }), 'Kregg').pay, 60, 'CUSTOM_PAY 020989 = 60');
 
-  // Multi-tech: base split 50/50 + tips split 50/50 + $30 bonus.
-  eq(computeJobPay(job({ tip: 20, line_items: [
+  // Two techs (second_tech) + Second Technician line: base split 50/50 + tips
+  // split 50/50 + $30 half-bonus.
+  eq(computeJobPay(job({ second_tech: true, tip: 20, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: 'Second Technician', line_total: 70 }
-  ] }), 'Kregg').pay, 75, 'multi-tech (70/2 + 20/2 + 30 = 35 + 10 + 30)');
+  ] }), 'Kregg').pay, 75, 'two techs (70/2 + 20/2 + 30 = 35 + 10 + 30)');
 
-  // Multi-tech with "Lifting Help" variation (same logic).
-  eq(computeJobPay(job({ line_items: [
+  // Two techs with "Lifting Help" variation (same logic).
+  eq(computeJobPay(job({ second_tech: true, line_items: [
     { name: '70"–84"', line_total: 169 },
     { name: 'Lifting Help', line_total: 70 }
-  ] }), 'Kregg').pay, 70, 'multi-tech lifting help (80/2 + 30 = 40 + 30)');
+  ] }), 'Kregg').pay, 70, 'two techs lifting help (80/2 + 30 = 40 + 30)');
 
-  // Multi-tech without sufficient payment (< $70, no bonus).
-  eq(computeJobPay(job({ line_items: [
+  // Two techs, Second Technician line under $70 → no $60 add-on, just a base split.
+  eq(computeJobPay(job({ second_tech: true, line_items: [
     { name: '33"–59"', line_total: 109 },
     { name: 'Second Technician', line_total: 50 }
-  ] }), 'Zach').pay, 30, 'multi-tech no bonus (60/2 = 30, no $30 bonus for <70)');
+  ] }), 'Zach').pay, 30, 'two techs no bonus (60/2 = 30, no $30 bonus for <70)');
 
   // Juan is NEVER split (works two-person jobs with his wife, who isn't a paid
   // tech): full base + full tips + the WHOLE $60 two-person add-on (not the $30
@@ -972,8 +975,8 @@ function runSelfTests() {
     { name: '98"+', line_total: 229 },
     { name: 'Second Technician', line_total: 70 }
   ] }), 'Juan').pay, 230, 'Juan two-person NOT split (130 + 40 + 60)');
-  // Same job for a normal tech still splits 50/50 + $30 half-bonus.
-  eq(computeJobPay(job({ tip: 40, line_items: [
+  // Same job with a second real tech still splits 50/50 + $30 half-bonus.
+  eq(computeJobPay(job({ second_tech: true, tip: 40, line_items: [
     { name: '98"+', line_total: 229 },
     { name: 'Second Technician', line_total: 70 }
   ] }), 'Kregg').pay, 115, 'Other tech two-person splits (130/2 + 40/2 + 30)');
@@ -983,7 +986,7 @@ function runSelfTests() {
     { name: '70"-85"', line_total: 149 },
     { name: 'Second Technician', line_total: 70 },
   ] }), 'TK').pay, 140, 'TK two-person NOT split: 80 base + full 60 = 140');
-  eq(computeJobPay(job({ line_items: [
+  eq(computeJobPay(job({ second_tech: true, line_items: [
     { name: '70"-85"', line_total: 149 },
     { name: 'Second Technician', line_total: 70 },
   ] }), 'Kregg').pay, 70, 'normal tech same job splits: 80/2 + 30 = 70');
@@ -1020,12 +1023,12 @@ function runSelfTests() {
     { name: 'After-Hours Service Fee (8 PM)', kind: 'fee', line_total: 75 }
   ] }), 'Kregg').pay, 135, '8pm single tech (60 + 75 bonus)');
 
-  // After-hours 8 PM bonus (multi-tech).
-  eq(computeJobPay(job({ line_items: [
+  // After-hours 8 PM bonus (two techs). Base splits, $30 half-bonus, full $75 each.
+  eq(computeJobPay(job({ second_tech: true, line_items: [
     { name: '60"–69"', line_total: 119 },
     { name: 'After-Hours Service Fee (8 PM)', kind: 'fee', line_total: 75 },
     { name: 'Second Technician', line_total: 70 }
-  ] }), 'Zach').pay, 140, '8pm multi-tech (70/2 + 30 + 75 = 35 + 30 + 75)');
+  ] }), 'Zach').pay, 140, '8pm two techs (70/2 + 30 + 75 = 35 + 30 + 75)');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
