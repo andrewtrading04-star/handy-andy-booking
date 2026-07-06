@@ -890,6 +890,7 @@
       </div>
       <div id="nbBringsOwnNote" style="display:none;font-size:12px;color:var(--ink-2);margin:8px 0 6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">This technician brings their own second person, so no second tech needs to be scheduled. The two-person fee still applies.</div>
       <input type="hidden" id="nbDate">
+      <div id="nbRequestedTimes" style="display:none;font-size:13px;padding:10px 12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbCalWrap" style="display:none;">
         <div class="nb-cal-head">
           <button type="button" id="nbCalPrev" class="nb-cal-nav">‹</button>
@@ -4143,6 +4144,9 @@ function convertEstimateToJob(id){
     address_line1: e.customer_address||e.address_line1||'',
     city: e.customer_city||'', state: e.customer_state||'',
     line_items: lines,
+    // The dates/times the customer picked on the approve page — shown above the
+    // availability calendar so the office schedules to what they requested.
+    preferred_slots: Array.isArray(e.preferred_slots)?e.preferred_slots:[],
   });
 }
 
@@ -5205,6 +5209,7 @@ async function openNewBooking(prefill){
   document.getElementById('nbCardWrap').style.display='none';
   document.getElementById('nbDate').value='';
   document.getElementById('nbCalWrap').style.display='none';
+  renderNbRequestedTimes(null);   // clear any prior estimate's requested times
   nbCalMonth=new Date(); nbCalMonth.setDate(1);
   nbZipAreaId=null;   // no zip yet -> all techs until a metro is resolved
   { const zr=document.getElementById('nbZipArea'); if(zr){ zr.textContent=''; zr.className='nb-zip-area'; } }
@@ -5273,6 +5278,9 @@ async function openNewBooking(prefill){
         .filter(l=>l.label||l.price);
       renderNbConvertSummary();
     }
+    // The times the customer requested on the approve page — shown above the
+    // availability calendar so the office can match one of them.
+    renderNbRequestedTimes(prefill.preferred_slots);
     // Resolve the zip's metro so the tech list filters + the calendar loads.
     if(prefill.postal_code){ const z=document.getElementById('nbZip'); if(z) z.dispatchEvent(new Event('change')); }
     // We already have the customer — expand the details so they're visible/editable.
@@ -5284,6 +5292,21 @@ async function openNewBooking(prefill){
 // for a normal manual booking. Included in nbCollectSelections so they flow into
 // the total + the created job's line items.
 let nbConvertLines=null;
+// Show the customer's requested dates/times (from the approve page) above the
+// availability calendar when converting an estimate. Hidden for a normal booking.
+function renderNbRequestedTimes(slots){
+  const el=document.getElementById('nbRequestedTimes'); if(!el) return;
+  const list=(Array.isArray(slots)?slots:[]).filter(s=>s&&s.date);
+  if(!list.length){ el.style.display='none'; el.innerHTML=''; return; }
+  const fmt=s=>{
+    let d=s.date;
+    try{ d=new Date(s.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }catch(_){}
+    const t=s.label||s.slot_key||'';
+    return `<div style="padding:2px 0;">📅 <b>${esc(d)}</b>${t?` · ${esc(t)}`:''}</div>`;
+  };
+  el.innerHTML=`<div style="font-weight:800;color:#047857;margin-bottom:4px;">🗓️ Customer requested these dates and times</div>${list.map(fmt).join('')}`;
+  el.style.display='';
+}
 function renderNbConvertSummary(){
   const el=document.getElementById('nbConvertSummary'); if(!el) return;
   if(!nbConvertLines || !nbConvertLines.length){ el.style.display='none'; el.innerHTML=''; return; }
