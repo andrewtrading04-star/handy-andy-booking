@@ -161,6 +161,13 @@
   .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;}
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotbonus{display:inline-block;margin-left:8px;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;vertical-align:middle;letter-spacing:.3px;}
+  /* Extra-time-slot pills ("block my next slot") */
+  .slotheld{font-size:14px;color:var(--ink);margin-bottom:8px;}
+  .slotrow{display:flex;flex-wrap:wrap;gap:8px;}
+  .slotpill{display:inline-flex;align-items:center;gap:6px;background:var(--navy);border:1px solid var(--line);color:var(--ink);font-size:13px;font-weight:600;padding:7px 10px;border-radius:999px;}
+  .slotpill.main{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotpill-x{background:transparent;border:none;color:var(--mute);font-size:17px;line-height:1;padding:0 2px;font-weight:700;}
+  .slotpill-x:hover{color:var(--red);}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -584,6 +591,8 @@ async function showDetail(id){
         ${j.partner_tech?`<div class="kv" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-weight:700;">${ic('users')} 2nd tech: ${esc(j.partner_tech)}</div>`:''}
       </div>
 
+      ${slotsCardHtml(j)}
+
       ${j.bracket&&j.bracket.needed?`<div class="card"><h3>📦 Bracket</h3>
         <div class="kv">${esc(j.bracket.label)}</div>
         ${j.bracket.supplied_by
@@ -707,6 +716,9 @@ async function showDetail(id){
       catch(e){ toast(e.message); bsave.disabled=false; }
     };
 
+    // Extra time slots ("block my next slot" — big jobs that run long).
+    bindSlots(id, j);
+
     // Multi-tech sync: while this job is open, unpaid, and not yet complete, poll
     // so that if the OTHER tech on the job takes the payment, this screen switches
     // to "paid" and unblocks Mark Complete on its own — no manual refresh needed.
@@ -723,6 +735,53 @@ async function showDetail(id){
     }
   }catch(e){ v.innerHTML=`<div class="detail"><button class="back" id="back">‹ Back</button><div class="empty">${esc(e.message)}</div></div>`;
     document.getElementById('back').addEventListener('click',showJobs); }
+}
+
+// ── Extra time slots (big-job "block my next slot") ──────────────────────────
+// A job normally holds ONE 2-hour slot. A big job can run into the next slot(s),
+// so the tech reserves them here — one tap adds the next slot, ✕ releases it.
+// The office schedule + availability treat reserved slots as busy, so no new
+// customer gets booked on top of a job that runs long. Hidden when the job has
+// no time yet, is finished, or the DB predates migration 0052.
+function slotsCardHtml(j){
+  const s=j.slots;
+  if(!s || !s.available || !s.main_slot) return '';
+  if(j.status==='completed'||j.status==='cancelled') return '';
+  const held=1+(s.extra?s.extra.length:0);
+  const extraChips=(s.extra||[]).map(x=>
+    `<span class="slotpill"><span>${esc(x.label)}</span><button class="slotpill-x" data-rm="${esc(x.slot_key)}" title="Release this slot">×</button></span>`
+  ).join('');
+  const next=(s.addable&&s.addable.length)?s.addable[0]:null;
+  return `<div class="card" id="slotsCard">
+    <h3>⧉ Reserve Extra Time</h3>
+    <div class="sub" style="color:var(--mute);font-size:13px;line-height:1.5;margin-bottom:10px;">
+      Running long? Block the next slot so no new job lands on top of you.
+    </div>
+    <div class="slotheld">This job holds <strong>${held}</strong> time slot${held===1?'':'s'}:</div>
+    <div class="slotrow">
+      <span class="slotpill main"><span>${esc(s.main_label||'Start')}</span></span>
+      ${extraChips}
+    </div>
+    ${next
+      ? `<button class="btn ghost" id="slotAdd" data-next="${esc(next.slot_key)}" style="margin-top:12px;">⛔ Block my next slot <span style="opacity:.7;font-weight:600;">(${esc(next.label)})</span></button>`
+      : (s.extra&&s.extra.length
+          ? `<div class="sub" style="color:var(--mute);font-size:13px;margin-top:12px;">No more slots left in the day to block.</div>`
+          : `<div class="sub" style="color:var(--mute);font-size:13px;margin-top:12px;">No later slots available to block today.</div>`)}
+  </div>`;
+}
+function bindSlots(id, j){
+  const s=j.slots; if(!s || !s.available) return;
+  const curKeys=(s.extra||[]).map(x=>x.slot_key);
+  async function save(nextKeys, btn){
+    if(btn) btn.disabled=true;
+    try{ await api('job_slots',{method:'POST',body:{id,slots:nextKeys}}); showDetail(id); }
+    catch(e){ toast(e.message); if(btn) btn.disabled=false; }
+  }
+  const add=document.getElementById('slotAdd');
+  if(add) add.onclick=()=>save([...curKeys, add.dataset.next], add);
+  document.querySelectorAll('#slotsCard [data-rm]').forEach(b=>{
+    b.onclick=()=>save(curKeys.filter(k=>k!==b.dataset.rm), b);
+  });
 }
 
 // ── Change / add the card on file ────────────────────────────────────────────

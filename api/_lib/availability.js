@@ -110,20 +110,20 @@ export function todayStr(tz) {
 }
 
 // Local wall-clock 'HH:MM' (tz) for an instant ISO string.
-function localHHMM(tz, instantISO) {
+export function localHHMM(tz, instantISO) {
   const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' })
     .formatToParts(new Date(instantISO)).reduce((a, x) => (a[x.type] = x.value, a), {});
   const hh = p.hour === '24' ? '00' : p.hour;   // some envs emit 24 for midnight
   return `${hh}:${p.minute}`;
 }
 // Local calendar date 'YYYY-MM-DD' (tz) for an instant.
-function localDateStr(tz, instantISO) {
+export function localDateStr(tz, instantISO) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
     .format(new Date(instantISO));
 }
 function toMin(s) { const [h, m] = s.split(':').map(Number); return h * 60 + m; }
 // Which fixed slot (if any) a local wall-clock time falls inside: [start,end).
-function slotKeyForLocalTime(hhmm) {
+export function slotKeyForLocalTime(hhmm) {
   const t = toMin(hhmm);
   for (const s of SLOTS) if (t >= toMin(s.start) && t < toMin(s.end)) return s.key;
   for (const s of SLOTS) if (toMin(s.start) === t) return s.key;   // exact-start fallback

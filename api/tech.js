@@ -17,7 +17,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS } from './_lib/sms.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
-import { SLOTS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
 
@@ -45,6 +45,13 @@ let techHasSecondCol = true;
 // bookings.stripe_account (migration 0032) may not be applied yet; flipped off
 // the first time a select errors on it so the charge path degrades gracefully.
 let techHasStripeAcctCol = true;
+// extra_slots (migration 0052): a big job reserves additional daily slots so the
+// tech isn't double-booked into them. Optimistic select, degrade if not applied —
+// mirrors the admin.js / availability.js pattern.
+let techHasExtraCol = true;
+const esCol = () => (techHasExtraCol ? ', extra_slots' : '');
+const esOf = (b) => (techHasExtraCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
+const isExtraErr = (e) => /extra_slots/.test((e && e.message) || '');
 function scopeMine(q, auth) {
   return techHasSecondCol
     ? q.or(`technician_id.eq.${auth.tech_id},secondary_technician_id.eq.${auth.tech_id}`)
@@ -97,6 +104,7 @@ export default async function handler(req, res) {
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
       case 'job_card_update':  return await jobCardUpdate(req, res, db, auth, body);
       case 'job_bracket_supplier': return await jobBracketSetSupplier(req, res, db, auth, body);
+      case 'job_slots':        return await jobSlots(req, res, db, auth, body);
       case 'job_photos':       return await jobPhotos(req, res, db, auth);
       case 'job_photo_add':    return await jobPhotoAdd(req, res, db, auth, body);
       case 'job_photo_delete': return await jobPhotoDelete(req, res, db, auth, body);
@@ -464,8 +472,8 @@ async function job(req, res, db, auth) {
       business_slug: data.business?.slug || '',
       line_items: data.line_items || [],
       travel_payout: travelMap.get(String(data.postal_code || '')) || 0,
-      // A second tech is on the job. It only SPLITS 50/50 when the customer booked a
-      // two-person job; on a one-person job the lead keeps full pay and the helper $0.
+      // A second real tech on the job splits the base pay 50/50 (owner rule);
+      // a solo tech keeps it all. Juan/TK bring their own helper and never split.
       second_tech: !!data.secondary_technician_id,
       is_secondary: data.secondary_technician_id === auth.tech_id && data.technician_id !== auth.tech_id,
     }, viewerName);
@@ -479,7 +487,110 @@ async function job(req, res, db, auth) {
     shaped.tip_pay = tp ? Math.round(Number(tp.amount) || 0) : 0;
   } catch (e) { shaped.tech_pay = null; }
 
+  // ── Extra time slots (big-job "block my next slot") ──────────────────────────
+  // How many daily slots this job holds and which later ones the tech can still
+  // block. The occupancy readers all treat extra_slots as busy, so reserving one
+  // keeps a new customer from being booked on top of a job that runs long.
+  shaped.slots = null;
+  if (data.scheduled_at) {
+    try {
+      const jtz = (await areaTzMap(db, [data.service_area_id]))[data.service_area_id]
+        || data.business?.timezone || 'America/Denver';
+      const dateStr = localDateStr(jtz, data.scheduled_at);
+      const mainSlot = slotKeyForLocalTime(localHHMM(jtz, data.scheduled_at));
+      // Refetch with extra_slots (the job() select omits it) so we know what's held.
+      let current = [];
+      const { data: es, error: esErr } = await db.from('bookings')
+        .select(`id${esCol()}`).eq('id', id).maybeSingle();
+      if (esErr && isExtraErr(esErr)) techHasExtraCol = false;
+      else if (!esErr) current = esOf(es);
+      // Slots already busy for THIS tech that day (their other jobs + those jobs'
+      // extra slots), so we don't offer a slot they're already committed to.
+      const takenByOthers = await takenSlotsForTech(db, auth.tech_id, jtz, dateStr, id);
+      // A tech can only block slots AFTER the job's own slot (a job runs forward).
+      const mainIdx = SLOTS.findIndex(s => s.key === mainSlot);
+      const addable = SLOTS
+        .filter((s, i) => i > mainIdx && !current.includes(s.key) && !takenByOthers.has(s.key))
+        .map(s => ({ slot_key: s.key, label: s.label }));
+      shaped.slots = {
+        available: techHasExtraCol,
+        main_slot: mainSlot,
+        main_label: (SLOTS.find(s => s.key === mainSlot) || {}).label || null,
+        extra: current.map(k => ({ slot_key: k, label: (SLOTS.find(s => s.key === k) || {}).label || k })),
+        addable,
+      };
+    } catch (e) { shaped.slots = null; }
+  }
+
   return res.status(200).json({ job: shaped });
+}
+
+// Slot keys already busy for a tech on a given local date: the main slot of each
+// of their OTHER bookings that day, plus those bookings' reserved extra_slots.
+// `excludeId` drops the job we're editing so its own slots don't count as taken.
+async function takenSlotsForTech(db, techId, tz, dateStr, excludeId) {
+  const taken = new Set();
+  // Bound to the target local day (a generous UTC window; the exact date is
+  // re-checked per row below, so metro-tz jobs near midnight still resolve).
+  const winStart = localDateStartUTC(tz, dateStr).toISOString();
+  const winEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, scheduled_at, status${esCol()}`), { tech_id: techId })
+    .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+    .gte('scheduled_at', winStart).lt('scheduled_at', winEnd);
+  let { data, error } = await build();
+  if (error && isExtraErr(error)) { techHasExtraCol = false; ({ data, error } = await build()); }
+  if (error) return taken;
+  for (const b of (data || [])) {
+    if (b.id === excludeId) continue;
+    if (localDateStr(tz, b.scheduled_at) !== dateStr) continue;
+    const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+    if (k) taken.add(k);
+    for (const sk of esOf(b)) taken.add(sk);
+  }
+  return taken;
+}
+
+// POST { id, slots:[...] } — set this job's reserved extra slots. Tech-scoped: the
+// caller must be assigned to the job. Validates each key is real, after the job's
+// own slot, and free for this tech that day. Mirrors admin.js bookingSlots.
+async function jobSlots(req, res, db, auth, body) {
+  const id = (req.query.id || (body && body.id) || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const build = () => scopeMine(db.from('bookings')
+    .select(`id, scheduled_at, service_area_id, business:businesses ( timezone ), status${esCol()}`), auth)
+    .eq('id', id).maybeSingle();
+  let { data: b, error } = await build();
+  if (error && isExtraErr(error)) { techHasExtraCol = false; ({ data: b, error } = await build()); }
+  if (error || !b) return res.status(404).json({ error: 'Job not found' });
+  if (!techHasExtraCol) return res.status(400).json({ error: 'Extra time slots need migration 0052 applied first.' });
+  if (!b.scheduled_at) return res.status(400).json({ error: 'This job has no scheduled time yet.' });
+
+  const jtz = (await areaTzMap(db, [b.service_area_id]))[b.service_area_id]
+    || b.business?.timezone || 'America/Denver';
+  const dateStr = localDateStr(jtz, b.scheduled_at);
+  const mainSlot = slotKeyForLocalTime(localHHMM(jtz, b.scheduled_at));
+  const mainIdx = SLOTS.findIndex(s => s.key === mainSlot);
+  if (mainIdx < 0) return res.status(400).json({ error: "This job's time doesn't line up with a standard slot." });
+  const takenByOthers = await takenSlotsForTech(db, auth.tech_id, jtz, dateStr, id);
+
+  const requested = Array.isArray(body && body.slots) ? body.slots.map(String) : [];
+  const clean = [];
+  for (const sk of requested) {
+    if (!SLOT_KEYS.has(sk)) return res.status(400).json({ error: `Invalid time slot: ${sk}` });
+    if (sk === mainSlot) continue;                       // main slot is implied
+    const idx = SLOTS.findIndex(s => s.key === sk);
+    if (idx <= mainIdx) return res.status(400).json({ error: 'You can only reserve time slots after this job starts.' });
+    if (takenByOthers.has(sk)) {
+      const lab = (SLOTS.find(s => s.key === sk) || {}).label || sk;
+      return res.status(409).json({ error: `${lab} is already booked for you — can't reserve it.` });
+    }
+    if (!clean.includes(sk)) clean.push(sk);
+  }
+  const { error: uErr } = await db.from('bookings').update({ extra_slots: clean }).eq('id', b.id);
+  if (uErr) { if (isExtraErr(uErr)) { techHasExtraCol = false; return res.status(400).json({ error: 'Extra time slots need migration 0052 applied first.' }); } throw uErr; }
+  return res.status(200).json({ ok: true, id: b.id, extra_slots: clean });
 }
 
 // Normalize editor line items to storable rows. Each editor line is { text, price }
