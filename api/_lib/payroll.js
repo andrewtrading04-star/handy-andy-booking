@@ -466,20 +466,21 @@ export function computeJobPay(job, techName) {
     }
   }
 
-  // ── Travel payout: the tech's share of the service-area surcharge. Prefer the
-  // surcharge line actually on the ticket (source of truth — the customer paid $X
-  // surcharge, so the tech earns the matching tier: $65→$50, etc.), but never pay
-  // less than the per-zip payout the caller looked up (job.travel_payout). Treated
-  // like the after-hours bonus — a per-trip stipend, NOT split, so each tech on
-  // the trip earns it.
-  let travelPayout = Number(job.travel_payout) || 0;
+  // ── Travel payout: the tech's share of the service-area surcharge the CUSTOMER
+  // was actually charged. Owner rule: a tech earns travel ONLY when a travel /
+  // service-area surcharge line is on the ticket (the customer paid for it) — NOT
+  // merely because the job's zip is configured with a payout. No surcharge line =
+  // no travel bonus. (A zip's configured payout only sets what the tier pays IF a
+  // surcharge was charged; it never pays on its own.) On a two-tech job the trip's
+  // travel is SPLIT between the techs (one trip, one surcharge — see below).
+  let travelPayout = 0;
   for (const li of job.line_items || []) {
     // "Service Area Surcharge" (widget) and "Travel Fee" / "Service Area Fee"
     // (office New Booking) are the same thing — the tech earns the matching tier
-    // ($65→$50, …) from whichever the ticket carries, so they're paid for the
-    // trip even when the job's zip has no configured payout column.
-    if (/service area surcharge|travel fee|service.?area fee/i.test(li.name || '')) {
-      travelPayout = Math.max(travelPayout, travelPayoutForSurcharge(li.line_total));
+    // ($65→$50, …) from whichever the ticket carries. Only a CHARGED line (>$0)
+    // counts; a $0 travel line means the customer wasn't billed, so no payout.
+    if (Number(li.line_total) > 0 && /service area surcharge|travel fee|service.?area fee/i.test(li.name || '')) {
+      travelPayout = travelPayoutForSurcharge(li.line_total);
       break;
     }
   }
@@ -624,22 +625,23 @@ export function computeJobPay(job, techName) {
   //   • EXCEPTION: Juan/TK bring their OWN off-system helper (not a paid system
   //     tech), so they are NEVER split — twoTechs is false for them and they keep
   //     the full base/tips plus the whole $60.
-  //   • After-hours ($75) and travel-tier payouts are per-trip stipends — NOT
-  //     split; each tech on the trip earns the full amount.
+  //   • Travel is ONE trip's surcharge — SPLIT between the two techs (owner rule).
+  //   • After-hours ($75) is a per-trip stipend — each tech on the trip earns it.
   if (twoTechs) {
     // The WHOLE tech-pay pool splits evenly: all base labor + the $60 second-tech
     // add-on + tips, divided by two. Split to the CENT — e.g. 70 + 80 + 35 + 60 =
-    // 245 → $122.50 each (not $122 or $123). Per-trip stipends (after-hours,
-    // travel) are NOT split; each tech on the trip earns the full amount.
+    // 245 → $122.50 each (not $122 or $123). Travel is one trip's surcharge, so it
+    // splits too (half each). After-hours stays full to each tech.
     let baseTotal = 0;
     for (const item of breakdown) baseTotal += item.amount;
     const pool = baseTotal + feeBonus + tip;
     const share = round2(pool / 2);
+    const travelHalf = travelPayout ? round2(travelPayout / 2) : 0;
     const newBreakdown = [{ label: `½ of job tech pay ($${round2(pool)} ÷ 2)`, amount: share }];
     if (afterHoursBonus) newBreakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
-    if (travelPayout) newBreakdown.push({ label: 'Travel payout', amount: travelPayout });
-    const finalPay = share + afterHoursBonus + travelPayout;
-    flags.push('Two-tech job — tech pay split 50/50');
+    if (travelHalf) newBreakdown.push({ label: 'Travel payout (½ of trip)', amount: travelHalf });
+    const finalPay = share + afterHoursBonus + travelHalf;
+    flags.push('Two-tech job — tech pay + travel split 50/50');
     return { pay: round2(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
     // Single tech (or Juan/TK with their own helper) — full base + tips, plus the
@@ -713,8 +715,8 @@ function runSelfTests() {
   // tech earns the full $50. Juan brings his OWN off-system helper, so he never
   // splits: he keeps the full base + full travel.
   eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 210, 'Juan (own helper) never splits = full 160 + 50 travel = 210');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 125, 'Two techs: base 150 split = 75 + full 50 travel = 125');
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 125, 'Second of two techs earns the same split = 75 + 50 travel = 125');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 100, 'Two techs: base 150 split = 75 + travel 50 SPLIT = 25 -> 100');
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 100, 'Second of two techs: 75 base share + 25 travel half = 100');
   // Customer PAID for the two-person option ("cannot help lift" $70): Juan keeps
   // the WHOLE $60 add-on on top of his full base. 70-85 base 90 + 60 = 150.
   eq(computeJobPay(job({ line_items: [
@@ -776,11 +778,13 @@ function runSelfTests() {
     { name: 'My TV is 70-85 inches and I can help lift it', line_total: 0 },
     { name: 'No, I will handle TV removal myself', line_total: 0 },
   ] };
-  eq(computeJobPay(job({ ...saner }), 'Steve').pay, 90, 'Saner solo: 80 base + 10 travel = 90');
+  // NO surcharge line on this ticket, so the zip's configured travel_payout does
+  // NOT pay (owner rule: travel only when the customer was charged a surcharge).
+  eq(computeJobPay(job({ ...saner }), 'Steve').pay, 80, 'Saner solo: 80 base, no surcharge line -> no travel = 80');
   // When a SECOND real tech is assigned, the base splits 50/50 (owner rule).
   // Travel is per-trip — each tech keeps the full $10.
-  eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 50, 'Saner two techs: base 80 split = 40 + full 10 travel = 50');
-  eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 50, 'Saner second tech: same split = 40 + 10 travel = 50');
+  eq(computeJobPay(job({ ...saner, second_tech: true }), 'Steve').pay, 40, 'Saner two techs: base 80 split = 40, no surcharge line -> no travel');
+  eq(computeJobPay(job({ ...saner, second_tech: true, is_secondary: true }), 'Zach').pay, 40, 'Saner second tech: 40, no travel (no surcharge line)');
   eq(computeJobPay(job({ ...saner }), 'Steve').flags.length, 0, 'Saner solo: no review flags');
   // Two techs split the base; a solo tech keeps it whole.
   eq(computeJobPay(job({ line_items: [
@@ -821,7 +825,7 @@ function runSelfTests() {
     { name: 'Bracket: Full Motion', quantity: 3, unit_price: 115, line_total: 345 },
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
-  ], business_slug: 'doms', travel_payout: 50 }), 'Steve').pay, 585, 'reported job: 5×$65 boards (325) + 3×60-69 (210) + full motion $0 + $50 travel = 585');
+  ], business_slug: 'doms', travel_payout: 50 }), 'Steve').pay, 535, 'reported job: 5×$65 boards (325) + 3×60-69 (210); zip travel_payout does NOT pay without a surcharge line = 535');
   // Dry erase board alongside a TV base: base + 1 board both pay.
   eq(computeJobPay(job({ line_items: [
     { name: '60"-69"', line_total: 119 },
@@ -907,7 +911,7 @@ function runSelfTests() {
     { name: 'Wall Surface: Drywall', quantity: 3, line_total: 0 },
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
-  ] }), 'TK').pay, 325, 'Joseph job TK = 210 base + 65 board + 50 travel = 325');
+  ] }), 'TK').pay, 275, 'Joseph job TK = 210 base + 65 board; no surcharge line -> no travel = 275');
   // Same job with the REAL stored names that bake "×3" into the label — the
   // bracket/size lines must still match (not fall through to custom-hourly and
   // overpay). Without the ×N-strip this paid $650 (Full Motion ×3 -> 4h custom).
@@ -919,7 +923,7 @@ function runSelfTests() {
     { name: 'Wall Surface: Drywall ×3', quantity: 3, line_total: 0 },
     { name: 'Dismount: Guaranteed Dismount Service', line_total: 35 },
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
-  ] }), 'TK').pay, 325, 'Joseph job with ×3-baked names still = 325, not 650');
+  ] }), 'TK').pay, 275, 'Joseph job with ×3-baked names still = 275, not 650 (no travel w/o surcharge line)');
   // The bracket rate resolves through a baked-in "×3" suffix (Juan paid $60/bracket).
   eq(computeJobPay(job({ line_items: [
     { name: '60"-69"', line_total: 119 },
