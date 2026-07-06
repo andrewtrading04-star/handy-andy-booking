@@ -485,7 +485,11 @@ export function computeJobPay(job, techName) {
   // the trip earns it.
   let travelPayout = Number(job.travel_payout) || 0;
   for (const li of job.line_items || []) {
-    if (/service area surcharge/i.test(li.name || '')) {
+    // "Service Area Surcharge" (widget) and "Travel Fee" / "Service Area Fee"
+    // (office New Booking) are the same thing — the tech earns the matching tier
+    // ($65→$50, …) from whichever the ticket carries, so they're paid for the
+    // trip even when the job's zip has no configured payout column.
+    if (/service area surcharge|travel fee|service.?area fee/i.test(li.name || '')) {
       travelPayout = Math.max(travelPayout, travelPayoutForSurcharge(li.line_total));
       break;
     }

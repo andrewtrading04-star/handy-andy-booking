@@ -5334,7 +5334,9 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
   if(cat!=='Assurion') nbPopulateTechs();
   document.getElementById('nbDate').value='';
   document.getElementById('nbSlotsWrap').style.display='none';
-  document.getElementById('nbTravelFee').value='';
+  // NOTE: do NOT clear the travel fee here — it belongs to the ZIP/location, not
+  // the service, so it must survive picking a service. (Assurion/GDS force it to
+  // $0 at submit regardless.)
   updateNbTotal();
   // Reset the 2nd-technician picker when category changes.
   document.getElementById('nbSecondTech').value='';
