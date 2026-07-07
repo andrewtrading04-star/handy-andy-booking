@@ -5053,7 +5053,7 @@ function greetStatsHtml(){
     `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
       (revBySlug ? (
         `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
-        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Job revenue · Sat–Fri</span>`+
+        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Completed jobs · Sat–Fri</span>`+
         `<div style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
           `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div>`+
             `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;">${money(revBySlug.doms||0)}</div></div>`+

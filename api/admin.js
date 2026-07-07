@@ -569,10 +569,11 @@ async function summary(req, res, db, auth) {
 
     // Per-business JOB REVENUE for the Saturday–Friday work week. Per owner's
     // rule the revenue week runs Sat→Fri (e.g. Jul 4–Jul 10), NOT the Sunday-based
-    // schedule week the stat boxes use. Sums every non-canceled job's price for
-    // each business over that 7-day window and reports both companies side by side.
-    // Replaces the old Stripe upcoming-payout line — this metric is no longer tied
-    // to any Stripe account.
+    // schedule week the stat boxes use, and revenue counts ONLY jobs that have
+    // actually been COMPLETED — upcoming/pending/assigned jobs are not revenue yet.
+    // Sums each COMPLETED job's price per business over that 7-day window and
+    // reports both companies side by side. Replaces the old Stripe upcoming-payout
+    // line — this metric is no longer tied to any Stripe account.
     try {
       const daysSinceSat = (localDow(tz, base) + 1) % 7;            // Sat=0, Sun=1, … Fri=6
       const satWeekStart = localDayStartUTC(tz, -daysSinceSat, base);
@@ -582,7 +583,7 @@ async function summary(req, res, db, auth) {
           .eq('business_id', bb.id)
           .gte('scheduled_at', satWeekStart.toISOString())
           .lt('scheduled_at', satWeekEnd.toISOString())
-          .in('status', ACTIVE_STATUSES);
+          .eq('status', 'completed');
         const total = Math.round((rows || []).reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
         return [bb.slug, total];
       }));
