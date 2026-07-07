@@ -1071,17 +1071,11 @@
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
             <span style="color:#fff!important;">$${it.amount}</span>
           </div>`).join('');
-    const tips=[0,5,10,15,20];
-    const tipHtml=tips.map(t=>`<button class="ha-tip" data-tip="${t}"
-      style="background:${tipAmount===t?'#ff6600':'#27272a'}!important;color:#fff!important;border:1.5px solid ${tipAmount===t?'#ff6600':'#3f3f46'}!important;border-radius:6px!important;padding:8px 14px!important;font-size:14px!important;cursor:pointer!important;flex:1!important;">
-      ${t===0?'No Tip':`$${t}`}
-    </button>`).join('');
     return `
       <h1 style="${S.h1};color:#ff6600!important;">Almost Done! Last Step…</h1>
-      <div style="background:rgba(34,197,94,0.08)!important;border:1px solid rgba(34,197,94,0.2)!important;border-radius:8px!important;padding:12px 14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
+      <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
         💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
-        Payment is taken at time of service by the technician.
-        Card is only needed now to hold the appointment.
+        <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service — your card only holds the appointment.</div>
         We will only charge you after your services have been completed.
       </div>
       <input type="text"  id="c-fn" style="${S.inputL}" placeholder="First Name"     value="${customer.first_name}">
@@ -1094,10 +1088,6 @@
         <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
         <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
         <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
-      </div>
-      <div style="margin-bottom:14px!important;">
-        <div style="font-size:13px!important;color:#a0a0ab!important;margin-bottom:8px!important;">Tip your technician (optional)</div>
-        <div style="display:flex!important;gap:6px!important;">${tipHtml}</div>
       </div>
       <div style="margin-bottom:20px!important;">
         <input type="text" id="c-coupon" style="${S.inputL};margin-bottom:0!important;" placeholder="Coupon code (optional)" value="${couponCode}">
@@ -1188,12 +1178,6 @@
     root.querySelectorAll('.ha-sel').forEach(c=>c.addEventListener('click',()=>{selectOnly(c.dataset.s,c.dataset.o);render();}));
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
-    root.querySelectorAll('.ha-tip').forEach(b=>b.addEventListener('click',()=>{
-      // Snapshot current field values before re-rendering so they aren't lost
-      const fn=root.querySelector('#c-fn'),ln=root.querySelector('#c-ln'),em=root.querySelector('#c-em'),ph=root.querySelector('#c-ph'),ad=root.querySelector('#c-ad'),zp=root.querySelector('#c-zip'),cp=root.querySelector('#c-coupon');
-      if(fn)customer.first_name=fn.value;if(ln)customer.last_name=ln.value;if(em)customer.email=em.value;if(ph)customer.phone=ph.value;if(ad)customer.address=ad.value;if(zp)customer.zip=zp.value.replace(/\D/g,'');if(cp)couponCode=cp.value;
-      tipAmount=parseInt(b.dataset.tip);render();
-    }));
     root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{optionComments[e.target.dataset.o]=e.target.value;}));
     // Capture the customer's name as soon as they type it (on blur) so the booking
     // analytics shows who the session belongs to, even if they don't finish booking.
