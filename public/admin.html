@@ -4800,7 +4800,13 @@ function invLowBrackets(t){ return invLowBracketTypes(t).length>0; }
 // Juan is excluded from wire-concealment (plate) low-stock warnings, per owner —
 // his plate stock isn't tracked for reorders for now. His brackets still count.
 function invIgnorePlates(t){ return /\bjuan\b/i.test(t.technician_name||''); }
-function invLowPlates(t){ return !invIgnorePlates(t) && (t.wire_plate||0)<=LOW_PLATES_MAX; }
+// A tech is "low on plates" only in the genuinely-low band 1..3. A count of 0
+// means plates were never stocked/tracked for that tech (the API returns 0 for a
+// null wire_plate_qty), which is the common case for businesses that don't do
+// behind-the-wall wire concealment — flagging that as "low" is a permanent false
+// alarm. Real shortages still warn: plates decrement 1 per behind-the-wall job,
+// so a tech running down always passes through 3→2→1 (each warns) before 0.
+function invLowPlates(t){ const w=t.wire_plate||0; return !invIgnorePlates(t) && w>=1 && w<=LOW_PLATES_MAX; }
 function invIsLow(t){ return invLowBrackets(t)||invLowPlates(t); }
 function lowStockCount(inv){ return (inv||[]).filter(invIsLow).length; }
 // Jump to the Bracket Inventory section (reuses the sidebar nav button).
