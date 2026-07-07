@@ -178,17 +178,24 @@ async function bracketSync(req, res) {
   if (assignedRow) {
     // The assigned tech's business owns this order.
     const patch = {};
+    const wasDelivered = assignedRow.status === 'delivered';
+    const nowDelivered = status === 'delivered';
     if (upgrades(assignedRow.status)) Object.assign(patch, statusPatch());
     if (order_url && !assignedRow.order_url) patch.order_url = order_url;
-    // Self-heal quantities (e.g. a pre-fix mis-parse) and move the tech's
-    // inventory by the difference so counts stay consistent.
-    if (totalQty > 0 && (assignedRow.flat_qty !== flat_qty || assignedRow.tilting_qty !== tilting_qty || assignedRow.full_motion_qty !== full_motion_qty)) {
+    const qtyChanged = totalQty > 0 && (assignedRow.flat_qty !== flat_qty || assignedRow.tilting_qty !== tilting_qty || assignedRow.full_motion_qty !== full_motion_qty);
+    if (qtyChanged) { patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty; }
+    // Inventory moves ONLY on delivery — never while an order is in route.
+    // Credit the full order the first time it flips to delivered; after that,
+    // self-heal by any later quantity correction from a follow-up email.
+    if (!wasDelivered && nowDelivered && totalQty > 0) {
+      await adjustBracketInventory(db, assignedRow.business_id, assignedRow.technician_id,
+        { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty });
+    } else if (wasDelivered && qtyChanged) {
       await adjustBracketInventory(db, assignedRow.business_id, assignedRow.technician_id, {
         flat:        flat_qty        - (assignedRow.flat_qty || 0),
         tilting:     tilting_qty     - (assignedRow.tilting_qty || 0),
         full_motion: full_motion_qty - (assignedRow.full_motion_qty || 0),
       });
-      patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty;
     }
     if (Object.keys(patch).length) {
       const { error } = await db.from('bracket_purchases').update(patch).eq('id', assignedRow.id);
@@ -203,10 +210,10 @@ async function bracketSync(req, res) {
       results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
     }
   } else if (matched) {
-    // Auto-assign to the tech the order ships to. We only get here when the order
-    // is unassigned everywhere, so this credits inventory exactly once — same as
-    // the owner clicking "Assign". Own the row for the tech's business (update the
-    // existing unassigned twin there, or insert), then drop the other twins.
+    // Auto-assign to the tech the order ships to. This only RESERVES the order to
+    // the tech — it does NOT touch on-hand inventory. Brackets are added to the
+    // count only when the order is delivered (below). Own the row for the tech's
+    // business (update the existing unassigned twin there, or insert), drop twins.
     const own = (rows || []).find(r => r.business_id === matched.business_id) || null;
     const patch = { technician_id: matched.id };
     if (order_url) patch.order_url = order_url;
@@ -224,8 +231,10 @@ async function bracketSync(req, res) {
       });
       results.push({ business: slugOf(matched.business_id), action: error ? 'assign_insert_failed' : 'auto_assigned_new', tech: matched.name, error: error?.message });
     }
-    // Credit the tech's inventory by the order quantity (first-and-only credit).
-    if (totalQty > 0) {
+    // Credit inventory ONLY if this order is already delivered at the moment we
+    // auto-assign it (e.g. the first email we saw was the delivery notice). An
+    // in-route order adds nothing until its delivery email arrives.
+    if (status === 'delivered' && totalQty > 0) {
       await adjustBracketInventory(db, matched.business_id, matched.id, { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty });
     }
     // Remove the still-unassigned twin(s) of this order in other businesses.

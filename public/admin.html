@@ -4435,10 +4435,11 @@ async function renderBrackets(){
     // ── Brackets In Route ───────────────────────────────────────────────────
     // Brackets that are ordered but not yet delivered (status = in_route). Same
     // shape as the inventory count — quantity by type — so you can see what's
-    // coming before it lands. Aggregated per technician (Unassigned until it's
-    // assigned to someone on delivery).
+    // coming before it lands. Sourced from ALL recent orders (assigned + not) so
+    // an order auto-assigned to a tech still shows here while it's in route; it
+    // moves into that tech's on-hand count only when it's delivered.
     {
-      const inRoute=(pend&&pend.purchases||[]).filter(p=>{ const s=(p.status||'in_route').toLowerCase(); return s==='in_route'||s==='ordered'; });
+      const inRoute=((purch&&purch.purchases)||[]).filter(p=>{ const s=(p.status||'in_route').toLowerCase(); return s==='in_route'||s==='ordered'; });
       const byTech={};
       for(const p of inRoute){
         const k=p.technician_name||'Unassigned';
@@ -4555,11 +4556,13 @@ async function renderBrackets(){
     </tr></thead>`;
 
     const bracketRow = (p) => {
-      // Order # as plain text. We used to link p.order_url, but Walmart's email
-      // "View order" links are one-time, session-bound tokens that 400 when opened
-      // later from here — the delivery address (which auto-assigns the tech) is the
-      // useful signal instead, so we don't surface the dead link.
-      const orderCell=p.walmart_order_num?esc(p.walmart_order_num):'-';
+      // Order # + a "View ↗" that opens the Walmart account orders page. We do NOT
+      // link p.order_url — Walmart's email "View order" links are one-time,
+      // session-bound tokens that 400 when opened later from here. The account
+      // orders list always opens; find this order by its number.
+      const orderCell=p.walmart_order_num
+        ? `${esc(p.walmart_order_num)} <a href="https://www.walmart.com/orders" target="_blank" rel="noopener" title="Opens your Walmart orders — find #${esc(p.walmart_order_num)}" style="font-size:11px;white-space:nowrap;margin-left:4px;">View ↗</a>`
+        : '-';
       const assigned=p.technician_name && p.technician_name!=='Unassigned';
       const techCell=assigned
         ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`

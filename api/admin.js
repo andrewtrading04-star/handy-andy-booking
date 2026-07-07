@@ -5017,7 +5017,7 @@ async function bracketAssign(req, res, db, auth, body) {
 
   // Fetch the pending purchase (must belong to this business and be unassigned).
   const { data: purchase } = await db.from('bracket_purchases')
-    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id, walmart_order_num')
+    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id, walmart_order_num, status')
     .eq('id', purchaseId).eq('business_id', bizId).maybeSingle();
   if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
   if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
@@ -5051,31 +5051,38 @@ async function bracketAssign(req, res, db, auth, body) {
       .neq('business_id', bizId);
   }
 
-  // Add quantities to the tech's inventory (read-then-write; no atomic increment).
-  const { data: inv } = await db.from('bracket_inventory')
-    .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
-  if (inv) {
-    const { error: upErr } = await db.from('bracket_inventory').update({
-      flat_qty: (inv.flat_qty || 0) + flat,
-      tilting_qty: (inv.tilting_qty || 0) + tilting,
-      full_motion_qty: (inv.full_motion_qty || 0) + full_motion,
-    }).eq('id', inv.id);
-    if (upErr) throw upErr;
-  } else {
-    const { error: insErr } = await db.from('bracket_inventory').insert({
-      business_id: bizId,
-      technician_id: techId,
-      flat_qty: flat,
-      tilting_qty: tilting,
-      full_motion_qty: full_motion,
-    });
-    if (insErr) throw insErr;
+  // Inventory moves ONLY on delivery. If the owner assigns an order that's still
+  // in route, we just reserve it to the tech — the brackets are added to the
+  // count when the delivery email arrives. Assigning an already-delivered order
+  // credits it now (read-then-write; no atomic increment).
+  const credited = purchase.status === 'delivered';
+  if (credited) {
+    const { data: inv } = await db.from('bracket_inventory')
+      .select('id, flat_qty, tilting_qty, full_motion_qty')
+      .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+    if (inv) {
+      const { error: upErr } = await db.from('bracket_inventory').update({
+        flat_qty: (inv.flat_qty || 0) + flat,
+        tilting_qty: (inv.tilting_qty || 0) + tilting,
+        full_motion_qty: (inv.full_motion_qty || 0) + full_motion,
+      }).eq('id', inv.id);
+      if (upErr) throw upErr;
+    } else {
+      const { error: insErr } = await db.from('bracket_inventory').insert({
+        business_id: bizId,
+        technician_id: techId,
+        flat_qty: flat,
+        tilting_qty: tilting,
+        full_motion_qty: full_motion,
+      });
+      if (insErr) throw insErr;
+    }
   }
 
   return res.status(200).json({
     ok: true,
     technician_name: tech.name,
+    reserved: !credited,
     assigned: { flat, tilting, full_motion, total: flat + tilting + full_motion },
   });
 }
