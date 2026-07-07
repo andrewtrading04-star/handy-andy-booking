@@ -4586,6 +4586,21 @@ async function bracketInventory(req, res, db, auth) {
     }))
   );
 
+  // Which techs actually STOCK wire-concealment plates? The wire_plate_qty
+  // column is `not null default 0`, so a 0 can mean either "ran out" or "never
+  // tracked". Businesses that don't do behind-the-wall wire concealment (e.g.
+  // Handy Andy) sit at 0 forever, so a blanket "0 <= 3 = low" fires a permanent
+  // false alarm. Distinguish via purchase history: a business is plate-tracked
+  // if it has ever ordered plates; a tech is plate-tracked if their business is
+  // OR they currently hold >0. Untracked techs are excluded from plate low-stock
+  // warnings; a tracked tech who genuinely burns to 0 STILL warns (real shortage).
+  let bizPlateTracked = false;
+  try {
+    const { count } = await db.from('wire_plate_purchases')
+      .select('id', { count: 'exact', head: true }).eq('business_id', bizId);
+    bizPlateTracked = (count || 0) > 0;
+  } catch { /* table missing on older deploys → treat as untracked (no false alarms) */ }
+
   return res.status(200).json({
     inventory: final.map(i => ({
       technician_id: i.technician_id,
@@ -4595,6 +4610,7 @@ async function bracketInventory(req, res, db, auth) {
       full_motion: i.full_motion_qty || 0,
       total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
       wire_plate: i.wire_plate_qty || 0,
+      wire_plate_tracked: bizPlateTracked || (i.wire_plate_qty || 0) > 0,
       updated_at: i.updated_at,
     })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
   });
