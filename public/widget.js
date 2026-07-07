@@ -400,6 +400,11 @@
   const BOOKING_IDEM_KEY='ha_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
   // Stripe
   let _stripe=null, _stripeElements=null, _stripeCard=null;
+  // Live card validity, driven by the Element's `change` event. Lets us block a
+  // submit on an incomplete card BEFORE calling Stripe (the #1 checkout failure
+  // was "card number is incomplete" — people tapping Complete with a half-filled
+  // card, especially on mobile) and show the error inline instead of an alert.
+  let _cardComplete=false;
 
   // ─── State helpers ────────────────────────────────────────────────────────
   function getSec(k){ return serviceConfig?.sections.find(s=>s.stepKey===k); }
@@ -504,10 +509,18 @@
         _stripeElements=_stripe.elements();
         _stripeCard=_stripeElements.create('card',{
           style:{
-            base:{color:'#fff',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:'15px','::placeholder':{color:'#71717a'}},
+            base:{color:'#fff',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:'16px','::placeholder':{color:'#71717a'}},
             invalid:{color:'#ef4444'},
           },
           hidePostalCode:true,
+        });
+        // Live feedback: reflect the Element's validity into the inline error line
+        // under the field (created at render time) and track completeness so the
+        // submit handler can stop an incomplete card before it ever hits Stripe.
+        _stripeCard.on('change',(ev)=>{
+          _cardComplete=!!ev.complete;
+          const errEl=document.getElementById('stripe-card-errors');
+          if(errEl) errEl.textContent = (ev.error && ev.error.message) ? ev.error.message : '';
         });
         resolve();
       }
@@ -1079,6 +1092,7 @@
       <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
         <div style="font-size:11px!important;color:#a0a0ab!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
         <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
+        <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
         <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
       </div>
       <div style="margin-bottom:14px!important;">
@@ -1319,6 +1333,20 @@
     if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
     if(couponCode)logEvent('answer','coupon:'+couponCode);
 
+    // Card must be fully entered before we lock in or call Stripe. This is the
+    // biggest checkout leak: people tap Complete with a half-filled card and hit
+    // "card number is incomplete". Show the error inline, scroll to + focus the
+    // field, and stop — no alert, no wasted Stripe round-trip, no double-book lock.
+    if(_stripe&&_stripeCard&&!_cardComplete){
+      const errEl=document.getElementById('stripe-card-errors');
+      if(errEl&&!errEl.textContent) errEl.textContent='Please finish entering your card number, expiry date, and CVC.';
+      const cardBox=document.getElementById('stripe-card-element');
+      if(cardBox&&cardBox.scrollIntoView) cardBox.scrollIntoView({behavior:'smooth',block:'center'});
+      try{_stripeCard.focus();}catch(e){}
+      logEvent('form_error','customer',null,'card incomplete (blocked pre-submit)');
+      return;
+    }
+
     // Lock now — all validation passed, we're committing to a single booking attempt.
     isSubmitting=true;
 
@@ -1341,7 +1369,12 @@
         isSubmitting=false; // no job created yet — let them fix the card and retry
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
         logEvent('booking_failed','customer',null,'card: '+error.message);
-        return alert(error.message);
+        const errEl=document.getElementById('stripe-card-errors');
+        if(errEl) errEl.textContent=error.message;
+        const cardBox=document.getElementById('stripe-card-element');
+        if(cardBox&&cardBox.scrollIntoView) cardBox.scrollIntoView({behavior:'smooth',block:'center'});
+        try{_stripeCard.focus();}catch(e){}
+        return;
       }
       stripePaymentMethodId=paymentMethod.id;
     }
