@@ -1136,6 +1136,10 @@
           <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount)*100)/100}</div>
         </div>
       </div>
+      <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
+        <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
+        <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from Handy Andy TV Mounting at the number I provide. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to unsubscribe, HELP for help. See our <a href="https://www.ihandyandy.com/privacy-policy/" target="_blank" rel="noopener" style="color:#ff8a4c!important;text-decoration:underline!important;">Privacy Policy</a> and <a href="https://www.ihandyandy.com/terms-of-service/" target="_blank" rel="noopener" style="color:#ff8a4c!important;text-decoration:underline!important;">Terms of Service</a>.</span>
+      </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-submit" style="${S.btnPri}">Complete My Booking ✓</button>
@@ -1325,6 +1329,8 @@
     customer.phone=root.querySelector('#c-ph').value.trim();
     customer.address=root.querySelector('#c-ad').value.trim();
     couponCode=root.querySelector('#c-coupon')?.value.trim().toUpperCase()||'';
+    // SMS-consent checkbox — opt-in, not required to book; recorded with the order.
+    const smsConsent=!!(root.querySelector('#c-sms-consent')||{}).checked;
     if(!customer.email){logEvent('form_error','customer',null,'missing email');return alert('Please enter your email address.');}
     if(!customer.phone){logEvent('form_error','customer',null,'missing phone');return alert('Please enter your phone number.');}
     if(!customer.address){logEvent('form_error','customer',null,'missing address');return alert('Please enter your street address.');}
@@ -1422,6 +1428,7 @@
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
+      sms_consent:smsConsent,
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
       ...(NATIVE&&{business:'handy-andy'}),
