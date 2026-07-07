@@ -741,6 +741,37 @@ async function status(req, res, db, auth, body) {
     }
   }
 
+  // On completion: auto-decrement the company BRACKETS this job used (Flat /
+  // Tilting / Full Motion) from the supplier's on-hand inventory — for EVERY job,
+  // solo OR two-tech. (Previously only two-tech jobs ever decremented, via the
+  // supplier picker, so a solo tech's count never went down — the TK/Greg bug.)
+  // The supplier is the recorded bracket_supplied_by (two-tech), else the job's
+  // assigned tech, else the completing tech. Stamped so re-completing never
+  // double-deducts; customer-supplied/own brackets are skipped by detectBracketQtys.
+  if (next === 'completed' && !existing.metadata?.bracket_deducted_at) {
+    try {
+      const { data: liRows } = await db.from('booking_line_items')
+        .select('name, quantity').eq('booking_id', id);
+      const need = detectBracketQtys(liRows || []);
+      if (bracketTotal(need) > 0) {
+        let supplier = auth.tech_id;
+        try {
+          const { data: sup } = await db.from('bookings')
+            .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
+          supplier = sup?.bracket_supplied_by || sup?.technician_id || auth.tech_id;
+        } catch (_) { /* pre-0035: fall back to the completing tech */ }
+        await adjustBracketInventory(db, jobBizId, supplier, need, -1);
+        // Re-read metadata so we preserve the wire-plate stamp set just above.
+        const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+        await db.from('bookings').update({
+          metadata: { ...(fresh?.metadata || existing.metadata || {}), bracket_deducted_at: new Date().toISOString() },
+        }).eq('id', id);
+      }
+    } catch (e) {
+      console.error(`[bracket] decrement failed for booking ${id}:`, e.message);
+    }
+  }
+
   // Reflect availability in the admin dashboard.
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
@@ -881,9 +912,15 @@ async function jobBracketSetSupplier(req, res, db, auth, body) {
   const prev = b.bracket_supplied_by || null;
   if (prev === supplierId) return res.status(200).json({ ok: true, supplied_by: supplierId });
 
-  // Move the count: give it back to the previous supplier (if any), take from the new one.
-  if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1);
-  await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1);
+  // The actual inventory deduction happens ONCE, at job completion (see status()).
+  // So here we only RECORD who supplied it — UNLESS the job was already completed
+  // and deducted, in which case changing the supplier must MOVE the count from the
+  // old supplier to the new one (give it back, take from the new).
+  const { data: metaRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+  if (metaRow?.metadata?.bracket_deducted_at) {
+    if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1);
+    await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1);
+  }
 
   const { error: upErr } = await db.from('bookings')
     .update({ bracket_supplied_by: supplierId, bracket_supplied_at: new Date().toISOString() })

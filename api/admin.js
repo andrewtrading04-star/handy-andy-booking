@@ -2179,6 +2179,34 @@ async function bookingUpdate(req, res, db, auth, body) {
         console.error(`[wireplate] decrement failed for booking ${id}:`, e.message);
       }
     }
+
+    // Auto-decrement the company BRACKETS this job used from the supplier's
+    // inventory — same rule as the tech app, for solo AND two-tech jobs. Stamped
+    // (bracket_deducted_at) so completing/reopening never double-deducts.
+    if (newStatus === 'completed' && !existing.metadata?.bracket_deducted_at) {
+      try {
+        const { data: liRows } = await db.from('booking_line_items')
+          .select('name, quantity').eq('booking_id', id);
+        const need = detectBracketQtys(liRows || []);
+        if (bracketTotal(need) > 0) {
+          let supplier = existing.technician_id || null;
+          try {
+            const { data: sup } = await db.from('bookings')
+              .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
+            supplier = sup?.bracket_supplied_by || sup?.technician_id || existing.technician_id || null;
+          } catch (_) { /* pre-0035: fall back to assigned tech */ }
+          if (supplier) {
+            await adjustBracketInventory(db, biz.id, supplier, need, -1);
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            await db.from('bookings').update({
+              metadata: { ...(cur?.metadata || existing.metadata || {}), bracket_deducted_at: now },
+            }).eq('id', id);
+          }
+        }
+      } catch (e) {
+        console.error(`[bracket] decrement failed for booking ${id}:`, e.message);
+      }
+    }
   }
 
   // Notify the technician when they are newly assigned to this job (only when the
@@ -4746,6 +4774,40 @@ function detectWirePlateQty(lineItems) {
     }
   }
   return n;
+}
+
+// Company BRACKETS a job uses, by type (skips customer-supplied / own brackets).
+// Mirror of tech.js detectBracketQtys so the dashboard completion path deducts
+// the same way the tech app does.
+function detectBracketQtys(lineItems) {
+  const out = { flat: 0, tilting: 0, full_motion: 0 };
+  for (const li of lineItems || []) {
+    const name = (li.name || '').toLowerCase();
+    const qty = Number(li.quantity) || 1;
+    if (/customer.?supplied/.test(name)) continue;
+    if (/full.?motion/.test(name)) out.full_motion += qty;
+    else if (/tilt/.test(name)) out.tilting += qty;
+    else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
+  }
+  return out;
+}
+function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }
+
+// Subtract (sign -1) or add (sign +1) brackets from a tech's inventory (floor 0),
+// creating the row if missing. Best-effort; never throws into completion.
+async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
+  if (!techId || bracketTotal(qtys) <= 0) return;
+  const { data: inv } = await db.from('bracket_inventory')
+    .select('id, flat_qty, tilting_qty, full_motion_qty')
+    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+  const cur = inv || { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
+  const next = {
+    flat_qty:        Math.max(0, (Number(cur.flat_qty) || 0) + sign * (qtys.flat || 0)),
+    tilting_qty:     Math.max(0, (Number(cur.tilting_qty) || 0) + sign * (qtys.tilting || 0)),
+    full_motion_qty: Math.max(0, (Number(cur.full_motion_qty) || 0) + sign * (qtys.full_motion || 0)),
+  };
+  if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
+  else await db.from('bracket_inventory').insert({ business_id: businessId, technician_id: techId, ...next });
 }
 
 // Subtract wire concealment plates from a tech's inventory (floor 0) and log it.
