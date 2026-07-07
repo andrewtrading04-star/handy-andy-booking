@@ -4025,7 +4025,7 @@ function estTotals(items, taxRate){
 
 async function renderEstimates(){
   const view=document.getElementById('view');
-  const filters=Object.entries({all:'All',...EST_STATUS,not_approved:'Not approved'}).map(([k,v])=>
+  const filters=Object.entries({all:'All',...EST_STATUS,not_approved:'Not approved',archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <div class="est-filters" id="estFilters">${filters}</div>
@@ -4131,6 +4131,7 @@ function estCard(e){
 // Convert an approved estimate into a booking: open the New Booking modal with
 // the customer details + the estimate's priced lines pre-loaded, so the office
 // just picks a date/time slot and a tech, then books.
+let nbSourceEstimateId=null;   // estimate this new-booking was converted from (archived on save)
 function convertEstimateToJob(id){
   const e=estCache[id]; if(!e){ toast('Estimate not found — refresh and try again.'); return; }
   const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(it.description||Number(it.unit_price)>0));
@@ -4148,6 +4149,7 @@ function convertEstimateToJob(id){
     // The dates/times the customer picked on the approve page — shown above the
     // availability calendar so the office schedules to what they requested.
     preferred_slots: Array.isArray(e.preferred_slots)?e.preferred_slots:[],
+    _sourceEstimateId: id,   // archive this estimate once the job is actually created
   });
 }
 
@@ -5234,6 +5236,7 @@ async function openNewBooking(prefill){
   document.getElementById('nbCustomLabel').value=''; document.getElementById('nbCustomPrice').value='';
   document.getElementById('nbTotalDisplay').textContent='';
   nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
+  nbSourceEstimateId=(prefill&&prefill._sourceEstimateId)||null;   // archive it on save
   document.getElementById('nbUpsellPanel').classList.add('hidden');   // collapse the add-ons popover
   nbUpsSel={}; nbUpsCustom=[]; document.getElementById('nbUpsCustom').innerHTML='';
   nbAreaName=''; nbMinWaived=false;                                   // reset branch-minimum state
@@ -6707,6 +6710,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       payment_method_id: paymentMethodId,
       sms_consent: document.getElementById('nbSmsConsent').checked,
     }});
+    // Converted from an estimate? Archive it now that the job exists, so it leaves
+    // the estimates list. Best-effort — the booking is already created either way.
+    if(nbSourceEstimateId){
+      const _eid=nbSourceEstimateId; nbSourceEstimateId=null;
+      api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'archived' }}).catch(()=>{});
+    }
     document.getElementById('modal').classList.add('hidden');
     toast('Booking created'); refreshCurrent();
   }catch(e2){ err.textContent=e2.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } }

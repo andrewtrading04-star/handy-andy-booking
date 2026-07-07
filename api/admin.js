@@ -3769,13 +3769,25 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
+  // Auto-archive: any estimate older than 7 days drops into the Archived folder so
+  // the working list only shows the last week. Idempotent (skips already-archived).
+  // Best-effort — a failure here must never block the list from loading.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    await db.from('estimates').update({ status: 'archived' })
+      .eq('business_id', biz.id).neq('status', 'archived').lt('created_at', sevenDaysAgo);
+  } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
+
   let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
       .order('created_at', { ascending: false })
       .limit(200);
+    // A specific status (incl. 'archived') filters to it; the default/'all' view
+    // hides archived so converted + aged-out estimates leave the working list.
     if (status && status !== 'all') q = q.eq('status', status);
+    else q = q.neq('status', 'archived');
     return q;
   };
   let { data, error } = await runQuery();
@@ -3808,7 +3820,7 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   const patch = {};
   if (body.status) {
-    const VALID = ['new', 'contacted', 'scheduled', 'closed'];
+    const VALID = ['new', 'contacted', 'scheduled', 'closed', 'archived'];
     if (!VALID.includes(body.status)) return res.status(400).json({ error: 'Invalid status' });
     patch.status = body.status;
   }
