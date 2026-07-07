@@ -390,8 +390,9 @@
   .bracket-qty.low,.bracket-qty .low{color:#dc2626;}
   .bracket-qty.warn,.bracket-qty .warn{color:#b45309;}
   /* Low-stock "Reorder" chip shown inline next to a count that has crossed the
-     threshold (≤2 brackets = red, ≤3 wire plates = amber). Owner clicks to add
-     stock via the same Edit modal; secretaries see a static "Low" tag. */
+     threshold (≤2 of ANY single bracket type = red, ≤3 wire plates = amber).
+     Owner clicks to add stock via the same Edit modal; secretaries see a static
+     "Low" tag naming the low type(s). */
   .inv-chip{display:inline-flex;align-items:center;gap:4px;margin-left:8px;vertical-align:middle;
     font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:2px 8px;border-radius:7px;
     background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;cursor:pointer;white-space:nowrap;}
@@ -4413,17 +4414,19 @@ async function renderBrackets(){
 
     for(const tech of inv.inventory||[]){
       const total=tech.flat+tech.tilting+tech.full_motion;
-      const bLow=invLowBrackets(tech);
-      const lowClass=bLow?'low':'';
+      const lowTypes=invLowBracketTypes(tech);
+      const bLow=lowTypes.length>0;
+      const TYPE_LABEL={flat:'Flat',tilting:'Tilting',full_motion:'Full Motion'};
+      const lowLabel=lowTypes.map(t=>TYPE_LABEL[t]).join(', ');
       const bChip=bLow?(role==='owner'
-        ? `<span class="inv-chip" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})" title="Add bracket stock for ${esc(tech.technician_name)}">⚠ Reorder</span>`
-        : `<span class="inv-chip static">⚠ Low</span>`):'';
+        ? `<span class="inv-chip" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})" title="Low on ${esc(lowLabel)} — add stock for ${esc(tech.technician_name)}">⚠ Reorder ${esc(lowLabel)}</span>`
+        : `<span class="inv-chip static" title="Low on ${esc(lowLabel)}">⚠ Low: ${esc(lowLabel)}</span>`):'';
       html+=`<tr>
         <td>${esc(tech.technician_name)}</td>
-        <td class="bracket-qty"><span class="${lowClass}">${tech.flat}</span></td>
-        <td class="bracket-qty"><span class="${lowClass}">${tech.tilting}</span></td>
-        <td class="bracket-qty"><span class="${lowClass}">${tech.full_motion}</span></td>
-        <td class="bracket-qty"><strong class="${lowClass}">${total}</strong>${bChip}</td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'flat')?'low':''}">${tech.flat}</span></td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'tilting')?'low':''}">${tech.tilting}</span></td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'full_motion')?'low':''}">${tech.full_motion}</span></td>
+        <td class="bracket-qty"><strong>${total}</strong>${bChip}</td>
         ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})">Edit</button></td>`:''}
       </tr>`;
     }
@@ -4785,8 +4788,15 @@ async function saveWirePlateCount(techId, techName, cur){
 // Used by both the Bracket Inventory chips and the Predicted-income warning so
 // the two never disagree.
 const LOW_BRACKETS_MAX=2, LOW_PLATES_MAX=3;
+const BRACKET_TYPES=['flat','tilting','full_motion'];
 function invBracketTotal(t){ return (t.flat||0)+(t.tilting||0)+(t.full_motion||0); }
-function invLowBrackets(t){ return invBracketTotal(t)<=LOW_BRACKETS_MAX; }
+// A tech is "low" when ANY single bracket TYPE hits the threshold (≤2) — not the
+// combined total. Running out of Full Motion specifically means you can't do a
+// full-motion job even if your flat/tilting stock is high, so each type warns on
+// its own. Returns the list of low types (empty = not low).
+function invLowType(t,type){ return (t[type]||0)<=LOW_BRACKETS_MAX; }
+function invLowBracketTypes(t){ return BRACKET_TYPES.filter(ty=>invLowType(t,ty)); }
+function invLowBrackets(t){ return invLowBracketTypes(t).length>0; }
 // Juan is excluded from wire-concealment (plate) low-stock warnings, per owner —
 // his plate stock isn't tracked for reorders for now. His brackets still count.
 function invIgnorePlates(t){ return /\bjuan\b/i.test(t.technician_name||''); }
