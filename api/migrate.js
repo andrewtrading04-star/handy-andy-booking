@@ -114,6 +114,7 @@ const TECH_HOME_ADDRESSES = [
   { num: '7350',  zip: '77011', name: 'juan',  slug: 'handy-andy' },  // Juan Beltran — Houston, TX
   { num: '3749',  zip: '80205', name: 'kregg', slug: 'handy-andy' },  // Kregg G — Denver, CO
   { num: '16113', zip: '78728', name: 'zach',  slug: 'handy-andy' },  // Zach Benaya — Austin, TX
+  { num: '9600',  zip: '80231', name: 'greg',  slug: 'doms' },        // Gregory Gadlin — Denver, CO
 ];
 
 // Match a delivery address to the tech it ships to. STRICT: the street number
