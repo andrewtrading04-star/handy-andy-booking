@@ -484,13 +484,6 @@ async function summary(req, res, db, auth) {
       return t >= weekStart && t < weekEnd && ACTIVE_STATUSES.includes(b.status);
     });
 
-    // Sparkline windows for the per-business avg-ticket box (pure).
-    const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const dayWins = [];
-    for (let i = 6; i >= 0; i--) dayWins.push([localDayStartUTC(tz, -i), localDayStartUTC(tz, -i + 1)]);
-    const atStart = new Date(Math.min(lastWeekStart.getTime(), dayWins[0][0].getTime()));
-    const atEnd = new Date(Math.max(weekEnd.getTime(), localDayStartUTC(tz, 1).getTime()));
-
     // Per-business realized profit THIS WEEK (parallel across businesses).
     const weekBySlugP = Promise.all((allBiz || []).map(async (bb) => {
       const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
@@ -502,23 +495,24 @@ async function summary(req, res, db, auth) {
       return [bb.slug, Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
     }));
 
-    // Per-business AVG TICKET sparkline + this-week vs last-week % (parallel).
+    // Per-business AVG TICKET over the LAST 7 DAYS (parallel across businesses).
+    // Average ticket = total of real completed tickets ÷ number of them. Blank /
+    // free / $0 tickets are excluded from BOTH the total and the count (they're
+    // not real tickets), and days with no jobs simply don't contribute — so a
+    // light day never drags the number down. Rolling window = today + prior 6 days.
+    const d7Start = localDayStartUTC(tz, -6);
+    const d7End = localDayStartUTC(tz, 1);
     const avgBySlugP = Promise.all((allBiz || []).map(async (bb) => {
-      const { data: rows } = await db.from('bookings').select('price, scheduled_at')
+      const { data: rows } = await db.from('bookings').select('price')
         .eq('business_id', bb.id)
-        .gte('scheduled_at', atStart.toISOString())
-        .lt('scheduled_at', atEnd.toISOString())
+        .gte('scheduled_at', d7Start.toISOString())
+        .lt('scheduled_at', d7End.toISOString())
         .eq('status', 'completed');
-      const avgIn = (a, b) => {
-        const r = (rows || []).filter(x => { const t = new Date(x.scheduled_at); return t >= a && t < b; });
-        if (!r.length) return null;   // empty day/week — ignored
-        return Math.round(r.reduce((n, x) => n + Number(x.price || 0), 0) / r.length);
-      };
-      const spark = dayWins.map(([d0, d1]) => avgIn(d0, d1));
-      const wk = avgIn(weekStart, weekEnd);
-      const lw = avgIn(lastWeekStart, weekStart);
-      const pct = (wk != null && lw != null && lw > 0) ? Math.round(((wk - lw) / lw) * 100) : null;
-      return [bb.slug, { spark, week: wk, last_week: lw, pct }];
+      const real = (rows || []).filter(x => Number(x.price) > 0);   // drop $0 / free / blank tickets
+      const count = real.length;
+      const total = Math.round(real.reduce((n, x) => n + Number(x.price || 0), 0) * 100) / 100;
+      const avg = count ? Math.round(total / count) : null;
+      return [bb.slug, { avg, count, total }];
     }));
 
     // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
