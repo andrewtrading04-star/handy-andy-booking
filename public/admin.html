@@ -5043,16 +5043,22 @@ function greetStatsHtml(){
       `<span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span>`+
       `<div class="ndp-seg"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div>`+
       `<span class="gstat-s" style="margin-top:1px;">Both companies combined</span></div>` : '';
+  // Revenue this week = every non-canceled job's price over the Sat–Fri work week,
+  // both companies combined, with the per-business split below. Job-revenue based
+  // (no Stripe). Falls back to the single-business week figure if the cross-business
+  // breakdown isn't present.
+  const revBySlug=r.week_by_slug||null;
+  const revTotal=(r.week_total!=null)?r.week_total:(r.week||0);
   return `<div class="greet-stats">`+
-    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week</span><span class="gstat-v">${money(r.week||0)}</span>`+
-      (r.payouts ? (
+    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
+      (revBySlug ? (
         `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
-        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Upcoming payout · ${money(r.payouts.total)}</span>`+
+        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Job revenue · Sat–Fri</span>`+
         `<div style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
           `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div>`+
-            `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;">${r.payouts.doms!=null?money(r.payouts.doms):'—'}</div></div>`+
+            `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;">${money(revBySlug.doms||0)}</div></div>`+
           `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('handy-andy'))}</div>`+
-            `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;">${r.payouts.handy_andy!=null?money(r.payouts.handy_andy):'—'}</div></div>`+
+            `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;">${money(revBySlug['handy-andy']||0)}</div></div>`+
         `</div>`
       ) : '')+
     `</div>`+

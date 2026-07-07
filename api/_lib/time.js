@@ -41,7 +41,7 @@ export function addDaysStr(dateStr, days) {
 }
 
 // Local day-of-week 0..6 (Sun..Sat) in tz.
-function localDow(tz, base = new Date()) {
+export function localDow(tz, base = new Date()) {
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(base);
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(wd);
 }

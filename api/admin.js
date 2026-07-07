@@ -20,10 +20,10 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
-import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr, localDow } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, upcomingPayoutBySlug } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
@@ -567,20 +567,32 @@ async function summary(req, res, db, auth) {
       net_daily_yesterday,
     };
 
-    // Upcoming Stripe payout across BOTH businesses — the "Expected <date>" figure
-    // from each Stripe account's Payouts box, combined. Owner-only + best-effort:
-    // a Stripe hiccup leaves it null and the Revenue box simply omits the line.
+    // Per-business JOB REVENUE for the Saturday–Friday work week. Per owner's
+    // rule the revenue week runs Sat→Fri (e.g. Jul 4–Jul 10), NOT the Sunday-based
+    // schedule week the stat boxes use. Sums every non-canceled job's price for
+    // each business over that 7-day window and reports both companies side by side.
+    // Replaces the old Stripe upcoming-payout line — this metric is no longer tied
+    // to any Stripe account.
     try {
-      const pay = await upcomingPayoutBySlug(['handy-andy', 'doms']);
-      const ha = pay['handy-andy'], dm = pay['doms'];
-      if (ha != null || dm != null) {
-        revenue.payouts = {
-          total: (Number(ha) || 0) + (Number(dm) || 0),
-          handy_andy: ha,
-          doms: dm,
-        };
-      }
-    } catch (e) { console.warn('[admin] payout summary failed:', e.message); }
+      const daysSinceSat = (localDow(tz, base) + 1) % 7;            // Sat=0, Sun=1, … Fri=6
+      const satWeekStart = localDayStartUTC(tz, -daysSinceSat, base);
+      const satWeekEnd = new Date(satWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const revBySlug = await Promise.all((allBiz || []).map(async (bb) => {
+        const { data: rows } = await db.from('bookings').select('price, status')
+          .eq('business_id', bb.id)
+          .gte('scheduled_at', satWeekStart.toISOString())
+          .lt('scheduled_at', satWeekEnd.toISOString())
+          .in('status', ACTIVE_STATUSES);
+        const total = Math.round((rows || []).reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
+        return [bb.slug, total];
+      }));
+      const bySlug = Object.fromEntries(revBySlug);
+      const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
+      const lastDay = new Date(satWeekEnd.getTime() - 24 * 60 * 60 * 1000);
+      revenue.week_by_slug = bySlug;
+      revenue.week_total = Math.round(Object.values(bySlug).reduce((a, b) => a + b, 0) * 100) / 100;
+      revenue.week_range_label = `${fmtMD(satWeekStart)} – ${fmtMD(lastDay)}`;
+    } catch (e) { console.warn('[admin] weekly revenue-by-business failed:', e.message); }
   }
 
   // Photos "To Post" + address alerts are independent — fetch them concurrently.
