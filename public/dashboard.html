@@ -437,7 +437,11 @@ function drawCharts(d){
 }
 
 load();
-timer = setInterval(load, 30000);
+// This board often runs 24/7 on a screen, so it's a constant source of Vercel
+// function calls. Refresh every 2 min instead of 30 s (still plenty live), and
+// pause while the tab/screen is hidden.
+timer = setInterval(()=>{ if(document.hidden) return; load(); }, 120000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
 </script>
 </body>
 </html>

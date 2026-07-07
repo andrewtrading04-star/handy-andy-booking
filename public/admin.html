@@ -1299,7 +1299,7 @@ function enterApp(){
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
   loadBadAlerts();
   if(alertTimer) clearInterval(alertTimer);
-  alertTimer=setInterval(loadBadAlerts, 60000);
+  alertTimer=setInterval(()=>{ if(document.hidden) return; loadBadAlerts(); }, 180000);
 }
 
 // ── Bad-review alert banner (1-star reviews in the last 24h) ────────────────
@@ -1414,7 +1414,7 @@ function navTo(s){
   document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
-  if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 25000); }
+  if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 60000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
     if(s==='estimates') renderEstimates();
     else if(s==='brackets') renderBrackets();
@@ -2891,7 +2891,7 @@ async function renderAnalytics(scope){
 
   await loadAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
-  pollTimer=setInterval(()=>{ if((section==='analytics'||section==='handyman') && !anaLoading) loadAnalytics(); }, 30000);
+  pollTimer=setInterval(()=>{ if(document.hidden) return; if((section==='analytics'||section==='handyman') && !anaLoading) loadAnalytics(); }, 90000);
 }
 
 async function loadAnalytics(){
@@ -3203,7 +3203,7 @@ async function renderWebAnalytics(){
   });
   await loadWebAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
-  pollTimer=setInterval(()=>{ if(section==='webanalytics' && !webLoading) loadWebAnalytics(); }, 30000);
+  pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='webanalytics' && !webLoading) loadWebAnalytics(); }, 90000);
 }
 
 async function loadWebAnalytics(){
@@ -5048,8 +5048,21 @@ function greetStatsHtml(){
 }
 function startGreetingClock(){
   if(greetingClock) clearInterval(greetingClock);
-  greetingClock=setInterval(()=>{ if(section==='schedule') paintGreeting(); }, 15000);
+  // Local clock re-paint only (no API call) — but skip when the tab is hidden.
+  greetingClock=setInterval(()=>{ if(document.hidden) return; if(section==='schedule') paintGreeting(); }, 30000);
 }
+// Polling is paused while the tab is in the background (see the document.hidden
+// guards on each interval) — that's the single biggest cut to Vercel function
+// usage, since dashboards sit open in background tabs all day. When the user
+// comes BACK to the tab, refresh the current view once so nothing looks stale.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden) return;
+  try{
+    if(section==='schedule' && calMode==='jobs') renderSchedule(true);
+    else if(section==='analytics'||section==='handyman'){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
+    else if(section==='webanalytics'){ if(typeof loadWebAnalytics==='function' && !webLoading) loadWebAnalytics(); }
+  }catch(_){/* refresh-on-return is best-effort */}
+});
 
 async function saveTech(payload){
   try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
