@@ -105,6 +105,36 @@ async function adjustBracketInventory(db, businessId, technicianId, delta) {
 //     update only that row, self-heal its quantities from the email (moving the
 //     tech's inventory by the difference), and drop leftover unassigned twins in
 //     other businesses so the same delivery isn't shown or counted twice.
+// Tech home addresses — bracket orders ship to a tech's house, so the delivery
+// address in the Walmart email tells us which tech the order is for. Keyed by
+// street number + ZIP (unique per tech). Add a line when a tech moves or joins.
+const TECH_HOME_ADDRESSES = [
+  { num: '5809',  zip: '80128', name: 'steve', slug: 'handy-andy' },  // Steve Burns — Littleton, CO
+  { num: '10507', zip: '80022', name: 'tk',    slug: 'doms' },        // Tk Adeshewo — Commerce City, CO
+  { num: '7350',  zip: '77011', name: 'juan',  slug: 'handy-andy' },  // Juan Beltran — Houston, TX
+  { num: '3749',  zip: '80205', name: 'kregg', slug: 'handy-andy' },  // Kregg G — Denver, CO
+  { num: '16113', zip: '78728', name: 'zach',  slug: 'handy-andy' },  // Zach Benaya — Austin, TX
+];
+
+// Match a delivery address to the tech it ships to. STRICT: the street number
+// AND the ZIP must both equal a known tech's home. Returns {id, business_id,
+// name} or null — an unknown address leaves the order unassigned, never guessed.
+async function matchTechByAddress(db, businesses, address) {
+  if (!address) return null;
+  const num = (String(address).match(/\b(\d{1,6})\b/) || [])[1];
+  const zips = [...String(address).matchAll(/\b(\d{5})(?:-\d{4})?\b/g)].map(m => m[1]);
+  const zip = zips.length ? zips[zips.length - 1] : null;
+  if (!num || !zip) return null;
+  const entry = TECH_HOME_ADDRESSES.find(e => e.num === num && e.zip === zip);
+  if (!entry) return null;
+  const biz = (businesses || []).find(b => b.slug === entry.slug);
+  if (!biz) return null;
+  const { data: techs } = await db.from('technicians')
+    .select('id, name, business_id').eq('business_id', biz.id).ilike('name', entry.name + '%').limit(1);
+  const tech = (techs || [])[0];
+  return tech ? { id: tech.id, business_id: tech.business_id, name: tech.name } : null;
+}
+
 // Status only ever upgrades (in_route → delivered), never downgrades.
 async function bracketSync(req, res) {
   const body = req.body || {};
@@ -142,6 +172,8 @@ async function bracketSync(req, res) {
   };
 
   const assignedRow = (rows || []).find(r => r.technician_id);
+  // No tech on it yet? Auto-assign by the delivery address in the email.
+  const matched = assignedRow ? null : await matchTechByAddress(db, businesses, body.delivery_address);
   if (assignedRow) {
     // The assigned tech's business owns this order.
     const patch = {};
@@ -166,6 +198,38 @@ async function bracketSync(req, res) {
     // Drop leftover unassigned twins of the same order anywhere else.
     for (const r of (rows || [])) {
       if (r.id === assignedRow.id || r.technician_id) continue;
+      await db.from('bracket_purchases').delete().eq('id', r.id);
+      results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
+    }
+  } else if (matched) {
+    // Auto-assign to the tech the order ships to. We only get here when the order
+    // is unassigned everywhere, so this credits inventory exactly once — same as
+    // the owner clicking "Assign". Own the row for the tech's business (update the
+    // existing unassigned twin there, or insert), then drop the other twins.
+    const own = (rows || []).find(r => r.business_id === matched.business_id) || null;
+    const patch = { technician_id: matched.id };
+    if (order_url) patch.order_url = order_url;
+    if (own) {
+      if (upgrades(own.status)) Object.assign(patch, statusPatch());
+      if (totalQty > 0) { patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty; }
+      const { error } = await db.from('bracket_purchases').update(patch).eq('id', own.id);
+      results.push({ business: slugOf(matched.business_id), action: error ? 'assign_failed' : 'auto_assigned', tech: matched.name, error: error?.message });
+    } else if (totalQty === 0) {
+      results.push({ business: slugOf(matched.business_id), action: 'skipped', reason: 'no_qty_for_new_order' });
+    } else {
+      const { error } = await db.from('bracket_purchases').insert({
+        business_id: matched.business_id, technician_id: matched.id, walmart_order_num,
+        flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
+      });
+      results.push({ business: slugOf(matched.business_id), action: error ? 'assign_insert_failed' : 'auto_assigned_new', tech: matched.name, error: error?.message });
+    }
+    // Credit the tech's inventory by the order quantity (first-and-only credit).
+    if (totalQty > 0) {
+      await adjustBracketInventory(db, matched.business_id, matched.id, { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty });
+    }
+    // Remove the still-unassigned twin(s) of this order in other businesses.
+    for (const r of (rows || [])) {
+      if (r.business_id === matched.business_id || r.technician_id) continue;
       await db.from('bracket_purchases').delete().eq('id', r.id);
       results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
     }

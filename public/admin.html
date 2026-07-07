@@ -4555,9 +4555,11 @@ async function renderBrackets(){
     </tr></thead>`;
 
     const bracketRow = (p) => {
-      const orderCell=p.order_url
-        ? `<a href="${esc(p.order_url)}" target="_blank" rel="noopener">${p.walmart_order_num?esc(p.walmart_order_num):'View order'} ↗</a>`
-        : (p.walmart_order_num?esc(p.walmart_order_num):'-');
+      // Order # as plain text. We used to link p.order_url, but Walmart's email
+      // "View order" links are one-time, session-bound tokens that 400 when opened
+      // later from here — the delivery address (which auto-assigns the tech) is the
+      // useful signal instead, so we don't surface the dead link.
+      const orderCell=p.walmart_order_num?esc(p.walmart_order_num):'-';
       const assigned=p.technician_name && p.technician_name!=='Unassigned';
       const techCell=assigned
         ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`
@@ -4612,7 +4614,10 @@ async function renderBrackets(){
         if(d.full_motion) parts.push(`${d.full_motion} Full Motion`);
         const desc=parts.join(', ')||`${d.total} bracket${d.total===1?'':'s'}`;
         const when=d.delivered_date||d.order_date||'';
-        const link=d.order_url?`<a href="${esc(d.order_url)}" target="_blank" rel="noopener">View Walmart order ↗</a>`:'';
+        // No "View Walmart order" link — those email links are one-time tokens that
+        // 400 when opened later. Orders auto-assign by delivery address; anything
+        // that lands here is an unknown address to assign manually.
+        const link='';
         html+=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #fde68a;">
           <div style="flex:1;min-width:200px;">
             <strong style="font-size:14px;">${esc(desc)}</strong> ${bracketStatusBadge(d.status)}

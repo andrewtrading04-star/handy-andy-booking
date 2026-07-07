@@ -83,6 +83,21 @@ export function extractOrderUrl(text) {
       || null;
 }
 
+// Delivery address from the order email — the line carrying street, city, ST,
+// ZIP (e.g. "10507 Vaughn St, Commerce City, CO, 80022, USA"). Bracket orders
+// ship to a tech's home, so this is how we auto-assign the order to that tech.
+// Loose on formatting on purpose: the downstream match is strict (street number
+// AND ZIP must equal a known tech), so a stray/incorrect capture simply doesn't
+// match anyone and the order stays unassigned — never mis-assigned.
+export function extractDeliveryAddress(text) {
+  if (!text) return null;
+  // Street number, then a name that STARTS with a letter (so a stray number at
+  // the end of the previous line — "Arrives Jul 7" — can't become the number).
+  const m = text.match(/(\d{1,6}\s+[A-Za-z][A-Za-z0-9.\-#/ ]{1,49}?,\s*[A-Za-z .'\-]{2,40}?,\s*[A-Z]{2}\.?,?\s*\d{5}(?:-\d{4})?)/);
+  if (!m) return null;
+  return m[1].replace(/\s+/g, ' ').trim().replace(/,\s*$/, '');
+}
+
 // Order date → YYYY-MM-DD. "Order date: Sun, Jun 28, 2026" or m/d/Y; today if absent.
 export function extractOrderDate(text, todayISO) {
   const today = todayISO || new Date().toISOString().slice(0, 10);
@@ -138,6 +153,7 @@ export function parseWalmartEmails({ subject = '', text = '', html = '', todayIS
       order_date: extractOrderDate(seg, today),
       delivered_date: status === 'delivered' ? today : null,
       order_url: extractOrderUrl(seg) || extractOrderUrl(html),
+      delivery_address: extractDeliveryAddress(seg) || extractDeliveryAddress(body),
     });
   }
   return out;
