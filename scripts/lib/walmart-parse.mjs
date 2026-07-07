@@ -92,8 +92,11 @@ export function extractOrderUrl(text) {
 export function extractDeliveryAddress(text) {
   if (!text) return null;
   // Street number, then a name that STARTS with a letter (so a stray number at
-  // the end of the previous line — "Arrives Jul 7" — can't become the number).
-  const m = text.match(/(\d{1,6}\s+[A-Za-z][A-Za-z0-9.\-#/ ]{1,49}?,\s*[A-Za-z .'\-]{2,40}?,\s*[A-Z]{2}\.?,?\s*\d{5}(?:-\d{4})?)/);
+  // the end of the previous line — "Arrives Jul 7" — can't become the number),
+  // then an OPTIONAL apartment/unit field the email sometimes splits into its own
+  // comma section ("…Ave, Apt 8T, Denver…"). The apt part must contain a digit so
+  // it can never swallow the city (which has none), then city, ST, ZIP.
+  const m = text.match(/(\d{1,6}\s+[A-Za-z][A-Za-z0-9.\-#/ ]{1,49}?(?:,\s*(?:[A-Za-z]{1,8}\.?\s*)?#?\d[A-Za-z0-9\- ]{0,8})?,\s*[A-Za-z .'\-]{2,40}?,\s*[A-Z]{2}\.?,?\s*\d{5}(?:-\d{4})?)/);
   if (!m) return null;
   return m[1].replace(/\s+/g, ' ').trim().replace(/,\s*$/, '');
 }
