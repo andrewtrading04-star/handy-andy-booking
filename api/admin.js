@@ -574,6 +574,10 @@ async function summary(req, res, db, auth) {
     // Sums each COMPLETED job's price per business over that 7-day window and
     // reports both companies side by side. Replaces the old Stripe upcoming-payout
     // line — this metric is no longer tied to any Stripe account.
+    // Default to a defined zero so a transient failure below shows $0 rather than
+    // silently falling back (client-side) to the old ACTIVE/Sunday-week figure.
+    revenue.week_by_slug = null;
+    revenue.week_total = 0;
     try {
       const daysSinceSat = (localDow(tz, base) + 1) % 7;            // Sat=0, Sun=1, … Fri=6
       const satWeekStart = localDayStartUTC(tz, -daysSinceSat, base);
