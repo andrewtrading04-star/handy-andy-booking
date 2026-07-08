@@ -278,15 +278,18 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       bioText = `${techName} is your installer for this job.`;
     }
     meetTechBlock = `
-      <tr><td style="padding:18px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eceef1;border-radius:14px;">
+      <tr><td style="padding:20px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eceef1;border-radius:16px;">
           <tr>
-            <td width="78" valign="top" style="padding:16px 0 16px 16px;">
-              <img src="${esc(details.technicianPhotoUrl)}" width="58" height="58" alt="${techName}" style="display:block;width:58px;height:58px;border-radius:29px;object-fit:cover;">
+            <td width="148" valign="top" style="padding:18px 0 18px 18px;">
+              <img src="${esc(details.technicianPhotoUrl)}" width="130" height="130" alt="${techName}" style="display:block;width:130px;height:130px;border-radius:20px;object-fit:cover;">
             </td>
-            <td valign="top" style="padding:16px 16px 16px 12px;">
-              <div style="font-size:14.5px;font-weight:800;color:#11181c;margin:0 0 4px;">This is ${techName} — your lead installer</div>
-              <div style="font-size:13px;color:#4b5563;line-height:1.55;">${bioText}</div>
+            <td valign="top" style="padding:18px 18px 18px 14px;">
+              <div style="margin:0 0 7px;">
+                <span style="font-size:16.5px;font-weight:800;color:#11181c;">${techName}</span>
+                <span style="display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#a1490f;background:#ffe4cf;padding:3px 9px;border-radius:100px;vertical-align:middle;">Lead installer</span>
+              </div>
+              <div style="font-size:14px;color:#4b5563;line-height:1.6;">${bioText}</div>
             </td>
           </tr>
         </table>
