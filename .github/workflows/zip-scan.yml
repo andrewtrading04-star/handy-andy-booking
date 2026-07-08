@@ -1,0 +1,25 @@
+name: ZIP system scan
+
+# Verifies the LIVE zip → service-area/travel-fee lookup (the data behind the
+# New Booking ZIP card and the public widgets) against the intended tier table
+# from the migrations. Fails red on any missing zip, wrong fee, or wrong metro.
+# Manual dispatch only — run it after changing zips/tiers to confirm production
+# answers correctly.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Scan production zip answers
+        run: node scripts/zip-scan.mjs
