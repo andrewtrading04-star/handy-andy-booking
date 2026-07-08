@@ -20,7 +20,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
-import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr, localDow } from './_lib/time.js';
+import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
@@ -590,36 +590,33 @@ async function summary(req, res, db, auth) {
       week_predicted_by_slug: Object.fromEntries(predictedBySlug),
     };
 
-    // Per-business JOB REVENUE for the Saturday–Friday work week. Per owner's
-    // rule the revenue week runs Sat→Fri (e.g. Jul 4–Jul 10), NOT the Sunday-based
-    // schedule week the stat boxes use, and revenue counts ONLY jobs that have
-    // actually been COMPLETED — upcoming/pending/assigned jobs are not revenue yet.
-    // Sums each COMPLETED job's price per business over that 7-day window and
-    // reports both companies side by side. Replaces the old Stripe upcoming-payout
-    // line — this metric is no longer tied to any Stripe account.
+    // Per-business JOB REVENUE for the Sunday–Saturday work week — the SAME week
+    // window as Profit this week / Predicted income (weekStart/weekEnd above), per
+    // owner's rule (previously this ran its own Sat→Fri window; now unified across
+    // all three cards). Revenue counts ONLY jobs that have actually been
+    // COMPLETED — upcoming/pending/assigned jobs are not revenue yet. Sums each
+    // COMPLETED job's price per business over that 7-day window and reports both
+    // companies side by side. Not tied to any Stripe account.
     // Default to a defined zero so a transient failure below shows $0 rather than
-    // silently falling back (client-side) to the old ACTIVE/Sunday-week figure.
+    // silently falling back (client-side) to a stale figure.
     revenue.week_by_slug = null;
     revenue.week_total = 0;
     try {
-      const daysSinceSat = (localDow(tz, base) + 1) % 7;            // Sat=0, Sun=1, … Fri=6
-      const satWeekStart = localDayStartUTC(tz, -daysSinceSat, base);
-      const satWeekEnd = new Date(satWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
       const revBySlug = await Promise.all((allBiz || []).map(async (bb) => {
         const { data: rows } = await db.from('bookings').select('price, status')
           .eq('business_id', bb.id)
-          .gte('scheduled_at', satWeekStart.toISOString())
-          .lt('scheduled_at', satWeekEnd.toISOString())
+          .gte('scheduled_at', weekStart.toISOString())
+          .lt('scheduled_at', weekEnd.toISOString())
           .eq('status', 'completed');
         const total = Math.round((rows || []).reduce((n, r) => n + Number(r.price || 0), 0) * 100) / 100;
         return [bb.slug, total];
       }));
       const bySlug = Object.fromEntries(revBySlug);
       const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
-      const lastDay = new Date(satWeekEnd.getTime() - 24 * 60 * 60 * 1000);
+      const lastDay = new Date(weekEnd.getTime() - 24 * 60 * 60 * 1000);
       revenue.week_by_slug = bySlug;
       revenue.week_total = Math.round(Object.values(bySlug).reduce((a, b) => a + b, 0) * 100) / 100;
-      revenue.week_range_label = `${fmtMD(satWeekStart)} – ${fmtMD(lastDay)}`;
+      revenue.week_range_label = `${fmtMD(weekStart)} – ${fmtMD(lastDay)}`;
     } catch (e) { console.warn('[admin] weekly revenue-by-business failed:', e.message); }
   }
 
