@@ -16,8 +16,9 @@
 --     80241 (Northglenn), 80026 (Lafayette), 80025 (Eldorado Springs)
 --
 -- Denver is served by BOTH Handy Andy and Dom's, so every zip below is added
--- to both. Also includes 80234 (Northglenn), added live via the seed_zip
--- action on 2026-07-08 but never given its own migration until now.
+-- to both. (80234/Northglenn was seeded live earlier the same day at Denver #3
+-- -- $65/$50, matching its neighbors 80233/80260 -- and is intentionally NOT
+-- touched here: it isn't part of this batch and is already correctly tiered.)
 --
 -- Idempotent: ON CONFLICT (business_id, postal_code) DO UPDATE re-asserts the
 -- tier in place, so a zip that already exists is simply re-tiered, not duplicated.
@@ -33,8 +34,6 @@ from (values
   ('handy-andy','Denver','80020',65, 50),
   ('doms',      'Denver','80020',65, 50),
   -- Denver #4 ($100 / $75)
-  ('handy-andy','Denver','80234',100, 75),
-  ('doms',      'Denver','80234',100, 75),
   ('handy-andy','Denver','80501',100, 75),
   ('doms',      'Denver','80501',100, 75),
   ('handy-andy','Denver','80504',100, 75),
@@ -69,6 +68,6 @@ on conflict (business_id, postal_code) do update
 --   join businesses b on b.id = z.business_id
 --   join service_areas sa on sa.id = z.service_area_id
 --   where z.postal_code in
---     ('80003','80020','80234','80501','80504','80104','80516','80503','80439','80403','80241','80026','80025')
+--     ('80003','80020','80501','80504','80104','80516','80503','80439','80403','80241','80026','80025')
 --   order by metro, z.postal_code, b.slug;
 -- ============================================================================
