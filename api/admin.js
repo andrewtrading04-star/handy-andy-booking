@@ -2917,10 +2917,32 @@ async function zipArea(req, res, db, auth) {
       .select('service_area_id, service_area:service_areas ( name )')
       .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle());
   }
+  // Not served by THIS business? Check whether the OTHER company covers the zip
+  // (e.g. a Houston zip typed while the dashboard is on Dom's, which is
+  // Denver-only). The office was told "new area" with no hint that the zip is
+  // perfectly bookable one tab over — surface which business serves it instead.
+  let other_business = null;
+  if (!data) {
+    try {
+      const { data: hit } = await db.from('service_area_zips')
+        .select('surcharge, business:businesses!inner ( slug, name, active ), service_area:service_areas ( name )')
+        .eq('postal_code', postal).neq('business_id', biz.id)
+        .eq('business.active', true).limit(1).maybeSingle();
+      if (hit?.business) {
+        other_business = {
+          slug: hit.business.slug,
+          name: hit.business.name,
+          area: hit.service_area?.name || null,
+          surcharge: Number(hit.surcharge) || 0,
+        };
+      }
+    } catch (e) { /* hint only — never block the zip answer */ }
+  }
   return res.status(200).json({
     service_area_id: data?.service_area_id || null,
     name: data?.service_area?.name || null,
     surcharge: Number(data?.surcharge) || 0,
+    other_business,
   });
 }
 

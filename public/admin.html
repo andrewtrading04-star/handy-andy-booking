@@ -437,6 +437,7 @@
   .nb-zip-area.ok{color:rgba(255,255,255,.92);font-weight:600;}
   .nb-zip-area.muted{color:rgba(255,255,255,.6);}
   .nb-zip-area.bad{color:#ff9b9b;}
+  .nb-zip-area.bad b{color:#ffd7a1;}
   .nb-cust{border:1px solid var(--line);border-radius:11px;padding:2px 12px;background:#fff;}
   .nb-cust>summary{cursor:pointer;font-size:13.5px;font-weight:700;color:var(--accent);padding:10px 2px;list-style:none;display:flex;align-items:center;gap:8px;}
   .nb-cust>summary::-webkit-details-marker{display:none;}
@@ -5880,8 +5881,8 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
-  nbZipAreaId=null; nbAreaName=''; let surcharge=0;
-  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; }catch(err){} }
+  nbZipAreaId=null; nbAreaName=''; let surcharge=0, otherBiz=null;
+  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }catch(err){} }
   // Show a live service-area / travel-fee readout next to the ZIP, in the same
   // assistant voice as the question above it.
   { const zr=document.getElementById('nbZipArea');
@@ -5892,6 +5893,12 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
           ? `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and the travel fee is <b>$${surcharge}</b>. I'll fill it in below.`
           : `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and there's no travel fee for this area.`;
         zr.className='nb-zip-area ok';
+      }
+      else if(postal.length===5 && otherBiz){
+        // The zip IS served — just by the other company. Don't say "new area";
+        // tell the office which business tab actually books it.
+        zr.innerHTML=`That's a <b>${esc(otherBiz.name||otherBiz.slug)}</b> area${otherBiz.area?` (${esc(otherBiz.area)}${otherBiz.surcharge>0?` · travel fee $${otherBiz.surcharge}`:''})`:''} — switch the dashboard to <b>${esc(otherBiz.name||otherBiz.slug)}</b> to book it.`;
+        zr.className='nb-zip-area bad';
       }
       else if(postal.length===5){ zr.textContent="That's a new area for us — the booking is still fine, just add a travel fee below if you need one."; zr.className='nb-zip-area muted'; }
       else { nbZipReplyIdle(); }
