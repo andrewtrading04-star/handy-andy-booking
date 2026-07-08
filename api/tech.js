@@ -778,7 +778,14 @@ async function status(req, res, db, auth, body) {
   // Send SMS to customer on certain status changes (if customer opted in).
   if (next === 'on_the_way' && existing.customer?.phone && existing.sms_consent) {
     const etaMinutes = body.eta_minutes || 30;
-    const msg = `Your tech is on the way! ETA ${etaMinutes} minutes.`;
+    let techName = 'Your tech', bizName = 'us';
+    try {
+      const { data: _t } = await db.from('technicians')
+        .select('name, business:businesses ( name )').eq('id', auth.tech_id).maybeSingle();
+      if (_t?.name) techName = String(_t.name).split(' ')[0];
+      if (_t?.business?.name) bizName = _t.business.name;
+    } catch { /* best-effort — fall back to generic */ }
+    const msg = `Heads up! ${techName} from ${bizName} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. STOP to opt out.`;
     sendSMS(existing.customer.phone, msg).catch(console.error);
   }
 
@@ -832,7 +839,7 @@ async function status(req, res, db, auth, body) {
 
     // SMS reminder 20 minutes after completion (if customer opted in).
     if (existing.customer?.phone && existing.sms_consent) {
-      const msg = `Your job is complete! How did we do? ${reviewLink}`;
+      const msg = `How did we do? Leave us your honest opinion about our service here: ${reviewLink}. STOP to opt out.`;
       setTimeout(() => { sendSMS(existing.customer.phone, msg).catch(console.error); }, 20 * 60 * 1000);
     }
   } else if (next === 'completed') {

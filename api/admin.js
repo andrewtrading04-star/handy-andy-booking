@@ -162,10 +162,11 @@ async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO) {
   }
   // Cross-company: the tech works for the other company today. Make it
   // unmistakable which business this job belongs to.
+  const appLink = (process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')) + '/tech.html';
   const crossCompany = tech.business_id && tech.business_id !== biz.id;
   const msg = crossCompany
-    ? `NEW JOB FOR ${String(biz.name || '').toUpperCase()}: you're booked for ${whenTxt}. IMPORTANT: this job is for ${biz.name} (not your own company). Check your schedule for the details.`
-    : `You just got a job for ${whenTxt}. Please check your schedule for more information.`;
+    ? `You got a job for ${String(biz.name || '').toUpperCase()} (not your own company)! ${whenTxt}. Address & details in the app: ${appLink}`
+    : `You got a job! ${whenTxt}. Address & details in the app: ${appLink}`;
   sendSMS(tech.phone, msg).catch(console.error);
 }
 
@@ -1892,8 +1893,11 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // Send booking confirmation SMS to customer (if they opted in)
   if (c.phone && scheduled_at && body.sms_consent) {
-    const dateStr = new Date(scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const msg = `Your appointment is booked for ${dateStr}. We'll send you a message when your tech is on the way!`;
+    const _tz = biz.timezone || 'America/Denver';
+    const _d = new Date(scheduled_at);
+    const dateStr = _d.toLocaleDateString('en-US', { timeZone: _tz, weekday: 'short', month: 'short', day: 'numeric' });
+    const timeStr = _d.toLocaleTimeString('en-US', { timeZone: _tz, hour: 'numeric', minute: '2-digit' });
+    const msg = `You're booked! ✅ ${biz.name} will see you ${dateStr} at ${timeStr}. We'll text you when your tech is on the way. Reply STOP to opt out.`;
     sendSMS(c.phone, msg).catch(console.error);
   }
 
@@ -2042,7 +2046,27 @@ async function bookingUpdate(req, res, db, auth, body) {
       // Soft-cancel: keep the row (status='cancelled') so it stays auditable and
       // visible under "Include canceled". Every slot-occupancy query excludes
       // cancelled bookings, so the slot is freed exactly as the old delete did.
-      patch.status = newStatus = 'cancelled'; patch.cancelled_at = now; break;
+      patch.status = newStatus = 'cancelled'; patch.cancelled_at = now;
+      // Notify the assigned tech their job was canceled (internal, no consent
+      // needed). Fire-and-forget + best-effort so it can never block the cancel.
+      if (existing.technician_id) {
+        (async () => {
+          try {
+            const { data: _t } = await db.from('technicians').select('phone').eq('id', existing.technician_id).maybeSingle();
+            if (!_t?.phone) return;
+            const _tz = biz.timezone || 'America/Denver';
+            let when = 'your job';
+            if (existing.scheduled_at) {
+              const _d = new Date(existing.scheduled_at);
+              when = _d.toLocaleDateString('en-US', { timeZone: _tz, weekday: 'short', month: 'short', day: 'numeric' }) +
+                     ' ' + _d.toLocaleTimeString('en-US', { timeZone: _tz, hour: 'numeric', minute: '2-digit' });
+            }
+            const msg = `❌ Job canceled: ${when} (${existing.customer?.name || 'customer'}). No action needed — your calendar's updated.`;
+            sendSMS(_t.phone, msg).catch(console.error);
+          } catch (e) { console.warn('[cancel] tech SMS failed:', e.message); }
+        })();
+      }
+      break;
     case 'reschedule': {
       // Preferred path: a calendar date + one of the fixed slots. Convert it to a
       // timestamp server-side in the booking's METRO timezone (same logic as new
@@ -2180,7 +2204,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
       // Send SMS after 20 minutes if customer opted in
       if (existing.customer?.phone && existing.sms_consent) {
-        const msg = `Your job is complete! How did we do? ${reviewLink}`;
+        const msg = `How did we do? Leave us your honest opinion about our service here: ${reviewLink}. STOP to opt out.`;
         setTimeout(() => {
           sendSMS(existing.customer.phone, msg).catch(console.error);
         }, 20 * 60 * 1000);
