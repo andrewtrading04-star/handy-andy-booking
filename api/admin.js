@@ -237,6 +237,7 @@ export default async function handler(req, res) {
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'google_reviews':       return await googleReviews(req, res, db, auth);
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
+      case 'avg_ticket':        return await avgTicketWeek(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
@@ -3822,6 +3823,35 @@ async function badReviews(req, res, db, auth) {
 }
 
 // ── Estimates (customer quote requests from the public estimate page) ────────
+// Avg ticket per business for a 7-day window offset by whole weeks (0 = last 7
+// days, -1 = the week before, …). Same math as the dashboard's avg_by_slug, so
+// the box can page back/forward a week. Owner-only.
+async function avgTicketWeek(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const tz = biz.timezone || 'America/Denver';
+  let offset = parseInt(req.query.offset);
+  if (!isFinite(offset)) offset = 0;
+  offset = Math.max(-260, Math.min(0, offset));   // up to ~5 years back, never the future
+  const start = localDayStartUTC(tz, -6 + offset * 7);
+  const end = localDayStartUTC(tz, 1 + offset * 7);
+  const { data: allBiz } = await db.from('businesses').select('id, slug').eq('active', true);
+  const bySlug = {};
+  await Promise.all((allBiz || []).map(async (bb) => {
+    const { data: rows } = await db.from('bookings').select('price')
+      .eq('business_id', bb.id)
+      .gte('scheduled_at', start.toISOString()).lt('scheduled_at', end.toISOString())
+      .eq('status', 'completed');
+    const real = (rows || []).filter(x => Number(x.price) > 0);   // drop $0/free tickets
+    const count = real.length;
+    const total = Math.round(real.reduce((n, x) => n + Number(x.price || 0), 0) * 100) / 100;
+    bySlug[bb.slug] = { avg: count ? Math.round(total / count) : null, count, total };
+  }));
+  const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
+  const lastDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  return res.status(200).json({ avg_by_slug: bySlug, range_label: `${fmtMD(start)} – ${fmtMD(lastDay)}`, offset });
+}
+
 async function estimates(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const status = (req.query.status || '').toString();

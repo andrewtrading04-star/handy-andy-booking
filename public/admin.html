@@ -5024,19 +5024,29 @@ function greetNoteHtml(){
 // tickets ÷ number of them, over the last 7 days, per company. Bar length is the
 // average; the count + total sit alongside. $0/free tickets and empty days are
 // already excluded server-side (see avg_by_slug), so nothing drags it down.
+let avgWeekOffset=0;          // 0 = current 7 days · -1 = the week before · etc.
+let avgTicketOverride=null;   // fetched {avg_by_slug, range_label} for a non-zero offset
+const AVG_SCALE_MAX=400;      // bars are full at $400 (fixed scale, not relative)
 function avgTicketBoxHtml(pf, r){
-  const abs = pf && pf.avg_by_slug;
-  if(!abs) return `<div class="gstat"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money((r&&r.avg_ticket)||0)}</span><span class="gstat-s">per job this month</span></div>`;
+  const useOv = avgWeekOffset!==0 && avgTicketOverride;
+  const abs = useOv ? avgTicketOverride.avg_by_slug : (pf && pf.avg_by_slug);
+  const navBtn=(delta,ch,disabled)=>`<button type="button" onclick="avgTicketNav(${delta})" ${disabled?'disabled':''} title="${delta<0?'Previous week':'Next week'}" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#fff;border-radius:6px;width:24px;height:22px;line-height:1;cursor:${disabled?'default':'pointer'};opacity:${disabled?'.35':'1'};font-size:14px;font-weight:800;padding:0;">${ch}</button>`;
+  const rangeLabel = useOv ? (avgTicketOverride.range_label||'that week') : '7 days';
+  const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">`+
+      `<span class="gstat-l">Avg ticket · ${esc(rangeLabel)}</span>`+
+      `<span style="display:flex;gap:5px;flex:0 0 auto;">${navBtn(-1,'‹',false)}${navBtn(1,'›',avgWeekOffset>=0)}</span>`+
+    `</div>`;
+  if(!abs) return `<div class="gstat" id="avgTicketBox"><span class="gstat-l">Avg ticket</span><span class="gstat-v">${money((r&&r.avg_ticket)||0)}</span><span class="gstat-s">per job this month</span></div>`;
   const items=[
     {label:bizShort('doms'), color:'#60a5fa', d:abs.doms||{}},
     {label:bizShort('handy-andy'), color:'#FF8A5C', d:abs['handy-andy']||{}},
   ];
-  const maxAvg=Math.max(0, ...items.map(x=>Number(x.d.avg)||0));
-  if(!maxAvg) return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span><div class="gstat-s" style="margin:4px 0;">No completed tickets in the last 7 days.</div></div>`;
+  const hasAny=items.some(x=>(Number(x.d.avg)||0)>0);
+  if(!hasAny) return `<div class="gstat" id="avgTicketBox">${header}<div class="gstat-s" style="margin:6px 0;">No completed tickets ${avgWeekOffset===0?'in the last 7 days':'that week'}.</div></div>`;
   items.sort((a,b)=>(Number(b.d.avg)||0)-(Number(a.d.avg)||0));   // richer company on top
   const bar=(s)=>{
     const avg=Number(s.d.avg)||0, cnt=Number(s.d.count)||0, tot=Number(s.d.total)||0;
-    const w=avg>0 ? Math.max(avg/maxAvg*100, 6) : 0;
+    const w=avg>0 ? Math.min(Math.max(avg/AVG_SCALE_MAX*100, 6), 100) : 0;   // full at $400
     const inside=w>=32, lbl=avg>0?money(avg):'—';
     return `<div style="margin-top:11px;">`+
       `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;">`+
@@ -5051,7 +5061,22 @@ function avgTicketBoxHtml(pf, r){
       `</div>`+
     `</div>`;
   };
-  return `<div class="gstat"><span class="gstat-l">Avg ticket · 7 days</span>${items.map(bar).join('')}</div>`;
+  return `<div class="gstat" id="avgTicketBox">${header}${items.map(bar).join('')}</div>`;
+}
+// Step the Avg Ticket box back/forward a week and re-render just that box.
+async function avgTicketNav(delta){
+  const next=avgWeekOffset+delta;
+  if(next>0) return;   // never into the future
+  const prev=avgWeekOffset; avgWeekOffset=next;
+  try{
+    if(avgWeekOffset===0){ avgTicketOverride=null; }
+    else{
+      const d=await api('avg_ticket',{ params:{ business:current.slug, offset:avgWeekOffset }});
+      avgTicketOverride={ avg_by_slug:d.avg_by_slug||{}, range_label:d.range_label||'' };
+    }
+  }catch(e){ avgWeekOffset=prev; toast('Error: '+e.message); return; }
+  const box=document.getElementById('avgTicketBox');
+  if(box) box.outerHTML=avgTicketBoxHtml((greetingData&&greetingData.profit)||null,(greetingData&&greetingData.revenue)||null);
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
