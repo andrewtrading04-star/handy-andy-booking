@@ -595,7 +595,7 @@ async function summary(req, res, db, auth) {
   }
 
   // Photos "To Post" + address alerts are independent — fetch them concurrently.
-  const [photosToPost, address_alerts] = await Promise.all([
+  const [photosToPost, address_alerts, estimate_alerts] = await Promise.all([
     // Photos flagged "To Post" (the social-media queue) for this business. Safe
     // even before the 0043 migration — the status column exists (0026); 'to_post'
     // simply yields 0 until photos are categorized. Never let a photo-count hiccup
@@ -636,12 +636,36 @@ async function summary(req, res, db, auth) {
       } catch (e) { console.warn('[admin] address alerts failed:', e.message); }
       return out;
     })(),
+    // ── Approved estimates still waiting to be booked. An estimate the customer
+    // has APPROVED (status 'scheduled') but that hasn't been turned into a job yet
+    // is a hot, ready-to-book lead — flag it so the office books it ASAP. Auto-
+    // clears the moment it's converted (converting archives it) or otherwise leaves
+    // the approved state. Ones missing an address on file are called out specially.
+    (async () => {
+      const out = [];
+      try {
+        const { data: eRows } = await db.from('estimates')
+          .select('id, customer_name, customer_phone, customer_zip, created_at')
+          .eq('business_id', biz.id).eq('status', 'scheduled')
+          .order('created_at', { ascending: false }).limit(50);
+        for (const e of (eRows || [])) {
+          out.push({
+            id: e.id,
+            name: e.customer_name || 'Customer',
+            phone: e.customer_phone || null,
+            no_address: !(e.customer_zip && String(e.customer_zip).trim()),
+          });
+        }
+      } catch (err) { console.warn('[admin] estimate alerts failed:', err.message); }
+      return out;
+    })(),
   ]);
 
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: tz },
     today: (today || []).map(shapeBooking),
     address_alerts,
+    estimate_alerts,
     revenue,
     profit,
     technicians: techs || [],
@@ -3769,13 +3793,16 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  // Auto-archive: any estimate older than 7 days drops into the Archived folder so
-  // the working list only shows the last week. Idempotent (skips already-archived).
-  // Best-effort — a failure here must never block the list from loading.
+  // Auto-archive: estimates older than 7 days drop into the Archived folder so the
+  // working list only shows the last week. APPROVED estimates (status 'scheduled')
+  // are exempt — a customer-approved estimate is a job waiting to be booked, so it
+  // stays visible (and keeps its "book ASAP" alert) until it's actually converted.
+  // Idempotent (skips already-archived); best-effort so it never blocks the list.
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   try {
     await db.from('estimates').update({ status: 'archived' })
-      .eq('business_id', biz.id).neq('status', 'archived').lt('created_at', sevenDaysAgo);
+      .eq('business_id', biz.id).neq('status', 'archived').neq('status', 'scheduled')
+      .lt('created_at', sevenDaysAgo);
   } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
 
   let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at';

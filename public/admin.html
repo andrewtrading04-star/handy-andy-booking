@@ -4854,6 +4854,7 @@ async function renderGreeting(){
       revenue: s.revenue || null,
       profit: s.profit || null,
       addressAlerts: s.address_alerts || [],
+      estimateAlerts: s.estimate_alerts || [],
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
       lowStockTechs: lowStockCount(bracketInv),
     };
@@ -4886,6 +4887,23 @@ function addressAlertHtml(){
     ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(a.phone)}</a>`:''}
   </div>`).join('');
 }
+// Approved-estimate reminder banner: a customer approved their estimate but the
+// job isn't booked yet. Shows for owner + secretary; auto-clears the moment the
+// estimate is converted to a job (converting archives it, dropping it out of the
+// 'scheduled'/approved set the server returns).
+function estimateAlertHtml(){
+  const list=(greetingData&&greetingData.estimateAlerts)||[];
+  if(!list.length) return '';
+  return list.map(a=>`<div class="crit-alert">
+    <div class="ca-h">⚠ Approved estimate — book this job ASAP</div>
+    <div class="ca-b"><strong>${esc(a.name||'Customer')}</strong> approved their estimate${a.no_address?' — <strong>no card on file and no address</strong>. Get both before booking':''}. Book this job as soon as possible.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(a.phone)}</a>`:''}
+      <button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="goToEstimates()">📋 Go to estimate →</button>
+    </div>
+  </div>`).join('');
+}
+function goToEstimates(){ const b=document.querySelector('[data-nav="estimates"]'); if(b) b.click(); }
 function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
 function getTimeGreeting(name, tz) {
   const now = new Date();
@@ -4931,6 +4949,7 @@ function paintGreeting(){
     : '';
   el.innerHTML=
     addressAlertHtml()+
+    estimateAlertHtml()+
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
     greetStatsHtml()+
