@@ -550,6 +550,14 @@
     if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
     return items;
   }
+  // Running total shown in the sticky footer bar on every step (except zip,
+  // before we know the service area, and customer, which already shows its own
+  // full breakdown). Mirrors the exact formula bCustomer() uses for its
+  // subtotal, so the number the customer watches grow never disagrees with the
+  // one they see at checkout.
+  function footerTotal(){
+    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge();
+  }
   function slotSurcharge(sl){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
     if(!m)return 0;let h=parseInt(m[1]);
@@ -579,6 +587,14 @@
     info:'background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#ff9944!important;display:block!important;',
     ok:'background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#4ade80!important;display:block!important;',
     price:p=>p>0?` <span style="color:#a0a0ab!important;font-size:12px!important;">(+$${p})</span>`:'',
+    // Sticky running-total footer — bleeds to the host's own edges (host padding
+    // is 28px, so -28px margins here reach the card's border) and sits as the
+    // last thing on every step so the price a customer is building stays visible
+    // the whole time, instead of arriving as one number at the very end.
+    footerBar:t=>`<div style="margin:18px -28px -28px!important;padding:12px 28px!important;background:#0e0e10!important;border-top:1px solid #2d2d34!important;display:flex!important;justify-content:space-between!important;align-items:center!important;font-size:13px!important;">
+      <span style="color:#a0a0ab!important;">Estimated total</span>
+      <span style="font-weight:800!important;font-size:17px!important;color:#ff9944!important;">$${t}</span>
+    </div>`,
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -605,7 +621,11 @@
       case 'slots':    body=bSlots();    break;
       case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()); break;
     }
-    root.innerHTML=prog+body;
+    // Running total on every step except 'zip' (service area/pricing profile
+    // isn't known yet) and 'customer' (bCustomer() already shows its own full
+    // itemized breakdown, so a second total would be redundant there).
+    const footer=(key==='zip'||key==='customer')?'':S.footerBar(Math.round(footerTotal()*100)/100);
+    root.innerHTML=prog+body+footer;
     wire(root);
     // Mount Stripe card element after DOM is ready
     if(key==='customer'){
