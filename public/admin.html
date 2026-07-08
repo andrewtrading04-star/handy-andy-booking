@@ -4066,6 +4066,15 @@ async function renderEstimates(){
   }catch(err){ const w=document.getElementById('estWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
+// The customer's local timezone for an estimate, by ZIP: Colorado (Denver, ZIP
+// 80/81) is Mountain; Texas (Houston + Austin, ZIP 75–79) is Central. Falls back
+// to the current business's timezone. Label is what the office reads on the card.
+function estTimezone(e){
+  const z=String(e&&e.customer_zip||'').trim();
+  if(/^8[01]/.test(z)) return { tz:'America/Denver',  label:'Denver time'  };   // Colorado
+  if(/^7[78]/.test(z)) return { tz:'America/Chicago', label:'Houston time' };   // Houston 77xxx / Austin 78xxx
+  return { tz:(current&&current.timezone)||'America/Denver', label:'' };
+}
 function estCard(e){
   const phone=esc(e.customer_phone||'');
   const tel=phone?`<a href="tel:${phone}" style="color:var(--accent);text-decoration:none;">${phone}</a>`:'';
@@ -4076,7 +4085,11 @@ function estCard(e){
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
   const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
   const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
-  const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  // When the estimate came in, in the CUSTOMER's local time (Denver vs Houston),
+  // shown as a prominent badge at the top so the office sees it at a glance.
+  const _tzi=estTimezone(e);
+  const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  const receivedBadge=created?`<div style="display:inline-block;font-size:13px;font-weight:800;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:8px;padding:5px 11px;margin-bottom:9px;">📥 Came in ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
   // Priced quote summary (line items). Shown when the office has built a quote.
   const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)):[];
   const eTax=(e.tax_rate==null)?0:Number(e.tax_rate);
@@ -4105,6 +4118,7 @@ function estCard(e){
   return `<div class="job est-card" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
+        ${receivedBadge}
         <div class="name">${esc(e.service_label||'Estimate request')}</div>
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
         ${hasQuote ? '' : `<div class="est-desc">${esc(e.description||'')}</div>`}
@@ -4115,7 +4129,7 @@ function estCard(e){
       ${photo}
     </div>
     <div class="row est-foot">
-      <span class="meta" style="font-size:12px;">${esc(created)}${e.sms_consent===false?' · <span style="color:var(--mute);">no SMS consent</span>':''}</span>
+      <span class="meta" style="font-size:12px;">${e.sms_consent===false?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         ${e.approved_at?`<button class="btn sm" data-est-convert="${e.id}" title="Create a booking from this approved estimate">→ Convert to job</button>`:''}
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
