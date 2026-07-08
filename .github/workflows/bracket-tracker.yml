@@ -1,13 +1,14 @@
 name: Bracket inventory tracker
 
-# Reads unread Walmart order emails from Gmail, parses bracket types and
-# quantities, and pushes each order to the HAD CRM via /api/bracket-sync.
-# Runs hourly (was every 15 min) — deliveries still appear within the hour, at
-# 1/4 the Vercel function calls. The sync endpoint is idempotent.
+# Reads Walmart order emails from Gmail, parses bracket types and quantities, and
+# pushes each order to the HAD CRM via /api/bracket-sync (auto-assigns to the tech
+# by delivery address; credits inventory on delivery). Runs every 15 minutes so a
+# new order or delivery lands within ~15 min instead of sitting for hours. The
+# sync endpoint is idempotent, so frequent runs are safe.
 
 on:
   schedule:
-    - cron: '0 * * * *'   # hourly (was every 15 minutes)
+    - cron: '*/15 * * * *'   # every 15 minutes
   workflow_dispatch:
     inputs:
       order:

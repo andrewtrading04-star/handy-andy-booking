@@ -654,7 +654,13 @@ async function summary(req, res, db, auth) {
           .eq('business_id', biz.id).eq('book_alert', true).neq('status', 'archived')
           .order('created_at', { ascending: false }).limit(50);
         if (error) { if (/book_alert/.test(error.message || '')) return []; throw error; }
+        // One alert per person: dedupe on name + phone so a duplicate estimate
+        // (e.g. "Anne Fowler" and "anne fowler") doesn't show the banner twice.
+        const seen = new Set();
         for (const e of (eRows || [])) {
+          const key = `${String(e.customer_name || '').trim().toLowerCase()}|${String(e.customer_phone || '').replace(/\D/g, '')}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
           out.push({
             id: e.id,
             name: e.customer_name || 'Customer',
