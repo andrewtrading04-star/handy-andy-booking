@@ -420,16 +420,24 @@
   #nbSteps:empty{display:none;}
   .nb-step-t{font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
   .nb-hint{font-size:13px;color:var(--ink-2);font-style:italic;}
-  /* New Booking: ZIP-first lead block + last-step collapsible customer details */
-  .nb-ziplead{background:#f6f8fb;border:1px solid var(--line);border-radius:11px;padding:12px 13px;display:grid;gap:7px;}
-  .nb-lead-lab{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-2);}
+  /* New Booking: ZIP-first lead block ("assistant" card) + last-step collapsible
+     customer details. Mirrors the dark navy "Jarvis" greeting card on the
+     dashboard home screen, so starting a booking feels like the same assistant. */
+  .nb-ziplead{background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;
+    border-radius:13px;padding:16px 16px 15px;display:grid;gap:11px;color:#fff;}
+  .nb-lead-q{font-size:14.5px;font-weight:700;line-height:1.5;}
+  .nb-lead-q b{color:#ffb27a;}
   .nb-ziprow{display:flex;gap:12px;align-items:center;}
-  .nb-ziprow #nbZip{max-width:132px;font-size:18px;font-weight:800;letter-spacing:.08em;text-align:center;}
-  .nb-zip-area{font-size:13px;font-weight:700;min-height:1em;}
-  .nb-zip-area.ok{color:#15803d;}
-  .nb-zip-area.muted{color:var(--mute);font-weight:600;}
-  .nb-zip-area.bad{color:#b91c1c;}
-  .nb-lead-hint{font-size:12px;color:var(--mute);line-height:1.45;}
+  .nb-ziprow #nbZip{max-width:150px;flex:none;font-size:18px;font-weight:800;letter-spacing:.08em;text-align:center;margin:0;
+    background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;}
+  .nb-ziprow #nbZip::placeholder{color:rgba(255,255,255,.4);}
+  .nb-ziprow #nbZip:focus{border-color:#ffb27a;outline:none;}
+  .nb-zip-area{font-size:13px;font-weight:600;line-height:1.5;min-height:1.3em;color:rgba(255,255,255,.75);}
+  .nb-zip-area b{color:#5ef0a0;}
+  .nb-zip-area.ok{color:rgba(255,255,255,.92);font-weight:600;}
+  .nb-zip-area.muted{color:rgba(255,255,255,.6);}
+  .nb-zip-area.bad{color:#ff9b9b;}
+  .nb-lead-hint{font-size:12px;color:var(--mute);line-height:1.45;padding:0 2px;}
   .nb-cust{border:1px solid var(--line);border-radius:11px;padding:2px 12px;background:#fff;}
   .nb-cust>summary{cursor:pointer;font-size:13.5px;font-weight:700;color:var(--accent);padding:10px 2px;list-style:none;display:flex;align-items:center;gap:8px;}
   .nb-cust>summary::-webkit-details-marker{display:none;}
@@ -865,13 +873,13 @@
     <form id="nbForm" style="display:grid;gap:10px;">
       <!-- ① Qualify the caller by ZIP first — check the service area & price before collecting any details. -->
       <div class="nb-ziplead">
-        <label class="nb-lead-lab" for="nbZip">Customer ZIP</label>
+        <div class="nb-lead-q">What's the customer's <b>ZIP Code</b>?</div>
         <div class="nb-ziprow">
           <input class="search" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
-          <div id="nbZipArea" class="nb-zip-area"></div>
         </div>
-        <div class="nb-lead-hint">Start with the ZIP to check the area &amp; price. Collect the customer's name &amp; address at the end — no need for a full address to quote.</div>
+        <div id="nbZipArea" class="nb-zip-area"></div>
       </div>
+      <div class="nb-lead-hint">Start with the ZIP to check the area &amp; price. Collect the customer's name &amp; address at the end — no need for a full address to quote.</div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
@@ -5351,7 +5359,7 @@ async function openNewBooking(prefill){
   renderNbRequestedTimes(null);   // clear any prior estimate's requested times
   nbCalMonth=new Date(); nbCalMonth.setDate(1);
   nbZipAreaId=null;   // no zip yet -> all techs until a metro is resolved
-  { const zr=document.getElementById('nbZipArea'); if(zr){ zr.textContent=''; zr.className='nb-zip-area'; } }
+  nbZipReplyIdle();
   { const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=false; }   // ZIP first; details collected last
   try{
     const [svc, tech] = await Promise.all([
@@ -5468,6 +5476,13 @@ let nbOwnTechs=[], nbPartner=null;
 let nbZipAreaId=null;
 let nbAreaName='';        // metro name of the entered zip (Denver / Austin / Houston)
 let nbMinWaived=false;    // office chose to send below the branch minimum anyway
+// Idle assistant line shown in the dark "What's the customer's ZIP Code?" card
+// before anything is typed (or after the field is cleared) — kept as one string
+// so the reset path and the change handler never drift apart.
+function nbZipReplyIdle(){
+  const zr=document.getElementById('nbZipArea');
+  if(zr){ zr.textContent="I'll check the service area and travel fee as soon as you type it."; zr.className='nb-zip-area muted'; }
+}
 // Restrict the OWN roster to the entered zip's metro. Falls back to the full
 // roster if no zip is set or none of our techs are tagged to that metro (so the
 // dropdown is never empty due to missing area data).
@@ -5869,13 +5884,19 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   const postal=document.getElementById('nbZip').value.trim();
   nbZipAreaId=null; nbAreaName=''; let surcharge=0;
   if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; }catch(err){} }
-  // Show a live service-area / travel-fee readout next to the ZIP.
+  // Show a live service-area / travel-fee readout next to the ZIP, in the same
+  // assistant voice as the question above it.
   { const zr=document.getElementById('nbZipArea');
     if(zr){
-      if(!postal){ zr.textContent=''; zr.className='nb-zip-area'; }
-      else if(nbZipAreaId){ zr.textContent=`✓ ${nbAreaName||'In service area'}${surcharge>0?` · travel fee $${surcharge}`:' · no travel fee'}`; zr.className='nb-zip-area ok'; }
-      else if(postal.length===5){ zr.textContent='New area — booking is fine; add a travel fee below if needed'; zr.className='nb-zip-area muted'; }
-      else { zr.textContent=''; zr.className='nb-zip-area'; }
+      if(!postal){ nbZipReplyIdle(); }
+      else if(nbZipAreaId){
+        zr.innerHTML = surcharge>0
+          ? `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and the travel fee is <b>$${surcharge}</b>. I'll fill it in below.`
+          : `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and there's no travel fee for this area.`;
+        zr.className='nb-zip-area ok';
+      }
+      else if(postal.length===5){ zr.textContent="That's a new area for us — the booking is still fine, just add a travel fee below if you need one."; zr.className='nb-zip-area muted'; }
+      else { nbZipReplyIdle(); }
     } }
   // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
   // the public widget does — but only when the field is empty or still holds the
