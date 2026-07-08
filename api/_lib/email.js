@@ -260,6 +260,39 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       </td></tr>`;
   }
 
+  // ── "Meet your tech" — a photo + short intro for the assigned technician.
+  // Only renders when BOTH a name and a photo are on file (set from the
+  // Technicians tab in the dashboard) — a tech with neither configured yet
+  // simply never shows this block, so nothing looks broken or half-filled.
+  // Bio text: a custom blurb wins; otherwise a sentence built from bio_years;
+  // otherwise a generic line that still reads as intentional.
+  let meetTechBlock = '';
+  if (details.technicianName && details.technicianPhotoUrl) {
+    const techName = esc(details.technicianName);
+    let bioText;
+    if (details.technicianBioBlurb) {
+      bioText = esc(details.technicianBioBlurb);
+    } else if (Number(details.technicianBioYears) > 0) {
+      bioText = `${techName} has been doing this for over ${Number(details.technicianBioYears)} years, so you're in good hands.`;
+    } else {
+      bioText = `${techName} is your installer for this job.`;
+    }
+    meetTechBlock = `
+      <tr><td style="padding:18px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eceef1;border-radius:14px;">
+          <tr>
+            <td width="78" valign="top" style="padding:16px 0 16px 16px;">
+              <img src="${esc(details.technicianPhotoUrl)}" width="58" height="58" alt="${techName}" style="display:block;width:58px;height:58px;border-radius:29px;object-fit:cover;">
+            </td>
+            <td valign="top" style="padding:16px 16px 16px 12px;">
+              <div style="font-size:14.5px;font-weight:800;color:#11181c;margin:0 0 4px;">This is ${techName} — your lead installer</div>
+              <div style="font-size:13px;color:#4b5563;line-height:1.55;">${bioText}</div>
+            </td>
+          </tr>
+        </table>
+      </td></tr>`;
+  }
+
   // ── "What to expect" — appointment-day guidance, shown as icon cards ─────────
   // Reusable inline-style snippets keep the markup email-client safe.
   const para = 'font-size:13.5px;color:#4b5563;line-height:1.62;margin:0;';
@@ -352,6 +385,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
         ${priceBlock}
         ${twoTechNote}
         ${calendarBlock}
+        ${meetTechBlock}
         ${expectBlock}
         <tr><td style="padding:24px 28px 30px;">
           <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">

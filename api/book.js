@@ -303,11 +303,15 @@ async function bookDoms(req, res) {
   let technician_id = null;
   try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey }); }
   catch (e) { console.warn('[book-doms] tech pick failed:', e.message); }
-  // Resolve the assigned tech's name for the confirmation email (best-effort).
-  let technicianName = null;
+  // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
+  // confirmation-email block) — best-effort.
+  let technicianName = null, technicianPhoto = null;
   if (technician_id) {
-    try { const { data: _t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle(); technicianName = _t?.name || null; }
-    catch (e) { /* name is best-effort */ }
+    try {
+      const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+      technicianName = _t?.name || null;
+      technicianPhoto = _t || null;
+    } catch (e) { /* name is best-effort */ }
   }
 
   if (cardNote) console.log('[book-doms] card:', cardNote);
@@ -364,6 +368,9 @@ async function bookDoms(req, res) {
         timeWindow:  sum.timeWindow || (slot ? slot.label : ''),
         serviceName: "Dom's TV Mounting",
         technicianName,
+        technicianPhotoUrl: technicianPhoto?.photo_url || null,
+        technicianBioYears: technicianPhoto?.bio_years || null,
+        technicianBioBlurb: technicianPhoto?.bio_blurb || null,
         address:     { line1: customer.address, city: b.city || 'Denver', state: b.state || 'CO', zip },
         lines:       emailLines,
         total:       price,
@@ -513,10 +520,13 @@ async function bookHandyAndy(req, res) {
   let technician_id = null;
   try { technician_id = await pickOpenTech(db, { businessSlug: 'handy-andy', dateStr, slotKey, serviceAreaId, timezone: tz }); }
   catch (e) { console.warn('[book-ha] tech pick failed:', e.message); }
-  let technicianName = null;
+  let technicianName = null, technicianPhoto = null;
   if (technician_id) {
-    try { const { data: _t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle(); technicianName = _t?.name || null; }
-    catch (e) { /* name is best-effort */ }
+    try {
+      const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+      technicianName = _t?.name || null;
+      technicianPhoto = _t || null;
+    } catch (e) { /* name is best-effort */ }
   }
 
   const city = b.city || area.name || null;
@@ -574,6 +584,9 @@ async function bookHandyAndy(req, res) {
         timeWindow:  sum.timeWindow || (slot ? slot.label : ''),
         serviceName: 'TV Mounting',
         technicianName,
+        technicianPhotoUrl: technicianPhoto?.photo_url || null,
+        technicianBioYears: technicianPhoto?.bio_years || null,
+        technicianBioBlurb: technicianPhoto?.bio_blurb || null,
         address:     { line1: customer.address, city, state, zip },
         lines:       emailLines,
         total:       price,

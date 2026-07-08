@@ -3653,8 +3653,11 @@ async function renderTechnicians(){
     document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
-          <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}${t.average_rating ? ` <span class="rating-badge">⭐ ${t.average_rating}</span>` : ''}</div>
-            <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div></div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${t.photo_url?`<img src="${esc(t.photo_url)}" alt="" style="width:36px;height:36px;border-radius:18px;object-fit:cover;flex:none;">`:`<div style="width:36px;height:36px;border-radius:18px;background:var(--line2);flex:none;"></div>`}
+            <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}${t.average_rating ? ` <span class="rating-badge">⭐ ${t.average_rating}</span>` : ''}</div>
+              <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div></div>
+          </div>
           <select class="assign tstatus"><option value="available" ${t.status==='available'?'selected':''}>available</option>
             <option value="on_job" ${t.status==='on_job'?'selected':''}>on job</option>
             <option value="off" ${t.status==='off'?'selected':''}>off</option></select>
@@ -3664,6 +3667,13 @@ async function renderTechnicians(){
           <button class="btn ghost sm" data-act="phone">Set phone</button>
           <button class="btn ghost sm" data-act="pin">Set PIN</button>
           <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
+        </div>
+        <div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
+          <span class="meta" style="font-size:13px;font-weight:700;">Meet-your-tech email photo</span>
+          <button class="btn ghost sm" data-act="photo">${t.photo_url?'Replace photo':'Upload photo'}</button>
+          <button class="btn ghost sm" data-act="bioyears">Years exp.${t.bio_years!=null?` (${t.bio_years})`:''}</button>
+          <button class="btn ghost sm" data-act="bioblurb">Bio text${t.bio_blurb?' ✓':''}</button>
+          <input type="file" accept="image/*" class="techPhotoFile" style="display:none;">
         </div>
         ${role==='owner'?`<div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
           <span class="meta" style="font-size:13px;">Max jobs per day</span>
@@ -3681,7 +3691,18 @@ async function renderTechnicians(){
         if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }
         if(btn.dataset.act==='pin'){ const p=prompt('New 4-digit PIN:'); if(p){ if(!/^\d{4}$/.test(p)) return toast('PIN must be 4 digits'); saveTech({ id, pin:p }); } }
         if(btn.dataset.act==='toggle'){ saveTech({ id, active: btn.textContent==='Activate' }); }
+        if(btn.dataset.act==='photo'){ card.querySelector('.techPhotoFile').click(); }
+        if(btn.dataset.act==='bioyears'){ const v=prompt('Years of experience (blank to clear):'); if(v!=null) saveTech({ id, bio_years:v }); }
+        if(btn.dataset.act==='bioblurb'){ const v=prompt('Short bio line for the confirmation email (blank to clear):\n\ne.g. "Juan has been mounting TVs for over 7 years, so you\'re in good hands."'); if(v!=null) saveTech({ id, bio_blurb:v }); }
       }));
+      card.querySelector('.techPhotoFile').addEventListener('change', async e=>{
+        const f=e.target.files[0]; e.target.value=''; if(!f) return;
+        try{
+          const dataUrl=await compressImage(f,500,0.85);
+          await api('technician_photo_upload',{ method:'POST', body:{ business:current.slug, id, image:dataUrl }});
+          toast('Photo saved ✓'); renderTechnicians();
+        }catch(err){ toast(err.message||'Could not upload photo'); }
+      });
     });
   }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }

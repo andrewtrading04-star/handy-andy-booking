@@ -229,6 +229,7 @@ export default async function handler(req, res) {
       case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
+      case 'technician_photo_upload': return await technicianPhotoUpload(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
@@ -1751,9 +1752,13 @@ async function bookingCreate(req, res, db, auth, body) {
   // one. Resolve the primary's name to decide (covers a concrete pick AND an
   // "any" pick that happened to land on Juan/Zach).
   let primaryBringsOwnSecond = false;
+  // Also carries photo_url/bio_years/bio_blurb for the confirmation email's
+  // "Meet your tech" block further down — one query serves both purposes.
+  let primaryTechInfo = null;
   if (technician_id) {
-    const { data: pt } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle();
+    const { data: pt } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
     primaryBringsOwnSecond = bringsOwnSecondTech(pt?.name);
+    primaryTechInfo = pt || null;
   }
 
   // Secondary technician (for jobs requiring 2 techs, e.g. a large-TV lift). The
@@ -1989,6 +1994,10 @@ async function bookingCreate(req, res, db, auth, body) {
       const { subject, html } = bookingConfirmationEmail({
         firstName,
         dateLong, timeWindow,
+        technicianName: primaryTechInfo?.name || null,
+        technicianPhotoUrl: primaryTechInfo?.photo_url || null,
+        technicianBioYears: primaryTechInfo?.bio_years || null,
+        technicianBioBlurb: primaryTechInfo?.bio_blurb || null,
         address: { line1: c.address_line1, city: c.city, state: c.state, zip: c.postal_code },
         lines: emailLines,
         total: hasPrice ? Number(body.price) : null,
@@ -3021,11 +3030,12 @@ async function placeDetails(req, res, auth) {
 async function technicians(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   // service_area_id (0022) powers the New Booking metro filter; max_jobs_per_day
-  // (0034) is the per-tech daily cap. Both optional — drop whichever column the
-  // DB doesn't have yet so the roster always loads.
-  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash';
+  // (0034) is the per-tech daily cap; photo_url/bio_years/bio_blurb (0060) power
+  // the "Meet your tech" confirmation-email block. All optional — drop whichever
+  // column the DB doesn't have yet so the roster always loads.
+  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash, photo_url, bio_years, bio_blurb';
   let data, error;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('technicians').select(cols).eq('business_id', biz.id).order('name'));
     if (!error) break;
     const col = missingColumn(error.message);
@@ -3103,6 +3113,13 @@ async function technicianUpdate(req, res, db, auth, body) {
     const v = body.max_jobs_per_day;
     patch.max_jobs_per_day = (v === '' || v == null) ? null : Math.max(0, Math.floor(Number(v)) || 0);
   }
+  // Bio for the "Meet your tech" confirmation-email block. bio_years is a
+  // non-negative whole number or null (blank = don't show a years claim).
+  if (body.bio_years !== undefined) {
+    const v = body.bio_years;
+    patch.bio_years = (v === '' || v == null) ? null : Math.max(0, Math.floor(Number(v)) || 0);
+  }
+  if (body.bio_blurb !== undefined) patch.bio_blurb = (body.bio_blurb || '').toString().trim().slice(0, 400) || null;
   if (Object.keys(patch).length) {
     const { error } = await db.from('technicians').update(patch).eq('id', id).eq('business_id', biz.id);
     if (error) throw error;
@@ -3115,6 +3132,24 @@ async function technicianUpdate(req, res, db, auth, body) {
     if (error) throw error;
   }
   return res.status(200).json({ ok: true });
+}
+
+// Upload/replace a technician's profile photo — used by the "Meet your tech"
+// confirmation-email block. Reuses the same booking-photos storage bucket as
+// job photos. POST { business, id, image } (image = data URL from the browser,
+// already resized client-side).
+async function technicianPhotoUpload(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: existing } = await db.from('technicians').select('id, photo_url').eq('id', id).eq('business_id', biz.id).single();
+  if (!existing) return res.status(404).json({ error: 'Technician not found' });
+
+  const up = await uploadImage(body.image, `tech-photos/${biz.id}/${id}`);
+  const { error } = await db.from('technicians').update({ photo_url: up.url }).eq('id', id).eq('business_id', biz.id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true, photo_url: up.url });
 }
 
 // ── Technician weekly availability ───────────────────────────────────────────
