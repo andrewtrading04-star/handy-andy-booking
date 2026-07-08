@@ -3645,6 +3645,14 @@ function renderPayrollData(d){
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────
+// Mirrors the exact fallback logic in api/_lib/email.js's meetTechBlock, so the
+// Technicians-tab preview always matches what the confirmation email actually sends.
+function techBioText(t){
+  const name = esc(t.name);
+  if (t.bio_blurb) return esc(t.bio_blurb);
+  if (Number(t.bio_years) > 0) return `${name} has been doing this for over ${Number(t.bio_years)} years, so you're in good hands.`;
+  return `${name} is your installer for this job.`;
+}
 async function renderTechnicians(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
@@ -3675,6 +3683,23 @@ async function renderTechnicians(){
           <button class="btn ghost sm" data-act="bioblurb">Bio text${t.bio_blurb?' ✓':''}</button>
           <input type="file" accept="image/*" class="techPhotoFile" style="display:none;">
         </div>
+        ${t.photo_url?`<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+          <div class="meta" style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin-bottom:7px;">What customers see in their confirmation email</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:460px;background:#ffffff;border:1px solid #eceef1;border-radius:16px;">
+            <tr>
+              <td width="148" valign="top" style="padding:18px 0 18px 18px;">
+                <img src="${esc(t.photo_url)}" width="130" height="130" alt="${esc(t.name)}" style="display:block;width:130px;height:130px;border-radius:20px;object-fit:cover;">
+              </td>
+              <td valign="top" style="padding:18px 18px 18px 14px;">
+                <div style="margin:0 0 7px;">
+                  <span style="font-size:16.5px;font-weight:800;color:#11181c;">${esc(t.name)}</span>
+                  <span style="display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#a1490f;background:#ffe4cf;padding:3px 9px;border-radius:100px;vertical-align:middle;">Lead installer</span>
+                </div>
+                <div style="font-size:14px;color:#4b5563;line-height:1.6;">${techBioText(t)}</div>
+              </td>
+            </tr>
+          </table>
+        </div>`:''}
         ${role==='owner'?`<div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
           <span class="meta" style="font-size:13px;">Max jobs per day</span>
           <input type="number" min="0" inputmode="numeric" class="maxjobs" value="${t.max_jobs_per_day!=null?t.max_jobs_per_day:''}" placeholder="No limit" style="width:110px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
