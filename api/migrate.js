@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
+import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -768,6 +769,56 @@ export default async function handler(req, res) {
       return await googleReviewSync(req, res);
     } catch (e) {
       console.error('[google_review_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // One-shot SMS pipeline proof: sends the 5 approved customer/tech notification
+  // templates (exact live wording, with realistic example placeholder data) to a
+  // single phone number, so the owner can confirm Twilio is wired up correctly
+  // without needing a real booking. Secured by CRON_SECRET, like the rest of
+  // this file's automation endpoints — NOT the admin bearer, since this is
+  // triggered by a GitHub Actions dispatch rather than a dashboard login.
+  // Deliberately bounded: it can only ever send these 5 fixed templates to the
+  // phone number given, never an arbitrary caller-supplied message — so even if
+  // this endpoint were ever hit by someone else with the secret, it can't be
+  // used to spam arbitrary text to arbitrary numbers.
+  if (action === 'sms_test') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const phone = (req.body && req.body.phone || '').toString().trim();
+      if (!phone) return res.status(400).json({ error: 'phone required' });
+      if (!smsConfigured()) return res.status(400).json({ error: 'No SMS provider configured (Twilio/SimpleTexting env vars missing).' });
+
+      const templates = [
+        { label: 'Customer · booking confirmed',
+          text: "You're booked! ✅ Handy Andy will see you Wed, Jul 8 at 2:00 PM. We'll text you when your tech is on the way. Reply STOP to opt out." },
+        { label: "Customer · tech's on the way",
+          text: 'Heads up! Zach from Handy Andy is en route (ETA ~15 min). Please prepare for his arrival. STOP to opt out.' },
+        { label: 'Customer · review request',
+          text: 'How did we do? Leave us your honest opinion about our service here: https://handy-andy-booking.vercel.app/review.html?token=demo. STOP to opt out.' },
+        { label: 'Tech · new job assigned',
+          text: 'You got a job! Wed, Jul 8, 2:00 PM. Address & details in the app: https://handy-andy-booking.vercel.app/tech.html' },
+        { label: 'Tech · job canceled',
+          text: "❌ Job canceled: Wed, Jul 8 2:00 PM (Jane Doe). No action needed — your calendar's updated." },
+      ];
+
+      const results = [];
+      for (let i = 0; i < templates.length; i++) {
+        const t = templates[i];
+        const r = await sendSMSResult(phone, `(${i + 1}/${templates.length} · ${t.label})\n${t.text}`);
+        results.push({ label: t.label, ok: !!r.ok, error: r.error || r.skipped || null });
+      }
+      const sent = results.filter(r => r.ok).length;
+      console.log('[sms_test]', phone.slice(-4), `${sent}/${templates.length} sent`);
+      return res.status(200).json({ ok: sent === templates.length, sent, total: templates.length, results });
+    } catch (e) {
+      console.error('[sms_test]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

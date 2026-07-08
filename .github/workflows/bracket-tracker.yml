@@ -27,6 +27,10 @@ on:
         description: 'Add a service-area zip: "zip,area,surcharge,payout" (e.g. 80027,Denver,65,50). Skips the email scan.'
         required: false
         default: ''
+      sms_test_phone:
+        description: 'Send the 5 approved customer/tech SMS templates to this number (e.g. 13374997817) to prove Twilio is wired up. Runs before, not instead of, the email scan.'
+        required: false
+        default: ''
 
 jobs:
   sync:
@@ -50,6 +54,18 @@ jobs:
               -d "{\"walmart_order_num\":\"$o\",\"status\":\"$STATUS\"}"
             echo ""
           done
+
+      - name: Send SMS pipeline test (optional)
+        if: ${{ github.event.inputs.sms_test_phone != '' }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PHONE: ${{ github.event.inputs.sms_test_phone }}
+        run: |
+          curl -fsS -X POST "https://handy-andy-booking.vercel.app/api/migrate?action=sms_test" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"phone\":\"$PHONE\"}"
+          echo ""
 
       - name: Check out repository
         uses: actions/checkout@v4
