@@ -5000,6 +5000,13 @@ function paintGreeting(){
     const pf=(greetingData&&greetingData.profit)||{};
     const v=profitView==='yesterday'?(pf.yesterday||0):(pf.today||0);
     const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(v);
+    const bySlug=profitView==='yesterday'?pf.yesterday_by_slug:pf.today_by_slug;
+    const splitEl=document.getElementById('pfSplit');
+    if(splitEl){
+      const dEl=splitEl.querySelector('[data-split="doms"]'), hEl=splitEl.querySelector('[data-split="handy-andy"]');
+      if(dEl) dEl.textContent=money(Number((bySlug&&bySlug.doms)||0));
+      if(hEl) hEl.textContent=money(Number((bySlug&&bySlug['handy-andy'])||0));
+    }
     el.querySelectorAll('[data-pv]').forEach(b=>b.classList.toggle('on', b.dataset.pv===profitView));
   }));
   const callsLink=el.querySelector('[data-gocalls]');
@@ -5094,6 +5101,20 @@ async function avgTicketNav(delta){
   const box=document.getElementById('avgTicketBox');
   if(box) box.outerHTML=avgTicketBoxHtml((greetingData&&greetingData.profit)||null,(greetingData&&greetingData.revenue)||null);
 }
+// Reusable Doms(blue)/Handy Andy(orange) split row for a gstat box — same visual
+// pattern as the "Revenue this week" / "Profit this week" boxes: a divider, then
+// two colored figures side by side. `id` lets a toggle (Today/Yesterday) update
+// just the numbers in place, with no re-render of the whole card.
+function bizSplitHtml(bySlug, id){
+  const d=Number((bySlug&&bySlug.doms)||0), h=Number((bySlug&&bySlug['handy-andy'])||0);
+  return `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
+    `<div${id?` id="${id}"`:''} style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
+      `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div>`+
+        `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;" data-split="doms">${money(d)}</div></div>`+
+      `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('handy-andy'))}</div>`+
+        `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;" data-split="handy-andy">${money(h)}</div></div>`+
+    `</div>`;
+}
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
@@ -5112,7 +5133,9 @@ function greetStatsHtml(){
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Profit</span>`+
       `<span class="gstat-v" id="pfVal" style="color:#4ade80;">${money(profitVal)}</span>`+
-      `<div class="ndp-seg"><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div></div>`+
+      `<div class="ndp-seg"><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div>`+
+      bizSplitHtml(profitView==='yesterday'?(pf&&pf.yesterday_by_slug):(pf&&pf.today_by_slug), 'pfSplit')+
+    `</div>`+
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Net daily profit</span>`+
       `<span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span>`+
@@ -5138,6 +5161,10 @@ function greetStatsHtml(){
       ) : '')+
     `</div>`+
     `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span>`+
+      ((pf&&pf.week_predicted_by_slug) ? (
+        `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;margin-top:2px;">Active jobs · this week</span>`+
+        bizSplitHtml(pf.week_predicted_by_slug, null)
+      ) : '')+
       ((greetingData.lowStockTechs||0)>0 ? `<div class="gstat-warn" onclick="goToBrackets()" title="View bracket inventory">⚠ ${greetingData.lowStockTechs} tech${greetingData.lowStockTechs>1?'s':''} low on stock</div>` : '')+
     `</div>`+
     avgTicketBoxHtml(pf, r)+

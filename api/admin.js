@@ -522,11 +522,16 @@ async function summary(req, res, db, auth) {
 
     // Net daily profit for a day offset (0 = today, -1 = yesterday), summed across
     // ALL active businesses (each in its OWN local day), parallel across businesses.
+    // Returns BOTH the combined total (net daily profit, both companies) AND the
+    // per-business breakdown (today_by_slug / yesterday_by_slug) — one pass of
+    // queries serves both, so the per-business split costs nothing extra.
     const netDailyFor = async (offset) => {
       const parts = await Promise.all((allBiz || []).map(async (bb) => {
         let rows;
         if (offset === 0 && bb.id === biz.id) {
           rows = today;   // reuse this business's already-fetched today rows
+        } else if (offset === -1 && bb.id === biz.id) {
+          rows = yRows;   // reuse this business's already-fetched yesterday rows
         } else {
           const btz = bb.timezone || 'America/Denver';
           const d0 = localDayStartUTC(btz, offset), d1 = localDayStartUTC(btz, offset + 1);
@@ -536,15 +541,30 @@ async function summary(req, res, db, auth) {
             .lt('scheduled_at', d1.toISOString())));
         }
         const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
-        if (!paidDone.length) return 0;
+        if (!paidDone.length) return [bb.slug, 0];
         const e = await computeJobEconomics(db, bb, paidDone, true, await travelMapFor(bb));
-        return paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
+        return [bb.slug, Math.round(paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
       }));
-      return Math.round(parts.reduce((a, b) => a + b, 0));
+      const bySlug = Object.fromEntries(parts);
+      const total = Math.round(parts.reduce((a, [, v]) => a + v, 0));
+      return { total, bySlug };
     };
 
+    // Per-business PREDICTED income for the week — same "active jobs, as if every
+    // one gets paid" logic as pPredicted above, just split by business instead of
+    // only computed for the business currently being viewed.
+    const predictedBySlugP = Promise.all((allBiz || []).map(async (bb) => {
+      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', bb.id)
+        .gte('scheduled_at', weekStart.toISOString())
+        .lt('scheduled_at', weekEnd.toISOString()));
+      const active = (rows || []).filter(b => ACTIVE_STATUSES.includes(b.status));
+      const e = await computeJobEconomics(db, bb, active, true, await travelMapFor(bb));
+      return [bb.slug, Math.round(active.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
+    }));
+
     // All of the above are independent — resolve them concurrently.
-    const [pWeek, pToday, pYesterday, pPredicted, weekBySlug, avgBySlug, net_daily, net_daily_yesterday] = await Promise.all([
+    const [pWeek, pToday, pYesterday, pPredicted, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
       sumProfit(paidDoneWeek),
       sumProfit(paidDoneToday),
       sumProfit(earned(yRows)),
@@ -553,6 +573,7 @@ async function summary(req, res, db, auth) {
       avgBySlugP,
       netDailyFor(0),
       netDailyFor(-1),
+      predictedBySlugP,
     ]);
 
     profit = {
@@ -562,8 +583,11 @@ async function summary(req, res, db, auth) {
       week_predicted: Math.round(pPredicted),
       week_by_slug: Object.fromEntries(weekBySlug),
       avg_by_slug: Object.fromEntries(avgBySlug),
-      net_daily,
-      net_daily_yesterday,
+      net_daily: netToday.total,
+      net_daily_yesterday: netYesterday.total,
+      today_by_slug: netToday.bySlug,
+      yesterday_by_slug: netYesterday.bySlug,
+      week_predicted_by_slug: Object.fromEntries(predictedBySlug),
     };
 
     // Per-business JOB REVENUE for the Saturday–Friday work week. Per owner's
