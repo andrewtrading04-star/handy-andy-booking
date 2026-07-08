@@ -457,25 +457,27 @@
   /* Reschedule modal */
   .rs-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
   .rs-slots{display:grid;gap:8px;}
-  /* New-booking calendar */
-  .nb-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;width:100%;}
-  .nb-cal-title{font-size:14px;font-weight:700;color:var(--ink);}
-  .nb-cal-nav{background:#fff;border:1px solid var(--line);color:var(--ink-2);width:30px;height:30px;border-radius:8px;font-size:16px;cursor:pointer;}
-  .nb-cal-nav:hover{border-color:var(--accent);color:var(--accent);}
+  /* New-booking calendar — "Navy Assistant": matches the dark ZIP-lead card
+     above it in the same form, so the booking flow reads as one voice. */
+  #nbCalWrap{width:100%;min-width:0;background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;
+    border-radius:13px;padding:14px 14px 12px;color:#fff;}
+  .nb-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;width:100%;}
+  .nb-cal-title{font-size:14px;font-weight:800;color:#fff;}
+  .nb-cal-nav{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;width:28px;height:28px;border-radius:8px;font-size:15px;cursor:pointer;}
+  .nb-cal-nav:hover{border-color:#ff8a3d;color:#ff8a3d;}
   .nb-cal-nav:disabled{opacity:.35;cursor:not-allowed;}
-  #nbCalWrap{width:100%;min-width:0;}
   #nbSlotsWrap{width:100%;min-width:0;}
   #nbCardWrap{width:100%;min-width:0;}
-  .nb-cal-dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:4px;width:100%;}
-  .nb-cal-dow span{text-align:center;font-size:11px;font-weight:700;color:var(--ink-2);}
+  .nb-cal-dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:5px;width:100%;}
+  .nb-cal-dow span{text-align:center;font-size:10.5px;font-weight:800;color:rgba(255,255,255,.65);}
   .nb-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;width:100%;}
-  .nb-cal-day{aspect-ratio:1;min-width:0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:13px;border:1px solid transparent;}
+  .nb-cal-day{aspect-ratio:1;min-width:0;display:flex;align-items:center;justify-content:center;border-radius:7px;font-size:12.5px;border:1px solid transparent;}
   .nb-cal-day.empty{visibility:hidden;}
-  .nb-cal-day.avail{background:#fff;border-color:var(--line);color:var(--ink);cursor:pointer;font-weight:600;}
-  .nb-cal-day.avail:hover{border-color:var(--accent);}
-  .nb-cal-day.off{color:#c9c9c9;cursor:not-allowed;text-decoration:line-through;}
-  .nb-cal-day.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;}
-  .nb-cal-hint{font-size:11px;color:var(--ink-2);margin-top:8px;font-style:italic;}
+  .nb-cal-day.avail{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);color:#fff;cursor:pointer;font-weight:600;}
+  .nb-cal-day.avail:hover{border-color:#ff8a3d;}
+  .nb-cal-day.off{color:rgba(255,255,255,.28);cursor:not-allowed;text-decoration:line-through;}
+  .nb-cal-day.sel{background:#ff8a3d;border-color:#ff8a3d;color:#0b1f3a;font-weight:800;}
+  .nb-cal-hint{font-size:10.5px;color:rgba(255,255,255,.55);margin-top:8px;font-style:italic;}
   .nb-optq{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:13px;color:var(--ink);}
   .nb-optq.on{border-color:var(--accent);background:rgba(238,108,40,.07);}
   .nb-optq .nb-optlabel{flex:1;}
