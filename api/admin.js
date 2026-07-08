@@ -2241,7 +2241,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 
       // Send SMS after 20 minutes if customer opted in
       if (existing.customer?.phone && existing.sms_consent) {
-        const msg = `How did we do? Leave us your honest opinion about our service here: ${reviewLink}. STOP to opt out.`;
+        const msg = `How did we do?\n\nLeave your technician a review here:\n${reviewLink}\n\nSTOP to opt out`;
         setTimeout(() => {
           sendSMS(existing.customer.phone, msg).catch(console.error);
         }, 20 * 60 * 1000);

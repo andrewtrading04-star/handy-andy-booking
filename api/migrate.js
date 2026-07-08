@@ -801,7 +801,7 @@ export default async function handler(req, res) {
         { label: "Customer · tech's on the way",
           text: 'Heads up! Zach from Handy Andy is en route (ETA ~15 min). Please prepare for his arrival. STOP to opt out.' },
         { label: 'Customer · review request',
-          text: 'How did we do? Leave us your honest opinion about our service here: https://handy-andy-booking.vercel.app/review.html?token=demo. STOP to opt out.' },
+          text: 'How did we do?\n\nLeave your technician a review here:\nhttps://handy-andy-booking.vercel.app/review.html?token=demo\n\nSTOP to opt out' },
         { label: 'Tech · new job assigned',
           text: 'You got a job! Wed, Jul 8, 2:00 PM. Address & details in the app: https://handy-andy-booking.vercel.app/tech.html' },
         { label: 'Tech · job canceled',
