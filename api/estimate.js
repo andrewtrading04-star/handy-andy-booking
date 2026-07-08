@@ -167,9 +167,14 @@ async function submit(req, res, db) {
   const { data: row, error } = await insertResilient(db, 'estimates', estimateInsert);
   if (error) throw error;
 
-  // Notify staff (owner + secretary) per business settings.
-  const phones = Array.isArray(biz.settings?.estimate_notify_phones) ? biz.settings.estimate_notify_phones : [];
-  if (phones.length) {
+  // Notify staff (owner + secretary) per business settings, PLUS the
+  // business's secretary (Heather/Joey) directly via env var — guarantees they
+  // always get texted even if estimate_notify_phones was never configured or
+  // doesn't include their number. Deduped so a number set both ways only texts once.
+  const phones = new Set(Array.isArray(biz.settings?.estimate_notify_phones) ? biz.settings.estimate_notify_phones : []);
+  if (biz.slug === 'handy-andy' && process.env.HANDY_ANDY_SECRETARY_PHONE) phones.add(process.env.HANDY_ANDY_SECRETARY_PHONE);
+  if (biz.slug === 'doms' && process.env.DOMS_SECRETARY_PHONE) phones.add(process.env.DOMS_SECRETARY_PHONE);
+  if (phones.size) {
     const when = preferred_slots.length
       ? ' Preferred: ' + preferred_slots.map(s => `${s.label || s.slot_key}`).slice(0, 2).join(', ') + (preferred_slots.length > 2 ? '…' : '')
       : '';
