@@ -387,8 +387,22 @@ export function computeJobPay(job, techName) {
     return { pay: ASSURION_TOTAL[jn], breakdown: [{ label: `Assurion override (job #${jn})`, amount: ASSURION_TOTAL[jn] }], flags, state: 'paid' };
   }
 
-  // Assurion (Steve): pay comes from the job note "Tech pay: $X".
+  // One-off owner override, stored on the JOB itself (never in code). A note line
+  // "Payroll override: $60" pays the tech exactly that flat amount regardless of
+  // line items or payment status — for the rare cross-company / comped / special
+  // job the owner wants paid a fixed number. Data-driven on purpose: it's a
+  // one-time edit to that one booking, not a rule baked into the engine, so it
+  // requires no code change to add or remove another. Never deferred.
   const notes = String(job.notes || '');
+  {
+    const ov = notes.match(/payroll\s*override\s*:?\s*\$?\s*(\d+(?:\.\d{1,2})?)/i);
+    if (ov) {
+      const amt = round2(parseFloat(ov[1]));
+      return { pay: amt, breakdown: [{ label: 'Payroll override (owner-set)', amount: amt }], flags, state: 'paid' };
+    }
+  }
+
+  // Assurion (Steve): pay comes from the job note "Tech pay: $X".
   if (/assurion/i.test(notes)) {
     const m = notes.match(/Tech pay:\s*\$?(\d+)/i);
     if (m) {
