@@ -13,6 +13,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { sendSMS } from './_lib/sms.js';
+import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
 
@@ -178,6 +179,16 @@ async function submit(req, res, db) {
     const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
     for (const p of phones) sendSMS(p, msg).catch(console.error);
   }
+
+  // Email heads-up to the business's secretary (Heather/Joey) — the ONLY
+  // per-request email they get for online activity now (real bookings no
+  // longer email them; see mirror.js). Best-effort: never blocks the request.
+  sendOwnerEstimateAlert({
+    slug: biz.slug, businessName: biz.name,
+    customer: { name, phone, email: customer.email || null },
+    zip, serviceLabel: service_label, description,
+    preferredSlots: preferred_slots, photoUrl: photo_url,
+  }).catch(e => console.warn('[estimate] owner email failed:', e.message));
 
   return res.status(200).json({ ok: true, id: row.id });
 }

@@ -1148,7 +1148,7 @@
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
-        <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from Handy Andy TV Mounting at the number I provide. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to unsubscribe, HELP for help. See our <a href="https://www.ihandyandy.com/privacy-policy/" target="_blank" rel="noopener" style="color:#ff8a4c!important;text-decoration:underline!important;">Privacy Policy</a> and <a href="https://www.ihandyandy.com/terms-of-service/" target="_blank" rel="noopener" style="color:#ff8a4c!important;text-decoration:underline!important;">Terms of Service</a>.</span>
+        <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from Handy Andy TV Mounting. Reply STOP to unsubscribe.</span>
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>

@@ -80,3 +80,57 @@ export async function sendOwnerBookingAlert(d = {}) {
     console.warn('[owner-notify] non-fatal:', e.message);
   }
 }
+
+// "New estimate request" heads-up email — the ONLY per-request email Heather
+// (Handy Andy) / Joey (Doms) get for online activity now; a real booking no
+// longer emails them (see mirror.js). Same recipient rule as the booking
+// alert (secretary always, owner only when PER_BOOKING_ALERTS=1), same
+// override env vars, but its own distinct content — this is a QUOTE request,
+// not an appointment, so the email must never claim otherwise.
+export async function sendOwnerEstimateAlert(d = {}) {
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig(d.slug);
+    if (!cfg.apiKey) return;
+
+    const recipients = new Set();
+    if (process.env.PER_BOOKING_ALERTS === '1') {
+      recipients.add(process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com');
+    }
+    const slug = String(d.slug || '').toLowerCase();
+    if (slug === 'handy-andy') {
+      recipients.add(process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
+    } else if (slug === 'doms') {
+      recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
+    }
+    recipients.delete('');
+    if (!recipients.size) return;
+
+    const c = d.customer || {};
+    const rows = [
+      ['Company', d.businessName],
+      ['Customer', c.name],
+      ['Phone', c.phone],
+      ['Email', c.email],
+      ['ZIP', d.zip],
+      ['Service', d.serviceLabel],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const slotsHtml = (Array.isArray(d.preferredSlots) && d.preferredSlots.length)
+      ? `<p style="margin:14px 0 0;"><b>Preferred times:</b> ${escHtml(d.preferredSlots.map(s => s.label || s.slot_key).join(', '))}</p>` : '';
+    const photoHtml = d.photoUrl ? `<p style="margin:14px 0 0;"><a href="${escHtml(d.photoUrl)}">View attached photo</a></p>` : '';
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 12px;">New estimate request — not a booking yet.</h2>
+      <table style="border-collapse:collapse;">${tbl}</table>
+      <p style="margin:14px 0 0;"><b>What they need:</b> ${escHtml(d.description || '')}</p>
+      ${slotsHtml}
+      ${photoHtml}
+      <p style="margin:16px 0 0;font-size:12px;color:#6b7280;">Check the Estimates tab on the dashboard to price it and send an approval link.</p>
+    </div>`;
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: 'New estimate request', html, replyTo: cfg.from });
+    }
+  } catch (e) {
+    console.warn('[owner-notify] non-fatal:', e.message);
+  }
+}

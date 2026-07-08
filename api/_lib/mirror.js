@@ -8,7 +8,6 @@
 // via scripts/import-zenbooker.mjs.
 import { serviceClient } from './supabase.js';
 import { signToken } from './auth.js';
-import { sendOwnerBookingAlert } from './owner-notify.js';
 
 function first(...vals) { for (const v of vals) if (v != null && v !== '') return v; return null; }
 
@@ -187,20 +186,9 @@ export async function mirrorBooking(ctx = {}) {
       status: bookingRow.status, note: `Mirrored from ${ctx.source || 'widget'} booking`,
     });
 
-    // Owner heads-up email on customer self-bookings (widget only — not office
-    // 'manual', imports, or warranty dispatches). Reaches here only on a NEW
-    // booking; the idempotency duplicate path returns earlier, so no double email.
-    if ((ctx.source || 'widget') === 'widget') {
-      const c = ctx.customer || {}, a = ctx.address || {};
-      await sendOwnerBookingAlert({
-        slug: ctx.businessSlug, businessName: biz.name || ctx.businessSlug, timezone: biz.timezone,
-        customer: { name: first(c.name, `${c.first_name || ''} ${c.last_name || ''}`.trim(), 'Customer'), phone: c.phone, email: c.email },
-        address: { line1: a.line1, city: a.city, state: a.state, zip: a.postal_code },
-        serviceName: ctx.service_name, scheduledAt: scheduled_at, scheduledEnd: ctx.scheduled_end,
-        technicianName: providerName, price, lineItems: ctx.line_items, customerNotes: ctx.customer_notes,
-        bookingId: booking_id,
-      });
-    }
+    // Note: online (widget) bookings no longer send Heather/Joey a "someone just
+    // booked" email — per owner request, that heads-up email is only sent for
+    // ESTIMATE requests now (see sendOwnerEstimateAlert in api/estimate.js).
 
     // Native callers (e.g. the Doms widget) need the new row's id to confirm /
     // email the booking. Zenbooker callers ignore the return value.
