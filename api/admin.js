@@ -144,14 +144,17 @@ function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Offic
 // Notify a technician by SMS that they've been assigned a job. Fire-and-forget;
 // safe to call even if the tech has no phone (sendSMS no-ops). `scheduledAtISO`
 // may be null (unscheduled job) — we fall back to a generic line.
-async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO) {
+async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO, areaTz) {
   if (!technicianId) return;
   // Look up by id ALONE (not business) so a cross-company tech — whose home
   // business differs from this booking's — is still found and texted.
   const { data: tech } = await db.from('technicians')
     .select('phone, business_id').eq('id', technicianId).maybeSingle();
   if (!tech?.phone) return;
-  const tz = biz.timezone || 'America/Denver';
+  // The time must be the JOB's local time (an Austin job is Central), not the
+  // business's home tz — else the tech is told an hour off. Caller passes the
+  // service-area tz; fall back to the business tz only when it's unknown.
+  const tz = areaTz || biz.timezone || 'America/Denver';
   let whenTxt = 'a new job';
   if (scheduledAtISO) {
     try {
@@ -1905,17 +1908,18 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // Send booking confirmation SMS to customer (if they opted in)
   if (c.phone && scheduled_at && body.sms_consent) {
-    const _tz = biz.timezone || 'America/Denver';
+    // Use the JOB's local time (tz was resolved from the service area above), so an
+    // Austin customer sees Central time — not the business's Mountain time.
     const _d = new Date(scheduled_at);
-    const dateStr = _d.toLocaleDateString('en-US', { timeZone: _tz, weekday: 'short', month: 'short', day: 'numeric' });
-    const timeStr = _d.toLocaleTimeString('en-US', { timeZone: _tz, hour: 'numeric', minute: '2-digit' });
+    const dateStr = _d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
+    const timeStr = _d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
     const msg = `You're booked! ✅ ${biz.name} will see you ${dateStr} at ${timeStr}. We'll text you when your tech is on the way. Reply STOP to opt out.`;
     sendSMS(c.phone, msg).catch(console.error);
   }
 
-  // Notify the technician if one was assigned at creation time.
-  if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at).catch(console.error);
-  if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at).catch(console.error);
+  // Notify the technician if one was assigned at creation time (job-local tz).
+  if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at, tz).catch(console.error);
+  if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at, tz).catch(console.error);
 
   // ---- Branded booking-confirmation email (best-effort; never fails the booking) ----
   // Mirrors the public widget's confirmation so phone-in jobs the office books
@@ -2282,12 +2286,17 @@ async function bookingUpdate(req, res, db, auth, body) {
 
   // Notify the technician when they are newly assigned to this job (only when the
   // tech actually changed, so re-saving the same assignment doesn't re-text them).
+  // Resolve the JOB's local tz from its zip so the texted time is the job's local
+  // time (an Austin job is Central), not the business's Mountain time.
+  const assignTz = (body.action === 'assign')
+    ? await areaTimezone(db, await serviceAreaIdFromPostal(db, biz.id, existing.postal_code), biz.timezone || 'America/Denver')
+    : (biz.timezone || 'America/Denver');
   if (body.action === 'assign' && patch.technician_id && patch.technician_id !== existing.technician_id) {
-    notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at).catch(console.error);
+    notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at, assignTz).catch(console.error);
   }
   // Also notify secondary technician if assigned
   if (body.action === 'assign' && 'secondary_technician_id' in patch && patch.secondary_technician_id && patch.secondary_technician_id !== existing.secondary_technician_id) {
-    notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at).catch(console.error);
+    notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at, assignTz).catch(console.error);
   }
   return res.status(200).json({ ok: true });
 }
