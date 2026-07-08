@@ -906,7 +906,16 @@
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;">Available Times</div>
         <div id="nbSlots" style="display:grid;gap:6px;"></div>
       </div>
-      <textarea class="search" style="margin:12px 0 0 0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
+      <!-- ③ Customer details — comes right after the time slot picker. -->
+      <details id="nbCustDetails" class="nb-cust">
+        <summary class="nb-cust-sum">Customer details <span class="nb-cust-tag">name · phone · email · address</span></summary>
+        <div class="nb-cust-body">
+          <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
+          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
+          <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address… (optional — type a ZIP to use ZIP only)">
+          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"></div>
+        </div>
+      </details>
       <select class="search" style="margin:0;width:100%;" id="nbPaymentMethod">
         <option value="">Select payment method</option>
         <option value="card">Credit Card</option>
@@ -917,20 +926,11 @@
         <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
         <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">Card is saved and charged at time of service.</div>
       </div>
+      <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
       <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
         <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
         <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment</label>
       </div>
-      <!-- ③ Customer details — collected LAST, once the customer agrees on price + time. -->
-      <details id="nbCustDetails" class="nb-cust">
-        <summary class="nb-cust-sum">Customer details <span class="nb-cust-tag">name · phone · email · address</span></summary>
-        <div class="nb-cust-body">
-          <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
-          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbPhone" placeholder="Phone *"><input class="search" style="margin:0" id="nbEmail" placeholder="Email *"></div>
-          <input class="search" style="margin:0" id="nbAddr" placeholder="Start typing an address… (optional — type a ZIP to use ZIP only)">
-          <div style="display:flex;gap:8px;"><input class="search" style="margin:0" id="nbCity" placeholder="City"><input class="search" style="margin:0;max-width:70px" id="nbState" placeholder="ST"></div>
-        </div>
-      </details>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
         <button class="btn ghost" type="button" id="nbSendEstimate">Send estimate</button>
@@ -6330,7 +6330,7 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
 // (waivable) and warn. Change a number here to change that branch's minimum.
 const NB_MINIMUMS = {
   'handy-andy': { austin: 119, default: 139 },   // matches the customer booking widget
-  'doms':       { default: 139 },                 // Denver-based (assumed same as HA Denver)
+  'doms':       { default: 135 },                 // Denver-based
 };
 function nbCurrentMinimum(){
   const m = NB_MINIMUMS[(current&&current.slug)] || {};
