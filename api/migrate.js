@@ -282,6 +282,17 @@ async function bracketSync(req, res) {
     } catch (e) { /* order_total column not present yet — ignore */ }
   }
 
+  // Record the parsed "Arrives …" date so the tech app can show an estimated
+  // delivery for in-route orders. Best-effort + fills only a null, same as
+  // order_total: silently skipped if the column isn't applied yet.
+  if (body.estimated_delivery && /^\d{4}-\d{2}-\d{2}$/.test(String(body.estimated_delivery))) {
+    try {
+      await db.from('bracket_purchases')
+        .update({ estimated_delivery: body.estimated_delivery })
+        .eq('walmart_order_num', walmart_order_num).is('estimated_delivery', null);
+    } catch (e) { /* estimated_delivery column not present yet — ignore */ }
+  }
+
   console.log('[bracket_sync]', walmart_order_num, results.map(r => `${r.business}:${r.action}`).join(', '));
   return res.status(200).json({ ok: true, order: walmart_order_num, results });
 }

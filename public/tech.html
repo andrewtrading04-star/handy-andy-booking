@@ -1581,6 +1581,30 @@ function renderInventory(data){
       <div style="min-width:96px;text-align:center;font-size:18px;font-weight:800;">${qty}</div>
     </div>`;
   const wp=Number(data.wire_plate)||0;
+  // In-route brackets: what's on the way to this tech but not yet delivered.
+  const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
+  const fmtEst=(iso)=>{ if(!iso) return null; const d=new Date(iso+'T00:00:00'); if(isNaN(d.getTime())) return null; return d.toLocaleDateString('en-US',{month:'long',day:'numeric'}); };
+  const inRoute=Array.isArray(data.in_route)?data.in_route:[];
+  const inRouteLines=[];
+  inRoute.forEach(o=>{
+    const parts=[];
+    if(o.full_motion>0) parts.push(plural(o.full_motion,'full motion'));
+    if(o.tilting>0)     parts.push(plural(o.tilting,'tilting'));
+    if(o.flat>0)        parts.push(plural(o.flat,'flat'));
+    if(!parts.length) return;
+    const est=fmtEst(o.estimated_delivery);
+    inRouteLines.push(`
+      <div style="padding:12px 0;border-bottom:1px solid var(--line);">
+        <div style="font-weight:700;font-size:15px;">${esc(parts.join(' + '))} <span style="color:var(--mute);font-weight:600;">In Route</span></div>
+        ${est?`<div class="sub" style="color:var(--mute);font-size:13px;margin-top:3px;">Estimated delivery ${esc(est)}</div>`:''}
+      </div>`);
+  });
+  const inRouteHtml = inRouteLines.length ? `
+    <div style="padding:18px 2px 6px;"><div style="font-weight:800;font-size:15px;">In Route</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:2px;">On the way to you. These get added to your on-hand count once they're delivered.</div></div>
+    <div class="card">
+      ${inRouteLines.join('')}
+    </div>` : '';
   v.innerHTML=`<div class="detail">
     <button class="back" id="invBack">‹ Today's jobs</button>
 
@@ -1593,6 +1617,7 @@ function renderInventory(data){
       ${row('Tilting',tilt)}
       ${row('Full Motion',fm)}
     </div>
+    ${inRouteHtml}
 
     <div style="padding:18px 2px 6px;"><div style="font-weight:800;font-size:15px;">Wire Concealment Plates</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:2px;">You manage these. They drop by 1 each time you finish a behind-the-wall wire job — fix the number here if it ever looks off.</div></div>

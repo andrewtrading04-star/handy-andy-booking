@@ -1680,6 +1680,51 @@ async function bracketInventory(req, res, db, auth) {
   const flat = inv?.flat_qty || 0;
   const tilting = inv?.tilting_qty || 0;
   const full_motion = inv?.full_motion_qty || 0;
+
+  // In-route orders assigned to this tech — brackets on the way but not yet
+  // delivered, so the tech knows what's coming and roughly when. Best-effort:
+  // if the query fails for any reason we just return an empty list (the on-hand
+  // counts above must never be blocked by this extra lookup).
+  let in_route = [];
+  try {
+    const irCols = (withEst) =>
+      `id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, order_date, created_at${withEst ? ', estimated_delivery' : ''}`;
+    let { data: rows, error: irErr } = await db.from('bracket_purchases')
+      .select(irCols(true))
+      .eq('technician_id', auth.tech_id)
+      .eq('business_id', auth.business_id)
+      .eq('status', 'in_route')
+      .order('created_at', { ascending: true });
+    // estimated_delivery arrives with its migration; degrade gracefully if absent.
+    if (irErr && /estimated_delivery/.test(irErr.message || '')) {
+      ({ data: rows } = await db.from('bracket_purchases')
+        .select(irCols(false))
+        .eq('technician_id', auth.tech_id)
+        .eq('business_id', auth.business_id)
+        .eq('status', 'in_route')
+        .order('created_at', { ascending: true }));
+    }
+    in_route = (rows || []).map((r) => {
+      // Estimated arrival: the parsed "Arrives …" date if we have it, otherwise
+      // ~7 days after the order date (Walmart's typical bracket shipping window).
+      let est = r.estimated_delivery || null;
+      if (!est) {
+        const base = r.order_date || (r.created_at ? String(r.created_at).slice(0, 10) : null);
+        if (base) {
+          const d = new Date(base + 'T00:00:00Z');
+          if (!isNaN(d.getTime())) { d.setUTCDate(d.getUTCDate() + 7); est = d.toISOString().slice(0, 10); }
+        }
+      }
+      return {
+        order_num: r.walmart_order_num || null,
+        flat: r.flat_qty || 0,
+        tilting: r.tilting_qty || 0,
+        full_motion: r.full_motion_qty || 0,
+        estimated_delivery: est,
+      };
+    }).filter((o) => (o.flat + o.tilting + o.full_motion) > 0);
+  } catch (e) { in_route = []; }
+
   return res.status(200).json({
     flat,
     tilting,
@@ -1687,6 +1732,7 @@ async function bracketInventory(req, res, db, auth) {
     total: flat + tilting + full_motion,
     wire_plate: hasWp ? (inv?.wire_plate_qty || 0) : 0,
     updated_at: inv?.updated_at || null,
+    in_route,
   });
 }
 

@@ -113,6 +113,31 @@ export function extractOrderTotal(text) {
   return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
 }
 
+// Estimated arrival → YYYY-MM-DD. Walmart order/shipping emails carry an
+// "Arrives <Mon DD>" (sometimes "Arriving …" / "Estimated delivery …") line.
+// The year is usually omitted, so we anchor to the order date's year and roll to
+// next year if the month already passed (a late-Dec order arriving in Jan).
+// Returns null when no arrival line is present.
+export function extractArrivesDate(text, orderISO) {
+  if (!text) return null;
+  const m = text.match(/(?:arriv(?:es|ing)|estimated\s+delivery|expected\s+delivery|delivery\s+(?:by|date))\b[^A-Za-z0-9]{0,12}([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/i);
+  if (!m) return null;
+  const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+  const mon = months[m[1].slice(0, 3).toLowerCase()];
+  if (mon == null) return null;
+  const day = parseInt(m[2], 10);
+  if (!(day >= 1 && day <= 31)) return null;
+  const base = orderISO && /^\d{4}-\d{2}-\d{2}$/.test(orderISO) ? orderISO : new Date().toISOString().slice(0, 10);
+  let year = m[3] ? parseInt(m[3], 10) : parseInt(base.slice(0, 4), 10);
+  if (!m[3]) {
+    const orderMon = parseInt(base.slice(5, 7), 10) - 1;
+    if (mon < orderMon - 1) year += 1; // arrival month well before order month → next year
+  }
+  const d = new Date(Date.UTC(year, mon, day));
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
 // Order date → YYYY-MM-DD. "Order date: Sun, Jun 28, 2026" or m/d/Y; today if absent.
 export function extractOrderDate(text, todayISO) {
   const today = todayISO || new Date().toISOString().slice(0, 10);
@@ -159,13 +184,15 @@ export function parseWalmartEmails({ subject = '', text = '', html = '', todayIS
     const seg = body.slice(markers[i].index, (i + 1 < markers.length) ? markers[i + 1].index : body.length);
     const { flat, tilting, fullMotion } = extractBrackets(seg);
     const status = detectStatus(subject, seg);
+    const orderDate = extractOrderDate(seg, today);
     out.push({
       walmart_order_num: markers[i].num,
       flat_qty: flat,
       tilting_qty: tilting,
       full_motion_qty: fullMotion,
       status,
-      order_date: extractOrderDate(seg, today),
+      order_date: orderDate,
+      estimated_delivery: extractArrivesDate(seg, orderDate) || extractArrivesDate(body, orderDate),
       delivered_date: status === 'delivered' ? today : null,
       order_url: extractOrderUrl(seg) || extractOrderUrl(html),
       delivery_address: extractDeliveryAddress(seg) || extractDeliveryAddress(body),

@@ -97,6 +97,7 @@ function mergeByOrder(payloads) {
     if ((STATUS_RANK[p.status] ?? 0) > (STATUS_RANK[cur.status] ?? 0)) cur.status = p.status;
     cur.order_url      = cur.order_url || p.order_url;
     cur.delivered_date = cur.delivered_date || p.delivered_date;
+    cur.estimated_delivery = cur.estimated_delivery || p.estimated_delivery;
     if (p.order_date && (!cur.order_date || p.order_date < cur.order_date)) cur.order_date = p.order_date;
   }
   return [...byOrder.values()];
