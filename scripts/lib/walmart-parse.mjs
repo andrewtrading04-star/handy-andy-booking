@@ -101,6 +101,18 @@ export function extractDeliveryAddress(text) {
   return m[1].replace(/\s+/g, ' ').trim().replace(/,\s*$/, '');
 }
 
+// Order total (what we paid) from the email — "Order total … $178.61" or
+// "Includes all fees, taxes and discounts $178.61". Anchored to those labels so
+// it doesn't grab a per-item price; returns null if no labeled total is found.
+export function extractOrderTotal(text) {
+  if (!text) return null;
+  const m = text.match(/includes all fees[^$]*\$\s*([\d,]+\.\d{2})/i)
+         || text.match(/order\s*total[^$]{0,60}?\$\s*([\d,]+\.\d{2})/i);
+  if (!m) return null;
+  const v = parseFloat(m[1].replace(/,/g, ''));
+  return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
+}
+
 // Order date → YYYY-MM-DD. "Order date: Sun, Jun 28, 2026" or m/d/Y; today if absent.
 export function extractOrderDate(text, todayISO) {
   const today = todayISO || new Date().toISOString().slice(0, 10);
@@ -157,6 +169,7 @@ export function parseWalmartEmails({ subject = '', text = '', html = '', todayIS
       delivered_date: status === 'delivered' ? today : null,
       order_url: extractOrderUrl(seg) || extractOrderUrl(html),
       delivery_address: extractDeliveryAddress(seg) || extractDeliveryAddress(body),
+      order_total: extractOrderTotal(seg) || extractOrderTotal(body),
     });
   }
   return out;

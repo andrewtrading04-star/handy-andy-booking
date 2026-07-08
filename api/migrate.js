@@ -271,6 +271,17 @@ async function bracketSync(req, res) {
     }
   }
 
+  // Record what we PAID (the order total from the email) on the order's row(s),
+  // once. Best-effort: silently skipped if the order_total column isn't applied
+  // yet, and only fills a null so a corrected total is never clobbered.
+  if (body.order_total != null && isFinite(Number(body.order_total))) {
+    try {
+      await db.from('bracket_purchases')
+        .update({ order_total: Math.round(Number(body.order_total) * 100) / 100 })
+        .eq('walmart_order_num', walmart_order_num).is('order_total', null);
+    } catch (e) { /* order_total column not present yet — ignore */ }
+  }
+
   console.log('[bracket_sync]', walmart_order_num, results.map(r => `${r.business}:${r.action}`).join(', '));
   return res.status(200).json({ ok: true, order: walmart_order_num, results });
 }

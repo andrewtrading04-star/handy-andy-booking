@@ -645,10 +645,15 @@ async function summary(req, res, db, auth) {
     (async () => {
       const out = [];
       try {
-        const { data: eRows } = await db.from('estimates')
+        // Show the "book ASAP" alert ONLY for estimates explicitly flagged for it
+        // (book_alert = true) and not yet archived — controllable per estimate via
+        // a data flag rather than firing on every approved one, and with no name
+        // hardcoded. Degrades to no alerts until the book_alert column exists.
+        const { data: eRows, error } = await db.from('estimates')
           .select('id, customer_name, customer_phone, customer_zip, created_at')
-          .eq('business_id', biz.id).eq('status', 'scheduled')
+          .eq('business_id', biz.id).eq('book_alert', true).neq('status', 'archived')
           .order('created_at', { ascending: false }).limit(50);
+        if (error) { if (/book_alert/.test(error.message || '')) return []; throw error; }
         for (const e of (eRows || [])) {
           out.push({
             id: e.id,
@@ -4703,12 +4708,17 @@ async function bracketPurchases(req, res, db, auth) {
   const slugById = new Map((bizes || []).map(b => [b.id, b.slug]));
   const ids = (bizes || []).map(b => b.id);
 
-  const { data: purch, error } = await db.from('bracket_purchases')
-    .select(`id, business_id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at,
-             technician:technicians ( id, name )`)
-    .in('business_id', ids)
-    .order('created_at', { ascending: false })
-    .limit(limit * 2);
+  const baseCols = `id, business_id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, {TOTAL}created_at,
+             technician:technicians ( id, name )`;
+  let { data: purch, error } = await db.from('bracket_purchases')
+    .select(baseCols.replace('{TOTAL}', 'order_total, '))
+    .in('business_id', ids).order('created_at', { ascending: false }).limit(limit * 2);
+  // order_total arrives with its migration; degrade gracefully if not applied yet.
+  if (error && /order_total/.test(error.message || '')) {
+    ({ data: purch, error } = await db.from('bracket_purchases')
+      .select(baseCols.replace('{TOTAL}', ''))
+      .in('business_id', ids).order('created_at', { ascending: false }).limit(limit * 2));
+  }
   if (error) throw error;
 
   // Dedupe by order number. Prefer the ASSIGNED row (shows who has it); among
@@ -4736,6 +4746,7 @@ async function bracketPurchases(req, res, db, auth) {
       order_date: p.order_date,
       delivered_date: p.delivered_date,
       order_url: p.order_url || null,
+      order_total: p.order_total != null ? Number(p.order_total) : null,
       created_at: p.created_at,
     })),
   });
