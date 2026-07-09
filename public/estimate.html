@@ -28,19 +28,14 @@
   h1{font-size:21px;font-weight:800;margin:6px 0 4px;line-height:1.25;color:var(--navy);}
   .sub{color:var(--ink-2);font-size:14px;margin-bottom:16px;}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .opt{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:13px 12px;text-align:left;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink);transition:.12s;display:flex;align-items:flex-start;gap:10px;}
+  .opt{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:13px 12px;text-align:left;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink);transition:.12s;display:flex;align-items:flex-start;gap:10px;text-decoration:none;}
   .opt .opt-txt{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  .opt .opt-title{color:var(--accent);}
   .opt small{font-weight:500;color:var(--mute);font-size:12px;line-height:1.4;}
   .opt:hover{border-color:var(--accent);}
   .opt.on{border-color:var(--accent);background:var(--accent-soft);}
-  .opt-ic{width:32px;height:32px;border-radius:8px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .opt-ic{width:32px;height:32px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
   .opt-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;}
-  .opt.on .opt-ic{background:var(--accent);}
-  .tvrow{margin-top:10px;background:var(--navy);border-radius:12px;padding:14px 15px;display:flex;align-items:center;gap:12px;text-decoration:none;cursor:pointer;}
-  .tvrow .opt-ic{background:var(--accent);}
-  .tvrow .opt-txt b{color:#fff;font-size:14px;font-weight:800;display:block;}
-  .tvrow .opt-txt small{color:rgba(255,255,255,.65);font-size:12px;}
-  .tvrow .pill{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:800;letter-spacing:.05em;padding:5px 10px;border-radius:20px;flex:0 0 auto;white-space:nowrap;}
   textarea,input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:13px 14px;font-size:16px;font-family:inherit;}
   textarea{min-height:130px;resize:vertical;}
   textarea:focus,input:focus{outline:none;border-color:var(--accent);}
@@ -261,19 +256,18 @@ function stepService(){
   const opts = state.services.map(s =>
     `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
       <span class="opt-ic"><svg><use href="#${serviceIcon(s.name)}"/></svg></span>
-      <span class="opt-txt"><span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}</span>
+      <span class="opt-txt"><span class="opt-title">${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}</span>
     </button>`).join('');
-  const grid = state.services.length ? `<div class="grid">${opts}</div>` : '';
-  // TV Mounting is a distinct instant-book row (not an estimate-flow tile) —
-  // styled to stand apart since tapping it leaves the estimate flow entirely.
+  // TV Mounting is a tile alongside the rest, styled identically — it just
+  // links straight to the booking page instead of continuing the estimate flow.
   const tvm = BOOK_URL
-    ? `<a class="tvrow" href="${BOOK_URL}" target="_top" rel="noopener">
+    ? `<a class="opt" href="${BOOK_URL}" target="_top" rel="noopener">
       <span class="opt-ic"><svg><use href="#i-tv"/></svg></span>
-      <span class="opt-txt"><b>TV Mounting</b><small>Skip the estimate — book an install instantly</small></span>
-      <span class="pill">Book now</span>
+      <span class="opt-txt"><span class="opt-title">TV Mounting</span><small>Book your TV mount install instantly.</small></span>
     </a>`
     : '';
-  const inner = (state.services.length || tvm) ? `${grid}${tvm}`
+  const inner = (state.services.length || tvm)
+    ? `<div class="grid">${opts}${tvm}</div>`
     : `<div class="sub">No services available right now. Please call us instead.</div>`;
   return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
     { nextDisabled: !state.serviceId });
