@@ -64,11 +64,24 @@ export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError
   if (idempotencyKey) headers['Idempotency-Key'] = String(idempotencyKey).slice(0, 256);
 
   try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
+    // Hard 8s cap on the Resend call. Without it, a stalled connection hangs the
+    // whole serverless response — booking creation awaits these sends AFTER the
+    // booking row exists, so an unbounded email fetch = the office UI stuck on
+    // "Processing…" for a booking that actually succeeded. 8s is far above
+    // Resend's normal latency; on abort the caller gets { sent:false, error }.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    let res;
+    try {
+      res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       const msg = `Resend ${res.status}: ${errText.slice(0, 400)}`;

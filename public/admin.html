@@ -761,8 +761,12 @@
 </style>
 <!-- Stripe.js — loaded up front so "Change card" / charge flows always have
      window.Stripe available (previously only the New Booking flow loaded it
-     lazily, so Change card failed with "Payment library not loaded"). -->
-<script src="https://js.stripe.com/v3/"></script>
+     lazily, so Change card failed with "Payment library not loaded").
+     `async` so a slow stripe.com fetch can't block first paint of the whole
+     dashboard: every consumer runs from a user-triggered handler long after
+     load, each guards !window.Stripe, and ensureNbStripe() lazily injects the
+     script again if it's somehow still missing. -->
+<script async src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
 
@@ -5441,7 +5445,11 @@ async function openNewBooking(prefill){
   resetNbSteps();
   nbSelectedSlot=null;
   nbServiceId=null;
-  nbBookingKey=nbNewKey();   // fresh idempotency key for this booking attempt
+  nbModalSession++;   // new modal session — in-flight attempts from a prior one must not hide it
+  // Belt-and-braces: form.reset() does NOT restore a button's disabled state or
+  // label, so explicitly revive the submit button in case a previous attempt
+  // left it on "Processing…" (the old page-reload-required bug).
+  { const sb=document.querySelector('#nbForm button[type="submit"]'); if(sb){ sb.disabled=false; sb.textContent='Create booking'; } }
   document.getElementById('nbSlots').innerHTML='';
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
@@ -5463,13 +5471,36 @@ async function openNewBooking(prefill){
   nbZipAreaId=null;   // no zip yet -> all techs until a metro is resolved
   nbZipReplyIdle();
   { const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=false; }   // ZIP first; details collected last
+  // Show the modal IMMEDIATELY — every reset above is synchronous, and nothing
+  // below needs to block first paint. It used to stay hidden until services +
+  // technicians + the partner roster had ALL round-tripped (2 serial network
+  // phases), which is exactly the "takes forever to open" complaint.
+  modal.classList.remove('hidden');
+  attachAddressAutocomplete(document.getElementById('nbAddr'), { city:'nbCity', state:'nbState', zip:'nbZip' });
+  // Kick the availability calendar off NOW, in parallel with the roster/services
+  // fetch — it depends on neither (the tech filter falls back to "any"). When a
+  // prefill carries a ZIP, skip it: the zip-change dispatch below re-runs both
+  // the partner load and the calendar with the resolved metro, so the unfiltered
+  // first pass would just be thrown away (it used to double-fetch).
+  const prefillHasZip = !!(prefill && prefill.postal_code);
+  if(!prefillHasZip) loadNbCalendar();
   try{
-    const [svc, tech] = await Promise.all([
-      api('services',{ params:{ business:current.slug }}),
-      // Always fetch (not techCache) so each tech carries service_area_id for the
-      // zip-based metro filter on the tech dropdowns.
-      api('technicians',{ params:{ business:current.slug }}),
-    ]);
+    // Services + technicians change rarely; a 60s per-business cache makes
+    // repeat opens instant. Safe: the picked tech/slot is re-validated
+    // server-side at create time, so a briefly-stale roster can't mis-book.
+    const cached = nbDataCache.get(current.slug);
+    let svc, tech;
+    if(cached && (Date.now()-cached.at)<60000){
+      ({ svc, tech } = cached);
+    } else {
+      [svc, tech] = await Promise.all([
+        api('services',{ params:{ business:current.slug }}),
+        // Full fetch (not techCache) so each tech carries service_area_id for
+        // the zip-based metro filter on the tech dropdowns.
+        api('technicians',{ params:{ business:current.slug }}),
+      ]);
+      nbDataCache.set(current.slug, { at: Date.now(), svc, tech });
+    }
     nbServices = svc.services || [];
     nbSelectedSlot = null;
     // Assurion is a Handy-Andy-only channel handled by Steve. Surface it as its
@@ -5502,12 +5533,11 @@ async function openNewBooking(prefill){
     nbOwnTechs = tech.technicians || [];
     // Partner-company roster for cross-company booking (best-effort). When a
     // partner exists, a second "company" pool lets the office book their techs.
+    // Not awaited: the partner dropdown pool fills in when it lands, and the
+    // zip-change pass re-runs it anyway — nothing else here depends on it.
     nbPartner = null;
-    await nbLoadPartnerTechs();
-    loadNbCalendar();
+    if(!prefillHasZip) nbLoadPartnerTechs().catch(err=>{ const e=document.getElementById('nbErr'); if(e && !e.textContent) e.textContent=err.message||'Could not load the technician list — reopen the form.'; });
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }
-  modal.classList.remove('hidden');
-  attachAddressAutocomplete(document.getElementById('nbAddr'), { city:'nbCity', state:'nbState', zip:'nbZip' });
   // Pre-fill an existing customer's details (from the Customers tab "Create
   // Appointment" button) so the office doesn't re-enter them.
   if(prefill){
@@ -5564,10 +5594,19 @@ function renderNbConvertSummary(){
   el.style.display='';
 }
 let nbServices=[], nbSelectedSlot=null, nbServiceId=null;
-// One idempotency key per new-booking attempt (set on modal open). Every submit
-// for this attempt carries the SAME key, so a double-click / double-submit is
-// de-duplicated server-side into a single booking instead of creating two.
-let nbBookingKey=null;
+// Idempotency keys are derived from the booking's CONTENT (business+date+slot+
+// customer) and cached here until the create definitively succeeds. That way a
+// retry of the same job — whether an in-place resubmit OR "timed out, closed the
+// modal, reopened, re-entered it" — carries the SAME key and the server dedupes
+// it. (The old per-modal-open key only protected in-place double-clicks.)
+const nbKeyCache=new Map();
+// 60s per-business cache of the services + technicians responses so reopening
+// the New Booking modal is instant instead of re-paying two round-trips. Staleness
+// is bounded and harmless: tech/slot choices are re-validated server-side on create.
+const nbDataCache=new Map();
+// Bumped on every modal open, so a late success from a previous attempt can tell
+// the modal was reopened for a NEW job and must not yank it shut.
+let nbModalSession=0;
 function nbNewKey(){ return (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : 'k-'+Date.now()+'-'+Math.random().toString(16).slice(2); }
 // Cross-company booking: own roster, and the partner company's roster (if any).
 // The primary AND the second technician each have their own company pool, so a
@@ -5843,7 +5882,25 @@ document.getElementById('nbSecondTech').addEventListener('change',onSecondTechCh
 // (Handy Andy DBs that never received migrations 0003/0015 — the public widget
 // hardcodes these so it was never noticed), seed the full set once and re-fetch
 // so every step (Bracket, Fireplace, Wires, etc.) shows in New Booking.
-async function nbLoadTvOptions(serviceId){
+// Cached per (business, service) for the session: the groups only change via the
+// one-time seed/relabel self-heals below, which converge on first load — so
+// re-picking "TV Mounting" (or reopening the modal) renders instantly instead of
+// re-paying up to 5 sequential API calls. The cached value is the promise, so
+// concurrent selections share one in-flight request.
+const nbTvOptionsCache=new Map();
+function nbLoadTvOptions(serviceId){
+  const ck=current.slug+':'+serviceId;
+  let p=nbTvOptionsCache.get(ck);
+  if(!p){
+    p=nbLoadTvOptionsUncached(serviceId);
+    nbTvOptionsCache.set(ck,p);
+    p.then(g=>{ if(!g||!g.length) nbTvOptionsCache.delete(ck); },()=>nbTvOptionsCache.delete(ck));
+  }
+  // Hand each caller its own copy — nbRelocateOneConnect and the render steps
+  // mutate the group arrays, and shared mutation across opens corrupts state.
+  return p.then(g=>JSON.parse(JSON.stringify(g)));
+}
+async function nbLoadTvOptionsUncached(serviceId){
   let groups=[];
   try{
     const r=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
@@ -6592,8 +6649,15 @@ document.getElementById('nbService').addEventListener('change',async e=>{
 // ── Payment method + Stripe card entry ──────────────────────────────────────
 const NB_STRIPE_KEY='pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
 let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
+// Race a promise against a rejecting timer. Stripe.js's script load and its
+// createPaymentMethod network call have NO built-in timeout — on a stalled
+// connection they can pend forever, which stranded the submit button on
+// "Processing…" (the 45s api() timeout only guards our own API calls).
+function nbWithTimeout(p,ms,msg){
+  return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
+}
 function ensureNbStripe(){
-  return new Promise((resolve,reject)=>{
+  return nbWithTimeout(new Promise((resolve,reject)=>{
     if(nbStripeCard){ resolve(); return; }
     const init=()=>{
       try{
@@ -6607,7 +6671,7 @@ function ensureNbStripe(){
     if(window.Stripe){ init(); return; }
     const s=document.createElement('script'); s.src='https://js.stripe.com/v3/';
     s.onload=init; s.onerror=()=>reject(new Error('Could not load Stripe.')); document.head.appendChild(s);
-  });
+  }),20000,'Could not load the card processor — check your connection and try again.');
 }
 document.getElementById('nbPaymentMethod').addEventListener('change',async e=>{
   const isCard=e.target.value==='card';
@@ -6900,57 +6964,80 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
 
   // For card payments, tokenize the card with Stripe before creating the booking.
   let paymentMethodId=null;
-  // Disable submit button early to prevent double-submission
+  // Disable submit early to block double-clicks. EVERYTHING past this line runs
+  // inside try/finally: the finally ALWAYS restores the button — success paths
+  // included. The old code never re-enabled it after a successful booking, so
+  // the NEXT New Booking in the same page session opened with a dead
+  // "Processing…" button (the "have to reload the page" bug the office hit).
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
-
-  if(paymentMethod==='card'){
-    if(!email){ openCust(); err.textContent='Email is required to save a card on file'; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
-    try{
-      await ensureNbStripe();
-      const {paymentMethod:pm,error}=await nbStripe.createPaymentMethod({
-        type:'card', card:nbStripeCard,
-        billing_details:{ name, email, phone },
-      });
-      if(error){ err.textContent=error.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
-      paymentMethodId=pm.id;
-    }catch(e3){ err.textContent=e3.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } return; }
-  }
+  const mySession=nbModalSession;   // detect close-and-reopen-for-a-new-job while in flight
   try{
-    await api('booking_create',{ method:'POST', body:{
-      business: current.slug,
-      idempotency_key: nbBookingKey,
-      customer:{ name, phone, email,
-        address_line1:document.getElementById('nbAddr').value.trim(),
-        city:document.getElementById('nbCity').value.trim(),
-        state:document.getElementById('nbState').value.trim(),
-        postal_code:document.getElementById('nbZip').value.trim() },
-      service_id: nbServiceId || document.getElementById('nbService').value || null,
-      technician_id: prim.id || 'any',
-      pool: prim.pool,
-      secondary_technician_id: sec ? sec.id : null,
-      pool2: sec ? sec.pool : 'own',
-      needs_lifting: secondMode==='mandatory',
-      tv_size_category: nbSelectedLiftingKind()||null,
-      scheduled_date: date,
-      scheduled_slot: nbSelectedSlot.key,
-      selections,
-      subtotal,
-      tax,
-      price: totalPrice,
-      notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
-      payment_method: paymentMethod || null,
-      payment_method_id: paymentMethodId,
-      sms_consent: document.getElementById('nbSmsConsent').checked,
-    }});
-    // Converted from an estimate? Archive it now that the job exists, so it leaves
-    // the estimates list. Best-effort — the booking is already created either way.
-    if(nbSourceEstimateId){
-      const _eid=nbSourceEstimateId; nbSourceEstimateId=null;
-      api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'archived' }}).catch(()=>{});
+    if(paymentMethod==='card'){
+      if(!email){ openCust(); err.textContent='Email is required to save a card on file'; return; }
+      try{
+        await ensureNbStripe();
+        // Stripe.js has no built-in timeout; unbounded, a stalled tokenize call
+        // stranded the button forever (api()'s 45s guard doesn't cover Stripe).
+        const {paymentMethod:pm,error}=await nbWithTimeout(nbStripe.createPaymentMethod({
+          type:'card', card:nbStripeCard,
+          billing_details:{ name, email, phone },
+        }),30000,'Card processing timed out — check your connection and try again.');
+        if(error){ err.textContent=error.message; return; }
+        paymentMethodId=pm.id;
+      }catch(e3){ err.textContent=e3.message; return; }
     }
-    document.getElementById('modal').classList.add('hidden');
-    toast('Booking created'); refreshCurrent();
-  }catch(e2){ err.textContent=e2.message; if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; } }
+    // Idempotency key derived from the booking's CONTENT (business+date+slot+
+    // customer), cached until definitive success. Re-entering the same job after
+    // a timeout — even via close modal + reopen, which used to mint a fresh
+    // per-modal key — reuses the SAME key, so the server dedupes it.
+    const fp=[current.slug,date,nbSelectedSlot.key,phone||email||name].join('|');
+    const key=nbKeyCache.get(fp)||nbNewKey();
+    nbKeyCache.set(fp,key);
+    try{
+      const resp=await api('booking_create',{ method:'POST', body:{
+        business: current.slug,
+        idempotency_key: key,
+        customer:{ name, phone, email,
+          address_line1:document.getElementById('nbAddr').value.trim(),
+          city:document.getElementById('nbCity').value.trim(),
+          state:document.getElementById('nbState').value.trim(),
+          postal_code:document.getElementById('nbZip').value.trim() },
+        service_id: nbServiceId || document.getElementById('nbService').value || null,
+        technician_id: prim.id || 'any',
+        pool: prim.pool,
+        secondary_technician_id: sec ? sec.id : null,
+        pool2: sec ? sec.pool : 'own',
+        needs_lifting: secondMode==='mandatory',
+        tv_size_category: nbSelectedLiftingKind()||null,
+        scheduled_date: date,
+        scheduled_slot: nbSelectedSlot.key,
+        selections,
+        subtotal,
+        tax,
+        price: totalPrice,
+        notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
+        payment_method: paymentMethod || null,
+        payment_method_id: paymentMethodId,
+        sms_consent: document.getElementById('nbSmsConsent').checked,
+      }});
+      nbKeyCache.delete(fp);
+      // Converted from an estimate? Archive it now that the job exists, so it leaves
+      // the estimates list. Best-effort — the booking is already created either way.
+      if(nbSourceEstimateId){
+        const _eid=nbSourceEstimateId; nbSourceEstimateId=null;
+        api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'archived' }}).catch(()=>{});
+      }
+      // Only hide the modal if it still belongs to THIS attempt — if the office
+      // closed it and reopened for a different job while this request was in
+      // flight, don't yank their new entry shut.
+      if(mySession===nbModalSession) document.getElementById('modal').classList.add('hidden');
+      if(resp&&resp.warning) toast(resp.warning);
+      toast(resp&&resp.duplicate ? 'That booking already existed — no duplicate was created' : 'Booking created');
+      refreshCurrent();
+    }catch(e2){ err.textContent=e2.message; }
+  }finally{
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; }
+  }
 });
 
 // ── Lightbox ────────────────────────────────────────────────────────────────
