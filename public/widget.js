@@ -666,7 +666,65 @@
     // Mount Stripe card element after DOM is ready
     if(key==='customer'){
       ensureStripe().then(mountStripeCard);
+      armExitIntent();
     }
+  }
+
+  // ─── Exit intent (customer/checkout step only, once per page load) ────────
+  // Two device-native triggers for the same offer: desktop mouse exits upward
+  // through the top of the viewport (mouseout with no relatedTarget); back
+  // button / back-swipe on mobile or desktop, via a trapped history entry.
+  // Whichever fires first shows the modal; only once per session.
+  let exitIntentArmed=false, exitIntentShown=false;
+  const EXIT_COUPON='LASTCHANCE10';
+  function armExitIntent(){
+    if(exitIntentArmed||exitIntentShown)return;
+    exitIntentArmed=true;
+    document.addEventListener('mouseout',onExitMouseOut);
+    try{ history.pushState({haExitTrap:true},'',location.href); }catch(e){}
+    window.addEventListener('popstate',onExitPopState);
+  }
+  function onExitMouseOut(e){
+    if(!e.relatedTarget&&!e.toElement&&e.clientY<=0)showExitIntentModal();
+  }
+  function onExitPopState(){
+    if(exitIntentShown)return;
+    try{ history.pushState({haExitTrap:true},'',location.href); }catch(e){}
+    showExitIntentModal();
+  }
+  function disarmExitIntent(){
+    exitIntentArmed=false;
+    document.removeEventListener('mouseout',onExitMouseOut);
+    window.removeEventListener('popstate',onExitPopState);
+  }
+  function showExitIntentModal(){
+    if(exitIntentShown)return;
+    exitIntentShown=true;
+    disarmExitIntent();
+    logEvent('answer','exit_intent_shown');
+    const ov=document.createElement('div');
+    ov.id='ha-exit-ov';
+    ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.75)!important;';
+    ov.innerHTML=`
+      <div style="position:relative!important;width:100%!important;max-width:360px!important;background:#18181c!important;border:1px solid #2d2d34!important;border-radius:12px!important;padding:26px 22px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif!important;color:#fff!important;text-align:center!important;">
+        <button id="ha-exit-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:12px!important;background:none!important;border:none!important;color:#a0a0ab!important;font-size:18px!important;cursor:pointer!important;padding:4px!important;">✕</button>
+        <div style="font-size:17px!important;font-weight:800!important;margin:0 0 6px!important;">Wait — don't lose your spot</div>
+        <div style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 16px!important;line-height:1.5!important;">Here's $10 off to lock in today's price.</div>
+        <div style="font-family:ui-monospace,Menlo,Consolas,monospace!important;font-weight:800!important;letter-spacing:0.05em!important;background:rgba(255,102,0,0.14)!important;border:1px solid rgba(255,102,0,0.4)!important;color:#ff9944!important;padding:7px 15px!important;border-radius:8px!important;display:inline-block!important;margin-bottom:16px!important;font-size:13.5px!important;">${EXIT_COUPON}</div>
+        <div>
+          <button id="ha-exit-apply" style="${S.btnPri};width:100%!important;">Apply $10 off &amp; continue</button>
+          <button id="ha-exit-close" style="${S.btnSec};width:100%!important;margin-top:9px!important;">No thanks</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close=reason=>{ ov.remove(); logEvent('answer','exit_intent_'+reason); };
+    ov.querySelector('#ha-exit-x').addEventListener('click',()=>close('dismissed'));
+    ov.querySelector('#ha-exit-close').addEventListener('click',()=>close('dismissed'));
+    ov.querySelector('#ha-exit-apply').addEventListener('click',()=>{
+      couponCode=EXIT_COUPON;
+      const f=document.getElementById('c-coupon'); if(f)f.value=EXIT_COUPON;
+      close('applied');
+    });
   }
 
   // ─── Step builders ────────────────────────────────────────────────────────
