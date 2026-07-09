@@ -1919,7 +1919,7 @@ function openBooking(b){
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
       ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkChangeCard">💳 Change card</button>`:''}
-      ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
+      ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓${b.amount_refunded>0?` <span style="color:#b45309;">(${money2(b.amount_refunded)} refunded)</span>`:''}</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
       ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
     </div>
     <div id="bkCardBox" class="hidden" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
@@ -1975,7 +1975,17 @@ function openBooking(b){
   const ro=document.getElementById('bkReopen'); if(ro) ro.onclick=async()=>{ if(confirm('Reopen this completed job? It will be marked as assigned or confirmed.')){  await updateBooking({ id:b.id, action:'reopen' }); close(); } };
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=()=>openChargeFlowAdmin(b);
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
-  const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{ if(confirm('Refund this charge to the customer?')){ await paymentAction(b.id,'refund'); close(); } };
+  const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{
+    let max;
+    try{ const r=await api('booking_payment',{method:'POST',body:{business:current.slug,id:b.id,action:'refund_status'}}); max=r.remaining; }
+    catch(err){ return toast(err.message); }
+    const v=prompt(`How much would you like to refund? (max $${max.toFixed(2)})`);
+    if(v==null) return;
+    const amt=Number(v);
+    if(!v.trim()||!isFinite(amt)||amt<=0) return toast('Enter an amount greater than $0.');
+    if(amt>max+0.001) return toast(`Amount exceeds the refundable balance ($${max.toFixed(2)}).`);
+    await paymentAction(b.id,'refund',amt); close();
+  };
   const cc=document.getElementById('bkChangeCard'); if(cc) cc.onclick=()=>{ const box=document.getElementById('bkCardBox'); if(box){ box.classList.remove('hidden'); cc.style.display='none'; mountBkCard(b); } };
   const ccx=document.getElementById('bkCardCancel'); if(ccx) ccx.onclick=()=>{ const box=document.getElementById('bkCardBox'); if(box) box.classList.add('hidden'); if(cc) cc.style.display=''; };
   // Photos + notes (loaded async; they don't refresh the whole list on change).
@@ -2413,8 +2423,9 @@ async function loadBookingAuthorization(id){
 
 async function paymentAction(id, action, amount){
   try{
-    await api('booking_payment',{ method:'POST', body:{ business:current.slug, id, action, amount }});
-    toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
+    const r=await api('booking_payment',{ method:'POST', body:{ business:current.slug, id, action, amount }});
+    if(r.warning){ toast(r.warning); }
+    else toast(action==='charge'?'Card charged ✓':action==='refund'?(r.payment_status==='refunded'?'Refunded':'Partially refunded'):action==='mark_paid'?'Marked paid ✓':'Updated');
     refreshCurrent();
   }catch(err){ toast(err.message); }
 }

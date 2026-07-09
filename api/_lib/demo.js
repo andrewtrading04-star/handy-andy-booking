@@ -18,7 +18,12 @@ export function demoStripeResponse(path, method = 'POST', body = null) {
     // Fake "money in the account" for the Revenue-box payout figure.
     return { available: [{ currency: 'usd', amount: 812300 }], pending: [{ currency: 'usd', amount: 154200 }] };
   }
-  if (p.startsWith('/payment_intents')) return { id: 'pi_demo', status: 'succeeded', amount: (body && body.amount) || 0, charges: { data: [{ id: 'ch_demo', payment_method_details: { card } }] } };
+  if (p.startsWith('/payment_intents')) {
+    // GET (refund lookup) has no body to read an amount from — fake a charge
+    // comfortably above any demo ticket price so the refund-amount check passes.
+    if (method === 'GET') return { id: 'pi_demo', status: 'succeeded', amount: 999999, latest_charge: { id: 'ch_demo', amount: 999999, amount_refunded: 0 } };
+    return { id: 'pi_demo', status: 'succeeded', amount: (body && body.amount) || 0, charges: { data: [{ id: 'ch_demo', payment_method_details: { card } }] } };
+  }
   if (p.startsWith('/charges'))         return { id: 'ch_demo', status: 'succeeded', amount: (body && body.amount) || 0, paid: true };
   if (p.startsWith('/refunds'))         return { id: 're_demo', status: 'succeeded', amount: (body && body.amount) || 0 };
   if (p.startsWith('/disputes'))        return { data: [] };

@@ -2483,12 +2483,59 @@ async function bookingPayment(req, res, db, auth, body) {
     return res.status(200).json({ ok: true, payment_status: 'unpaid' });
   }
 
-  if (act === 'refund') {
+  // refund_status / refund both need the TRUE remaining refundable balance —
+  // re-fetched from Stripe rather than trusted from our own amount_refunded
+  // column, since that column could drift (e.g. a refund issued directly in
+  // the Stripe dashboard) and refunding off a stale number risks over-refunding.
+  if (act === 'refund_status' || act === 'refund') {
     if (!b.stripe_payment_intent_id) return res.status(400).json({ error: 'No Stripe charge on this booking to refund.' });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id }, ...acct }); }
+    let pi;
+    try { pi = await stripe(`/payment_intents/${b.stripe_payment_intent_id}?expand[]=latest_charge`, { method: 'GET', ...acct }); }
+    catch (e) { return res.status(e.status || 400).json({ error: 'Could not look up this charge on Stripe: ' + e.message }); }
+    const charge = pi.latest_charge || null;
+    if (!charge) return res.status(400).json({ error: 'No captured charge found for this booking — nothing to refund.' });
+    const capturedCents = charge.amount;
+    const refundedCents = charge.amount_refunded || 0;
+    const remainingCents = capturedCents - refundedCents;
+
+    if (act === 'refund_status') return res.status(200).json({ ok: true, remaining: remainingCents / 100 });
+
+    if (remainingCents <= 0) return res.status(400).json({ error: 'This charge has already been fully refunded.' });
+    // Amount is REQUIRED — never fall back to refunding the full remaining
+    // balance just because it was omitted (that's a silent full refund).
+    if (body.amount == null) return res.status(400).json({ error: 'A refund amount is required.' });
+    const requestedDollars = Number(body.amount);
+    if (!requestedDollars || !isFinite(requestedDollars) || requestedDollars <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
+    // toFixed(2) first to dodge float noise (e.g. 10.005*100 -> 1000.4999999999999)
+    // before rounding to the nearest whole cent.
+    const requestedCents = Math.round(Number((requestedDollars * 100).toFixed(2)));
+    if (requestedCents <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
+    if (requestedCents > remainingCents) return res.status(400).json({ error: `Amount exceeds the refundable balance ($${(remainingCents / 100).toFixed(2)}).` });
+    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id, amount: requestedCents }, ...acct }); }
     catch (e) { return res.status(e.status || 400).json({ error: 'Refund failed: ' + e.message }); }
-    await db.from('bookings').update({ payment_status: 'refunded' }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'refunded' });
+    const newRefundedCents = refundedCents + requestedCents;
+    const amount_refunded = Math.round(newRefundedCents) / 100;
+    // Deliberately NOT a new payment_status value — payroll's paymentState()
+    // and the revenue 'earned' filters below both key on status === 'paid',
+    // so a partial refund must keep reading as 'paid'. Only flip to 'refunded'
+    // once the balance is fully exhausted, same as a one-shot full refund today.
+    const payment_status = newRefundedCents >= capturedCents ? 'refunded' : 'paid';
+    // Mirror the esCol()/extraSlotsCol short-circuit convention: skip straight
+    // to the column-less write once we already know amount_refunded is missing,
+    // instead of a write-then-catch round trip every time.
+    const patch = amountRefundedCol ? { payment_status, amount_refunded } : { payment_status };
+    const { error: updErr } = await db.from('bookings').update(patch).eq('id', id);
+    // The Stripe refund already succeeded above regardless of what happens here.
+    if (updErr) {
+      if (isAmountRefundedErr(updErr)) {
+        amountRefundedCol = false;
+        const { error: fallbackErr } = await db.from('bookings').update({ payment_status }).eq('id', id);
+        if (fallbackErr) return res.status(200).json({ ok: true, payment_status, amount_refunded, warning: `Refund succeeded on Stripe ($${(requestedCents / 100).toFixed(2)}), but saving it to the booking failed: ${fallbackErr.message}. Please reconcile manually.` });
+        return res.status(200).json({ ok: true, payment_status, amount_refunded, warning: 'Refund succeeded, but the running refunded-total could not be saved yet — run migration 0061, then it will track correctly on the next refund.' });
+      }
+      return res.status(200).json({ ok: true, payment_status, amount_refunded, warning: `Refund succeeded on Stripe ($${(requestedCents / 100).toFixed(2)}), but saving it to the booking failed: ${updErr.message}. Please reconcile manually.` });
+    }
+    return res.status(200).json({ ok: true, payment_status, amount_refunded, remaining: (capturedCents - newRefundedCents) / 100 });
   }
 
   // Charge the card on file.
@@ -3249,13 +3296,18 @@ let extraSlotsCol = true;
 const esCol = () => (extraSlotsCol ? ', extra_slots' : '');            // append to a raw select
 const esOf = (b) => (extraSlotsCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
 const isExtraSlotsErr = (e) => /extra_slots/.test((e && e.message) || '');
+// amount_refunded (migration 0061) — same optimistic pattern, so the dashboard
+// never breaks reading bookings while that migration hasn't landed yet.
+let amountRefundedCol = true;
+const arCol = () => (amountRefundedCol ? ', amount_refunded' : '');
+const isAmountRefundedErr = (e) => /amount_refunded/.test((e && e.message) || '');
 function bookingSelect() {
   // The technician embeds are disambiguated by FK column (technician_id /
   // secondary_technician_id) because bookings has TWO foreign keys to
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id${esCol()},
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id${esCol()}${arCol()},
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
@@ -3273,9 +3325,10 @@ function bookingSelect() {
 // makeQuery receives the select string and returns a fresh (awaitable) query.
 async function fetchBookingRows(makeQuery) {
   let { data, error } = await makeQuery(bookingSelect());
-  if (error && (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '') || isExtraSlotsErr(error))) {
+  if (error && (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '') || isExtraSlotsErr(error) || isAmountRefundedErr(error))) {
     if (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) bookingLiftCols = false;
     if (isExtraSlotsErr(error)) extraSlotsCol = false;
+    if (isAmountRefundedErr(error)) amountRefundedCol = false;
     ({ data, error } = await makeQuery(bookingSelect()));
   }
   return { data, error };
@@ -3302,6 +3355,7 @@ function shapeBooking(b) {
     // schedule card can show the true total the customer paid (price + tip).
     tip: b.tip,
     payment_status: b.payment_status,
+    amount_refunded: amountRefundedCol ? (b.amount_refunded || null) : null,
     paid_at: b.paid_at,
     notes: b.notes,
     customer_notes: b.customer_notes,
