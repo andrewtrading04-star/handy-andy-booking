@@ -4924,7 +4924,9 @@ async function bracketPurchases(req, res, db, auth) {
       order_date: p.order_date,
       delivered_date: p.delivered_date,
       order_url: p.order_url || null,
-      order_total: p.order_total != null ? Number(p.order_total) : null,
+      // Owner-only: what brackets cost stays private from secretaries (same
+      // rule as bracket_cost in computeJobEconomics).
+      order_total: (auth.role === 'owner' && p.order_total != null) ? Number(p.order_total) : null,
       created_at: p.created_at,
     })),
   });
