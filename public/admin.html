@@ -1127,15 +1127,32 @@ let availViewSlug = null;      // which business the Availability tab is viewing
 const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
 // ── API helper ───────────────────────────────────────────────────────────
-async function api(action, { method='GET', params={}, body=null } = {}) {
+async function api(action, { method='GET', params={}, body=null, timeoutMs=45000 } = {}) {
   const url = new URL(API, location.origin);
   url.searchParams.set('action', action);
   for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
-  const res = await fetch(url, {
-    method,
-    headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  // Every request is guarded by a generous timeout. Without this, a stalled
+  // connection (dropped wifi, a laptop that slept mid-request, a hung
+  // serverless function) left `fetch` pending forever — the caller's button
+  // stayed disabled/"Processing…" until the whole page was reloaded, since
+  // nothing ever rejected to reach a catch block. 45s is long enough that no
+  // legitimate request should ever hit it, short enough that a truly-dead
+  // connection eventually gives up and lets the UI recover.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw e.name === 'AbortError' ? new Error('Request timed out — check your connection and try again.') : e;
+  } finally {
+    clearTimeout(timer);
+  }
   // A 401 on an AUTHENTICATED call means the saved token is stale — log out and
   // prompt re-login. But a 401 from the login / session_status calls is just a
   // bad password or absent session: don't call logout() (it would mask the real
