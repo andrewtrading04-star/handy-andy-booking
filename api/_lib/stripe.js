@@ -80,11 +80,26 @@ function toForm(obj) {
 export async function stripe(path, { method = 'POST', body = null, slug = null, account = null } = {}) {
   // Demo mode: return a believable fake instead of calling Stripe.
   if (demoMode()) return demoStripeResponse(path, method, body);
-  const res = await fetch(STRIPE_API + path, {
-    method,
-    headers: { Authorization: `Bearer ${secretKey({ account, slug })}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body ? toForm(body) : undefined,
-  });
+  // 15s cap per Stripe call. These run inside booking/charge request handlers;
+  // an unbounded stall would hang the office UI on "Processing…" until the
+  // serverless platform kills the function. Stripe's own p99 is well under this.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  let res;
+  try {
+    res = await fetch(STRIPE_API + path, {
+      method,
+      headers: { Authorization: `Bearer ${secretKey({ account, slug })}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body ? toForm(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    const err = e.name === 'AbortError' ? new Error('Stripe request timed out') : e;
+    if (err !== e) err.status = 504;
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = new Error((data && data.error && data.error.message) || 'Stripe request failed');

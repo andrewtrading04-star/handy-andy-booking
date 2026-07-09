@@ -1633,23 +1633,33 @@ async function saveCardOnFile(pmId, cust, slug = null) {
   const SK = businessSecretKey(slug);
   if (!SK) return null;
   const sAuth = { Authorization: `Bearer ${SK}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+  // Each Stripe call is capped at 15s — these three run serially inside
+  // booking_create's response path, so one stalled connection would otherwise
+  // hang the office UI on "Processing…" with the booking already created.
+  const fetchT = async (url, opts) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+    catch (e) { throw e.name === 'AbortError' ? new Error('Stripe request timed out') : e; }
+    finally { clearTimeout(timer); }
+  };
   // Create a Stripe customer for the card.
   const cb = new URLSearchParams();
   if (cust.email) cb.set('email', cust.email);
   if (cust.name) cb.set('name', cust.name);
   if (cust.phone) cb.set('phone', cust.phone);
   cb.set('description', 'Dashboard booking customer');
-  const ccr = await fetch('https://api.stripe.com/v1/customers', { method: 'POST', headers: sAuth, body: cb });
+  const ccr = await fetchT('https://api.stripe.com/v1/customers', { method: 'POST', headers: sAuth, body: cb });
   const cc = await ccr.json();
   if (!ccr.ok) throw new Error(cc?.error?.message || 'Stripe customer create failed');
   const customerId = cc.id;
   // Attach the payment method and make it the default.
   const ab = new URLSearchParams(); ab.set('customer', customerId);
-  const ar = await fetch(`https://api.stripe.com/v1/payment_methods/${pmId}/attach`, { method: 'POST', headers: sAuth, body: ab });
+  const ar = await fetchT(`https://api.stripe.com/v1/payment_methods/${pmId}/attach`, { method: 'POST', headers: sAuth, body: ab });
   const pm = await ar.json();
   if (!ar.ok) throw new Error(pm?.error?.message || 'Attach failed');
   const db = new URLSearchParams(); db.set('invoice_settings[default_payment_method]', pmId);
-  await fetch(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
+  await fetchT(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
   return { customerId, pmId, brand: pm?.card?.brand || null, last4: pm?.card?.last4 || null };
 }
 
@@ -1819,6 +1829,27 @@ async function bookingCreate(req, res, db, auth, body) {
 
   const paymentMethod = body.payment_method || null;        // card | cash | quote | null
   const status = technician_id ? 'assigned' : 'confirmed';
+
+  // Duplicate backstop BEYOND the idempotency key: the dashboard mints a fresh
+  // key per modal-open, so "request timed out → close modal → reopen → re-enter
+  // the same job" carries a NEW key and the key dedupe can't catch it. The same
+  // customer with a non-cancelled booking at the same exact date+slot is that
+  // exact re-entry — refuse with the existing booking id instead of silently
+  // double-booking (best-effort: any query error falls through to a normal create).
+  if (customer_id && scheduled_at) {
+    try {
+      const { data: same } = await db.from('bookings').select('id, status')
+        .eq('business_id', biz.id).eq('customer_id', customer_id).eq('scheduled_at', scheduled_at)
+        .not('status', 'in', '(cancelled,no_show)').limit(1).maybeSingle();
+      if (same?.id) {
+        return res.status(409).json({
+          error: 'This customer already has a booking at that exact date and time — it may have gone through on a previous attempt. Check the schedule before re-booking.',
+          id: same.id, duplicate: true,
+        });
+      }
+    } catch { /* dedupe is best-effort — never block a legitimate booking on it */ }
+  }
+
   // Signed review-link token (30-day TTL) so the completion follow-up can point
   // the customer at the review widget. booking_id is patched in after insert.
   const bookingInsert = {
@@ -1897,6 +1928,11 @@ async function bookingCreate(req, res, db, auth, body) {
   }
 
   // Frozen price breakdown — one line item per chosen option.
+  // NOTE: the booking row already exists past this point. NOTHING below may
+  // throw a 500 — that would tell the office "booking failed" for a booking
+  // that EXISTS, and the natural retry double-books. Failures here are
+  // collected as a warning on the (still-200) response instead.
+  let postInsertWarning = null;
   const selections = Array.isArray(body.selections) ? body.selections : [];
   if (selections.length) {
     const rows = selections.map(s => {
@@ -1911,7 +1947,10 @@ async function bookingCreate(req, res, db, auth, body) {
       };
     });
     const { error: liErr } = await db.from('booking_line_items').insert(rows);
-    if (liErr) throw liErr;
+    if (liErr) {
+      console.error('[admin] line-items insert failed (booking exists):', liErr.message);
+      postInsertWarning = 'Booking was created, but its line items could not be saved — open the job and re-add them.';
+    }
   }
 
   // Add tax as a line item
@@ -1922,7 +1961,10 @@ async function bookingCreate(req, res, db, auth, body) {
       quantity: 1, unit_price: Number(body.tax), line_total: Number(body.tax),
       service_id: null, option_id: null, taxable: false,
     });
-    if (taxErr) throw taxErr;
+    if (taxErr) {
+      console.error('[admin] tax line-item insert failed (booking exists):', taxErr.message);
+      postInsertWarning = postInsertWarning || 'Booking was created, but the tax line could not be saved — open the job and re-add it.';
+    }
   }
 
   await db.from('booking_status_events').insert({
@@ -1951,7 +1993,13 @@ async function bookingCreate(req, res, db, auth, body) {
   // each get their own colors, sender, and reply-to via emailConfig/brandFor.
   // sendEmail itself is gated by emailNotificationsOn() + the Resend key, so this
   // no-ops safely until those are set.
-  if (c.email) {
+  // Both notification emails run CONCURRENTLY and each Resend call is capped at
+  // 8s inside sendEmail — they stay awaited (a serverless function must not
+  // return before its sends finish or they get frozen mid-flight), but they can
+  // no longer stall the response unboundedly: worst case adds a few seconds, not
+  // the pre-timeout "Processing… forever" hang the office was hitting.
+  const confirmationEmailP = (async () => {
+    if (!c.email) return;
     try {
       const firstName = (c.name || '').trim().split(/\s+/)[0] || '';
       let dateLong = '';
@@ -2018,12 +2066,13 @@ async function bookingCreate(req, res, db, auth, body) {
     } catch (e) {
       console.error('[admin] confirmation email error:', e.message);
     }
-  }
+  })();
 
   // TEMPORARY owner heads-up: email the owner when a SECRETARY (Heather/Joey)
   // books a job from the dashboard — NOT when the owner books one. Toggle off any
   // time by setting NOTIFY_SECRETARY_BOOKINGS=0 in the environment. Best-effort.
-  if (auth.role !== 'owner' && process.env.NOTIFY_SECRETARY_BOOKINGS !== '0') {
+  const ownerAlertP = (async () => {
+    if (auth.role === 'owner' || process.env.NOTIFY_SECRETARY_BOOKINGS === '0') return;
     try {
       let techName = null;
       const techIds = [technician_id, secondary_technician_id].filter(Boolean);
@@ -2053,9 +2102,11 @@ async function bookingCreate(req, res, db, auth, body) {
         lineItems, customerNotes: body.customer_notes || null, bookingId: bRow.id,
       });
     } catch (e) { console.warn('[admin] secretary booking alert non-fatal:', e.message); }
-  }
+  })();
 
-  return res.status(200).json({ ok: true, id: bRow.id });
+  await Promise.all([confirmationEmailP, ownerAlertP]);
+
+  return res.status(200).json({ ok: true, id: bRow.id, ...(postInsertWarning ? { warning: postInsertWarning } : {}) });
 }
 
 // ── Booking update: confirm | cancel | reschedule | assign | status ──────────
@@ -3091,21 +3142,30 @@ async function technicians(req, res, db, auth) {
   // Never leak the hash; just say whether a PIN is set.
   const techs = (data || []).map(({ pin_hash, ...t }) => ({ ...t, pin_set: !!pin_hash }));
 
-  // Fetch average rating for each technician from bookings
-  for (const tech of techs) {
-    const { data: ratings, error: ratingsError } = await db
-      .from('bookings')
-      .select('review_rating')
-      .eq('technician_id', tech.id)
-      .not('review_rating', 'is', null);
-
-    if (!ratingsError && ratings && ratings.length > 0) {
-      const avgRating = ratings.reduce((sum, r) => sum + r.review_rating, 0) / ratings.length;
-      tech.average_rating = Math.round(avgRating * 10) / 10; // Round to 1 decimal place
-    } else {
-      tech.average_rating = null;
+  // Average rating per technician, in ONE batched query. This used to be a
+  // serial per-tech loop (N+1) fetching every reviewed booking one tech at a
+  // time — on a 10-tech roster that alone added ~10 round-trips to every New
+  // Booking modal open, which waits on this endpoint before showing.
+  for (const tech of techs) tech.average_rating = null;
+  try {
+    const ids = techs.map(t => t.id);
+    if (ids.length) {
+      const { data: ratings } = await db.from('bookings')
+        .select('technician_id, review_rating')
+        .in('technician_id', ids)
+        .not('review_rating', 'is', null);
+      const agg = new Map();   // technician_id -> { sum, n }
+      for (const r of (ratings || [])) {
+        const a = agg.get(r.technician_id) || { sum: 0, n: 0 };
+        a.sum += r.review_rating; a.n++;
+        agg.set(r.technician_id, a);
+      }
+      for (const tech of techs) {
+        const a = agg.get(tech.id);
+        if (a && a.n) tech.average_rating = Math.round((a.sum / a.n) * 10) / 10;
+      }
     }
-  }
+  } catch (e) { console.warn('[admin] tech ratings batch non-fatal:', e.message); }
 
   return res.status(200).json({ technicians: techs });
 }
