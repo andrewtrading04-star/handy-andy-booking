@@ -3731,7 +3731,7 @@ async function reviewCalls(req, res, db, auth) {
   // column) — it must be embedded as a relation, exactly like bookingSelect().
   const selFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
       review_email_opened_at, review_email_count, review_token, ${cc}
-      customer:customers ( name, phone, email ),
+      customer:customers ( name, phone, email, postal_code ),
       technician:technicians!technician_id ( name ),
       service:services ( id, name ),
       line_items:booking_line_items ( name, quantity, unit_price, line_total )`;
@@ -3768,6 +3768,7 @@ async function reviewCalls(req, res, db, auth) {
         business_name: b.name,
         customer_name: row.customer?.name || '—',
         phone: row.customer?.phone || null,
+        zip: row.customer?.postal_code || null,
         has_email: !!row.customer?.email,
         technician_name: row.technician?.name || '—',
         service_name: row.service?.name || 'Service',
