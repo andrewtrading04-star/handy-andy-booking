@@ -1095,6 +1095,7 @@ function lsJSON(key, fallback){
 let token = lsGet('ha_admin_token') || '';
 let role = lsGet('ha_admin_role') || '';
 let userName = lsGet('ha_admin_name') || '';
+let scope = lsGet('ha_admin_scope') || '';
 let appConfig = lsJSON('ha_admin_config', {}); // { email, sms } outbound channels
 let businesses = lsJSON('ha_admin_biz', []);
 // Display name for a business slug, sourced from the loaded businesses (DB), so
@@ -1261,11 +1262,12 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   if(btn){ btn.disabled=true; }
   try {
     const d = await api('login', { method:'POST', body:{ password: document.getElementById('pw').value } });
-    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    token=d.token; role=d.role; userName=d.name||''; scope=d.scope||''; appConfig=d.config||{}; businesses=d.businesses||[];
     document.getElementById('demoBanner')?.classList.toggle('hidden', !(appConfig&&appConfig.demo));
     lsSet('ha_admin_token',token);
     lsSet('ha_admin_role',role);
     lsSet('ha_admin_name',userName);
+    lsSet('ha_admin_scope',scope);
     lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
     lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
@@ -1281,8 +1283,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   }
 });
 function logout(){
-  token=''; role=''; userName=''; appConfig={}; businesses=[]; current=null;
-  lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
+  token=''; role=''; userName=''; scope=''; appConfig={}; businesses=[]; current=null;
+  lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
   if(pollTimer) clearInterval(pollTimer);
   if(alertTimer){ clearInterval(alertTimer); alertTimer=null; }
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
@@ -1318,6 +1320,10 @@ function enterApp(){
   // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
   if(navTech) navTech.style.display = '';
+  // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
+  // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
+  const navRc=document.querySelector('[data-nav="reviewcalls"]');
+  if(navRc) navRc.style.display = scope==='handy-andy' ? 'none' : '';
   renderSwitcher();
   navTo('schedule');
   refreshEstimateBadge();
@@ -1427,6 +1433,7 @@ document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
   b.addEventListener('click',()=>{ navTo(b.dataset.nav); closeSidebar(); }));
 
 function navTo(s){
+  if(s==='reviewcalls' && scope==='handy-andy') s='schedule';   // not on Heather's platform
   section=s;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -4681,7 +4688,7 @@ async function renderBrackets(){
         <td class="bracket-qty">${p.flat_qty}</td>
         <td class="bracket-qty">${p.tilting_qty}</td>
         <td class="bracket-qty">${p.full_motion_qty}</td>
-        <td class="bracket-qty">${p.order_total!=null?'$'+Number(p.order_total).toFixed(2):'<span style="color:var(--mute);">—</span>'}</td>
+        <td class="bracket-qty">${(role==='owner' && p.order_total!=null)?'$'+Number(p.order_total).toFixed(2):'<span style="color:var(--mute);">—</span>'}</td>
         <td>${statusCell}</td>
         <td>${p.order_date||'-'}</td>
       </tr>`;
@@ -4689,7 +4696,7 @@ async function renderBrackets(){
 
     const totalSpent=(allOrders||[]).reduce((s,p)=>s+(Number(p.order_total)||0),0);
     html+=`<div class="bracket-section">
-      <h3>Recent Walmart Orders ${totalSpent>0?`<span style="font-weight:400;font-size:12px;color:var(--mute);">— $${totalSpent.toFixed(2)} tracked</span>`:''}</h3>
+      <h3>Recent Walmart Orders ${(role==='owner' && totalSpent>0)?`<span style="font-weight:400;font-size:12px;color:var(--mute);">— $${totalSpent.toFixed(2)} tracked</span>`:''}</h3>
       <table class="bracket-table">${orderHead}<tbody>${
         activeOrders.length ? activeOrders.map(bracketRow).join('')
         : `<tr><td colspan="8" style="text-align:center;color:var(--mute);">No active orders</td></tr>`
@@ -4930,7 +4937,8 @@ async function renderGreeting(){
       api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }}),
       refreshEstimateBadge(),
       // How many review calls Joey has to make (cross-business, yesterday's jobs).
-      api('review_calls',{ params:{ days:1 }}).catch(()=>({counts:{}})),
+      // Not part of Heather's (Handy Andy) platform — skip the call entirely.
+      scope==='handy-andy' ? Promise.resolve({counts:{}}) : api('review_calls',{ params:{ days:1 }}).catch(()=>({counts:{}})),
     ];
     // Owner: also check for pending brackets + current per-tech stock levels
     // (the stock feeds the low-stock warning in the Predicted-income box).
@@ -5057,7 +5065,12 @@ function paintGreeting(){
   const callsPart = calls===0
     ? `no review phone calls to make`
     : `<b>${calls}</b> <span class="greet-link" data-gocalls="1">review phone call${calls===1?'':'s'}</span> to make`;
-  const summarySentence = `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
+  // Heather (Handy Andy) doesn't make review calls — omit that clause for her.
+  // scope, not userName, is the reliable per-login signal (see the same check
+  // already used to hide the Review Calls nav item / skip the API call above).
+  const summarySentence = scope==='handy-andy'
+    ? `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today and ${estPart}.`
+    : `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
@@ -6931,11 +6944,12 @@ document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id
 async function tryAutoLogin(){
   try{
     const d = await api('session_status');
-    token=d.token; role=d.role; userName=d.name||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    token=d.token; role=d.role; userName=d.name||''; scope=d.scope||''; appConfig=d.config||{}; businesses=d.businesses||[];
     document.getElementById('demoBanner')?.classList.toggle('hidden', !(appConfig&&appConfig.demo));
     lsSet('ha_admin_token',token);
     lsSet('ha_admin_role',role);
     lsSet('ha_admin_name',userName);
+    lsSet('ha_admin_scope',scope);
     lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
     lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
