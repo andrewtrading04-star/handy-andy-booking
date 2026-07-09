@@ -3951,7 +3951,7 @@ function rcCard(r){
   return `<div class="rc-card">
     <div class="rc-main">
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
-      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
+      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
       ${itemsRow}
       <div class="rc-badges">${badges.join('')}</div>
     </div>
