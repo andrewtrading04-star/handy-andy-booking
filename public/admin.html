@@ -5045,11 +5045,25 @@ function paintGreeting(){
   const callsTxt = calls > 0
     ? `, plus <b>${calls}</b> <span class="greet-link" data-gocalls="1">phone call${calls===1?'':'s'} to make</span>`
     : '';
+  // Daily-summary sentence: "There are 6 jobs on the schedule today, 3 estimates
+  // that need to be responded to and 6 review phone calls to make." Jobs/estimates
+  // already come back per-business from `summary`; review calls are cross-business
+  // (Joey works both). Estimate/call counts stay clickable (existing data-goest /
+  // data-gocalls wiring below already expects these spans).
+  const jobsPart = jobs===0 ? `no jobs` : `<b>${jobs}</b> job${jobs===1?'':'s'}`;
+  const estPart = est===0
+    ? `no estimates that need to be responded to`
+    : `<b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} to be responded to`;
+  const callsPart = calls===0
+    ? `no review phone calls to make`
+    : `<b>${calls}</b> <span class="greet-link" data-gocalls="1">review phone call${calls===1?'':'s'}</span> to make`;
+  const summarySentence = `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
+    `<div class="greet-line">${summarySentence}</div>`+
     greetStatsHtml()+
     greetNoteHtml();
   // Net Daily Profit toggle (Today / Yesterday) — switches the value with no refetch.
