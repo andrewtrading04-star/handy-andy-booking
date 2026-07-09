@@ -3721,6 +3721,8 @@ const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'de
 // 'callback' stay on the list so Joey tries again. ('reviewed' kept for old data.)
 const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact', 'promised_review', 'complaint'];
 async function reviewCalls(req, res, db, auth) {
+  // Joey's (Doms) outreach tool — not part of Heather's (Handy Andy) platform.
+  if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
   const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
 
@@ -3806,6 +3808,7 @@ async function reviewCalls(req, res, db, auth) {
 // Log the outcome of a review call (Joey). Cross-business: resolve by id.
 async function reviewCallLog(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
   const id = body && body.id;
   const status = ((body && body.status) || '').toString().trim();
   if (!id) return res.status(400).json({ error: 'id required' });
