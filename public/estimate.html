@@ -10,6 +10,7 @@
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   :root{
     --accent:#ff6600; --accent-soft:rgba(255,102,0,.10);
+    --navy:#0a1628;
     --ink:#16181d; --ink-2:#3f4654; --mute:#8a909c;
     --line:#e7e9ee; --line2:#f1f2f5; --bg:#f5f6f8; --card:#fff;
     --radius:14px;
@@ -20,17 +21,29 @@
   .brand .logo{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;}
   .brand .name{font-size:17px;font-weight:800;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 4px 20px rgba(20,30,50,.06);overflow:hidden;}
+  .trustbar{background:var(--navy);color:#fff;font-size:11px;padding:9px 14px;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;text-align:center;letter-spacing:.01em;}
+  .trustbar b{color:var(--accent);font-weight:800;}
+  .trustbar .dot{opacity:.45;}
   .progress{height:5px;background:var(--line2);}
   .progress .bar{height:100%;background:var(--accent);width:20%;transition:width .25s ease;}
   .pad{padding:22px 20px 20px;}
   .step-tag{font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.7px;}
-  h1{font-size:21px;font-weight:800;margin:6px 0 4px;line-height:1.25;}
+  h1{font-size:21px;font-weight:800;margin:6px 0 4px;line-height:1.25;color:var(--navy);}
   .sub{color:var(--ink-2);font-size:14px;margin-bottom:16px;}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .opt{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:14px 12px;text-align:left;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink);transition:.12s;display:flex;flex-direction:column;gap:3px;}
+  .opt{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:13px 12px;text-align:left;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink);transition:.12s;display:flex;align-items:flex-start;gap:10px;}
+  .opt .opt-txt{display:flex;flex-direction:column;gap:3px;min-width:0;}
   .opt small{font-weight:500;color:var(--mute);font-size:12px;line-height:1.4;}
   .opt:hover{border-color:var(--accent);}
   .opt.on{border-color:var(--accent);background:var(--accent-soft);}
+  .opt-ic{width:32px;height:32px;border-radius:8px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .opt-ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;}
+  .opt.on .opt-ic{background:var(--accent);}
+  .tvrow{margin-top:10px;background:var(--navy);border-radius:12px;padding:14px 15px;display:flex;align-items:center;gap:12px;text-decoration:none;cursor:pointer;}
+  .tvrow .opt-ic{background:var(--accent);}
+  .tvrow .opt-txt b{color:#fff;font-size:14px;font-weight:800;display:block;}
+  .tvrow .opt-txt small{color:rgba(255,255,255,.65);font-size:12px;}
+  .tvrow .pill{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:800;letter-spacing:.05em;padding:5px 10px;border-radius:20px;flex:0 0 auto;white-space:nowrap;}
   textarea,input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:13px 14px;font-size:16px;font-family:inherit;}
   textarea{min-height:130px;resize:vertical;}
   textarea:focus,input:focus{outline:none;border-color:var(--accent);}
@@ -78,6 +91,7 @@
     <div class="name" id="brandName">Request an Estimate</div>
   </div>
   <div class="card">
+    <div class="trustbar" id="trustbar"><b>Licensed &amp; Insured</b><span class="dot">·</span><span>Highly rated locally</span><span class="dot">·</span><span>Serving your area</span></div>
     <div class="progress"><div class="bar" id="bar"></div></div>
     <div class="pad" id="pad">
       <div class="loading" id="boot">Loading…</div>
@@ -85,6 +99,18 @@
   </div>
   <div class="foot">We'll review your request and reach out to schedule. No charge to ask.</div>
 </div>
+
+<svg style="display:none">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7"/><path d="M6 10v9h12v-9"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></symbol>
+  <symbol id="i-frame" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/><rect x="8" y="8" width="8" height="8" rx=".5"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3s6.5 7.5 6.5 12A6.5 6.5 0 1 1 5.5 15C5.5 10.5 12 3 12 3Z"/></symbol>
+  <symbol id="i-signal" viewBox="0 0 24 24"><path d="M4 12l8-7 8 7"/><path d="M8.5 13.5a5 5 0 0 1 7 0"/><circle cx="12" cy="17" r="1"/></symbol>
+  <symbol id="i-patch" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 16l8-8"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><path d="M9.5 20h5M10 22h4"/><path d="M12 4V2"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M9 21h6M12 17v4"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 4.6L4 16.2V20h3.8l5.3-5.3a4 4 0 0 0 4.6-5.4l-2.6 2.6-2-2 2.6-2.6Z"/></symbol>
+</svg>
 
 <script>
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -99,6 +125,36 @@ document.documentElement.style.setProperty('--accent-soft', hexToSoft(getCompute
 // target="_top" so an embedding iframe navigates the whole page.
 const BOOK_URLS = { 'handy-andy':'https://www.ihandyandy.com/book', 'doms':'https://www.domstvmounting.com/book' };
 const BOOK_URL = BOOK_URLS[SLUG] || '';
+
+// Trust-bar copy, per business — same pattern as ACCENTS/BOOK_URLS above. Kept
+// generic on purpose (no invented review counts or years-in-business) so it's
+// truthful for any business using this widget without per-business edits.
+const TRUST_LINES = {
+  'handy-andy': ['Licensed &amp; Insured', 'Highly rated locally', 'Serving your area'],
+  'doms':       ['Licensed &amp; Insured', 'Highly rated locally', 'Serving your area'],
+};
+function renderTrustBar(){
+  const parts = TRUST_LINES[SLUG] || TRUST_LINES['handy-andy'];
+  const el = document.getElementById('trustbar');
+  if(!el) return;
+  el.innerHTML = `<b>${parts[0]}</b>` + parts.slice(1).map(p=>`<span class="dot">·</span><span>${p}</span>`).join('');
+}
+
+// Best-effort icon for a service tile, matched by keyword so it degrades
+// gracefully for any business's actual (server-driven) service list instead
+// of assuming Handy Andy's exact category names.
+function serviceIcon(name){
+  const n = (name||'').toLowerCase();
+  if(/furniture|assembl|flat-?pack/.test(n)) return 'i-box';
+  if(/\bart\b|mirror|shelv|shelf|frame/.test(n)) return 'i-frame';
+  if(/plumb|faucet|leak|drain|pipe/.test(n)) return 'i-drop';
+  if(/smart|camera|doorbell|thermostat|\bhub\b/.test(n)) return 'i-signal';
+  if(/drywall|patch|wall repair/.test(n)) return 'i-patch';
+  if(/electric|\blight/.test(n) || /fixture|switch|outlet|\bfan\b/.test(n)) return 'i-bulb';
+  if(/\btv\b|television/.test(n)) return 'i-tv';
+  if(/home repair|general repair|handyman|fix.?it/.test(n)) return 'i-home';
+  return 'i-tool';
+}
 
 const WINDOWS = [
   { key:'s1', label:'8:00 AM – 10:00 AM' },
@@ -164,6 +220,7 @@ function trackStep(){
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
+renderTrustBar();
 (async function boot(){
   try{
     const r = await fetch(`/api/estimate?action=services&business=${encodeURIComponent(SLUG)}`);
@@ -212,17 +269,20 @@ function shell(tag, title, sub, inner, opts={}){
 function stepService(){
   const opts = state.services.map(s =>
     `<button type="button" class="opt ${state.serviceId===s.id?'on':''}" data-svc="${s.id}" data-label="${esc(s.name)}">
-      <span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}
+      <span class="opt-ic"><svg><use href="#${serviceIcon(s.name)}"/></svg></span>
+      <span class="opt-txt"><span>${esc(s.name)}</span>${s.description?`<small>${esc(s.description)}</small>`:''}</span>
     </button>`).join('');
-  // TV Mounting is an extra tile styled like the others, but instead of
-  // continuing the estimate flow it links straight to the booking page.
+  const grid = state.services.length ? `<div class="grid">${opts}</div>` : '';
+  // TV Mounting is a distinct instant-book row (not an estimate-flow tile) —
+  // styled to stand apart since tapping it leaves the estimate flow entirely.
   const tvm = BOOK_URL
-    ? `<a class="opt" href="${BOOK_URL}" target="_top" rel="noopener">
-      <span>TV Mounting</span><small>Book your TV mount install instantly.</small>
+    ? `<a class="tvrow" href="${BOOK_URL}" target="_top" rel="noopener">
+      <span class="opt-ic"><svg><use href="#i-tv"/></svg></span>
+      <span class="opt-txt"><b>TV Mounting</b><small>Skip the estimate — book an install instantly</small></span>
+      <span class="pill">Book now</span>
     </a>`
     : '';
-  const inner = (state.services.length || tvm)
-    ? `<div class="grid">${opts}${tvm}</div>`
+  const inner = (state.services.length || tvm) ? `${grid}${tvm}`
     : `<div class="sub">No services available right now. Please call us instead.</div>`;
   return shell('Service', 'What do you need help with?', 'Choose the type of work.', inner,
     { nextDisabled: !state.serviceId });
