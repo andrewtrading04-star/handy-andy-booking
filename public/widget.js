@@ -389,7 +389,7 @@
   let stepIdx=0, isFrameTV=false, territoryId='', enteredZip='', areaCity='', areaState='';
   let serviceConfig=null, selections={}, selectedSlot=null;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
-  let customer={first_name:'',last_name:'',email:'',phone:'',address:''};
+  let customer={first_name:'',last_name:'',email:'',phone:'',address:'',address_line2:''};
   let tipAmount=0, couponCode='';
   let optionComments={}; // { [optionId]: "free text" } for Handyman / Other
   // Hard guard against double-booking: once a booking POST is in flight we never
@@ -1162,6 +1162,7 @@
       <input type="email" id="c-em" style="${S.inputL}" placeholder="Email Address"  value="${customer.email}">
       <input type="tel"   id="c-ph" style="${S.inputL}" placeholder="Phone Number"   value="${customer.phone}">
       <input type="text"  id="c-ad" style="${S.inputL}" placeholder="Street Address" value="${customer.address}">
+      <input type="text"  id="c-ad2" style="${S.inputL}" placeholder="Apt, suite, or unit number (optional)" value="${customer.address_line2}">
       <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
         <div style="font-size:11px!important;color:#a0a0ab!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
         <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
@@ -1391,6 +1392,7 @@
     customer.email=root.querySelector('#c-em').value.trim();
     customer.phone=root.querySelector('#c-ph').value.trim();
     customer.address=root.querySelector('#c-ad').value.trim();
+    customer.address_line2=root.querySelector('#c-ad2')?.value.trim()||'';
     couponCode=root.querySelector('#c-coupon')?.value.trim().toUpperCase()||'';
     // SMS-consent checkbox — opt-in, not required to book; recorded with the order.
     const smsConsent=!!(root.querySelector('#c-sms-consent')||{}).checked;
@@ -1431,7 +1433,7 @@
           name:`${customer.first_name} ${customer.last_name}`.trim(),
           email:customer.email,
           phone:customer.phone,
-          address:{line1:customer.address},
+          address:{line1:customer.address,line2:customer.address_line2||undefined},
         },
       });
       if(error){
@@ -1480,7 +1482,7 @@
       firstName:customer.first_name||'',
       name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
       email:customer.email||'', phone:customer.phone||'',
-      address:customer.address||'', city:loc.city, state:loc.state, zip:enteredZip||'',
+      address:[customer.address,customer.address_line2].filter(Boolean).join(', '), city:loc.city, state:loc.state, zip:enteredZip||'',
       dateISO:selectedDate||'', dateLong:_df?`${_df.long}, ${_df.date}`:'',
       timeWindow:_slot.arrival_window||'',
       lines:_lines, total:_taxBase+_tax-_couponDisc, tip:tipAmount||0,
