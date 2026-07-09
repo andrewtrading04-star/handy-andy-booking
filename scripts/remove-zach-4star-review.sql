@@ -1,43 +1,45 @@
 -- ============================================================================
--- ONE-TIME: remove Zach's mistaken 4-star Google review, and nothing else.
+-- ONE-TIME: remove Zach's mistaken 4-star review (James Braddock, 7/9/2026),
+-- and nothing else.
 -- ----------------------------------------------------------------------------
--- Two places hold review data for a tech:
---   google_reviews.rating       the actual ingested Google review (shown in
---                                the Reviews tab / "just got a review" banner)
---   bookings.review_rating      the customer's rating from the internal
---                                review-request flow, on whichever job this
---                                specific review was tied to -- THIS is what
---                                feeds the average_rating star badge shown
---                                next to Zach's name in the Technicians tab.
+-- The Reviews tab's "Sent / Opened / stars" card reads straight from the
+-- bookings table (see reviewRequests() in api/admin.js) -- there is no
+-- separate review_requests table, and this particular review was never
+-- ingested into google_reviews either (no "Left a Google review" pill was
+-- showing), so the first version of this script correctly found nothing to
+-- delete there. The star rating itself is bookings.review_rating on this one
+-- completed job.
 --
--- Deletes the google_reviews row, then -- scoped ONLY to the exact booking
--- that row was linked to (via a single atomic statement, not a broad
--- "any of Zach's 4-star jobs" match) -- clears review_rating on that one
--- booking if it's also a 4. No other booking, tech, or review is touched.
+-- Scoped tightly to customer + tech + rating so only this exact booking is
+-- touched -- nothing else on it changes, no other booking/tech/review is
+-- affected. reviewed_at is deliberately left alone: it's what keeps this job
+-- out of the review-call queue (the customer already responded), and that
+-- should stay true regardless of what rating is shown.
 -- ============================================================================
 set search_path = app, public, extensions;
 
--- Verify first (see exactly what this will remove):
---   select gr.id, gr.reviewer_name, gr.rating, gr.review_date, gr.booking_id
---   from google_reviews gr
---   join technicians t on t.id = gr.technician_id
---   where t.name ilike 'zach%' and gr.rating = 4;
+-- Verify first (confirm this is the one row before running the update):
+--   select b.id, c.name as customer_name, t.name as technician_name,
+--          b.completed_at, b.review_rating, b.review_text
+--   from bookings b
+--   join customers c on c.id = b.customer_id
+--   join technicians t on t.id = b.technician_id
+--   where c.name ilike 'james braddock%' and t.name ilike 'zach%'
+--     and b.review_rating = 4 and b.status = 'completed';
 
-with removed as (
-  delete from google_reviews gr
-  using technicians t
-  where gr.technician_id = t.id
-    and t.name ilike 'zach%'
-    and gr.rating = 4
-  returning gr.booking_id
-)
 update bookings b
-set review_rating = null
-from removed
-where b.id = removed.booking_id
-  and b.review_rating = 4;
+set review_rating = null,
+    review_text = null
+from customers c, technicians t
+where b.customer_id = c.id
+  and b.technician_id = t.id
+  and c.name ilike 'james braddock%'
+  and t.name ilike 'zach%'
+  and b.review_rating = 4
+  and b.status = 'completed';
 
--- Verify after:
---   select gr.id from google_reviews gr join technicians t on t.id=gr.technician_id
---   where t.name ilike 'zach%' and gr.rating = 4;   -- should return 0 rows
+-- Verify after (should return 0 rows):
+--   select id from bookings b join customers c on c.id=b.customer_id
+--   join technicians t on t.id=b.technician_id
+--   where c.name ilike 'james braddock%' and t.name ilike 'zach%' and b.review_rating = 4;
 -- ============================================================================
