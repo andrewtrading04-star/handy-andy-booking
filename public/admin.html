@@ -4688,7 +4688,7 @@ async function renderBrackets(){
         <td class="bracket-qty">${p.flat_qty}</td>
         <td class="bracket-qty">${p.tilting_qty}</td>
         <td class="bracket-qty">${p.full_motion_qty}</td>
-        <td class="bracket-qty">${p.order_total!=null?'$'+Number(p.order_total).toFixed(2):'<span style="color:var(--mute);">—</span>'}</td>
+        <td class="bracket-qty">${(role==='owner' && p.order_total!=null)?'$'+Number(p.order_total).toFixed(2):'<span style="color:var(--mute);">—</span>'}</td>
         <td>${statusCell}</td>
         <td>${p.order_date||'-'}</td>
       </tr>`;
@@ -4696,7 +4696,7 @@ async function renderBrackets(){
 
     const totalSpent=(allOrders||[]).reduce((s,p)=>s+(Number(p.order_total)||0),0);
     html+=`<div class="bracket-section">
-      <h3>Recent Walmart Orders ${totalSpent>0?`<span style="font-weight:400;font-size:12px;color:var(--mute);">— $${totalSpent.toFixed(2)} tracked</span>`:''}</h3>
+      <h3>Recent Walmart Orders ${(role==='owner' && totalSpent>0)?`<span style="font-weight:400;font-size:12px;color:var(--mute);">— $${totalSpent.toFixed(2)} tracked</span>`:''}</h3>
       <table class="bracket-table">${orderHead}<tbody>${
         activeOrders.length ? activeOrders.map(bracketRow).join('')
         : `<tr><td colspan="8" style="text-align:center;color:var(--mute);">No active orders</td></tr>`
