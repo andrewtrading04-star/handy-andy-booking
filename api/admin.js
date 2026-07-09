@@ -485,10 +485,6 @@ async function summary(req, res, db, auth) {
     // Row sets (pure filters over the already-fetched jobs — no queries).
     const paidDoneWeek = earned(pjobs).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
     const paidDoneToday = earned(today);
-    const weekAllJobs = (pjobs || []).filter(b => {
-      const t = new Date(b.scheduled_at);
-      return t >= weekStart && t < weekEnd && ACTIVE_STATUSES.includes(b.status);
-    });
 
     // Per-business realized profit THIS WEEK (parallel across businesses).
     const weekBySlugP = Promise.all((allBiz || []).map(async (bb) => {
@@ -551,9 +547,11 @@ async function summary(req, res, db, auth) {
       return { total, bySlug };
     };
 
-    // Per-business PREDICTED income for the week — same "active jobs, as if every
-    // one gets paid" logic as pPredicted above, just split by business instead of
-    // only computed for the business currently being viewed.
+    // Per-business PREDICTED income for the week — "active jobs, as if every one
+    // gets paid" — computed once per business; the top-line total (below) is
+    // always this sum, so it can never drift out of sync with the split shown
+    // under it (they used to be two separate computations, and the top-line one
+    // was scoped to only the currently-viewed business — that was the bug).
     const predictedBySlugP = Promise.all((allBiz || []).map(async (bb) => {
       const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
         .eq('business_id', bb.id)
@@ -565,11 +563,10 @@ async function summary(req, res, db, auth) {
     }));
 
     // All of the above are independent — resolve them concurrently.
-    const [pWeek, pToday, pYesterday, pPredicted, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
+    const [pWeek, pToday, pYesterday, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
       sumProfit(paidDoneWeek),
       sumProfit(paidDoneToday),
       sumProfit(earned(yRows)),
-      sumProfit(weekAllJobs),
       weekBySlugP,
       avgBySlugP,
       netDailyFor(0),
@@ -581,7 +578,7 @@ async function summary(req, res, db, auth) {
       week: Math.round(pWeek),
       today: Math.round(pToday),
       yesterday: Math.round(pYesterday),
-      week_predicted: Math.round(pPredicted),
+      week_predicted: Math.round(predictedBySlug.reduce((n, [, v]) => n + v, 0)),
       week_by_slug: Object.fromEntries(weekBySlug),
       avg_by_slug: Object.fromEntries(avgBySlug),
       net_daily: netToday.total,
