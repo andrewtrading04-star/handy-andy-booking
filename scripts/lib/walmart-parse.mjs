@@ -114,13 +114,15 @@ export function extractOrderTotal(text) {
 }
 
 // Estimated arrival → YYYY-MM-DD. Walmart order/shipping emails carry an
-// "Arrives <Mon DD>" (sometimes "Arriving …" / "Estimated delivery …") line.
+// "Arrives <Mon DD>" (sometimes "Arriving …" / "Estimated delivery …") line —
+// often with a weekday name first ("Arrives Thu, Jul 9"), which the optional
+// group below skips over so it isn't mistaken for the month itself.
 // The year is usually omitted, so we anchor to the order date's year and roll to
 // next year if the month already passed (a late-Dec order arriving in Jan).
 // Returns null when no arrival line is present.
 export function extractArrivesDate(text, orderISO) {
   if (!text) return null;
-  const m = text.match(/(?:arriv(?:es|ing)|estimated\s+delivery|expected\s+delivery|delivery\s+(?:by|date))\b[^A-Za-z0-9]{0,12}([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/i);
+  const m = text.match(/(?:arriv(?:es|ing)|estimated\s+delivery|expected\s+delivery|delivery\s+(?:by|date))\b[^A-Za-z0-9]{0,6}(?:[A-Za-z]{3,9}\.?,?\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/i);
   if (!m) return null;
   const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
   const mon = months[m[1].slice(0, 3).toLowerCase()];
