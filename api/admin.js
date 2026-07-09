@@ -3730,7 +3730,7 @@ async function reviewCalls(req, res, db, auth) {
   // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
   // column) — it must be embedded as a relation, exactly like bookingSelect().
   const selFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
-      review_email_opened_at, review_email_count, review_token, ${cc}
+      review_email_opened_at, review_email_count, review_token, postal_code, ${cc}
       customer:customers ( name, phone, email, postal_code ),
       technician:technicians!technician_id ( name ),
       service:services ( id, name ),
@@ -3768,7 +3768,7 @@ async function reviewCalls(req, res, db, auth) {
         business_name: b.name,
         customer_name: row.customer?.name || '—',
         phone: row.customer?.phone || null,
-        zip: row.customer?.postal_code || null,
+        zip: row.postal_code || row.customer?.postal_code || null,   // booking zip first; imported customers often have it only on the booking
         has_email: !!row.customer?.email,
         technician_name: row.technician?.name || '—',
         service_name: row.service?.name || 'Service',
