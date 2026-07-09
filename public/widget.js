@@ -45,14 +45,15 @@
     '1724797832896x339501352491155460': 'austin',
   };
 
-  // Valid coupon codes → discount in dollars. Must match COUPONS in api/book.js,
-  // which is the enforcing copy — this one only gives instant feedback pre-Stripe
-  // and shows the discount on the thank-you summary.
+  // Valid coupon codes → discount in dollars. Must match HA_COUPONS in
+  // api/book.js, which is the enforcing copy — this one only gives instant
+  // feedback pre-Stripe and shows the discount on the thank-you summary.
   const COUPONS = {
     MCDENVER20: 20, MP10: 10, AUS10: 10, HOU10: 10, DEN10: 10,
     ISREAL15: 15, STEVE15: 15, BATCITY10: 10, FBD15: 15, FB15: 15,
     ANNIVERSARY15: 15, BING10: 10, OLIVE10: 10, STV10: 10, G10TV: 10,
     TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
+    LASTCHANCE10: 10,   // exit-intent offer
   };
 
   // Analytics tracking — session id is "<visitorId>.<sessionId>" so repeat visitors can be identified

@@ -107,12 +107,18 @@ function slotWhen(slotId, territoryId) {
 
 // Valid coupon codes → discount in dollars (owner-provided, June 2026).
 // Zenbooker has no native coupon support, so a valid code is applied to the
-// job as a negative-price custom service line item.
-const COUPONS = {
+// job as a negative-price custom service line item. Kept in its own map per
+// business (renamed from a single shared COUPONS) so a code minted for one
+// business can never accidentally apply to the other's booking.
+const HA_COUPONS = {
   MCDENVER20: 20, MP10: 10, AUS10: 10, HOU10: 10, DEN10: 10,
   ISREAL15: 15, STEVE15: 15, BATCITY10: 10, FBD15: 15, FB15: 15,
   ANNIVERSARY15: 15, BING10: 10, OLIVE10: 10, STV10: 10, G10TV: 10,
   TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
+  LASTCHANCE10: 10,   // exit-intent offer
+};
+const DOMS_COUPONS = {
+  DONTGO10: 10,   // exit-intent offer
 };
 
 // Hard-coded after-hours fee: every job whose arrival window starts at 8 PM or
@@ -245,6 +251,10 @@ async function bookDoms(req, res) {
     surcharge = Number(z?.surcharge) || 0;
   }
 
+  // Coupon (validated server-side; unknown codes are ignored, never trusted).
+  const couponCode = String(b.coupon || '').trim().toUpperCase();
+  const couponAmt = DOMS_COUPONS[couponCode] || 0;
+
   // ── Line items for storage. Prefer explicit line_items; else map the
   // email_summary lines the widget already computed for display.
   const sum = b.email_summary || {};
@@ -269,6 +279,9 @@ async function bookDoms(req, res) {
   // so a stale/tampered widget can never drop it.
   if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
     lines.push({ kind: 'fee', name: 'Service area surcharge', quantity: 1, unit_price: surcharge, line_total: surcharge });
+  }
+  if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
+    lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
@@ -445,7 +458,7 @@ async function bookHandyAndy(req, res) {
 
   // Coupon (validated server-side; unknown codes are ignored, never trusted).
   const couponCode = String(b.coupon || '').trim().toUpperCase();
-  const couponAmt = COUPONS[couponCode] || 0;
+  const couponAmt = HA_COUPONS[couponCode] || 0;
 
   // ── Line items for storage. Prefer explicit line_items; else the email_summary
   // lines the widget computed for display.
@@ -686,10 +699,10 @@ export default async function handler(req, res) {
   const couponCode = String(coupon || '').trim().toUpperCase();
   let couponDiscount = 0;
   if (couponCode) {
-    if (!(couponCode in COUPONS)) {
+    if (!(couponCode in HA_COUPONS)) {
       return res.status(400).json({ error: `Invalid coupon code "${couponCode}". Please check the code or clear the field.` });
     }
-    couponDiscount = COUPONS[couponCode];
+    couponDiscount = HA_COUPONS[couponCode];
   }
 
   const services = [{ service_id, selections: zbk_selections || [] }];
