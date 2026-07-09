@@ -484,7 +484,6 @@ async function summary(req, res, db, auth) {
 
     // Row sets (pure filters over the already-fetched jobs — no queries).
     const paidDoneWeek = earned(pjobs).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
-    const paidDoneToday = earned(today);
 
     // Per-business realized profit THIS WEEK (parallel across businesses).
     const weekBySlugP = Promise.all((allBiz || []).map(async (bb) => {
@@ -563,10 +562,12 @@ async function summary(req, res, db, auth) {
     }));
 
     // All of the above are independent — resolve them concurrently.
-    const [pWeek, pToday, pYesterday, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
+    // "today"/"yesterday" and net_daily/net_daily_yesterday are the SAME metric
+    // (realized profit for that day) — netDailyFor already computes it correctly
+    // across both businesses (and reuses the already-fetched today/yRows rows for
+    // this one), so today/yesterday are just its totals, not a separate query.
+    const [pWeek, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
       sumProfit(paidDoneWeek),
-      sumProfit(paidDoneToday),
-      sumProfit(earned(yRows)),
       weekBySlugP,
       avgBySlugP,
       netDailyFor(0),
@@ -576,8 +577,8 @@ async function summary(req, res, db, auth) {
 
     profit = {
       week: Math.round(pWeek),
-      today: Math.round(pToday),
-      yesterday: Math.round(pYesterday),
+      today: netToday.total,
+      yesterday: netYesterday.total,
       week_predicted: Math.round(predictedBySlug.reduce((n, [, v]) => n + v, 0)),
       week_by_slug: Object.fromEntries(weekBySlug),
       avg_by_slug: Object.fromEntries(avgBySlug),
