@@ -9,13 +9,16 @@
 -- ============================================================================
 set search_path = app, public, extensions;
 
--- 1) Drop her completed job(s) out of the review-call queue.
-update bookings
+-- 1) Drop her completed job(s) out of the review-call queue. The customer's
+--    name lives on `customers`, not `bookings` (bookings.customer_id -> customers.id).
+update bookings b
 set review_call_status = 'reviewed',
     review_call_at = now(),
     review_call_by = 'Owner (confirmed Google review)'
-where customer_name ilike 'renita knight%'
-  and status = 'completed';
+from customers c
+where b.customer_id = c.id
+  and c.name ilike 'renita knight%'
+  and b.status = 'completed';
 
 -- 2) Record the actual review (credited to her job's lead technician),
 --    limited to her most recent completed job so she isn't double-counted
@@ -32,15 +35,17 @@ select
   b.technician_id,
   false
 from bookings b
-where b.customer_name ilike 'renita knight%'
+join customers c on c.id = b.customer_id
+where c.name ilike 'renita knight%'
   and b.status = 'completed'
 order by b.completed_at desc
 limit 1
 on conflict (business_id, google_key) do nothing;
 
 -- Verify:
---   select customer_name, review_call_status, review_call_by
---   from bookings where customer_name ilike 'renita knight%';
+--   select c.name, b.review_call_status, b.review_call_by
+--   from bookings b join customers c on c.id = b.customer_id
+--   where c.name ilike 'renita knight%';
 --
 --   select reviewer_name, rating, review_date, technician_id
 --   from google_reviews where reviewer_name ilike 'renita knight%';
