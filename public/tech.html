@@ -268,10 +268,22 @@ function lsJSON(key, fallback){
 let token=lsGet('ha_tech_token')||'';
 let tech=lsJSON('ha_tech_info', null);
 
-async function api(action,{method='GET',params={},body=null}={}){
+async function api(action,{method='GET',params={},body=null,timeoutMs=45000}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
   for(const[k,v]of Object.entries(params)) if(v!=null&&v!=='') url.searchParams.set(k,v);
-  const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined});
+  // Guard every request with a generous timeout — without it, a stalled connection
+  // left `fetch` pending forever and a Save/submit button stayed stuck until the
+  // tech force-reloaded the app. See the matching fix in admin.html's api().
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  let res;
+  try{
+    res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
+  }catch(e){
+    throw e.name==='AbortError' ? new Error('Request timed out — check your connection and try again.') : e;
+  }finally{
+    clearTimeout(timer);
+  }
   const data=await res.json().catch(()=>({}));
   // A 401 on an AUTHENTICATED call means the saved token is no longer valid — log
   // out and prompt re-login. But a 401 from login is just bad credentials, so let

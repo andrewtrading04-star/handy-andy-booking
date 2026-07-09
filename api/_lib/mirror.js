@@ -62,7 +62,7 @@ export async function mirrorBooking(ctx = {}) {
       name: first(c.name, `${c.first_name || ''} ${c.last_name || ''}`.trim(), 'Customer'),
       first_name: c.first_name || null, last_name: c.last_name || null,
       phone: c.phone || null, email: c.email || null,
-      address_line1: a.line1 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
+      address_line1: a.line1 || null, address_line2: a.line2 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
       stripe_customer_id: ctx.stripe_customer_id || null,
       zenbooker_customer_id: ctx.zenbooker_customer_id ? String(ctx.zenbooker_customer_id) : null,
     };
@@ -106,7 +106,7 @@ export async function mirrorBooking(ctx = {}) {
       // mirrors leave it NULL = legacy global/slug behavior.
       ...(ctx.stripe_account ? { stripe_account: ctx.stripe_account } : {}),
       price, tip: Number(ctx.tip) || 0,
-      address_line1: a.line1 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
+      address_line1: a.line1 || null, address_line2: a.line2 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
       notes: first(ctx.notes, providerName && `Zenbooker tech: ${providerName}`),
       customer_notes: ctx.customer_notes || null,
       zenbooker_job_id: ctx.zenbooker_job_id ? String(ctx.zenbooker_job_id) : null,

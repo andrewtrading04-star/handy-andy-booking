@@ -258,11 +258,16 @@ function matchItem(name) {
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
   if (isFrameInBoxBracket(name)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   // Wire/cord concealment worded outside the standard keys ("Hide Cords in Wall",
-  // "Cords in the wall"). In/behind the wall pays the behind-wall rate ($45/$35);
-  // an explicit "outside" pays the outside rate ($15). The exact-key lookups above
-  // already caught "hide the wires behind/outside the wall"; this covers "cords"
-  // and other phrasings so wire work is never dropped to an unmatched flag.
-  if (/\b(cord|wire)s?\b/i.test(name) && /\bwall\b/i.test(name)) {
+  // "Cords in the wall", or a manually-typed line item like "Outside wire
+  // concealment" that never says "wall" at all — the office types these free-hand
+  // straight into the tech app's line-item editor, not just picked from the
+  // widget's own preset labels). In/behind the wall pays the behind-wall rate
+  // ($45/$35); an explicit "outside" pays the outside rate ($15). "Concealment"
+  // is as strong a signal as "wall" here (it IS the app's own canonical label for
+  // this exact service — see "Outside Wire Concealment" / "In-Wall Wire
+  // Concealment" in admin.html/tech.html) — trigger on either so a hand-typed
+  // line never silently falls through to an unmatched $0.
+  if (/\b(cord|wire)s?\b/i.test(name) && /\bwall\b|conceal/i.test(name)) {
     return /\boutside\b/i.test(name)
       ? { key: 'outside wall wires', juan: 15, other: 15 }
       : { key: 'behind wall wires', juan: 45, other: 35 };
@@ -960,6 +965,14 @@ function runSelfTests() {
   // Wires (Juan vs other).
   eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 }, { name: 'Hide wires BEHIND the wall', line_total: 60 }] }), 'Steve').pay, 95, 'behind-wall other = 60+35');
   eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 }, { name: 'Hide wires BEHIND the wall', line_total: 60 }] }), 'Juan').pay, 105, 'behind-wall Juan = 60+45');
+  // Hand-typed line items that never say "wall" at all (David Tichenor's job,
+  // 2026-07-09: office typed "Outside wire concealment" straight into the tech
+  // app's line-item editor instead of picking a widget preset — it silently
+  // scored $0 and the tech was underpaid $15 until "concealment" was added as an
+  // alternate trigger alongside "wall").
+  eq(computeJobPay(job({ line_items: [{ name: '70"-85"', line_total: 149 }, { name: 'Outside wire concealment', line_total: 25 }] }), 'Zach').pay, 95, 'hand-typed "outside wire concealment" (no "wall") = 80+15');
+  eq(computeJobPay(job({ line_items: [{ name: '70"-85"', line_total: 149 }, { name: 'Outside wire concealment', line_total: 25 }] }), 'Juan').pay, 105, 'same, Juan = 90+15');
+  eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 }, { name: 'Wire concealment', line_total: 60 }] }), 'Zach').pay, 95, 'hand-typed "wire concealment" alone defaults to behind-wall = 60+35');
 
   // Handyman $65/hr, 2h min.
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 255 -> 3h*65=195');
