@@ -4132,19 +4132,31 @@ async function renderReviews(){
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
     const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
 
-    // ── Review-request tracking: sent / opened / reviewed, with a resend button.
+    // ── Review-request tracking: email + SMS sends/clicks, with a resend button.
+    // Click-tracking replaces the old pixel-based open tracking — works identically for both channels.
     const reqRows=requests.map(r=>{
       const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
       const pill='display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;';
       const base=pill+'background:#eef0f2;color:#5b6470;';
       const okp=pill+'background:#dcfce7;color:#15803d;';
       const starp=pill+'background:#fef3c7;color:#a16207;';
-      const sent = r.sent_at
-        ? `<span style="${okp}">Sent${r.send_count>1?` ×${r.send_count}`:''}</span>`
-        : `<span style="${base}">Not sent</span>`;
-      const opened = r.opened_at
-        ? `<span style="${okp}">Opened</span>`
-        : (r.sent_at?`<span style="${base}">Not opened</span>`:'');
+
+      // Email: sent status + click tracking
+      const emailSent = r.email_sent_at
+        ? `<span style="${okp}">📧 Sent${r.email_count>1?` ×${r.email_count}`:''}</span>`
+        : `<span style="${base}">📧 Not sent</span>`;
+      const emailClicked = r.clicked_at && r.click_channel==='email'
+        ? `<span style="${okp}">📧 Clicked</span>`
+        : (r.email_sent_at?`<span style="${base}">📧 Not clicked</span>`:'');
+
+      // SMS: sent status + click tracking
+      const smsSent = r.sms_sent_at
+        ? `<span style="${okp}">💬 Sent</span>`
+        : '';
+      const smsClicked = r.clicked_at && r.click_channel==='sms'
+        ? `<span style="${okp}">💬 Clicked</span>`
+        : (r.sms_sent_at?`<span style="${base}">💬 Not clicked</span>`:'');
+
       const reviewed = r.rating
         ? `<span style="${starp}">${'⭐'.repeat(r.rating)}</span>`
         : `<span style="${base}">No review yet</span>`;
@@ -4155,10 +4167,10 @@ async function renderReviews(){
           <div style="flex:1;min-width:0;">
             <div class="name">${esc(r.customer_name)}</div>
             <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
-            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${sent}${opened}${reviewed}${gpill}</div>
+            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${emailSent}${emailClicked}${smsSent}${smsClicked}${reviewed}${gpill}</div>
           </div>
           <div style="text-align:right;white-space:nowrap;">
-            ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
+            ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.email_sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
           </div>
         </div>
       </div>`;
