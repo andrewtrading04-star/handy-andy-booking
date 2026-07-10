@@ -25,11 +25,17 @@ import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, compu
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
-import { gscTopQueries } from './_lib/gsc.js';
+import { gscQuery } from './_lib/gsc.js';
 
 // Search Console domain per business — the free "what did people search to
 // find us" data source (see api/_lib/gsc.js).
 const GSC_DOMAIN_BY_SLUG = { 'handy-andy': 'ihandyandy.com', 'doms': 'domstvmounting.com' };
+// Substrings that mark a query as "branded" (already knew the business name)
+// vs. genuine new discovery, for the branded/non-branded split.
+const GSC_BRAND_TERMS = {
+  'handy-andy': ['handy andy', 'ihandyandy', 'handyandy'],
+  'doms': ["dom's tv", 'doms tv', 'domstvmounting', "dom's tv mounting"],
+};
 
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
 // to expose). Handy Andy uses the main account; Doms uses its own.
@@ -4112,26 +4118,55 @@ async function avgTicketWeek(req, res, db, auth) {
   return res.status(200).json({ avg_by_slug: bySlug, range_label: `${fmtMD(start)} – ${fmtMD(lastDay)}`, offset });
 }
 
-// Top Google search queries for a business's site (free, via Search Console —
-// see api/_lib/gsc.js). Best-effort: this is a bonus data source layered onto
-// Website Analytics, so a missing/misconfigured credential degrades to an
-// empty list with an explanatory `error` string rather than breaking the page.
+// Google Search Console data for a business's site (free — see api/_lib/gsc.js).
+// Best-effort: this is a bonus data source layered onto Website Analytics, so a
+// missing/misconfigured credential degrades to empty lists with an explanatory
+// `error` string rather than breaking the page. Two API calls cover four views:
+//   - dimensions=['query'] (up to 500 rows) -> top queries, striking-distance
+//     keywords (position 11-20), and the branded/non-branded click split
+//   - dimensions=['query','page'] -> which landing page each query lands on
 async function gscQueries(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const domain = GSC_DOMAIN_BY_SLUG[biz.slug];
-  if (!domain) return res.status(200).json({ rows: [], error: `No Search Console domain configured for ${biz.slug}` });
+  if (!domain) return res.status(200).json({ rows: [], strikingDistance: [], queryPages: [], brandSplit: null, error: `No Search Console domain configured for ${biz.slug}` });
   const days = Math.max(1, Math.min(Number(req.query.days) || 28, 480));
   // Search Console data lags ~2-3 days behind real time, so end a few days
   // back instead of "today" — otherwise the freshest days come back empty.
   const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
   const fmt = (d) => d.toISOString().split('T')[0];
+  const startDate = fmt(start), endDate = fmt(end);
   try {
-    const { site, rows } = await gscTopQueries({ domain, startDate: fmt(start), endDate: fmt(end), rowLimit: 50 });
-    rows.sort((a, b) => b.clicks - a.clicks);
-    return res.status(200).json({ site, rows, rangeDays: days });
+    const [byQuery, byQueryPage] = await Promise.all([
+      gscQuery({ domain, startDate, endDate, dimensions: ['query'], rowLimit: 500 }),
+      gscQuery({ domain, startDate, endDate, dimensions: ['query', 'page'], rowLimit: 50 }),
+    ]);
+    const queryRows = byQuery.rows.map(r => ({ query: r.keys[0] || '', clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }));
+    const rows = [...queryRows].sort((a, b) => b.clicks - a.clicks).slice(0, 25);
+
+    // Striking distance: page-2-ish rankings with real impressions behind them
+    // — small on-page work here has the best odds of moving the needle.
+    const strikingDistance = queryRows
+      .filter(r => r.position >= 11 && r.position <= 20 && r.impressions >= 10)
+      .sort((a, b) => b.impressions - a.impressions)
+      .slice(0, 25);
+
+    // Branded vs non-branded — how much of this traffic already knew the
+    // business name vs. genuine new discovery through search.
+    const brandTerms = GSC_BRAND_TERMS[biz.slug] || [];
+    const isBranded = (q) => brandTerms.some(t => q.toLowerCase().includes(t));
+    const brandedClicks = queryRows.filter(r => isBranded(r.query)).reduce((s, r) => s + r.clicks, 0);
+    const totalClicks = queryRows.reduce((s, r) => s + r.clicks, 0);
+    const brandSplit = { branded: brandedClicks, nonBranded: totalClicks - brandedClicks };
+
+    const queryPages = byQueryPage.rows
+      .map(r => ({ query: r.keys[0] || '', page: r.keys[1] || '', clicks: r.clicks, impressions: r.impressions, position: r.position }))
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, 25);
+
+    return res.status(200).json({ site: byQuery.site, rangeDays: days, rows, strikingDistance, queryPages, brandSplit });
   } catch (e) {
-    return res.status(200).json({ rows: [], error: e.message });
+    return res.status(200).json({ rows: [], strikingDistance: [], queryPages: [], brandSplit: null, error: e.message });
   }
 }
 

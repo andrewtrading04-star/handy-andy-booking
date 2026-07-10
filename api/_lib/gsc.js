@@ -61,10 +61,13 @@ function siteCandidates(domain) {
   return [`sc-domain:${domain}`, `https://${domain}/`, `https://www.${domain}/`, `http://${domain}/`];
 }
 
-// Top search queries for a domain over [startDate, endDate] ('YYYY-MM-DD').
+// Search Analytics query for a domain over [startDate, endDate] ('YYYY-MM-DD').
+// `dimensions` controls the grouping — ['query'] for plain top-queries,
+// ['query','page'] to pair each query with its landing page, etc. Each row's
+// `keys` array lines up positionally with the requested dimensions.
 // Best-effort: throws with a clear message on total failure so callers can
 // degrade gracefully (this is a bonus data source, not core functionality).
-export async function gscTopQueries({ domain, startDate, endDate, rowLimit = 25 }) {
+export async function gscQuery({ domain, startDate, endDate, dimensions = ['query'], rowLimit = 25 }) {
   const token = await getAccessToken();
   const known = _siteCache.get(domain);
   const candidates = known ? [known, ...siteCandidates(domain).filter(s => s !== known)] : siteCandidates(domain);
@@ -74,7 +77,7 @@ export async function gscTopQueries({ domain, startDate, endDate, rowLimit = 25 
       const r = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/searchAnalytics/query`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startDate, endDate, dimensions: ['query'], rowLimit, type: 'web' }),
+        body: JSON.stringify({ startDate, endDate, dimensions, rowLimit, type: 'web' }),
       });
       if (!r.ok) { lastErr = new Error(`${site}: HTTP ${r.status} — ${(await r.text().catch(() => '')).slice(0, 200)}`); continue; }
       const data = await r.json();
@@ -82,7 +85,7 @@ export async function gscTopQueries({ domain, startDate, endDate, rowLimit = 25 
       return {
         site,
         rows: (data.rows || []).map(row => ({
-          query: row.keys?.[0] || '',
+          keys: row.keys || [],
           clicks: row.clicks || 0,
           impressions: row.impressions || 0,
           ctr: row.ctr || 0,
