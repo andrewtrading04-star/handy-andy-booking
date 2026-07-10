@@ -64,27 +64,38 @@ async function placeDetailsPublic(req, res) {
 // Records the first time a customer clicks the review link from either channel,
 // then redirects to review.html. Replaces the old email open-pixel with a
 // click-tracking redirect that works identically for email and SMS.
-// Never errors visibly — best-effort, always redirects.
+//
+// The redirect ALWAYS carries the customer's original token, no matter what
+// happens with tracking — a tracking failure (bad token, DB error, migration
+// not applied yet) must never break the review page for the customer.
 async function serveReviewClick(req, res) {
-  const now = new Date().toISOString();
-  const channel = (req.query.ch || 'email').toString().toLowerCase(); // 'email' or 'sms'
-  let reviewToken = null;
+  const rawToken = ((req.query || {}).token || '').toString();
+  const channel = ((req.query || {}).ch || '').toString().toLowerCase() === 'sms' ? 'sms' : 'email';
   try {
-    const t = verifyToken(((req.query || {}).token || '').toString());
+    const t = verifyToken(rawToken);
     if (t && t.kind === 'review' && t.booking_id) {
       const db = serviceClient();
-      // Record first click only, capture which channel it came from
+      const now = new Date().toISOString();
+      // First click only, with the channel it came from. Prefer the dedicated
+      // columns (migration 0062); if they aren't applied yet, fall back to the
+      // bookings.metadata JSONB so tracking still records.
       const { error } = await db.from('bookings')
         .update({ review_clicked_at: now, review_click_channel: channel })
         .eq('id', t.booking_id)
         .is('review_clicked_at', null);
-      if (!error) reviewToken = ((req.query || {}).token || '').toString();
+      if (error) {
+        const { data: cur } = await db.from('bookings').select('metadata').eq('id', t.booking_id).maybeSingle();
+        const meta = (cur && cur.metadata) || {};
+        if (cur && !meta.review_clicked_at) {
+          await db.from('bookings')
+            .update({ metadata: { ...meta, review_clicked_at: now, review_click_channel: channel } })
+            .eq('id', t.booking_id);
+        }
+      }
     }
   } catch (e) { /* tracking is best-effort; always redirect */ }
-  // Redirect to the review page. If token wasn't recorded (either booking not found
-  // or already clicked), the redirect will fail with a 404 in review.html.
-  const redirectUrl = `${process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')}/review.html?token=${encodeURIComponent(reviewToken || '')}`;
-  return res.redirect(302, redirectUrl);
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  return res.redirect(302, `${base}/review.html?token=${encodeURIComponent(rawToken)}`);
 }
 
 // After creating the Zenbooker job this handler does several more sequential
