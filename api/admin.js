@@ -25,6 +25,11 @@ import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, compu
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
+import { gscTopQueries } from './_lib/gsc.js';
+
+// Search Console domain per business — the free "what did people search to
+// find us" data source (see api/_lib/gsc.js).
+const GSC_DOMAIN_BY_SLUG = { 'handy-andy': 'ihandyandy.com', 'doms': 'domstvmounting.com' };
 
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
 // to expose). Handy Andy uses the main account; Doms uses its own.
@@ -242,6 +247,7 @@ export default async function handler(req, res) {
       case 'google_reviews':       return await googleReviews(req, res, db, auth);
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
       case 'avg_ticket':        return await avgTicketWeek(req, res, db, auth);
+      case 'gsc_queries':       return await gscQueries(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
@@ -4104,6 +4110,29 @@ async function avgTicketWeek(req, res, db, auth) {
   const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
   const lastDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
   return res.status(200).json({ avg_by_slug: bySlug, range_label: `${fmtMD(start)} – ${fmtMD(lastDay)}`, offset });
+}
+
+// Top Google search queries for a business's site (free, via Search Console —
+// see api/_lib/gsc.js). Best-effort: this is a bonus data source layered onto
+// Website Analytics, so a missing/misconfigured credential degrades to an
+// empty list with an explanatory `error` string rather than breaking the page.
+async function gscQueries(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const domain = GSC_DOMAIN_BY_SLUG[biz.slug];
+  if (!domain) return res.status(200).json({ rows: [], error: `No Search Console domain configured for ${biz.slug}` });
+  const days = Math.max(1, Math.min(Number(req.query.days) || 28, 480));
+  // Search Console data lags ~2-3 days behind real time, so end a few days
+  // back instead of "today" — otherwise the freshest days come back empty.
+  const end = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+  const fmt = (d) => d.toISOString().split('T')[0];
+  try {
+    const { site, rows } = await gscTopQueries({ domain, startDate: fmt(start), endDate: fmt(end), rowLimit: 50 });
+    rows.sort((a, b) => b.clicks - a.clicks);
+    return res.status(200).json({ site, rows, rangeDays: days });
+  } catch (e) {
+    return res.status(200).json({ rows: [], error: e.message });
+  }
 }
 
 async function estimates(req, res, db, auth) {

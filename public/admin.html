@@ -3289,7 +3289,7 @@ async function loadWebAnalytics(){
       try{ const r=await fetch(base+path+(path.includes('?')?'&':'?')+qs); return r.ok?await r.json():fallback; }
       catch{ return fallback; }
     };
-    const [pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit]=await Promise.all([
+    const [pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc]=await Promise.all([
       get('/api/analytics/page-views',{total:0,events:[]}),
       get('/api/analytics/clicks',{total:0,by_button:{}}),
       get('/api/analytics/form-interactions',{total:0,by_field:{}}),
@@ -3301,8 +3301,11 @@ async function loadWebAnalytics(){
       get('/api/analytics/referrers',{referrers:[]}),
       get('/api/analytics/pages-bounce',{pages_bounce:[]}),
       get('/api/analytics/exit-pages',{exit_pages:[]}),
+      // Real Google search queries (Search Console) — separate source from the
+      // rest of this screen, fetched through our own API rather than webBackend().
+      api('gsc_queries',{ params:{ business:current.slug, days:28 }}).catch(e=>({rows:[],error:e.message})),
     ]);
-    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,lastUpdated:new Date().toISOString()});
+    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,lastUpdated:new Date().toISOString()});
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
   }finally{ webLoading=false; }
@@ -3381,8 +3384,21 @@ function webRender(d){
     <div class="card"><h2>Recent Sessions</h2>${webSessionsTbl(d.ses.sessions)}</div>
   </div>`;
 
+  // Real Google search queries — free via Search Console, separate range from
+  // the rest of this screen (always the last 28 days; Google's own data lags
+  // ~2-3 days, so "Today"/"Yesterday" wouldn't have anything to show yet).
+  html+=`<div class="section card"><h2>🔎 Top Google Search Queries <span style="font-weight:400;font-size:12px;color:var(--mute);">— last 28 days</span></h2>${webGscTbl(d.gsc)}</div>`;
+
   content.innerHTML=html;
   webDrawCharts(d,brand);
+}
+function webGscTbl(gsc){
+  if(gsc && gsc.error && (!gsc.rows||!gsc.rows.length)) return `<div class="empty">Not connected yet — ${esc(gsc.error)}</div>`;
+  const rows=(gsc&&gsc.rows)||[];
+  if(!rows.length) return `<div class="empty">No Search Console data for this period yet.</div>`;
+  return `<div style="overflow-x:auto;"><table><tr><th>Search query</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Avg. position</th></tr>`+
+    rows.slice(0,25).map(r=>`<tr><td>${esc(r.query)}</td><td class="num">${webNum(r.clicks)}</td><td class="num">${webNum(r.impressions)}</td><td class="num">${(r.ctr*100).toFixed(1)}%</td><td class="num">${r.position.toFixed(1)}</td></tr>`).join('')+
+    `</table></div>`;
 }
 
 function webDeviceCard(dev,brand){
