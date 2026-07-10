@@ -290,6 +290,12 @@
   .rc-complaint{display:flex;flex-direction:column;gap:8px;}
   .rc-cmp-text{width:100%;min-height:62px;resize:vertical;font:inherit;font-size:13px;padding:9px 11px;border:1.5px solid #fde68a;border-radius:9px;background:#fffbeb;color:var(--ink);}
   .rc-cmp-text:focus{outline:none;border-color:#f59e0b;}
+  .rc-badge.green{background:#dcfce7;color:#15803d;}
+  .rc-note{background:#fffbeb;border:1.5px solid #fde68a;border-radius:9px;padding:9px 11px;font-size:13px;color:#78350f;line-height:1.5;margin-top:8px;max-width:52ch;}
+  .rc-week-nav{display:flex;align-items:center;gap:10px;background:var(--line2);border-radius:10px;padding:6px 10px;flex:none;}
+  .rc-week-arrow{border:0;background:#fff;width:28px;height:28px;border-radius:8px;font-size:15px;font-weight:800;color:var(--ink-2);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  .rc-week-arrow:disabled{opacity:.35;cursor:default;box-shadow:none;}
+  .rc-week-label{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;}
   @media(max-width:640px){ .rc-card{flex-direction:column;align-items:stretch;} .rc-actions{min-width:0;} }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
@@ -3160,13 +3166,13 @@ function anaErrTbl(recent){
 }
 function anaSessionsTbl(rows){
   if(!rows||!rows.length) return `<div class="empty">No sessions yet in this period.</div>`;
-  return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Status</th><th>Got As Far As</th><th>Quoted/Paid</th><th>Device</th><th>Customer</th><th>City</th><th>ZIP</th><th>Time Spent</th><th></th></tr>`+
+  return `<div style="overflow-x:auto;"><table><tr><th>When</th><th>Status</th><th>Got As Far As</th><th>Quoted/Paid</th><th>Device</th><th>Coupon</th><th>City</th><th>ZIP</th><th>Time Spent</th><th></th></tr>`+
     rows.map(s=>`<tr>
       <td style="white-space:nowrap;">${new Date(s.when).toLocaleString('en-US',{timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})}</td>
       <td>${s.booked?'<span class="pill green">BOOKED</span>':(s.hadError?'<span class="pill red">error</span>':'<span class="pill gray">left</span>')}</td>
       <td>${esc(s.furthest)}</td>
       <td class="num">${s.value?anaMoney(s.value):'—'}</td>
-      <td>${esc(s.device||'—')}</td><td>${esc(s.customer||'—')}</td>
+      <td>${esc(s.device||'—')}</td><td>${s.coupon?`<span style="color:#15803d;font-weight:700;">${esc(s.coupon)}</span>`:''}</td>
       <td>${esc(s.city||'—')}</td><td>${esc(s.zip||'—')}</td>
       <td>${anaDur(s.durationSec)}</td>
       <td>${s.isRepeat?'<span class="pill blue">repeat visitor</span>':''}</td>
@@ -3873,6 +3879,7 @@ async function renderDisputes(){
 // ── Reviews ─────────────────────────────────────────────────────────────────
 // ── Review Calls — Joey's daily review-outreach queue ────────────────────────
 let _rcDays=1, _rcData=[], _rcComplaintFor=null, _rcComplaintText='', _rcWarning=null;
+let _rcFolder='to_call', _rcWeekOffset=0, _rcFolderCounts={}, _rcWeekLabel='';
 const RC_SCRIPT = "Hi, this is Joey with [Business name] — just calling to make sure everything went well with your installation. Is there anything else we can help with? … Great! One more thing — we also do handyman work: hanging curtains, mounting shelves, furniture assembly, small repairs — so keep us in mind. And if you have a minute, a quick Google review would mean a lot; I can text or email you the link right now.";
 function rcRel(iso){
   if(!iso) return '';
@@ -3889,39 +3896,88 @@ async function renderReviewCalls(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
   try{
-    const d=await api('review_calls',{ params:{ days:_rcDays }});
+    const params = _rcFolder==='to_call' ? { days:_rcDays } : { folder:_rcFolder, week_offset:_rcWeekOffset };
+    const d=await api('review_calls',{ params });
     _rcData=d.calls||[];
     _rcWarning=d.warning||null;
+    _rcFolderCounts=d.folder_counts||{};
+    _rcWeekLabel=d.week_label||'';
     paintReviewCalls();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 function paintReviewCalls(){
   const view=document.getElementById('view'); if(!view) return;
   const rows=_rcData||[];
+  const isToCall=_rcFolder==='to_call';
   const toCall=rows.filter(r=>!r.call_status).length;
   const inProg=rows.filter(r=>r.call_status).length;
   const seg=(v,l)=>`<button class="rc-seg-btn${_rcDays===v?' on':''}" data-rcdays="${v}">${l}</button>`;
-  const cards=rows.length ? rows.map(rcCard).join('')
-    : `<div class="empty" style="padding:34px 12px;">🎉 Nobody to call for this window — everyone has left a review or been handled.</div>`;
+  const folderTab=(key,label)=>{
+    const n=(!isToCall && _rcFolderCounts[key]!=null) ? ` <span style="opacity:.6;">${_rcFolderCounts[key]}</span>` : '';
+    return `<button class="rc-seg-btn${_rcFolder===key?' on':''}" data-rcfolder="${key}">${label}${n}</button>`;
+  };
+  const cards=rows.length ? rows.map(isToCall?rcCard:rcFolderCard).join('')
+    : `<div class="empty" style="padding:34px 12px;">${isToCall?'🎉 Nobody to call for this window — everyone has left a review or been handled.':'Nothing logged in this folder that week.'}</div>`;
+  const rangeControl = isToCall
+    ? `<div class="rc-seg">${seg(1,'Yesterday')}${seg(3,'Last 3 days')}${seg(7,'Last 7 days')}</div>`
+    : `<div class="rc-week-nav">
+         <button class="rc-week-arrow" data-rcweek="-1" title="Previous week">‹</button>
+         <span class="rc-week-label">Week of ${esc(_rcWeekLabel)}</span>
+         <button class="rc-week-arrow" data-rcweek="1" title="Next week" ${_rcWeekOffset>=0?'disabled':''}>›</button>
+       </div>`;
   view.innerHTML=`<div class="wrap">
     <div class="rc-head">
       <div><h2 class="rc-title">📞 Review Calls</h2>
         <div class="rc-sub">Customers from <b>both companies</b> who finished a job and haven't left us a review yet (Google <i>or</i> a CRM star rating). Call, thank them, invite a review — anyone who rates us drops off automatically.</div>
       </div>
-      <div class="rc-seg">${seg(1,'Yesterday')}${seg(3,'Last 3 days')}${seg(7,'Last 7 days')}</div>
+      ${rangeControl}
     </div>
-    <div class="rc-script">
+    <div class="rc-seg" style="margin-bottom:14px;">
+      ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
+    </div>
+    ${isToCall?`<div class="rc-script">
       <div class="rc-script-h">📋 Script <span>— say the company shown on each card</span></div>
       <div class="rc-script-b">“${esc(RC_SCRIPT)}”</div>
-    </div>
+    </div>`:''}
     ${_rcWarning?`<div class="nb-min-warn floored" style="margin-bottom:12px;">⚠ Couldn't load part of the list — ${esc(_rcWarning)}</div>`:''}
-    <div class="rc-count">${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}</div>
+    <div class="rc-count">${isToCall?`${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}`:`${rows.length} logged · week of ${esc(_rcWeekLabel)}`}</div>
     <div id="rcList">${cards}</div>
   </div>`;
   view.querySelectorAll('[data-rcdays]').forEach(b=>b.addEventListener('click',()=>{ _rcDays=+b.dataset.rcdays; renderReviewCalls(); }));
+  view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));
+  view.querySelectorAll('[data-rcweek]').forEach(b=>b.addEventListener('click',()=>{ _rcWeekOffset=Math.max(-520,Math.min(0,_rcWeekOffset+parseInt(b.dataset.rcweek))); renderReviewCalls(); }));
   view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz)));
   const badge=document.getElementById('rcBadge');
-  if(badge){ if(toCall>0){ badge.textContent=toCall; badge.style.display=''; } else badge.style.display='none'; }
+  if(badge){ if(isToCall && toCall>0){ badge.textContent=toCall; badge.style.display=''; } else if(isToCall) badge.style.display='none'; }
+}
+// Read-only history card for the folder views (Complaints / Promised review /
+// Voicemail / Do not contact) — no outcome buttons (that's already resolved),
+// just what happened, when, by whom, and the note if there was one.
+function rcFolderCard(r){
+  const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
+  const badges=[];
+  if(r.rating && r.rating<4) badges.push(`<span class="rc-badge red">⚠ left ${r.rating}★ private feedback — handle gently</span>`);
+  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at))}`:''}</span>`);
+  if(r.reviewed) badges.push(`<span class="rc-badge green">✅ Left a review since</span>`);
+  const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
+  const callBtn = r.call_status==='do_not_contact'
+    ? `<span class="rc-call disabled">🚫 Do not contact</span>`
+    : (tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`);
+  const resend=(r.has_email && r.has_review_link && !r.reviewed && r.call_status!=='do_not_contact')
+    ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
+  const noteBox = r.call_notes ? `<div class="rc-note">“${esc(r.call_notes)}”</div>` : '';
+  return `<div class="rc-card">
+    <div class="rc-main">
+      <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
+      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}</div>
+      <div class="rc-badges">${badges.join('')}</div>
+      ${noteBox}
+    </div>
+    <div class="rc-actions">
+      ${callBtn}
+      ${resend}
+    </div>
+  </div>`;
 }
 // What to show in a review-call card's 🛒 summary: the actual work Joey can
 // reference on the call — TV sizes, handyman, Assurion, and priced add-ons

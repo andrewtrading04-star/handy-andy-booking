@@ -63,17 +63,28 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     // Everything BOOKED (created) during today's Denver day, any business, minus
     // cancellations.
     const { data: rows } = await db.from('bookings')
-      .select(`id, created_at, scheduled_at, price, status, service_area_id,
+      .select(`id, created_at, scheduled_at, price, status, service_area_id, source, metadata,
                business:businesses ( name, timezone ),
                customer:customers ( name, phone, email ),
                technician:technicians!technician_id ( name ),
-               address_line1, city, state, postal_code,
-               line_items:booking_line_items ( kind, name, line_total )`)
+               booking_line_items ( kind, name ),
+               address_line1, city, state, postal_code`)
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
       .neq('status', 'cancelled')
       .order('created_at', { ascending: true });
     const bookings = rows || [];
+
+    // "Booked by" — online widget vs. whoever in the office created it manually.
+    const bookedByLabel = (b) => {
+      if (b.source === 'widget') return 'Online booking';
+      return b.metadata?.booked_by || 'Office';
+    };
+    // Coupon code, if the customer applied one (widget bookings only).
+    const couponLabel = (b) => {
+      const li = (b.booking_line_items || []).find(x => x.kind === 'coupon');
+      return li ? li.name.replace(/^Coupon\s+/i, '') : null;
+    };
 
     if (dryRun) return { would_send: bookings.length, to, denverHour: hour };
     // Nothing booked today → no email (keeps the inbox quiet on slow days).
@@ -97,18 +108,19 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
 
     const rowsHtml = bookings.map(b => {
       const addr = [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
-      const coupon = (b.line_items || []).find(li => li.kind === 'coupon');
+      const coupon = couponLabel(b);
       return `<tr style="border-top:1px solid #e5e7eb;">
-        <td style="padding:9px 12px;vertical-align:top;">
+        <td style="padding:9px 10px;vertical-align:top;">
           <div style="font-weight:700;color:#111;">${escHtml(b.customer?.name || 'Customer')}</div>
           <div style="color:#6b7280;font-size:12.5px;">${escHtml(b.business?.name || '')}</div>
           ${addr ? `<div style="color:#9ca3af;font-size:12px;margin-top:2px;">${escHtml(addr)}</div>` : ''}
-          ${coupon ? `<div style="color:#b45309;font-size:12px;margin-top:2px;">🏷️ ${escHtml(coupon.name)} (-${money(Math.abs(coupon.line_total))})</div>` : ''}
         </td>
-        <td style="padding:9px 12px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(fmtWhen(b.scheduled_at, rowTz(b)))}</td>
-        <td style="padding:9px 12px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(b.customer?.phone || '—')}</td>
-        <td style="padding:9px 12px;vertical-align:top;font-size:13px;color:#111;">${escHtml(b.technician?.name || 'Unassigned')}</td>
-        <td style="padding:9px 12px;vertical-align:top;text-align:right;font-weight:700;color:#111;white-space:nowrap;">${b.price != null ? money(b.price) : '—'}</td>
+        <td style="padding:9px 10px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(fmtWhen(b.scheduled_at, rowTz(b)))}</td>
+        <td style="padding:9px 10px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(b.customer?.phone || '—')}</td>
+        <td style="padding:9px 10px;vertical-align:top;font-size:13px;color:#111;">${escHtml(b.technician?.name || 'Unassigned')}</td>
+        <td style="padding:9px 10px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(bookedByLabel(b))}</td>
+        <td style="padding:9px 10px;vertical-align:top;font-size:13px;white-space:nowrap;">${coupon ? `<span style="color:#15803d;font-weight:700;">${escHtml(coupon)}</span>` : '<span style="color:#9ca3af;">—</span>'}</td>
+        <td style="padding:9px 10px;vertical-align:top;text-align:right;font-weight:700;color:#111;white-space:nowrap;">${b.price != null ? money(b.price) : '—'}</td>
       </tr>`;
     }).join('');
 
@@ -117,9 +129,10 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${escHtml(dateLabel)} · daily summary</div>
       <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
         <thead><tr style="background:#f9fafb;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">
-          <th style="padding:9px 12px;">Customer</th><th style="padding:9px 12px;">Appointment</th>
-          <th style="padding:9px 12px;">Phone</th><th style="padding:9px 12px;">Tech</th>
-          <th style="padding:9px 12px;text-align:right;">Total</th>
+          <th style="padding:9px 10px;">Customer</th><th style="padding:9px 10px;">Appointment</th>
+          <th style="padding:9px 10px;">Phone</th><th style="padding:9px 10px;">Tech</th>
+          <th style="padding:9px 10px;">Booked by</th><th style="padding:9px 10px;">Coupon</th>
+          <th style="padding:9px 10px;text-align:right;">Total</th>
         </tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>

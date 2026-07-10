@@ -3780,38 +3780,113 @@ const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'de
 // a complaint (handled + logged), or asked not to be contacted. 'voicemail' /
 // 'callback' stay on the list so Joey tries again. ('reviewed' kept for old data.)
 const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact', 'promised_review', 'complaint'];
+const RC_TZ = 'America/Denver';
+// NOTE: line_items lives in the booking_line_items TABLE (not a bookings
+// column) — it must be embedded as a relation, exactly like bookingSelect().
+const rcSelFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
+    review_email_opened_at, review_email_count, review_token, postal_code, ${cc}
+    customer:customers ( name, phone, email, postal_code ),
+    technician:technicians!technician_id ( name ),
+    service:services ( id, name ),
+    line_items:booking_line_items ( name, quantity, unit_price, line_total )`;
+const RC_CALL_COLS = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
+function rcMapRow(row, b) {
+  return {
+    id: row.id,
+    business_slug: b.slug,
+    business_name: b.name,
+    customer_name: row.customer?.name || '—',
+    phone: row.customer?.phone || null,
+    zip: row.postal_code || row.customer?.postal_code || null,   // booking zip first; imported customers often have it only on the booking
+    has_email: !!row.customer?.email,
+    technician_name: row.technician?.name || '—',
+    service_name: row.service?.name || 'Service',
+    // What they bought — so Joey can reference it on the call.
+    line_items: (Array.isArray(row.line_items) ? row.line_items : [])
+      .filter(li => li && (li.name || li.description))
+      .map(li => ({ name: String(li.name || li.description), qty: Number(li.quantity || li.qty) || 1, price: Number(li.line_total != null ? li.line_total : li.unit_price) || 0 })),
+    when: row.scheduled_at || row.completed_at || null,
+    is_completed: row.status === 'completed',
+    email_opened: !!row.review_email_opened_at,
+    email_count: row.review_email_count || 0,
+    rating: row.review_rating || null,          // 1–3 = they gave us negative feedback (handle with care)
+    has_review_link: !!row.review_token,
+    reviewed: row.reviewed_at != null || Number(row.review_rating) >= 4,
+    call_status: row.review_call_status || null,
+    call_at: row.review_call_at || null,
+    call_by: row.review_call_by || null,
+    call_notes: row.review_call_notes || null,
+  };
+}
+// Which review_call_status values live in each browsable folder — 'voicemail'
+// and 'callback' both mean "left a message, try again," so they share a folder.
+const RC_STATUS_TO_FOLDER = { complaint: 'complaint', promised_review: 'promised_review', voicemail: 'voicemail', callback: 'voicemail', do_not_contact: 'do_not_contact' };
+
 async function reviewCalls(req, res, db, auth) {
   // Joey's (Doms) outreach tool — not part of Heather's (Handy Andy) platform.
   if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
-  const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
+  const folder = (req.query.folder || 'to_call').toString();
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
-
-  const callCols = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
-  // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
-  // column) — it must be embedded as a relation, exactly like bookingSelect().
-  const selFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
-      review_email_opened_at, review_email_count, review_token, postal_code, ${cc}
-      customer:customers ( name, phone, email, postal_code ),
-      technician:technicians!technician_id ( name ),
-      service:services ( id, name ),
-      line_items:booking_line_items ( name, quantity, unit_price, line_total )`;
-
-  const out = [];
   const warnings = [];
+
+  if (folder !== 'to_call') {
+    // Folder browsing (Complaints / Promised review / Voicemail / Do not
+    // contact) — grouped by the calendar week (Sun–Sat) the call was LOGGED
+    // (review_call_at), not the job's scheduled date, so resolved calls are
+    // still reachable weeks later instead of disappearing once handled.
+    if (!['complaint', 'promised_review', 'voicemail', 'do_not_contact'].includes(folder)) {
+      return res.status(400).json({ error: 'Invalid folder' });
+    }
+    let weekOffset = parseInt(req.query.week_offset);
+    if (!isFinite(weekOffset)) weekOffset = 0;
+    weekOffset = Math.max(-520, Math.min(0, weekOffset));   // up to ~10 years back, never the future
+    const weekBase = new Date(Date.now() + weekOffset * 7 * 86400000);
+    const weekStart = startOfWeekUTC(RC_TZ, weekBase);
+    const weekEnd = localDayStartUTC(RC_TZ, 7, weekStart);
+
+    const out = [];
+    const folderCounts = { complaint: 0, promised_review: 0, voicemail: 0, do_not_contact: 0 };
+    for (const b of (bizs || [])) {
+      const { data, error } = await db.from('bookings').select(rcSelFor(RC_CALL_COLS))
+        .eq('business_id', b.id)
+        .gte('review_call_at', weekStart.toISOString()).lt('review_call_at', weekEnd.toISOString())
+        .order('review_call_at', { ascending: false }).limit(500);
+      if (error) { console.warn('[review_calls:folder]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
+      for (const row of (data || [])) {
+        const fkey = RC_STATUS_TO_FOLDER[row.review_call_status];
+        if (!fkey) continue;
+        folderCounts[fkey]++;
+        if (fkey === folder) out.push(rcMapRow(row, b));
+      }
+    }
+    out.sort((a, c) => new Date(c.call_at || 0) - new Date(a.call_at || 0));
+    const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: RC_TZ, month: 'short', day: 'numeric' }).format(d);
+    const weekLastDay = new Date(weekEnd.getTime() - 86400000);
+    return res.status(200).json({
+      calls: out,
+      warning: warnings.length ? warnings.join(' · ') : null,
+      folder_counts: folderCounts,
+      week_offset: weekOffset,
+      week_label: `${fmtMD(weekStart)} – ${fmtMD(weekLastDay)}`,
+    });
+  }
+
+  const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
+  const out = [];
   for (const b of (bizs || [])) {
-    const tz = b.timezone || 'America/Denver';
+    const tz = b.timezone || RC_TZ;
     const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
     const winEnd = localDayStartUTC(tz, 0);          // start of today — give them the day of the job to review first
     // Base the window on scheduled_at (ALWAYS set) rather than completed_at — the
     // latter is null for imported jobs and for any job the tech didn't tap
     // "complete" on. Include every non-cancelled booking that was on the schedule
     // that day: a job scheduled yesterday happened, whether or not it's marked done.
-    const run = (cc) => db.from('bookings').select(selFor(cc))
+    const run = (cc) => db.from('bookings').select(rcSelFor(cc))
       .eq('business_id', b.id)
       .in('status', ['confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'])
       .gte('scheduled_at', winStart.toISOString()).lt('scheduled_at', winEnd.toISOString())
       .order('scheduled_at', { ascending: false }).limit(500);
-    let { data, error } = await run(callCols);
+    let { data, error } = await run(RC_CALL_COLS);
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
     if (error) { console.warn('[review_calls]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
     for (const row of (data || [])) {
@@ -3821,32 +3896,8 @@ async function reviewCalls(req, res, db, auth) {
       // signal. Plus a >= 4 backstop. A job that merely carries a stale imported
       // rating (no submission → no reviewed_at) stays callable.
       if (row.reviewed_at != null || Number(row.review_rating) >= 4) continue;
-      if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey
-      out.push({
-        id: row.id,
-        business_slug: b.slug,
-        business_name: b.name,
-        customer_name: row.customer?.name || '—',
-        phone: row.customer?.phone || null,
-        zip: row.postal_code || row.customer?.postal_code || null,   // booking zip first; imported customers often have it only on the booking
-        has_email: !!row.customer?.email,
-        technician_name: row.technician?.name || '—',
-        service_name: row.service?.name || 'Service',
-        // What they bought — so Joey can reference it on the call.
-        line_items: (Array.isArray(row.line_items) ? row.line_items : [])
-          .filter(li => li && (li.name || li.description))
-          .map(li => ({ name: String(li.name || li.description), qty: Number(li.quantity || li.qty) || 1, price: Number(li.line_total != null ? li.line_total : li.unit_price) || 0 })),
-        when: row.scheduled_at || row.completed_at || null,
-        is_completed: row.status === 'completed',
-        email_opened: !!row.review_email_opened_at,
-        email_count: row.review_email_count || 0,
-        rating: row.review_rating || null,          // 1–3 = they gave us negative feedback (handle with care)
-        has_review_link: !!row.review_token,
-        call_status: row.review_call_status || null,
-        call_at: row.review_call_at || null,
-        call_by: row.review_call_by || null,
-        call_notes: row.review_call_notes || null,
-      });
+      if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey — find it under its folder tab now
+      out.push(rcMapRow(row, b));
     }
   }
   // Not-yet-called first, then most-recently-completed first.
