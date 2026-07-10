@@ -14,7 +14,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
@@ -795,8 +795,10 @@ async function status(req, res, db, auth, body) {
   if (next === 'completed' && existing.review_token) {
     console.log(`[review] job ${id} marked completed, review_token=${existing.review_token}, email=${existing.customer?.email}`);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-    const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
-    const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(existing.review_token)}`;
+    // Click-tracking redirect URLs (api/book.js review_click) — one per channel
+    // so the dashboard can show which channel the customer engaged from.
+    const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=email`;
+    const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=sms`;
 
     // Brand the email by the JOB's business (orange vs blue) — for a
     // cross-company job that's the host company, not the tech's own.
@@ -811,8 +813,7 @@ async function status(req, res, db, auth, body) {
           const brand = brandFor(slug);
           const { subject, html } = reviewEmail({
             firstName: existing.customer.name || 'there',
-            reviewUrl: reviewLink,
-            pixelUrl,
+            clickUrl: emailClickUrl,
           }, brand);
           const { from } = emailConfig(slug);
           const emailResult = await sendEmail({ slug, to: existing.customer.email, subject, html, replyTo: from });
@@ -837,10 +838,32 @@ async function status(req, res, db, auth, body) {
       console.warn(`[review] no customer email on booking ${id}`);
     }
 
-    // SMS reminder 20 minutes after completion (if customer opted in).
+    // Review-request SMS (if customer opted in). Sent right away, only once —
+    // the old setTimeout(20 min) never fired: Vercel freezes the function as
+    // soon as the response is returned, so in-process timers silently die.
     if (existing.customer?.phone && existing.sms_consent) {
-      const msg = `How did we do?\n\nLeave your technician a review here:\n${reviewLink}\n\nSTOP to opt out`;
-      setTimeout(() => { sendSMS(existing.customer.phone, msg).catch(console.error); }, 20 * 60 * 1000);
+      if (existing.metadata?.review_sms_sent_at) {
+        console.log(`[review] SMS already sent at ${existing.metadata.review_sms_sent_at}, skipping`);
+      } else {
+        try {
+          const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+          const r = await sendSMSResult(existing.customer.phone, msg);
+          if (r.ok) {
+            const nowIso = new Date().toISOString();
+            // Re-read metadata (same reason as the email stamp above) and mark
+            // sent — in metadata (always works) and the 0062 tracking column
+            // (best-effort until the migration is applied).
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            await db.from('bookings').update({ metadata: { ...(cur?.metadata || existing.metadata || {}), review_sms_sent_at: nowIso } }).eq('id', id);
+            try { await db.from('bookings').update({ review_sms_sent_at: nowIso }).eq('id', id); } catch { /* column not applied yet */ }
+            console.log(`[review] SMS sent (${slug}) booking=${id}`);
+          } else {
+            console.warn(`[review] SMS NOT sent booking=${id}:`, r.skipped || r.error);
+          }
+        } catch (e) {
+          console.error(`[review] SMS failed for booking ${id}:`, e.message);
+        }
+      }
     }
   } else if (next === 'completed') {
     console.log(`[review] job ${id} marked completed but no review_token`);

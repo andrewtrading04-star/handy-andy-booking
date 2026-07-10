@@ -2284,8 +2284,9 @@ async function bookingUpdate(req, res, db, auth, body) {
       const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=email`;
       const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=sms`;
 
-      // Send review email immediately
-      if (existing.customer?.email) {
+      // Send review email immediately — only once per booking (metadata stamp),
+      // so a reopen → re-complete never double-emails the customer.
+      if (existing.customer?.email && !existing.metadata?.review_email_sent_at) {
         try {
           const brand = brandFor(biz.slug);
           const { subject, html } = reviewEmail({
@@ -2297,10 +2298,10 @@ async function bookingUpdate(req, res, db, auth, body) {
 
           // Mark review email as sent — best-effort, never blocks completion
           if (emailResult.sent) {
-            const meta = existing.metadata || {};
-            const newMeta = { ...meta, review_email_sent_at: now };
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            const newMeta = { ...(cur?.metadata || existing.metadata || {}), review_email_sent_at: now };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
-            await db.from('bookings').update({ review_email_sent_at: now, review_email_count: 1 }).eq('id', id);
+            try { await db.from('bookings').update({ review_email_sent_at: now, review_email_count: 1 }).eq('id', id); } catch { /* column not applied yet */ }
             console.log(`[review] email sent to ${existing.customer.email} (${biz.slug}) booking=${id}`);
           }
         } catch (e) {
@@ -2308,15 +2309,20 @@ async function bookingUpdate(req, res, db, auth, body) {
         }
       }
 
-      // Send SMS immediately if customer opted in (replaces the old setTimeout pattern that
-      // never fired on serverless). Log the send timestamp.
-      if (existing.customer?.phone && existing.sms_consent) {
+      // Review-request SMS if the customer opted in — same once-only stamp.
+      // (Replaces the old setTimeout pattern that never fired on serverless.)
+      if (existing.customer?.phone && existing.sms_consent && !existing.metadata?.review_sms_sent_at) {
         try {
           const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
-          await sendSMS(existing.customer.phone, msg);
-          // Record SMS sent timestamp for tracking
-          await db.from('bookings').update({ review_sms_sent_at: now }).eq('id', id);
-          console.log(`[review] SMS sent to ${existing.customer.phone} (${biz.slug}) booking=${id}`);
+          const smsResult = await sendSMSResult(existing.customer.phone, msg);
+          if (smsResult.ok) {
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            await db.from('bookings').update({ metadata: { ...(cur?.metadata || existing.metadata || {}), review_sms_sent_at: now } }).eq('id', id);
+            try { await db.from('bookings').update({ review_sms_sent_at: now }).eq('id', id); } catch { /* column not applied yet */ }
+            console.log(`[review] SMS sent (${biz.slug}) booking=${id}`);
+          } else {
+            console.warn(`[review] SMS NOT sent booking=${id}:`, smsResult.skipped || smsResult.error);
+          }
         } catch (e) {
           console.error(`[review] SMS failed for booking ${id}:`, e.message);
         }
@@ -3564,12 +3570,12 @@ async function reviewCheck(req, res, body) {
 
   if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
 
-  // Reaching this page means the customer CLICKED the review link in the email —
-  // that proves they opened it, even when the tracking pixel was blocked (Gmail/
-  // Outlook proxy or strip images, so the pixel often never fires). Backfill the
-  // open time if it's still null. Best-effort; never block the page load.
-  db.from('bookings').update({ review_email_opened_at: new Date().toISOString() })
-    .eq('id', booking.id).is('review_email_opened_at', null)
+  // Reaching this page means the customer CLICKED a review link — count it even
+  // when they arrived via an old direct link that skipped the review_click
+  // redirect. Channel unknown here, so only stamp the time. Best-effort; never
+  // block the page load.
+  db.from('bookings').update({ review_clicked_at: new Date().toISOString() })
+    .eq('id', booking.id).is('review_clicked_at', null)
     .then(() => {}, () => {});
 
   const slug = booking.business?.slug || 'handy-andy';
@@ -3627,11 +3633,11 @@ async function reviewSubmit(req, res, body) {
 
   if (uErr) throw uErr;
 
-  // Submitting a review is proof the customer opened the email — backfill the
-  // open time if the tracking pixel never fired (blocked/proxied images), so a
-  // real review can never read "email not opened". Best-effort.
-  db.from('bookings').update({ review_email_opened_at: now })
-    .eq('id', booking.id).is('review_email_opened_at', null)
+  // Submitting a review is proof the customer clicked through — backfill the
+  // click time if the redirect stamp never landed, so a real review can never
+  // read "link not clicked". Best-effort.
+  db.from('bookings').update({ review_clicked_at: now })
+    .eq('id', booking.id).is('review_clicked_at', null)
     .then(() => {}, () => {});
 
   // Send email if rating ≤ 4 and feedback exists
@@ -3723,7 +3729,9 @@ async function reviewRequests(req, res, db, auth) {
   let { data, error } = await db.from('bookings').select(cols(true))
     .eq('business_id', biz.id).eq('status', 'completed')
     .order('completed_at', { ascending: false }).limit(300);
-  if (error && /review_click/.test(error.message || '')) {
+  // Any tracking column missing (migrations 0033/0062 not applied) → re-select
+  // without them; the bookings.metadata stamps carry the same data as fallback.
+  if (error && /review_(email|sms|click)/.test(error.message || '')) {
     hasTrack = false;
     ({ data, error } = await db.from('bookings').select(cols(false))
       .eq('business_id', biz.id).eq('status', 'completed')
@@ -3738,9 +3746,9 @@ async function reviewRequests(req, res, db, auth) {
     completed_at: b.completed_at || b.scheduled_at || null,
     email_sent_at: (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null,
     email_count: hasTrack ? (b.review_email_count || 0) : (b.metadata?.review_email_sent_at ? 1 : 0),
-    sms_sent_at: hasTrack ? b.review_sms_sent_at || null : null,
-    clicked_at: hasTrack ? b.review_clicked_at || null : null,
-    click_channel: hasTrack ? b.review_click_channel || null : null,
+    sms_sent_at: (hasTrack ? b.review_sms_sent_at : null) || b.metadata?.review_sms_sent_at || null,
+    clicked_at: (hasTrack ? b.review_clicked_at : null) || b.metadata?.review_clicked_at || null,
+    click_channel: (hasTrack ? b.review_click_channel : null) || b.metadata?.review_click_channel || null,
     rating: b.review_rating || null,
     reviewed_at: b.reviewed_at || null,
     tracking: hasTrack,

@@ -573,7 +573,9 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const firstName = (details.firstName || '').trim();
   // clickUrl is the click-tracking redirect endpoint (/api/book?action=review_click&token=X&ch=email)
   // which logs the click, then redirects to review.html. Replaces the old separate pixel URL.
-  const clickUrl = details.clickUrl || '#';
+  // Accept the legacy `reviewUrl` param too so an out-of-date caller can never
+  // produce an email whose button goes nowhere.
+  const clickUrl = details.clickUrl || details.reviewUrl || '#';
 
   const subject = `How did we do?`;
 
