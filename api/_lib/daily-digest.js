@@ -67,7 +67,8 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
                business:businesses ( name, timezone ),
                customer:customers ( name, phone, email ),
                technician:technicians!technician_id ( name ),
-               address_line1, city, state, postal_code`)
+               address_line1, city, state, postal_code,
+               line_items:booking_line_items ( kind, name, line_total )`)
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
       .neq('status', 'cancelled')
@@ -96,11 +97,13 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
 
     const rowsHtml = bookings.map(b => {
       const addr = [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
+      const coupon = (b.line_items || []).find(li => li.kind === 'coupon');
       return `<tr style="border-top:1px solid #e5e7eb;">
         <td style="padding:9px 12px;vertical-align:top;">
           <div style="font-weight:700;color:#111;">${escHtml(b.customer?.name || 'Customer')}</div>
           <div style="color:#6b7280;font-size:12.5px;">${escHtml(b.business?.name || '')}</div>
           ${addr ? `<div style="color:#9ca3af;font-size:12px;margin-top:2px;">${escHtml(addr)}</div>` : ''}
+          ${coupon ? `<div style="color:#b45309;font-size:12px;margin-top:2px;">🏷️ ${escHtml(coupon.name)} (-${money(Math.abs(coupon.line_total))})</div>` : ''}
         </td>
         <td style="padding:9px 12px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(fmtWhen(b.scheduled_at, rowTz(b)))}</td>
         <td style="padding:9px 12px;vertical-align:top;font-size:13px;color:#111;white-space:nowrap;">${escHtml(b.customer?.phone || '—')}</td>
