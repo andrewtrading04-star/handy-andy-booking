@@ -2280,8 +2280,9 @@ async function bookingUpdate(req, res, db, auth, body) {
     // Send review email and SMS when job is completed
     if (newStatus === 'completed' && existing.review_token) {
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-      const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(existing.review_token)}`;
-      const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(existing.review_token)}`;
+      // Click-tracking redirect URL for both email and SMS — logs which channel the click came from
+      const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=email`;
+      const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=sms`;
 
       // Send review email immediately
       if (existing.customer?.email) {
@@ -2289,14 +2290,12 @@ async function bookingUpdate(req, res, db, auth, body) {
           const brand = brandFor(biz.slug);
           const { subject, html } = reviewEmail({
             firstName: existing.customer.name || 'there',
-            reviewUrl: reviewLink,
-            pixelUrl,
+            clickUrl: emailClickUrl,
           }, brand);
           const { from } = emailConfig(biz.slug);
           const emailResult = await sendEmail({ slug: biz.slug, to: existing.customer.email, subject, html, replyTo: from });
 
-          // Mark review email as sent — in metadata (back-compat) and the tracking
-          // columns (migration 0033; best-effort so it never blocks completion).
+          // Mark review email as sent — best-effort, never blocks completion
           if (emailResult.sent) {
             const meta = existing.metadata || {};
             const newMeta = { ...meta, review_email_sent_at: now };
@@ -2309,12 +2308,18 @@ async function bookingUpdate(req, res, db, auth, body) {
         }
       }
 
-      // Send SMS after 20 minutes if customer opted in
+      // Send SMS immediately if customer opted in (replaces the old setTimeout pattern that
+      // never fired on serverless). Log the send timestamp.
       if (existing.customer?.phone && existing.sms_consent) {
-        const msg = `How did we do?\n\nLeave your technician a review here:\n${reviewLink}\n\nSTOP to opt out`;
-        setTimeout(() => {
-          sendSMS(existing.customer.phone, msg).catch(console.error);
-        }, 20 * 60 * 1000);
+        try {
+          const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+          await sendSMS(existing.customer.phone, msg);
+          // Record SMS sent timestamp for tracking
+          await db.from('bookings').update({ review_sms_sent_at: now }).eq('id', id);
+          console.log(`[review] SMS sent to ${existing.customer.phone} (${biz.slug}) booking=${id}`);
+        } catch (e) {
+          console.error(`[review] SMS failed for booking ${id}:`, e.message);
+        }
       }
     }
 
@@ -3707,19 +3712,18 @@ async function sendFeedbackEmail(params) {
 }
 
 // ── Reviews list (admin dashboard reviews tab) ──────────────────────────────
-// Review-request tracking: every completed job and where its "How did we do?"
-// email stands — sent, opened (pixel), and whether a review came back. Tolerant
-// of the 0033 tracking columns not being applied yet (falls back to metadata).
+// Review-request tracking: every completed job showing email/SMS sends and click tracking.
+// Replaces the old email-only open-pixel with unified click tracking (works for both channels).
 async function reviewRequests(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business || ''); } catch (e) { return bail(res, e); }
   const cols = (t) => `id, scheduled_at, completed_at, review_rating, reviewed_at, review_token, metadata,
-      ${t ? 'review_email_sent_at, review_email_opened_at, review_email_count, ' : ''}
+      ${t ? 'review_email_sent_at, review_email_count, review_sms_sent_at, review_clicked_at, review_click_channel, ' : ''}
       customer:customers(name, email), technician:technicians!technician_id(name)`;
   let hasTrack = true;
   let { data, error } = await db.from('bookings').select(cols(true))
     .eq('business_id', biz.id).eq('status', 'completed')
     .order('completed_at', { ascending: false }).limit(300);
-  if (error && /review_email_/.test(error.message || '')) {
+  if (error && /review_click/.test(error.message || '')) {
     hasTrack = false;
     ({ data, error } = await db.from('bookings').select(cols(false))
       .eq('business_id', biz.id).eq('status', 'completed')
@@ -3732,9 +3736,11 @@ async function reviewRequests(req, res, db, auth) {
     has_email: !!b.customer?.email,
     technician_name: b.technician?.name || '—',
     completed_at: b.completed_at || b.scheduled_at || null,
-    sent_at: (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null,
-    opened_at: hasTrack ? (b.review_email_opened_at || null) : null,
-    send_count: hasTrack ? (b.review_email_count || 0) : (b.metadata?.review_email_sent_at ? 1 : 0),
+    email_sent_at: (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null,
+    email_count: hasTrack ? (b.review_email_count || 0) : (b.metadata?.review_email_sent_at ? 1 : 0),
+    sms_sent_at: hasTrack ? b.review_sms_sent_at || null : null,
+    clicked_at: hasTrack ? b.review_clicked_at || null : null,
+    click_channel: hasTrack ? b.review_click_channel || null : null,
     rating: b.review_rating || null,
     reviewed_at: b.reviewed_at || null,
     tracking: hasTrack,
@@ -3757,10 +3763,9 @@ async function reviewResend(req, res, db, auth, body) {
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
 
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
-  const reviewLink = `${baseUrl}/review.html?token=${encodeURIComponent(b.review_token)}`;
-  const pixelUrl = `${baseUrl}/api/book?action=review_open&token=${encodeURIComponent(b.review_token)}`;
+  const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=email`;
   const { from } = emailConfig(biz.slug);
-  const { subject, html } = reviewEmail({ firstName: b.customer.name || 'there', reviewUrl: reviewLink, pixelUrl }, brandFor(biz.slug));
+  const { subject, html } = reviewEmail({ firstName: b.customer.name || 'there', clickUrl: emailClickUrl }, brandFor(biz.slug));
   try {
     await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from, throwOnError: true });
   } catch (e) {

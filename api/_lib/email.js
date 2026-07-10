@@ -571,11 +571,9 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const rgb = hexRgb(accent);
   const tintBg   = `rgba(${rgb},0.06)`;
   const firstName = (details.firstName || '').trim();
-  const reviewUrl = details.reviewUrl || '#';
-  // 1×1 open-tracking pixel (set when the email is opened). Best-effort: many
-  // mail clients block remote images, so an un-opened status isn't conclusive.
-  const pixelUrl = (details.pixelUrl || '').trim();
-  const pixel = pixelUrl ? `<img src="${esc(pixelUrl)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;">` : '';
+  // clickUrl is the click-tracking redirect endpoint (/api/book?action=review_click&token=X&ch=email)
+  // which logs the click, then redirects to review.html. Replaces the old separate pixel URL.
+  const clickUrl = details.clickUrl || '#';
 
   const subject = `How did we do?`;
 
@@ -584,7 +582,6 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
 <body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">How did we do? ${esc(b.name)} would love to hear from you.</div>
-  ${pixel}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
@@ -605,7 +602,7 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
 
         <!-- Call-to-action button -->
         <tr><td style="padding:28px 28px 8px;text-align:center;">
-          <a href="${esc(reviewUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 32px;border-radius:10px;letter-spacing:.3px;">Share Your Feedback</a>
+          <a href="${esc(clickUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 32px;border-radius:10px;letter-spacing:.3px;">Share Your Feedback</a>
         </td></tr>
 
         <!-- Info -->

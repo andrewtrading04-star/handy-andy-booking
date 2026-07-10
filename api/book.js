@@ -60,24 +60,31 @@ async function placeDetailsPublic(req, res) {
   }
 }
 
-// 1×1 transparent GIF for review-email open tracking.
-const TRACKING_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-// GET /api/book?action=review_open&token=<review_token> — records the first open
-// of a "How did we do?" email, then returns the pixel. Never errors visibly.
-async function serveReviewPixel(req, res) {
-  res.setHeader('Content-Type', 'image/gif');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-  res.setHeader('Pragma', 'no-cache');
+// GET/POST /api/book?action=review_click&token=<review_token>&ch=email|sms
+// Records the first time a customer clicks the review link from either channel,
+// then redirects to review.html. Replaces the old email open-pixel with a
+// click-tracking redirect that works identically for email and SMS.
+// Never errors visibly — best-effort, always redirects.
+async function serveReviewClick(req, res) {
+  const now = new Date().toISOString();
+  const channel = (req.query.ch || 'email').toString().toLowerCase(); // 'email' or 'sms'
+  let reviewToken = null;
   try {
     const t = verifyToken(((req.query || {}).token || '').toString());
     if (t && t.kind === 'review' && t.booking_id) {
       const db = serviceClient();
-      await db.from('bookings')
-        .update({ review_email_opened_at: new Date().toISOString() })
-        .eq('id', t.booking_id).is('review_email_opened_at', null);
+      // Record first click only, capture which channel it came from
+      const { error } = await db.from('bookings')
+        .update({ review_clicked_at: now, review_click_channel: channel })
+        .eq('id', t.booking_id)
+        .is('review_clicked_at', null);
+      if (!error) reviewToken = ((req.query || {}).token || '').toString();
     }
-  } catch (e) { /* tracking is best-effort; always return the pixel */ }
-  return res.status(200).send(TRACKING_GIF);
+  } catch (e) { /* tracking is best-effort; always redirect */ }
+  // Redirect to the review page. If token wasn't recorded (either booking not found
+  // or already clicked), the redirect will fail with a 404 in review.html.
+  const redirectUrl = `${process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')}/review.html?token=${encodeURIComponent(reviewToken || '')}`;
+  return res.redirect(302, redirectUrl);
 }
 
 // After creating the Zenbooker job this handler does several more sequential
@@ -634,7 +641,7 @@ export default async function handler(req, res) {
   // booking-confirmation emails. Lives here (rather than its own api/ file) to
   // stay under Vercel's 12-function Hobby cap.
   if (req.method === 'GET' && (req.query || {}).action === 'ics') return serveIcs(req, res);
-  if (req.method === 'GET' && (req.query || {}).action === 'review_open') return serveReviewPixel(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'review_click') return serveReviewClick(req, res);
   // Public address-autocomplete proxy for the booking widget.
   if (req.method === 'GET' && (req.query || {}).action === 'places_autocomplete') return placesAutocompletePublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'place_details') return placeDetailsPublic(req, res);
