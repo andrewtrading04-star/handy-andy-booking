@@ -720,6 +720,7 @@
   .ana .pill.gray{ background:#f0f1f4; color:var(--mute); }
   .ana .pill.red{ background:rgba(239,68,68,0.1); color:var(--red); }
   .ana .pill.blue{ background:rgba(37,99,235,0.12); color:var(--accent); }
+  .ana .pill.amber{ background:rgba(245,158,11,0.14); color:#92400e; }
   .ana .qblock{ margin-bottom:16px; }
   .ana .qtitle{ font-size:13px; font-weight:700; margin-bottom:8px; }
   .ana .abar{ display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12.5px; }
@@ -3389,6 +3390,13 @@ function webRender(d){
   // ~2-3 days, so "Today"/"Yesterday" wouldn't have anything to show yet).
   html+=`<div class="section card"><h2>🔎 Top Google Search Queries <span style="font-weight:400;font-size:12px;color:var(--mute);">— last 28 days</span></h2>${webGscTbl(d.gsc)}</div>`;
 
+  html+=`<div class="section card"><h2>🎯 Striking Distance Keywords <span style="font-weight:400;font-size:12px;color:var(--mute);">— ranking 11–20, worth pushing to page 1</span></h2>${webGscStrikingTbl(d.gsc)}</div>`;
+
+  html+=`<div class="grid two section">
+    <div class="card"><h2>🔗 Top Queries by Landing Page</h2>${webGscQueryPageTbl(d.gsc)}</div>
+    <div class="card"><h2>🏷️ Branded vs. Non-branded Search</h2>${webGscBrandCard(d.gsc)}</div>
+  </div>`;
+
   content.innerHTML=html;
   webDrawCharts(d,brand);
 }
@@ -3399,6 +3407,34 @@ function webGscTbl(gsc){
   return `<div style="overflow-x:auto;"><table><tr><th>Search query</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Avg. position</th></tr>`+
     rows.slice(0,25).map(r=>`<tr><td>${esc(r.query)}</td><td class="num">${webNum(r.clicks)}</td><td class="num">${webNum(r.impressions)}</td><td class="num">${(r.ctr*100).toFixed(1)}%</td><td class="num">${r.position.toFixed(1)}</td></tr>`).join('')+
     `</table></div>`;
+}
+function webGscStrikingTbl(gsc){
+  if(gsc && gsc.error && (!gsc.rows||!gsc.rows.length)) return `<div class="empty">Not connected yet — ${esc(gsc.error)}</div>`;
+  const rows=(gsc&&gsc.strikingDistance)||[];
+  if(!rows.length) return `<div class="empty">No page-2 keywords with real impressions found for this period.</div>`;
+  return `<div style="overflow-x:auto;"><table><tr><th>Query</th><th class="num">Position</th><th class="num">Impressions</th><th class="num">Clicks</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.query)}</td><td class="num"><span class="pill amber">${r.position.toFixed(1)}</span></td><td class="num">${webNum(r.impressions)}</td><td class="num">${webNum(r.clicks)}</td></tr>`).join('')+
+    `</table></div>`;
+}
+function webGscQueryPageTbl(gsc){
+  if(gsc && gsc.error && (!gsc.queryPages||!gsc.queryPages.length)) return `<div class="empty">Not connected yet.</div>`;
+  const rows=(gsc&&gsc.queryPages)||[];
+  if(!rows.length) return `<div class="empty">No Search Console data for this period yet.</div>`;
+  return `<div style="overflow-x:auto;"><table><tr><th>Query</th><th>Landing page</th><th class="num">Clicks</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.query)}</td><td style="color:var(--mute);">${esc(webShortPath(r.page))}</td><td class="num">${webNum(r.clicks)}</td></tr>`).join('')+
+    `</table></div>`;
+}
+function webGscBrandCard(gsc){
+  const split=gsc&&gsc.brandSplit;
+  if(!split || (split.branded+split.nonBranded)<=0) return `<div class="empty">${gsc&&gsc.error?'Not connected yet — '+esc(gsc.error):'No Search Console data for this period yet.'}</div>`;
+  const total=split.branded+split.nonBranded;
+  const pct=(n)=>Math.round(n/total*100);
+  const bar=(label,n,color)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;">
+    <div style="width:110px;font-size:12.5px;font-weight:700;flex-shrink:0;">${label}</div>
+    <div style="flex:1;height:20px;border-radius:5px;background:var(--line2);overflow:hidden;"><div style="height:100%;width:${Math.max(pct(n),2)}%;background:${color};"></div></div>
+    <div style="width:70px;text-align:right;font-size:12.5px;font-weight:800;flex-shrink:0;">${pct(n)}% · ${webNum(n)}</div>
+  </div>`;
+  return bar('Non-branded', split.nonBranded, anaBrand())+bar('Branded', split.branded, 'var(--mute)');
 }
 
 function webDeviceCard(dev,brand){
