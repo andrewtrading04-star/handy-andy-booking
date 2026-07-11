@@ -230,6 +230,7 @@
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
   .empty{color:var(--mute);text-align:center;padding:48px 0;}
   .stars{color:var(--amber);}
+  .stars-big{color:var(--amber);font-size:19px;letter-spacing:1px;line-height:1;}
   /* Estimates */
   /* Owner-only economics strip on the Schedule > List rows */
   .evt-econ{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--line2);font-size:12.5px;}
@@ -605,7 +606,9 @@
   /* "Left a Google review" pill */
   .gpill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:#dcfce7;color:#166534;}
   /* ── Compact Google-review rows (tight list, not big cards) ─────────────── */
-  .greview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 11px;margin-bottom:7px;}
+  .greview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 28px 8px 11px;margin-bottom:7px;position:relative;}
+  .greview-x{position:absolute;top:6px;right:7px;background:none;border:none;color:var(--mute);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px;border-radius:6px;}
+  .greview-x:hover{background:var(--line2);color:var(--ink);}
   .greview-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
   .greview-stars{font-size:12px;white-space:nowrap;letter-spacing:-1px;}
   .greview-who{color:var(--mute);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
@@ -4214,15 +4217,15 @@ function revChanTileHtml(label, chan, id, channelKey){
 
 function reviewReqCardHtml(r, gByBooking){
   const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
-  const reviewed = r.rating
-    ? `<span class="stars">${'★'.repeat(r.rating)}</span>`
-    : `<span class="chk pending">No review yet</span>`;
+  const starsBig = r.rating ? `<span class="stars-big">${'★'.repeat(r.rating)}</span>` : '';
+  const reviewed = r.rating ? '' : `<span class="chk pending">No review yet</span>`;
   const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
   return `<div class="job">
     <div class="rev-card-top">
-      <div style="min-width:0;">
+      <div style="min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
         <div class="name">${esc(r.customer_name)}</div>
-        <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
+        ${starsBig}
+        <div class="meta" style="width:100%;">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${gpill}${reviewed}</div>
     </div>
@@ -4397,7 +4400,9 @@ async function renderReviews(){
     const techOptsFor=(sel)=>`<option value="">— credit a tech —</option>`+revTechs.map(t=>`<option value="${esc(t.id)}" ${t.id===sel?'selected':''}>${esc(t.name)}</option>`).join('');
     // Same per-review template as before, just parameterized with an extra
     // class so the New/Past split below can style the two groups differently
-    // without touching any of the actual review content/markup.
+    // without touching any of the actual review content/markup. The × button
+    // is a permanent dismiss — separate from the New/Past "seen" split, which
+    // only moves a review between groups rather than hiding it.
     const gReviewHtml=(r, extraClass)=>{
       const stars='⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
       const when=r.review_date||(r.created_at?new Date(r.created_at).toLocaleDateString():'');
@@ -4409,6 +4414,7 @@ async function renderReviews(){
       const text=ratingOnly?'':`<div class="greview-text">${esc(r.review_text)}</div>`;
       const who=`${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}`;
       return `<div class="greview${extraClass?' '+extraClass:''}">
+        <button class="greview-x" data-gdismiss="${esc(r.id)}" title="Dismiss this review">×</button>
         <div class="greview-top">
           <span class="greview-stars">${stars}</span>
           <span class="greview-who" title="${esc(who)}">${who}</span>
@@ -4416,32 +4422,51 @@ async function renderReviews(){
         </div>${text}
       </div>`;
     };
-    // "New" = not yet seen (r.seen is false/undefined) — these get a colored
-    // accent bar. "Past" = already seen — same card, just dimmed. Order within
-    // each group is unchanged (both arrive newest-first from the API).
-    const newGReviews=gReviews.filter(r=>!r.seen||_reviewsPinnedNewIds.has(r.id));
-    const pastGReviews=gReviews.filter(r=>r.seen&&!_reviewsPinnedNewIds.has(r.id));
-    const gHtml=
-      (newGReviews.length
-        ? `<div class="greview-group-h">New<span class="chk">${newGReviews.length}</span></div>`+newGReviews.map(r=>gReviewHtml(r,'is-new')).join('')
-        : '')+
-      (pastGReviews.length
-        ? `<div class="greview-group-h">Past<span class="chk">${pastGReviews.length}</span></div>`+pastGReviews.map(r=>gReviewHtml(r,'is-past')).join('')
-        : '');
+    // Mutable working copy — dismissing a review splices it out of this array
+    // and repaints, without a network refetch of the whole tab.
+    let _gReviewsList=gReviews.slice();
+    function paintGReviews(){
+      const wrap=document.getElementById('gRevWrap');
+      if(!wrap) return;
+      // "New" = not yet seen (r.seen is false/undefined) — colored accent bar.
+      // "Past" = already seen — same card, just dimmed. Order within each
+      // group is unchanged (both arrive newest-first from the API).
+      const newGReviews=_gReviewsList.filter(r=>!r.seen||_reviewsPinnedNewIds.has(r.id));
+      const pastGReviews=_gReviewsList.filter(r=>r.seen&&!_reviewsPinnedNewIds.has(r.id));
+      wrap.innerHTML=
+        (_gReviewsList.length ? (
+          (newGReviews.length
+            ? `<div class="greview-group-h">New<span class="chk">${newGReviews.length}</span></div>`+newGReviews.map(r=>gReviewHtml(r,'is-new')).join('')
+            : '')+
+          (pastGReviews.length
+            ? `<div class="greview-group-h">Past<span class="chk">${pastGReviews.length}</span></div>`+pastGReviews.map(r=>gReviewHtml(r,'is-past')).join('')
+            : '')
+        ) : '<div class="empty">No Google reviews yet.</div>');
+      wrap.querySelectorAll('[data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
+        try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
+        catch(e){ toast(e.message); }
+      }));
+      wrap.querySelectorAll('[data-gdismiss]').forEach(btn=>btn.addEventListener('click',async()=>{
+        const id=btn.dataset.gdismiss;
+        btn.disabled=true;
+        try{
+          await api('google_review_update',{ method:'POST', body:{ business:current.slug, id, dismissed:true }});
+          _gReviewsList=_gReviewsList.filter(r=>r.id!==id);
+          paintGReviews();
+        }catch(e){ toast(e.message); btn.disabled=false; }
+      }));
+    }
 
     document.getElementById('revWrap').innerHTML=
       `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">⭐ Google reviews</div>`+
-      (gReviews.length?gHtml:'<div class="empty">No Google reviews yet.</div>')+
+      `<div id="gRevWrap"></div>`+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Review requests</div>`+
       `<div id="revReqWrap"></div>`+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received (in-app)</div>`+
       (revHtml||'<div class="empty">No reviews yet.</div>');
 
+    paintGReviews();
     paintReviewRequests(gByBooking);
-    document.querySelectorAll('#revWrap [data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
-      try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
-      catch(e){ toast(e.message); }
-    }));
 
     // "Once I see it, it moves to Past": pin these ids as "New" for the rest
     // of this session (see _reviewsPinnedNewIds above) so the admin keeps
@@ -4454,8 +4479,9 @@ async function renderReviews(){
     // is silent by design; only a *successful* write updates the
     // dashboard-level green banner (_googleReviewsCache), since an unsynced
     // review is still genuinely unseen server-side and should keep alerting.
-    if(newGReviews.length){
-      newGReviews.forEach(r=>{
+    const newGReviewsForSync=gReviews.filter(r=>!r.seen);
+    if(newGReviewsForSync.length){
+      newGReviewsForSync.forEach(r=>{
         _reviewsPinnedNewIds.add(r.id);
         api('google_review_update',{ method:'POST', body:{ business:current.slug, id:r.id, seen:true }})
           .then(()=>{
