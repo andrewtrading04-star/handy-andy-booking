@@ -1881,7 +1881,10 @@ async function bookingCreate(req, res, db, auth, body) {
     payment_method: paymentMethod,
     needs_lifting: !!body.needs_lifting,
     tv_size_category: body.tv_size_category || null,
-    sms_consent: !!body.sms_consent,
+    // Opt-out model (every SMS we send already says "STOP to opt out"): default
+    // to consented unless the office explicitly unchecked the box for this
+    // customer. Matches the estimate/quote flow's sms_consent default below.
+    sms_consent: body.sms_consent !== false,
     idempotency_key: idempotencyKey,
     // Who booked it, for the "Booked by" line on the job detail. Owner = "Admin";
     // a secretary = their name (Heather / Joey). Widget bookings carry source
