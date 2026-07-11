@@ -390,7 +390,7 @@
   let serviceConfig=null, selections={}, selectedSlot=null;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
   let customer={first_name:'',last_name:'',email:'',phone:'',address:'',address_line2:''};
-  let tipAmount=0, couponCode='';
+  let tipAmount=0, couponCode='', smsConsentChecked=false;
   let optionComments={}; // { [optionId]: "free text" } for Handyman / Other
   // Hard guard against double-booking: once a booking POST is in flight we never
   // fire a second one, so repeated "Complete My Booking" clicks can't create
@@ -1217,7 +1217,7 @@
         </div>
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
-        <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
+        <input type="checkbox" id="c-sms-consent" ${smsConsentChecked?'checked':''} style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
         <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from Handy Andy TV Mounting. Reply STOP to unsubscribe.</span>
       </label>
       <div style="${S.actions}">
@@ -1275,6 +1275,16 @@
     const captureName=()=>{ if(fnEl)customer.first_name=fnEl.value.trim(); if(lnEl)customer.last_name=lnEl.value.trim(); if(customer.first_name||customer.last_name) logEvent('answer','customer_name'); };
     if(fnEl)fnEl.addEventListener('blur',captureName);
     if(lnEl)lnEl.addEventListener('blur',captureName);
+    // Keep every checkout-step field synced to its backing variable on blur/change —
+    // coupon changes and the exit-intent "Apply" button both trigger a re-render
+    // while still on this step, and render() rebuilds the form from these
+    // variables, so anything not captured here would silently be wiped.
+    const emEl=root.querySelector('#c-em'), phEl=root.querySelector('#c-ph'), ad2El=root.querySelector('#c-ad2');
+    if(emEl)emEl.addEventListener('blur',()=>{customer.email=emEl.value.trim();});
+    if(phEl)phEl.addEventListener('blur',()=>{customer.phone=phEl.value.trim();});
+    if(ad2El)ad2El.addEventListener('blur',()=>{customer.address_line2=ad2El.value.trim();});
+    const smsEl=root.querySelector('#c-sms-consent');
+    if(smsEl)smsEl.addEventListener('change',()=>{smsConsentChecked=smsEl.checked;});
     // Re-render on coupon change so a manually-typed code shows its discount
     // immediately (matches the exit-intent code's own live-feedback re-render).
     const couponEl=root.querySelector('#c-coupon');
