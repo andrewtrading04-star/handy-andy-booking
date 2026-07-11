@@ -71,24 +71,28 @@ async function placeDetailsPublic(req, res) {
 async function serveReviewClick(req, res) {
   const rawToken = ((req.query || {}).token || '').toString();
   const channel = ((req.query || {}).ch || '').toString().toLowerCase() === 'sms' ? 'sms' : 'email';
+  const perChannelCol = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
   try {
     const t = verifyToken(rawToken);
     if (t && t.kind === 'review' && t.booking_id) {
       const db = serviceClient();
       const now = new Date().toISOString();
-      // First click only, with the channel it came from. Prefer the dedicated
-      // columns (migration 0062); if they aren't applied yet, fall back to the
-      // bookings.metadata JSONB so tracking still records.
+      // Per-channel click (migration 0063) — each channel records its OWN first
+      // click, so a customer who opens both links shows as having opened both,
+      // not just whichever channel they clicked first. review_clicked_at/
+      // review_click_channel (0062) are kept in step for anything still reading
+      // them. If the 0063/0062 columns aren't applied yet, fall back to metadata.
       const { error } = await db.from('bookings')
-        .update({ review_clicked_at: now, review_click_channel: channel })
+        .update({ [perChannelCol]: now, review_clicked_at: now, review_click_channel: channel })
         .eq('id', t.booking_id)
-        .is('review_clicked_at', null);
+        .is(perChannelCol, null);
       if (error) {
         const { data: cur } = await db.from('bookings').select('metadata').eq('id', t.booking_id).maybeSingle();
         const meta = (cur && cur.metadata) || {};
-        if (cur && !meta.review_clicked_at) {
+        const metaKey = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
+        if (cur && !meta[metaKey]) {
           await db.from('bookings')
-            .update({ metadata: { ...meta, review_clicked_at: now, review_click_channel: channel } })
+            .update({ metadata: { ...meta, [metaKey]: now, review_clicked_at: meta.review_clicked_at || now, review_click_channel: meta.review_click_channel || channel } })
             .eq('id', t.booking_id);
         }
       }

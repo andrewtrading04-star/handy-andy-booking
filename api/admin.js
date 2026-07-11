@@ -2283,6 +2283,8 @@ async function bookingUpdate(req, res, db, auth, body) {
       // Click-tracking redirect URL for both email and SMS — logs which channel the click came from
       const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=email`;
       const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=sms`;
+      // Twilio POSTs delivery status here as the text progresses (see api/analytics.js action=sms_status)
+      const smsStatusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(existing.review_token)}`;
 
       // Send review email immediately — only once per booking (metadata stamp),
       // so a reopen → re-complete never double-emails the customer.
@@ -2301,7 +2303,15 @@ async function bookingUpdate(req, res, db, auth, body) {
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             const newMeta = { ...(cur?.metadata || existing.metadata || {}), review_email_sent_at: now };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
-            try { await db.from('bookings').update({ review_email_sent_at: now, review_email_count: 1 }).eq('id', id); } catch { /* column not applied yet */ }
+            // review_email_id lets the Resend delivery webhook match its event
+            // back to this booking; review_email_status starts 'sent' and the
+            // webhook upgrades it to 'delivered'/'bounced'/'complained'.
+            try {
+              await db.from('bookings').update({
+                review_email_sent_at: now, review_email_count: 1,
+                review_email_id: emailResult.id || null, review_email_status: 'sent',
+              }).eq('id', id);
+            } catch { /* column not applied yet */ }
             console.log(`[review] email sent to ${existing.customer.email} (${biz.slug}) booking=${id}`);
           }
         } catch (e) {
@@ -2314,11 +2324,13 @@ async function bookingUpdate(req, res, db, auth, body) {
       if (existing.customer?.phone && existing.sms_consent && !existing.metadata?.review_sms_sent_at) {
         try {
           const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
-          const smsResult = await sendSMSResult(existing.customer.phone, msg);
+          const smsResult = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
           if (smsResult.ok) {
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             await db.from('bookings').update({ metadata: { ...(cur?.metadata || existing.metadata || {}), review_sms_sent_at: now } }).eq('id', id);
-            try { await db.from('bookings').update({ review_sms_sent_at: now }).eq('id', id); } catch { /* column not applied yet */ }
+            // review_sms_status starts 'sent'; Twilio's status callback upgrades
+            // it to 'delivered'/'failed'/'undelivered' (see api/analytics.js).
+            try { await db.from('bookings').update({ review_sms_sent_at: now, review_sms_status: 'sent' }).eq('id', id); } catch { /* column not applied yet */ }
             console.log(`[review] SMS sent (${biz.slug}) booking=${id}`);
           } else {
             console.warn(`[review] SMS NOT sent booking=${id}:`, smsResult.skipped || smsResult.error);
@@ -3718,42 +3730,110 @@ async function sendFeedbackEmail(params) {
 }
 
 // ── Reviews list (admin dashboard reviews tab) ──────────────────────────────
-// Review-request tracking: every completed job showing email/SMS sends and click tracking.
-// Replaces the old email-only open-pixel with unified click tracking (works for both channels).
+// Review-request tracking: every completed job with a full per-channel
+// Sent → Delivered → Opened pipeline (email + SMS), newest first, paginated —
+// plus a 30-day email-vs-SMS engagement scoreboard computed independently of
+// the page window so it stays accurate regardless of which page is showing.
+const REVIEW_TRACK_COLS = `review_email_sent_at, review_email_count, review_email_id,
+      review_email_delivered_at, review_email_status, review_email_clicked_at,
+      review_sms_sent_at, review_sms_delivered_at, review_sms_status, review_sms_clicked_at,
+      review_clicked_at, review_click_channel`;
+
+function channelState(hasChannel, sentAt, deliveredAt, status, openedAt) {
+  if (!hasChannel) return { eligible: false, sent_at: null, delivered_at: null, status: null, opened_at: null };
+  const resolvedStatus = status || (deliveredAt ? 'delivered' : (sentAt ? 'sent' : null));
+  return { eligible: true, sent_at: sentAt || null, delivered_at: deliveredAt || null, status: resolvedStatus, opened_at: openedAt || null };
+}
+
 async function reviewRequests(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business || ''); } catch (e) { return bail(res, e); }
-  const cols = (t) => `id, scheduled_at, completed_at, review_rating, reviewed_at, review_token, metadata,
-      ${t ? 'review_email_sent_at, review_email_count, review_sms_sent_at, review_clicked_at, review_click_channel, ' : ''}
-      customer:customers(name, email), technician:technicians!technician_id(name)`;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const cols = (t) => `id, scheduled_at, completed_at, review_rating, reviewed_at, review_token, metadata, sms_consent,
+      ${t ? REVIEW_TRACK_COLS + ', ' : ''}
+      customer:customers(name, email, phone), technician:technicians!technician_id(name)`;
   let hasTrack = true;
-  let { data, error } = await db.from('bookings').select(cols(true))
+  let { data, error, count } = await db.from('bookings').select(cols(true), { count: 'exact' })
     .eq('business_id', biz.id).eq('status', 'completed')
-    .order('completed_at', { ascending: false }).limit(300);
-  // Any tracking column missing (migrations 0033/0062 not applied) → re-select
-  // without them; the bookings.metadata stamps carry the same data as fallback.
+    .order('completed_at', { ascending: false }).range(from, to);
+  // Any tracking column missing (migrations 0033/0062/0063 not applied) →
+  // re-select without them; the bookings.metadata stamps carry the sent-at
+  // data as fallback (delivered/status/per-channel-opened have no metadata
+  // fallback — they're new bonus signals, not core functionality).
   if (error && /review_(email|sms|click)/.test(error.message || '')) {
     hasTrack = false;
-    ({ data, error } = await db.from('bookings').select(cols(false))
+    ({ data, error, count } = await db.from('bookings').select(cols(false), { count: 'exact' })
       .eq('business_id', biz.id).eq('status', 'completed')
-      .order('completed_at', { ascending: false }).limit(300));
+      .order('completed_at', { ascending: false }).range(from, to));
   }
   if (error) throw error;
-  const rows = (data || []).map(b => ({
-    id: b.id,
-    customer_name: b.customer?.name || '—',
-    has_email: !!b.customer?.email,
-    technician_name: b.technician?.name || '—',
-    completed_at: b.completed_at || b.scheduled_at || null,
-    email_sent_at: (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null,
-    email_count: hasTrack ? (b.review_email_count || 0) : (b.metadata?.review_email_sent_at ? 1 : 0),
-    sms_sent_at: (hasTrack ? b.review_sms_sent_at : null) || b.metadata?.review_sms_sent_at || null,
-    clicked_at: (hasTrack ? b.review_clicked_at : null) || b.metadata?.review_clicked_at || null,
-    click_channel: (hasTrack ? b.review_click_channel : null) || b.metadata?.review_click_channel || null,
-    rating: b.review_rating || null,
-    reviewed_at: b.reviewed_at || null,
-    tracking: hasTrack,
-  }));
-  return res.status(200).json({ requests: rows });
+
+  const rows = (data || []).map(b => {
+    const hasEmail = !!b.customer?.email;
+    const hasSms = !!b.customer?.phone && !!b.sms_consent;
+    const emailSentAt = (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null;
+    const smsSentAt = (hasTrack ? b.review_sms_sent_at : null) || b.metadata?.review_sms_sent_at || null;
+    // Per-channel opened: prefer the 0063 per-channel column; fall back to the
+    // 0062 shared "first click" column when it matches this channel (covers
+    // clicks recorded before 0063 was applied).
+    const emailOpenedAt = (hasTrack ? b.review_email_clicked_at : null)
+      || b.metadata?.review_email_clicked_at
+      || ((hasTrack ? b.review_click_channel : b.metadata?.review_click_channel) === 'email' ? (b.review_clicked_at || b.metadata?.review_clicked_at) : null) || null;
+    const smsOpenedAt = (hasTrack ? b.review_sms_clicked_at : null)
+      || b.metadata?.review_sms_clicked_at
+      || ((hasTrack ? b.review_click_channel : b.metadata?.review_click_channel) === 'sms' ? (b.review_clicked_at || b.metadata?.review_clicked_at) : null) || null;
+    return {
+      id: b.id,
+      customer_name: b.customer?.name || '—',
+      technician_name: b.technician?.name || '—',
+      completed_at: b.completed_at || b.scheduled_at || null,
+      has_email: hasEmail,
+      email_count: hasTrack ? (b.review_email_count || 0) : (emailSentAt ? 1 : 0),
+      email: channelState(hasEmail, emailSentAt, hasTrack ? b.review_email_delivered_at : null, hasTrack ? b.review_email_status : null, emailOpenedAt),
+      sms: channelState(hasSms, smsSentAt, hasTrack ? b.review_sms_delivered_at : null, hasTrack ? b.review_sms_status : null, smsOpenedAt),
+      rating: b.review_rating || null,
+      reviewed_at: b.reviewed_at || null,
+      tracking: hasTrack,
+    };
+  });
+
+  const scoreboard = await reviewScoreboard(db, biz.id, hasTrack);
+  return res.status(200).json({ requests: rows, page, limit, total: count || rows.length, scoreboard });
+}
+
+// 30-day email-vs-SMS engagement scoreboard — computed over ALL completed
+// jobs in the window, independent of reviewRequests' pagination, so it's
+// always the true last-30-days number regardless of which page is showing.
+async function reviewScoreboard(db, businessId, hasTrack) {
+  const windowDays = 30;
+  if (!hasTrack) return { windowDays, email: null, sms: null };
+  const sinceISO = new Date(Date.now() - windowDays * 86400000).toISOString();
+  const { data, error } = await db.from('bookings')
+    .select('review_email_sent_at, review_email_delivered_at, review_email_clicked_at, review_sms_sent_at, review_sms_delivered_at, review_sms_clicked_at, review_clicked_at, review_click_channel')
+    .eq('business_id', businessId).eq('status', 'completed')
+    .gte('completed_at', sinceISO);
+  if (error || !data) return { windowDays, email: null, sms: null };
+
+  const tally = (sentKey, deliveredKey, clickedKey) => {
+    let sent = 0, delivered = 0, opened = 0;
+    for (const b of data) {
+      if (!b[sentKey]) continue;
+      sent++;
+      if (b[deliveredKey]) delivered++;
+      const ch = clickedKey === 'review_sms_clicked_at' ? 'sms' : 'email';
+      const openedAt = b[clickedKey] || (b.review_click_channel === ch ? b.review_clicked_at : null);
+      if (openedAt) opened++;
+    }
+    return { sent, delivered, opened, openRate: sent ? Math.round((opened / sent) * 100) : null };
+  };
+  return {
+    windowDays,
+    email: tally('review_email_sent_at', 'review_email_delivered_at', 'review_email_clicked_at'),
+    sms: tally('review_sms_sent_at', 'review_sms_delivered_at', 'review_sms_clicked_at'),
+  };
 }
 
 // Resend the "How did we do?" email for one completed job.
@@ -3774,8 +3854,9 @@ async function reviewResend(req, res, db, auth, body) {
   const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=email`;
   const { from } = emailConfig(biz.slug);
   const { subject, html } = reviewEmail({ firstName: b.customer.name || 'there', clickUrl: emailClickUrl }, brandFor(biz.slug));
+  let emailResult;
   try {
-    await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from, throwOnError: true });
+    emailResult = await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from, throwOnError: true });
   } catch (e) {
     return res.status(502).json({ error: 'Email failed to send: ' + e.message });
   }
@@ -3783,10 +3864,17 @@ async function reviewResend(req, res, db, auth, body) {
   const now = new Date().toISOString();
   await db.from('bookings').update({ metadata: { ...(b.metadata || {}), review_email_sent_at: now } }).eq('id', id);
   // Best-effort tracking-column bump (no-op if migration 0033 isn't applied).
+  // A resend is a fresh delivery attempt — reset status to 'sent' and re-point
+  // review_email_id at the NEW Resend message so the delivery webhook matches
+  // the right send (the old id, if it never got picked up by the webhook,
+  // simply goes stale).
   try {
     const { data: cur } = await db.from('bookings').select('review_email_count').eq('id', id).single();
     const next = (Number(cur?.review_email_count) || 0) + 1;
-    await db.from('bookings').update({ review_email_sent_at: now, review_email_count: next }).eq('id', id);
+    await db.from('bookings').update({
+      review_email_sent_at: now, review_email_count: next,
+      review_email_id: emailResult.id || null, review_email_status: 'sent', review_email_delivered_at: null,
+    }).eq('id', id);
   } catch (e) { /* column absent — metadata already updated above */ }
 
   return res.status(200).json({ ok: true });
