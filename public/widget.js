@@ -581,7 +581,7 @@
   // subtotal, so the number the customer watches grow never disagrees with the
   // one they see at checkout.
   function footerTotal(){
-    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge();
+    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge()-(COUPONS[couponCode]||0);
   }
   function slotSurcharge(sl,ds){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
@@ -628,7 +628,7 @@
     // last thing on every step so the price a customer is building stays visible
     // the whole time, instead of arriving as one number at the very end.
     footerBar:t=>`<div style="margin:18px -28px -28px!important;padding:12px 28px!important;background:#0e0e10!important;border-top:1px solid #2d2d34!important;display:flex!important;justify-content:space-between!important;align-items:center!important;font-size:13px!important;">
-      <span style="color:#a0a0ab!important;">Estimated total</span>
+      <span style="color:#a0a0ab!important;">${(COUPONS[couponCode]||0)>0?`Estimated total <span style="color:#4ade80!important;font-weight:700!important;">— ${couponCode} applied (-$${COUPONS[couponCode]})</span>`:'Estimated total'}</span>
       <span style="font-weight:800!important;font-size:17px!important;color:#ff9944!important;">$${t}</span>
     </div>`,
   };
@@ -666,25 +666,32 @@
     // Mount Stripe card element after DOM is ready
     if(key==='customer'){
       ensureStripe().then(mountStripeCard);
-      armExitIntent();
     }
+    // Arm exit-intent as soon as the customer is past the zip step, not only
+    // on the final checkout step — most drop-off happens mid-funnel (picking
+    // TV size, bracket, wires, etc.), so gating the offer to the last step
+    // meant it was never even armed for the majority of abandoners.
+    if(key!=='zip')armExitIntent();
   }
 
-  // ─── Exit intent (customer/checkout step only, once per page load) ────────
+  // ─── Exit intent (armed once the customer is past the zip step) ───────────
   // Two device-native triggers for the same offer: desktop mouse exits upward
   // through the top of the viewport (mouseout with no relatedTarget); back
   // button / back-swipe on mobile or desktop, via a trapped history entry.
   // Whichever fires first shows the modal; only once per session.
-  let exitIntentArmed=false, exitIntentShown=false;
+  let exitIntentArmed=false, exitIntentShown=false, exitIntentArmedAt=0;
   const EXIT_COUPON='LASTCHANCE10';
+  const EXIT_MIN_DWELL_MS=4000; // ignore a reflexive glance at the address bar right after arming
   function armExitIntent(){
     if(exitIntentArmed||exitIntentShown)return;
     exitIntentArmed=true;
+    exitIntentArmedAt=Date.now();
     document.addEventListener('mouseout',onExitMouseOut);
     try{ history.pushState({haExitTrap:true},'',location.href); }catch(e){}
     window.addEventListener('popstate',onExitPopState);
   }
   function onExitMouseOut(e){
+    if(Date.now()-exitIntentArmedAt<EXIT_MIN_DWELL_MS)return;
     if(!e.relatedTarget&&!e.toElement&&e.clientY<=0)showExitIntentModal();
   }
   function onExitPopState(){
@@ -701,7 +708,7 @@
     if(exitIntentShown)return;
     exitIntentShown=true;
     disarmExitIntent();
-    logEvent('answer','exit_intent_shown');
+    logEvent('answer','exit_intent:shown');
     const ov=document.createElement('div');
     ov.id='ha-exit-ov';
     ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.75)!important;';
@@ -717,13 +724,14 @@
         </div>
       </div>`;
     document.body.appendChild(ov);
-    const close=reason=>{ ov.remove(); logEvent('answer','exit_intent_'+reason); };
+    const close=reason=>{ ov.remove(); logEvent('answer','exit_intent:'+reason); };
     ov.querySelector('#ha-exit-x').addEventListener('click',()=>close('dismissed'));
     ov.querySelector('#ha-exit-close').addEventListener('click',()=>close('dismissed'));
     ov.querySelector('#ha-exit-apply').addEventListener('click',()=>{
       couponCode=EXIT_COUPON;
       const f=document.getElementById('c-coupon'); if(f)f.value=EXIT_COUPON;
       close('applied');
+      render(); // reflect the discount immediately instead of silently applying it
     });
   }
 
@@ -1145,6 +1153,7 @@
     const zipDisc=zipDiscount();
     const ah=selectedSlotSurcharge();
     const base=calcTotal()+adj-zipDisc+ah;
+    const couponDisc=COUPONS[couponCode]||0;
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
@@ -1192,6 +1201,10 @@
             <span>Location</span>
             <span style="color:#4ade80!important;">-$${zipDisc}</span>
           </div>`:''}
+          ${couponDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Coupon ${couponCode}</span>
+            <span id="ha-coupon-disc" style="color:#4ade80!important;">-$${couponDisc}</span>
+          </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax (8.25%)</span>
             <span id="ha-tax" style="color:#fff!important;">$${Math.round(base*TAX_RATE*100)/100}</span>
@@ -1203,7 +1216,7 @@
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
           <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">Total</div>
-          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount)*100)/100}</div>
+          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount-couponDisc)*100)/100}</div>
         </div>
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
@@ -1265,6 +1278,13 @@
     const captureName=()=>{ if(fnEl)customer.first_name=fnEl.value.trim(); if(lnEl)customer.last_name=lnEl.value.trim(); if(customer.first_name||customer.last_name) logEvent('answer','customer_name'); };
     if(fnEl)fnEl.addEventListener('blur',captureName);
     if(lnEl)lnEl.addEventListener('blur',captureName);
+    // Re-render on coupon change so a manually-typed code shows its discount
+    // immediately (matches the exit-intent code's own live-feedback re-render).
+    const couponEl=root.querySelector('#c-coupon');
+    if(couponEl)couponEl.addEventListener('blur',()=>{
+      const v=couponEl.value.trim().toUpperCase();
+      if(v!==couponCode){ couponCode=v; render(); }
+    });
     attachAddrAutocomplete(root);
     // Card inputs replaced by Stripe Elements — no manual binding needed
   }
