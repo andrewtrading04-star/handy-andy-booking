@@ -612,6 +612,11 @@
   .greview-credit{margin-left:auto;flex:0 0 auto;}
   .greview-credit select{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:150px;}
   .greview-text{color:var(--ink-2);font-size:12.5px;line-height:1.4;margin-top:4px;}
+  /* ── Google reviews: New vs Past grouping ────────────────────────────────── */
+  .greview-group-h{display:flex;align-items:center;gap:8px;margin:12px 0 7px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);}
+  .greview-group-h:first-child{margin-top:0;}
+  .greview.is-new{border-left:3px solid var(--accent);padding-left:9px;}
+  .greview.is-past{opacity:.75;}
 
   /* ── Review-requests scoreboard + per-channel Sent→Delivered→Opened pipeline ── */
   .rev-scoreboard{display:flex;gap:10px;margin-bottom:14px;}
@@ -641,6 +646,17 @@
   .rev-pipe-v{display:flex;flex-direction:column;gap:4px;}
   .rev-tile-foot{display:flex;justify-content:flex-end;margin-top:1px;}
   @media (max-width:520px){ .rev-tiles{grid-template-columns:1fr;} }
+
+  /* ── Review-requests: Today / Yesterday / weekly groups ──────────────────── */
+  .rq-group{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff;}
+  .rq-group-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line2);
+    font-size:12.5px;font-weight:800;color:var(--ink);}
+  .rq-group-h.clickable{cursor:pointer;user-select:none;}
+  .rq-group-title{flex:1;min-width:0;}
+  .rq-chevron{display:inline-block;font-size:10px;color:var(--mute);transition:transform .15s ease;transform:rotate(0deg);}
+  .rq-group.collapsed .rq-chevron{transform:rotate(-90deg);}
+  .rq-group-body{padding:11px 12px;display:flex;flex-direction:column;gap:9px;}
+  .rq-group.collapsed .rq-group-body{display:none;}
 
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
@@ -4147,6 +4163,11 @@ async function rcAction(id, act, biz){
 
 // ── Review requests: scoreboard + per-job Sent→Delivered→Opened pipeline ────
 let _revReqState={ page:1, limit:25, total:0, rows:[], scoreboard:null };
+// Collapse state for weekly groups in the "Review requests" list, keyed by the
+// bucket's Monday date (YYYY-MM-DD, local). Missing/undefined === collapsed
+// (all weekly buckets default to collapsed). Preserved across re-renders
+// (e.g. after "Load more") since this lives outside paintReviewRequests().
+let _revReqWeekCollapsed={};
 
 function revScoreboardHtml(sb){
   if(!sb || !sb.email || !sb.sms) return '';
@@ -4212,23 +4233,112 @@ function reviewReqCardHtml(r, gByBooking){
   </div>`;
 }
 
-// Renders the scoreboard + accumulated rows + "Load more" into #revReqWrap,
-// and (re)wires the resend/load-more buttons. Called on first load and after
-// each "Load more" fetch — the container is scoped so this never touches the
+// ── Grouping helpers for the review-requests list: Today / Yesterday / weekly
+// (Monday-start) buckets, using the LOCAL calendar date of r.completed_at. ──
+// Returns midnight-local Date for a Date, or null if `d` isn't a valid Date.
+function _rqLocalDay(d){
+  if(!(d instanceof Date) || isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function _rqSameDay(a,b){ return !!a && !!b && a.getTime()===b.getTime(); }
+// Monday (local midnight) of the calendar week containing `day` (also local midnight).
+function _rqMondayOf(day){
+  const dow=day.getDay(); // 0=Sun..6=Sat
+  const back = dow===0 ? 6 : dow-1;
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate()-back);
+}
+function _rqShortDate(d){ return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+function _rqKeyOf(d){
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+// Buckets an already-newest-first array of review-request rows into
+// { type:'today'|'yesterday'|'week', label, key?, rows } groups, preserving
+// row order and emitting weekly groups in the order they're first encountered
+// (i.e. most-recent week first, since rows arrive sorted newest-first).
+function groupReviewRequestRows(rows){
+  const today=_rqLocalDay(new Date());
+  const yesterday=new Date(today); yesterday.setDate(yesterday.getDate()-1);
+  const groups=[];
+  let todayGroup=null, yesterdayGroup=null, undatedGroup=null;
+  const weekGroups=new Map();
+  for(const r of rows){
+    let day=null;
+    try{ day = r && r.completed_at ? _rqLocalDay(new Date(r.completed_at)) : null; }catch(_){ day=null; }
+    if(!day){
+      // No/invalid completed_at (e.g. an imported job whose source lacked a
+      // completed/scheduled timestamp) — still show it rather than silently
+      // dropping it from the list, just bucket it separately since it can't
+      // be placed on the calendar.
+      if(!undatedGroup){ undatedGroup={ type:'undated', label:'Undated', rows:[] }; groups.push(undatedGroup); }
+      undatedGroup.rows.push(r);
+      continue;
+    }
+    if(_rqSameDay(day, today)){
+      if(!todayGroup){ todayGroup={ type:'today', label:'Today', rows:[] }; groups.push(todayGroup); }
+      todayGroup.rows.push(r);
+    } else if(_rqSameDay(day, yesterday)){
+      if(!yesterdayGroup){ yesterdayGroup={ type:'yesterday', label:'Yesterday', rows:[] }; groups.push(yesterdayGroup); }
+      yesterdayGroup.rows.push(r);
+    } else {
+      const monday=_rqMondayOf(day);
+      const key=_rqKeyOf(monday);
+      let g=weekGroups.get(key);
+      if(!g){
+        const sunday=new Date(monday); sunday.setDate(sunday.getDate()+6);
+        g={ type:'week', key, label:`${_rqShortDate(monday)} – ${_rqShortDate(sunday)}`, rows:[] };
+        weekGroups.set(key,g);
+        groups.push(g);
+      }
+      g.rows.push(r);
+    }
+  }
+  return groups;
+}
+// Renders one group (Today/Yesterday always-expanded, or a collapsible weekly
+// bucket) using the exact same reviewReqCardHtml() card markup.
+function rqGroupHtml(g, gByBooking){
+  const cards=g.rows.map(r=>reviewReqCardHtml(r,gByBooking)).join('');
+  if(g.type!=='week'){
+    return `<div class="rq-group">
+      <div class="rq-group-h"><span class="rq-chevron">▾</span><span class="rq-group-title">${esc(g.label)}</span><span class="chk">${g.rows.length}</span></div>
+      <div class="rq-group-body">${cards}</div>
+    </div>`;
+  }
+  const collapsed = _revReqWeekCollapsed[g.key]!==false; // default: collapsed
+  return `<div class="rq-group${collapsed?' collapsed':''}" data-week-key="${esc(g.key)}">
+    <div class="rq-group-h clickable" data-week-toggle="${esc(g.key)}"><span class="rq-chevron">▾</span><span class="rq-group-title">${esc(g.label)}</span><span class="chk">${g.rows.length}</span></div>
+    <div class="rq-group-body">${cards}</div>
+  </div>`;
+}
+
+// Renders the scoreboard + accumulated rows (grouped into Today / Yesterday /
+// weekly buckets) + "Load more" into #revReqWrap, and (re)wires the
+// resend/load-more/week-toggle buttons. Called on first load and after each
+// "Load more" fetch — the container is scoped so this never touches the
 // Google-reviews or in-app-reviews sections above/below it.
 function paintReviewRequests(gByBooking){
   const wrap=document.getElementById('revReqWrap');
   if(!wrap) return;
   const hasMore=_revReqState.rows.length<_revReqState.total;
+  const groupsHtml = _revReqState.rows.length
+    ? groupReviewRequestRows(_revReqState.rows).map(g=>rqGroupHtml(g,gByBooking)).join('')
+    : '<div class="empty">No completed jobs yet.</div>';
   wrap.innerHTML =
     revScoreboardHtml(_revReqState.scoreboard)+
-    (_revReqState.rows.map(r=>reviewReqCardHtml(r,gByBooking)).join('')||'<div class="empty">No completed jobs yet.</div>')+
-    (hasMore?`<button type="button" class="btn ghost sm" id="revReqLoadMore" style="width:100%;margin-top:8px;">Load more (${_revReqState.rows.length} of ${_revReqState.total})</button>`:'');
+    groupsHtml+
+    (hasMore?`<button type="button" class="btn ghost sm" id="revReqLoadMore" style="width:100%;margin-top:8px;">Load earlier weeks (${_revReqState.rows.length} of ${_revReqState.total})</button>`:'');
   wrap.querySelectorAll('[data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
     const channel = btn.dataset.channel === 'sms' ? 'sms' : 'email';
     btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
     try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend, channel }}); toast(channel==='sms'?'Review text sent ✓':'Review email sent ✓'); renderReviews(); }
     catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
+  }));
+  wrap.querySelectorAll('[data-week-toggle]').forEach(h=>h.addEventListener('click',()=>{
+    const key=h.dataset.weekToggle;
+    const collapsedNow=_revReqWeekCollapsed[key]!==false;
+    _revReqWeekCollapsed[key]=!collapsedNow; // toggle, and remember it across re-renders
+    paintReviewRequests(gByBooking);
   }));
   const lm=document.getElementById('revReqLoadMore');
   if(lm) lm.addEventListener('click',async()=>{
@@ -4243,7 +4353,14 @@ function paintReviewRequests(gByBooking){
   });
 }
 
+let _reviewsRenderSeq=0;
+// Ids that have already been shown to the admin under "New" during this
+// session — kept pinned there for the rest of the visit even after the
+// background "mark as seen" sync (below) lands and the server starts
+// reporting seen:true on subsequent fetches.
+const _reviewsPinnedNewIds=new Set();
 async function renderReviews(){
+  const mySeq=++_reviewsRenderSeq;
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
   try{
@@ -4253,6 +4370,11 @@ async function renderReviews(){
       api('google_reviews',{ params:{ business:current.slug }}).catch(()=>({reviews:[]})),
       api('technicians',{ params:{ business:current.slug }}).catch(()=>({technicians:[]})),
     ]);
+    // A newer renderReviews() invocation has started (or already finished)
+    // since this one began — bail out so we don't overwrite fresher DOM with
+    // stale data or fire duplicate "mark as seen" calls for reviews the
+    // newer invocation is already handling.
+    if(mySeq!==_reviewsRenderSeq) return;
     const reviews=d.reviews||[];
     const gReviews=gr.reviews||[];
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
@@ -4273,7 +4395,10 @@ async function renderReviews(){
       </div>`).join('');
 
     const techOptsFor=(sel)=>`<option value="">— credit a tech —</option>`+revTechs.map(t=>`<option value="${esc(t.id)}" ${t.id===sel?'selected':''}>${esc(t.name)}</option>`).join('');
-    const gHtml=gReviews.map(r=>{
+    // Same per-review template as before, just parameterized with an extra
+    // class so the New/Past split below can style the two groups differently
+    // without touching any of the actual review content/markup.
+    const gReviewHtml=(r, extraClass)=>{
       const stars='⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
       const when=r.review_date||(r.created_at?new Date(r.created_at).toLocaleDateString():'');
       const credit=role==='owner'
@@ -4283,18 +4408,30 @@ async function renderReviews(){
       const ratingOnly=!r.review_text||/only left a rating/i.test(r.review_text);
       const text=ratingOnly?'':`<div class="greview-text">${esc(r.review_text)}</div>`;
       const who=`${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}`;
-      return `<div class="greview">
+      return `<div class="greview${extraClass?' '+extraClass:''}">
         <div class="greview-top">
           <span class="greview-stars">${stars}</span>
           <span class="greview-who" title="${esc(who)}">${who}</span>
           <span class="greview-credit">${credit}</span>
         </div>${text}
       </div>`;
-    }).join('');
+    };
+    // "New" = not yet seen (r.seen is false/undefined) — these get a colored
+    // accent bar. "Past" = already seen — same card, just dimmed. Order within
+    // each group is unchanged (both arrive newest-first from the API).
+    const newGReviews=gReviews.filter(r=>!r.seen||_reviewsPinnedNewIds.has(r.id));
+    const pastGReviews=gReviews.filter(r=>r.seen&&!_reviewsPinnedNewIds.has(r.id));
+    const gHtml=
+      (newGReviews.length
+        ? `<div class="greview-group-h">New<span class="chk">${newGReviews.length}</span></div>`+newGReviews.map(r=>gReviewHtml(r,'is-new')).join('')
+        : '')+
+      (pastGReviews.length
+        ? `<div class="greview-group-h">Past<span class="chk">${pastGReviews.length}</span></div>`+pastGReviews.map(r=>gReviewHtml(r,'is-past')).join('')
+        : '');
 
     document.getElementById('revWrap').innerHTML=
       `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">⭐ Google reviews</div>`+
-      (gHtml||'<div class="empty">No Google reviews yet.</div>')+
+      (gReviews.length?gHtml:'<div class="empty">No Google reviews yet.</div>')+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Review requests</div>`+
       `<div id="revReqWrap"></div>`+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received (in-app)</div>`+
@@ -4305,7 +4442,33 @@ async function renderReviews(){
       try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
       catch(e){ toast(e.message); }
     }));
-  }catch(err){ const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+
+    // "Once I see it, it moves to Past": pin these ids as "New" for the rest
+    // of this session (see _reviewsPinnedNewIds above) so the admin keeps
+    // seeing them under New even once the background sync below lands and
+    // the server starts reporting seen:true on later fetches. In the
+    // background, best-effort (and in parallel — never sequential/awaited)
+    // mark each just-viewed review as seen server-side so the NEXT session
+    // it's filed under Past. Every call is independently caught so one
+    // failure never blocks the rest or surfaces an error toast — this sync
+    // is silent by design; only a *successful* write updates the
+    // dashboard-level green banner (_googleReviewsCache), since an unsynced
+    // review is still genuinely unseen server-side and should keep alerting.
+    if(newGReviews.length){
+      newGReviews.forEach(r=>{
+        _reviewsPinnedNewIds.add(r.id);
+        api('google_review_update',{ method:'POST', body:{ business:current.slug, id:r.id, seen:true }})
+          .then(()=>{
+            const cached=_googleReviewsCache.find(x=>x.id===r.id);
+            if(cached) cached.seen=true;
+            if(typeof renderGoodAlerts==='function'){
+              renderGoodAlerts(_googleReviewsCache.filter(x=>!x.seen));
+            }
+          })
+          .catch(()=>{});
+      });
+    }
+  }catch(err){ if(mySeq!==_reviewsRenderSeq) return; const w=document.getElementById('revWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
 // ── Estimates (customer quote requests) ─────────────────────────────────────
