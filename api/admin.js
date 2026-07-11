@@ -4121,18 +4121,29 @@ async function reviews(req, res, db, auth) {
 // Degrades to an empty list if the table isn't applied yet.
 async function googleReviews(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
-  const { data: rows, error } = await db.from('google_reviews')
-    .select(`id, reviewer_name, rating, review_text, review_date, seen, created_at, technician_id, booking_id,
-             technician:technicians ( id, name )`)
+  const selectWithDismiss = `id, reviewer_name, rating, review_text, review_date, seen, dismissed_at, created_at, technician_id, booking_id,
+             technician:technicians ( id, name )`;
+  let { data: rows, error } = await db.from('google_reviews')
+    .select(selectWithDismiss)
     .eq('business_id', biz.id)
     .order('created_at', { ascending: false })
     .limit(100);
+  // Pre-0065 database: dismissed_at doesn't exist yet — retry without it so the
+  // list still works (nothing can be dismissed until the migration is applied).
+  if (error && /dismissed_at/.test(error.message || '')) {
+    ({ data: rows, error } = await db.from('google_reviews')
+      .select(`id, reviewer_name, rating, review_text, review_date, seen, created_at, technician_id, booking_id,
+               technician:technicians ( id, name )`)
+      .eq('business_id', biz.id)
+      .order('created_at', { ascending: false })
+      .limit(100));
+  }
   if (error) {
     if (/google_reviews/.test(error.message || '')) return res.status(200).json({ reviews: [] });
     throw error;
   }
   return res.status(200).json({
-    reviews: (rows || []).map(r => ({
+    reviews: (rows || []).filter(r => !r.dismissed_at).map(r => ({
       id: r.id,
       reviewer_name: r.reviewer_name || 'A customer',
       rating: r.rating,
@@ -4147,8 +4158,9 @@ async function googleReviews(req, res, db, auth) {
   });
 }
 
-// Dismiss the "new Google review" banner (seen=true) or re-attribute the review
-// to a specific tech. Scoped to the caller's business.
+// Dismiss the "new Google review" banner (seen=true), permanently hide it from
+// the Reviews tab list (dismissed=true), or re-attribute it to a technician.
+// Scoped to the caller's business.
 async function googleReviewUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const biz = await resolveBusiness(db, auth, body.business || '');
@@ -4156,6 +4168,7 @@ async function googleReviewUpdate(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const patch = {};
   if (body.seen !== undefined) patch.seen = !!body.seen;
+  if (body.dismissed !== undefined) patch.dismissed_at = body.dismissed ? new Date().toISOString() : null;
   if (body.technician_id !== undefined) {
     const tid = (body.technician_id || '').toString() || null;
     if (tid) {
@@ -4165,7 +4178,14 @@ async function googleReviewUpdate(req, res, db, auth, body) {
     patch.technician_id = tid;
   }
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'nothing to update' });
-  const { error } = await db.from('google_reviews').update(patch).eq('id', id).eq('business_id', biz.id);
+  let { error } = await db.from('google_reviews').update(patch).eq('id', id).eq('business_id', biz.id);
+  // Pre-0065 database: dismissed_at doesn't exist yet — drop it and retry so
+  // seen/technician updates still work even before the migration is applied.
+  if (error && /dismissed_at/.test(error.message || '') && 'dismissed_at' in patch) {
+    delete patch.dismissed_at;
+    if (!Object.keys(patch).length) return res.status(503).json({ error: 'Dismiss not available yet — migration 0065 not applied.' });
+    ({ error } = await db.from('google_reviews').update(patch).eq('id', id).eq('business_id', biz.id));
+  }
   if (error) throw error;
   return res.status(200).json({ ok: true });
 }
