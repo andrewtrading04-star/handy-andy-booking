@@ -663,18 +663,15 @@
     const footer=(key==='zip'||key==='customer')?'':S.footerBar(Math.round(footerTotal()*100)/100);
     root.innerHTML=prog+body+footer;
     wire(root);
-    // Mount Stripe card element after DOM is ready
+    // Mount Stripe card element after DOM is ready, and arm exit-intent —
+    // checkout/customer step only.
     if(key==='customer'){
       ensureStripe().then(mountStripeCard);
+      armExitIntent();
     }
-    // Arm exit-intent as soon as the customer is past the zip step, not only
-    // on the final checkout step — most drop-off happens mid-funnel (picking
-    // TV size, bracket, wires, etc.), so gating the offer to the last step
-    // meant it was never even armed for the majority of abandoners.
-    if(key!=='zip')armExitIntent();
   }
 
-  // ─── Exit intent (armed once the customer is past the zip step) ───────────
+  // ─── Exit intent (customer/checkout step only, once per page load) ────────
   // Two device-native triggers for the same offer: desktop mouse exits upward
   // through the top of the viewport (mouseout with no relatedTarget); back
   // button / back-swipe on mobile or desktop, via a trapped history entry.
