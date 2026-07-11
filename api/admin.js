@@ -3842,15 +3842,40 @@ async function reviewResend(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const id = body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
+  const channel = body.channel === 'sms' ? 'sms' : 'email';
   const { data: b, error } = await db.from('bookings')
-    .select('id, review_token, metadata, customer:customers(name, email)')
+    .select('id, review_token, metadata, sms_consent, customer:customers(name, email, phone)')
     .eq('id', id).eq('business_id', biz.id).single();
   if (error || !b) return res.status(404).json({ error: 'Booking not found' });
   if (!b.review_token) return res.status(400).json({ error: 'This job has no review link yet.' });
+
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+
+  if (channel === 'sms') {
+    if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
+    if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
+    const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=sms`;
+    const smsStatusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(b.review_token)}`;
+    const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+    const r = await sendSMSResult(b.customer.phone, msg, { statusCallback: smsStatusCallback });
+    if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
+
+    const now = new Date().toISOString();
+    await db.from('bookings').update({ metadata: { ...(b.metadata || {}), review_sms_sent_at: now } }).eq('id', id);
+    // Best-effort tracking-column bump — same fresh-delivery-attempt reset as
+    // the email path below (Twilio's status callback matches by review_token,
+    // not message sid, so there's no id column to re-point here).
+    try {
+      await db.from('bookings').update({
+        review_sms_sent_at: now, review_sms_status: 'sent', review_sms_delivered_at: null,
+      }).eq('id', id);
+    } catch (e) { /* column absent — metadata already updated above */ }
+    return res.status(200).json({ ok: true });
+  }
+
   if (!b.customer?.email) return res.status(400).json({ error: 'No customer email on file for this job.' });
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
 
-  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
   const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=email`;
   const { from } = emailConfig(biz.slug);
   const { subject, html } = reviewEmail({ firstName: b.customer.name || 'there', clickUrl: emailClickUrl }, brandFor(biz.slug));

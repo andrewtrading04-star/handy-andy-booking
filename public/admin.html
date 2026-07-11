@@ -630,6 +630,17 @@
   .chk.delivered{background:#e0edff;color:#1d4ed8;}
   .chk.fail{background:#fee2e2;color:#b91c1c;}
   .chk.na{background:#f5f6f8;color:#c4ccd6;}
+  /* Option 4: side-by-side channel tiles — each channel gets its own bordered
+     box so a failed channel (red tile) visually separates from a healthy one,
+     and its resend button sits inside the tile it affects (no ambiguity). */
+  .rev-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+  .rev-tiles{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+  .rev-tile{border:1px solid var(--line);background:#fafbfc;border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:7px;}
+  .rev-tile.fail{border-color:#fecaca;background:#fef2f2;}
+  .rev-tile.fail .rev-chan-label{color:#b91c1c;}
+  .rev-pipe-v{display:flex;flex-direction:column;gap:4px;}
+  .rev-tile-foot{display:flex;justify-content:flex-end;margin-top:1px;}
+  @media (max-width:520px){ .rev-tiles{grid-template-columns:1fr;} }
 
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
@@ -4149,18 +4160,22 @@ function revScoreboardHtml(sb){
   </div>`;
 }
 
-// One channel's Sent → Delivered → Opened pipeline as 3 chips. `chan` is the
-// { eligible, sent_at, delivered_at, status, opened_at } shape the API returns.
-function revChanPipeHtml(label, chan){
+const REV_FAIL_STATUSES={bounced:'Bounced',complained:'Complained',failed:'Failed',undelivered:'Undelivered'};
+
+// One channel's Sent → Delivered → Opened pipeline as a bordered tile, stacked
+// vertically (not a left-to-right arrow chain) so it reads cleanly at tile
+// width. `chan` is the { eligible, sent_at, delivered_at, status, opened_at }
+// shape the API returns. The resend button lives inside the tile it affects.
+function revChanTileHtml(label, chan, id, channelKey){
   if(!chan || !chan.eligible){
-    return `<div class="rev-chan"><div class="rev-chan-label">${label}</div><div class="rev-pipe"><span class="chk na">— N/A</span></div></div>`;
+    return `<div class="rev-tile"><div class="rev-chan-label">${label}</div><div class="rev-pipe-v"><span class="chk na">— N/A</span></div></div>`;
   }
-  const FAIL_STATUSES={bounced:'Bounced',complained:'Complained',failed:'Failed',undelivered:'Undelivered'};
+  const failed = chan.status && REV_FAIL_STATUSES[chan.status];
   const sentChip = chan.sent_at ? `<span class="chk done">✓ Sent</span>` : `<span class="chk pending">○ Not sent yet</span>`;
   let midChip, openChip;
-  if(chan.status && FAIL_STATUSES[chan.status]){
-    midChip=`<span class="chk fail">✕ ${FAIL_STATUSES[chan.status]}</span>`;
-    openChip=`<span class="chk na">— n/a</span>`;
+  if(failed){
+    midChip=`<span class="chk fail">✕ ${REV_FAIL_STATUSES[chan.status]}</span>`;
+    openChip=null;
   } else if(chan.delivered_at){
     midChip=`<span class="chk delivered">✓ Delivered</span>`;
     openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:`<span class="chk pending">○ Not opened</span>`;
@@ -4171,28 +4186,28 @@ function revChanPipeHtml(label, chan){
     midChip=`<span class="chk na">— n/a</span>`;
     openChip=`<span class="chk na">— n/a</span>`;
   }
-  return `<div class="rev-chan"><div class="rev-chan-label">${label}</div><div class="rev-pipe">${sentChip}<span class="arrow">→</span>${midChip}<span class="arrow">→</span>${openChip}</div></div>`;
+  const label2 = chan.sent_at ? 'Resend' : 'Send';
+  const btn = `<div class="rev-tile-foot"><button class="btn ghost sm" data-resend="${esc(id)}" data-channel="${channelKey}">${label2} ${channelKey==='email'?'email':'text'}</button></div>`;
+  return `<div class="rev-tile${failed?' fail':''}"><div class="rev-chan-label">${label}</div><div class="rev-pipe-v">${sentChip}${midChip}${openChip||''}</div>${btn}</div>`;
 }
 
 function reviewReqCardHtml(r, gByBooking){
   const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
   const reviewed = r.rating
-    ? `<span class="chk done">${'★'.repeat(r.rating)}</span>`
+    ? `<span class="stars">${'★'.repeat(r.rating)}</span>`
     : `<span class="chk pending">No review yet</span>`;
   const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
-  const canResend = r.has_email;
   return `<div class="job">
-    <div class="row">
-      <div style="flex:1;min-width:0;">
+    <div class="rev-card-top">
+      <div style="min-width:0;">
         <div class="name">${esc(r.customer_name)}</div>
         <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
-        ${revChanPipeHtml('📧 Email', r.email)}
-        ${revChanPipeHtml('💬 Text', r.sms)}
-        <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${reviewed}${gpill}</div>
       </div>
-      <div style="text-align:right;white-space:nowrap;">
-        ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.email&&r.email.sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
-      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${gpill}${reviewed}</div>
+    </div>
+    <div class="rev-tiles">
+      ${revChanTileHtml('📧 Email', r.email, r.id, 'email')}
+      ${revChanTileHtml('💬 Text', r.sms, r.id, 'sms')}
     </div>
   </div>`;
 }
@@ -4210,8 +4225,9 @@ function paintReviewRequests(gByBooking){
     (_revReqState.rows.map(r=>reviewReqCardHtml(r,gByBooking)).join('')||'<div class="empty">No completed jobs yet.</div>')+
     (hasMore?`<button type="button" class="btn ghost sm" id="revReqLoadMore" style="width:100%;margin-top:8px;">Load more (${_revReqState.rows.length} of ${_revReqState.total})</button>`:'');
   wrap.querySelectorAll('[data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
+    const channel = btn.dataset.channel === 'sms' ? 'sms' : 'email';
     btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
-    try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend }}); toast('Review email sent ✓'); renderReviews(); }
+    try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend, channel }}); toast(channel==='sms'?'Review text sent ✓':'Review email sent ✓'); renderReviews(); }
     catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
   }));
   const lm=document.getElementById('revReqLoadMore');
