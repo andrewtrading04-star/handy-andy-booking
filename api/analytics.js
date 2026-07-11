@@ -168,18 +168,23 @@ function verifySvixSignature({ id, timestamp, rawBody, signatureHeader, secret }
 
 // POST /api/analytics?action=email_webhook — Resend's delivery webhook.
 // Configure at https://resend.com/webhooks pointing here, subscribed to
-// email.delivered / email.bounced / email.complained, with RESEND_WEBHOOK_SECRET
-// set to the signing secret Resend shows when the webhook is created. Doms only
-// needs DOMS_RESEND_WEBHOOK_SECRET if it's on a SEPARATE Resend account with its
-// own webhook; otherwise the shared secret covers both (same fallback pattern as
-// emailConfig()). We only ever act on an email_id WE issued (stored as
+// email.delivered / email.bounced / email.complained. Handy Andy and Doms each
+// have their own Resend account/webhook, so their signing secrets are set as
+// RESEND_WEBHOOK_SECRET_Handy_Andy and RESEND_WEBHOOK_SECRET_Doms in Vercel
+// (RESEND_WEBHOOK_SECRET / DOMS_RESEND_WEBHOOK_SECRET are also accepted for a
+// shared-account setup). We only ever act on an email_id WE issued (stored as
 // review_email_id at send time) — a forged webhook can't touch an arbitrary
 // booking without guessing a live Resend message id (an unguessable UUID).
 async function handleResendWebhook(req, res) {
   res.setHeader('Content-Type', 'text/plain');
   try {
     const rawBody = await readRawBody(req);
-    const secrets = [process.env.RESEND_WEBHOOK_SECRET, process.env.DOMS_RESEND_WEBHOOK_SECRET].filter(Boolean);
+    const secrets = [
+      process.env.RESEND_WEBHOOK_SECRET,
+      process.env.DOMS_RESEND_WEBHOOK_SECRET,
+      process.env.RESEND_WEBHOOK_SECRET_Handy_Andy,
+      process.env.RESEND_WEBHOOK_SECRET_Doms,
+    ].filter(Boolean);
     const verified = secrets.some((secret) => verifySvixSignature({
       id: req.headers['svix-id'], timestamp: req.headers['svix-timestamp'],
       rawBody, signatureHeader: req.headers['svix-signature'], secret,
