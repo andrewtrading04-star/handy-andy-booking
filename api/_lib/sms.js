@@ -62,11 +62,14 @@ async function sendViaSimpleTexting(to, message) {
   return { ok: true };
 }
 
-async function sendViaTwilio(to, message) {
+async function sendViaTwilio(to, message, statusCallback) {
   const formData = new URLSearchParams();
   formData.append('From', process.env.TWILIO_PHONE_NUMBER);
   formData.append('To', to);
   formData.append('Body', message);
+  // Twilio POSTs delivery-status updates (queued/sent/delivered/failed/undelivered)
+  // to this URL as the message progresses — see api/analytics.js action=sms_status.
+  if (statusCallback) formData.append('StatusCallback', statusCallback);
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: 'POST',
@@ -85,7 +88,10 @@ async function sendViaTwilio(to, message) {
 // user why a text didn't go out (e.g. the Estimates tab) can surface a real
 // reason. `skipped` is a config/precondition miss; `error` is a live provider
 // failure (the message string is safe to show).
-export async function sendSMSResult(phoneNumber, message) {
+// opts.statusCallback: a URL for Twilio to POST delivery-status updates to.
+// Only honored on the Twilio path — SimpleTexting has no per-message callback
+// param in its API, so it's silently ignored there.
+export async function sendSMSResult(phoneNumber, message, opts = {}) {
   // Demo mode: pretend the text sent (no provider call, nothing delivered).
   if (demoMode()) { console.log('[sms:demo] pretend-sent to', String(phoneNumber).slice(-4)); return { ok: true, demo: true }; }
   if (!smsNotificationsOn()) return { ok: false, skipped: 'notifications_off' };
@@ -95,7 +101,7 @@ export async function sendSMSResult(phoneNumber, message) {
   try {
     const r = simpleTextingConfigured()
       ? await sendViaSimpleTexting(to, message)
-      : await sendViaTwilio(to, message);
+      : await sendViaTwilio(to, message, opts.statusCallback);
     if (r.ok) console.log('[SMS] Sent to', to.slice(-4));
     return r;
   } catch (e) {

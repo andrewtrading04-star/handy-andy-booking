@@ -799,6 +799,8 @@ async function status(req, res, db, auth, body) {
     // so the dashboard can show which channel the customer engaged from.
     const emailClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=email`;
     const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(existing.review_token)}&ch=sms`;
+    // Twilio POSTs delivery status here as the text progresses (see api/analytics.js action=sms_status)
+    const smsStatusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(existing.review_token)}`;
 
     // Brand the email by the JOB's business (orange vs blue) — for a
     // cross-company job that's the host company, not the tech's own.
@@ -825,7 +827,15 @@ async function status(req, res, db, auth, body) {
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             const newMeta = { ...(cur?.metadata || existing.metadata || {}), review_email_sent_at: nowIso };
             await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
-            await db.from('bookings').update({ review_email_sent_at: nowIso, review_email_count: 1 }).eq('id', id);
+            // review_email_id lets the Resend delivery webhook match its event
+            // back to this booking; review_email_status starts 'sent' and the
+            // webhook upgrades it to 'delivered'/'bounced'/'complained'.
+            try {
+              await db.from('bookings').update({
+                review_email_sent_at: nowIso, review_email_count: 1,
+                review_email_id: emailResult.id || null, review_email_status: 'sent',
+              }).eq('id', id);
+            } catch { /* column not applied yet */ }
             console.log(`[review] email sent to ${existing.customer.email} (${slug}) booking=${id}`);
           } else {
             console.warn(`[review] email NOT sent to ${existing.customer.email} (${slug}) booking=${id}:`, emailResult.skipped || emailResult.error);
@@ -847,15 +857,17 @@ async function status(req, res, db, auth, body) {
       } else {
         try {
           const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
-          const r = await sendSMSResult(existing.customer.phone, msg);
+          const r = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
           if (r.ok) {
             const nowIso = new Date().toISOString();
             // Re-read metadata (same reason as the email stamp above) and mark
-            // sent — in metadata (always works) and the 0062 tracking column
-            // (best-effort until the migration is applied).
+            // sent — in metadata (always works) and the tracking columns
+            // (best-effort until the migrations are applied). review_sms_status
+            // starts 'sent'; Twilio's status callback upgrades it to
+            // 'delivered'/'failed'/'undelivered' (see api/analytics.js).
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             await db.from('bookings').update({ metadata: { ...(cur?.metadata || existing.metadata || {}), review_sms_sent_at: nowIso } }).eq('id', id);
-            try { await db.from('bookings').update({ review_sms_sent_at: nowIso }).eq('id', id); } catch { /* column not applied yet */ }
+            try { await db.from('bookings').update({ review_sms_sent_at: nowIso, review_sms_status: 'sent' }).eq('id', id); } catch { /* column not applied yet */ }
             console.log(`[review] SMS sent (${slug}) booking=${id}`);
           } else {
             console.warn(`[review] SMS NOT sent booking=${id}:`, r.skipped || r.error);

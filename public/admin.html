@@ -613,6 +613,24 @@
   .greview-credit select{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:150px;}
   .greview-text{color:var(--ink-2);font-size:12.5px;line-height:1.4;margin-top:4px;}
 
+  /* ── Review-requests scoreboard + per-channel Sent→Delivered→Opened pipeline ── */
+  .rev-scoreboard{display:flex;gap:10px;margin-bottom:14px;}
+  .rev-score-card{flex:1;background:#fff;border:2px solid var(--line);border-radius:10px;padding:12px 14px;text-align:center;}
+  .rev-score-card.lead{border-color:var(--amber);background:rgba(245,158,11,0.07);}
+  .rev-score-card .rsc-ch{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);}
+  .rev-score-card .rsc-pct{font-size:24px;font-weight:800;margin:2px 0;color:var(--ink);}
+  .rev-score-card .rsc-sub{font-size:11px;color:var(--mute);}
+  .rev-chan{display:flex;flex-direction:column;gap:3px;margin-top:8px;}
+  .rev-chan-label{font-size:10px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;}
+  .rev-pipe{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+  .rev-pipe .arrow{color:#c4ccd6;font-size:10px;}
+  .chk{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:7px;background:#f5f6f8;color:var(--mute);white-space:nowrap;}
+  .chk.done{background:#dcfce7;color:#15803d;}
+  .chk.pending{background:#fef3c7;color:#92400e;}
+  .chk.delivered{background:#e0edff;color:#1d4ed8;}
+  .chk.fail{background:#fee2e2;color:#b91c1c;}
+  .chk.na{background:#f5f6f8;color:#c4ccd6;}
+
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
     background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.14), transparent 60%), var(--gnavy,#0b1f3a);
@@ -4116,65 +4134,115 @@ async function rcAction(id, act, biz){
   }catch(e){ toast(e.message); }
 }
 
+// ── Review requests: scoreboard + per-job Sent→Delivered→Opened pipeline ────
+let _revReqState={ page:1, limit:25, total:0, rows:[], scoreboard:null };
+
+function revScoreboardHtml(sb){
+  if(!sb || !sb.email || !sb.sms) return '';
+  const e=sb.email, s=sb.sms;
+  const eLead = e.openRate!=null && (s.openRate==null || e.openRate>=s.openRate);
+  const sLead = s.openRate!=null && (e.openRate==null || s.openRate>e.openRate);
+  const pct=(v)=> v==null?'—':v+'%';
+  return `<div class="rev-scoreboard">
+    <div class="rev-score-card ${eLead&&e.openRate!=null?'lead':''}"><div class="rsc-ch">📧 Email</div><div class="rsc-pct">${pct(e.openRate)}${eLead&&e.openRate!=null?' 👑':''}</div><div class="rsc-sub">opened · last ${sb.windowDays}d (${e.sent} sent)</div></div>
+    <div class="rev-score-card ${sLead&&s.openRate!=null?'lead':''}"><div class="rsc-ch">💬 Text</div><div class="rsc-pct">${pct(s.openRate)}${sLead&&s.openRate!=null?' 👑':''}</div><div class="rsc-sub">opened · last ${sb.windowDays}d (${s.sent} sent)</div></div>
+  </div>`;
+}
+
+// One channel's Sent → Delivered → Opened pipeline as 3 chips. `chan` is the
+// { eligible, sent_at, delivered_at, status, opened_at } shape the API returns.
+function revChanPipeHtml(label, chan){
+  if(!chan || !chan.eligible){
+    return `<div class="rev-chan"><div class="rev-chan-label">${label}</div><div class="rev-pipe"><span class="chk na">— N/A</span></div></div>`;
+  }
+  const FAIL_STATUSES={bounced:'Bounced',complained:'Complained',failed:'Failed',undelivered:'Undelivered'};
+  const sentChip = chan.sent_at ? `<span class="chk done">✓ Sent</span>` : `<span class="chk pending">○ Not sent yet</span>`;
+  let midChip, openChip;
+  if(chan.status && FAIL_STATUSES[chan.status]){
+    midChip=`<span class="chk fail">✕ ${FAIL_STATUSES[chan.status]}</span>`;
+    openChip=`<span class="chk na">— n/a</span>`;
+  } else if(chan.delivered_at){
+    midChip=`<span class="chk delivered">✓ Delivered</span>`;
+    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:`<span class="chk pending">○ Not opened</span>`;
+  } else if(chan.sent_at){
+    midChip=`<span class="chk pending">○ Delivery pending</span>`;
+    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:`<span class="chk pending">○ Not opened</span>`;
+  } else {
+    midChip=`<span class="chk na">— n/a</span>`;
+    openChip=`<span class="chk na">— n/a</span>`;
+  }
+  return `<div class="rev-chan"><div class="rev-chan-label">${label}</div><div class="rev-pipe">${sentChip}<span class="arrow">→</span>${midChip}<span class="arrow">→</span>${openChip}</div></div>`;
+}
+
+function reviewReqCardHtml(r, gByBooking){
+  const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
+  const reviewed = r.rating
+    ? `<span class="chk done">${'★'.repeat(r.rating)}</span>`
+    : `<span class="chk pending">No review yet</span>`;
+  const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
+  const canResend = r.has_email;
+  return `<div class="job">
+    <div class="row">
+      <div style="flex:1;min-width:0;">
+        <div class="name">${esc(r.customer_name)}</div>
+        <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
+        ${revChanPipeHtml('📧 Email', r.email)}
+        ${revChanPipeHtml('💬 Text', r.sms)}
+        <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${reviewed}${gpill}</div>
+      </div>
+      <div style="text-align:right;white-space:nowrap;">
+        ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.email&&r.email.sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+// Renders the scoreboard + accumulated rows + "Load more" into #revReqWrap,
+// and (re)wires the resend/load-more buttons. Called on first load and after
+// each "Load more" fetch — the container is scoped so this never touches the
+// Google-reviews or in-app-reviews sections above/below it.
+function paintReviewRequests(gByBooking){
+  const wrap=document.getElementById('revReqWrap');
+  if(!wrap) return;
+  const hasMore=_revReqState.rows.length<_revReqState.total;
+  wrap.innerHTML =
+    revScoreboardHtml(_revReqState.scoreboard)+
+    (_revReqState.rows.map(r=>reviewReqCardHtml(r,gByBooking)).join('')||'<div class="empty">No completed jobs yet.</div>')+
+    (hasMore?`<button type="button" class="btn ghost sm" id="revReqLoadMore" style="width:100%;margin-top:8px;">Load more (${_revReqState.rows.length} of ${_revReqState.total})</button>`:'');
+  wrap.querySelectorAll('[data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
+    btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
+    try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend }}); toast('Review email sent ✓'); renderReviews(); }
+    catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
+  }));
+  const lm=document.getElementById('revReqLoadMore');
+  if(lm) lm.addEventListener('click',async()=>{
+    lm.disabled=true; lm.textContent='Loading…';
+    try{
+      const next=await api('review_requests',{ params:{ business:current.slug, page:_revReqState.page+1, limit:_revReqState.limit }});
+      _revReqState.page+=1;
+      _revReqState.rows=_revReqState.rows.concat(next.requests||[]);
+      _revReqState.total=next.total||_revReqState.total;
+      paintReviewRequests(gByBooking);
+    }catch(e){ toast(e.message); lm.disabled=false; lm.textContent='Load more'; }
+  });
+}
+
 async function renderReviews(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
   try{
     const [d, rq, gr, tl]=await Promise.all([
       api('reviews',{ params:{ business:current.slug }}),
-      api('review_requests',{ params:{ business:current.slug }}).catch(()=>({requests:[]})),
+      api('review_requests',{ params:{ business:current.slug, page:1, limit:25 }}).catch(()=>({requests:[],total:0,scoreboard:null})),
       api('google_reviews',{ params:{ business:current.slug }}).catch(()=>({reviews:[]})),
       api('technicians',{ params:{ business:current.slug }}).catch(()=>({technicians:[]})),
     ]);
     const reviews=d.reviews||[];
-    const requests=rq.requests||[];
     const gReviews=gr.reviews||[];
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
     const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
 
-    // ── Review-request tracking: email + SMS sends/clicks, with a resend button.
-    // Click-tracking replaces the old pixel-based open tracking — works identically for both channels.
-    const reqRows=requests.map(r=>{
-      const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
-      const pill='display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;';
-      const base=pill+'background:#eef0f2;color:#5b6470;';
-      const okp=pill+'background:#dcfce7;color:#15803d;';
-      const starp=pill+'background:#fef3c7;color:#a16207;';
-
-      // Email: sent status + click tracking
-      const emailSent = r.email_sent_at
-        ? `<span style="${okp}">📧 Sent${r.email_count>1?` ×${r.email_count}`:''}</span>`
-        : `<span style="${base}">📧 Not sent</span>`;
-      const emailClicked = r.clicked_at && r.click_channel==='email'
-        ? `<span style="${okp}">📧 Clicked</span>`
-        : (r.email_sent_at?`<span style="${base}">📧 Not clicked</span>`:'');
-
-      // SMS: sent status + click tracking
-      const smsSent = r.sms_sent_at
-        ? `<span style="${okp}">💬 Sent</span>`
-        : '';
-      const smsClicked = r.clicked_at && r.click_channel==='sms'
-        ? `<span style="${okp}">💬 Clicked</span>`
-        : (r.sms_sent_at?`<span style="${base}">💬 Not clicked</span>`:'');
-
-      const reviewed = r.rating
-        ? `<span style="${starp}">${'⭐'.repeat(r.rating)}</span>`
-        : `<span style="${base}">No review yet</span>`;
-      const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
-      const canResend = r.has_email;
-      return `<div class="job">
-        <div class="row">
-          <div style="flex:1;min-width:0;">
-            <div class="name">${esc(r.customer_name)}</div>
-            <div class="meta">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
-            <div class="meta" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${emailSent}${emailClicked}${smsSent}${smsClicked}${reviewed}${gpill}</div>
-          </div>
-          <div style="text-align:right;white-space:nowrap;">
-            ${canResend?`<button class="btn ghost sm" data-resend="${esc(r.id)}">${r.email_sent_at?'Resend':'Send'} email</button>`:'<span class="meta" style="color:var(--mute);font-size:12px;">No email</span>'}
-          </div>
-        </div>
-      </div>`;
-    }).join('');
+    _revReqState={ page:1, limit:25, total:rq.total||0, rows:rq.requests||[], scoreboard:rq.scoreboard||null };
 
     const revHtml=reviews.map(r=>`
       <div class="job">
@@ -4212,15 +4280,11 @@ async function renderReviews(){
       `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">⭐ Google reviews</div>`+
       (gHtml||'<div class="empty">No Google reviews yet.</div>')+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Review requests</div>`+
-      (reqRows||'<div class="empty">No completed jobs yet.</div>')+
+      `<div id="revReqWrap"></div>`+
       `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received (in-app)</div>`+
       (revHtml||'<div class="empty">No reviews yet.</div>');
 
-    document.querySelectorAll('#revWrap [data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
-      btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
-      try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:btn.dataset.resend }}); toast('Review email sent ✓'); renderReviews(); }
-      catch(e){ toast(e.message); btn.disabled=false; btn.textContent=prev; }
-    }));
+    paintReviewRequests(gByBooking);
     document.querySelectorAll('#revWrap [data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
       try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
       catch(e){ toast(e.message); }
