@@ -5715,20 +5715,26 @@ function incomeChartSvg(history){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough weeks yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
   const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
-  const w=380, h=130, padX=8, padY=16;
-  const innerW=w-2*padX, innerH=h-2*padY;
+  // Extra top padding (padY) leaves room for a value label above every dot,
+  // not just the peak; alternating label height (near/far) keeps closely
+  // spaced weeks from overlapping each other's text.
+  const w=380, h=160, padX=10, padTop=34, padBottom=16;
+  const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
-  const xy=vals.map((v,i)=>[padX+i*stepX, padY+(1-(v-min)/range)*innerH]);
+  const xy=vals.map((v,i)=>[padX+i*stepX, padTop+(1-(v-min)/range)*innerH]);
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
   const maxIdx=vals.indexOf(max);
   const dots=xy.map(([x,y],i)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="${i===maxIdx?'#86efac':'#4ade80'}"/>`).join('');
-  const peakY=xy[maxIdx][1];
-  const peakLabel=`<text x="${xy[maxIdx][0].toFixed(1)}" y="${Math.max(10,peakY-8).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="#86efac">${money(max)}</text>`;
+  const labels=xy.map(([x,y],i)=>{
+    const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
+    const ly=Math.max(9, y-far);
+    return `<text x="${x.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
+  }).join('');
   const shortDate=ds=>{ const d=new Date(ds+'T00:00:00Z'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}); };
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;margin-top:4px;">`+
-      `<line x1="${padX}" y1="${h-padY}" x2="${w-padX}" y2="${h-padY}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
+      `<line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
       `<polyline points="${pts}" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`+
-      dots+peakLabel+
+      dots+labels+
     `</svg>`+
     `<div style="display:flex;justify-content:space-between;font-size:10px;opacity:.7;margin-top:2px;">`+
       `<span>${esc(shortDate(history[0].pay_date))}</span><span>${esc(shortDate(history[history.length-1].pay_date))}</span>`+
