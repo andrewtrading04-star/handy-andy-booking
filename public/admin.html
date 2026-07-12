@@ -510,23 +510,30 @@
   /* ── Booking detail card: dark modern redesign (visual only — same markup, ──
      same button ids/behavior, just restyled). Scoped to #bkModal so no other
      modal (reschedule, cancel, etc.) is affected. */
+  /* Option 3 contrast fix: primary row content is near-white; --mute is
+     redefined (scoped to this modal only) for the genuinely secondary bits
+     that already use var(--mute) inline — timestamps, "· Mountain time",
+     slot captions — a touch lighter than the global light-theme --mute so
+     it still reads as secondary, not invisible, on a dark card. */
+  #bkModal{ --mute:#93a6bd; }
   #bkModal .sheet{background:#0f1b2e;border:1px solid #1c2e46;color:#dbe4ee;box-shadow:0 24px 60px rgba(0,0,0,.45);}
   #bkModal #bkTitle{color:#fff;font-size:19px;}
-  #bkModal .bk-row{color:#9fb0c3;padding:8px 0;}
-  #bkModal .bk-row span:first-child{color:#5b6f8a;}
-  #bkModal .bk-row a{color:#7fb3ff;}
+  #bkModal .bk-row{color:#eef2f7;padding:8px 0;}
+  #bkModal .bk-row span:first-child{color:#c8d3e0;}
+  #bkModal .bk-row a{color:#8fc0ff;}
+  #bkModal .bk-sec-h{color:#fff;}
   #bkModal .bk-xco{background:rgba(251,146,60,.12);border-color:rgba(251,146,60,.35);color:#fdba74;}
   #bkModal .bk-slots{border-top-color:rgba(255,255,255,.1);}
-  #bkModal .bk-slotchip{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#dbe4ee;}
+  #bkModal .bk-slotchip{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18);color:#eef2f7;}
   #bkModal hr, #bkModal .bk-row + .bk-row{border-color:rgba(255,255,255,.08);}
   /* Uniform button system: every action in this card is the same height/shape
      regardless of .sm or inline color override (Mark complete / Charge card
      keep their green/blue meaning — only size+radius+font are unified here). */
   #bkModal .bk-actions{gap:9px;}
   #bkModal .bk-actions .btn{height:38px;width:auto;flex:1 1 auto;min-width:110px;padding:0 16px;font-size:13px;font-weight:600;border-radius:9px;}
-  #bkModal .btn.ghost{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
-  #bkModal .bk-assign{color:#9fb0c3;}
-  #bkModal .bk-assign select{background:#16273f;border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
+  #bkModal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
+  #bkModal .bk-assign{color:#eef2f7;font-weight:600;}
+  #bkModal .bk-assign select{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #bkModal #bkClose{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
   .bk-slotchip .t{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--mute);}
   .bk-slotchip.main{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;}
