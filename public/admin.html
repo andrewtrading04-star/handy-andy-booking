@@ -1651,7 +1651,7 @@ function jobTerritoryAreaId(b){
 function passFilters(b){
   if(filterArea && jobTerritoryAreaId(b)!==filterArea) return false;
   if(filterTech==='unassigned'){ if(b.technician_id) return false; }
-  else if(filterTech!=='all'){ if(b.technician_id!==filterTech) return false; }
+  else if(filterTech!=='all'){ if(b.technician_id!==filterTech && b.secondary_technician_id!==filterTech) return false; }
 
   // Search filter
   if(jobSearchQuery){
