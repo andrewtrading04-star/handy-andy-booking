@@ -3670,24 +3670,31 @@ function renderPayrollData(d){
   </div>`;
 
   // ── Actual Profit (owner-only; this whole page is owner-gated) ──────────
-  // Hand-entered, split into one section per business — each business's own
-  // Stripe account minus that business's tech pay. Never shown to
-  // techs/secretary — this page 403s for anyone else.
-  const apRow = (biz, label, val) => `<div style="flex:1; min-width:220px;">
+  // Hand-entered: each business's Stripe payout, plus total tech pay across
+  // both businesses; a 4th read-only figure ("Total I made") computes live
+  // as doms + handy_andy - tech_pay. Never shown to techs/secretary — this
+  // page 403s for anyone else.
+  const ap = d.actual_profit || {};
+  const apRow = (field, label, val) => `<div style="flex:1; min-width:220px;">
       <div style="font-size:12px; font-weight:700; color:#92660b; margin-bottom:6px;">${esc(label)}</div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span style="color:var(--mute);">$</span>
-        <input type="number" step="0.01" data-ap-biz="${biz}" class="ap-input" value="${val!=null?val:''}" placeholder="Enter Stripe total" style="width:150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
-        <button class="btn ap-save" data-ap-biz="${biz}" style="width:auto;">Save</button>
-        <span class="ap-status" data-ap-biz="${biz}" style="font-size:13px; color:var(--mute);"></span>
+        <input type="number" step="0.01" data-ap-field="${field}" class="ap-input" value="${val!=null?val:''}" placeholder="Enter amount" style="width:150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
+        <button class="btn ap-save" data-ap-field="${field}" style="width:auto;">Save</button>
+        <span class="ap-status" data-ap-field="${field}" style="font-size:13px; color:var(--mute);"></span>
       </div>
     </div>`;
   html+=`<div class="card" style="border:1px solid #f0b429; background:#fffbea; margin-bottom:14px;">
     <div style="font-size:12px; font-weight:700; color:#92660b; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">🔒 Actual Profit — private, owner only</div>
     <div style="font-size:13px; color:var(--mute); margin-bottom:10px;">Pay date ${esc(payDateLbl)}</div>
-    <div style="display:flex; gap:20px; flex-wrap:wrap;">
-      ${apRow('doms', "Dom's", d.actual_profit?.doms)}
-      ${apRow('handy-andy', 'Handy Andy', d.actual_profit?.handy_andy)}
+    <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px;">
+      ${apRow('doms_stripe_payout', "Dom's Stripe payout", ap.doms_stripe_payout)}
+      ${apRow('handy_andy_stripe_payout', 'Handy Andy Stripe payout', ap.handy_andy_stripe_payout)}
+      ${apRow('tech_pay', 'Tech pay', ap.tech_pay)}
+    </div>
+    <div style="border-top:1px solid #f0b429; padding-top:10px;">
+      <div style="font-size:12px; font-weight:700; color:#92660b; margin-bottom:2px;">Total I made</div>
+      <div id="apTotalMade" style="font-size:22px; font-weight:800; color:#92660b;">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
     </div>
   </div>`;
 
@@ -3836,19 +3843,29 @@ function renderPayrollData(d){
     payrollTechFilter = e.target.value || null;
     if(payrollRawData) renderPayrollData(payrollRawData);
   });
+  const recalcApTotal=()=>{
+    const totalEl=document.getElementById('apTotalMade'); if(!totalEl) return;
+    const get=f=>{ const v=content.querySelector(`.ap-input[data-ap-field="${f}"]`)?.value; return v===''||v==null?null:Number(v); };
+    const ds=get('doms_stripe_payout'), ha=get('handy_andy_stripe_payout'), tp=get('tech_pay');
+    totalEl.textContent=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp)) ? payFmtUSD(ds+ha-tp) : '—';
+  };
+  content.querySelectorAll('.ap-input').forEach(inp=>inp.addEventListener('input', recalcApTotal));
   content.querySelectorAll('.ap-save').forEach(btn=>{
     btn.addEventListener('click', async()=>{
-      const biz=btn.dataset.apBiz;
-      const inp=content.querySelector(`.ap-input[data-ap-biz="${biz}"]`);
-      const statusEl=content.querySelector(`.ap-status[data-ap-biz="${biz}"]`);
+      const field=btn.dataset.apField;
+      const inp=content.querySelector(`.ap-input[data-ap-field="${field}"]`);
+      const statusEl=content.querySelector(`.ap-status[data-ap-field="${field}"]`);
       const val=inp.value;
       if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
       btn.disabled=true;
       try{
-        await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, business:biz, amount:Number(val) } });
+        await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, field, amount:Number(val) } });
         if(payrollRawData){
           payrollRawData.actual_profit=payrollRawData.actual_profit||{};
-          payrollRawData.actual_profit[biz==='doms'?'doms':'handy_andy']=Number(val);
+          payrollRawData.actual_profit[field]=Number(val);
+          const ap2=payrollRawData.actual_profit;
+          payrollRawData.actual_profit.total_made=(ap2.doms_stripe_payout!=null&&ap2.handy_andy_stripe_payout!=null&&ap2.tech_pay!=null)
+            ? (ap2.doms_stripe_payout+ap2.handy_andy_stripe_payout-ap2.tech_pay) : null;
         }
         statusEl.textContent='Saved';
       }catch(err){ statusEl.textContent=err.message; }

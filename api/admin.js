@@ -5131,14 +5131,18 @@ async function payroll(req, res, db, auth) {
   const data = Object.values(techPayroll).filter(t => t.jobs.length > 0 || t.deferred.length > 0);
   const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
 
-  // Owner-only "actual profit" — one row per pay date, split into a Dom's
-  // figure and a Handy Andy figure (each business's own Stripe account minus
-  // that business's tech pay, hand-entered each Sun night/Mon morning). Same
-  // row shown on both businesses' payroll pages. This function is already
-  // gated to auth.role === 'owner' above, so it's never sent to a secretary
-  // or tech — no extra check needed here.
+  // Owner-only "actual profit" — one row per pay date with three hand-entered
+  // figures (Dom's Stripe payout, Handy Andy Stripe payout, total tech pay
+  // across both businesses) plus a computed 4th: what the owner actually
+  // made. Same row shown on both businesses' payroll pages. This function is
+  // already gated to auth.role === 'owner' above, so it's never sent to a
+  // secretary or tech — no extra check needed here.
   const { data: profitRow } = await db.from('actual_profit_weekly')
-    .select('doms_amount, handy_andy_amount').eq('pay_date', payDate).maybeSingle();
+    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay').eq('pay_date', payDate).maybeSingle();
+  const domsStripe = profitRow?.doms_stripe_payout != null ? Number(profitRow.doms_stripe_payout) : null;
+  const haStripe = profitRow?.handy_andy_stripe_payout != null ? Number(profitRow.handy_andy_stripe_payout) : null;
+  const techPay = profitRow?.tech_pay != null ? Number(profitRow.tech_pay) : null;
+  const allThreeSet = domsStripe != null && haStripe != null && techPay != null;
 
   return res.status(200).json({
     week_start: parsedWeek,
@@ -5147,38 +5151,41 @@ async function payroll(req, res, db, auth) {
     techs: data,
     total: data.reduce((sum, t) => sum + t.total, 0),
     actual_profit: {
-      doms: profitRow?.doms_amount != null ? Number(profitRow.doms_amount) : null,
-      handy_andy: profitRow?.handy_andy_amount != null ? Number(profitRow.handy_andy_amount) : null,
+      doms_stripe_payout: domsStripe,
+      handy_andy_stripe_payout: haStripe,
+      tech_pay: techPay,
+      total_made: allThreeSet ? (domsStripe + haStripe - techPay) : null,
     },
   });
 }
 
-// Owner-only: hand-enter one business's "actual profit" figure for a given
+// Owner-only: hand-enter one of the three actual-profit fields for a given
 // pay date (upsert — Sunday-night entry can be corrected Monday). Merges
-// with whatever the OTHER business already has for that date instead of
-// clobbering it, since both businesses share one row per pay_date.
+// with whatever the OTHER two fields already have for that date instead of
+// clobbering them, since all three share one row per pay_date.
 async function actualProfitSave(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-  const { pay_date, business, amount } = req.body || {};
+  const { pay_date, field, amount } = req.body || {};
+  const validFields = ['doms_stripe_payout', 'handy_andy_stripe_payout', 'tech_pay'];
   if (!pay_date || !/^\d{4}-\d{2}-\d{2}$/.test(pay_date)) return res.status(400).json({ error: 'pay_date (YYYY-MM-DD) required' });
-  if (business !== 'doms' && business !== 'handy-andy') return res.status(400).json({ error: "business must be 'doms' or 'handy-andy'" });
+  if (!validFields.includes(field)) return res.status(400).json({ error: `field must be one of ${validFields.join(', ')}` });
   if (amount == null || isNaN(Number(amount))) return res.status(400).json({ error: 'amount required' });
 
-  const col = business === 'doms' ? 'doms_amount' : 'handy_andy_amount';
   const { data: existing } = await db.from('actual_profit_weekly')
-    .select('doms_amount, handy_andy_amount').eq('pay_date', pay_date).maybeSingle();
+    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay').eq('pay_date', pay_date).maybeSingle();
 
   const row = {
     pay_date,
-    doms_amount: existing?.doms_amount ?? null,
-    handy_andy_amount: existing?.handy_andy_amount ?? null,
-    [col]: Number(amount),
+    doms_stripe_payout: existing?.doms_stripe_payout ?? null,
+    handy_andy_stripe_payout: existing?.handy_andy_stripe_payout ?? null,
+    tech_pay: existing?.tech_pay ?? null,
+    [field]: Number(amount),
     updated_at: new Date().toISOString(),
   };
   const { error } = await db.from('actual_profit_weekly').upsert(row, { onConflict: 'pay_date' });
   if (error) throw error;
 
-  return res.status(200).json({ ok: true, pay_date, business, amount: Number(amount) });
+  return res.status(200).json({ ok: true, pay_date, field, amount: Number(amount) });
 }
 
 // ── Bracket Inventory ────────────────────────────────────────────────────────
