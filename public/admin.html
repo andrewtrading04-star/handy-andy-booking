@@ -516,10 +516,10 @@
      slot captions — a touch lighter than the global light-theme --mute so
      it still reads as secondary, not invisible, on a dark card. */
   #bkModal{ --mute:#93a6bd; }
-  #bkModal .sheet{background:#0f1b2e;border:1px solid #1c2e46;color:#dbe4ee;box-shadow:0 24px 60px rgba(0,0,0,.45);}
-  #bkModal #bkTitle{color:#fff;font-size:19px;}
-  #bkModal .bk-row{color:#eef2f7;padding:8px 0;}
-  #bkModal .bk-row span:first-child{color:#c8d3e0;}
+  #bkModal .sheet{background:#0f1b2e;border:1px solid #1c2e46;color:#dbe4ee;box-shadow:0 24px 60px rgba(0,0,0,.45);padding:26px;}
+  #bkModal #bkTitle{color:#fff;font-size:25px;font-weight:800;margin-bottom:6px;}
+  #bkModal .bk-row{color:#eef2f7;padding:9px 0;font-size:15px;}
+  #bkModal .bk-row span:first-child{color:#c8d3e0;width:22px;font-size:15px;}
   #bkModal .bk-row a{color:#8fc0ff;}
   #bkModal .bk-sec-h{color:#fff;}
   #bkModal .bk-xco{background:rgba(251,146,60,.12);border-color:rgba(251,146,60,.35);color:#fdba74;}
@@ -529,8 +529,13 @@
   /* Uniform button system: every action in this card is the same height/shape
      regardless of .sm or inline color override (Mark complete / Charge card
      keep their green/blue meaning — only size+radius+font are unified here). */
-  #bkModal .bk-actions{gap:9px;}
-  #bkModal .bk-actions .btn{height:38px;width:auto;flex:1 1 auto;min-width:110px;padding:0 16px;font-size:13px;font-weight:600;border-radius:9px;}
+  #bkModal .bk-actions{gap:10px;}
+  #bkModal .bk-actions .btn{height:48px;width:auto;flex:1 1 auto;min-width:110px;padding:0 16px;font-size:15px;font-weight:700;border-radius:12px;}
+  /* Mark complete / Charge card are the primary actions — each gets its own
+     full-width row, like the reference mockup, instead of sharing space
+     with the smaller secondary buttons. */
+  #bkModal .bk-actions .btn#bkComplete,
+  #bkModal .bk-actions .btn#bkCharge{flex:1 1 100%;}
   #bkModal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #bkModal .bk-assign{color:#eef2f7;font-weight:600;}
   #bkModal .bk-assign select{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
