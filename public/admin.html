@@ -3656,6 +3656,25 @@ function renderPayrollData(d){
     <div class="pr-kpi"><div class="v ink">${payDateLbl}</div><div class="l">Pay Date<br>(Saturday + 9 days)</div></div>
   </div>`;
 
+  // ── Per-Person Detail ────────────────────────────────────────────────────
+  // Shown up top (right after the KPI strip) so each tech's total pay for the
+  // week is visible at a glance, before scrolling into the day-by-day detail.
+  html+=`<div class="pr-sec">Payroll — Per-Person Detail</div>`;
+  html+=`<div class="pr-note">Each technician's job count and total pay for the week. Deferred jobs are completed but not yet paid.</div>`;
+  html+=`<table class="pr-tbl"><thead><tr>
+      <th>Technician</th><th class="r">Jobs</th><th class="r">Deferred</th><th class="r">Total Pay</th>
+    </tr></thead><tbody>`;
+  techs.forEach((t,i)=>{
+    html+=`<tr class="${i%2?'z':''}">
+      <td class="pr-name">${esc(t.name)}</td>
+      <td class="r">${t.jobs.length}</td>
+      <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
+      <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
+    </tr>`;
+  });
+  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(d.total)}</td></tr>`;
+  html+=`</tbody></table>`;
+
   // ── Daily Breakdown ──────────────────────────────────────────────────────
   html+=`<div class="pr-sec">Daily Breakdown</div>`;
   html+=`<div class="pr-note">Jobs by day for each technician this week.</div>`;
@@ -3714,23 +3733,6 @@ function renderPayrollData(d){
     }
     html+=`</tbody></table></div>`;
   }
-
-  // ── Per-Person Detail ────────────────────────────────────────────────────
-  html+=`<div class="pr-sec">Payroll — Per-Person Detail</div>`;
-  html+=`<div class="pr-note">Each technician's job count and total pay for the week. Deferred jobs are completed but not yet paid.</div>`;
-  html+=`<table class="pr-tbl"><thead><tr>
-      <th>Technician</th><th class="r">Jobs</th><th class="r">Deferred</th><th class="r">Total Pay</th>
-    </tr></thead><tbody>`;
-  techs.forEach((t,i)=>{
-    html+=`<tr class="${i%2?'z':''}">
-      <td class="pr-name">${esc(t.name)}</td>
-      <td class="r">${t.jobs.length}</td>
-      <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
-      <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
-    </tr>`;
-  });
-  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(d.total)}</td></tr>`;
-  html+=`</tbody></table>`;
 
   // ── Per-Tech Job Breakdown ───────────────────────────────────────────────
   const techsWithJobs = techs.filter(t=>t.jobs.length);
