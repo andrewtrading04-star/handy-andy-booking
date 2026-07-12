@@ -5716,16 +5716,22 @@ function bizSplitHtml(bySlug, id){
 function incomeChartSvg(history){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough weeks yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
-  const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
+  // Fixed scale: floor $0, ceiling $10k, regardless of the actual data range.
+  // A week over $10k still plots (clamped to the top edge) rather than
+  // rescaling the whole chart and squashing every other week flat.
+  const min=0, max=10000, range=max-min;
+  const maxIdx=vals.indexOf(Math.max(...vals));
   // Extra top padding (padY) leaves room for a value label above every dot,
   // not just the peak; alternating label height (near/far) keeps closely
   // spaced weeks from overlapping each other's text.
   const w=380, h=160, padX=10, padTop=34, padBottom=16;
   const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
-  const xy=vals.map((v,i)=>[padX+i*stepX, padTop+(1-(v-min)/range)*innerH]);
+  const xy=vals.map((v,i)=>{
+    const clamped=Math.min(Math.max(v,min),max);
+    return [padX+i*stepX, padTop+(1-(clamped-min)/range)*innerH];
+  });
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
-  const maxIdx=vals.indexOf(max);
   const dots=xy.map(([x,y],i)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="${i===maxIdx?'#86efac':'#4ade80'}"/>`).join('');
   const labels=xy.map(([x,y],i)=>{
     const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
