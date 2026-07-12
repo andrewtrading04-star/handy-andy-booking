@@ -3676,7 +3676,7 @@ function renderPayrollData(d){
   // page 403s for anyone else.
   const ap = d.actual_profit || {};
   const apRow = (field, label, val) => `<div style="flex:1; min-width:220px;">
-      <div style="font-size:12px; font-weight:700; color:#92660b; margin-bottom:6px;">${esc(label)}</div>
+      <div style="font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">${esc(label)}</div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span style="color:var(--mute);">$</span>
         <input type="number" step="0.01" data-ap-field="${field}" class="ap-input" value="${val!=null?val:''}" placeholder="Enter amount" style="width:150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
@@ -3684,17 +3684,17 @@ function renderPayrollData(d){
         <span class="ap-status" data-ap-field="${field}" style="font-size:13px; color:var(--mute);"></span>
       </div>
     </div>`;
-  html+=`<div class="card" style="border:1px solid #f0b429; background:#fffbea; margin-bottom:14px;">
-    <div style="font-size:12px; font-weight:700; color:#92660b; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">🔒 Actual Profit — private, owner only</div>
-    <div style="font-size:13px; color:var(--mute); margin-bottom:10px;">Pay date ${esc(payDateLbl)}</div>
+  html+=`<div class="pr-sec">🔒 Actual Profit — private, owner only</div>
+  <div class="pr-note">Pay date ${esc(payDateLbl)}</div>
+  <div class="card" style="margin-bottom:14px;">
     <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px;">
       ${apRow('doms_stripe_payout', "Dom's Stripe payout", ap.doms_stripe_payout)}
       ${apRow('handy_andy_stripe_payout', 'Handy Andy Stripe payout', ap.handy_andy_stripe_payout)}
       ${apRow('tech_pay', 'Tech pay', ap.tech_pay)}
     </div>
-    <div style="border-top:1px solid #f0b429; padding-top:10px;">
-      <div style="font-size:12px; font-weight:700; color:#92660b; margin-bottom:2px;">Total I made</div>
-      <div id="apTotalMade" style="font-size:22px; font-weight:800; color:#92660b;">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
+    <div style="border-top:1px solid var(--line); padding-top:10px;">
+      <div style="font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px;">Total I made</div>
+      <div id="apTotalMade" style="font-size:22px; font-weight:800; color:var(--ink);">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
     </div>
   </div>`;
 
