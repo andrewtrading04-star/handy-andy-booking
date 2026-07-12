@@ -66,6 +66,7 @@ const ITEM_RATES = {
   'full motion':             { juan: 60, other: 0 },
   // Mantel Mount: $195 to the customer, $110 to the tech (paid labor, all techs).
   'mantel mount':            { juan: 110, other: 110 },
+  'install customer supplied mantel mount': { juan: 110, other: 110 },
   'customer supplied bracket': { juan: 0, other: 0 },
   'i have my own bracket':   { juan: 0, other: 0 },
   'i have my own mounting bracket': { juan: 0, other: 0 },
