@@ -3576,6 +3576,8 @@ function webDrawCharts(d,brand){
 
 // ── Payroll ─────────────────────────────────────────────────────────────────
 let payrollWeek = null;
+let payrollTechFilter = null;   // null = all techs; set to a tech name to show just them
+let payrollRawData = null;      // last fetched payroll response, cached so the tech filter can re-render without a refetch
 async function renderPayroll(){
   const view=document.getElementById('view');
   if(!payrollWeek) payrollWeek = sundayOf(todayStr());
@@ -3623,6 +3625,10 @@ async function loadPayroll(){
       const bizName = (current && current.name) ? current.name : '';
       upd.innerHTML=`Pay period: <strong>${payFmtDateUTC(d.week_start,{month:'long',day:'numeric'})} – ${payFmtDateUTC(d.week_end,{month:'long',day:'numeric',year:'numeric'})}</strong>${bizName?` · ${esc(bizName)}`:''}`;
     }
+    payrollRawData = d;
+    // A tech who has no earnings this week won't be in d.techs — drop a stale
+    // filter instead of silently showing "All techs" data under their name.
+    if(payrollTechFilter && !(d.techs||[]).some(t=>t.name===payrollTechFilter)) payrollTechFilter=null;
     renderPayrollData(d);
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading payroll: ${esc(err.message)}</div>`;
@@ -3635,12 +3641,18 @@ function payFmtDateUTC(ds,opts){ return new Date(ds+'T00:00:00Z').toLocaleDateSt
 function renderPayrollData(d){
   const content=document.getElementById('payContent'); if(!content) return;
   content.className='payrep';
-  const techs=d.techs||[];
+  const allTechs=d.techs||[];
 
-  if(!techs.length){
+  if(!allTechs.length){
     content.innerHTML=`<div class="pr-empty">No earnings recorded for this week.</div>`;
     return;
   }
+
+  // Tech filter: null/"" = show everyone; otherwise scope every section below
+  // (KPIs, per-person table, daily breakdown, job breakdown, deferred) to just
+  // that one technician.
+  const techs = payrollTechFilter ? allTechs.filter(t=>t.name===payrollTechFilter) : allTechs;
+  const total = payrollTechFilter ? techs.reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
 
   const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
   const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
@@ -3648,9 +3660,18 @@ function renderPayrollData(d){
 
   let html='';
 
+  // ── Tech filter ──────────────────────────────────────────────────────────
+  html+=`<div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+    <span style="font-size:13px; font-weight:700; color:var(--mute);">Technician</span>
+    <select id="payTechFilter" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
+      <option value=""${payrollTechFilter?'':' selected'}>All technicians</option>
+      ${allTechs.map(t=>`<option value="${esc(t.name)}"${payrollTechFilter===t.name?' selected':''}>${esc(t.name)}</option>`).join('')}
+    </select>
+  </div>`;
+
   // ── KPI strip ────────────────────────────────────────────────────────────
   html+=`<div class="pr-kpis">
-    <div class="pr-kpi"><div class="v green">${payFmtUSD(d.total)}</div><div class="l">Total Payroll<br>(this week)</div></div>
+    <div class="pr-kpi"><div class="v green">${payFmtUSD(total)}</div><div class="l">Total Payroll<br>(this week)</div></div>
     <div class="pr-kpi"><div class="v blue">${techs.length}</div><div class="l">Technicians Paid</div></div>
     <div class="pr-kpi"><div class="v blue">${jobsCount}</div><div class="l">Jobs Worked</div></div>
     <div class="pr-kpi"><div class="v ink">${payDateLbl}</div><div class="l">Pay Date<br>(Saturday + 9 days)</div></div>
@@ -3672,7 +3693,7 @@ function renderPayrollData(d){
       <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
     </tr>`;
   });
-  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(d.total)}</td></tr>`;
+  html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(total)}</td></tr>`;
   html+=`</tbody></table>`;
 
   // ── Daily Breakdown ──────────────────────────────────────────────────────
@@ -3789,6 +3810,10 @@ function renderPayrollData(d){
   }
 
   content.innerHTML=html;
+  document.getElementById('payTechFilter').addEventListener('change', e=>{
+    payrollTechFilter = e.target.value || null;
+    if(payrollRawData) renderPayrollData(payrollRawData);
+  });
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────
