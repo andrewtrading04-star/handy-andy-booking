@@ -1537,17 +1537,23 @@ async function techPayroll(req, res, db, auth) {
   const secCol = techHasSecondCol ? 'secondary_technician_id, ' : '';
   const jobsSelect = `
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
-      tip, notes, customer_notes, zenbooker_job_number, postal_code, ${secCol}
+      tip, notes, customer_notes, zenbooker_job_number, postal_code, technician_id, ${secCol}
       customers(name), services(name),
       line_items:booking_line_items(kind, name, unit_price, line_total)
     `;
-  let { data: jobs, error } = await db.from('bookings')
+  // A job counts for this tech whether they're the primary OR the secondary
+  // (helper) technician — otherwise a two-tech job's helper leg is silently
+  // dropped from their own payroll view (mirrors the admin.js payroll() fix).
+  let jobsQuery = db.from('bookings')
     .select(jobsSelect)
-    .eq('technician_id', techId)
     .eq('status', 'completed')
     .gte('scheduled_at', weekStart + 'T00:00:00Z')
     .lte('scheduled_at', weekEnd + 'T23:59:59Z')
     .order('scheduled_at');
+  jobsQuery = techHasSecondCol
+    ? jobsQuery.or(`technician_id.eq.${techId},secondary_technician_id.eq.${techId}`)
+    : jobsQuery.eq('technician_id', techId);
+  let { data: jobs, error } = await jobsQuery;
   if (error && /secondary_technician_id/.test(error.message || '')) {
     techHasSecondCol = false;
     ({ data: jobs, error } = await db.from('bookings')
@@ -1582,6 +1588,7 @@ async function techPayroll(req, res, db, auth) {
       line_items: b.line_items || [],
       travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
       second_tech: !!b.secondary_technician_id,
+      is_secondary: techId === b.secondary_technician_id && techId !== b.technician_id,
     }, techName);
 
     const base = {
