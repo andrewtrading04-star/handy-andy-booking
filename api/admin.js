@@ -5059,6 +5059,24 @@ async function payroll(req, res, db, auth) {
     techPayroll[tech.id] = { name: tech.name, jobs: [], deferred: [], total: 0 };
   }
 
+  // A job in THIS business can be worked by a technician who belongs to a
+  // DIFFERENT business (cross-company helper, e.g. a Handy Andy tech helping
+  // on a Dom's job). That tech's own `technicians` row has a different
+  // business_id, so the query above never picks them up and their pay would
+  // otherwise be silently dropped by the `if (!techPayroll[techId]) continue`
+  // check below. Backfill anyone referenced by this week's jobs but missing
+  // from techPayroll with a direct by-id lookup (no business_id filter).
+  const allTechIds = new Set(Object.values(jobTechs).flat());
+  const missingTechIds = [...allTechIds].filter(id => !techPayroll[id]);
+  if (missingTechIds.length) {
+    const { data: crossTechs, error: crossErr } = await db.from('technicians')
+      .select('id, name').in('id', missingTechIds);
+    if (crossErr) throw crossErr;
+    for (const tech of crossTechs || []) {
+      techPayroll[tech.id] = { name: tech.name, jobs: [], deferred: [], total: 0 };
+    }
+  }
+
   for (const b of jobs || []) {
     const techList = jobTechs[b.id] || [];
     for (const techId of techList) {
