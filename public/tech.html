@@ -1449,7 +1449,8 @@ function renderPayroll(data){
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Weekly earnings</div></div>
 
     <div class="card">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <h3>Week of ${fmtDs(payrollWeekStart,{month:'short',day:'numeric'})} – ${fmtDs(weekEnd,{month:'short',day:'numeric'})}</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:12px;">
         <div>
           <div style="color:var(--mute);font-size:12px;">Next payout</div>
           <div style="font-size:20px;font-weight:800;color:var(--green);">$${data.total}</div>
@@ -1458,14 +1459,6 @@ function renderPayroll(data){
           <div style="color:var(--mute);font-size:12px;">Pay date</div>
           <div style="font-size:20px;font-weight:800;color:var(--green);">${fmtDs(payDate,{month:'short',day:'numeric'})}</div>
         </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Week of ${fmtDs(payrollWeekStart,{month:'short',day:'numeric'})} – ${fmtDs(weekEnd,{month:'short',day:'numeric'})}</h3>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:12px;">
-        <div style="font-size:13px;color:var(--mute);">Pay Date</div>
-        <div style="font-weight:700;">${fmtDs(payDate,{month:'short',day:'numeric'})}</div>
         ${mpRow}
       </div>
     </div>
