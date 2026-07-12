@@ -3669,6 +3669,20 @@ function renderPayrollData(d){
     </select>
   </div>`;
 
+  // ── Actual Profit (owner-only; this whole page is owner-gated) ──────────
+  // Hand-entered combined total of both Stripe accounts for this pay date.
+  // Never shown to techs/secretary — this page 403s for anyone else.
+  html+=`<div class="card" style="border:1px solid #f0b429; background:#fffbea; margin-bottom:14px;">
+    <div style="font-size:12px; font-weight:700; color:#92660b; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">🔒 Actual Profit — private, owner only</div>
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="font-size:13px; color:var(--mute);">Pay date ${esc(payDateLbl)}</span>
+      <span style="color:var(--mute);">$</span>
+      <input type="number" step="0.01" id="actualProfitInput" value="${d.actual_profit!=null?d.actual_profit:''}" placeholder="Enter combined Stripe total" style="width:160px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
+      <button class="btn" id="actualProfitSave" style="width:auto;">Save</button>
+      <span id="actualProfitStatus" style="font-size:13px; color:var(--mute);"></span>
+    </div>
+  </div>`;
+
   // ── KPI strip ────────────────────────────────────────────────────────────
   html+=`<div class="pr-kpis">
     <div class="pr-kpi"><div class="v green">${payFmtUSD(total)}</div><div class="l">Total Payroll<br>(this week)</div></div>
@@ -3813,6 +3827,19 @@ function renderPayrollData(d){
   document.getElementById('payTechFilter').addEventListener('change', e=>{
     payrollTechFilter = e.target.value || null;
     if(payrollRawData) renderPayrollData(payrollRawData);
+  });
+  document.getElementById('actualProfitSave').addEventListener('click', async()=>{
+    const inp=document.getElementById('actualProfitInput');
+    const statusEl=document.getElementById('actualProfitStatus');
+    const val=inp.value;
+    if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
+    const btn=document.getElementById('actualProfitSave'); btn.disabled=true;
+    try{
+      await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, amount:Number(val) } });
+      if(payrollRawData) payrollRawData.actual_profit=Number(val);
+      statusEl.textContent='Saved';
+    }catch(err){ statusEl.textContent=err.message; }
+    finally{ btn.disabled=false; }
   });
 }
 

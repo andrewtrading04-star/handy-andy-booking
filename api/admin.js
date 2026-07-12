@@ -272,6 +272,7 @@ export default async function handler(req, res) {
       case 'wire_plate_remove': return await wirePlateRemove(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
+      case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -5128,13 +5129,38 @@ async function payroll(req, res, db, auth) {
 
   // Format response
   const data = Object.values(techPayroll).filter(t => t.jobs.length > 0 || t.deferred.length > 0);
+  const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
+
+  // Owner-only "actual profit" (combined total of both Stripe accounts, hand-
+  // entered each Sun night/Mon morning) for this pay date. This function is
+  // already gated to auth.role === 'owner' above, so it's never sent to a
+  // secretary or tech — no extra check needed here.
+  const { data: profitRow } = await db.from('actual_profit_weekly')
+    .select('amount').eq('pay_date', payDate).maybeSingle();
+
   return res.status(200).json({
     week_start: parsedWeek,
     week_end: weekEnd,
-    pay_date: addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS),
+    pay_date: payDate,
     techs: data,
     total: data.reduce((sum, t) => sum + t.total, 0),
+    actual_profit: profitRow ? Number(profitRow.amount) : null,
   });
+}
+
+// Owner-only: hand-enter the combined-Stripe-accounts "actual profit" figure
+// for a given pay date (upsert — Sunday-night entry can be corrected Monday).
+async function actualProfitSave(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { pay_date, amount } = req.body || {};
+  if (!pay_date || !/^\d{4}-\d{2}-\d{2}$/.test(pay_date)) return res.status(400).json({ error: 'pay_date (YYYY-MM-DD) required' });
+  if (amount == null || isNaN(Number(amount))) return res.status(400).json({ error: 'amount required' });
+
+  const { error } = await db.from('actual_profit_weekly')
+    .upsert({ pay_date, amount: Number(amount), updated_at: new Date().toISOString() }, { onConflict: 'pay_date' });
+  if (error) throw error;
+
+  return res.status(200).json({ ok: true, pay_date, amount: Number(amount) });
 }
 
 // ── Bracket Inventory ────────────────────────────────────────────────────────
