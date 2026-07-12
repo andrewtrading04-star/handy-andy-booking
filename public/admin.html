@@ -2073,8 +2073,16 @@ function openBooking(b){
         ${canReopen?`<button class="btn ghost sm" id="bkReopen">Reopen job</button>`:''}
       </div>
     </div>`:''}
+    <div class="bk-sec"><div class="bk-sec-h">Line items</div>
+      <div id="bkLineItems"></div>
+      <button type="button" class="btn ghost sm" id="bkLiAdd" style="margin-top:8px;">+ Add line item</button>
+      <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:12px;">
+        <button type="button" class="btn sm" id="bkLiSave">Save line items</button>
+      </div>
+    </div>
     <div class="bk-minicard">
       <div class="bk-minicard-head"><span class="bk-badge bk-badge-pay">💳</span><span class="bk-minicard-label">Payment</span></div>
+      <div style="font-weight:700;margin-bottom:10px;">Total: <span id="bkLiTotal"></span></div>
       <div class="bk-actions">
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
@@ -2083,7 +2091,7 @@ function openBooking(b){
         ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
       </div>
     </div>
-    <div id="bkCardBox" class="hidden" style="border-top:1px solid var(--line2);padding-top:12px;margin-top:4px;">
+    <div id="bkCardBox" class="hidden" style="margin-top:0;">
       <div class="sub" style="font-size:13px;color:var(--mute);margin-bottom:8px;">Enter the card the customer wants to use:</div>
       <div id="bkCardEl" style="padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;"></div>
       <div id="bkCardErr" style="color:#dc2626;font-size:13px;margin-top:8px;"></div>
@@ -2093,14 +2101,6 @@ function openBooking(b){
       </div>
     </div>
     <div id="bkAuthWrap"></div>
-    <div class="bk-sec"><div class="bk-sec-h">Line items</div>
-      <div id="bkLineItems"></div>
-      <button type="button" class="btn ghost sm" id="bkLiAdd" style="margin-top:8px;">+ Add line item</button>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
-        <div style="font-weight:700;">Total: <span id="bkLiTotal"></span></div>
-        <button type="button" class="btn sm" id="bkLiSave">Save line items</button>
-      </div>
-    </div>
     <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
       <input type="file" id="bkPhotoInput" accept="image/*" multiple style="display:none">
       <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">${ic('camera')} Add photo</button>
