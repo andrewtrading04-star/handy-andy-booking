@@ -5708,6 +5708,32 @@ function bizSplitHtml(bySlug, id){
         `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;" data-split="handy-andy">${money(h)}</div></div>`+
     `</div>`;
 }
+// Weekly-income line chart for the Income box: thin teal line + a dot per
+// week (peak dot/label highlighted), scaled to whatever history is given —
+// no hardcoded values, unlike the earlier 5-option mockup this is based on.
+function incomeChartSvg(history){
+  if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough weeks yet to chart.</div>`;
+  const vals=history.map(h=>Number(h.total_made)||0);
+  const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
+  const w=380, h=130, padX=8, padY=16;
+  const innerW=w-2*padX, innerH=h-2*padY;
+  const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
+  const xy=vals.map((v,i)=>[padX+i*stepX, padY+(1-(v-min)/range)*innerH]);
+  const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const maxIdx=vals.indexOf(max);
+  const dots=xy.map(([x,y],i)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="${i===maxIdx?'#86efac':'#4ade80'}"/>`).join('');
+  const peakY=xy[maxIdx][1];
+  const peakLabel=`<text x="${xy[maxIdx][0].toFixed(1)}" y="${Math.max(10,peakY-8).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="#86efac">${money(max)}</text>`;
+  const shortDate=ds=>{ const d=new Date(ds+'T00:00:00Z'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}); };
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;margin-top:4px;">`+
+      `<line x1="${padX}" y1="${h-padY}" x2="${w-padX}" y2="${h-padY}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
+      `<polyline points="${pts}" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`+
+      dots+peakLabel+
+    `</svg>`+
+    `<div style="display:flex;justify-content:space-between;font-size:10px;opacity:.7;margin-top:2px;">`+
+      `<span>${esc(shortDate(history[0].pay_date))}</span><span>${esc(shortDate(history[history.length-1].pay_date))}</span>`+
+    `</div>`;
+}
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
@@ -5716,16 +5742,23 @@ function greetStatsHtml(){
   const wbs=(pf&&pf.week_by_slug)||{};
   const wDoms=Number(wbs.doms||0), wHA=Number(wbs['handy-andy']||0), wTotal=wDoms+wHA;
   const profitCards = pf ?
+    // Income box (bottom-left): private line chart of hand-entered weekly
+    // "Total I made" figures from the payroll page's Actual Profit tracker.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;">`+
+      `<span class="gstat-l">🔒 Income</span>`+
+      incomeChartSvg(pf.income_history)+
+    `</div>`+
+    // Combined Profit box: this-week total (+ split) merged with the
+    // Today/Yesterday toggle that used to be its own separate box.
+    `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Profit this week</span>`+
       `<span class="gstat-v" style="color:#4ade80;">${money(wTotal)}</span>`+
       `<div style="display:flex;gap:18px;justify-content:center;margin-top:1px;">`+
         `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#60a5fa;">${money(wDoms)}</div></div>`+
         `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('handy-andy'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#FF8A5C;">${money(wHA)}</div></div>`+
-      `</div></div>`+
-    `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
-      `<span class="gstat-l">Profit</span>`+
-      `<span class="gstat-v" id="pfVal" style="color:#4ade80;">${money(profitVal)}</span>`+
+      `</div>`+
+      `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:6px 0 2px;"></div>`+
+      `<span class="gstat-v" id="pfVal" style="color:#4ade80;font-size:20px;">${money(profitVal)}</span>`+
       `<div class="ndp-seg"><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div>`+
       bizSplitHtml(profitView==='yesterday'?(pf&&pf.yesterday_by_slug):(pf&&pf.today_by_slug), 'pfSplit')+
     `</div>`+

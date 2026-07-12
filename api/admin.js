@@ -602,6 +602,23 @@ async function summary(req, res, db, auth) {
       week_predicted_by_slug: Object.fromEntries(predictedBySlug),
     };
 
+    // Income history for the dashboard's "Income" box (owner-only, hand-entered
+    // via the payroll page's Actual Profit tracker). Only weeks with all three
+    // fields filled in have a real total_made; last 24 for a readable chart.
+    {
+      const { data: apRows } = await db.from('actual_profit_weekly')
+        .select('pay_date, doms_stripe_payout, handy_andy_stripe_payout, tech_pay')
+        .not('doms_stripe_payout', 'is', null)
+        .not('handy_andy_stripe_payout', 'is', null)
+        .not('tech_pay', 'is', null)
+        .order('pay_date', { ascending: false })
+        .limit(24);
+      profit.income_history = (apRows || []).map(r => ({
+        pay_date: r.pay_date,
+        total_made: Math.round((Number(r.doms_stripe_payout) + Number(r.handy_andy_stripe_payout) - Number(r.tech_pay)) * 100) / 100,
+      })).reverse();
+    }
+
     // Per-business JOB REVENUE for the Sunday–Saturday work week — the SAME week
     // window as Profit this week / Predicted income (weekStart/weekEnd above), per
     // owner's rule (previously this ran its own Sat→Fri window; now unified across
