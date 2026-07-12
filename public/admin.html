@@ -3670,16 +3670,24 @@ function renderPayrollData(d){
   </div>`;
 
   // ── Actual Profit (owner-only; this whole page is owner-gated) ──────────
-  // Hand-entered combined total of both Stripe accounts for this pay date.
-  // Never shown to techs/secretary — this page 403s for anyone else.
+  // Hand-entered, split into one section per business — each business's own
+  // Stripe account minus that business's tech pay. Never shown to
+  // techs/secretary — this page 403s for anyone else.
+  const apRow = (biz, label, val) => `<div style="flex:1; min-width:220px;">
+      <div style="font-size:12px; font-weight:700; color:#92660b; margin-bottom:6px;">${esc(label)}</div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="color:var(--mute);">$</span>
+        <input type="number" step="0.01" data-ap-biz="${biz}" class="ap-input" value="${val!=null?val:''}" placeholder="Enter Stripe total" style="width:150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
+        <button class="btn ap-save" data-ap-biz="${biz}" style="width:auto;">Save</button>
+        <span class="ap-status" data-ap-biz="${biz}" style="font-size:13px; color:var(--mute);"></span>
+      </div>
+    </div>`;
   html+=`<div class="card" style="border:1px solid #f0b429; background:#fffbea; margin-bottom:14px;">
-    <div style="font-size:12px; font-weight:700; color:#92660b; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">🔒 Actual Profit — private, owner only</div>
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <span style="font-size:13px; color:var(--mute);">Pay date ${esc(payDateLbl)}</span>
-      <span style="color:var(--mute);">$</span>
-      <input type="number" step="0.01" id="actualProfitInput" value="${d.actual_profit!=null?d.actual_profit:''}" placeholder="Enter combined Stripe total" style="width:160px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px;">
-      <button class="btn" id="actualProfitSave" style="width:auto;">Save</button>
-      <span id="actualProfitStatus" style="font-size:13px; color:var(--mute);"></span>
+    <div style="font-size:12px; font-weight:700; color:#92660b; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">🔒 Actual Profit — private, owner only</div>
+    <div style="font-size:13px; color:var(--mute); margin-bottom:10px;">Pay date ${esc(payDateLbl)}</div>
+    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+      ${apRow('doms', "Dom's", d.actual_profit?.doms)}
+      ${apRow('handy-andy', 'Handy Andy', d.actual_profit?.handy_andy)}
     </div>
   </div>`;
 
@@ -3828,18 +3836,24 @@ function renderPayrollData(d){
     payrollTechFilter = e.target.value || null;
     if(payrollRawData) renderPayrollData(payrollRawData);
   });
-  document.getElementById('actualProfitSave').addEventListener('click', async()=>{
-    const inp=document.getElementById('actualProfitInput');
-    const statusEl=document.getElementById('actualProfitStatus');
-    const val=inp.value;
-    if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
-    const btn=document.getElementById('actualProfitSave'); btn.disabled=true;
-    try{
-      await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, amount:Number(val) } });
-      if(payrollRawData) payrollRawData.actual_profit=Number(val);
-      statusEl.textContent='Saved';
-    }catch(err){ statusEl.textContent=err.message; }
-    finally{ btn.disabled=false; }
+  content.querySelectorAll('.ap-save').forEach(btn=>{
+    btn.addEventListener('click', async()=>{
+      const biz=btn.dataset.apBiz;
+      const inp=content.querySelector(`.ap-input[data-ap-biz="${biz}"]`);
+      const statusEl=content.querySelector(`.ap-status[data-ap-biz="${biz}"]`);
+      const val=inp.value;
+      if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
+      btn.disabled=true;
+      try{
+        await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, business:biz, amount:Number(val) } });
+        if(payrollRawData){
+          payrollRawData.actual_profit=payrollRawData.actual_profit||{};
+          payrollRawData.actual_profit[biz==='doms'?'doms':'handy_andy']=Number(val);
+        }
+        statusEl.textContent='Saved';
+      }catch(err){ statusEl.textContent=err.message; }
+      finally{ btn.disabled=false; }
+    });
   });
 }
 
