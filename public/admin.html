@@ -1871,6 +1871,20 @@ function statusBadge(status){
   return `<span class="badge b-${s}">${s==='completed'?'Completed ✓':s.replace(/_/g,' ')}</span>`;
 }
 
+// "On the way" text delivery status — real data from Twilio's status callback
+// (see tech.js's on_the_way handler + api/analytics.js sms_status), not a
+// guess. Admin/secretary view only — shapeBooking() never sends these fields
+// to the tech app's own booking read, so this simply won't exist there.
+function otwSmsBadge(b){
+  const st=b.on_the_way_sms_status;
+  if(!st) return '';
+  const when=b.on_the_way_sms_delivered_at||b.on_the_way_sms_sent_at;
+  const timeStr=when?fmtDateTime(when):'';
+  if(st==='delivered') return `<div style="font-size:12px;font-weight:700;color:#15803d;margin-top:2px;">✓ Text delivered${timeStr?' · '+esc(timeStr):''}</div>`;
+  if(st==='failed'||st==='undelivered') return `<div style="font-size:12px;font-weight:700;color:#b91c1c;margin-top:2px;">✕ Text failed${timeStr?' · '+esc(timeStr):''}</div>`;
+  return `<div style="font-size:12px;font-weight:700;color:#a05a00;margin-top:2px;">… Text sending${timeStr?' · '+esc(timeStr):''}</div>`;
+}
+
 // True when a booking already carries a two-person / lift fee, so we never add a
 // second one. Matches the same wordings the payroll engine treats as a 2nd-tech
 // line (so the $30/tech bonus is already accounted for).
@@ -1970,7 +1984,7 @@ function openBooking(b){
   // only on jobs that originally requested a two-person lift.
   const showSecond=canAssign;
   const _bktz=bookingTz(b);
-  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}`;
+  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}${otwSmsBadge(b)}`;
   document.getElementById('bkBody').innerHTML=`
     <div class="bk-row"><span>${ic('customers')}</span><div>Booked by <strong>${esc(bookedBy)}</strong></div></div>
     ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}

@@ -786,7 +786,20 @@ async function status(req, res, db, auth, body) {
       if (_t?.business?.name) bizName = _t.business.name;
     } catch { /* best-effort — fall back to generic */ }
     const msg = `Heads up! ${techName} from ${bizName} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. STOP to opt out.`;
-    sendSMS(existing.customer.phone, msg).catch(console.error);
+    // Real delivery tracking (admin/secretary dashboard only — never surfaced to
+    // techs): a signed token carries the booking id through Twilio's status
+    // callback (api/analytics.js action=sms_status), same pattern the review SMS
+    // already uses. 'pending' is set immediately on a successful send attempt;
+    // the callback later flips it to 'delivered' or 'failed'/'undelivered'.
+    const otwBase = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
+    const otwStatusCallback = `${otwBase}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;
+    sendSMSResult(existing.customer.phone, msg, { statusCallback: otwStatusCallback }).then(r => {
+      const patch = r.ok
+        ? { on_the_way_sms_status: 'pending', on_the_way_sms_sent_at: new Date().toISOString() }
+        : { on_the_way_sms_status: 'failed', on_the_way_sms_sent_at: new Date().toISOString() };
+      return db.from('bookings').update(patch).eq('id', id);
+    }).catch(console.error);
   }
 
   // On completion: send the branded review-request email immediately, and an SMS

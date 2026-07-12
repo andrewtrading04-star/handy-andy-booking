@@ -3422,6 +3422,7 @@ function bookingSelect() {
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id${esCol()}${arCol()},
+          on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
@@ -3471,6 +3472,11 @@ function shapeBooking(b) {
     payment_status: b.payment_status,
     amount_refunded: amountRefundedCol ? (b.amount_refunded || null) : null,
     paid_at: b.paid_at,
+    // "On the way" text delivery — admin/secretary dashboard only, never sent to
+    // the tech app's own booking read (that's a separate query in tech.js).
+    on_the_way_sms_status: b.on_the_way_sms_status || null,
+    on_the_way_sms_sent_at: b.on_the_way_sms_sent_at || null,
+    on_the_way_sms_delivered_at: b.on_the_way_sms_delivered_at || null,
     notes: b.notes,
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,

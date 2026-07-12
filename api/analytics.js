@@ -138,6 +138,19 @@ async function handleTwilioStatus(req, res) {
       } else if (status === 'failed' || status === 'undelivered') {
         await db.from('bookings').update({ review_sms_status: status }).eq('id', t.booking_id);
       }
+    } else if (t && t.kind === 'on_the_way' && t.booking_id) {
+      // Same delivery-tracking pattern as the review SMS above, for the
+      // tech's "on the way" text — admin/secretary dashboard only, never
+      // shown to techs.
+      const status = (params.MessageStatus || '').toLowerCase();
+      const db = serviceClient();
+      if (status === 'delivered') {
+        await db.from('bookings')
+          .update({ on_the_way_sms_delivered_at: new Date().toISOString(), on_the_way_sms_status: 'delivered' })
+          .eq('id', t.booking_id).is('on_the_way_sms_delivered_at', null);
+      } else if (status === 'failed' || status === 'undelivered') {
+        await db.from('bookings').update({ on_the_way_sms_status: status }).eq('id', t.booking_id);
+      }
     }
   } catch (e) {
     console.error('[sms_status] error:', e.message);
