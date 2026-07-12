@@ -506,6 +506,28 @@
   .bk-slots{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
   .bk-slotchips{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
   .bk-slotchip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);}
+
+  /* ── Booking detail card: dark modern redesign (visual only — same markup, ──
+     same button ids/behavior, just restyled). Scoped to #bkModal so no other
+     modal (reschedule, cancel, etc.) is affected. */
+  #bkModal .sheet{background:#0f1b2e;border:1px solid #1c2e46;color:#dbe4ee;box-shadow:0 24px 60px rgba(0,0,0,.45);}
+  #bkModal #bkTitle{color:#fff;font-size:19px;}
+  #bkModal .bk-row{color:#9fb0c3;padding:8px 0;}
+  #bkModal .bk-row span:first-child{color:#5b6f8a;}
+  #bkModal .bk-row a{color:#7fb3ff;}
+  #bkModal .bk-xco{background:rgba(251,146,60,.12);border-color:rgba(251,146,60,.35);color:#fdba74;}
+  #bkModal .bk-slots{border-top-color:rgba(255,255,255,.1);}
+  #bkModal .bk-slotchip{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#dbe4ee;}
+  #bkModal hr, #bkModal .bk-row + .bk-row{border-color:rgba(255,255,255,.08);}
+  /* Uniform button system: every action in this card is the same height/shape
+     regardless of .sm or inline color override (Mark complete / Charge card
+     keep their green/blue meaning — only size+radius+font are unified here). */
+  #bkModal .bk-actions{gap:9px;}
+  #bkModal .bk-actions .btn{height:38px;width:auto;flex:1 1 auto;min-width:110px;padding:0 16px;font-size:13px;font-weight:600;border-radius:9px;}
+  #bkModal .btn.ghost{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
+  #bkModal .bk-assign{color:#9fb0c3;}
+  #bkModal .bk-assign select{background:#16273f;border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
+  #bkModal #bkClose{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#dbe4ee;}
   .bk-slotchip .t{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--mute);}
   .bk-slotchip.main{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;}
   .bk-slotchip.main .t{color:#3b6fd4;}
@@ -1880,9 +1902,9 @@ function otwSmsBadge(b){
   if(!st) return '';
   const when=b.on_the_way_sms_delivered_at||b.on_the_way_sms_sent_at;
   const timeStr=when?fmtDateTime(when):'';
-  if(st==='delivered') return `<div style="font-size:12px;font-weight:700;color:#15803d;margin-top:2px;">✓ Text delivered${timeStr?' · '+esc(timeStr):''}</div>`;
-  if(st==='failed'||st==='undelivered') return `<div style="font-size:12px;font-weight:700;color:#b91c1c;margin-top:2px;">✕ Text failed${timeStr?' · '+esc(timeStr):''}</div>`;
-  return `<div style="font-size:12px;font-weight:700;color:#a05a00;margin-top:2px;">… Text sending${timeStr?' · '+esc(timeStr):''}</div>`;
+  if(st==='delivered') return `<div style="font-size:12px;font-weight:700;color:#4ade80;margin-top:2px;">✓ Text delivered${timeStr?' · '+esc(timeStr):''}</div>`;
+  if(st==='failed'||st==='undelivered') return `<div style="font-size:12px;font-weight:700;color:#f87171;margin-top:2px;">✕ Text failed${timeStr?' · '+esc(timeStr):''}</div>`;
+  return `<div style="font-size:12px;font-weight:700;color:#fbbf24;margin-top:2px;">… Text sending${timeStr?' · '+esc(timeStr):''}</div>`;
 }
 
 // True when a booking already carries a two-person / lift fee, so we never add a
