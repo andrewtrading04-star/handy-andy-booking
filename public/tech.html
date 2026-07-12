@@ -1452,11 +1452,11 @@ function renderPayroll(data){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div>
           <div style="color:var(--mute);font-size:12px;">Next payout</div>
-          <div style="font-size:20px;font-weight:800;">$${data.total}</div>
+          <div style="font-size:20px;font-weight:800;color:var(--green);">$${data.total}</div>
         </div>
         <div>
           <div style="color:var(--mute);font-size:12px;">Pay date</div>
-          <div style="font-size:20px;font-weight:800;">${fmtDs(payDate,{month:'short',day:'numeric'})}</div>
+          <div style="font-size:20px;font-weight:800;color:var(--green);">${fmtDs(payDate,{month:'short',day:'numeric'})}</div>
         </div>
       </div>
     </div>
@@ -1480,7 +1480,7 @@ function renderPayroll(data){
     <div class="card">
       <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
         <div style="color:var(--mute);font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;">Weekly Total</div>
-        <div style="font-size:24px;font-weight:800;color:var(--green);">$${data.total}</div>
+        <div style="font-size:24px;font-weight:800;color:var(--ink);">$${data.total}</div>
       </div>
     </div>
 
