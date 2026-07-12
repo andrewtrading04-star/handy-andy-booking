@@ -1407,7 +1407,7 @@ function renderPayroll(data){
   if(mp && mp.amount!=null){
     let when='';
     if(mp.date){ const dd=new Date(mp.date+'T00:00:00'), n=dd.getDate(); when=` (${dd.toLocaleString('en-US',{month:'short'})} ${n})`; }
-    mpRow=`<div style="font-size:13px;color:var(--mute);">Expected Pay${when}</div>
+    mpRow=`<div style="font-size:13px;color:var(--mute);">Additional Pay${when}</div>
       <div style="font-weight:800;color:var(--green,#16a34a);">$${Number(mp.amount).toLocaleString()}</div>`;
   }
 
