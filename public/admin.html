@@ -5522,7 +5522,7 @@ function getTimeGreeting(name, tz) {
   return `Good ${timeOfDay}.`;
 }
 let netDailyView='today';   // 'today' | 'yesterday' for the Net Daily Profit card
-let profitView='today';     // 'today' | 'yesterday' for the Profit card
+let profitView='week';      // 'week' | 'today' | 'yesterday' for the tabbed Profit card
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
@@ -5587,13 +5587,15 @@ function paintGreeting(){
     const vEl=document.getElementById('ndpVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-ndp]').forEach(b=>b.classList.toggle('on', b.dataset.ndp===netDailyView));
   }));
-  // Profit card Today/Yesterday toggle (this business).
+  // Profit card tab toggle: This week / Today / Yesterday (this business).
   el.querySelectorAll('[data-pv]').forEach(btn=>btn.addEventListener('click',()=>{
     profitView=btn.dataset.pv;
     const pf=(greetingData&&greetingData.profit)||{};
-    const v=profitView==='yesterday'?(pf.yesterday||0):(pf.today||0);
+    const wbs=pf.week_by_slug||{};
+    const weekTotal=Number(wbs.doms||0)+Number(wbs['handy-andy']||0);
+    const v = profitView==='week' ? weekTotal : profitView==='yesterday' ? (pf.yesterday||0) : (pf.today||0);
     const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(v);
-    const bySlug=profitView==='yesterday'?pf.yesterday_by_slug:pf.today_by_slug;
+    const bySlug = profitView==='week' ? wbs : profitView==='yesterday' ? pf.yesterday_by_slug : pf.today_by_slug;
     const splitEl=document.getElementById('pfSplit');
     if(splitEl){
       const dEl=splitEl.querySelector('[data-split="doms"]'), hEl=splitEl.querySelector('[data-split="handy-andy"]');
@@ -5744,9 +5746,16 @@ function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
   const ndpVal = netDailyView==='yesterday' ? ((pf&&pf.net_daily_yesterday)||0) : ((pf&&pf.net_daily)||0);
-  const profitVal = profitView==='yesterday' ? ((pf&&pf.yesterday)||0) : ((pf&&pf.today)||0);
   const wbs=(pf&&pf.week_by_slug)||{};
   const wDoms=Number(wbs.doms||0), wHA=Number(wbs['handy-andy']||0), wTotal=wDoms+wHA;
+  const profitVal = profitView==='week' ? wTotal : profitView==='yesterday' ? ((pf&&pf.yesterday)||0) : ((pf&&pf.today)||0);
+  // Split-by-business for whichever tab is active — 'week' reuses the same
+  // week_by_slug the old standalone box used; today/yesterday reuse theirs.
+  function profitSplitBySlug(pf){
+    if(!pf) return null;
+    if(profitView==='week') return pf.week_by_slug;
+    return profitView==='yesterday' ? pf.yesterday_by_slug : pf.today_by_slug;
+  }
   const profitCards = pf ?
     // Income box (bottom-left): private line chart of hand-entered weekly
     // "Total I made" figures from the payroll page's Actual Profit tracker.
@@ -5754,19 +5763,14 @@ function greetStatsHtml(){
       `<span class="gstat-l">🔒 Income</span>`+
       incomeChartSvg(pf.income_history)+
     `</div>`+
-    // Combined Profit box: this-week total (+ split) merged with the
-    // Today/Yesterday toggle that used to be its own separate box.
+    // Combined Profit box (tabbed): one number + split, swapped between
+    // This week / Today / Yesterday by the tab row — replaces the old
+    // stacked "week total, then a divider, then today/yesterday" layout.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
-      `<span class="gstat-l">Profit this week</span>`+
-      `<span class="gstat-v" style="color:#4ade80;">${money(wTotal)}</span>`+
-      `<div style="display:flex;gap:18px;justify-content:center;margin-top:1px;">`+
-        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#60a5fa;">${money(wDoms)}</div></div>`+
-        `<div style="text-align:center;"><div style="font-size:11px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('handy-andy'))}</div><div style="font-size:18px;font-weight:850;line-height:1.1;color:#FF8A5C;">${money(wHA)}</div></div>`+
-      `</div>`+
-      `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:6px 0 2px;"></div>`+
-      `<span class="gstat-v" id="pfVal" style="color:#4ade80;font-size:20px;">${money(profitVal)}</span>`+
-      `<div class="ndp-seg"><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div>`+
-      bizSplitHtml(profitView==='yesterday'?(pf&&pf.yesterday_by_slug):(pf&&pf.today_by_slug), 'pfSplit')+
+      `<span class="gstat-l">Profit</span>`+
+      `<div class="ndp-seg"><button data-pv="week" class="${profitView==='week'?'on':''}">This week</button><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div>`+
+      `<span class="gstat-v" id="pfVal" style="color:#4ade80;">${money(profitVal)}</span>`+
+      bizSplitHtml(profitSplitBySlug(pf), 'pfSplit')+
     `</div>`+
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Net daily profit</span>`+
