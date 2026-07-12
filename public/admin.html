@@ -507,6 +507,34 @@
   .bk-slotchips{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
   .bk-slotchip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);}
 
+  /* ── New Booking modal: dark theme + guided-progress redesign ── Same form,
+     same field ids, same business logic — the existing show/hide conditions
+     (category-specific steps, calendar, card box, etc.) are untouched. This
+     only restyles the surface dark and adds a progress indicator that OBSERVES
+     existing state (via a lightweight poll) rather than a separate step/nav
+     state machine, so nothing here can conflict with the current validation
+     or visibility logic. */
+  #modal .sheet{background:#0f1b2e;border:1px solid #1c2e46;color:#eef2f7;box-shadow:0 24px 60px rgba(0,0,0,.45);}
+  #modal h2{color:#fff;}
+  #modal .search{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
+  #modal .search::placeholder{color:#6b7f9c;}
+  #modal .search:focus{border-color:#3b82f6;outline:none;}
+  #modal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
+  #modal #nbConvertSummary{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#c7dcff;}
+  #modal #nbBringsOwnNote{background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.35);color:#fdba74;}
+  #modal #nbRequestedTimes{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
+  #modal #nbTotalDisplay{background:rgba(255,255,255,.05);color:#eef2f7;}
+  #modal .nb-min-warn.floored{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.4);color:#fca5a5;}
+  #modal .nb-min-warn.waived{background:rgba(251,146,60,.14);border-color:rgba(251,146,60,.4);color:#fdba74;}
+  #modal .nb-cust{background:#16273f;border-color:rgba(255,255,255,.14);}
+  #modal .nb-card-help{color:#9fb0c3;}
+  #modal .nb-consent-row{background:rgba(255,255,255,.06);}
+  #modal .nb-consent-row label{color:#eef2f7;}
+  #modal .nb-progress{margin-bottom:16px;}
+  #modal .nb-progress-track{height:4px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden;}
+  #modal .nb-progress-fill{height:100%;background:#3b82f6;border-radius:3px;transition:width .25s ease;width:0%;}
+  #modal .nb-progress-label{margin-top:8px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#8fa3bd;text-align:center;}
+
   /* ── Booking detail card: dark modern redesign (visual only — same markup, ──
      same button ids/behavior, just restyled). Scoped to #bkModal so no other
      modal (reschedule, cancel, etc.) is affected. */
@@ -995,6 +1023,10 @@
 <div id="modal" class="modal hidden">
   <div class="sheet">
     <h2>New Booking</h2>
+    <div id="nbProgress" class="nb-progress">
+      <div class="nb-progress-track"><div id="nbProgressFill" class="nb-progress-fill"></div></div>
+      <div id="nbProgressLabel" class="nb-progress-label">Step 1 of 7 · ZIP code</div>
+    </div>
     <form id="nbForm" style="display:grid;gap:10px;">
       <!-- ① Qualify the caller by ZIP first — check the service area & price before collecting any details. -->
       <div class="nb-ziplead">
@@ -1056,12 +1088,12 @@
       </select>
       <div id="nbCardWrap" style="display:none;">
         <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
-        <div style="font-size:11px;color:var(--ink-2);margin-top:6px;">Card is saved and charged at time of service.</div>
+        <div class="nb-card-help" style="font-size:11px;margin-top:6px;">Card is saved and charged at time of service.</div>
       </div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
-      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9f9f9;border-radius:8px;">
+      <div class="nb-consent-row" style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;">
         <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
-        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;color:var(--ink-2);margin:0;">Send SMS updates about this appointment</label>
+        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;margin:0;">Send SMS updates about this appointment</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -6241,6 +6273,38 @@ function nbZipReplyIdle(){
   const zr=document.getElementById('nbZipArea');
   if(zr){ zr.textContent="I'll check the service area and travel fee as soon as you type it."; zr.className='nb-zip-area muted'; }
 }
+
+// ── New Booking guided-progress bar ─────────────────────────────────────────
+// Pure observer: reads existing field state on a light poll and updates the
+// progress UI. Deliberately does NOT hook into or alter any existing
+// change/validation logic — nbDate in particular is set programmatically by
+// the calendar click handler (no 'change' event fires), so polling is the
+// simplest way to stay correct without touching that code.
+const NB_STEPS=[
+  { label:'ZIP code', done:()=>{ const el=document.getElementById('nbZip'); return !!el && el.value.trim().length===5; } },
+  { label:'Category', done:()=>{ const el=document.getElementById('nbCategory'); return !!el && !!el.value; } },
+  { label:'Pricing', done:()=>{ const el=document.getElementById('nbTotalDisplay'); return !!el && !!el.textContent.trim(); } },
+  { label:'Technician', done:()=>{ const el=document.getElementById('nbTech'); return !!el && !!el.value; } },
+  { label:'Date & time', done:()=>{ const el=document.getElementById('nbDate'); return !!el && !!el.value; } },
+  { label:'Customer details', done:()=>{
+      const v=id=>{ const el=document.getElementById(id); return el ? el.value.trim() : ''; };
+      return !!(v('nbName') && v('nbPhone') && v('nbEmail'));
+    } },
+  { label:'Payment', done:()=>{ const el=document.getElementById('nbPaymentMethod'); return !!el && !!el.value; } },
+];
+function nbUpdateProgress(){
+  const modal=document.getElementById('modal');
+  if(!modal || modal.classList.contains('hidden')) return;
+  const fill=document.getElementById('nbProgressFill');
+  const label=document.getElementById('nbProgressLabel');
+  if(!fill || !label) return;
+  let completed=0;
+  for(const s of NB_STEPS){ if(s.done()) completed++; else break; }
+  fill.style.width=(completed/NB_STEPS.length*100)+'%';
+  const curIdx=Math.min(completed, NB_STEPS.length-1);
+  label.textContent=`Step ${curIdx+1} of ${NB_STEPS.length} · ${NB_STEPS[curIdx].label}`;
+}
+setInterval(nbUpdateProgress, 400);
 // Restrict the OWN roster to the entered zip's metro. Falls back to the full
 // roster if no zip is set or none of our techs are tagged to that metro (so the
 // dropdown is never empty due to missing area data).
