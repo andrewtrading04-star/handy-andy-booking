@@ -3642,38 +3642,15 @@ function renderPayrollData(d){
   const content=document.getElementById('payContent'); if(!content) return;
   content.className='payrep';
   const allTechs=d.techs||[];
-
-  if(!allTechs.length){
-    content.innerHTML=`<div class="pr-empty">No earnings recorded for this week.</div>`;
-    return;
-  }
-
-  // Tech filter: null/"" = show everyone; otherwise scope every section below
-  // (KPIs, per-person table, daily breakdown, job breakdown, deferred) to just
-  // that one technician.
-  const techs = payrollTechFilter ? allTechs.filter(t=>t.name===payrollTechFilter) : allTechs;
-  const total = payrollTechFilter ? techs.reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
-
-  const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
-  const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
   const payDateLbl = payFmtDateUTC(d.pay_date,{month:'short',day:'numeric',year:'numeric'});
-
-  let html='';
-
-  // ── Tech filter ──────────────────────────────────────────────────────────
-  html+=`<div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
-    <span style="font-size:13px; font-weight:700; color:var(--mute);">Technician</span>
-    <select id="payTechFilter" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
-      <option value=""${payrollTechFilter?'':' selected'}>All technicians</option>
-      ${allTechs.map(t=>`<option value="${esc(t.name)}"${payrollTechFilter===t.name?' selected':''}>${esc(t.name)}</option>`).join('')}
-    </select>
-  </div>`;
 
   // ── Actual Profit (owner-only; this whole page is owner-gated) ──────────
   // Hand-entered: each business's Stripe payout, plus total tech pay across
   // both businesses; a 4th read-only figure ("Total I made") computes live
   // as doms + handy_andy - tech_pay. Never shown to techs/secretary — this
-  // page 403s for anyone else.
+  // page 403s for anyone else. Built BEFORE the "no jobs" early-return below
+  // so it still shows on a week with zero completed jobs — a real payout
+  // week can still need tracking even if the job-report side is empty.
   const ap = d.actual_profit || {};
   const apRow = (field, label, val) => `<div style="flex:1; min-width:220px;">
       <div style="font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">${esc(label)}</div>
@@ -3684,7 +3661,7 @@ function renderPayrollData(d){
         <span class="ap-status" data-ap-field="${field}" style="font-size:13px; color:var(--mute);"></span>
       </div>
     </div>`;
-  html+=`<div class="pr-sec">🔒 Actual Profit — private, owner only</div>
+  const apHtml = `<div class="pr-sec">🔒 Actual Profit — private, owner only</div>
   <div class="pr-note">Pay date ${esc(payDateLbl)}</div>
   <div class="card" style="margin-bottom:14px;">
     <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px;">
@@ -3697,6 +3674,62 @@ function renderPayrollData(d){
       <div id="apTotalMade" style="font-size:22px; font-weight:800; color:var(--ink);">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
     </div>
   </div>`;
+  const wireActualProfit = () => {
+    const recalcApTotal=()=>{
+      const totalEl=document.getElementById('apTotalMade'); if(!totalEl) return;
+      const get=f=>{ const v=content.querySelector(`.ap-input[data-ap-field="${f}"]`)?.value; return v===''||v==null?null:Number(v); };
+      const ds=get('doms_stripe_payout'), ha=get('handy_andy_stripe_payout'), tp=get('tech_pay');
+      totalEl.textContent=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp)) ? payFmtUSD(ds+ha-tp) : '—';
+    };
+    content.querySelectorAll('.ap-input').forEach(inp=>inp.addEventListener('input', recalcApTotal));
+    content.querySelectorAll('.ap-save').forEach(btn=>{
+      btn.addEventListener('click', async()=>{
+        const field=btn.dataset.apField;
+        const inp=content.querySelector(`.ap-input[data-ap-field="${field}"]`);
+        const statusEl=content.querySelector(`.ap-status[data-ap-field="${field}"]`);
+        const val=inp.value;
+        if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
+        btn.disabled=true;
+        try{
+          await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, field, amount:Number(val) } });
+          if(payrollRawData){
+            payrollRawData.actual_profit=payrollRawData.actual_profit||{};
+            payrollRawData.actual_profit[field]=Number(val);
+            const ap2=payrollRawData.actual_profit;
+            payrollRawData.actual_profit.total_made=(ap2.doms_stripe_payout!=null&&ap2.handy_andy_stripe_payout!=null&&ap2.tech_pay!=null)
+              ? (ap2.doms_stripe_payout+ap2.handy_andy_stripe_payout-ap2.tech_pay) : null;
+          }
+          statusEl.textContent='Saved';
+        }catch(err){ statusEl.textContent=err.message; }
+        finally{ btn.disabled=false; }
+      });
+    });
+  };
+
+  if(!allTechs.length){
+    content.innerHTML = apHtml + `<div class="pr-empty">No earnings recorded for this week.</div>`;
+    wireActualProfit();
+    return;
+  }
+
+  // Tech filter: null/"" = show everyone; otherwise scope every section below
+  // (KPIs, per-person table, daily breakdown, job breakdown, deferred) to just
+  // that one technician.
+  const techs = payrollTechFilter ? allTechs.filter(t=>t.name===payrollTechFilter) : allTechs;
+  const total = payrollTechFilter ? techs.reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
+
+  const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
+  const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
+
+  // ── Tech filter ──────────────────────────────────────────────────────────
+  let html=`<div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+    <span style="font-size:13px; font-weight:700; color:var(--mute);">Technician</span>
+    <select id="payTechFilter" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
+      <option value=""${payrollTechFilter?'':' selected'}>All technicians</option>
+      ${allTechs.map(t=>`<option value="${esc(t.name)}"${payrollTechFilter===t.name?' selected':''}>${esc(t.name)}</option>`).join('')}
+    </select>
+  </div>`;
+  html+=apHtml;
 
   // ── KPI strip ────────────────────────────────────────────────────────────
   html+=`<div class="pr-kpis">
@@ -3843,35 +3876,7 @@ function renderPayrollData(d){
     payrollTechFilter = e.target.value || null;
     if(payrollRawData) renderPayrollData(payrollRawData);
   });
-  const recalcApTotal=()=>{
-    const totalEl=document.getElementById('apTotalMade'); if(!totalEl) return;
-    const get=f=>{ const v=content.querySelector(`.ap-input[data-ap-field="${f}"]`)?.value; return v===''||v==null?null:Number(v); };
-    const ds=get('doms_stripe_payout'), ha=get('handy_andy_stripe_payout'), tp=get('tech_pay');
-    totalEl.textContent=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp)) ? payFmtUSD(ds+ha-tp) : '—';
-  };
-  content.querySelectorAll('.ap-input').forEach(inp=>inp.addEventListener('input', recalcApTotal));
-  content.querySelectorAll('.ap-save').forEach(btn=>{
-    btn.addEventListener('click', async()=>{
-      const field=btn.dataset.apField;
-      const inp=content.querySelector(`.ap-input[data-ap-field="${field}"]`);
-      const statusEl=content.querySelector(`.ap-status[data-ap-field="${field}"]`);
-      const val=inp.value;
-      if(val==='' || isNaN(Number(val))){ statusEl.textContent='Enter a number'; return; }
-      btn.disabled=true;
-      try{
-        await api('actual_profit_save',{ method:'POST', body:{ pay_date:d.pay_date, field, amount:Number(val) } });
-        if(payrollRawData){
-          payrollRawData.actual_profit=payrollRawData.actual_profit||{};
-          payrollRawData.actual_profit[field]=Number(val);
-          const ap2=payrollRawData.actual_profit;
-          payrollRawData.actual_profit.total_made=(ap2.doms_stripe_payout!=null&&ap2.handy_andy_stripe_payout!=null&&ap2.tech_pay!=null)
-            ? (ap2.doms_stripe_payout+ap2.handy_andy_stripe_payout-ap2.tech_pay) : null;
-        }
-        statusEl.textContent='Saved';
-      }catch(err){ statusEl.textContent=err.message; }
-      finally{ btn.disabled=false; }
-    });
-  });
+  wireActualProfit();
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────
