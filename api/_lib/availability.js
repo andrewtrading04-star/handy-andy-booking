@@ -414,16 +414,15 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   const list = techs || [];
   // A tech at their daily job cap is not eligible for this date.
   const atCap = (t, booked) => { const c = (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)); return c != null && booked.size >= c; };
-  // Try one tech list with the normal-schedule pass first, then the any-free pass.
+  // Only a tech who actually marked this exact slot available (recurring or a
+  // positive exception) is eligible — a tech who opted out of a day entirely
+  // (e.g. never works Mondays) must never be auto-booked into it just because
+  // they happen to have no conflicting job. Any slot nobody has opted into
+  // falls through to null so the office assigns it manually.
   const tryList = async (pool) => {
     for (const t of pool) {
       const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
       if (!keys.has(slotKey)) continue;
-      const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
-      if (atCap(t, booked)) continue;
-      if (!booked.has(slotKey)) return t.id;
-    }
-    for (const t of pool) {
       const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
       if (atCap(t, booked)) continue;
       if (!booked.has(slotKey)) return t.id;
