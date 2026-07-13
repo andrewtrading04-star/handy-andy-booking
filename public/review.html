@@ -57,6 +57,8 @@
   .state p{color:var(--mute);font-size:14px;line-height:1.55;}
   .error{display:none;color:var(--red);font-size:14px;margin-top:18px;font-weight:600;}
   .error.show{display:block;}
+  .copy-toast{display:none;color:var(--green);font-size:13px;margin-top:12px;font-weight:600;line-height:1.5;animation:fade .2s ease;}
+  .copy-toast.show{display:block;}
 </style>
 </head>
 <body>
@@ -91,6 +93,7 @@
         <svg class="gicon" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.3C39.7 36.4 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
         Leave us a Google review
       </button>
+      <div class="copy-toast" id="copyToast">&#10003; Copied your feedback &mdash; paste it (Ctrl/Cmd+V) into the Google review box that opens</div>
     </div>
 
     <!-- Success -->
@@ -173,10 +176,30 @@ $('lowSubmit').addEventListener('click', async () => {
 });
 
 $('googleBtn').addEventListener('click', async () => {
-  await saveReview($('highText').value.trim());
+  const feedbackText = $('highText').value.trim();
+  // Google's review page is Google's own, cross-origin, so we can't autofill the
+  // text box directly — there's no URL param for it either (Google blocks that
+  // to fight fake reviews). Copying to the clipboard first is the standard
+  // workaround: it's an OS-level clipboard, so it survives Google Maps opening
+  // as a separate app on mobile. Do this BEFORE the awaited save call so it
+  // still runs on the original click's user-activation (some browsers refuse
+  // clipboard writes once that expires).
+  let copied = false;
+  if (feedbackText && navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(feedbackText); copied = true; } catch (e) { /* clipboard blocked; skip */ }
+  }
+  await saveReview(feedbackText);
   if (saving) return;                 // save failed; error already shown
-  if (reviewUrl) { window.location.href = reviewUrl; }
-  else { finishWithThanks(); }
+  if (reviewUrl) {
+    if (copied) {
+      $('copyToast').classList.add('show');
+      setTimeout(() => { window.location.href = reviewUrl; }, 1400);
+    } else {
+      window.location.href = reviewUrl;
+    }
+  } else {
+    finishWithThanks();
+  }
 });
 
 async function saveReview(feedback){
