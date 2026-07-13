@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   if (src.business === 'doms') {
     try {
       const db = serviceClient();
-      const result = await publicOpenSlots(db, { businessSlug: 'doms', days: src.days });
+      const result = await publicOpenSlots(db, { businessSlug: 'doms', days: src.days, crossHire: true });
       return res.status(200).json(result);
     } catch (err) {
       return res.status(500).json({ error: 'Availability lookup failed', message: err.message });
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     if (!serviceAreaId) return res.status(400).json({ error: 'service_area_id is required' });
     try {
       const db = serviceClient();
-      const result = await publicOpenSlots(db, { businessSlug: 'handy-andy', days: src.days, serviceAreaId });
+      const result = await publicOpenSlots(db, { businessSlug: 'handy-andy', days: src.days, serviceAreaId, crossHire: true });
       return res.status(200).json(result);
     } catch (err) {
       return res.status(500).json({ error: 'Availability lookup failed', message: err.message });

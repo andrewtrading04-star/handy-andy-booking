@@ -104,6 +104,42 @@ export function computeExceptionRows(recurringKeys, selected) {
 
 const SLOT_BY_KEY = Object.fromEntries(SLOTS.map(s => [s.key, s]));
 
+// ── Cross-company cross-hire (Denver only) ───────────────────────────────────
+// Handy Andy and Doms share the Denver metro. Both companies' public widgets are
+// TV-mount visits, so a Denver customer on EITHER site may be offered the OTHER
+// company's techs as a fallback when their own company's techs are all booked —
+// the host company's own techs are always tried first (see pickOpenTech). This
+// is Denver-only: Handy Andy's Houston/Austin metros never cross-hire, and it
+// stays off automatically if either business has no Denver service area row.
+const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy' };
+
+// Resolve the partner business's Denver tech pool for a cross-hire lookup, or
+// null if not eligible (this request isn't for Denver, or the partner has no
+// Denver presence). `serviceAreaId` is the REQUESTING business's area (Handy
+// Andy always passes one; Doms is single-metro and passes none, so we confirm
+// Doms itself only serves Denver before treating it as eligible).
+async function crossHirePartner(db, businessSlug, serviceAreaId) {
+  const partnerSlug = PARTNER_SLUG[businessSlug];
+  if (!partnerSlug) return null;
+  let areaName = null;
+  if (serviceAreaId) {
+    const { data: area } = await db.from('service_areas').select('name').eq('id', serviceAreaId).maybeSingle();
+    areaName = area?.name || null;
+  } else {
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', businessSlug).single();
+    if (!biz) return null;
+    const { data: areas } = await db.from('service_areas').select('name').eq('business_id', biz.id);
+    if ((areas || []).length === 1 && /denver/i.test(areas[0].name || '')) areaName = areas[0].name;
+  }
+  if (!areaName || !/denver/i.test(areaName)) return null;
+  const { data: partnerBiz } = await db.from('businesses').select('id').eq('slug', partnerSlug).single();
+  if (!partnerBiz) return null;
+  const { data: partnerArea } = await db.from('service_areas').select('id')
+    .eq('business_id', partnerBiz.id).ilike('name', 'Denver').maybeSingle();
+  if (!partnerArea) return null;
+  return { partnerSlug, partnerBizId: partnerBiz.id, partnerServiceAreaId: partnerArea.id };
+}
+
 // 'YYYY-MM-DD' for "today" in a timezone.
 export function todayStr(tz) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -170,7 +206,7 @@ export function parseSlotId(id) {
 // techs in Central, and only the metro's own techs may take its jobs). `timezone`
 // (optional) overrides the zone explicitly; otherwise the area's, then the
 // business's, then Denver. Omit both for a single-area business (e.g. Doms).
-export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null }) {
+export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null, crossHire = false }) {
   // Allow booking up to ~3 months out (cap kept as a sanity bound on the batched queries).
   const horizon = Math.max(1, Math.min(Number(days) || 30, 95));
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
@@ -190,8 +226,26 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   const techSel = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q; };
   let { data: techs, error: techErr } = await techSel('id, max_jobs_per_day');
   if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await techSel('id'));
-  const techIds = (techs || []).map(t => t.id);
   const maxByTech = new Map((techs || []).map(t => [t.id, (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day))]));
+
+  // Cross-hire (Denver only): fold the partner company's Denver techs into the
+  // same pool so the customer sees a slot as open if EITHER company can cover
+  // it. Priority between the two is only enforced at booking time (pickOpenTech).
+  if (crossHire) {
+    const partner = await crossHirePartner(db, businessSlug, serviceAreaId);
+    if (partner) {
+      const pTechSel = (cols) => db.from('technicians').select(cols)
+        .eq('business_id', partner.partnerBizId).eq('active', true).eq('service_area_id', partner.partnerServiceAreaId);
+      let { data: pTechs, error: pErr } = await pTechSel('id, max_jobs_per_day');
+      if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pTechSel('id'));
+      for (const t of (pTechs || [])) {
+        maxByTech.set(t.id, (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)));
+        (techs || (techs = [])).push(t);
+      }
+    }
+  }
+
+  const techIds = (techs || []).map(t => t.id);
   if (!techIds.length) return { days: [], timezone: tz };
 
   const start = todayStr(tz);
@@ -342,7 +396,7 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
 // an exact date+slot, so a public booking actually OCCUPIES the slot (prevents
 // two customers grabbing the same window). Falls back to any tech free that slot,
 // else null (the office will assign). Returns a CRM technician id.
-export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null }) {
+export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false }) {
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return null;
   let areaTz = null;
@@ -360,19 +414,38 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   const list = techs || [];
   // A tech at their daily job cap is not eligible for this date.
   const atCap = (t, booked) => { const c = (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)); return c != null && booked.size >= c; };
-  // First choice: on the normal schedule AND free in this slot AND under their cap.
-  for (const t of list) {
-    const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
-    if (!keys.has(slotKey)) continue;
-    const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
-    if (atCap(t, booked)) continue;
-    if (!booked.has(slotKey)) return t.id;
-  }
-  // Fallback: any active tech who is at least free in this slot and under their cap.
-  for (const t of list) {
-    const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
-    if (atCap(t, booked)) continue;
-    if (!booked.has(slotKey)) return t.id;
+  // Try one tech list with the normal-schedule pass first, then the any-free pass.
+  const tryList = async (pool) => {
+    for (const t of pool) {
+      const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
+      if (!keys.has(slotKey)) continue;
+      const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+      if (atCap(t, booked)) continue;
+      if (!booked.has(slotKey)) return t.id;
+    }
+    for (const t of pool) {
+      const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
+      if (atCap(t, booked)) continue;
+      if (!booked.has(slotKey)) return t.id;
+    }
+    return null;
+  };
+  // Host company's own techs always go first.
+  const hostPick = await tryList(list);
+  if (hostPick) return hostPick;
+  // Cross-hire fallback (Denver only): only reached once every host tech is
+  // unavailable for this slot/date.
+  if (crossHire) {
+    const partner = await crossHirePartner(db, businessSlug, serviceAreaId);
+    if (partner) {
+      const pBaseQ = (cols) => db.from('technicians').select(cols)
+        .eq('business_id', partner.partnerBizId).eq('active', true).eq('service_area_id', partner.partnerServiceAreaId)
+        .order('created_at', { ascending: true });
+      let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day');
+      if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
+      const partnerPick = await tryList(pTechs || []);
+      if (partnerPick) return partnerPick;
+    }
   }
   return null;
 }

@@ -336,7 +336,7 @@ async function bookDoms(req, res) {
 
   // ── Assign an available Doms tech so the slot is actually occupied.
   let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
   catch (e) { console.warn('[book-doms] tech pick failed:', e.message); }
   // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
   // confirmation-email block) — best-effort.
@@ -553,7 +553,7 @@ async function bookHandyAndy(req, res) {
 
   // ── Assign a tech from THIS metro's roster so the slot is occupied.
   let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'handy-andy', dateStr, slotKey, serviceAreaId, timezone: tz }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'handy-andy', dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
   catch (e) { console.warn('[book-ha] tech pick failed:', e.message); }
   let technicianName = null, technicianPhoto = null;
   if (technician_id) {
