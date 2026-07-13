@@ -4843,7 +4843,7 @@ function estCard(e){
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${e.sms_consent===false?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        ${e.approved_at?`<button class="btn sm" data-est-convert="${e.id}" title="Create a booking from this approved estimate">→ Convert to job</button>`:''}
+        <button class="btn sm" data-est-convert="${e.id}" title="${e.approved_at?'Create a booking from this approved estimate':'Create a booking now, without waiting for the customer to approve online (e.g. they approved by phone)'}">→ Convert to job${e.approved_at?'':' (unapproved)'}</button>
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
         ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
