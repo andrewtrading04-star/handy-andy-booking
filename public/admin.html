@@ -595,6 +595,17 @@
      undifferentiated stack of buttons. */
   #bkModal .bk-minicard{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:14px;margin-bottom:10px;}
   #bkModal .bk-minicard .bk-actions{margin-top:0;}
+  /* Reschedule/Edit/Cancel icon tiles — flex (not grid) so a single remaining
+     tile (Edit only, when canAssign is false) stretches to full width instead
+     of collapsing to a sliver. Colored by consequence, not frequency. */
+  #bkModal .bk-igrid{display:flex;gap:9px;margin-bottom:12px;}
+  #bkModal .bk-icell{flex:1 1 0;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+    border-radius:11px;padding:10px 6px;display:flex;flex-direction:column;align-items:center;gap:5px;
+    font-size:11px;font-weight:700;font-family:inherit;color:#dbe4ee;cursor:pointer;}
+  #bkModal .bk-icell-ic{font-size:17px;line-height:1;}
+  #bkModal .bk-icell-resched{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#93c5fd;}
+  #bkModal .bk-icell-edit{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);color:#9fb0c3;}
+  #bkModal .bk-icell-cancel{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#fca5a5;}
   #bkModal .bk-minicard-head{display:flex;align-items:center;gap:9px;margin-bottom:12px;}
   #bkModal .bk-minicard-label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#9fb0c3;}
   #bkModal .bk-badge{width:26px;height:26px;flex:0 0 26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;}
@@ -2124,11 +2135,18 @@ function openBooking(b){
     </div>`:''}
     <div class="bk-minicard">
       <div class="bk-minicard-head"><span class="bk-badge bk-badge-job">✓</span><span class="bk-minicard-label">Job</span></div>
+      <!-- Reschedule/Edit/Cancel are rare but consequential — kept as their own
+           always-visible tiles (never buried in a menu), colored by what happens
+           if you tap them: blue = routine change, grey = informational, red =
+           destructive. Mark Complete/Confirm/Reopen stay the primary full-width
+           buttons below, unchanged. -->
+      <div class="bk-igrid">
+        ${canAssign?`<button type="button" class="bk-icell bk-icell-resched" id="bkResched"><span class="bk-icell-ic">📅</span>Reschedule</button>`:''}
+        <button type="button" class="bk-icell bk-icell-edit" id="bkContactEdit" title="Edit address, phone & email"><span class="bk-icell-ic">✎</span>Edit</button>
+        ${canAssign?`<button type="button" class="bk-icell bk-icell-cancel" id="bkCancel"><span class="bk-icell-ic">✕</span>Cancel</button>`:''}
+      </div>
       <div class="bk-actions">
         ${b.status==='pending'?`<button class="btn sm" id="bkConfirm">Confirm</button>`:''}
-        ${canAssign?`<button class="btn ghost sm" id="bkResched">Reschedule</button>`:''}
-        ${canAssign?`<button class="btn ghost sm" id="bkCancel">Cancel</button>`:''}
-        <button type="button" class="btn ghost sm" id="bkContactEdit" title="Edit address, phone & email">Edit</button>
         ${canAssign?`<button class="btn sm" id="bkComplete" style="background:#15803d;border-color:#15803d;">✓ Mark complete</button>`:''}
         ${canReopen?`<button class="btn ghost sm" id="bkReopen">Reopen job</button>`:''}
       </div>
