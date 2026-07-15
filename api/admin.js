@@ -577,8 +577,17 @@ async function summary(req, res, db, auth) {
     // Realized profit for the week BEFORE the viewed one — same "completed AND
     // paid" definition as pWeek, just shifted back 7 days — so the greeting can
     // show a week-over-week % change. Summed across ALL businesses like pWeek.
+    // For the CURRENT week (the only case the greeting actually shows), this
+    // week is necessarily partial — it's only Wednesday, say — so comparing it
+    // against ALL of last week is comparing a partial week to a full one (a
+    // normal Wednesday reads as "down 87%" for no real reason). Last week's
+    // window is capped to the SAME elapsed time into the week, so the
+    // comparison is apples-to-apples. A fully-elapsed past week being viewed
+    // (via the schedule's week navigator) still compares full week to full week.
+    const now = new Date();
+    const isCurrentWeek = now >= weekStart && now < weekEnd;
     const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const lastWeekEnd = weekStart;
+    const lastWeekEnd = isCurrentWeek ? new Date(lastWeekStart.getTime() + (now.getTime() - weekStart.getTime())) : weekStart;
     const lastWeekProfitP = Promise.all((allBiz || []).map(async (bb) => {
       const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
         .eq('business_id', bb.id)
