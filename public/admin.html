@@ -5691,6 +5691,10 @@ function estimateAlertHtml(){
 // "this matters" the same way those do. Auto-clears the moment she acts on it
 // (build a quote / send it — anything that flips status off 'new').
 function staleEstimateAlertHtml(){
+  // This is a nag for whoever's actually supposed to respond to estimates
+  // (Heather/Joey) — the owner doesn't need it shouting at the top of their
+  // own dashboard every login.
+  if(role==='owner') return '';
   if(!estStale.count) return '';
   const waitTxt=fmtWaitMinutes(estStaleWaitMinutes());
   const body = estStale.count>1
