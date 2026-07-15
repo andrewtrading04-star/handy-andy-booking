@@ -606,6 +606,36 @@
   #bkModal .bk-icell-resched{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#93c5fd;}
   #bkModal .bk-icell-edit{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);color:#9fb0c3;}
   #bkModal .bk-icell-cancel{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#fca5a5;}
+  /* Line items: aligned table + a real +/- stepper for quantity + drag to
+     reorder (grab the ⠿ handle) — replaces the old separate white input boxes,
+     which never got this modal's dark treatment. */
+  #bkModal .li-tbl{width:100%;}
+  #bkModal .li-thead{display:grid;grid-template-columns:18px 1fr 84px 92px 22px;gap:8px;padding:0 2px 7px;
+    font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#93a6bd;}
+  #bkModal .li-thead .c{text-align:center;}
+  #bkModal .li-thead .r{text-align:right;}
+  #bkModal .li-row{display:grid;grid-template-columns:18px 1fr 84px 92px 22px;gap:8px;align-items:center;
+    padding:8px 2px;border-top:1px solid rgba(255,255,255,.07);cursor:grab;transition:box-shadow .12s,opacity .12s;}
+  #bkModal .li-row:first-of-type{border-top:none;}
+  #bkModal .li-row.dragging{opacity:.4;}
+  #bkModal .li-row.drag-over{box-shadow:inset 0 2px 0 #3b82f6;}
+  #bkModal .li-row:active{cursor:grabbing;}
+  #bkModal .li-handle{color:#4a5f80;font-size:13px;text-align:center;user-select:none;}
+  #bkModal .li-row:hover .li-handle{color:#93a6bd;}
+  #bkModal .li-name-in{width:100%;min-width:0;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.12);
+    color:#dbe4ee;font-size:13.5px;font-weight:600;font-family:inherit;padding:2px 0 4px;}
+  #bkModal select.li-name-select{border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.05);
+    color:#dbe4ee;padding:6px 8px;font-weight:700;font-size:13px;}
+  #bkModal .li-stepper{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);border-radius:9px;height:28px;}
+  #bkModal .li-stepper button{width:24px;height:28px;background:transparent;border:none;color:#93a6bd;font-size:15px;font-family:inherit;cursor:pointer;}
+  #bkModal .li-stepper button:hover{color:#eef2f7;}
+  #bkModal .li-stepper span{width:20px;text-align:center;font-weight:800;font-size:13px;color:#dbe4ee;}
+  #bkModal .li-pricebox{display:flex;align-items:center;gap:2px;justify-content:flex-end;}
+  #bkModal .li-pricebox span{color:#93a6bd;font-size:13px;}
+  #bkModal .li-pricebox input{width:64px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.12);
+    color:#dbe4ee;font-weight:700;text-align:right;font-family:inherit;font-size:13.5px;padding-bottom:3px;}
+  #bkModal .li-x{background:transparent;border:none;color:#5d7093;font-size:14px;font-weight:700;cursor:pointer;}
+  #bkModal .li-x:hover{color:#fca5a5;}
   #bkModal .bk-minicard-head{display:flex;align-items:center;gap:9px;margin-bottom:12px;}
   #bkModal .bk-minicard-label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#9fb0c3;}
   #bkModal .bk-badge{width:26px;height:26px;flex:0 0 26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;}
@@ -2391,25 +2421,27 @@ function mountLineItemsEditor(b){
   const qOf=r=>Math.max(1,Math.min(99,Math.round(Number(r.qty)||1)));
   const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*qOf(r),0); totalEl.textContent=money(Math.round(t*100)/100); };
   const render=()=>{
-    const qtyIn=(i,r)=>`<label title="Quantity" style="display:flex;align-items:center;gap:3px;color:var(--mute);font-weight:800;font-size:14px;">×<input type="number" min="1" max="99" step="1" inputmode="numeric" data-i="${i}" data-f="qty" value="${qOf(r)}" style="width:46px;padding:8px 4px;border:1px solid var(--line);border-radius:8px;font-size:16px;font-weight:800;text-align:center;color:var(--ink);"></label>`;
-    const priceIn=(i,r)=>`<div style="display:flex;align-items:center;gap:2px;"><span style="color:var(--mute);">$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each" style="width:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;text-align:right;"></div>`;
-    const delBtn=i=>`<button type="button" class="btn ghost sm" data-del="${i}" title="Remove" style="padding:6px 10px;">×</button>`;
-    const rowHtml=rows.map((r,i)=>{
+    const stepper=(i,r)=>`<div class="li-stepper" title="Quantity">
+        <button type="button" data-act="dec" data-i="${i}">−</button><span>${qOf(r)}</span><button type="button" data-act="inc" data-i="${i}">+</button>
+      </div>`;
+    const priceIn=(i,r)=>`<div class="li-pricebox"><span>$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each"></div>`;
+    const delBtn=i=>`<button type="button" class="li-x" data-del="${i}" title="Remove">×</button>`;
+    const nameCell=(i,r)=>{
       const si=tvSizeIndex(r.name);
       if(si>=0){
         // TV-size line: a dropdown that sets the canonical label AND the price
         // together, so the tech's pay (keyed off the label) can't drift from the charge.
         const opts=TV_SIZES.map((s,k)=>`<option value="${k}"${k===si?' selected':''}>${esc(s.label)}</option>`).join('');
-        return `<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-          <select data-i="${i}" data-f="size" title="TV size" style="flex:1;min-width:118px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);font-weight:700;">${opts}</select>
-          ${qtyIn(i,r)}${priceIn(i,r)}${delBtn(i)}
-        </div>`;
+        return `<select class="li-name-select" data-i="${i}" data-f="size" title="TV size">${opts}</select>`;
       }
-      return `<div class="bk-li-row" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <input type="text" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description" style="flex:1;min-width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
-        ${qtyIn(i,r)}${priceIn(i,r)}${delBtn(i)}
-      </div>`;
-    }).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
+      return `<input type="text" class="li-name-in" data-i="${i}" data-f="name" value="${esc(r.display!=null?r.display:r.name)}" placeholder="Description">`;
+    };
+    const rowHtml = rows.length ? `<div class="li-tbl">
+        <div class="li-thead"><span></span><span>Item</span><span class="c">Qty</span><span class="r">Price</span><span></span></div>
+        ${rows.map((r,i)=>`<div class="li-row" draggable="true" data-i="${i}">
+          <span class="li-handle" title="Drag to reorder">⠿</span>${nameCell(i,r)}${stepper(i,r)}${priceIn(i,r)}${delBtn(i)}
+        </div>`).join('')}
+      </div>` : '<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
     wrap.innerHTML=rowHtml;
     wrap.querySelectorAll('input[data-f]').forEach(inp=>{
       inp.addEventListener('input',()=>{
@@ -2417,7 +2449,7 @@ function mountLineItemsEditor(b){
         // Editing the name takes over the row: the typed text becomes both the
         // display AND what's saved (no longer a tidy-display of an original).
         if(f==='name'){ rows[i].name=inp.value; rows[i].display=inp.value; }
-        else rows[i][f]=inp.value;   // qty / unit kept raw while typing; clamped on use + save
+        else rows[i][f]=inp.value;   // unit kept raw while typing; clamped on use + save
         recalc();
       });
     });
@@ -2431,8 +2463,35 @@ function mountLineItemsEditor(b){
         render(); recalc();
       });
     });
+    // Quantity stepper (replaces the old typed-number field).
+    wrap.querySelectorAll('.li-stepper button').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const i=+btn.dataset.i, cur=qOf(rows[i]);
+        rows[i].qty = btn.dataset.act==='inc' ? Math.min(99,cur+1) : Math.max(1,cur-1);
+        render(); recalc();
+      });
+    });
     wrap.querySelectorAll('button[data-del]').forEach(btn=>{
       btn.addEventListener('click',()=>{ rows.splice(+btn.dataset.del,1); render(); recalc(); });
+    });
+    // Drag a row by its ⠿ handle to reorder; the new order is exactly what
+    // "Save line items" persists (rows is mapped in order on save), and round-
+    // trips correctly on reload via booking_line_items.sort_order (migration 0071).
+    let dragIdx=null;
+    wrap.querySelectorAll('.li-row').forEach(row=>{
+      row.addEventListener('dragstart',()=>{ dragIdx=+row.dataset.i; row.classList.add('dragging'); });
+      row.addEventListener('dragend',()=>{ row.classList.remove('dragging'); });
+      row.addEventListener('dragover',e=>{ e.preventDefault(); row.classList.add('drag-over'); });
+      row.addEventListener('dragleave',()=>{ row.classList.remove('drag-over'); });
+      row.addEventListener('drop',e=>{
+        e.preventDefault(); row.classList.remove('drag-over');
+        const dropIdx=+row.dataset.i;
+        if(dragIdx===null||dragIdx===dropIdx) return;
+        const [moved]=rows.splice(dragIdx,1);
+        rows.splice(dropIdx,0,moved);
+        dragIdx=null;
+        render(); recalc();
+      });
     });
     recalc();
   };

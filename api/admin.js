@@ -2527,13 +2527,20 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   if (delErr) throw delErr;
 
   if (items.length) {
-    const rows = items.map(it => ({
+    // sort_order = the array's index, so however the office dragged the rows
+    // into order on save is exactly how they read back next time (migration
+    // 0071 — without it, a delete-and-reinsert has no reliable original order:
+    // created_at is identical for every row in one insert, id is a random uuid).
+    const rows = items.map((it, i) => ({
       booking_id: id, business_id: biz.id,
       kind: it.kind, name: it.name,
       quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
-      taxable: it.taxable,
+      taxable: it.taxable, sort_order: i,
     }));
-    const { error: insErr } = await db.from('booking_line_items').insert(rows);
+    let { error: insErr } = await db.from('booking_line_items').insert(rows);
+    if (insErr && /sort_order/.test(insErr.message || '')) {
+      ({ error: insErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
+    }
     if (insErr) throw insErr;
   }
 
@@ -3454,6 +3461,11 @@ const isExtraSlotsErr = (e) => /extra_slots/.test((e && e.message) || '');
 let amountRefundedCol = true;
 const arCol = () => (amountRefundedCol ? ', amount_refunded' : '');
 const isAmountRefundedErr = (e) => /amount_refunded/.test((e && e.message) || '');
+// booking_line_items.sort_order (migration 0071) — same optimistic pattern, so
+// reads never break while that migration hasn't landed yet (falls back to
+// whatever order the DB naturally returns, same as before this feature existed).
+let sortOrderCol = true;
+const isSortOrderErr = (e) => /sort_order/.test((e && e.message) || '');
 function bookingSelect() {
   // The technician embeds are disambiguated by FK column (technician_id /
   // secondary_technician_id) because bookings has TWO foreign keys to
@@ -3478,12 +3490,21 @@ function bookingSelect() {
 // Run a bookings read, retrying once without the 0019 columns if they're missing.
 // makeQuery receives the select string and returns a fresh (awaitable) query.
 async function fetchBookingRows(makeQuery) {
-  let { data, error } = await makeQuery(bookingSelect());
+  // Order embedded line items by sort_order (migration 0071) so a dragged-into-
+  // order edit round-trips correctly on the next read, everywhere a booking is
+  // fetched — degrades to the DB's natural order if the column isn't there yet.
+  const run = () => {
+    let q = makeQuery(bookingSelect());
+    if (sortOrderCol) q = q.order('sort_order', { ascending: true, foreignTable: 'booking_line_items' });
+    return q;
+  };
+  let { data, error } = await run();
+  if (error && isSortOrderErr(error)) { sortOrderCol = false; ({ data, error } = await run()); }
   if (error && (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '') || isExtraSlotsErr(error) || isAmountRefundedErr(error))) {
     if (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) bookingLiftCols = false;
     if (isExtraSlotsErr(error)) extraSlotsCol = false;
     if (isAmountRefundedErr(error)) amountRefundedCol = false;
-    ({ data, error } = await makeQuery(bookingSelect()));
+    ({ data, error } = await run());
   }
   return { data, error };
 }
