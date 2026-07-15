@@ -2536,9 +2536,17 @@ function mountLineItemsEditor(b){
 let _bkStripe=null,_bkCard=null;
 function mountBkCard(b){
   const errEl=document.getElementById('bkCardErr');
-  const pk=b.stripe_pk||NB_STRIPE_KEY;
+  // NO fallback to NB_STRIPE_KEY here. b.stripe_pk (server-computed by
+  // bookingStripePk) is already correct for every business — it's never null
+  // for Handy Andy (bookingStripePk has its own built-in fallback), and it's
+  // ONLY null for a Doms booking when DOMS_STRIPE_PUBLISHABLE_KEY is unset.
+  // Falling back to the hardcoded (Handy Andy) key in that case — the
+  // original bug — would tokenize the card into the WRONG account, in
+  // exactly the "Change card" flow this session's fix tells the office to
+  // use to recover from that same failure.
+  const pk=b.stripe_pk||null;
   if(!window.Stripe){ if(errEl) errEl.textContent='Payment library not loaded. Refresh and try again.'; return; }
-  if(!pk){ if(errEl) errEl.textContent='Card entry is not set up for this business.'; return; }
+  if(!pk){ if(errEl) errEl.textContent='Card entry is not set up for this business — refresh and try again, or contact support if this persists.'; return; }
   try{ _bkStripe=window.Stripe(pk); }catch(e){ if(errEl) errEl.textContent='Could not start card entry.'; return; }
   if(_bkCard){ try{ _bkCard.unmount(); }catch(e){} }
   _bkCard=_bkStripe.elements().create('card');

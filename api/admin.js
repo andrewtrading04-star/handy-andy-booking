@@ -40,7 +40,13 @@ const GSC_BRAND_TERMS = {
 // Publishable Stripe key for the admin/tech card-on-file UIs, by business (safe
 // to expose). Handy Andy uses the main account; Doms uses its own.
 const STRIPE_PK_GLOBAL = process.env.STRIPE_PUBLISHABLE_KEY || 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
-function bookingStripePk(slug) { return slug === 'doms' ? (process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null) : STRIPE_PK_GLOBAL; }
+// Demo mode runs with no real Stripe keys at all (demoStripeResponse fakes
+// every call) — without this branch, a Doms demo session would get
+// stripe_pk:null (DOMS_STRIPE_PUBLISHABLE_KEY is never set there) and New
+// Booking/Change Card would hard-refuse card entry, breaking "click every
+// button" for a prospective buyer touring Doms. Real deployments are
+// unaffected: demoMode() is false there.
+function bookingStripePk(slug) { return (slug === 'doms' && !demoMode()) ? (process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null) : STRIPE_PK_GLOBAL; }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 
@@ -2039,7 +2045,11 @@ async function bookingCreate(req, res, db, auth, body) {
     const { error: liErr } = await db.from('booking_line_items').insert(rows);
     if (liErr) {
       console.error('[admin] line-items insert failed (booking exists):', liErr.message);
-      postInsertWarning = 'Booking was created, but its line items could not be saved — open the job and re-add them.';
+      // `||`, never a plain assignment — a prior card-save warning (money-
+      // relevant) must never be silently discarded just because line items
+      // ALSO failed to save in the same request. Matches the tax-line warning
+      // below, which already gets this right.
+      postInsertWarning = postInsertWarning || 'Booking was created, but its line items could not be saved — open the job and re-add them.';
     }
   }
 
