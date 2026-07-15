@@ -63,6 +63,16 @@
   .crit-alert a.ca-call{display:inline-block;margin-top:11px;background:#fff;color:#b91c1c;font-weight:900;text-decoration:none;padding:10px 18px;border-radius:9px;font-size:15px;}
   @keyframes critpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55);}50%{box-shadow:0 0 0 9px rgba(239,68,68,0);}}
   @media(prefers-reduced-motion:reduce){.crit-alert{animation:none;}}
+  /* Sticky nag bar: pinned across every screen while a job is still On the way /
+     In Progress past its scheduled end time. Tapping it jumps straight to that job. */
+  .overdue-bar{position:fixed;left:0;right:0;bottom:0;z-index:50;
+    max-width:520px;margin:0 auto;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    background:var(--amber);color:#3a2400;font-weight:800;font-size:13.5px;
+    display:flex;align-items:center;gap:8px;cursor:pointer;
+    box-shadow:0 -8px 20px rgba(0,0,0,.35);border-top:1px solid rgba(0,0,0,.15);}
+  .overdue-bar .ob-ic{flex:none;font-size:16px;}
+  .overdue-bar .ob-t{flex:1;min-width:0;line-height:1.35;}
+  .overdue-bar .ob-go{flex:none;font-size:12px;opacity:.8;white-space:nowrap;}
   .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:16px 18px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
   .hdr .name{font-weight:800;font-size:17px;}
   .hdr .sub{font-size:12px;color:var(--mute);}
@@ -232,6 +242,11 @@
   <div id="inventoryView" class="hidden"></div>
 
 </div>
+
+<!-- Sticky nag bar: a job still On the way/In Progress after its scheduled end
+     time. Lives outside the view-switcher (show()) so it stays pinned across
+     every screen, not just the jobs list, until the job is actually completed. -->
+<div id="overdueBar" class="overdue-bar hidden"></div>
 
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
@@ -404,7 +419,7 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
   }catch(e2){ err.textContent=e2.message; }
 });
 function logout(){ token='';tech=null; lsDel('ha_tech_token');lsDel('ha_tech_info');
-  show('login'); }
+  show('login'); renderOverdueBar(); }
 document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
@@ -483,6 +498,7 @@ async function loadWeek(){
     const d=await api('jobs',{params:{from:days[0],to:end}});
     weekJobs=d.jobs||[];
     if(d.tz) bizTz=d.tz;   // keep device in sync with the business timezone
+    renderOverdueBar();
     // Per-day counts on the calendar (grouped by business-tz date).
     const counts={};
     weekJobs.forEach(j=>{ const ds=jobLocalDate(j); counts[ds]=(counts[ds]||0)+1; });
@@ -511,6 +527,37 @@ function renderCritAlerts(){
     ${j.customer_phone?`<a class="ca-call" href="tel:${esc(j.customer_phone)}">📞 Call ${esc(j.customer_phone)}</a>`:''}
   </div>`).join('');
 }
+
+// Update a job's status in the already-loaded weekJobs array (so the sticky
+// overdue bar clears immediately, without waiting for the next full week reload)
+// and re-render the bar. Called right after a status change succeeds.
+function syncJobStatus(id,status){
+  const j=(weekJobs||[]).find(x=>x.id===id);
+  if(j) j.status=status;
+  renderOverdueBar();
+}
+
+// Sticky nag bar: pinned across every screen (see #overdueBar outside the view
+// switcher) while a job is still "On the way" or "In Progress" past its
+// scheduled end time — techs kept leaving a finished job open and moving on to
+// the next one without ever tapping Mark Complete. Purely a local re-check of
+// already-loaded weekJobs (no extra API call), so it also self-updates on the
+// 60s timer below as time passes, not just when jobs are freshly fetched.
+function renderOverdueBar(){
+  const bar=document.getElementById('overdueBar'); if(!bar) return;
+  if(!tech){ bar.classList.add('hidden'); return; }
+  const now=Date.now();
+  const overdue=(weekJobs||[])
+    .filter(j=>(j.status==='on_the_way'||j.status==='in_progress') && j.scheduled_end && new Date(j.scheduled_end).getTime()<now)
+    .sort((a,b)=>new Date(a.scheduled_end)-new Date(b.scheduled_end));
+  if(!overdue.length){ bar.classList.add('hidden'); bar.innerHTML=''; bar.onclick=null; return; }
+  const j=overdue[0];
+  const label=j.status==='on_the_way'?'still marked On the Way':'still In Progress';
+  bar.innerHTML=`<span class="ob-ic">⚠</span><span class="ob-t">${esc(j.customer_name||'A job')}'s job is ${label} past its end time — mark it complete.</span><span class="ob-go">Open →</span>`;
+  bar.classList.remove('hidden');
+  bar.onclick=()=>showDetail(j.id);
+}
+setInterval(renderOverdueBar, 60000);
 function renderDay(){
   renderCritAlerts();
   const isToday=scheduleDate===todayStr();
@@ -681,7 +728,7 @@ async function showDetail(id){
         // ETA button handler will call the actual status change
         const etaHandler=async(eta)=>{
           document.getElementById('etaModal').classList.add('hidden');
-          try{ await api('status',{method:'POST',body:{id,status:next.to,eta_minutes:eta}}); toast(next.label+' ✓'); showDetail(id); }
+          try{ await api('status',{method:'POST',body:{id,status:next.to,eta_minutes:eta}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
           catch(e){ toast(e.message); }
           document.querySelectorAll('#etaModal [data-eta]').forEach(b=>b.removeEventListener('click',etaHandler));
         };
@@ -689,7 +736,7 @@ async function showDetail(id){
           btn.addEventListener('click',()=>etaHandler(parseInt(btn.dataset.eta)));
         });
       } else {
-        try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); showDetail(id); }
+        try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
         catch(e){ toast(e.message); adv.disabled=false; }
       }
     });
