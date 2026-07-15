@@ -1147,6 +1147,10 @@
       <div id="nbCardWrap" style="display:none;">
         <div id="nbStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
         <div class="nb-card-help" style="font-size:11px;margin-top:6px;">Card is saved and charged at time of service.</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;">
+          <input type="checkbox" id="nbSkipCard" style="cursor:pointer;width:16px;height:16px;">
+          <span>Skip for now — add the card later from the job (booking still saves as Credit Card)</span>
+        </label>
       </div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
       <div class="nb-consent-row" style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;">
@@ -7867,7 +7871,14 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
   const mySession=nbModalSession;   // detect close-and-reopen-for-a-new-job while in flight
   try{
-    if(paymentMethod==='card'){
+    // Joey/Heather/Admin can book a job as "Credit Card" without having the
+    // card in hand right now — checking "Skip for now" bypasses tokenizing
+    // entirely; the booking saves with payment_method:'card' and no
+    // payment_method_id, same as if Stripe just wasn't attempted (no failure,
+    // no warning — this is an intentional, ordinary skip). Add the real card
+    // later via "Change card" on the job.
+    const skipCard=paymentMethod==='card' && !!document.getElementById('nbSkipCard')?.checked;
+    if(paymentMethod==='card' && !skipCard){
       if(!email){ openCust(); err.textContent='Email is required to save a card on file'; return; }
       try{
         await ensureNbStripe();
