@@ -606,8 +606,15 @@ async function summary(req, res, db, auth) {
     ]);
 
     const weekLastRounded = Math.round(pWeekLast);
+    // The dashboard's "This week" Profit figure is BOTH businesses combined
+    // (week_by_slug summed) — `pWeek` above is scoped to just the CURRENTLY
+    // VIEWED business, which is a different, smaller number. The trend must
+    // compare the same combined total the Profit box actually displays, or the
+    // greeting and the Profit box show two different "this week" figures.
+    const weekTotalCombined = Math.round(weekBySlug.reduce((n, [, v]) => n + v, 0));
     profit = {
       week: Math.round(pWeek),
+      week_total: weekTotalCombined,
       today: netToday.total,
       yesterday: netYesterday.total,
       week_predicted: Math.round(predictedBySlug.reduce((n, [, v]) => n + v, 0)),
@@ -618,10 +625,11 @@ async function summary(req, res, db, auth) {
       today_by_slug: netToday.bySlug,
       yesterday_by_slug: netYesterday.bySlug,
       week_predicted_by_slug: Object.fromEntries(predictedBySlug),
-      // Week-over-week realized-profit trend for the greeting sentence. null when
-      // last week had no realized profit at all — a % change off zero is meaningless.
+      // Week-over-week realized-profit trend for the greeting sentence, both
+      // sides combined across businesses. null when last week had no realized
+      // profit at all — a % change off zero is meaningless.
       week_last: weekLastRounded,
-      week_change_pct: weekLastRounded > 0 ? Math.round(((Math.round(pWeek) - weekLastRounded) / weekLastRounded) * 1000) / 10 : null,
+      week_change_pct: weekLastRounded > 0 ? Math.round(((weekTotalCombined - weekLastRounded) / weekLastRounded) * 1000) / 10 : null,
     };
 
     // Income history for the dashboard's "Income" box (owner-only, hand-entered

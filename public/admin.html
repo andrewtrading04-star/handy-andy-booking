@@ -5779,7 +5779,10 @@ function paintGreeting(){
   // flags unless something actually needs attention (unassigned job, low
   // bracket stock) — a normal day reads as just the profit line, nothing else.
   const pf=greetingData.profit||{};
-  const weekProfit=Number(pf.week)||0;
+  // week_total (both businesses combined) — NOT pf.week, which is scoped to
+  // just the currently-viewed business and would show a smaller, wrong figure
+  // than the Profit box's own "This week" total right below it.
+  const weekProfit=Number(pf.week_total)||0;
   const pct=pf.week_change_pct;
   const trendTxt = pct==null ? '' : (pct>=0 ? ` — <b class="good">up ${pct}%</b> over last week` : ` — <b class="urgent">down ${Math.abs(pct)}%</b> over last week`);
   const riskParts=[];
