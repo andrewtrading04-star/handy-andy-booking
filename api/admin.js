@@ -323,6 +323,12 @@ async function login(req, res, body) {
   if (scope !== 'all') q = q.eq('slug', scope);
   const { data: businesses, error } = await q;
   if (error) throw error;
+  // Each business's OWN Stripe publishable key (Doms has a separate Stripe
+  // account from Handy Andy) — a publishable key is safe to expose to the
+  // client. Without this, New Booking's card entry had no way to know which
+  // account to tokenize against and always used the wrong one for Doms,
+  // silently failing to save the card (booking still succeeded either way).
+  for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
   let name = displayNameFor(scope);
   // Demo: source the owner's greeting name from the DB (seeded) so it's driven by
@@ -1989,22 +1995,29 @@ async function bookingCreate(req, res, db, auth, body) {
   const reviewToken = signToken({ kind: 'review', booking_id: bRow.id }, 2592000);
   await db.from('bookings').update({ review_token: reviewToken }).eq('id', bRow.id);
 
+  // NOTE: the booking row already exists past this point. NOTHING below may
+  // throw a 500 — that would tell the office "booking failed" for a booking
+  // that EXISTS, and the natural retry double-books. Failures here are
+  // collected as a warning on the (still-200) response instead.
+  let postInsertWarning = null;
+
   // Save a tokenized card on file in Stripe so it can be charged at service time.
+  // A failure here used to be silently swallowed (console.warn only) — the
+  // booking looked completely successful (confirmation email/SMS still sent),
+  // so the office had no way to know the card never actually attached until a
+  // charge attempt failed at time of service, sometimes days later. Now it
+  // surfaces as a warning on the (still-successful) booking-create response.
   if (paymentMethod === 'card' && body.payment_method_id) {
     try {
       const ids = await saveCardOnFile(body.payment_method_id, { name: c.name, email: c.email, phone: c.phone }, biz.slug);
       if (ids) await db.from('bookings').update({
         stripe_customer_id: ids.customerId, stripe_payment_method_id: ids.pmId,
       }).eq('id', bRow.id);
-    } catch (e) { console.warn('[admin] card-on-file save failed:', e.message); }
+    } catch (e) {
+      console.warn('[admin] card-on-file save failed:', e.message);
+      postInsertWarning = `Booking was created, but the card could not be saved (${e.message}). Open the job and use "Change card" to add it before the appointment.`;
+    }
   }
-
-  // Frozen price breakdown — one line item per chosen option.
-  // NOTE: the booking row already exists past this point. NOTHING below may
-  // throw a 500 — that would tell the office "booking failed" for a booking
-  // that EXISTS, and the natural retry double-books. Failures here are
-  // collected as a warning on the (still-200) response instead.
-  let postInsertWarning = null;
   const selections = Array.isArray(body.selections) ? body.selections : [];
   if (selections.length) {
     const rows = selections.map(s => {

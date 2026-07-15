@@ -7518,15 +7518,32 @@ let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
 function nbWithTimeout(p,ms,msg){
   return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
 }
+// Doms has its OWN Stripe account, separate from Handy Andy's — a card
+// tokenized with the wrong business's publishable key creates a real Stripe
+// PaymentMethod, but in the WRONG account, so the server's attach-to-customer
+// call fails with "No such PaymentMethod" and the card silently never saves
+// (the booking itself still succeeds, so nothing looked wrong to the office).
+// `businesses[].stripe_pk` (from login()) gives the correct key per business.
+let nbStripePkUsed=null;   // which key the cached Elements instance was built with
+function currentNbStripePk(){
+  const biz=(businesses||[]).find(b=>b.slug===(current&&current.slug));
+  return (biz && biz.stripe_pk) || NB_STRIPE_KEY;
+}
 function ensureNbStripe(){
+  const pk=currentNbStripePk();
   return nbWithTimeout(new Promise((resolve,reject)=>{
-    if(nbStripeCard){ resolve(); return; }
+    if(nbStripeCard && nbStripePkUsed===pk){ resolve(); return; }
     const init=()=>{
       try{
-        nbStripe=window.Stripe(NB_STRIPE_KEY);
+        // Switched business since the card element was last built (e.g. Handy
+        // Andy -> Doms in the same session) — tear down and rebuild with the
+        // right account's key instead of silently reusing the wrong one.
+        if(nbStripeCard){ try{ nbStripeCard.unmount(); }catch(_){} nbStripeCard=null; }
+        nbStripe=window.Stripe(pk);
         nbStripeElements=nbStripe.elements();
         nbStripeCard=nbStripeElements.create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
         nbStripeCard.mount('#nbStripeCard');
+        nbStripePkUsed=pk;
         resolve();
       }catch(err){ reject(err); }
     };
