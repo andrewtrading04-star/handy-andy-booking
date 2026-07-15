@@ -365,6 +365,11 @@ async function sessionStatus(req, res) {
   if (auth.scope !== 'all') q = q.eq('slug', auth.scope);
   const { data: businesses, error } = await q;
   if (error) throw error;
+  // Same per-business Stripe publishable key login() sends — session_status is
+  // how EXISTING sessions (no fresh login) refresh their cached business list,
+  // so omitting it here would leave long-lived sessions tokenizing New Booking
+  // cards with the wrong account's key (the original Doms card-save bug).
+  for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
   const config = {
     email: demoMode() || !!process.env.RESEND_API_KEY,

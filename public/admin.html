@@ -7526,11 +7526,19 @@ function nbWithTimeout(p,ms,msg){
 // `businesses[].stripe_pk` (from login()) gives the correct key per business.
 let nbStripePkUsed=null;   // which key the cached Elements instance was built with
 function currentNbStripePk(){
-  const biz=(businesses||[]).find(b=>b.slug===(current&&current.slug));
-  return (biz && biz.stripe_pk) || NB_STRIPE_KEY;
+  const slug=current&&current.slug;
+  const biz=(businesses||[]).find(b=>b.slug===slug);
+  if(biz && biz.stripe_pk) return biz.stripe_pk;
+  // NB_STRIPE_KEY is HANDY ANDY's key — it is only ever a safe fallback for
+  // Handy Andy itself. For any other business (Doms has its own Stripe
+  // account), falling back would tokenize the card into the WRONG account and
+  // the card would silently fail to save (the original Annie bug). Better to
+  // refuse card entry outright than accept a card that can never be charged.
+  return slug==='handy-andy' ? NB_STRIPE_KEY : null;
 }
 function ensureNbStripe(){
   const pk=currentNbStripePk();
+  if(!pk) return Promise.reject(new Error('Card entry needs a refresh — press Ctrl+Shift+R (or log out and back in), then try again.'));
   return nbWithTimeout(new Promise((resolve,reject)=>{
     if(nbStripeCard && nbStripePkUsed===pk){ resolve(); return; }
     const init=()=>{
@@ -7910,7 +7918,11 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       // closed it and reopened for a different job while this request was in
       // flight, don't yank their new entry shut.
       if(mySession===nbModalSession) document.getElementById('modal').classList.add('hidden');
-      if(resp&&resp.warning) toast(resp.warning);
+      // A warning here can mean MONEY (e.g. "the card could not be saved") — a
+      // 2.4s toast stacked under "Booking created" is too easy to miss, and
+      // missing it is exactly how unpaid-job surprises happen at time of
+      // service. alert() blocks until acknowledged.
+      if(resp&&resp.warning) alert('⚠ '+resp.warning);
       toast(resp&&resp.duplicate ? 'That booking already existed — no duplicate was created' : 'Booking created');
       refreshCurrent();
     }catch(e2){ err.textContent=e2.message; }
@@ -7970,7 +7982,28 @@ function brandLogin(){
 }
 brandLogin();
 
-if(token && businesses.length) enterApp();
+// Refresh the cached session data in the background for an ALREADY-logged-in
+// session (no re-login, no UI interruption). Without this, `businesses` lives
+// in localStorage from whenever the user last typed their password — weeks ago
+// for Joey/Heather — so server-side additions to it (like each business's own
+// stripe_pk, the Doms card-save fix) would silently never reach long-lived
+// sessions. Only refreshes data; never re-enters the app or touches the view.
+async function refreshSessionCache(){
+  try{
+    const d=await api('session_status');
+    if(d && Array.isArray(d.businesses) && d.businesses.length){
+      businesses=d.businesses;
+      appConfig=d.config||appConfig;
+      // Re-point `current` at the refreshed row (same slug) so it also carries
+      // the new fields; renderSwitcher/business lookups all key off slug.
+      if(current){ const cur=businesses.find(b=>b.slug===current.slug); if(cur) current=cur; }
+      lsSet('ha_admin_biz',JSON.stringify(businesses));
+      lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
+    }
+  }catch{ /* offline or expired token — existing 401 handling covers it */ }
+}
+
+if(token && businesses.length){ enterApp(); refreshSessionCache(); }
 else tryAutoLogin();
 </script>
 </body>
