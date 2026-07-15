@@ -2785,7 +2785,7 @@ function openChargeFlowAdmin(b){
       </div>
       <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);max-width:520px;margin:0 auto;width:100%;box-sizing:border-box;">
         <button class="btn ghost" data-x>Cancel</button>
-        <button class="btn" data-next style="flex:1;">Continue to signature →</button>
+        <button class="btn" data-next style="flex:1;">Continue to tip →</button>
       </div>`;
     } else if(step===2){
       ov.innerHTML=`
@@ -2832,8 +2832,18 @@ function openChargeFlowAdmin(b){
   }
   function wire(){
     const x=ov.querySelector('[data-x]'); if(x) x.onclick=done;
-    const back=ov.querySelector('[data-back]'); if(back) back.onclick=()=>{ step--; render(); };
-    const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step++; render(); };
+    // Step 2 (signature) is no longer in the forward path (see data-next below),
+    // so "Back" from the tip screen must jump straight to step 1, not land on
+    // the orphaned signature screen.
+    const back=ov.querySelector('[data-back]'); if(back) back.onclick=()=>{ step=(step===3?1:step-1); render(); };
+    // Every admin-dashboard login is Andrew, Heather, or Joey (owner/secretary
+    // roles are the only ones that reach this screen) — a signature from the
+    // office charging on the business's own behalf was never the point; it
+    // existed for a customer present in person. Skips straight from the ticket
+    // review to tip, same as the old Zenbooker flow. sigData stays null and
+    // signerName stays custName, matching exactly what "Skip signature (phone
+    // order)" already sent — this is that same, now-default, path.
+    const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step=3; render(); };
     ov.querySelectorAll('[data-tip]').forEach(bn=>bn.onclick=()=>{ tip=Number(bn.dataset.tip)||0; render(); });
     const cust=ov.querySelector('#cfCustom'); if(cust) cust.oninput=()=>{ tip=Math.max(0,Number(cust.value)||0); const t=ov.querySelector('#cfTotal'); if(t) t.textContent=money(total()); const cb=ov.querySelector('#cfCharge'); if(cb) cb.textContent='Charge '+money(total()); };
     const charge=ov.querySelector('#cfCharge'); if(charge) charge.onclick=()=>submit();
