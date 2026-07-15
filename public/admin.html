@@ -778,6 +778,7 @@
   .greet-line{font-size:13.5px;line-height:1.6;opacity:.94;}
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-line b.urgent{color:#ff8a8a;}
+  .greet-line b.good{color:#5ef0a0;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
   /* Row 1 (revenue/predicted/avg-ticket) stays equal-height, sized by the chart;
@@ -5629,6 +5630,7 @@ async function renderGreeting(){
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
       jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
+      unassigned: (s.counts && s.counts.unassigned) || 0,
       estimates: newEst,
       photosToPost: (s.counts && s.counts.photos_to_post) || 0,
       brackets: role==='owner' ? bracketPending.reduce((sum,p)=>sum+p.total,0) : 0,
@@ -5771,9 +5773,25 @@ function paintGreeting(){
   // Heather (Handy Andy) doesn't make review calls — omit that clause for her.
   // scope, not userName, is the reliable per-login signal (see the same check
   // already used to hide the Review Calls nav item / skip the API call above).
-  const summarySentence = scope==='handy-andy'
-    ? `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today and ${estPart}.`
-    : `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
+  // Owner sees a different line entirely — he doesn't call customers or answer
+  // estimates, so those clauses are meaningless to him. Leads with this week's
+  // realized profit + its trend vs last week, then stays QUIET on jobs/risk
+  // flags unless something actually needs attention (unassigned job, low
+  // bracket stock) — a normal day reads as just the profit line, nothing else.
+  const pf=greetingData.profit||{};
+  const weekProfit=Number(pf.week)||0;
+  const pct=pf.week_change_pct;
+  const trendTxt = pct==null ? '' : (pct>=0 ? ` — <b class="good">up ${pct}%</b> over last week` : ` — <b class="urgent">down ${Math.abs(pct)}%</b> over last week`);
+  const riskParts=[];
+  if(greetingData.unassigned>0) riskParts.push(`<b class="urgent">${greetingData.unassigned}</b> unassigned`);
+  if(greetingData.lowStockTechs>0) riskParts.push(`<b class="urgent">${greetingData.lowStockTechs}</b> tech${greetingData.lowStockTechs===1?'':'s'} low on bracket stock`);
+  const ownerRiskTxt = riskParts.length ? `, ${jobsPart} today — ${riskParts.join(', ')}` : `, ${jobsPart} today`;
+  const ownerSentence = `This week's profit is <b>${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}.`;
+  const summarySentence = role==='owner'
+    ? ownerSentence
+    : scope==='handy-andy'
+      ? `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today and ${estPart}.`
+      : `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+

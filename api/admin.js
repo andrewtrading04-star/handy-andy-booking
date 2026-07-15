@@ -574,20 +574,38 @@ async function summary(req, res, db, auth) {
       return [bb.slug, Math.round(active.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
     }));
 
+    // Realized profit for the week BEFORE the viewed one — same "completed AND
+    // paid" definition as pWeek, just shifted back 7 days — so the greeting can
+    // show a week-over-week % change. Summed across ALL businesses like pWeek.
+    const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const lastWeekEnd = weekStart;
+    const lastWeekProfitP = Promise.all((allBiz || []).map(async (bb) => {
+      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+        .eq('business_id', bb.id)
+        .gte('scheduled_at', lastWeekStart.toISOString())
+        .lt('scheduled_at', lastWeekEnd.toISOString()));
+      const paid = earned(rows);
+      if (!paid.length) return 0;
+      const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
+      return paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0);
+    })).then(parts => parts.reduce((a, b) => a + b, 0));
+
     // All of the above are independent — resolve them concurrently.
     // "today"/"yesterday" and net_daily/net_daily_yesterday are the SAME metric
     // (realized profit for that day) — netDailyFor already computes it correctly
     // across both businesses (and reuses the already-fetched today/yRows rows for
     // this one), so today/yesterday are just its totals, not a separate query.
-    const [pWeek, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug] = await Promise.all([
+    const [pWeek, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug, pWeekLast] = await Promise.all([
       sumProfit(paidDoneWeek),
       weekBySlugP,
       avgBySlugP,
       netDailyFor(0),
       netDailyFor(-1),
       predictedBySlugP,
+      lastWeekProfitP,
     ]);
 
+    const weekLastRounded = Math.round(pWeekLast);
     profit = {
       week: Math.round(pWeek),
       today: netToday.total,
@@ -600,6 +618,10 @@ async function summary(req, res, db, auth) {
       today_by_slug: netToday.bySlug,
       yesterday_by_slug: netYesterday.bySlug,
       week_predicted_by_slug: Object.fromEntries(predictedBySlug),
+      // Week-over-week realized-profit trend for the greeting sentence. null when
+      // last week had no realized profit at all — a % change off zero is meaningless.
+      week_last: weekLastRounded,
+      week_change_pct: weekLastRounded > 0 ? Math.round(((Math.round(pWeek) - weekLastRounded) / weekLastRounded) * 1000) / 10 : null,
     };
 
     // Income history for the dashboard's "Income" box (owner-only, hand-entered
