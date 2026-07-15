@@ -78,6 +78,9 @@
   .side-nav button:hover{background:var(--line2);}
   .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
   .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
+  .nav-badge.urgent{background:#dc2626;animation:navbadgepulse 1.6s ease-in-out infinite;}
+  @keyframes navbadgepulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}50%{box-shadow:0 0 0 5px rgba(220,38,38,0);}}
+  @media(prefers-reduced-motion:reduce){.nav-badge.urgent{animation:none;}}
 
   .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
   .side-list{display:flex;flex-direction:column;gap:1px;padding:0 8px;}
@@ -316,6 +319,16 @@
   .est-approval.not-approved{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;}
   .est-approval-addons{margin-top:6px;font-size:12.5px;font-weight:700;color:#15803d;line-height:1.4;}
   .est-approval-addons b{color:#0f172a;}
+  /* Estimate aging: a "Needs Response" card past EST_STALE_MINUTES turns red and
+     pulses, with its age pill flipping from a grey "X ago" to "respond now". */
+  .est-toprow{display:flex;align-items:flex-start;gap:8px;}
+  .est-toprow .name{flex:1;min-width:0;}
+  .age-pill{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;flex:none;margin-top:1px;}
+  .age-pill.ok{background:var(--line2);color:var(--mute);}
+  .age-pill.stale{background:#dc2626;color:#fff;}
+  .job.est-card.stale{border-color:#fca5a5;background:#fff6f6;box-shadow:0 0 0 1px #fecaca;animation:estcardpulse 2.4s ease-in-out infinite;}
+  @keyframes estcardpulse{0%,100%{box-shadow:0 0 0 1px #fecaca;}50%{box-shadow:0 0 0 4px rgba(239,68,68,.15);}}
+  @media(prefers-reduced-motion:reduce){.job.est-card.stale{animation:none;}}
   /* ── New Booking: recommend add-ons popover ── */
   .nb-ups{position:relative;margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 34px rgba(15,23,42,.16);padding:15px;animation:nbUpsIn .16s ease;}
   .nb-ups.hidden{display:none;}
@@ -764,6 +777,7 @@
   .greet-hi{font-size:21px;font-weight:800;letter-spacing:.2px;margin-bottom:5px;}
   .greet-line{font-size:13.5px;line-height:1.6;opacity:.94;}
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
+  .greet-line b.urgent{color:#ff8a8a;}
   .greet-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:#fff;}
   .greet-link:hover{opacity:.85;}
   /* Row 1 (revenue/predicted/avg-ticket) stays equal-height, sized by the chart;
@@ -4720,6 +4734,14 @@ function estAgeDays(e){ return e&&e.created_at ? (Date.now()-new Date(e.created_
 function isNotApproved(e){ return e && e.status==='contacted' && !e.approved_at && estAgeDays(e)>=NOT_APPROVED_DAYS; }
 // Status colors: Needs Response = red, Estimate sent = black, Estimate approved = blue.
 const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
+// A "Needs Response" (status 'new') estimate nobody has touched in this long is
+// STALE — the single definition the sidebar badge, the dashboard banner, and the
+// greeting sentence all key off, so they can never disagree with each other or
+// with the estimate card's own age pill.
+const EST_STALE_MINUTES = 60;
+function estAgeMinutes(e){ return e&&e.created_at ? (Date.now()-new Date(e.created_at).getTime())/60000 : 0; }
+function isStaleEstimate(e){ return e && e.status==='new' && estAgeMinutes(e)>=EST_STALE_MINUTES; }
+function fmtWaitMinutes(mins){ mins=Math.max(0,Math.round(mins)); const h=Math.floor(mins/60), m=mins%60; return h>0?`${h}h${m?` ${m}m`:''}`:`${m}m`; }
 let estFilter = 'all';
 let estCache = {};   // id -> estimate row, so the quote modal can open without a refetch
 const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
@@ -4827,11 +4849,17 @@ function estCard(e){
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
       : `<div class="est-approval waiting">⏳ Waiting on approval</div>`);
-  return `<div class="job est-card" data-status="${esc(e.status)}">
+  // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
+  // same threshold as the sidebar badge / dashboard banner / greeting sentence.
+  const stale=isStaleEstimate(e);
+  const agePill = e.status==='new'
+    ? `<span class="age-pill ${stale?'stale':'ok'}">${stale?`⚠ ${fmtWaitMinutes(estAgeMinutes(e))} — respond now`:`${fmtWaitMinutes(estAgeMinutes(e))} ago`}</span>`
+    : '';
+  return `<div class="job est-card${stale?' stale':''}" data-status="${esc(e.status)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
         ${receivedBadge}
-        <div class="name">${esc(e.service_label||'Estimate request')}</div>
+        <div class="est-toprow"><div class="name">${esc(e.service_label||'Estimate request')}</div>${agePill}</div>
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
         ${hasQuote ? '' : `<div class="est-desc">${esc(e.description||'')}</div>`}
         ${slotChips}
@@ -5051,13 +5079,38 @@ async function sendEstimateMessage(estimateId, type, btn){
   }
 }
 
-// Lightweight unread-count badge for the sidebar (status = new).
+// Stale ('new', unattended EST_STALE_MINUTES+) estimate info — populated by
+// refreshEstimateBadge() below and read by the sidebar badge, the dashboard
+// critical-alert banner, and the greeting sentence, so all three always agree.
+// oldestCreatedAt (not a precomputed age) so the displayed wait time stays
+// accurate across the greeting's 30s local repaint (see startGreetingClock).
+let estStale = { count:0, oldestCreatedAt:null, oldestName:'', oldestPhone:'' };
+function estStaleWaitMinutes(){ return estStale.oldestCreatedAt ? (Date.now()-new Date(estStale.oldestCreatedAt).getTime())/60000 : 0; }
+
+// Lightweight unread-count badge for the sidebar (status = new). Turns urgent
+// (red, pulsing) the moment any of those estimates has gone unanswered past
+// EST_STALE_MINUTES, so it keeps nagging on every page, not just the home screen.
 async function refreshEstimateBadge(){
+  // Guard against a fast business switch: if the user has already moved off
+  // `slugAtCall` by the time this resolves, a slow response for the OLD business
+  // must never overwrite estStale/the badge with the wrong business's customer
+  // name/phone — just drop it, since the switch itself already triggered a fresh
+  // call for the new business that will land moments later.
+  const slugAtCall=current&&current.slug;
   try{
-    const d=await api('estimates',{ params:{ business:current.slug, status:'new' }});
-    const n=(d.estimates||[]).length;
+    const d=await api('estimates',{ params:{ business:slugAtCall, status:'new' }});
+    if(!current || current.slug!==slugAtCall) return 0;
+    const rows=d.estimates||[];
+    const n=rows.length;
+    const staleRows=rows.filter(isStaleEstimate).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+    estStale = staleRows.length
+      ? { count:staleRows.length, oldestCreatedAt:staleRows[0].created_at, oldestName:staleRows[0].customer_name||'Customer', oldestPhone:staleRows[0].customer_phone||'' }
+      : { count:0, oldestCreatedAt:null, oldestName:'', oldestPhone:'' };
     const badge=document.getElementById('estBadge');
-    if(badge){ badge.textContent=n; badge.style.display=n?'inline-block':'none'; }
+    if(badge){
+      badge.textContent=n; badge.style.display=n?'inline-block':'none';
+      badge.classList.toggle('urgent', estStale.count>0);
+    }
     return n;
   }catch{ return 0; }
 }
@@ -5632,6 +5685,26 @@ function estimateAlertHtml(){
     </div>
   </div>`).join('');
 }
+// New-estimate reminder banner: fires once any 'new' (Needs Response) estimate
+// has gone EST_STALE_MINUTES without a response. Reuses the exact .crit-alert
+// component the address/approved-estimate alerts already use, so it reads as
+// "this matters" the same way those do. Auto-clears the moment she acts on it
+// (build a quote / send it — anything that flips status off 'new').
+function staleEstimateAlertHtml(){
+  if(!estStale.count) return '';
+  const waitTxt=fmtWaitMinutes(estStaleWaitMinutes());
+  const body = estStale.count>1
+    ? `<strong>${estStale.count} estimates</strong> are waiting on a response — the oldest, <strong>${esc(estStale.oldestName)}</strong>, for <strong>${waitTxt}</strong>.`
+    : `<strong>${esc(estStale.oldestName)}</strong>'s estimate has been waiting <strong>${waitTxt}</strong> for a response.`;
+  return `<div class="crit-alert">
+    <div class="ca-h">⚠ Estimate needs a response</div>
+    <div class="ca-b">${body}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${estStale.oldestPhone?`<a class="ca-call" href="tel:${esc(estStale.oldestPhone)}">📞 Call ${esc(estStale.oldestPhone)}</a>`:''}
+      <button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="goToEstimates()">📋 Go to estimate →</button>
+    </div>
+  </div>`;
+}
 function goToEstimates(){ const b=document.querySelector('[data-nav="estimates"]'); if(b) b.click(); }
 function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
 function getTimeGreeting(name, tz) {
@@ -5682,9 +5755,12 @@ function paintGreeting(){
   // (Joey works both). Estimate/call counts stay clickable (existing data-goest /
   // data-gocalls wiring below already expects these spans).
   const jobsPart = jobs===0 ? `no jobs` : `<b>${jobs}</b> job${jobs===1?'':'s'}`;
+  // Turns urgent (red) once one of them has gone unanswered past EST_STALE_MINUTES
+  // — same estStale data driving the sidebar badge and the crit-alert banner.
+  const estUrgent = estStale.count>0;
   const estPart = est===0
     ? `no estimates that need to be responded to`
-    : `<b>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} to be responded to`;
+    : `<b${estUrgent?' class="urgent"':''}>${est}</b> <span class="greet-link" data-goest="1">estimate${est===1?'':'s'}</span> that need${est===1?'s':''} to be responded to${estUrgent?` — <b class="urgent">${fmtWaitMinutes(estStaleWaitMinutes())} old</b>`:''}`;
   const callsPart = calls===0
     ? `no review phone calls to make`
     : `<b>${calls}</b> <span class="greet-link" data-gocalls="1">review phone call${calls===1?'':'s'}</span> to make`;
@@ -5697,6 +5773,7 @@ function paintGreeting(){
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
+    staleEstimateAlertHtml()+
     `<div class="greet-hi">${hi}</div>`+
     `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
     `<div class="greet-line">${summarySentence}</div>`+
