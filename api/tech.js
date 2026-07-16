@@ -812,12 +812,22 @@ async function status(req, res, db, auth, body) {
     const otwBase = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
     const otwStatusCallback = `${otwBase}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;
-    sendSMSResult(existing.customer.phone, msg, { statusCallback: otwStatusCallback }).then(r => {
+    // Awaited, not fire-and-forget: Vercel can freeze the lambda the instant
+    // the HTTP response goes out, so a .then()-only send (as this was) could
+    // simply never run — the text, and its delivery-tracking write, silently
+    // never happened. The status change itself is already saved above by this
+    // point, so awaiting here only adds a beat to the tech's "On My Way ✓"
+    // response, never risks losing the status update. Any failure is caught
+    // and logged, same as before — never surfaced to the tech.
+    try {
+      const r = await sendSMSResult(existing.customer.phone, msg, { statusCallback: otwStatusCallback });
       const patch = r.ok
         ? { on_the_way_sms_status: 'pending', on_the_way_sms_sent_at: new Date().toISOString() }
         : { on_the_way_sms_status: 'failed', on_the_way_sms_sent_at: new Date().toISOString() };
-      return db.from('bookings').update(patch).eq('id', id);
-    }).catch(console.error);
+      await db.from('bookings').update(patch).eq('id', id);
+    } catch (e) {
+      console.error('[on_the_way sms]', e.message);
+    }
   }
 
   // On completion: send the branded review-request email immediately, and an SMS
