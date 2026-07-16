@@ -1027,6 +1027,17 @@ async function jobPayment(req, res, db, auth, body) {
   }
 
   if (act === 'charge') {
+    // The office has this same guard (api/admin.js bookingPayment) — the tech
+    // app never had it, so a double-tap, a timed-out retry, or the office
+    // charging the same job at the same moment from the dashboard could each
+    // create a SECOND real charge. Re-read fresh rather than trusting `b`
+    // (fetched at the top of this handler, so a moment stale).
+    {
+      const { data: fresh } = await db.from('bookings').select('payment_status').eq('id', id).maybeSingle();
+      if (fresh && fresh.payment_status === 'paid') {
+        return res.status(400).json({ error: 'This job is already paid.' });
+      }
+    }
     if (!stripeConfigured(acct)) {
       console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} -> payments NOT configured for this account`);
       return res.status(400).json({ error: `Card payments aren't set up on the server for ${b.business?.name || slug || 'this business'}. Take cash and tap "Mark paid (cash)".` });
@@ -1060,7 +1071,13 @@ async function jobPayment(req, res, db, auth, body) {
 
     let pi;
     try {
-      pi = await stripe('/payment_intents', { ...acct, body: {
+      // Keyed on job id + exact charge amount: a true retry (double-tap, a
+      // timed-out request the tech resubmits) has the SAME total and replays
+      // this same PaymentIntent instead of charging twice. A genuinely
+      // different subsequent attempt (e.g. a different tip after a decline)
+      // has a different total, so it correctly gets a fresh key/new intent.
+      const idempotencyKey = `job-charge-${id}-${Math.round(total * 100)}`;
+      pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
         amount: Math.round(total * 100), currency: 'usd',
         customer: custId, payment_method: pmId, off_session: true, confirm: true,
         description: `Job ${id}`, metadata: { job_id: id, tip: String(tip) },

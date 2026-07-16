@@ -77,7 +77,7 @@ function toForm(obj) {
 // Low-level call. `path` may include a query string for GET requests.
 // `account` (explicit) or `slug` (legacy) selects the Stripe account; omit both
 // for the global account.
-export async function stripe(path, { method = 'POST', body = null, slug = null, account = null } = {}) {
+export async function stripe(path, { method = 'POST', body = null, slug = null, account = null, idempotencyKey = null } = {}) {
   // Demo mode: return a believable fake instead of calling Stripe.
   if (demoMode()) return demoStripeResponse(path, method, body);
   // 15s cap per Stripe call. These run inside booking/charge request handlers;
@@ -89,7 +89,15 @@ export async function stripe(path, { method = 'POST', body = null, slug = null, 
   try {
     res = await fetch(STRIPE_API + path, {
       method,
-      headers: { Authorization: `Bearer ${secretKey({ account, slug })}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        Authorization: `Bearer ${secretKey({ account, slug })}`, 'Content-Type': 'application/x-www-form-urlencoded',
+        // A caller passes this on a charge-creating call so a client-side retry
+        // (timeout, double-tap) with the SAME amount replays the original
+        // PaymentIntent instead of creating a second real charge. Stripe scopes
+        // idempotency keys per API key, so this is safe to reuse the same string
+        // across accounts/customers.
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
       body: body ? toForm(body) : undefined,
       signal: ctrl.signal,
     });
