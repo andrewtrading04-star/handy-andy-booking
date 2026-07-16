@@ -704,6 +704,14 @@ async function status(req, res, db, auth, body) {
   if (STATUS_RANK[next] < (STATUS_RANK[existing.status] ?? 0)) {
     return res.status(409).json({ error: `This job has already moved past "${next.replace(/_/g, ' ')}" (it's currently ${existing.status.replace(/_/g, ' ')}) — refresh to see its latest status.` });
   }
+  // Same-status replay (a laggy double-tap, a stale second tab re-tapping the
+  // action the job is already in): succeed idempotently WITHOUT re-running any
+  // side effects. Without this, the rank check above (strictly <) let an exact
+  // replay through, and the on_the_way branch below — which has no once-guard
+  // of its own — would text the customer a duplicate en-route SMS.
+  if (next === existing.status) {
+    return res.status(200).json({ ok: true, status: next });
+  }
 
   // Gate completion on photo documentation (also enforced in the UI).
   if (next === 'completed') {
@@ -970,8 +978,16 @@ async function jobCardUpdate(req, res, db, auth, body) {
   const patch = { stripe_payment_method_id: pmId };
   if (r.customerId) patch.stripe_customer_id = r.customerId;
   if (b.payment_status !== 'card_on_file') patch.payment_status = 'card_on_file';
-  const { error: upErr } = await db.from('bookings').update(patch).eq('id', id);
+  // CAS on the payment_status we READ, not a blind write: the 'charging' guard
+  // above is a plain read, and the seconds-long Stripe call between it and
+  // here is exactly wide enough for a charge to acquire its lock (or a cash
+  // mark to land). Writing payment_status from the stale read would clobber
+  // that. Zero rows updated = the state moved under us — the card IS attached
+  // in Stripe (safe to redo), so a refresh-and-retry resolves it cleanly.
+  const { data: upRow, error: upErr } = await db.from('bookings').update(patch)
+    .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
   if (upErr) throw upErr;
+  if (!upRow) return res.status(409).json({ error: 'The payment state changed while saving the card (a charge may be in progress) — refresh the job and try again.' });
   return res.status(200).json({ ok: true });
 }
 
@@ -1031,7 +1047,7 @@ async function jobPayment(req, res, db, auth, body) {
   // optimistically and drop it if the column is missing, so charging never
   // breaks on deploy order (absent -> undefined -> legacy slug behavior).
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, business_id, price, tip, payment_status, scheduled_at, address_line1, city, state, postal_code, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+    .select(`id, business_id, price, tip, payment_status, updated_at, scheduled_at, address_line1, city, state, postal_code, ${techHasStripeAcctCol ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              business:businesses ( slug, name ),
              customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
     .eq('id', id).maybeSingle();
@@ -1046,13 +1062,25 @@ async function jobPayment(req, res, db, auth, body) {
   const acct = { account: b.stripe_account || null, slug };
   const now = new Date().toISOString();
 
-  if (act === 'mark_paid') {
-    await db.from('bookings').update({ payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'paid' });
-  }
-  if (act === 'mark_unpaid') {
-    await db.from('bookings').update({ payment_status: 'unpaid', paid_at: null }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'unpaid' });
+  // Fresh 'charging' lock = a real charge is mid-flight (maybe from the
+  // office) — marking over it would double-collect (cash recorded + the
+  // in-flight card charge still lands). Stale lock = crashed charge; the mark
+  // is the escape hatch and passes through. CAS write so a state change in
+  // the gap 409s instead of clobbering. Mirrors api/admin.js bookingPayment.
+  if (act === 'mark_paid' || act === 'mark_unpaid') {
+    if (b.payment_status === 'charging') {
+      const lockAgeMs = Date.now() - new Date(b.updated_at || 0).getTime();
+      if (lockAgeMs < 2 * 60 * 1000) {
+        return res.status(409).json({ error: 'This job is being charged right now — wait a moment and check whether the charge went through before marking it.' });
+      }
+    }
+    const patch = act === 'mark_paid'
+      ? { payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }
+      : { payment_status: 'unpaid', paid_at: null };
+    const { data: updated } = await db.from('bookings').update(patch)
+      .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
+    if (!updated) return res.status(409).json({ error: 'The payment state just changed (maybe a charge finished) — refresh and check before marking it.' });
+    return res.status(200).json({ ok: true, payment_status: patch.payment_status });
   }
 
   // Refunds are office-only. Techs must never issue refunds (owner request), so
@@ -1134,12 +1162,17 @@ async function jobPayment(req, res, db, auth, body) {
 
       let pi;
       try {
-        // Keyed on job id + exact charge amount: a true retry (double-tap, a
-        // timed-out request the tech resubmits) has the SAME total and replays
-        // this same PaymentIntent instead of charging twice. A genuinely
-        // different subsequent attempt (e.g. a different tip after a decline)
-        // has a different total, so it correctly gets a fresh key/new intent.
-        const idempotencyKey = `job-charge-${id}-${Math.round(total * 100)}`;
+        // Keyed on booking id + exact amount + the CARD being charged, with the
+        // SAME 'charge-' prefix the office path uses (api/admin.js): a true
+        // retry (double-tap, a timed-out request resubmitted — from EITHER app)
+        // has the same key and replays the same PaymentIntent instead of
+        // charging twice. Changing the amount (different tip) OR the card
+        // (customer hands over a new one after a decline) changes the key, so
+        // a genuinely new attempt is never blocked by Stripe's replay cache.
+        // Known residual: retrying the SAME card at the SAME total within 24h
+        // of a decline replays the cached decline — nudge the tip a cent or
+        // take cash if a customer insists the same card will work now.
+        const idempotencyKey = `charge-${id}-${Math.round(total * 100)}-${String(pmId).slice(-8)}`;
         pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
           amount: Math.round(total * 100), currency: 'usd',
           customer: custId, payment_method: pmId, off_session: true, confirm: true,
@@ -1154,10 +1187,25 @@ async function jobPayment(req, res, db, auth, body) {
       }
       const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
 
-      await db.from('bookings').update({
+      // The money has MOVED at this point — this write is also the lock
+      // release, so its error can't be ignored (supabase returns errors, it
+      // doesn't throw): an unnoticed failure would 200 "paid" while the row
+      // stays stuck on 'charging', blocking every retry/card-change/completion.
+      const paidPatch = {
         payment_status: 'paid', paid_at: now, amount_paid: total, tip,
         stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
-      }).eq('id', id);
+      };
+      let { error: payErr } = await db.from('bookings').update(paidPatch).eq('id', id);
+      if (payErr) ({ error: payErr } = await db.from('bookings').update(paidPatch).eq('id', id));   // one retry for a transient blip
+      if (payErr) {
+        // Still failing: free the lock with the minimal possible write so the
+        // job isn't stuck, and surface a loud warning — NEVER report failure
+        // (a "failed" message would invite a retry of a charge that succeeded).
+        const { error: fbErr } = await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id);
+        console.error('[tech charge] CRITICAL: Stripe charge succeeded but booking update failed', { booking: id, pi: pi.id, err: payErr.message, minimal_write_ok: !fbErr });
+        return res.status(200).json({ ok: true, payment_status: 'paid', amount: total, tip, payment_intent_id: pi.id,
+          warning: `The charge WENT THROUGH on Stripe ($${total.toFixed(2)}), but saving it to the job failed: ${payErr.message}. Do NOT charge again — tell the office to reconcile this job.` });
+      }
 
       // Freeze the signed authorization as chargeback evidence. Best-effort: the
       // money already moved, so a storage hiccup must never fail the charge.

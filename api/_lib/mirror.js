@@ -138,9 +138,23 @@ export async function mirrorBooking(ctx = {}) {
         bookingRow.metadata = { ...(prev.metadata || {}), ...bookingRow.metadata }; // merge, preserve prior stamps
         hadReviewToken = !!prev.review_token;
       }
-      const { data } = await db.from('bookings')
+      let up = await db.from('bookings')
         .upsert(bookingRow, { onConflict: 'business_id,zenbooker_job_id' }).select('id').single();
-      booking_id = data?.id || null;
+      if (isTechSlotRaceErr(up.error)) {
+        // Same tech/slot race handling as the two insert branches below — a
+        // Zenbooker job whose auto-assigned tech collides with an existing
+        // non-cancelled booking at that instant (bookings_tech_slot_unique)
+        // must fall back to unassigned, not silently lose the mirror (the
+        // upsert's error was previously discarded entirely, so this branch
+        // was the one place the 0073 index could eat a booking).
+        console.warn('[mirror] tech/slot race lost (zenbooker upsert), booking unassigned instead:', up.error.message);
+        technician_id = null;
+        bookingRow.technician_id = null;
+        if (bookingRow.status === 'assigned') bookingRow.status = 'confirmed';
+        up = await db.from('bookings')
+          .upsert(bookingRow, { onConflict: 'business_id,zenbooker_job_id' }).select('id').single();
+      }
+      booking_id = up.data?.id || null;
     } else if (ctx.idempotency_key) {
       // Native bookings: a retried submit (same key) must not duplicate. The
       // idempotency index is PARTIAL (…WHERE idempotency_key IS NOT NULL), which

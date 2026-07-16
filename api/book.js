@@ -450,7 +450,10 @@ async function bookDoms(req, res) {
   return res.status(200).json({
     success: true,
     booking_id: bookingId, job_id: bookingId,
-    status: technician_id ? 'assigned' : 'confirmed',
+    // From the mirror RESULT, not the locally-picked tech: if this exact
+    // tech+slot lost a race to a concurrent booking, mirrorBooking inserted
+    // the booking unassigned ('confirmed') and the response must say so.
+    status: result.technician_id ? 'assigned' : 'confirmed',
     card_saved: paymentStatus === 'card_on_file',
   });
 }
@@ -680,7 +683,10 @@ async function bookHandyAndy(req, res) {
   return res.status(200).json({
     success: true,
     booking_id: bookingId, job_id: bookingId,
-    status: technician_id ? 'assigned' : 'confirmed',
+    // From the mirror RESULT, not the locally-picked tech: if this exact
+    // tech+slot lost a race to a concurrent booking, mirrorBooking inserted
+    // the booking unassigned ('confirmed') and the response must say so.
+    status: result.technician_id ? 'assigned' : 'confirmed',
     card_saved: paymentStatus === 'card_on_file',
   });
 }

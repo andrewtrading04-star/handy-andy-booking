@@ -37,6 +37,21 @@ export function smsConfigured() {
   return demoMode() || simpleTextingConfigured() || twilioConfigured();
 }
 
+// Hard cap on how long a provider call may hang. Sends are now AWAITED on the
+// tech app's status path (repair #9), so an unresponsive provider would
+// otherwise hold that HTTP response open until Vercel kills the function —
+// the tech would see "failed" for a status change that already committed.
+// 10s is generous for a normal send; an abort is reported as ok:false so the
+// booking records sms_status 'failed' exactly like any other provider error.
+const SMS_TIMEOUT_MS = 10000;
+function smsTimeoutSignal() {
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), SMS_TIMEOUT_MS);
+  // Don't let the timer keep the lambda alive after a fast response.
+  if (typeof t.unref === 'function') t.unref();
+  return c.signal;
+}
+
 // SimpleTexting API v2 — single outbound message. The endpoint + body live here
 // only; confirm the exact request against the live example in your SimpleTexting
 // dashboard (Settings → API) on the first test, and adjust this one function if
@@ -44,6 +59,7 @@ export function smsConfigured() {
 async function sendViaSimpleTexting(to, message) {
   const res = await fetch('https://api-app2.simpletexting.com/v2/api/messages', {
     method: 'POST',
+    signal: smsTimeoutSignal(),
     headers: {
       Authorization: `Bearer ${process.env.SIMPLETEXTING_API_KEY}`,
       'Content-Type': 'application/json',
@@ -73,6 +89,7 @@ async function sendViaTwilio(to, message, statusCallback) {
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: 'POST',
+    signal: smsTimeoutSignal(),
     headers: { Authorization: `Basic ${auth}` },
     body: formData,
   });

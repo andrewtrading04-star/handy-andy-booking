@@ -2657,8 +2657,13 @@ async function bookingCardUpdate(req, res, db, auth, body) {
   const patch = { stripe_payment_method_id: pmId };
   if (r.customerId) patch.stripe_customer_id = r.customerId;
   if (b.payment_status !== 'card_on_file') patch.payment_status = 'card_on_file';
-  const { error: upErr } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
+  // CAS on the payment_status we READ — see api/tech.js jobCardUpdate for why:
+  // the 'charging' guard above is a plain read, and a charge can acquire its
+  // lock during the seconds-long Stripe call between it and this write.
+  const { data: upRow, error: upErr } = await db.from('bookings').update(patch)
+    .eq('id', id).eq('business_id', biz.id).eq('payment_status', b.payment_status).select('id').maybeSingle();
   if (upErr) throw upErr;
+  if (!upRow) return res.status(409).json({ error: 'The payment state changed while saving the card (a charge may be in progress) — refresh the booking and try again.' });
   return res.status(200).json({ ok: true });
 }
 
@@ -2679,7 +2684,7 @@ async function bookingPayment(req, res, db, auth, body) {
   // stripe_account (migration 0032) may not be applied yet — select it
   // optimistically and fall back without it so charging never breaks on deploy
   // order. Absent column -> b.stripe_account undefined -> legacy slug behavior.
-  const payCols = (withAcct) => `id, price, payment_status, ${withAcct ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
+  const payCols = (withAcct) => `id, price, payment_status, updated_at, ${withAcct ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
              customer:customers ( id, name, email, phone, stripe_customer_id )`;
   let { data: b, error } = await db.from('bookings').select(payCols(true)).eq('id', id).eq('business_id', biz.id).single();
   if (error && missingColumn(error.message) === 'stripe_account') {
@@ -2695,13 +2700,29 @@ async function bookingPayment(req, res, db, auth, body) {
   const now = new Date().toISOString();
 
   // Manual states — no Stripe involved (e.g. paid in cash to the technician).
-  if (act === 'mark_paid') {
-    await db.from('bookings').update({ payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'paid' });
-  }
-  if (act === 'mark_unpaid') {
-    await db.from('bookings').update({ payment_status: 'unpaid', paid_at: null }).eq('id', id);
-    return res.status(200).json({ ok: true, payment_status: 'unpaid' });
+  // A FRESH 'charging' lock means a real card charge is mid-flight right now
+  // (the whole charge path finishes in well under 2 minutes) — marking cash
+  // over it would record cash AND let the in-flight card charge land: double
+  // collection. A STALE 'charging' lock is a crashed charge; mark-paid is the
+  // office's escape hatch for exactly that, so it's allowed through. The
+  // updated_at trigger stamps every write, including the lock acquisition,
+  // so lock age is just now - updated_at. The write itself is a CAS on the
+  // status we read, so a state change in the gap cleanly 409s instead of
+  // clobbering.
+  if (act === 'mark_paid' || act === 'mark_unpaid') {
+    if (b.payment_status === 'charging') {
+      const lockAgeMs = Date.now() - new Date(b.updated_at || 0).getTime();
+      if (lockAgeMs < 2 * 60 * 1000) {
+        return res.status(409).json({ error: 'This booking is being charged right now — wait a moment and check whether the charge went through before marking it.' });
+      }
+    }
+    const patch = act === 'mark_paid'
+      ? { payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }
+      : { payment_status: 'unpaid', paid_at: null };
+    const { data: updated } = await db.from('bookings').update(patch)
+      .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
+    if (!updated) return res.status(409).json({ error: 'The payment state just changed (maybe a charge finished) — refresh and check before marking it.' });
+    return res.status(200).json({ ok: true, payment_status: patch.payment_status });
   }
 
   // refund_status / refund both need the TRUE remaining refundable balance —
@@ -2828,12 +2849,14 @@ async function bookingPayment(req, res, db, auth, body) {
     let card = { brand: null, last4: null };
     try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
 
-    // Keyed on booking id + exact charge amount: a true retry (double-click,
-    // a timed-out request the office resubmits) has the SAME total and
-    // replays this same PaymentIntent instead of charging twice. A
-    // genuinely different subsequent attempt has a different total, so it
-    // correctly gets a fresh key/new intent.
-    const idempotencyKey = `booking-charge-${id}-${Math.round(dollars * 100)}`;
+    // Keyed on booking id + exact amount + the CARD being charged, with the
+    // SAME 'charge-' prefix the tech path uses (api/tech.js): a true retry —
+    // from EITHER app — replays the same PaymentIntent instead of charging
+    // twice (previously the two paths used different prefixes, so an office
+    // retry of a tech charge, or vice versa, created a second real charge).
+    // Changing the amount OR the card changes the key, so a genuinely new
+    // attempt after a decline is never blocked by Stripe's replay cache.
+    const idempotencyKey = `charge-${id}-${Math.round(dollars * 100)}-${String(pmId).slice(-8)}`;
     let pi;
     try {
       pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
@@ -2850,10 +2873,22 @@ async function bookingPayment(req, res, db, auth, body) {
     }
     const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
 
-    await db.from('bookings').update({
+    // The money has MOVED at this point — this write is also the lock release,
+    // so its error can't be ignored (supabase returns errors, it doesn't
+    // throw): an unnoticed failure would 200 "paid" while the row stays stuck
+    // on 'charging', blocking every retry/card-change. Mirrors api/tech.js.
+    const paidPatch = {
       payment_status: 'paid', paid_at: now, amount_paid: dollars, tip,
       stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
-    }).eq('id', id);
+    };
+    let { error: payErr } = await db.from('bookings').update(paidPatch).eq('id', id);
+    if (payErr) ({ error: payErr } = await db.from('bookings').update(paidPatch).eq('id', id));   // one retry for a transient blip
+    if (payErr) {
+      const { error: fbErr } = await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id);
+      console.error('[admin charge] CRITICAL: Stripe charge succeeded but booking update failed', { booking: id, pi: pi.id, err: payErr.message, minimal_write_ok: !fbErr });
+      return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, tip, payment_intent_id: pi.id,
+        warning: `The charge WENT THROUGH on Stripe ($${dollars.toFixed(2)}, intent ${pi.id}), but saving it to the booking failed: ${payErr.message}. Do NOT charge again — reconcile manually.` });
+    }
 
     // Freeze the authorization (signature is optional from the office). Best-effort.
     await saveAuthorization(db, req, { ...b, business_id: biz.id }, { businessId: biz.id, total: dollars, ticketAmount, tip, card, pi, chargeId, body });
@@ -3597,7 +3632,7 @@ function bookingSelect() {
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at${esCol()}${arCol()},
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at, zenbooker_job_number${esCol()}${arCol()},
           on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
@@ -3657,11 +3692,16 @@ function economicsSelect() {
     : base;
 }
 // Run a bookings read for economicsSelect(), same missing-column degrade as
-// fetchBookingRows but gated on the real Postgres code (see repair #11) since
-// this is new code, not just a message-text guess.
+// fetchBookingRows. Gate note: economicsSelect's conditional piece is an
+// EMBED (technicians!secondary_technician_id), and PostgREST reports a
+// missing embed relationship with a PGRST-prefixed code, not Postgres 42703
+// (42703 is what a missing RAW column returns) — so accept either code
+// family, still requiring the column name in the message so an unrelated
+// error can never flip the flag (the repair #11 rule).
 async function fetchEconomicsRows(makeQuery) {
   let { data, error } = await makeQuery(economicsSelect());
-  if (error && error.code === '42703' && /secondary_technician_id/.test(error.message || '')) {
+  const codeOk = (e) => e.code === '42703' || String(e.code || '').startsWith('PGRST');
+  if (error && codeOk(error) && /secondary_technician_id/.test(error.message || '')) {
     bookingLiftCols = false;
     ({ data, error } = await makeQuery(economicsSelect()));
   }
