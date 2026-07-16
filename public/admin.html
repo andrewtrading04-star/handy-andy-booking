@@ -3154,12 +3154,20 @@ function drawGallery(){
 // passing widget=<current business slug> so it works for Doms (and Handy Andy).
 // Owner-only (the nav button is hidden for secretaries in enterApp()).
 const ANA_QUESTION_LABELS = {
+  // 'service' comes from the handyman/estimate widget (public/estimate.html,
+  // public/doms-estimate.html) logging 'service:<label>' the moment a customer
+  // picks a category (Furniture Assembly, Home Repairs, etc.) — the rest below
+  // are all from the TV-mounting booking widget's own answer questions.
+  service:'Service Requested',
   frame_tv:'TV Type', size:'TV Size', bracket:'Bracket Choice', fireplace:'Fireplace',
   surface:'Wall Surface', wires:'Wire Concealment', lifting:'Lifting Help', dismount:'Guaranteed Dismount',
   extras:'Add-ons Picked', slot:'Chosen Time Slot', slot_day:'Chosen Day of Week',
   tip:'Tip Selected', coupon:'Coupon Used',
 };
-const ANA_QUESTION_ORDER = ['frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','slot_day','slot','tip','coupon'];
+// 'service' leads the order — it's the headline answer on the Handyman
+// Analytics view (anaScope==='handyman'); harmless on the regular Booking
+// Analytics view since the TV-mounting widget never logs a 'service:' answer.
+const ANA_QUESTION_ORDER = ['service','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','slot_day','slot','tip','coupon'];
 const ANA_ANSWER_SHORT = { dismount: a => /^yes/i.test(a)?'Yes':/^no/i.test(a)?'No':a };
 const ANA_METRO_GROUPS = {
   Houston: ['houston','bellaire','pearland','sugar land','katy','the woodlands','pasadena','friendswood','league city','baytown','humble','spring','kingwood','tomball','cypress','stafford','missouri city','rosenberg','conroe','galveston','manvel','alvin','webster','clear lake','nassau bay','texas city','deer park','la porte','seabrook','kemah','dickinson'],
