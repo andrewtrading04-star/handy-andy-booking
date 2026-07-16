@@ -11,8 +11,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
-<!-- Chart.js 4 — powers the Booking Analytics view (loaded lazily-ish; only used there) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
+     Analytics open — see that function — instead of loading render-blocking
+     in <head> on every dashboard visit, when most opens never touch a chart. -->
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -3255,6 +3256,10 @@ async function loadAnalytics(){
   if(anaLoading) return;
   anaLoading=true;
   try{
+    // Kick off Chart.js alongside the data fetch (not after it) so the lazy
+    // load doesn't add latency on top of the network round trip — by the time
+    // there's data to draw, the script has very likely already arrived.
+    const chartReady=ensureChartJs().catch(()=>{});
     const r=await fetch(anaUrl(anaDays));
     if(!r.ok) throw new Error('API error '+r.status);
     const d=await r.json();
@@ -3263,6 +3268,7 @@ async function loadAnalytics(){
       const rc=await fetch(anaBase()+'?'+anaWParam()+'days='+anaCompareDays);
       if(rc.ok){ const dc=await rc.json(); if(!dc.error) d.comparison=dc; }
     }
+    await chartReady;
     anaRender(d);
   }catch(err){
     const content=document.getElementById('anaContent');
@@ -3474,6 +3480,24 @@ function anaHexRgb(hex){
   if(h.length===3){ return parseInt(h[0]+h[0],16)+','+parseInt(h[1]+h[1],16)+','+parseInt(h[2]+h[2],16); }
   return '255,107,53';
 }
+// Lazy-load Chart.js on first Analytics/Website Analytics open instead of in
+// <head> — most dashboard visits never open either tab, so loading it
+// render-blocking on every visit was pure waste. Cached promise so repeat
+// calls (a second chart-drawing pass, or opening both analytics tabs) reuse
+// the same in-flight/completed load instead of injecting the script twice.
+let _chartJsLoadP=null;
+function ensureChartJs(){
+  if(window.Chart) return Promise.resolve();
+  if(_chartJsLoadP) return _chartJsLoadP;
+  _chartJsLoadP=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/chart.js@4';
+    s.onload=()=>resolve();
+    s.onerror=()=>{ _chartJsLoadP=null; reject(new Error('Chart.js failed to load')); };
+    document.head.appendChild(s);
+  });
+  return _chartJsLoadP;
+}
 function anaDrawCharts(d){
   if(typeof Chart==='undefined') return;
   Object.values(anaCharts).forEach(c=>{ try{c.destroy();}catch(e){} }); anaCharts={};
@@ -3569,6 +3593,8 @@ async function loadWebAnalytics(){
   try{
     const base=webBackend();
     if(!base){ if(content) content.innerHTML=`<div class="card"><div class="empty">No website-analytics backend is configured for this business yet.</div></div>`; return; }
+    // Kick off Chart.js alongside the data fetches (not after) — see loadAnalytics.
+    const chartReady=ensureChartJs().catch(()=>{});
     const {from,to}=webRange(webDays);
     const qs='from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to);
     const get=async(path,fallback)=>{
@@ -3591,6 +3617,7 @@ async function loadWebAnalytics(){
       // rest of this screen, fetched through our own API rather than webBackend().
       api('gsc_queries',{ params:{ business:current.slug, days:28 }}).catch(e=>({rows:[],error:e.message})),
     ]);
+    await chartReady;
     webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,lastUpdated:new Date().toISOString()});
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
