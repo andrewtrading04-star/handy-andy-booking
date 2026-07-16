@@ -2761,6 +2761,10 @@ async function bookingPayment(req, res, db, auth, body) {
     if (!ticketAmount || ticketAmount <= 0) { const e = new Error('Enter an amount greater than $0.'); e.status = 400; throw e; }
     // Optional tip (e.g. the office runs the signed flow on a tablet too).
     const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+    // No ceiling here means a fat-fingered tip (e.g. $1500 instead of $15)
+    // would silently charge the customer's card for the full typo amount.
+    // A 100%-of-ticket tip is already generous, so cap there and reject above it.
+    if (tip > ticketAmount) { const e = new Error(`Tip ($${tip.toFixed(2)}) can't be more than the amount charged ($${ticketAmount.toFixed(2)}).`); e.status = 400; throw e; }
     const dollars = Math.round((ticketAmount + tip) * 100) / 100;
 
     // Resolve a Stripe customer + payment method (stored first, else look up by email).

@@ -1102,6 +1102,10 @@ async function jobPayment(req, res, db, auth, body) {
       if (ticketAmount <= 0) { const e = new Error('Cannot charge for a job with no price.'); e.status = 400; throw e; }
       // Tip the customer added on the signature screen (0 if they skipped it).
       const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+      // No ceiling here means a fat-fingered tip (e.g. $1500 instead of $15)
+      // would silently charge the customer's card for the full typo amount.
+      // A 100%-of-ticket tip is already generous, so cap there and reject above it.
+      if (tip > ticketAmount) { const e = new Error(`Tip ($${tip.toFixed(2)}) can't be more than the job total ($${ticketAmount.toFixed(2)}).`); e.status = 400; throw e; }
       const total = Math.round((ticketAmount + tip) * 100) / 100;
 
       let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
