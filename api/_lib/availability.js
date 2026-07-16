@@ -304,6 +304,13 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
     if (!changed) break;
     ({ data: bk, error: bkErr } = await runB(withSecond));
   }
+  // A remaining error here is NOT a missing-column shape we can degrade past —
+  // it's a genuine (likely transient) failure. Proceeding with `bk` treated as
+  // empty would mean every tech reads as free for every slot, offering
+  // already-booked times to the public and guaranteeing a double-book the
+  // moment two people book during the same Supabase hiccup. Fail loud instead
+  // (api/slots.js already turns this into a clean 500).
+  if (bkErr) throw bkErr;
   const techIdSet = new Set(techIds);
   const booked = new Set();
   // Jobs already booked per tech per day: `${techId}:${date}` -> count. Used to
@@ -384,6 +391,14 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
     if (!changed) break;
     ({ data, error } = await run(_liftOne));
   }
+  // Same reasoning as publicOpenSlots above: a remaining error here isn't a
+  // degradable missing-column shape, it's a genuine failure. This function
+  // decides whether a tech is free to actually BE ASSIGNED a booking — treating
+  // an error as "no bookings found" would let pickOpenTech hand a slot to a
+  // tech who may already be booked then, a real double-book, not just a
+  // display glitch. book.js already degrades a thrown pickOpenTech to an
+  // unassigned booking (office assigns manually) rather than crashing.
+  if (error) throw error;
   const taken = new Set();
   for (const b of (data || [])) {
     const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)); if (k) taken.add(k);
