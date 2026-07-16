@@ -1705,7 +1705,7 @@ function navTo(s){
   document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
-  if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') renderSchedule(true); }, 60000); }
+  if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
   else { view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
     if(s==='estimates') renderEstimates();
     else if(s==='brackets') renderBrackets();
@@ -1767,6 +1767,11 @@ function rangeBounds(dates){
   return [ addDays(dates[0],-1)+'T00:00:00.000Z', addDays(dates[6],2)+'T00:00:00.000Z' ];
 }
 
+// Cheap fingerprint {count, maxUpdatedAt} from the last full calendar fetch —
+// compared against calendar_probe's result so the 60s poll can skip the full
+// (heavy: embeds + per-job economics) re-fetch when nothing actually changed.
+// See calFingerprint() server-side for exactly what this can/can't detect.
+let calFp=null;
 async function renderSchedule(silent){
   const dates = currentWeekDates();
   const [from,to] = rangeBounds(dates);
@@ -1777,9 +1782,25 @@ async function renderSchedule(silent){
     const d = await api('calendar', { params:{ business: current.slug, from, to } });
     techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
     if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
+    calFp=d.fingerprint||null;
     renderSidebarFilters();
     renderCalBody();
   }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+// 60s poll target: ask the lightweight probe whether this week's bookings
+// changed at all before paying for the full calendar fetch (heavy embeds +
+// per-job payroll economics, recomputed for every job in the week). Falls
+// back to a real fetch on any probe error or if we don't have a fingerprint
+// yet, so a probe hiccup degrades to the old always-refetch behavior rather
+// than going stale.
+async function pollScheduleIfChanged(){
+  if(!calFp){ return renderSchedule(true); }
+  try{
+    const dates = currentWeekDates();
+    const [from,to] = rangeBounds(dates);
+    const p = await api('calendar_probe', { params:{ business: current.slug, from, to } });
+    if(p.count!==calFp.count || p.maxUpdatedAt!==calFp.maxUpdatedAt) await renderSchedule(true);
+  }catch(err){ await renderSchedule(true); }
 }
 
 function renderSidebarFilters(){
@@ -6200,7 +6221,7 @@ function startGreetingClock(){
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
   try{
-    if(section==='schedule' && calMode==='jobs') renderSchedule(true);
+    if(section==='schedule' && calMode==='jobs') pollScheduleIfChanged();
     else if(section==='analytics'||section==='handyman'){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
     else if(section==='webanalytics'){ if(typeof loadWebAnalytics==='function' && !webLoading) loadWebAnalytics(); }
   }catch(_){/* refresh-on-return is best-effort */}

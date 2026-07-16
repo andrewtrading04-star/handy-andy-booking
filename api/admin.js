@@ -220,6 +220,7 @@ export default async function handler(req, res) {
       case 'available_slots':   return await availableSlots(req, res, db, auth);
       case 'available_dates':   return await availableDates(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
+      case 'calendar_probe':    return await calendarProbe(req, res, db, auth);
       case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
@@ -804,6 +805,21 @@ async function summary(req, res, db, auth) {
 // Bookings within an explicit [from, to) window, plus the technicians and
 // service areas the sidebar needs to render filters and avatars — one call
 // bootstraps the whole calendar view.
+// Cheap "has this booking range changed" fingerprint — count + the most
+// recent updated_at — shared by calendar() (which already has full rows in
+// hand) and calendarProbe() (which fetches only these two columns for exactly
+// this purpose). bookings.updated_at is DB-trigger-maintained (BEFORE UPDATE,
+// every column, every write) so this is trustworthy for detecting a status
+// change, reschedule, assignment, price edit, etc. — anything that touches
+// the row. Known gap: a technician's color/active flag can change with no
+// bookings row touched, so this alone won't catch that — acceptable for a
+// polling optimization since it self-heals on the next real fetch (tab
+// switch, reload, or any actual booking change in the meantime).
+function calFingerprint(rows) {
+  let maxUpdatedAt = '';
+  for (const r of rows) { if (r.updated_at && r.updated_at > maxUpdatedAt) maxUpdatedAt = r.updated_at; }
+  return { count: rows.length, maxUpdatedAt };
+}
 async function calendar(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const from = (req.query.from || '').toString();
@@ -845,7 +861,27 @@ async function calendar(req, res, db, auth) {
     bookings,
     technicians: techs || [],
     areas: areas || [],
+    fingerprint: calFingerprint(bk || []),
   });
+}
+// Lightweight sibling of calendar(): no embeds, no per-job economics — just
+// enough to detect whether anything in this range changed since the last full
+// fetch, so the 60s schedule poll can skip re-fetching+re-computing the whole
+// week when nothing did. See calFingerprint() for what this can and can't detect.
+async function calendarProbe(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const from = (req.query.from || '').toString();
+  const to = (req.query.to || '').toString();
+  if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+  const { data: rows, error } = await db.from('bookings')
+    .select('updated_at')
+    .eq('business_id', biz.id)
+    .gte('scheduled_at', from).lt('scheduled_at', to)
+    .limit(2000);
+  if (error) throw error;
+
+  return res.status(200).json(calFingerprint(rows || []));
 }
 
 // Owner-only: collapse a service into exactly one of the three buckets the
@@ -3553,7 +3589,7 @@ function bookingSelect() {
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id${esCol()}${arCol()},
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at${esCol()}${arCol()},
           on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
