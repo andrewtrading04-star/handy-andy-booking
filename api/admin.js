@@ -4907,8 +4907,19 @@ async function fetchEstimateAnyBiz(db, id) {
   if (!Array.isArray(data.upsells)) data.upsells = [];
   if (!Array.isArray(data.accepted_upsells)) data.accepted_upsells = null;
   if (!('approved_total' in data)) data.approved_total = null;
-  const { data: biz } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
-  data.business = biz || null;
+  // This lookup's failure used to be silently discarded (data.business = null),
+  // and every caller below defaults est.business?.slug to 'handy-andy' when
+  // that happens — so a Doms estimate hitting a transient DB hiccup here would
+  // tokenize AND attach the customer's card into Handy Andy's Stripe account.
+  // Unlike a card-save failure elsewhere, this one has NO error to catch —
+  // the attach genuinely succeeds, just in the wrong account, so it would
+  // never surface until a Doms charge attempt failed at time of service.
+  // Fail loud instead: a customer seeing an error on the approve page is far
+  // better than their card silently ending up in the wrong company's account.
+  const { data: biz, error: bizErr } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
+  if (bizErr) throw bizErr;
+  if (!biz) throw new Error(`Estimate ${id} references a business (${data.business_id}) that could not be found.`);
+  data.business = biz;
   return data;
 }
 
