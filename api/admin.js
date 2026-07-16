@@ -5581,11 +5581,22 @@ function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_mot
 
 // Subtract (sign -1) or add (sign +1) brackets from a tech's inventory (floor 0),
 // creating the row if missing. Best-effort; never throws into completion.
+//
+// Inventory is tracked per TECH, not per job — a tech carries one physical
+// stock of brackets in their truck regardless of which company's customer
+// they're serving that day. Since Denver cross-hire (a tech can now complete
+// a job for the OTHER company), `businessId` here may be the JOB's business,
+// which can differ from the tech's own. Always resolve+use the tech's real
+// home business_id, so a cross-hire job deducts from the tech's actual stock
+// instead of creating a phantom always-zero row under the other company (the
+// bug that made TK show a false "reorder" alert under Handy Andy's table).
 async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
   if (!techId || bracketTotal(qtys) <= 0) return;
+  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const homeBizId = techRow?.business_id || businessId;
   const { data: inv } = await db.from('bracket_inventory')
     .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+    .eq('business_id', homeBizId).eq('technician_id', techId).maybeSingle();
   const cur = inv || { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
   const next = {
     flat_qty:        Math.max(0, (Number(cur.flat_qty) || 0) + sign * (qtys.flat || 0)),
@@ -5593,21 +5604,24 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
     full_motion_qty: Math.max(0, (Number(cur.full_motion_qty) || 0) + sign * (qtys.full_motion || 0)),
   };
   if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
-  else await db.from('bracket_inventory').insert({ business_id: businessId, technician_id: techId, ...next });
+  else await db.from('bracket_inventory').insert({ business_id: homeBizId, technician_id: techId, ...next });
 }
 
 // Subtract wire concealment plates from a tech's inventory (floor 0) and log it.
 // No-ops gracefully if migration 0039 isn't applied; never throws into the
-// completion path.
+// completion path. Same cross-hire fix as adjustBracketInventory above: the
+// STOCK row lives under the tech's own home business, never the job's.
 async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) {
   if (!qty || !techId) return;
+  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const homeBizId = techRow?.business_id || businessId;
   let { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty')
-    .eq('business_id', businessId).eq('technician_id', techId).maybeSingle();
+    .eq('business_id', homeBizId).eq('technician_id', techId).maybeSingle();
   if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
   if (!inv) {
     const { data: created } = await db.from('bracket_inventory')
-      .insert({ business_id: businessId, technician_id: techId, wire_plate_qty: 0 })
+      .insert({ business_id: homeBizId, technician_id: techId, wire_plate_qty: 0 })
       .select('id, wire_plate_qty').maybeSingle();
     inv = created || { id: null, wire_plate_qty: 0 };
   }
@@ -5618,6 +5632,9 @@ async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) 
       .eq('id', inv.id);
   }
   try {
+    // Usage LOG stays attributed to the JOB's business (which company's
+    // customer consumed it) — only the inventory row above moves to the
+    // tech's home business.
     await db.from('bracket_usage_logs').insert({
       business_id: businessId, booking_id: bookingId || null, technician_id: techId,
       flat_used: 0, tilting_used: 0, full_motion_used: 0, wire_plate_used: qty,
