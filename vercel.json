@@ -15,13 +15,13 @@
     {
       "source": "/(.*).html",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, max-age=0, must-revalidate" }
+        { "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }
       ]
     },
     {
       "source": "/:branded(handy-andy|heather|doms|joey)",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, max-age=0, must-revalidate" }
+        { "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }
       ]
     }
   ]
