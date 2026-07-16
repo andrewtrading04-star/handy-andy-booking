@@ -1,0 +1,15 @@
+-- Repair #2: a transient lock state so the office (api/admin.js bookingPayment)
+-- and the tech app (api/tech.js jobPayment) can't both charge the same booking
+-- at the same moment. Both charge paths were read-then-charge with no lock;
+-- the losing request's DB write silently overwrote the winner's
+-- stripe_payment_intent_id, so a double charge could go through with only one
+-- of the two PaymentIntents ever recorded on the booking.
+--
+-- 'charging' is set via a compare-and-swap update (.eq('payment_status', <prior>))
+-- right before the Stripe call; only one concurrent request can win that swap.
+-- Finalized to 'paid' on success, or restored to the prior value on any failure.
+-- Every existing payment_status reader already treats "not === 'paid'" as
+-- "not paid yet" (revenue sums, payroll, completion gating, status badges all
+-- degrade gracefully to their existing unpaid-shaped behavior for the sub-
+-- second this value is visible), so this is additive and safe.
+alter type app.payment_status add value if not exists 'charging';

@@ -917,6 +917,11 @@ async function jobCardUpdate(req, res, db, auth, body) {
   if (error && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This job is already paid — the card cannot be changed.' });
+  // 'charging' is a transient lock a charge-in-progress holds (see
+  // jobPayment) — changing the card underneath it would race the charge
+  // itself, and this write's own `if (b.payment_status !== 'card_on_file')`
+  // patch below would silently clobber the lock either way.
+  if (b.payment_status === 'charging') return res.status(409).json({ error: 'This job is being charged right now — wait a moment and try again.' });
 
   const acct = { account: b.stripe_account || null, slug: b.business?.slug || null };
   if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured on the server.' });
@@ -1030,77 +1035,106 @@ async function jobPayment(req, res, db, auth, body) {
     // The office has this same guard (api/admin.js bookingPayment) — the tech
     // app never had it, so a double-tap, a timed-out retry, or the office
     // charging the same job at the same moment from the dashboard could each
-    // create a SECOND real charge. Re-read fresh rather than trusting `b`
-    // (fetched at the top of this handler, so a moment stale).
+    // create a SECOND real charge. A plain "is it already paid" read isn't
+    // enough by itself — two concurrent requests can both read "not paid"
+    // before either writes. Acquire an actual lock via compare-and-swap: flip
+    // payment_status to the transient 'charging' state conditioned on it
+    // still being whatever we just read, so only ONE request can win the
+    // swap. The loser gets a clear "already being charged" error instead of
+    // a real second charge.
+    let priorPaymentStatus;
     {
       const { data: fresh } = await db.from('bookings').select('payment_status').eq('id', id).maybeSingle();
-      if (fresh && fresh.payment_status === 'paid') {
-        return res.status(400).json({ error: 'This job is already paid.' });
+      if (!fresh) return res.status(404).json({ error: 'Job not found' });
+      if (fresh.payment_status === 'paid') return res.status(400).json({ error: 'This job is already paid.' });
+      if (fresh.payment_status === 'charging') {
+        return res.status(409).json({ error: 'This job is already being charged (maybe from the office or another device) — check if it went through before trying again.' });
+      }
+      priorPaymentStatus = fresh.payment_status;
+      const { data: locked, error: lockErr } = await db.from('bookings')
+        .update({ payment_status: 'charging' })
+        .eq('id', id).eq('payment_status', priorPaymentStatus)
+        .select('id').maybeSingle();
+      if (lockErr) throw lockErr;
+      if (!locked) {
+        return res.status(409).json({ error: 'This job is already being charged (maybe from the office or another device) — check if it went through before trying again.' });
       }
     }
-    if (!stripeConfigured(acct)) {
-      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} -> payments NOT configured for this account`);
-      return res.status(400).json({ error: `Card payments aren't set up on the server for ${b.business?.name || slug || 'this business'}. Take cash and tap "Mark paid (cash)".` });
-    }
-    const ticketAmount = Number(b.price) || 0;
-    if (ticketAmount <= 0) return res.status(400).json({ error: 'Cannot charge for a job with no price.' });
-    // Tip the customer added on the signature screen (0 if they skipped it).
-    const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
-    const total = Math.round((ticketAmount + tip) * 100) / 100;
 
-    let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
-    let pmId = b.stripe_payment_method_id || null;
+    // Past this point the lock is held — ANY exit must release it (restore
+    // payment_status to what it was) or the job gets stuck showing "charging"
+    // forever with no way to retry or use "Mark paid (cash)".
     try {
-      if (!custId && b.customer && b.customer.email) {
-        const r = await findCardOnFileByEmail(b.customer.email, acct);
-        custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+      if (!stripeConfigured(acct)) {
+        console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} -> payments NOT configured for this account`);
+        const e = new Error(`Card payments aren't set up on the server for ${b.business?.name || slug || 'this business'}. Take cash and tap "Mark paid (cash)".`);
+        e.status = 400; throw e;
       }
-      if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
+      const ticketAmount = Number(b.price) || 0;
+      if (ticketAmount <= 0) { const e = new Error('Cannot charge for a job with no price.'); e.status = 400; throw e; }
+      // Tip the customer added on the signature screen (0 if they skipped it).
+      const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+      const total = Math.round((ticketAmount + tip) * 100) / 100;
+
+      let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
+      let pmId = b.stripe_payment_method_id || null;
+      try {
+        if (!custId && b.customer && b.customer.email) {
+          const r = await findCardOnFileByEmail(b.customer.email, acct);
+          custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+        }
+        if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
+      } catch (e) {
+        console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> card lookup failed: ${e.message}`);
+        e.status = e.status || 400; throw e;
+      }
+      if (!custId || !pmId) {
+        console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> no card on file (customer=${!!custId} paymentMethod=${!!pmId})`);
+        const e = new Error('No card on file for this customer. Take cash and tap "Mark paid (cash)".'); e.status = 400; throw e;
+      }
+
+      // Card brand/last4 for the receipt + dispute evidence (best-effort).
+      let card = { brand: null, last4: null };
+      try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+
+      let pi;
+      try {
+        // Keyed on job id + exact charge amount: a true retry (double-tap, a
+        // timed-out request the tech resubmits) has the SAME total and replays
+        // this same PaymentIntent instead of charging twice. A genuinely
+        // different subsequent attempt (e.g. a different tip after a decline)
+        // has a different total, so it correctly gets a fresh key/new intent.
+        const idempotencyKey = `job-charge-${id}-${Math.round(total * 100)}`;
+        pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
+          amount: Math.round(total * 100), currency: 'usd',
+          customer: custId, payment_method: pmId, off_session: true, confirm: true,
+          description: `Job ${id}`, metadata: { job_id: id, tip: String(tip) },
+          receipt_email: (b.customer && b.customer.email) || undefined,
+        }});
+      } catch (e) {
+        e.status = e.status || 402; e.message = 'Charge failed: ' + e.message; throw e;
+      }
+      if (pi.status !== 'succeeded') {
+        const e = new Error(`Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.`); e.status = 402; throw e;
+      }
+      const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
+
+      await db.from('bookings').update({
+        payment_status: 'paid', paid_at: now, amount_paid: total, tip,
+        stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
+      }).eq('id', id);
+
+      // Freeze the signed authorization as chargeback evidence. Best-effort: the
+      // money already moved, so a storage hiccup must never fail the charge.
+      await saveAuthorization(db, req, b, { businessId: b.business_id, total, ticketAmount, tip, card, pi, chargeId, body });
+
+      return res.status(200).json({ ok: true, payment_status: 'paid', amount: total, tip, payment_intent_id: pi.id });
     } catch (e) {
-      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> card lookup failed: ${e.message}`);
-      return res.status(e.status || 400).json({ error: e.message });
+      // Release the lock on any failure so the job can be retried (or paid
+      // with cash) instead of being stuck on 'charging'.
+      try { await db.from('bookings').update({ payment_status: priorPaymentStatus }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
+      return res.status(e.status || 500).json({ error: e.message });
     }
-    if (!custId || !pmId) {
-      console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} email=${b.customer?.email || 'none'} -> no card on file (customer=${!!custId} paymentMethod=${!!pmId})`);
-      return res.status(400).json({ error: 'No card on file for this customer. Take cash and tap "Mark paid (cash)".' });
-    }
-
-    // Card brand/last4 for the receipt + dispute evidence (best-effort).
-    let card = { brand: null, last4: null };
-    try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
-
-    let pi;
-    try {
-      // Keyed on job id + exact charge amount: a true retry (double-tap, a
-      // timed-out request the tech resubmits) has the SAME total and replays
-      // this same PaymentIntent instead of charging twice. A genuinely
-      // different subsequent attempt (e.g. a different tip after a decline)
-      // has a different total, so it correctly gets a fresh key/new intent.
-      const idempotencyKey = `job-charge-${id}-${Math.round(total * 100)}`;
-      pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
-        amount: Math.round(total * 100), currency: 'usd',
-        customer: custId, payment_method: pmId, off_session: true, confirm: true,
-        description: `Job ${id}`, metadata: { job_id: id, tip: String(tip) },
-        receipt_email: (b.customer && b.customer.email) || undefined,
-      }});
-    } catch (e) {
-      return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
-    }
-    if (pi.status !== 'succeeded') {
-      return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
-    }
-    const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
-
-    await db.from('bookings').update({
-      payment_status: 'paid', paid_at: now, amount_paid: total, tip,
-      stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
-    }).eq('id', id);
-
-    // Freeze the signed authorization as chargeback evidence. Best-effort: the
-    // money already moved, so a storage hiccup must never fail the charge.
-    await saveAuthorization(db, req, b, { businessId: b.business_id, total, ticketAmount, tip, card, pi, chargeId, body });
-
-    return res.status(200).json({ ok: true, payment_status: 'paid', amount: total, tip, payment_intent_id: pi.id });
   }
 
   return res.status(400).json({ error: `Unknown payment action "${act}"` });

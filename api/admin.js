@@ -2598,6 +2598,11 @@ async function bookingCardUpdate(req, res, db, auth, body) {
   }
   if (error || !b) return res.status(404).json({ error: 'Booking not found' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid — the card cannot be changed.' });
+  // 'charging' is a transient lock a charge-in-progress holds (see
+  // bookingPayment) — changing the card underneath it would race the charge
+  // itself, and this write's own `if (b.payment_status !== 'card_on_file')`
+  // patch below would silently clobber the lock either way.
+  if (b.payment_status === 'charging') return res.status(409).json({ error: 'This booking is being charged right now — wait a moment and try again.' });
 
   const acct = { account: b.stripe_account || null, slug: biz.slug };
   if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured for this business.' });
@@ -2721,53 +2726,96 @@ async function bookingPayment(req, res, db, auth, body) {
   if (act !== 'charge') return res.status(400).json({ error: `Unknown payment action "${act}"` });
   if (!stripeConfigured(acct)) return res.status(400).json({ error: 'Payments are not configured for this business. Use “Mark paid (cash)”.' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
-  const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
-  if (!ticketAmount || ticketAmount <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
-  // Optional tip (e.g. the office runs the signed flow on a tablet too).
-  const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
-  const dollars = Math.round((ticketAmount + tip) * 100) / 100;
 
-  // Resolve a Stripe customer + payment method (stored first, else look up by email).
-  let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
-  let pmId = b.stripe_payment_method_id || null;
-  try {
-    if (!custId && b.customer && b.customer.email) {
-      const r = await findCardOnFileByEmail(b.customer.email, acct);
-      custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+  // The tech app can charge this SAME booking from the field at the same
+  // moment the office charges it here — a plain "not paid yet" read isn't
+  // enough on its own (two requests can both read "not paid" before either
+  // writes). Acquire an actual lock via compare-and-swap: flip payment_status
+  // to the transient 'charging' state conditioned on it still being whatever
+  // we just read, so only ONE request can win the swap. The loser gets a
+  // clear "already being charged" error instead of creating a second charge.
+  let priorPaymentStatus;
+  {
+    const { data: fresh } = await db.from('bookings').select('payment_status').eq('id', id).eq('business_id', biz.id).maybeSingle();
+    if (!fresh) return res.status(404).json({ error: 'Booking not found' });
+    if (fresh.payment_status === 'paid') return res.status(400).json({ error: 'This booking is already paid.' });
+    if (fresh.payment_status === 'charging') {
+      return res.status(409).json({ error: 'This booking is already being charged (maybe from the tech app) — check if it went through before trying again.' });
     }
-    if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
-  } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
-  if (!custId || !pmId) return res.status(400).json({ error: 'No card on file for this customer. Use “Mark paid (cash)” instead.' });
+    priorPaymentStatus = fresh.payment_status;
+    const { data: locked, error: lockErr } = await db.from('bookings')
+      .update({ payment_status: 'charging' })
+      .eq('id', id).eq('business_id', biz.id).eq('payment_status', priorPaymentStatus)
+      .select('id').maybeSingle();
+    if (lockErr) throw lockErr;
+    if (!locked) {
+      return res.status(409).json({ error: 'This booking is already being charged (maybe from the tech app) — check if it went through before trying again.' });
+    }
+  }
 
-  // Card brand/last4 for the receipt + dispute evidence (best-effort).
-  let card = { brand: null, last4: null };
-  try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
-
-  let pi;
+  // Past this point the lock is held — ANY exit must release it (restore
+  // payment_status to what it was) or the booking gets stuck showing
+  // "charging" forever with no way to retry or use "Mark paid (cash)".
   try {
-    pi = await stripe('/payment_intents', { ...acct, body: {
-      amount: Math.round(dollars * 100), currency: 'usd',
-      customer: custId, payment_method: pmId, off_session: true, confirm: true,
-      description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug, tip: String(tip) },
-      receipt_email: (b.customer && b.customer.email) || undefined,
-    }});
+    const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
+    if (!ticketAmount || ticketAmount <= 0) { const e = new Error('Enter an amount greater than $0.'); e.status = 400; throw e; }
+    // Optional tip (e.g. the office runs the signed flow on a tablet too).
+    const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
+    const dollars = Math.round((ticketAmount + tip) * 100) / 100;
+
+    // Resolve a Stripe customer + payment method (stored first, else look up by email).
+    let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
+    let pmId = b.stripe_payment_method_id || null;
+    try {
+      if (!custId && b.customer && b.customer.email) {
+        const r = await findCardOnFileByEmail(b.customer.email, acct);
+        custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+      }
+      if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
+    } catch (e) { e.status = e.status || 400; throw e; }
+    if (!custId || !pmId) { const e = new Error('No card on file for this customer. Use “Mark paid (cash)” instead.'); e.status = 400; throw e; }
+
+    // Card brand/last4 for the receipt + dispute evidence (best-effort).
+    let card = { brand: null, last4: null };
+    try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+
+    // Keyed on booking id + exact charge amount: a true retry (double-click,
+    // a timed-out request the office resubmits) has the SAME total and
+    // replays this same PaymentIntent instead of charging twice. A
+    // genuinely different subsequent attempt has a different total, so it
+    // correctly gets a fresh key/new intent.
+    const idempotencyKey = `booking-charge-${id}-${Math.round(dollars * 100)}`;
+    let pi;
+    try {
+      pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
+        amount: Math.round(dollars * 100), currency: 'usd',
+        customer: custId, payment_method: pmId, off_session: true, confirm: true,
+        description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug, tip: String(tip) },
+        receipt_email: (b.customer && b.customer.email) || undefined,
+      }});
+    } catch (e) {
+      e.status = e.status || 402; e.message = 'Charge failed: ' + e.message; throw e;
+    }
+    if (pi.status !== 'succeeded') {
+      const e = new Error(`Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.`); e.status = 402; throw e;
+    }
+    const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
+
+    await db.from('bookings').update({
+      payment_status: 'paid', paid_at: now, amount_paid: dollars, tip,
+      stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
+    }).eq('id', id);
+
+    // Freeze the authorization (signature is optional from the office). Best-effort.
+    await saveAuthorization(db, req, { ...b, business_id: biz.id }, { businessId: biz.id, total: dollars, ticketAmount, tip, card, pi, chargeId, body });
+
+    return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, tip, payment_intent_id: pi.id });
   } catch (e) {
-    return res.status(e.status || 402).json({ error: 'Charge failed: ' + e.message });
+    // Release the lock on any failure so the booking can be retried (or paid
+    // with cash) instead of being stuck on 'charging'.
+    try { await db.from('bookings').update({ payment_status: priorPaymentStatus }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
+    return res.status(e.status || 500).json({ error: e.message });
   }
-  if (pi.status !== 'succeeded') {
-    return res.status(402).json({ error: `Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.` });
-  }
-  const chargeId = pi.latest_charge || (pi.charges && pi.charges.data && pi.charges.data[0] && pi.charges.data[0].id) || null;
-
-  await db.from('bookings').update({
-    payment_status: 'paid', paid_at: now, amount_paid: dollars, tip,
-    stripe_payment_intent_id: pi.id, stripe_customer_id: custId, stripe_payment_method_id: pmId,
-  }).eq('id', id);
-
-  // Freeze the authorization (signature is optional from the office). Best-effort.
-  await saveAuthorization(db, req, { ...b, business_id: biz.id }, { businessId: biz.id, total: dollars, ticketAmount, tip, card, pi, chargeId, body });
-
-  return res.status(200).json({ ok: true, payment_status: 'paid', amount: dollars, tip, payment_intent_id: pi.id });
 }
 
 // Edit a booking's SERVICE address after it's booked (office fixes a typo or the
