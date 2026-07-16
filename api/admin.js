@@ -482,12 +482,12 @@ async function summary(req, res, db, auth) {
     // map (fetched ONCE and shared across all the economics below).
     const yStart = localDayStartUTC(tz, -1);
     const [{ data: pjobs }, { data: yRows }, { data: allBiz }, travelBiz] = await Promise.all([
-      fetchBookingRows(sel => db.from('bookings').select(sel)
+      fetchEconomicsRows(sel => db.from('bookings').select(sel)
         .eq('business_id', biz.id)
         .gte('scheduled_at', rangeStart.toISOString())
         .lt('scheduled_at', rangeEnd.toISOString())
         .order('scheduled_at', { ascending: true })),
-      fetchBookingRows(sel => db.from('bookings').select(sel)
+      fetchEconomicsRows(sel => db.from('bookings').select(sel)
         .eq('business_id', biz.id)
         .gte('scheduled_at', yStart.toISOString())
         .lt('scheduled_at', todayStart.toISOString())),
@@ -523,7 +523,7 @@ async function summary(req, res, db, auth) {
       if (bb.id === biz.id) {
         rows = (pjobs || []).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
       } else {
-        const r = await fetchBookingRows(sel => db.from('bookings').select(sel)
+        const r = await fetchEconomicsRows(sel => db.from('bookings').select(sel)
           .eq('business_id', bb.id)
           .gte('scheduled_at', weekStart.toISOString())
           .lt('scheduled_at', weekEnd.toISOString()));
@@ -571,7 +571,7 @@ async function summary(req, res, db, auth) {
         } else {
           const btz = bb.timezone || 'America/Denver';
           const d0 = localDayStartUTC(btz, offset), d1 = localDayStartUTC(btz, offset + 1);
-          ({ data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+          ({ data: rows } = await fetchEconomicsRows(sel => db.from('bookings').select(sel)
             .eq('business_id', bb.id)
             .gte('scheduled_at', d0.toISOString())
             .lt('scheduled_at', d1.toISOString())));
@@ -604,7 +604,7 @@ async function summary(req, res, db, auth) {
     const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
     const lastWeekEnd = isCurrentWeek ? new Date(lastWeekStart.getTime() + (now.getTime() - weekStart.getTime())) : weekStart;
     const lastWeekProfitP = Promise.all((allBiz || []).map(async (bb) => {
-      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
+      const { data: rows } = await fetchEconomicsRows(sel => db.from('bookings').select(sel)
         .eq('business_id', bb.id)
         .gte('scheduled_at', lastWeekStart.toISOString())
         .lt('scheduled_at', lastWeekEnd.toISOString()));
@@ -3586,6 +3586,40 @@ async function fetchBookingRows(makeQuery) {
     if (isExtraSlotsErr(error)) extraSlotsCol = false;
     if (isAmountRefundedErr(error)) amountRefundedCol = false;
     ({ data, error } = await run());
+  }
+  return { data, error };
+}
+
+// Slim projection of bookingSelect() for PURE ECONOMICS MATH (profit /
+// predicted-income sums in summary()) — no customer info, no photo/note
+// counts, no display-only technician/business fields. Every field here is
+// actually read somewhere in the profit chain: computeJobEconomics itself
+// (price, subtotal, tip, postal_code, technician/secondary_technician name),
+// classifyService (notes, service name, line items), and the payroll engine's
+// computeJobPay (notes for payroll-override/Assurion detection,
+// zenbooker_job_number for pay overrides, service name for special-service
+// detection, line items for the whole pay walk). Dropping a field here would
+// silently change a computed profit number rather than error, so this list
+// was built by tracing every job.* / b.* read in that call chain — don't trim
+// further without re-checking api/_lib/payroll.js.
+function economicsSelect() {
+  const base = `id, status, payment_status, price, subtotal, tip, notes, customer_notes,
+          zenbooker_job_number, scheduled_at, postal_code,
+          service:services ( name ),
+          technician:technicians!technician_id ( name ),
+          line_items:booking_line_items ( name, kind, quantity, unit_price, line_total )`;
+  return bookingLiftCols
+    ? `${base}, secondary_technician:technicians!secondary_technician_id ( name )`
+    : base;
+}
+// Run a bookings read for economicsSelect(), same missing-column degrade as
+// fetchBookingRows but gated on the real Postgres code (see repair #11) since
+// this is new code, not just a message-text guess.
+async function fetchEconomicsRows(makeQuery) {
+  let { data, error } = await makeQuery(economicsSelect());
+  if (error && error.code === '42703' && /secondary_technician_id/.test(error.message || '')) {
+    bookingLiftCols = false;
+    ({ data, error } = await makeQuery(economicsSelect()));
   }
   return { data, error };
 }
