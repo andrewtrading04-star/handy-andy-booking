@@ -1561,7 +1561,8 @@ function enterApp(){
   if(navRc) navRc.style.display = scope==='handy-andy' ? 'none' : '';
   renderSwitcher();
   navTo('schedule');
-  refreshEstimateBadge();
+  // navTo('schedule') already runs renderGreeting(), which itself calls
+  // refreshEstimateBadge() — no need to fetch the same estimates list twice.
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
   loadBadAlerts();
   if(alertTimer) clearInterval(alertTimer);
@@ -1643,7 +1644,11 @@ async function openAlertJob(slug, id){
   // Switch context to the alert's business so the job modal (and its photo/note
   // loads, which use current.slug) resolve against the right business.
   if(biz && (!current || current.slug!==slug)){
-    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
+    // navTo(section) already runs refreshEstimateBadge() (via renderGreeting)
+    // when section is 'schedule' — only call it here for every OTHER section,
+    // where renderGreeting never runs, so the badge/estStale banner still
+    // updates on the switch without fetching the same estimates list twice.
+    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule') refreshEstimateBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -1659,7 +1664,9 @@ function renderSwitcher(){
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
-    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); refreshEstimateBadge(); loadGoodAlerts();
+    // See the matching comment in openAlertJob — navTo(section) already covers
+    // the 'schedule' case via renderGreeting().
+    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule') refreshEstimateBadge(); loadGoodAlerts();
   }));
 }
 
