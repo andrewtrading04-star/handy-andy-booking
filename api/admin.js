@@ -496,12 +496,6 @@ async function summary(req, res, db, auth) {
     ]);
 
     const earned = (rows) => (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
-    // Profit for a set of THIS business's rows — economics computed in memory,
-    // reusing the already-fetched travel-payout map so there's no extra query.
-    const sumProfit = async (rows) => {
-      const e = await computeJobEconomics(db, biz, rows, true, travelBiz);
-      return rows.reduce((n, b) => n + (Number(e[b.id]?.profit) || 0), 0);
-    };
     // Per-business travel-payout map cache (this business already fetched), so the
     // cross-business loops never refetch the same map.
     const travelCache = new Map([[biz.id, travelBiz]]);
@@ -512,18 +506,34 @@ async function summary(req, res, db, auth) {
       return m;
     };
 
-    // Row sets (pure filters over the already-fetched jobs — no queries).
-    const paidDoneWeek = earned(pjobs).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
-
-    // Per-business realized profit THIS WEEK (parallel across businesses).
-    const weekBySlugP = Promise.all((allBiz || []).map(async (bb) => {
-      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
-        .eq('business_id', bb.id)
-        .gte('scheduled_at', weekStart.toISOString())
-        .lt('scheduled_at', weekEnd.toISOString()));
-      const paid = earned(rows);
-      const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
-      return [bb.slug, Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
+    // Per-business week rows (weekStart–weekEnd), fetched ONCE per business and
+    // shared by realized profit (weekBySlug/pWeek) AND predicted income
+    // (predictedBySlug) below — these used to be two separate fetches of the
+    // exact same rows (one per metric), each followed by its own
+    // computeJobEconomics pass. `active` (every non-cancelled/no-show status,
+    // which includes 'completed') is a superset of the realized/"earned" rows
+    // (completed AND paid), and computeJobEconomics projects EVERY row as if
+    // completed+paid regardless of its real status — so one pass over `active`
+    // yields correct per-job profit for both the realized subset and the full
+    // predicted set. The currently-viewed business's rows are sliced out of
+    // `pjobs` (already fetched above, whose range already covers this week)
+    // instead of a redundant fetch.
+    const weekEconBySlugP = Promise.all((allBiz || []).map(async (bb) => {
+      let rows;
+      if (bb.id === biz.id) {
+        rows = (pjobs || []).filter(b => { const t = new Date(b.scheduled_at); return t >= weekStart && t < weekEnd; });
+      } else {
+        const r = await fetchBookingRows(sel => db.from('bookings').select(sel)
+          .eq('business_id', bb.id)
+          .gte('scheduled_at', weekStart.toISOString())
+          .lt('scheduled_at', weekEnd.toISOString()));
+        rows = r.data || [];
+      }
+      const active = rows.filter(b => ACTIVE_STATUSES.includes(b.status));
+      const e = await computeJobEconomics(db, bb, active, true, await travelMapFor(bb));
+      const paidProfit = Math.round(earned(active).reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0));
+      const predictedProfit = Math.round(active.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0));
+      return { slug: bb.slug, paidProfit, predictedProfit };
     }));
 
     // Per-business AVG TICKET over the LAST 7 DAYS (parallel across businesses).
@@ -576,20 +586,8 @@ async function summary(req, res, db, auth) {
       return { total, bySlug };
     };
 
-    // Per-business PREDICTED income for the week — "active jobs, as if every one
-    // gets paid" — computed once per business; the top-line total (below) is
-    // always this sum, so it can never drift out of sync with the split shown
-    // under it (they used to be two separate computations, and the top-line one
-    // was scoped to only the currently-viewed business — that was the bug).
-    const predictedBySlugP = Promise.all((allBiz || []).map(async (bb) => {
-      const { data: rows } = await fetchBookingRows(sel => db.from('bookings').select(sel)
-        .eq('business_id', bb.id)
-        .gte('scheduled_at', weekStart.toISOString())
-        .lt('scheduled_at', weekEnd.toISOString()));
-      const active = (rows || []).filter(b => ACTIVE_STATUSES.includes(b.status));
-      const e = await computeJobEconomics(db, bb, active, true, await travelMapFor(bb));
-      return [bb.slug, Math.round(active.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
-    }));
+    // Predicted income ("active jobs, as if every one gets paid") is now just
+    // the other half of weekEconBySlugP above — see its comment.
 
     // Realized profit for the week BEFORE the viewed one — same "completed AND
     // paid" definition as pWeek, just shifted back 7 days — so the greeting can
@@ -621,15 +619,18 @@ async function summary(req, res, db, auth) {
     // (realized profit for that day) — netDailyFor already computes it correctly
     // across both businesses (and reuses the already-fetched today/yRows rows for
     // this one), so today/yesterday are just its totals, not a separate query.
-    const [pWeek, weekBySlug, avgBySlug, netToday, netYesterday, predictedBySlug, pWeekLast] = await Promise.all([
-      sumProfit(paidDoneWeek),
-      weekBySlugP,
+    const [weekEconBySlug, avgBySlug, netToday, netYesterday, pWeekLast] = await Promise.all([
+      weekEconBySlugP,
       avgBySlugP,
       netDailyFor(0),
       netDailyFor(-1),
-      predictedBySlugP,
       lastWeekProfitP,
     ]);
+    // Split the combined per-business pass back into the two [slug, value] pair
+    // arrays the rest of this function (and profit's shape below) already expects.
+    const weekBySlug = weekEconBySlug.map(x => [x.slug, x.paidProfit]);
+    const predictedBySlug = weekEconBySlug.map(x => [x.slug, x.predictedProfit]);
+    const pWeek = weekEconBySlug.find(x => x.slug === biz.slug)?.paidProfit || 0;
 
     const weekLastRounded = Math.round(pWeekLast);
     // The dashboard's "This week" Profit figure is BOTH businesses combined
