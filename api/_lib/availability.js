@@ -322,13 +322,19 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   const dayCount = new Map();
   for (const b of (bk || [])) {
     const slotKey = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
-    if (!slotKey) continue;
+    // An odd-time manual booking (doesn't land on one of the 5 fixed slots)
+    // can't be marked busy at any specific slot, but it still occupies the
+    // tech's day — it must still count toward max_jobs_per_day, or a tech with
+    // several off-slot jobs reads as having room for more than they actually
+    // do. Only the slot-level occupancy below is skipped without a slotKey.
     const dateStr = localDateStr(tz, b.scheduled_at);
     const extra = esOf2(b);
     for (const tid of [b.technician_id, b.secondary_technician_id]) {
       if (tid && techIdSet.has(tid)) {
-        booked.add(`${tid}:${dateStr}:${slotKey}`);
-        for (const sk of extra) booked.add(`${tid}:${dateStr}:${sk}`);   // extra slots busy, same job
+        if (slotKey) {
+          booked.add(`${tid}:${dateStr}:${slotKey}`);
+          for (const sk of extra) booked.add(`${tid}:${dateStr}:${sk}`);   // extra slots busy, same job
+        }
         // Cap counts JOBS, not slots — one big job over 2 slots is still one job.
         dayCount.set(`${tid}:${dateStr}`, (dayCount.get(`${tid}:${dateStr}`) || 0) + 1);
       }

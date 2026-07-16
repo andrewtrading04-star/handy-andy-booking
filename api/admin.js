@@ -2732,7 +2732,15 @@ async function bookingPayment(req, res, db, auth, body) {
     const requestedCents = Math.round(Number((requestedDollars * 100).toFixed(2)));
     if (requestedCents <= 0) return res.status(400).json({ error: 'Enter an amount greater than $0.' });
     if (requestedCents > remainingCents) return res.status(400).json({ error: `Amount exceeds the refundable balance ($${(remainingCents / 100).toFixed(2)}).` });
-    try { await stripe('/refunds', { body: { payment_intent: b.stripe_payment_intent_id, amount: requestedCents }, ...acct }); }
+    // Keyed on the id + the refunded-balance we just read + the requested amount:
+    // a double-click (or a browser retry of the same request) reads the SAME
+    // pre-refund refundedCents and submits the SAME amount, so it replays this
+    // same idempotency key and Stripe coalesces it into the one real refund
+    // instead of a second one. A genuinely later, separate refund has a
+    // different refundedCents by then (the first one already posted), so it
+    // still gets its own fresh key.
+    const idempotencyKey = `refund-${id}-${refundedCents}-${requestedCents}`;
+    try { await stripe('/refunds', { idempotencyKey, body: { payment_intent: b.stripe_payment_intent_id, amount: requestedCents }, ...acct }); }
     catch (e) { return res.status(e.status || 400).json({ error: 'Refund failed: ' + e.message }); }
     const newRefundedCents = refundedCents + requestedCents;
     const amount_refunded = Math.round(newRefundedCents) / 100;
