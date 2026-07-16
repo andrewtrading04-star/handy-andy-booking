@@ -434,6 +434,18 @@ function todayStr(){ return new Intl.DateTimeFormat('en-CA',{timeZone:bizTz,year
 let scheduleDate=todayStr();           // selected day (YYYY-MM-DD, business tz)
 let weekJobs=[];                       // all jobs in the visible week
 
+// Which job the ETA modal (#etaModal, a single static element reused across
+// every job view) is currently showing an ETA prompt FOR. Previously each
+// "On My Way" tap attached a brand-new click listener to the modal's buttons
+// on top of whatever was already there (removeEventListener was a no-op — it
+// tried to remove the named etaHandler, but the actually-attached listener
+// was a distinct anonymous wrapper each time), so tapping an ETA on job B
+// could also re-fire job A's still-attached handler: a ghost status change +
+// a duplicate customer text for a job the tech isn't even looking at. The
+// modal's buttons are now bound ONCE (see bottom of file) and just read
+// whichever job is "pending" here at click time.
+let etaPending=null;   // { id, next, advBtn } while the modal is open, else null
+
 // Calendar-date math on 'YYYY-MM-DD' strings via a noon-UTC anchor. A calendar
 // date's weekday/number are timezone-independent, so this never drifts.
 function dateAnchor(ds){ return new Date(ds+'T12:00:00Z'); }
@@ -722,19 +734,13 @@ async function showDetail(id){
     const adv=document.getElementById('advance');
     if(adv && !adv.disabled) adv.addEventListener('click',async()=>{
       adv.disabled=true;
-      // If going "on the way", show ETA modal first
+      // If going "on the way", show ETA modal first — its buttons are bound
+      // ONCE (see the "ETA modal" block near the bottom of this script) and
+      // read `etaPending` at click time, so this just records which job/
+      // button the answer is for and shows it.
       if(next.to==='on_the_way'){
+        etaPending={ id, next, advBtn:adv };
         document.getElementById('etaModal').classList.remove('hidden');
-        // ETA button handler will call the actual status change
-        const etaHandler=async(eta)=>{
-          document.getElementById('etaModal').classList.add('hidden');
-          try{ await api('status',{method:'POST',body:{id,status:next.to,eta_minutes:eta}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
-          catch(e){ toast(e.message); }
-          document.querySelectorAll('#etaModal [data-eta]').forEach(b=>b.removeEventListener('click',etaHandler));
-        };
-        document.querySelectorAll('#etaModal [data-eta]').forEach(btn=>{
-          btn.addEventListener('click',()=>etaHandler(parseInt(btn.dataset.eta)));
-        });
       } else {
         try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
         catch(e){ toast(e.message); adv.disabled=false; }
@@ -1715,6 +1721,38 @@ function renderInventory(data){
 // Lightbox close (tap backdrop or ×)
 document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
 document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
+
+// ETA modal (#etaModal) — bound ONCE here, not re-attached on every "On My
+// Way" tap (see the note by `let etaPending` above for why that was buggy).
+// Reads `etaPending` at click time so it always acts on whichever job most
+// recently opened the modal.
+function closeEtaModal(){ document.getElementById('etaModal').classList.add('hidden'); }
+document.querySelectorAll('#etaModal [data-eta]').forEach(btn=>{
+  btn.addEventListener('click',async()=>{
+    const pending=etaPending; if(!pending) return;
+    closeEtaModal();
+    const eta=parseInt(btn.dataset.eta);
+    try{
+      await api('status',{method:'POST',body:{id:pending.id,status:pending.next.to,eta_minutes:eta}});
+      toast(pending.next.label+' ✓'); syncJobStatus(pending.id,pending.next.to); showDetail(pending.id);
+    }catch(e){
+      toast(e.message);
+      // Never leave the advance button stuck disabled — the tech had no way
+      // to retry or fall back except reloading the whole app.
+      if(pending.advBtn) pending.advBtn.disabled=false;
+    }
+    etaPending=null;
+  });
+});
+// Tapping the backdrop backs out without changing status — the modal had no
+// cancel path at all before, so a tech who opened it by mistake was stuck
+// choosing an ETA; re-enable the button they tapped, same as any other cancel.
+document.getElementById('etaModal').addEventListener('click',e=>{
+  if(e.target.id!=='etaModal') return;
+  closeEtaModal();
+  if(etaPending && etaPending.advBtn) etaPending.advBtn.disabled=false;
+  etaPending=null;
+});
 
 // Boot
 if(token&&tech) showJobs(); else { show('login'); }
