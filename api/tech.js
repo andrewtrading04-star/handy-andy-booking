@@ -80,6 +80,17 @@ const TECH_STATUS = {
   in_progress: { tech: 'on_job',    stamp: null },
   completed:   { tech: 'available', stamp: 'completed_at' },
 };
+// Forward-only progression, enforced server-side. Without this, a stale phone
+// tab (an old job screen left open, a second tech's app, a slow browser-back)
+// could flip an already-completed job back to "on_the_way" — re-marking the
+// tech busy for a job that's actually done, and re-firing the en-route SMS
+// (which has no once-guard of its own) to a customer whose job already
+// finished. completed/cancelled/no_show are terminal: nothing changes a job's
+// status from the tech app once it's reached one of those, in either
+// direction. Statuses not listed here (a legacy/unknown value) rank as 0 so
+// an unexpected current status never accidentally BLOCKS a normal forward move.
+const STATUS_RANK = { pending: 0, confirmed: 0, assigned: 0, on_the_way: 1, arrived: 2, in_progress: 3, completed: 4 };
+const TERMINAL_STATUS = new Set(['completed', 'cancelled', 'no_show']);
 
 export default async function handler(req, res) {
   applyCors(req, res);
@@ -678,11 +689,18 @@ async function status(req, res, db, auth, body) {
   // advance it too. All downstream writes use the job's OWN business_id, not the
   // tech's home business.
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
+    .select(`id, status, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
     .eq('id', id).maybeSingle();
   const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
   const jobBizId = existing.business_id;
+
+  if (TERMINAL_STATUS.has(existing.status)) {
+    return res.status(409).json({ error: `This job is already ${existing.status.replace(/_/g, ' ')} — its status can't be changed from here. Refresh the job list if this doesn't look right.` });
+  }
+  if (STATUS_RANK[next] < (STATUS_RANK[existing.status] ?? 0)) {
+    return res.status(409).json({ error: `This job has already moved past "${next.replace(/_/g, ' ')}" (it's currently ${existing.status.replace(/_/g, ' ')}) — refresh to see its latest status.` });
+  }
 
   // Gate completion on photo documentation (also enforced in the UI).
   if (next === 'completed') {
