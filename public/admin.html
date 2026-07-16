@@ -9,8 +9,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<!-- Font Awesome 6 (Free Solid & Regular) — used for Doms iconography -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<!-- Font Awesome 6 (~100KB) is lazy-injected by ensureFontAwesome() the first
+     time a Doms session needs it — see isDoms()/ic()/applyIconTheme() —
+     instead of loading render-blocking in <head> for every session, when
+     Handy Andy (roughly half of them) never uses a single FA icon. -->
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
@@ -1413,9 +1415,24 @@ const ICONS = {
   webanalytics:{e:'🌐', f:'fa-solid fa-globe'},
 };
 function isDoms(){ return !!(current && current.slug==='doms'); }
-function ic(name){ const m=ICONS[name]; if(!m) return ''; return isDoms() ? `<i class="${m.f}"></i>` : m.e; }
+// Font Awesome is only ever needed by a Doms session (Handy Andy always uses
+// the emoji glyph — see ICONS above) — inject it on first actual need instead
+// of loading it render-blocking in <head> for every session. Idempotent: safe
+// to call on every icon render.
+let _faLoaded=false;
+function ensureFontAwesome(){
+  if(_faLoaded) return;
+  _faLoaded=true;
+  const link=document.createElement('link');
+  link.rel='stylesheet';
+  link.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css';
+  link.referrerPolicy='no-referrer';
+  document.head.appendChild(link);
+}
+function ic(name){ const m=ICONS[name]; if(!m) return ''; if(!isDoms()) return m.e; ensureFontAwesome(); return `<i class="${m.f}"></i>`; }
 function applyIconTheme(){
   const doms=isDoms();
+  if(doms) ensureFontAwesome();
   document.body.classList.toggle('doms', doms);
   document.querySelectorAll('[data-ico]').forEach(el=>{
     const m=ICONS[el.dataset.ico]; if(!m) return;
