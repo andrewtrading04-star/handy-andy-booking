@@ -6362,6 +6362,7 @@ async function openNewBooking(prefill){
   // technicians + the partner roster had ALL round-tripped (2 serial network
   // phases), which is exactly the "takes forever to open" complaint.
   modal.classList.remove('hidden');
+  nbStartProgressTimer();
   attachAddressAutocomplete(document.getElementById('nbAddr'), { city:'nbCity', state:'nbState', zip:'nbZip' });
   // Kick the availability calendar off NOW, in parallel with the roster/services
   // fetch — it depends on neither (the tech filter falls back to "any"). When a
@@ -6541,7 +6542,23 @@ function nbUpdateProgress(){
   const curIdx=Math.min(completed, NB_STEPS.length-1);
   label.textContent=`Step ${curIdx+1} of ${NB_STEPS.length} · ${NB_STEPS[curIdx].label}`;
 }
-setInterval(nbUpdateProgress, 400);
+// Only tick while the New Booking modal is actually open — it used to run
+// unconditionally from page load (2.5x/sec, all day, every tab) and just
+// early-return while hidden. Started on open (see openNewBooking); the tick
+// itself self-stops the moment the modal goes hidden, so it doesn't matter
+// which of the modal's several close paths (backdrop click, cancel, post-save
+// auto-close) actually closed it — no need to hook each one separately.
+let nbProgressTimer=null;
+function nbStopProgressTimer(){ if(nbProgressTimer){ clearInterval(nbProgressTimer); nbProgressTimer=null; } }
+function nbStartProgressTimer(){
+  nbStopProgressTimer();
+  nbProgressTimer=setInterval(()=>{
+    const modal=document.getElementById('modal');
+    if(!modal || modal.classList.contains('hidden')){ nbStopProgressTimer(); return; }
+    if(document.hidden) return;   // backgrounded tab: skip the tick, don't stop the timer
+    nbUpdateProgress();
+  }, 400);
+}
 // Restrict the OWN roster to the entered zip's metro. Falls back to the full
 // roster if no zip is set or none of our techs are tagged to that metro (so the
 // dropdown is never empty due to missing area data).
