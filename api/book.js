@@ -6,6 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
+import { sendCardSaveFailedAlert } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -350,6 +351,14 @@ async function bookDoms(req, res) {
   }
 
   if (cardNote) console.log('[book-doms] card:', cardNote);
+  // A card was offered but never actually attached (wrong/unset key, a Stripe
+  // error) — the exact silent-failure class that left a real customer's card
+  // untracked until charge time (the "Annie" incident). The booking still
+  // proceeds either way, but this must be VISIBLE, not just a server log line:
+  // written into the booking's own internal notes so the office sees it the
+  // moment they open the job, and a direct alert email so nobody has to
+  // stumble onto it days later at time of service.
+  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file');
 
   // ── Write the booking (creates customer, booking, line items, status event,
   // review token) and get the new id back.
@@ -376,8 +385,7 @@ async function bookDoms(req, res) {
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
       stripe_payment_method_id: b.payment_method_id || null,
-      // Card status is logged server-side only — not written to office notes.
-      notes: null,
+      notes: cardSaveFailed ? `⚠ ${cardNote}` : null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};
   } catch (e) {
@@ -385,6 +393,15 @@ async function bookDoms(req, res) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
+
+  if (cardSaveFailed) {
+    await sendCardSaveFailedAlert({
+      slug: 'doms', businessName: "Dom's TV Mounting",
+      customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
+      when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
+      reason: cardNote, bookingId,
+    });
+  }
 
   // ── Doms-branded confirmation email (best-effort; never fails the booking).
   const domsEmail = emailConfig('doms');
@@ -567,6 +584,8 @@ async function bookHandyAndy(req, res) {
   const city = b.city || area.name || null;
   const state = b.state || area.state || null;
   if (cardNote) console.log('[book-ha] card:', cardNote);
+  // Same silent-failure class as bookDoms above — see the comment there.
+  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file');
 
   // ── Write the booking (customer, booking, line items, status event, review token).
   let result = {};
@@ -592,8 +611,7 @@ async function bookHandyAndy(req, res) {
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
       stripe_payment_method_id: b.payment_method_id || null,
-      // Card status is logged server-side only — not written to office notes.
-      notes: null,
+      notes: cardSaveFailed ? `⚠ ${cardNote}` : null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};
   } catch (e) {
@@ -601,6 +619,15 @@ async function bookHandyAndy(req, res) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
+
+  if (cardSaveFailed) {
+    await sendCardSaveFailedAlert({
+      slug: 'handy-andy', businessName: 'Handy Andy TV Mounting',
+      customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
+      when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz || 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
+      reason: cardNote, bookingId,
+    });
+  }
 
   // ── Handy Andy-branded confirmation email (best-effort; never fails booking).
   const haEmail = emailConfig('handy-andy');

@@ -81,6 +81,59 @@ export async function sendOwnerBookingAlert(d = {}) {
   }
 }
 
+// "Card didn't save" alert — fires when a public booking widget captured a
+// payment_method_id but it never actually ended up on file (wrong/unset
+// Stripe key, a Stripe error, etc.). This is the exact silent-failure class
+// that caused a real customer's card to go untracked until a charge attempt
+// failed at time of service (the "Annie" incident) — the booking itself
+// still succeeds (never blocked on this), but someone needs to know to add
+// the card manually before the appointment, not discover it days later.
+//
+// Unlike sendOwnerBookingAlert, this ALWAYS reaches the owner (not gated on
+// PER_BOOKING_ALERTS) — a routine "someone booked" email can wait for the
+// daily digest, but a card that silently failed to save needs action before
+// the job's scheduled date, and is rare enough not to be noisy.
+export async function sendCardSaveFailedAlert(d = {}) {
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig(d.slug);
+    if (!cfg.apiKey) return;
+
+    const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
+    const slug = String(d.slug || '').toLowerCase();
+    if (slug === 'handy-andy') {
+      recipients.add(process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
+    } else if (slug === 'doms') {
+      recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
+    }
+    recipients.delete('');
+    if (!recipients.size) return;
+
+    const c = d.customer || {};
+    const rows = [
+      ['Company', d.businessName],
+      ['Customer', c.name],
+      ['Phone', c.phone],
+      ['Email', c.email],
+      ['When', d.when],
+      ['Reason', d.reason],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 4px;color:#b91c1c;">⚠ A customer's card did not save</h2>
+      <p style="margin:0 0 14px;color:#374151;">They entered a card when booking, but it never actually attached — the booking still went through, but there's no card to charge at service time.</p>
+      <table style="border-collapse:collapse;">${tbl}</table>
+      <p style="margin:16px 0 0;font-size:13px;">Open this booking and use <b>"Change card"</b> to add it before the appointment.</p>
+      ${d.bookingId ? `<p style="margin:10px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(d.bookingId)}</p>` : ''}
+    </div>`;
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: `⚠ Card did not save — ${d.customer?.name || 'a customer'}`, html, replyTo: cfg.from });
+    }
+  } catch (e) {
+    console.warn('[owner-notify] non-fatal:', e.message);
+  }
+}
+
 // "New estimate request" heads-up email — the ONLY per-request email Heather
 // (Handy Andy) / Joey (Doms) get for online activity now; a real booking no
 // longer emails them (see mirror.js). Same recipient rule as the booking
