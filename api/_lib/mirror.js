@@ -11,6 +11,13 @@ import { signToken } from './auth.js';
 
 function first(...vals) { for (const v of vals) if (v != null && v !== '') return v; return null; }
 
+// True only for a violation of bookings_tech_slot_unique (migration 0073) —
+// two concurrent bookings landed on the same tech's same exact slot. Checked
+// by index name specifically so it's never confused with the idempotency_key
+// uniqueness check just below, which is a different constraint and needs
+// completely different handling (return the EXISTING booking, not retry).
+function isTechSlotRaceErr(e) { return !!(e && e.code === '23505' && /bookings_tech_slot_unique/.test(e.message || '')); }
+
 export async function mirrorBooking(ctx = {}) {
   try {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return;
@@ -140,7 +147,23 @@ export async function mirrorBooking(ctx = {}) {
       // can't be an upsert arbiter — so insert and, on the unique violation,
       // return the existing booking instead (and skip re-writing line items).
       bookingRow.idempotency_key = String(ctx.idempotency_key);
-      const ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      let ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      if (isTechSlotRaceErr(ins.error)) {
+        // A DIFFERENT customer's booking landed on this exact tech+slot first
+        // (see bookings_tech_slot_unique, migration 0073) — not a retry of
+        // THIS customer's own submit, so the idempotency-duplicate branch
+        // below is the wrong handling. Fall back to unassigned rather than
+        // losing the booking or double-booking the tech; the office assigns
+        // manually. Downstream callers (book.js) compare the returned
+        // technician_id against what they originally picked so a "meet your
+        // tech" confirmation email never names a tech who isn't actually on
+        // the job.
+        console.warn('[mirror] tech/slot race lost, booking unassigned instead:', ins.error.message);
+        technician_id = null;
+        bookingRow.technician_id = null;
+        if (bookingRow.status === 'assigned') bookingRow.status = 'confirmed';
+        ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      }
       if (!ins.error) {
         booking_id = ins.data?.id || null;
       } else if (ins.error.code === '23505' || /duplicate key|idempotency/i.test(ins.error.message || '')) {
@@ -156,7 +179,15 @@ export async function mirrorBooking(ctx = {}) {
         return;   // best-effort: swallow
       }
     } else {
-      booking_id = (await db.from('bookings').insert(bookingRow).select('id').single()).data?.id || null;
+      let ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      if (isTechSlotRaceErr(ins.error)) {
+        console.warn('[mirror] tech/slot race lost, booking unassigned instead:', ins.error.message);
+        technician_id = null;
+        bookingRow.technician_id = null;
+        if (bookingRow.status === 'assigned') bookingRow.status = 'confirmed';
+        ins = await db.from('bookings').insert(bookingRow).select('id').single();
+      }
+      booking_id = ins.data?.id || null;
     }
     if (!booking_id) return;
 

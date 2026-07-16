@@ -393,6 +393,15 @@ async function bookDoms(req, res) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
+  // mirrorBooking falls back to unassigned if this exact tech+slot lost a race
+  // to a concurrent booking (bookings_tech_slot_unique, migration 0073) —
+  // when that happens the booking's real technician_id comes back null even
+  // though `technician_id` here still holds the tech we ORIGINALLY picked.
+  // Never let the confirmation email say "Meet [Tech]" for a job that isn't
+  // actually assigned to them.
+  if (technician_id && result.technician_id !== technician_id) {
+    technicianName = null; technicianPhoto = null;
+  }
 
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
@@ -619,6 +628,10 @@ async function bookHandyAndy(req, res) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
+  // Same race-fallback check as bookDoms above — see the comment there.
+  if (technician_id && result.technician_id !== technician_id) {
+    technicianName = null; technicianPhoto = null;
+  }
 
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
