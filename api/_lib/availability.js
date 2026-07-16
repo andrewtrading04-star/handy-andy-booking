@@ -21,7 +21,11 @@ export const SLOT_KEYS = new Set(SLOTS.map(s => s.key));
 let _extraCol = true;
 const esCol2 = () => (_extraCol ? ', extra_slots' : '');
 const esOf2 = (b) => (_extraCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
-const _isExtraErr = (e) => /extra_slots/.test((e && e.message) || '');
+// Gate on Postgres's actual "undefined column" code (42703), not just a message
+// match — an unrelated error (network hiccup, an unrelated constraint message
+// that happens to mention "extra_slots") must never permanently disable the
+// column for the rest of the lambda's lifetime.
+const _isExtraErr = (e) => !!(e && e.code === '42703' && /extra_slots/.test(e.message || ''));
 
 // Sunday-first to match JS Date.getDay().
 export const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -387,7 +391,7 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
   for (let i = 0; i < 2 && error; i++) {
     let changed = false;
     if (_isExtraErr(error)) { _extraCol = false; changed = true; }
-    if (/secondary_technician_id/.test(error.message || '')) { _liftOne = false; changed = true; }
+    if (error.code === '42703' && /secondary_technician_id/.test(error.message || '')) { _liftOne = false; changed = true; }
     if (!changed) break;
     ({ data, error } = await run(_liftOne));
   }

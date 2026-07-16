@@ -51,7 +51,10 @@ let techHasStripeAcctCol = true;
 let techHasExtraCol = true;
 const esCol = () => (techHasExtraCol ? ', extra_slots' : '');
 const esOf = (b) => (techHasExtraCol && Array.isArray(b && b.extra_slots)) ? b.extra_slots : [];
-const isExtraErr = (e) => /extra_slots/.test((e && e.message) || '');
+// Gate on Postgres's actual "undefined column" code (42703), not just a message
+// match — an unrelated error must never permanently disable the column for the
+// rest of the lambda's lifetime.
+const isExtraErr = (e) => !!(e && e.code === '42703' && /extra_slots/.test(e.message || ''));
 function scopeMine(q, auth) {
   return techHasSecondCol
     ? q.or(`technician_id.eq.${auth.tech_id},secondary_technician_id.eq.${auth.tech_id}`)
@@ -62,7 +65,7 @@ function scopeMine(q, auth) {
 // lacks it. `build()` must return a not-yet-awaited Supabase query.
 async function fetchMine(build) {
   let r = await build();
-  if (r.error && /secondary_technician_id/.test(r.error.message || '')) {
+  if (r.error && r.error.code === '42703' && /secondary_technician_id/.test(r.error.message || '')) {
     techHasSecondCol = false;
     r = await build();
   }
@@ -942,7 +945,7 @@ async function jobCardUpdate(req, res, db, auth, body) {
              customer:customers ( name, email, phone )`), auth)
     .eq('id', id).maybeSingle();
   let { data: b, error } = await fetchMine(build);
-  if (error && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
+  if (error && error.code === '42703' && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
   if (b.payment_status === 'paid') return res.status(400).json({ error: 'This job is already paid — the card cannot be changed.' });
   // 'charging' is a transient lock a charge-in-progress holds (see
@@ -1033,7 +1036,7 @@ async function jobPayment(req, res, db, auth, body) {
              customer:customers ( id, name, email, phone, stripe_customer_id )`), auth)
     .eq('id', id).maybeSingle();
   let { data: b, error } = await fetchMine(build);
-  if (error && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
+  if (error && error.code === '42703' && /stripe_account/.test(error.message || '')) { techHasStripeAcctCol = false; ({ data: b, error } = await fetchMine(build)); }
   if (error || !b) return res.status(404).json({ error: 'Job not found' });
 
   // Charge/refund with the Stripe account the booking's card lives in: the
@@ -1667,7 +1670,7 @@ async function techPayroll(req, res, db, auth) {
     ? jobsQuery.or(`technician_id.eq.${techId},secondary_technician_id.eq.${techId}`)
     : jobsQuery.eq('technician_id', techId);
   let { data: jobs, error } = await jobsQuery;
-  if (error && /secondary_technician_id/.test(error.message || '')) {
+  if (error && error.code === '42703' && /secondary_technician_id/.test(error.message || '')) {
     techHasSecondCol = false;
     ({ data: jobs, error } = await db.from('bookings')
       .select(jobsSelect.replace('secondary_technician_id, ', ''))
