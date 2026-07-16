@@ -134,6 +134,57 @@ export async function sendCardSaveFailedAlert(d = {}) {
   }
 }
 
+// "Unrecognized line item" alert — fires when a public booking widget submits
+// a line item that matches NEITHER a known service_options catalog price NOR
+// one of our own fee/tax/coupon names (see reconcileLinesWithCatalog in
+// api/book.js). The booking still goes through at the price submitted — a
+// false positive here (a genuine new wording the catalog matcher doesn't
+// recognize yet) must never block a real customer — but it's worth a human
+// glancing at, since it's also exactly what a tampered/forged line item would
+// look like. Always reaches the owner (not gated on PER_BOOKING_ALERTS), same
+// urgency class as sendCardSaveFailedAlert.
+export async function sendPriceMismatchAlert(d = {}) {
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig(d.slug);
+    if (!cfg.apiKey) return;
+
+    const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
+    const slug = String(d.slug || '').toLowerCase();
+    if (slug === 'handy-andy') {
+      recipients.add(process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
+    } else if (slug === 'doms') {
+      recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
+    }
+    recipients.delete('');
+    if (!recipients.size) return;
+
+    const c = d.customer || {};
+    const money = (n) => '$' + (Number(n) || 0).toFixed(2);
+    const rows = [
+      ['Company', d.businessName],
+      ['Customer', c.name],
+      ['Phone', c.phone],
+      ['Email', c.email],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const items = (Array.isArray(d.lineItems) ? d.lineItems : []).filter(Boolean)
+      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(li.name || 'Item')}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 4px;color:#b91c1c;">⚠ Unrecognized line item on a new booking</h2>
+      <p style="margin:0 0 14px;color:#374151;">One or more line items on this booking didn't match anything in the price catalog — the booking still went through at the price submitted, but it's worth a quick look to confirm it's correct.</p>
+      <table style="border-collapse:collapse;">${tbl}</table>
+      ${items ? `<h3 style="margin:16px 0 6px;font-size:14px;">Unrecognized item(s)</h3><table style="border-collapse:collapse;font-size:14px;">${items}</table>` : ''}
+      ${d.bookingId ? `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(d.bookingId)}</p>` : ''}
+    </div>`;
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: `⚠ Unrecognized line item — ${d.customer?.name || 'a customer'}`, html, replyTo: cfg.from });
+    }
+  } catch (e) {
+    console.warn('[owner-notify] non-fatal:', e.message);
+  }
+}
+
 // "New estimate request" heads-up email — the ONLY per-request email Heather
 // (Handy Andy) / Joey (Doms) get for online activity now; a real booking no
 // longer emails them (see mirror.js). Same recipient rule as the booking

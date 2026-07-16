@@ -6,7 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert } from './_lib/owner-notify.js';
+import { sendCardSaveFailedAlert, sendPriceMismatchAlert } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -185,6 +185,50 @@ const TERRITORY_SURCHARGE = {
 };
 function territorySurchargeFor(territoryId) { return TERRITORY_SURCHARGE[territoryId] || 0; }
 
+// ── Re-price catalog line items server-side ─────────────────────────────────
+// The widget's line_items arrive with client-computed unit_price/line_total —
+// nothing here previously checked those against anything, so a tampered/stale
+// widget request could book a real job at any price an attacker chose. Every
+// real customer-facing choice (TV size, bracket, wires, fireplace, surface,
+// lifting, dismount, extras) is a priced row in service_options, so any line
+// whose name matches one gets its price FORCE-OVERWRITTEN from the catalog —
+// tampering has zero effect on those. A line matching NEITHER a catalog option
+// NOR one of our own fee/tax/coupon names is left in place at face value (a
+// real customer must never be blocked over an unrecognized wording our
+// matcher doesn't know yet) but is returned in `unmatched` for a human to see.
+//
+// Reserved names are stripped from the CLIENT's lines entirely, before the
+// catalog match — otherwise a forged line literally named "Tax" or "Coupon"
+// would satisfy the `!lines.some(...)` checks below and suppress the real
+// fee/tax computation. The server always computes those itself afterward.
+//
+// Matched by NAME only, regardless of whatever `kind` the client claims for a
+// line — trusting the client's `kind` field would let an attacker dodge
+// re-pricing entirely just by labeling a real service line "fee" or "coupon"
+// instead of "option". Coupons are validated separately via the dedicated
+// b.coupon code (see couponCode/couponAmt above), never via a client-supplied
+// coupon-kind line item, so there's no legitimate line this would misfire on.
+const RESERVED_LINE_NAME_RE = /surcharge|after.?hours|coupon|discount|^tax\b/i;
+async function reconcileLinesWithCatalog(db, businessId, lines) {
+  const kept = (lines || []).filter(l => !RESERVED_LINE_NAME_RE.test(l.name || ''));
+  const { data: opts } = await db.from('service_options')
+    .select('label, price').eq('business_id', businessId).eq('active', true);
+  // Strip a baked-in "×3"/"x3" quantity suffix before comparing — some widget
+  // paths fold the count into the label itself (e.g. "Full Motion Bracket ×3")
+  // rather than sending it as a separate quantity, same as payroll.js's own
+  // stripQtySuffix has to handle for tech-pay matching.
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s*[x×✕✖]\s*\d+\s*$/, '').trim().replace(/\s+/g, ' ');
+  const catalog = new Map((opts || []).map(o => [norm(o.label), Number(o.price) || 0]));
+  const unmatched = [];
+  const reconciled = kept.map(l => {
+    const price = catalog.get(norm(l.name));
+    if (price == null) { unmatched.push(l); return l; }
+    const quantity = Number(l.quantity) || 1;
+    return { ...l, unit_price: price, line_total: Math.round(price * quantity * 100) / 100 };
+  });
+  return { lines: reconciled, unmatched };
+}
+
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
 // RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
 function icsEscape(s) {
@@ -298,6 +342,11 @@ async function bookDoms(req, res) {
         quantity: qty, unit_price: qty ? amount / qty : amount, line_total: amount };
     });
   }
+  // Force every catalog-matched line to its real service_options price — see
+  // reconcileLinesWithCatalog. unmatchedLines is reported to the owner below,
+  // once we have a bookingId, but never blocks the booking.
+  let unmatchedLines = [];
+  ({ lines, unmatched: unmatchedLines } = await reconcileLinesWithCatalog(db, biz.id, lines));
   // Add the travel surcharge server-side if the widget didn't already include it,
   // so a stale/tampered widget can never drop it.
   if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
@@ -409,6 +458,13 @@ async function bookDoms(req, res) {
       customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
       when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
       reason: cardNote, bookingId,
+    });
+  }
+  if (unmatchedLines.length) {
+    await sendPriceMismatchAlert({
+      slug: 'doms', businessName: "Dom's TV Mounting",
+      customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
+      lineItems: unmatchedLines, bookingId,
     });
   }
 
@@ -528,6 +584,11 @@ async function bookHandyAndy(req, res) {
         quantity: qty, unit_price: qty ? amount / qty : amount, line_total: amount };
     });
   }
+  // Force every catalog-matched line to its real service_options price — see
+  // reconcileLinesWithCatalog. unmatchedLines is reported to the owner below,
+  // once we have a bookingId, but never blocks the booking.
+  let unmatchedLines = [];
+  ({ lines, unmatched: unmatchedLines } = await reconcileLinesWithCatalog(db, biz.id, lines));
   // Enforce the money the customer must owe, server-side, so a stale/tampered
   // widget can never drop the surcharge or after-hours fee.
   if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
@@ -639,6 +700,13 @@ async function bookHandyAndy(req, res) {
       customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
       when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz || 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
       reason: cardNote, bookingId,
+    });
+  }
+  if (unmatchedLines.length) {
+    await sendPriceMismatchAlert({
+      slug: 'handy-andy', businessName: 'Handy Andy TV Mounting',
+      customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
+      lineItems: unmatchedLines, bookingId,
     });
   }
 
