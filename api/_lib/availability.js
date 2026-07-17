@@ -381,8 +381,17 @@ async function recurringPlusExceptions(db, techId, dateStr, dow) {
 }
 let _liftOne = true;
 // Slot keys already occupied by a non-cancelled booking for ONE tech on a date
-// (across ANY business — a tech booked anywhere is busy everywhere).
-async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
+// (across ANY business — a tech booked anywhere is busy everywhere), PLUS how
+// many distinct JOBS that is. Two different questions: `taken` answers "is
+// this exact slot free"; `jobCount` answers "how many jobs does this tech
+// already have today" for the max_jobs_per_day cap. jobCount must count ONE
+// per booking ROW regardless of how many slot keys it touches (a multi-slot
+// job via extra_slots) or whether it has a matching slotKey at all (an
+// odd-time manual booking has no slotKey to add to `taken`, but it still
+// occupies a full slot in the tech's day and must still count toward the
+// cap) — mirrors the same job-vs-slot distinction publicOpenSlots already
+// makes via its own dayCount (see that function's comment).
+async function bookedSlotsOneTech(db, techId, dateStr, tz) {
   const dayStart = localDateStartUTC(tz, dateStr).toISOString();
   const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
   const run = (withSecond) => {
@@ -410,11 +419,13 @@ async function bookedSlotKeysOneTech(db, techId, dateStr, tz) {
   // unassigned booking (office assigns manually) rather than crashing.
   if (error) throw error;
   const taken = new Set();
+  let jobCount = 0;
   for (const b of (data || [])) {
+    jobCount++;
     const k = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)); if (k) taken.add(k);
     for (const sk of esOf2(b)) taken.add(sk);
   }
-  return taken;
+  return { taken, jobCount };
 }
 
 // Pick the first active tech who is available (recurring/exception) AND free for
@@ -437,8 +448,13 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day');
   if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await baseQ('id'));
   const list = techs || [];
-  // A tech at their daily job cap is not eligible for this date.
-  const atCap = (t, booked) => { const c = (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)); return c != null && booked.size >= c; };
+  // A tech at their daily job cap is not eligible for this date. Counts JOBS
+  // (bookedSlotsOneTech's jobCount), not slots — see that function's comment.
+  // Previously this compared against `booked.size` (a slot-KEY count), which
+  // both undercounted (an off-slot manual booking added nothing) and
+  // overcounted (one multi-slot job added 2+ entries) — a tech could be
+  // auto-assigned past their real daily capacity.
+  const atCap = (t, jobCount) => { const c = (t.max_jobs_per_day == null ? null : Number(t.max_jobs_per_day)); return c != null && jobCount >= c; };
   // Only a tech who actually marked this exact slot available (recurring or a
   // positive exception) is eligible — a tech who opted out of a day entirely
   // (e.g. never works Mondays) must never be auto-booked into it just because
@@ -448,9 +464,9 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
     for (const t of pool) {
       const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
       if (!keys.has(slotKey)) continue;
-      const booked = await bookedSlotKeysOneTech(db, t.id, dateStr, tz);
-      if (atCap(t, booked)) continue;
-      if (!booked.has(slotKey)) return t.id;
+      const { taken, jobCount } = await bookedSlotsOneTech(db, t.id, dateStr, tz);
+      if (atCap(t, jobCount)) continue;
+      if (!taken.has(slotKey)) return t.id;
     }
     return null;
   };
