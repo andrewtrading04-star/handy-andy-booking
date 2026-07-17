@@ -251,6 +251,17 @@
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
 
+<!-- Bracket-discretion reminder (shown once per job, before the ETA modal, when
+     the job needs a company-supplied bracket) -->
+<div id="bracketModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:32px;max-width:340px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
+    <div style="width:48px;height:48px;border-radius:50%;background:#fef3e2;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:22px;">📦</div>
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;color:#222a35;">Before you go in</h2>
+    <p style="color:#7a8694;font-size:14.5px;line-height:1.5;margin-bottom:24px;">Remember to leave the bracket box inside your vehicle. Customer should not see the box the brackets came in.</p>
+    <button class="btn" id="bracketGotIt" style="width:100%;background:#FF6B35;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">Got it, continue</button>
+  </div>
+</div>
+
 <!-- ETA Modal (shown when tech marks job as "on the way") -->
 <div id="etaModal" class="lightbox hidden">
   <div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
@@ -445,6 +456,15 @@ let weekJobs=[];                       // all jobs in the visible week
 // modal's buttons are now bound ONCE (see bottom of file) and just read
 // whichever job is "pending" here at click time.
 let etaPending=null;   // { id, next, advBtn } while the modal is open, else null
+
+// Bracket-discretion reminder: shown once per job, right before the ETA modal,
+// only for jobs that actually need a company-supplied bracket. Same
+// bound-once/read-at-click-time pattern as etaPending above (see the note
+// there for why a per-tap listener was buggy). Ack is stored in localStorage
+// (not just a JS var) so it survives a re-open of the same job this session.
+let bracketPending=null;   // { id, next, advBtn } while the modal is open, else null
+function bracketAcked(id){ return lsGet('bracket_ack_'+id)==='1'; }
+function ackBracket(id){ lsSet('bracket_ack_'+id,'1'); }
 
 // Calendar-date math on 'YYYY-MM-DD' strings via a noon-UTC anchor. A calendar
 // date's weekday/number are timezone-independent, so this never drifts.
@@ -739,8 +759,13 @@ async function showDetail(id){
       // read `etaPending` at click time, so this just records which job/
       // button the answer is for and shows it.
       if(next.to==='on_the_way'){
-        etaPending={ id, next, advBtn:adv };
-        document.getElementById('etaModal').classList.remove('hidden');
+        if(j.bracket && j.bracket.needed && !bracketAcked(id)){
+          bracketPending={ id, next, advBtn:adv };
+          document.getElementById('bracketModal').classList.remove('hidden');
+        } else {
+          etaPending={ id, next, advBtn:adv };
+          document.getElementById('etaModal').classList.remove('hidden');
+        }
       } else {
         try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
         catch(e){ toast(e.message); adv.disabled=false; }
@@ -1721,6 +1746,26 @@ function renderInventory(data){
 // Lightbox close (tap backdrop or ×)
 document.getElementById('lbClose').addEventListener('click',()=>document.getElementById('lightbox').classList.add('hidden'));
 document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') document.getElementById('lightbox').classList.add('hidden'); });
+
+// Bracket modal (#bracketModal) — bound ONCE, same pattern as #etaModal below.
+// "Got it" acks the job (so it never re-shows for this job) and falls straight
+// through into the ETA modal — the reminder gates the SAME "On My Way" action,
+// it doesn't replace it.
+function closeBracketModal(){ document.getElementById('bracketModal').classList.add('hidden'); }
+document.getElementById('bracketGotIt').addEventListener('click',()=>{
+  const pending=bracketPending; if(!pending) return;
+  closeBracketModal();
+  ackBracket(pending.id);
+  etaPending=pending;
+  document.getElementById('etaModal').classList.remove('hidden');
+  bracketPending=null;
+});
+document.getElementById('bracketModal').addEventListener('click',e=>{
+  if(e.target.id!=='bracketModal') return;
+  closeBracketModal();
+  if(bracketPending && bracketPending.advBtn) bracketPending.advBtn.disabled=false;
+  bracketPending=null;
+});
 
 // ETA modal (#etaModal) — bound ONCE here, not re-attached on every "On My
 // Way" tap (see the note by `let etaPending` above for why that was buggy).
