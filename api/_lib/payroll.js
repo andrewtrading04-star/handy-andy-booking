@@ -27,12 +27,6 @@ export const PAY_DATE_OFFSET_DAYS = 9;    // days after the period-end Saturday
 export function isJuan(techName) {
   return /\bjuan\b/i.test(String(techName || ''));
 }
-// Techs who work two-person jobs with their OWN helper (a spouse/partner who is
-// NOT a paid tech in the system): Juan and TK. They are NEVER split — each keeps
-// the full base/tips AND the entire $60 two-person add-on (not the $30 half).
-export function bringsOwnSecond(techName) {
-  return isJuan(techName) || /\btk\b/i.test(String(techName || ''));
-}
 export function isRetired(techName) {
   // Dismissed techs — never paid (rate sheet §10): Evan and Israel.
   return /\b(evan|israel)\b/i.test(String(techName || ''));
@@ -373,7 +367,6 @@ export function computeJobPay(job, techName) {
   const flags = [];
   const breakdown = [];
   const juan = isJuan(techName);
-  const ownHelper = bringsOwnSecond(techName);   // Juan or TK — never split, full $60
   const rate = (pair) => (juan ? pair.juan : pair.other);
 
   // Hard exclusions.
@@ -470,9 +463,10 @@ export function computeJobPay(job, techName) {
   //   • ONE tech on the job               -> that tech keeps ALL the pay.
   //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay
   //     (so $30 each on a split, or the whole $60 to a solo tech).
-  //   • Juan/TK bring their OWN off-system helper, so they never split — twoTechs is
-  //     false for them and they keep the full base + the whole $60.
-  const twoTechs = !!job.second_tech && !ownHelper;
+  // job.second_tech is only ever true when a REAL system tech is assigned as
+  // secondary (Juan/TK's own off-system helper is never entered as one) — so
+  // it always means an actual two-person job, no exception for who's primary.
+  const twoTechs = !!job.second_tech;
   const feeBonus = multiTech.secondTechBonus > 0 ? 60 : 0;
 
   // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
@@ -640,9 +634,17 @@ export function computeJobPay(job, techName) {
   //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay.
   //       - two techs: $30 to each (the $60 splits with the base)
   //       - one tech:  the whole $60 to that tech
-  //   • EXCEPTION: Juan/TK bring their OWN off-system helper (not a paid system
-  //     tech), so they are NEVER split — twoTechs is false for them and they keep
-  //     the full base/tips plus the whole $60.
+  //   • Juan/TK bring their OWN off-system helper (not a paid system tech) on
+  //     their solo bookings — but that's simply the "ONE tech on the job" case
+  //     above (job.second_tech is false, so twoTechs is already false; no
+  //     special-case needed). FIX (Krabo Malobo job, Jul 2026): this used to
+  //     ALSO force twoTechs=false whenever Juan/TK was primary, even when a
+  //     REAL system tech was recorded as job.second_tech (e.g. a cross-hire —
+  //     Steve from Handy Andy helping TK on a Dom's job). That double-paid the
+  //     job: TK got the full pool AND the real second tech separately computed
+  //     their own half-share. A recorded second_tech is always a genuine paid
+  //     tech (an off-system helper is never in job.second_tech at all), so it
+  //     must always split normally — Juan/TK included.
   //   • Travel is ONE trip's surcharge — SPLIT between the two techs (owner rule).
   //   • After-hours ($75) is a per-trip stipend — each tech on the trip earns it.
   if (twoTechs) {
@@ -730,9 +732,13 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: julianaItems }), 'Kregg').pay, 202, 'Other tech same job = 150 base + $52 travel = 202');
   // TWO real system techs on the job -> base splits 50/50 (owner rule: 2 techs
   // selected = split the tech pay). Travel is one trip's share, SPLIT in half —
-  // $52 -> $26 each. Juan brings his OWN off-system helper, so he never splits:
-  // he keeps the full base + full travel.
-  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 212, 'Juan (own helper) never splits = full 160 + $52 travel = 212');
+  // $52 -> $26 each. FIX (Krabo Malobo job, Jul 2026): Juan's "brings his own
+  // off-system helper" exception only applies when there's NO real second_tech
+  // recorded — a recorded one is always a genuine paid tech (e.g. a cross-hire),
+  // so it splits like anyone else's job. This used to assert Juan kept the full
+  // 212 here even with second_tech:true, which double-paid the job once the
+  // real second tech's own pay was also computed.
+  eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Juan').pay, 106, 'Juan WITH a real second tech splits like anyone else: (160+52)/2 = 106');
   eq(computeJobPay(job({ line_items: julianaItems, second_tech: true }), 'Kregg').pay, 101, 'Two techs: base 150 split = 75 + travel $52 SPLIT = 26 -> 101');
   eq(computeJobPay(job({ line_items: julianaItems, second_tech: true, is_secondary: true }), 'Kregg').pay, 101, 'Second of two techs: 75 base share + 26 travel half = 101');
   // Customer PAID for the two-person option ("cannot help lift" $70): Juan keeps
@@ -1056,6 +1062,17 @@ function runSelfTests() {
     { name: '70"-85"', line_total: 149 },
     { name: 'Second Technician', line_total: 70 },
   ] }), 'Kregg').pay, 70, 'normal tech same job splits: 80/2 + 30 = 70');
+  // FIX (Krabo Malobo job, Jul 2026): TK/Juan's "brings own helper" exception
+  // must NOT apply once a REAL system tech is recorded as job.second_tech (an
+  // off-system helper is never entered as one) — that's a genuine two-person
+  // job, same as anyone else's. Previously TK kept the FULL pool here AND the
+  // real second tech's own computeJobPay call ALSO gave them a half-share —
+  // double-paying the job (e.g. $345 total became $517.50: $345 to TK + $172.50
+  // to the cross-hire second tech, on a $529 job).
+  eq(computeJobPay(job({ second_tech: true, tip: 40, line_items: [
+    { name: '98"+', line_total: 229 },
+    { name: 'Second Technician', line_total: 70 }
+  ] }), 'TK').pay, 115, 'TK WITH a real second tech splits like anyone else: (130+40+60)/2 = 115');
 
   // Service-area surcharge → tech travel payout: a flat 80% of whatever travel
   // fee the customer was charged (house keeps 20%), derived from the surcharge
