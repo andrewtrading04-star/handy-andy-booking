@@ -505,8 +505,12 @@
   .nb-optq.on{border-color:var(--accent);background:#fef5f0;}
   .nb-optq .nb-optlabel{flex:1;}
   .nb-optq.on .nb-optlabel{font-weight:600;}
+  .nb-optq .nb-price{color:var(--ink-2);font-size:12.5px;flex-shrink:0;}
+  .nb-optq.on .nb-price{color:var(--accent);font-weight:600;}
+  .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;}
+  .nb-optq.on .nb-optdot{background:var(--accent);border-color:var(--accent);}
   .nb-stepper{display:flex;align-items:center;gap:0;flex-shrink:0;}
-  .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .nb-q-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
   .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
   .nb-cap{font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0;margin-left:6px;}
@@ -7423,13 +7427,18 @@ function renderNbSteps(){
         const bwMax=bw?nbBehindWallMax():Infinity;
         const plusDis=(atCap || ct>=bwMax)?' disabled':'';
         html+=`<div class="nb-optq${ct>0?' on':''}">`+
+              `<span class="nb-optdot">${ct>0?'✓':''}</span>`+
               `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
               `<span class="nb-price">${priceLbl}</span>`+
-              `<span class="nb-stepper">`+
-                `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
-                `<span class="nb-qty">${ct}</span>`+
-                `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
-              `</span></div>`;
+              (ct>0
+                ? `<span class="nb-stepper">`+
+                    `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
+                    `<span class="nb-qty">${ct}</span>`+
+                    `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
+                  `</span>`
+                : `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`
+              )+
+              `</div>`;
         // "Other" add-on: when selected, let the admin describe it.
         if(nbIsOtherOption(o) && ct>0){
           html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
