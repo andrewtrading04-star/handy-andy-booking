@@ -2780,7 +2780,9 @@ async function loadBookingAuthorization(id){
 async function paymentAction(id, action, amount){
   try{
     const r=await api('booking_payment',{ method:'POST', body:{ business:current.slug, id, action, amount }});
-    if(r.warning){ toast(r.warning); }
+    // Warnings are money matters (e.g. "the earlier charge actually went
+    // through — no new charge was made") — a 2.6s toast is too easy to miss.
+    if(r.warning){ alert(r.warning); }
     else toast(action==='charge'?'Card charged ✓':action==='refund'?(r.payment_status==='refunded'?'Refunded':'Partially refunded'):action==='mark_paid'?'Marked paid ✓':'Updated');
     refreshCurrent();
   }catch(err){ toast(err.message); }
@@ -2899,13 +2901,14 @@ function openChargeFlowAdmin(b){
     const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; }
     const nm=signerName;
     try{
-      await api('booking_payment',{ method:'POST', body:{ business:current.slug, id:b.id, action:'charge', amount:base, tip,
+      const r=await api('booking_payment',{ method:'POST', body:{ business:current.slug, id:b.id, action:'charge', amount:base, tip,
         signature:sigData||undefined, customer_name:nm,
         terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+CHARGE_REFUND_POLICY, terms_version:CHARGE_TERMS_VERSION,
         snapshot:{ line_items:b.line_items||[], ticket_amount:base, tip, total:total() } }});
       done();
       const m=document.getElementById('bkModal'); if(m) m.classList.add('hidden');
-      toast('Charged '+money(total())+' — receipt sent ✓');
+      if(r&&r.warning) alert(r.warning);   // e.g. "already charged on an earlier attempt — no new charge was made"
+      else toast('Charged '+money(total())+' — receipt sent ✓');
       refreshCurrent();
     }catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+money(total()); } }
   }

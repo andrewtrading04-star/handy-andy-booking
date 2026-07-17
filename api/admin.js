@@ -23,7 +23,7 @@ import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
 
@@ -2710,10 +2710,33 @@ async function bookingPayment(req, res, db, auth, body) {
   // status we read, so a state change in the gap cleanly 409s instead of
   // clobbering.
   if (act === 'mark_paid' || act === 'mark_unpaid') {
+    // A booking paid by a REAL card charge must never be quietly re-opened:
+    // the money already moved, and 'unpaid' would let a second charge through
+    // (a different amount/card gets a different idempotency key — a genuine
+    // second charge, not a replay). Refund it instead.
+    if (act === 'mark_unpaid' && b.payment_status === 'paid' && b.stripe_payment_intent_id) {
+      return res.status(400).json({ error: 'This booking was paid by CARD (the charge is on file with Stripe). Marking it unpaid could lead to charging the customer twice — issue a refund instead.' });
+    }
     if (b.payment_status === 'charging') {
       const lockAgeMs = Date.now() - new Date(b.updated_at || 0).getTime();
       if (lockAgeMs < 2 * 60 * 1000) {
         return res.status(409).json({ error: 'This booking is being charged right now — wait a moment and check whether the charge went through before marking it.' });
+      }
+    }
+    // Cash-mark reconciliation: see api/tech.js — a client-side charge timeout
+    // doesn't stop Stripe finishing server-side; if an unrecorded landed charge
+    // exists, record THAT instead of cash so the customer isn't collected twice.
+    if (act === 'mark_paid' && !b.stripe_payment_intent_id) {
+      const landed = await findLandedCharge(id, acct);
+      if (landed) {
+        const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+        if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+        if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+        const { data: rec } = await db.from('bookings').update(patch)
+          .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
+        if (!rec) return res.status(409).json({ error: 'The payment state just changed — refresh and check before marking it.' });
+        return res.status(200).json({ ok: true, payment_status: 'paid', recovered: true,
+          warning: `This booking's card charge actually WENT THROUGH ($${landed.amount.toFixed(2)}) on an earlier attempt that looked like it failed. It's been recorded as a CARD payment — don't also collect cash.` });
       }
     }
     const patch = act === 'mark_paid'
@@ -2823,6 +2846,25 @@ async function bookingPayment(req, res, db, auth, body) {
   // payment_status to what it was) or the booking gets stuck showing
   // "charging" forever with no way to retry or use "Mark paid (cash)".
   try {
+    // Reconciliation guard: a previous attempt (from EITHER app) that timed
+    // out client-side may still have LANDED on Stripe, leaving this booking
+    // unpaid with no recorded intent. A retry at a different amount/card gets
+    // a different idempotency key — a second real charge. If an unrecorded
+    // landed charge exists, ADOPT it and stop. See api/tech.js for details.
+    if (!b.stripe_payment_intent_id) {
+      const landed = await findLandedCharge(id, acct);
+      if (landed) {
+        const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+        if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+        if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+        let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
+        if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
+        if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[admin charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
+        return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
+          warning: `This booking was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
+      }
+    }
+
     const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
     if (!ticketAmount || ticketAmount <= 0) { const e = new Error('Enter an amount greater than $0.'); e.status = 400; throw e; }
     // Optional tip (e.g. the office runs the signed flow on a tablet too).

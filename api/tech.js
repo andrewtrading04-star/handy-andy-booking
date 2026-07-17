@@ -18,7 +18,7 @@ import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
 
 // Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
@@ -1068,10 +1068,37 @@ async function jobPayment(req, res, db, auth, body) {
   // is the escape hatch and passes through. CAS write so a state change in
   // the gap 409s instead of clobbering. Mirrors api/admin.js bookingPayment.
   if (act === 'mark_paid' || act === 'mark_unpaid') {
+    // A booking paid by a REAL card charge must never be quietly re-opened:
+    // the money already moved, and 'unpaid' would let a second charge through
+    // (a different amount/card gets a different idempotency key — a genuine
+    // second charge, not a replay). Refund it instead; the refund path flips
+    // the status itself.
+    if (act === 'mark_unpaid' && b.payment_status === 'paid' && b.stripe_payment_intent_id) {
+      return res.status(400).json({ error: 'This job was paid by CARD (the charge is on file with Stripe). Marking it unpaid could lead to charging the customer twice — the office should issue a refund instead.' });
+    }
     if (b.payment_status === 'charging') {
       const lockAgeMs = Date.now() - new Date(b.updated_at || 0).getTime();
       if (lockAgeMs < 2 * 60 * 1000) {
         return res.status(409).json({ error: 'This job is being charged right now — wait a moment and check whether the charge went through before marking it.' });
+      }
+    }
+    // Cash-mark reconciliation: the classic reason a tech reaches for "Mark
+    // paid (cash)" is a charge that LOOKED like it failed (timed out) — but a
+    // client-side timeout doesn't stop Stripe finishing the charge server-side.
+    // If an unrecorded landed charge exists, record THAT instead of cash, so
+    // the customer is never collected twice (card + cash). Best-effort: a
+    // search failure just falls through to the normal cash mark.
+    if (act === 'mark_paid' && !b.stripe_payment_intent_id) {
+      const landed = await findLandedCharge(id, acct);
+      if (landed) {
+        const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+        if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+        if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+        const { data: rec } = await db.from('bookings').update(patch)
+          .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
+        if (!rec) return res.status(409).json({ error: 'The payment state just changed — refresh and check before marking it.' });
+        return res.status(200).json({ ok: true, payment_status: 'paid', recovered: true,
+          warning: `This job's card charge actually WENT THROUGH ($${landed.amount.toFixed(2)}) on an earlier attempt that looked like it failed. It's been recorded as a CARD payment — do NOT take cash from the customer.` });
       }
     }
     const patch = act === 'mark_paid'
@@ -1129,6 +1156,27 @@ async function jobPayment(req, res, db, auth, body) {
         const e = new Error(`Card payments aren't set up on the server for ${b.business?.name || slug || 'this business'}. Take cash and tap "Mark paid (cash)".`);
         e.status = 400; throw e;
       }
+      // Reconciliation guard: a previous attempt that timed out CLIENT-side may
+      // still have LANDED on Stripe (the abort doesn't cancel Stripe's side),
+      // leaving this booking unpaid with no recorded intent. A same-amount/
+      // same-card retry replays via the idempotency key, but a retry with a
+      // different tip or a swapped card gets a DIFFERENT key — a second real
+      // charge. So if an unrecorded landed charge exists, ADOPT it and stop.
+      // Best-effort: a search failure falls through to a normal charge.
+      if (!b.stripe_payment_intent_id) {
+        const landed = await findLandedCharge(id, acct);
+        if (landed) {
+          const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+          if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+          if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+          let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
+          if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
+          if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[tech charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
+          return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
+            warning: `This job was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
+        }
+      }
+
       const ticketAmount = Number(b.price) || 0;
       if (ticketAmount <= 0) { const e = new Error('Cannot charge for a job with no price.'); e.status = 400; throw e; }
       // Tip the customer added on the signature screen (0 if they skipped it).

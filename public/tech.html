@@ -1051,8 +1051,12 @@ function openLightbox(url){
 
 async function paymentAction(jobId,action){
   try{
-    await api('job_payment',{method:'POST',body:{id:jobId,action}});
-    toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
+    const r=await api('job_payment',{method:'POST',body:{id:jobId,action}});
+    // A `warning` means money needs the tech's attention (e.g. "the earlier
+    // charge actually went through — do NOT take cash") — a 2.6s toast is far
+    // too easy to miss for that, so use a blocking alert.
+    if(r&&r.warning) alert(r.warning);
+    else toast(action==='charge'?'Card charged ✓':action==='refund'?'Refunded':action==='mark_paid'?'Marked paid ✓':'Updated');
     setTimeout(()=>showDetail(jobId),400);
   }catch(e){ toast(e.message); }
 }
@@ -1224,11 +1228,13 @@ function openChargeFlow(j){
     const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; } else toast('Charging…');
     const nm=signerName;
     try{
-      await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
+      const r=await api('job_payment',{method:'POST',body:{ id:j.id, action:'charge', tip,
         signature:sigData||undefined, customer_name:nm,
         terms_text:termsFor(nm)+'\n\nRefund & Cancellation Policy:\n'+REFUND_POLICY, terms_version:TERMS_VERSION,
         snapshot:{ line_items:j.line_items||[], ticket_amount:base, tip, total:total() } }});
-      done(); toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
+      done();
+      if(r&&r.warning) alert(r.warning);   // e.g. "already charged on an earlier attempt — no new charge was made"
+      else toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
       setTimeout(()=>showDetail(j.id),400);
     }catch(e){
       charging=false; ov.style.pointerEvents='';
@@ -1242,8 +1248,11 @@ function openChargeFlow(j){
   // obvious banner with the reason, and (when there's no card to charge) a
   // one-tap "Take cash — mark paid" so the job can still close in the field.
   async function markPaidCash(){
-    try{ await api('job_payment',{method:'POST',body:{ id:j.id, action:'mark_paid' }});
-      done(); toast('Marked paid (cash) ✓'); setTimeout(()=>showDetail(j.id),400);
+    try{ const r=await api('job_payment',{method:'POST',body:{ id:j.id, action:'mark_paid' }});
+      done();
+      if(r&&r.warning) alert(r.warning);   // e.g. "the card charge actually went through — do NOT take cash"
+      else toast('Marked paid (cash) ✓');
+      setTimeout(()=>showDetail(j.id),400);
     }catch(e){ toast(e.message||'Could not mark paid'); }
   }
   function chargeError(msg){

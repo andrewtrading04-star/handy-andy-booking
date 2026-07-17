@@ -227,6 +227,46 @@ export async function upcomingPayoutBySlug(slugs) {
   return out;
 }
 
+// Reconciliation guard — find a charge for this booking that ALREADY LANDED on
+// Stripe but was never recorded in the CRM. The one way that happens: a charge
+// request times out CLIENT-side (the 15s abort above) while Stripe completes
+// the PaymentIntent server-side — the catch path restores the booking to
+// unpaid and the intent id is never written. A later retry at the SAME
+// amount+card is safely replayed by the idempotency key, but a retry with a
+// DIFFERENT amount or card gets a different key and would create a second
+// real charge (the exact residual behind the Jul 15 double-charge class).
+// So before charging (or cash-marking) a booking with no recorded intent,
+// search Stripe for a succeeded, un-refunded PaymentIntent tagged with this
+// booking's id (both charge paths stamp metadata.job_id / metadata.booking_id).
+// Best-effort by design: any search failure returns null and the caller
+// proceeds exactly as before — this guard must never block a legitimate
+// charge over a Stripe search hiccup. Note Stripe search is eventually
+// consistent (up to ~1 min); the idempotency key covers that early window.
+export async function findLandedCharge(bookingId, sel = null) {
+  if (demoMode()) return null;
+  const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
+  try {
+    for (const metaKey of ['job_id', 'booking_id']) {
+      const q = encodeURIComponent(`metadata['${metaKey}']:'${bookingId}'`);
+      const out = await stripe(`/payment_intents/search?query=${q}&limit=10&expand[]=data.latest_charge`, { method: 'GET', slug, account });
+      const hit = (out.data || []).find(pi => pi.status === 'succeeded'
+        && pi.latest_charge && !pi.latest_charge.refunded && !(Number(pi.latest_charge.amount_refunded) > 0));
+      if (hit) {
+        return {
+          id: hit.id,
+          amount: Math.round(Number(hit.amount)) / 100,
+          tip: Number(hit.metadata && hit.metadata.tip) || 0,
+          customerId: (typeof hit.customer === 'string' ? hit.customer : hit.customer?.id) || null,
+          paymentMethodId: (typeof hit.payment_method === 'string' ? hit.payment_method : hit.payment_method?.id) || null,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[stripe reconcile] landed-charge search failed (proceeding without):', e.message);
+  }
+  return null;
+}
+
 // Save a card on file in a business's Stripe account: find/create the customer
 // by email, attach the payment method, and make it the default. Returns the
 // Stripe customer id. Used by the public Doms booking flow (and reusable by any
