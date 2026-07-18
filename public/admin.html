@@ -563,19 +563,38 @@
   #modal .nb-opts>.nb-opt:first-child,#modal .nb-opts>.nb-optq:first-child,#modal .nb-opts>.nb-slot:first-child{border-top:none;}
   #modal .nb-opt:hover,#modal .nb-optq:hover,#modal .nb-slot:hover{background:rgba(255,255,255,.04);}
   #modal .nb-opt.on,#modal .nb-optq.on,#modal .nb-slot.on{background:rgba(59,130,246,.1);color:#fff;font-weight:700;}
-  #modal .nb-opt{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:10px 4px;}
+  /* Fixed-width price/control columns (not "auto") so the price sits on the
+     SAME vertical line whether or not the row has grown a stepper — it used to
+     jump ~50px left the instant a row was selected. Dot aligned to the first
+     line of text (align-items:start + a small top offset) so it doesn't float
+     to the vertical center of a wrapped 2-line label (the Frame TV row). */
+  #modal .nb-opt{display:grid;grid-template-columns:20px 1fr 64px;align-items:start;gap:10px;padding:10px 4px;}
   #modal .nb-slot{padding:10px 4px;}
-  #modal .nb-optq{display:grid;grid-template-columns:20px 1fr auto auto;align-items:center;gap:10px;padding:9px 4px;}
-  #modal .nb-opt .nb-optlabel,#modal .nb-optq .nb-optlabel{min-width:0;}
-  #modal .nb-opt .nb-price,#modal .nb-optq .nb-price{color:#93a6bd;font-size:12.5px;font-weight:600;text-align:right;}
+  #modal .nb-optq{display:grid;grid-template-columns:20px 1fr 64px 84px;align-items:start;gap:10px;padding:9px 4px;}
+  #modal .nb-opt .nb-optlabel,#modal .nb-optq .nb-optlabel{min-width:0;padding-top:1px;}
+  #modal .nb-opt .nb-price,#modal .nb-optq .nb-price{color:#93a6bd;font-size:12.5px;font-weight:600;text-align:right;padding-top:1px;}
   #modal .nb-opt.on .nb-price,#modal .nb-optq.on .nb-price{color:#eef2f7;font-weight:700;}
-  #modal .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.28);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;background:transparent;}
+  #modal .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.28);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;background:transparent;margin-top:1px;}
   #modal .nb-opt.on .nb-optdot,#modal .nb-optq.on .nb-optdot{background:#3b82f6;border-color:#3b82f6;}
-  #modal .nb-stepper{display:flex;align-items:center;gap:2px;flex-shrink:0;}
-  #modal .nb-q-btn{width:26px;height:26px;border:none;background:rgba(255,255,255,.06);border-radius:7px;font-size:15px;line-height:1;color:#93a6bd;}
-  #modal .nb-q-btn:hover:not(:disabled){background:rgba(255,255,255,.12);color:#eef2f7;}
+  #modal .nb-stepper{display:flex;align-items:center;justify-content:flex-end;gap:2px;flex-shrink:0;}
+  #modal .nb-optq>.nb-q-btn{justify-self:end;}
+  #modal .nb-q-btn{width:34px;height:34px;border:none;background:rgba(255,255,255,.08);border-radius:9px;font-size:18px;line-height:1;color:#b9c8da;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  #modal .nb-q-btn:hover:not(:disabled){background:rgba(255,255,255,.16);color:#eef2f7;}
   #modal .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
-  #modal .nb-qty{width:20px;text-align:center;font-weight:800;font-size:13px;color:#dbe4ee;}
+  #modal .nb-qty{width:18px;text-align:center;font-weight:800;font-size:13px;color:#dbe4ee;}
+  /* Required/Optional tag on section headers. */
+  .nb-req-tag{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:99px;margin-left:6px;vertical-align:1px;}
+  .nb-req-tag.req{background:rgba(59,130,246,.18);color:#8ec2ff;}
+  .nb-req-tag.opt{background:rgba(255,255,255,.09);color:#93a6bd;}
+  #modal .nb-cap.done{color:#4ade80;}
+  /* Sticky running total: the need is staying visible while scrolling the
+     OPTION rows specifically (that's where priced picks pile up), not pinned
+     across the whole long form (tech/date/customer/payment below it). #nbSteps
+     gets its own bounded scroll region with a compact running-total chip
+     docked to ITS bottom; the full Subtotal/Tax/Total breakdown stays where
+     it already is, right below — this avoids showing the total twice at once. */
+  #modal #nbStepsScroll{max-height:min(46vh,380px);overflow-y:auto;margin:0 -8px;padding:0 8px;}
+  #modal #nbStepsMiniTotal{display:none;position:sticky;bottom:0;background:#132441;border-top:1px solid rgba(255,255,255,.14);margin-top:6px;padding:8px 4px;font-size:12.5px;font-weight:700;color:#eef2f7;text-align:right;z-index:2;}
   #modal .nb-consent-row{background:rgba(255,255,255,.06);}
   #modal .nb-consent-row label{color:#eef2f7;}
   #modal .nb-progress{margin-bottom:16px;}
@@ -1129,7 +1148,10 @@
       </div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
-      <div id="nbSteps"></div>
+      <div id="nbStepsScroll">
+        <div id="nbSteps"></div>
+        <div id="nbStepsMiniTotal"></div>
+      </div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
@@ -6618,7 +6640,20 @@ function nbZipReplyIdle(){
 const NB_STEPS=[
   { label:'ZIP code', done:()=>{ const el=document.getElementById('nbZip'); return !!el && el.value.trim().length===5; } },
   { label:'Category', done:()=>{ const el=document.getElementById('nbCategory'); return !!el && !!el.value; } },
-  { label:'Pricing', done:()=>{ const el=document.getElementById('nbTotalDisplay'); return !!el && !!el.textContent.trim(); } },
+  // Was "Pricing", done the instant nbTotalDisplay had ANY text — including
+  // "$0.00", before a single option was picked. Now genuinely checks that a
+  // real, required choice has been made (mirrors nbValidateTvMountingRequired
+  // for TV jobs; any non-empty selection for everything else), so the bar
+  // can't claim "Step 5 of 7" before the office has actually answered anything.
+  { label:'Options', done:()=>{
+      try{
+        if(nbGdsActive) return true;   // GDS has no options to pick
+        if(nbAssurionActive) return nbAssurionSel.size>0;
+        if(nbHandymanActive) return nbHandymanHours>0;
+        if(nbOptionGroups.length) return !nbValidateTvMountingRequired();
+        return false;
+      }catch(e){ return false; }
+    } },
   { label:'Technician', done:()=>{ const el=document.getElementById('nbTech'); return !!el && !!el.value; } },
   { label:'Date & time', done:()=>{ const el=document.getElementById('nbDate'); return !!el && !!el.value; } },
   { label:'Customer details', done:()=>{
@@ -7373,11 +7408,25 @@ function nbDisplayLabel(groupKey, optionLabel){
     if(/no|handle.*removal/i.test(optionLabel)) return 'No';
   }
   if(groupKey==='lifting'){
-    if(/70-85.*can\s*help|can\s*help.*70-85/i.test(optionLabel)) return '70-85 Inches - Customer can help lift -$0';
-    if(/70-85.*cannot|cannot.*70-85/i.test(optionLabel)) return '70-85 Inches - Customer will not help lift -$70';
+    // No baked-in "-$0"/"-$70" — the price COLUMN already shows the price;
+    // repeating it in the label (and with a MINUS sign next to a +$70 column)
+    // read as a contradiction.
+    if(/70-85.*can\s*help|can\s*help.*70-85/i.test(optionLabel)) return '70"–85" — customer can help lift';
+    if(/70-85.*cannot|cannot.*70-85/i.test(optionLabel)) return '70"–85" — customer cannot help lift';
   }
   if(groupKey==='wires'){
     return optionLabel.replace(/hide wires\s*/i, '').trim();
+  }
+  // Normalize TV-size labels to one consistent format across both catalogs.
+  // Dom's stores its first three tiers as "32 inch Or Less" / "33-59 inch" /
+  // "60-69 inch" while the rest already use the quote-mark format the larger
+  // tiers (and Handy Andy's whole catalog) use — display-only, no DB change.
+  if(groupKey==='size'){
+    const m=optionLabel.match(/^(\d+)\s*inch\s*or\s*less$/i);
+    if(m) return `${m[1]}" or less`;
+    const m2=optionLabel.match(/^(\d+)\s*-\s*(\d+)\s*inch$/i);
+    if(m2) return `${m2[1]}"–${m2[2]}"`;
+    return optionLabel.replace(/^(\d+)\+$/,'$1"+');   // Handy Andy's bare "98+"
   }
   return optionLabel;
 }
@@ -7561,7 +7610,15 @@ function renderNbSteps(){
   const tvCount=nbTotalTvs();
   const showLifting=nbShowLifting();
   const onlyFrame=nbOnlyFrame();
-  nbOptionGroups.forEach(g=>{
+  // Section order: required questions first (Size, Fireplace, Surface), then
+  // Lifting (conditionally required), then the optional ones. Previously this
+  // was whatever order the DB groups arrived in, which buried Fireplace (a
+  // REQUIRED question) behind Bracket (optional, and gated on size besides).
+  const NB_GROUP_ORDER={size:1,fireplace:2,surface:3,wires:4,bracket:5,lifting:6,dismount:7,extras:8};
+  const orderedGroups=[...nbOptionGroups].sort((a,b)=>(NB_GROUP_ORDER[a.key]||99)-(NB_GROUP_ORDER[b.key]||99));
+  // Required once the job needs this answer at all — matches nbValidateTvMountingRequired.
+  const NB_REQUIRED_GROUPS=new Set(['size','fireplace','surface']);
+  orderedGroups.forEach(g=>{
     // Lifting help is only relevant for TVs 70" and up — hide it otherwise.
     if(g.key==='lifting'){ if(!showLifting){ if(nbQty[g.id]) delete nbQty[g.id]; return; } }
     // Frame/Gallery TVs use the in-box bracket — hide the bracket question when
@@ -7577,8 +7634,16 @@ function renderNbSteps(){
     // a paid bracket for a TV that doesn't need one.
     const capN = g.key==='bracket' ? nbFrameTvQty.regular : tvCount;
     const atCap=tvBound && capN>0 && gCount>=capN;
-    const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${capN} selected</span>` : '';
-    html+=`<div class="nb-step"><div class="nb-step-t">${esc(nbGroupLabel(g))}${capLbl}</div>`;
+    // Only show a "X of Y" counter once it's actually meaningful (capN>0) —
+    // before a TV type is picked every per-TV header read "0/0 selected",
+    // which looked complete instead of blocked. Turns into a checkmark once
+    // satisfied instead of just restating the numbers back.
+    const capLbl = (tvBound && capN>0)
+      ? (gCount>=capN ? ` <span class="nb-cap done">✓ ${gCount} of ${capN}</span>` : ` <span class="nb-cap">${gCount} of ${capN}</span>`)
+      : '';
+    const isRequired = NB_REQUIRED_GROUPS.has(g.key) || (g.key==='lifting' && showLifting);
+    const reqTag = ` <span class="nb-req-tag ${isRequired?'req':'opt'}">${isRequired?'Required':'Optional'}</span>`;
+    html+=`<div class="nb-step"><div class="nb-step-t">${esc(nbGroupLabel(g))}${reqTag}${capLbl}</div>`;
     if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Select TV type first</div></div>`; return; }
     // Same rule as the lifting/only-frame gates above: when the render-level
     // gate hides this step, any selection inside it must be DELETED, not just
@@ -7761,6 +7826,15 @@ function nbAfterHoursFee(){
   const isSunday=ds ? new Date(ds+'T12:00:00').getDay()===0 : false;
   return isSunday?100:75;
 }
+// Compact running total pinned to the bottom of the scrolling options list —
+// visible while scrolling through TV Size/Bracket/etc rows, unlike the full
+// Subtotal/Tax/Total breakdown below the list, which scrolls out of view
+// exactly while priced picks are being made.
+function nbSetMiniTotal(text){
+  const el=document.getElementById('nbStepsMiniTotal'); if(!el) return;
+  el.style.display=text?'block':'none';
+  el.textContent=text;
+}
 function updateNbTotal(){
   const warn=document.getElementById('nbMinWarn'); if(warn) warn.style.display='none';
   const selections=nbCollectSelections();
@@ -7768,6 +7842,7 @@ function updateNbTotal(){
   // Assurion: customer pays $0; the total shown is Steve's payout.
   if(nbAssurionActive){
     document.getElementById('nbTotalDisplay').innerHTML=`Customer pays: $0.00 | <span style="font-size:130%;font-weight:800;">Steve’s payout: $${optionsTotal.toFixed(2)}</span>`;
+    nbSetMiniTotal(`Steve’s payout: $${optionsTotal.toFixed(2)}`);
     return;
   }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
@@ -7779,6 +7854,8 @@ function updateNbTotal(){
   const total=subtotal+tax;
   const ahNote=afterHours?` (incl. $${afterHours} after-hours)`:'';
   document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)}${ahNote} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+  // Only worth showing once there's a real option list to scroll through.
+  nbSetMiniTotal((nbOptionGroups.length && !nbGdsActive) ? `Total so far: $${total.toFixed(2)}` : '');
   renderNbMinWarn(selections);
 }
 // Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,
