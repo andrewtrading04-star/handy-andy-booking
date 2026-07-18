@@ -7397,21 +7397,31 @@ function renderNbSteps(){
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
+          `<span class="nb-optdot">${regCt>0?'✓':''}</span>`+
           `<span class="nb-optlabel">Customer has a regular TV</span>`+
           `<span class="nb-price">$0</span>`+
-          `<span class="nb-stepper">`+
-            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
-            `<span class="nb-qty">${regCt}</span>`+
-            `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`+
-          `</span></div>`+
+          (regCt>0
+            ? `<span class="nb-stepper">`+
+                `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
+                `<span class="nb-qty">${regCt}</span>`+
+                `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`+
+              `</span>`
+            : `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`
+          )+
+        `</div>`+
         `<div class="nb-optq${frameCt>0?' on':''}">`+
+          `<span class="nb-optdot">${frameCt>0?'✓':''}</span>`+
           `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
           `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
-          `<span class="nb-stepper">`+
-            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
-            `<span class="nb-qty">${frameCt}</span>`+
-            `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`+
-          `</span></div>`+
+          (frameCt>0
+            ? `<span class="nb-stepper">`+
+                `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
+                `<span class="nb-qty">${frameCt}</span>`+
+                `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`+
+              `</span>`
+            : `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`
+          )+
+        `</div>`+
       `</div></div>`;
   }
   const tvCount=nbTotalTvs();

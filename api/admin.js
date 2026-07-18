@@ -3484,10 +3484,16 @@ async function partnerTechnicians(req, res, db, auth) {
   const partner = await partnerBusiness(db, biz.slug);
   if (!partner) return res.status(200).json({ partner: null, technicians: [] });
 
+  // Resolve the zip against the PARTNER's own service-area table, not the
+  // host's — each business has its own row per metro (Doms's Denver and Handy
+  // Andy's Denver are different service_area_id values), so filtering the
+  // partner's technicians by the host's id could never match anything. This
+  // silently returned zero cross-hire techs for every ZIP entered on either
+  // side (reported: no Doms techs offered as 2nd tech on any Handy Andy job).
   const postalCode = (req.query.postal_code || '').toString();
   let serviceAreaId = null;
   if (postalCode) {
-    serviceAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+    serviceAreaId = await serviceAreaIdFromPostal(db, partner.id, postalCode);
   }
 
   let query = db.from('technicians')
@@ -5003,7 +5009,7 @@ async function estimateCreate(req, res, db, auth, body) {
       const greeting = firstName ? `Hi ${firstName}, ` : '';
       const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
       const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
-      const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
+      const msg = `${greeting}here's your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
       const r = await sendSMSResult(customer_phone, msg);
       texted = !!r.ok;
       if (!r.ok) console.warn(`[estimate_create] estimate SMS not sent:`, r.skipped || r.error);
@@ -5036,7 +5042,7 @@ async function estimateSendSms(req, res, db, auth, body) {
   const body_txt = items.length
     ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}${Number(est.tax_rate) > 0 ? ' (incl. tax)' : ''}`
     : (est.description || 'Your estimate request');
-  const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
+  const msg = `${greeting}here's your estimate. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
   if (!r.ok) {
