@@ -587,14 +587,6 @@
   .nb-req-tag.req{background:rgba(59,130,246,.18);color:#8ec2ff;}
   .nb-req-tag.opt{background:rgba(255,255,255,.09);color:#93a6bd;}
   #modal .nb-cap.done{color:#4ade80;}
-  /* Sticky running total: the need is staying visible while scrolling the
-     OPTION rows specifically (that's where priced picks pile up), not pinned
-     across the whole long form (tech/date/customer/payment below it). #nbSteps
-     gets its own bounded scroll region with a compact running-total chip
-     docked to ITS bottom; the full Subtotal/Tax/Total breakdown stays where
-     it already is, right below — this avoids showing the total twice at once. */
-  #modal #nbStepsScroll{max-height:min(46vh,380px);overflow-y:auto;margin:0 -8px;padding:0 8px;}
-  #modal #nbStepsMiniTotal{display:none;position:sticky;bottom:0;background:#132441;border-top:1px solid rgba(255,255,255,.14);margin-top:6px;padding:8px 4px;font-size:12.5px;font-weight:700;color:#eef2f7;text-align:right;z-index:2;}
   #modal .nb-consent-row{background:rgba(255,255,255,.06);}
   #modal .nb-consent-row label{color:#eef2f7;}
   #modal .nb-progress{margin-bottom:16px;}
@@ -1148,10 +1140,7 @@
       </div>
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
-      <div id="nbStepsScroll">
-        <div id="nbSteps"></div>
-        <div id="nbStepsMiniTotal"></div>
-      </div>
+      <div id="nbSteps"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
@@ -7851,15 +7840,6 @@ function nbAfterHoursFee(){
   const isSunday=ds ? new Date(ds+'T12:00:00').getDay()===0 : false;
   return isSunday?100:75;
 }
-// Compact running total pinned to the bottom of the scrolling options list —
-// visible while scrolling through TV Size/Bracket/etc rows, unlike the full
-// Subtotal/Tax/Total breakdown below the list, which scrolls out of view
-// exactly while priced picks are being made.
-function nbSetMiniTotal(text){
-  const el=document.getElementById('nbStepsMiniTotal'); if(!el) return;
-  el.style.display=text?'block':'none';
-  el.textContent=text;
-}
 function updateNbTotal(){
   const warn=document.getElementById('nbMinWarn'); if(warn) warn.style.display='none';
   const selections=nbCollectSelections();
@@ -7867,7 +7847,6 @@ function updateNbTotal(){
   // Assurion: customer pays $0; the total shown is Steve's payout.
   if(nbAssurionActive){
     document.getElementById('nbTotalDisplay').innerHTML=`Customer pays: $0.00 | <span style="font-size:130%;font-weight:800;">Steve’s payout: $${optionsTotal.toFixed(2)}</span>`;
-    nbSetMiniTotal(`Steve’s payout: $${optionsTotal.toFixed(2)}`);
     return;
   }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
@@ -7879,8 +7858,6 @@ function updateNbTotal(){
   const total=subtotal+tax;
   const ahNote=afterHours?` (incl. $${afterHours} after-hours)`:'';
   document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)}${ahNote} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
-  // Only worth showing once there's a real option list to scroll through.
-  nbSetMiniTotal((nbOptionGroups.length && !nbGdsActive) ? `Total so far: $${total.toFixed(2)}` : '');
   renderNbMinWarn(selections);
 }
 // Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,

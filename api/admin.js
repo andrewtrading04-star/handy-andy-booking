@@ -1389,7 +1389,16 @@ async function availableSlots(req, res, db, auth) {
       if (new Set([...P, ...S]).size >= 2) keys.add(k);
     }
   }
+  // Drop slots that have already started, but only for TODAY (in the same
+  // metro tz everything else here is computed in) — a future date's slots are
+  // never affected. Compared by START time, not end: once a slot's window has
+  // begun, it's no longer a real "book this" option even if it technically
+  // runs for another hour or two.
+  const nowISO = new Date().toISOString();
+  const isToday = dateStr === localDateStr(tz, nowISO);
+  const nowHHMM = isToday ? localHHMM(tz, nowISO) : null;
   const available = SLOTS.filter(s => keys.has(s.key))
+    .filter(s => !isToday || s.start > nowHHMM)
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
   return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
 }
