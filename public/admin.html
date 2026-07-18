@@ -100,7 +100,10 @@
      body text to black. Handy Andy (no .doms class) keeps its orange. */
   body.doms{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
   body.doms .logo .dot{ background:var(--accent); }
-  body.doms .nb-opt.on, body.doms .nb-slot.on, body.doms .nb-optq.on{ background:var(--accent-soft); }
+  /* New Booking's option rows are unified flat dark rows for both businesses now
+     (see the #modal-scoped block near the other #modal overrides) — the old
+     per-business card-tint override is superseded (the #modal id always wins
+     over this class-only selector) and removed rather than left dead. */
   .side-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
   .who{font-size:12px;color:var(--mute);flex:1;}
 
@@ -552,6 +555,27 @@
   #modal .nb-card-help{color:#9fb0c3;}
   #modal .nb-step-t{color:#eef2f7;}
   #modal .nb-hint{color:#9fb0c3;}
+  /* Option rows redesigned to match #bkModal's line-items table (flat rows,
+     thin dividers, no bordered/colored cards) instead of the old white/tinted
+     pill-card look. */
+  #modal .nb-opts{display:flex;flex-direction:column;gap:0;}
+  #modal .nb-opt,#modal .nb-optq,#modal .nb-slot{background:transparent;border:none;border-top:1px solid rgba(255,255,255,.08);border-radius:0;color:#dbe4ee;}
+  #modal .nb-opts>.nb-opt:first-child,#modal .nb-opts>.nb-optq:first-child,#modal .nb-opts>.nb-slot:first-child{border-top:none;}
+  #modal .nb-opt:hover,#modal .nb-optq:hover,#modal .nb-slot:hover{background:rgba(255,255,255,.04);}
+  #modal .nb-opt.on,#modal .nb-optq.on,#modal .nb-slot.on{background:rgba(59,130,246,.1);color:#fff;font-weight:700;}
+  #modal .nb-opt{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:10px 4px;}
+  #modal .nb-slot{padding:10px 4px;}
+  #modal .nb-optq{display:grid;grid-template-columns:20px 1fr auto auto;align-items:center;gap:10px;padding:9px 4px;}
+  #modal .nb-opt .nb-optlabel,#modal .nb-optq .nb-optlabel{min-width:0;}
+  #modal .nb-opt .nb-price,#modal .nb-optq .nb-price{color:#93a6bd;font-size:12.5px;font-weight:600;text-align:right;}
+  #modal .nb-opt.on .nb-price,#modal .nb-optq.on .nb-price{color:#eef2f7;font-weight:700;}
+  #modal .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.28);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;background:transparent;}
+  #modal .nb-opt.on .nb-optdot,#modal .nb-optq.on .nb-optdot{background:#3b82f6;border-color:#3b82f6;}
+  #modal .nb-stepper{display:flex;align-items:center;gap:2px;flex-shrink:0;}
+  #modal .nb-q-btn{width:26px;height:26px;border:none;background:rgba(255,255,255,.06);border-radius:7px;font-size:15px;line-height:1;color:#93a6bd;}
+  #modal .nb-q-btn:hover:not(:disabled){background:rgba(255,255,255,.12);color:#eef2f7;}
+  #modal .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
+  #modal .nb-qty{width:20px;text-align:center;font-weight:800;font-size:13px;color:#dbe4ee;}
   #modal .nb-consent-row{background:rgba(255,255,255,.06);}
   #modal .nb-consent-row label{color:#eef2f7;}
   #modal .nb-progress{margin-bottom:16px;}
@@ -7258,7 +7282,8 @@ function renderAssurionSteps(){
     g.items.forEach(([name,price])=>{
       const on=nbAssurionSel.has(name); const priceLbl=price?'$'+price:'$0';
       html+=`<button type="button" class="nb-opt${on?' on':''}" data-asrv="${esc(name)}">`+
-            `<span>${esc(name)}</span><span class="nb-price">${priceLbl}</span></button>`;
+            `<span class="nb-optdot">${on?'✓':''}</span>`+
+            `<span class="nb-optlabel">${esc(name)}</span><span class="nb-price">${priceLbl}</span></button>`;
     });
     html+='</div>';
   });
@@ -7472,7 +7497,8 @@ function renderNbSteps(){
       } else {
         const on=nbPickGet(g.id)===o.id;
         html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
-              `<span>${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
+              `<span class="nb-optdot">${on?'✓':''}</span>`+
+              `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
       }
     });
     html+='</div></div>';
