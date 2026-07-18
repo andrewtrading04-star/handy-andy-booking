@@ -75,7 +75,15 @@ async function serveReviewClick(req, res) {
   const perChannelCol = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
   try {
     const t = verifyToken(rawToken);
-    if (t && t.kind === 'review' && t.booking_id) {
+    // Accept BOTH token shapes: kind:'review' (admin.js mint, and mirror.js
+    // going forward) AND legacy kindless { booking_id } tokens — mirror.js
+    // minted those for every widget booking until Jul 2026, they live 30
+    // days, and resends reuse the STORED token, so they'll circulate for a
+    // while. A kindless token with a booking_id can only be a review token:
+    // every other token type (admin/tech/on_the_way/estimate_approve) always
+    // sets kind. Without this, the per-channel "opened" stamp was silently
+    // skipped for all widget bookings.
+    if (t && t.booking_id && (t.kind === 'review' || !t.kind)) {
       const db = serviceClient();
       const now = new Date().toISOString();
       // Per-channel click (migration 0063) — each channel records its OWN first

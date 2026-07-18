@@ -128,7 +128,13 @@ async function handleTwilioStatus(req, res) {
       return res.status(200).send('ok');
     }
     const t = verifyToken(token);
-    if (t && t.kind === 'review' && t.booking_id) {
+    // Same dual-shape acceptance as api/book.js review_click: legacy review
+    // tokens from mirror.js carry NO kind (every widget booking until Jul
+    // 2026), so requiring kind === 'review' silently dropped their delivery
+    // updates — review texts showed "Delivery pending" forever. A kindless
+    // token with a booking_id can only be a review token; on_the_way tokens
+    // always carry their kind and still route to the branch below.
+    if (t && t.booking_id && (t.kind === 'review' || !t.kind)) {
       const status = (params.MessageStatus || '').toLowerCase();
       const db = serviceClient();
       if (status === 'delivered') {

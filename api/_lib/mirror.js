@@ -209,7 +209,14 @@ export async function mirrorBooking(ctx = {}) {
     // seconds) — but only if the booking doesn't already have one, so a re-mirror
     // never invalidates a review link that was already emailed to the customer.
     if (!hadReviewToken) {
-      const reviewToken = signToken({ booking_id }, 2592000);
+      // kind:'review' matters: the click-tracking redirect (api/book.js
+      // review_click) and Twilio's delivery callback (api/analytics.js
+      // sms_status) both gate on t.kind === 'review'. This mint was the one
+      // place that omitted it (admin.js's mint includes it), so EVERY widget
+      // booking's review token silently failed both trackers — "Not opened"/
+      // "Delivery pending" forever, even for customers who clicked and left
+      // a review (the Kaylee Jawoisz card, Jul 2026).
+      const reviewToken = signToken({ kind: 'review', booking_id }, 2592000);
       await db.from('bookings').update({ review_token: reviewToken }).eq('id', booking_id);
     }
 

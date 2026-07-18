@@ -4113,6 +4113,15 @@ async function reviewRequests(req, res, db, auth) {
     const smsOpenedAt = (hasTrack ? b.review_sms_clicked_at : null)
       || b.metadata?.review_sms_clicked_at
       || ((hasTrack ? b.review_click_channel : b.metadata?.review_click_channel) === 'sms' ? (b.review_clicked_at || b.metadata?.review_clicked_at) : null) || null;
+    // Channel-UNKNOWN open: the customer provably clicked through (the review
+    // page stamped review_clicked_at, or they outright left a review) but
+    // neither channel recorded the click — legacy kindless tokens skipped the
+    // channel-stamping redirect (see api/book.js review_click). Without this,
+    // a card could show a 5-star review sitting above "Not opened" on both
+    // channels, which reads as the system contradicting itself.
+    const openedUnknownAt = (!emailOpenedAt && !smsOpenedAt)
+      ? ((hasTrack ? b.review_clicked_at : null) || b.metadata?.review_clicked_at || b.reviewed_at || null)
+      : null;
     return {
       id: b.id,
       customer_name: b.customer?.name || '—',
@@ -4122,6 +4131,7 @@ async function reviewRequests(req, res, db, auth) {
       email_count: hasTrack ? (b.review_email_count || 0) : (emailSentAt ? 1 : 0),
       email: channelState(hasEmail, emailSentAt, hasTrack ? b.review_email_delivered_at : null, hasTrack ? b.review_email_status : null, emailOpenedAt),
       sms: channelState(hasSms, smsSentAt, hasTrack ? b.review_sms_delivered_at : null, hasTrack ? b.review_sms_status : null, smsOpenedAt),
+      opened_unknown_at: openedUnknownAt,
       rating: b.review_rating || null,
       reviewed_at: b.reviewed_at || null,
       tracking: hasTrack,

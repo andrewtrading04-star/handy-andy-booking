@@ -4604,22 +4604,28 @@ const REV_FAIL_STATUSES={bounced:'Bounced',complained:'Complained',failed:'Faile
 // vertically (not a left-to-right arrow chain) so it reads cleanly at tile
 // width. `chan` is the { eligible, sent_at, delivered_at, status, opened_at }
 // shape the API returns. The resend button lives inside the tile it affects.
-function revChanTileHtml(label, chan, id, channelKey){
+function revChanTileHtml(label, chan, id, channelKey, openedUnknown){
   if(!chan || !chan.eligible){
     return `<div class="rev-tile"><div class="rev-chan-label">${label}</div><div class="rev-pipe-v"><span class="chk na">— N/A</span></div></div>`;
   }
   const failed = chan.status && REV_FAIL_STATUSES[chan.status];
   const sentChip = chan.sent_at ? `<span class="chk done">✓ Sent</span>` : `<span class="chk pending">○ Not sent yet</span>`;
+  // When the customer provably clicked through (or left a review) but the
+  // channel wasn't recorded, "○ Not opened" would contradict the 5 stars
+  // sitting right above it — say what's actually known instead.
+  const notOpened = openedUnknown
+    ? `<span class="chk delivered">✓ Opened · channel unknown</span>`
+    : `<span class="chk pending">○ Not opened</span>`;
   let midChip, openChip;
   if(failed){
     midChip=`<span class="chk fail">✕ ${REV_FAIL_STATUSES[chan.status]}</span>`;
     openChip=null;
   } else if(chan.delivered_at){
     midChip=`<span class="chk delivered">✓ Delivered</span>`;
-    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:`<span class="chk pending">○ Not opened</span>`;
+    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:notOpened;
   } else if(chan.sent_at){
     midChip=`<span class="chk pending">○ Delivery pending</span>`;
-    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:`<span class="chk pending">○ Not opened</span>`;
+    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:notOpened;
   } else {
     midChip=`<span class="chk na">— n/a</span>`;
     openChip=`<span class="chk na">— n/a</span>`;
@@ -4644,8 +4650,8 @@ function reviewReqCardHtml(r, gByBooking){
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${gpill}${reviewed}</div>
     </div>
     <div class="rev-tiles">
-      ${revChanTileHtml('📧 Email', r.email, r.id, 'email')}
-      ${revChanTileHtml('💬 Text', r.sms, r.id, 'sms')}
+      ${revChanTileHtml('📧 Email', r.email, r.id, 'email', !!r.opened_unknown_at)}
+      ${revChanTileHtml('💬 Text', r.sms, r.id, 'sms', !!r.opened_unknown_at)}
     </div>
   </div>`;
 }
