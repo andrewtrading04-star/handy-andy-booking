@@ -4992,7 +4992,27 @@ async function estimateCreate(req, res, db, auth, body) {
     return res.status(201).json({ id: est.id, ok: true, warning: `Estimate created but email failed: ${e.message}` });
   }
 
-  return res.status(201).json({ id: est.id, ok: true });
+  // Also text the customer the estimate + a link to view/approve it, so a
+  // phone-first customer can act on the same tap-through the email offers.
+  // Best-effort: a texting hiccup must never turn a sent estimate into an
+  // error (the email already went out above), so failures are logged only.
+  let texted = false;
+  if (customer_phone && body.sms_consent !== false && approveUrl) {
+    try {
+      const { total } = quoteTotals(line_items, DEFAULT_EST_TAX_RATE);
+      const greeting = firstName ? `Hi ${firstName}, ` : '';
+      const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
+      const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
+      const msg = `${greeting}here's your estimate from ${biz.name}. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
+      const r = await sendSMSResult(customer_phone, msg);
+      texted = !!r.ok;
+      if (!r.ok) console.warn(`[estimate_create] estimate SMS not sent:`, r.skipped || r.error);
+    } catch (e) {
+      console.warn('[estimate_create] estimate SMS threw:', e.message);
+    }
+  }
+
+  return res.status(201).json({ id: est.id, ok: true, texted });
 }
 
 // Send quote SMS to customer

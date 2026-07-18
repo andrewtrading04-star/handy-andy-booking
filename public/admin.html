@@ -7732,7 +7732,7 @@ async function sendEstimateFromBooking(upsells){
   withBtn.disabled=true; baseBtn.disabled=true; withBtn.textContent='Sending…';
 
   try{
-    await api('estimate_create',{ method:'POST', body:{
+    const res=await api('estimate_create',{ method:'POST', body:{
       business: current.slug,
       customer_name: name,
       customer_phone: phone,
@@ -7746,7 +7746,8 @@ async function sendEstimateFromBooking(upsells){
       sms_consent: document.getElementById('nbSmsConsent').checked,
     }});
     const n=(Array.isArray(upsells)?upsells:[]).length;
-    toast(n?`Estimate sent with ${n} recommendation${n>1?'s':''} ✓`:'Estimate sent to customer ✓');
+    const via=res&&res.texted?'emailed + texted':'emailed';
+    toast(n?`Estimate ${via} with ${n} recommendation${n>1?'s':''} ✓`:`Estimate ${via} to customer ✓`);
     document.getElementById('nbUpsellPanel').classList.add('hidden');
   }catch(e){
     err.textContent=e.message;
