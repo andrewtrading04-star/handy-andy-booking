@@ -10,6 +10,8 @@
 //   * the tech gets a text telling them they're late and staff was notified
 //   * the business's admin (Heather for Handy Andy, Joey for Dom's) gets a
 //     text naming the tech, the customer, and how late they are
+//   * the owner (OWNER_PHONE_NUMBER, if set — same env var the review-alert
+//     flow already uses) gets a copy of the staff text too
 //
 // Idempotent — a booking is alerted at most once. State is stored in the
 // existing bookings.metadata JSONB (metadata.late_alert_sent_at), so no schema
@@ -89,22 +91,27 @@ export async function checkLateTechs(opts = {}) {
 
     const techMsg = `You are LATE! You haven't hit "On my way" for your next job. Staff has been notified.`;
     const staffMsg = `Attention: ${firstName(techName)} is 30 minutes late to the job with ${customerName}.`;
+    // Owner CC is optional — if OWNER_PHONE_NUMBER isn't set, or happens to be
+    // the same number as the staff phone (avoid double-texting one phone).
+    const ownerPhone = process.env.OWNER_PHONE_NUMBER;
+    const ccOwner = ownerPhone && ownerPhone !== staffPhone;
 
     if (dryRun) {
       summary.alerted++;
-      summary.details.push({ id: b.id, wouldAlert: { tech: techPhone, staff: staffPhone }, slug });
+      summary.details.push({ id: b.id, wouldAlert: { tech: techPhone, staff: staffPhone, owner: ccOwner ? ownerPhone : null }, slug });
       continue;
     }
 
     try {
       const techResult = await sendSMSResult(techPhone, techMsg);
       const staffResult = await sendSMSResult(staffPhone, staffMsg);
+      const ownerResult = ccOwner ? await sendSMSResult(ownerPhone, staffMsg) : null;
       // Only mark the booking alerted once the tech text actually went out —
       // otherwise a provider hiccup would silently mean this booking NEVER
       // gets a late alert again (see reminders.js, which applies the same
-      // check-before-marking rule to its own send). The staff text failing
-      // alone doesn't block marking — the tech has still been told they're
-      // late, which is the half that matters most if only one can go out.
+      // check-before-marking rule to its own send). The staff/owner texts
+      // failing alone doesn't block marking — the tech has still been told
+      // they're late, which is the half that matters most if only one can go out.
       if (!techResult.ok) {
         summary.errors++;
         summary.details.push({ id: b.id, error: `tech SMS not sent: ${techResult.error || techResult.skipped}` });
@@ -114,11 +121,14 @@ export async function checkLateTechs(opts = {}) {
       if (!staffResult.ok) {
         console.warn(`[tech-late] staff SMS failed for booking ${b.id}:`, staffResult.error || staffResult.skipped);
       }
+      if (ownerResult && !ownerResult.ok) {
+        console.warn(`[tech-late] owner SMS failed for booking ${b.id}:`, ownerResult.error || ownerResult.skipped);
+      }
       const newMeta = { ...meta, late_alert_sent_at: new Date(now).toISOString() };
       const { error: upErr } = await db.from('bookings').update({ metadata: newMeta }).eq('id', b.id);
       if (upErr) console.warn(`[tech-late] alerted but failed to mark booking ${b.id}:`, upErr.message);
       summary.alerted++;
-      summary.details.push({ id: b.id, alerted: { tech: techName, staffEnv: STAFF_PHONE_ENV[slug], staffSent: staffResult.ok }, slug });
+      summary.details.push({ id: b.id, alerted: { tech: techName, staffEnv: STAFF_PHONE_ENV[slug], staffSent: staffResult.ok, ownerSent: ownerResult ? ownerResult.ok : null }, slug });
       console.log(`[tech-late] late alert sent — tech=${techName} booking=${b.id} slug=${slug}`);
     } catch (e) {
       summary.errors++;
