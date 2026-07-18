@@ -2273,7 +2273,7 @@ function openBooking(b){
     ${canAssign?`<div class="bk-minicard">
       <div class="bk-minicard-head"><span class="bk-badge bk-badge-assign">👤</span><span class="bk-minicard-label">Assignment</span></div>
       <div class="bk-actions">
-        <label class="bk-assign">Assign <select id="bkAssign">${techOpts}</select></label>
+        <label class="bk-assign">Assign <select id="bkAssign" data-booking-id="${esc(b.id)}">${techOpts}</select></label>
         ${showSecond?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}
       </div>
     </div>`:''}
@@ -2338,6 +2338,7 @@ function openBooking(b){
   renderBkSlots(b);   // populate the "Time slots" section (add/remove extra slots)
   const cr=document.getElementById('bkCopyReview'); if(cr) cr.onclick=()=>{ const link=location.origin+'/review.html?token='+encodeURIComponent(b.review_token); navigator.clipboard.writeText(link).then(()=>toast('Review link copied')).catch(()=>prompt('Copy this review link:',link)); };
   const as=document.getElementById('bkAssign'); if(as) as.onchange=async()=>{ await updateBooking({ id:b.id, action:'assign', technician_id: as.value||null }); close(); };
+  if(canAssign) loadBkPartnerAssignOptions(b);
   const sa=document.getElementById('bkSecondAssign'); if(sa) sa.onchange=async()=>{
     const secId=sa.value||null;
     await updateBooking({ id:b.id, action:'assign', secondary_technician_id: secId });
@@ -2809,6 +2810,41 @@ async function addBookingNote(id){
   btn.disabled=false;
 }
 function openLightbox(url){ document.getElementById('lightboxImg').src=url; document.getElementById('lightbox').classList.remove('hidden'); }
+
+// Cross-company assignment on the PRIMARY tech slot is deliberate, owner-
+// requested behavior (Dom's covering a Handy Andy job or vice versa) — but it
+// must be an explicit, clearly-labeled choice, never techs from both companies
+// silently mixed into one unlabeled list (that was the original bug: a stale
+// business-switch race left the wrong company's roster in techCache). So the
+// job-detail modal renders instantly with just our own roster (see
+// openBooking), then this fetches the partner company's roster in the
+// background and appends it as its own separately-labeled <optgroup> once it
+// arrives — same "fetch after paint, append when ready" pattern New Booking
+// already uses for its 2nd-tech partner pool (nbLoadPartnerTechs).
+async function loadBkPartnerAssignOptions(b){
+  const sel=document.getElementById('bkAssign');
+  if(!sel) return;
+  try{
+    const pt=await api('partner_technicians',{ params:{ business:current.slug, postal_code:b.postal_code||'' }});
+    // The admin may have closed this job or opened a different one while the
+    // fetch was in flight — bail rather than mutate a dropdown for the wrong job.
+    const stillOpen=document.getElementById('bkAssign');
+    if(!stillOpen || stillOpen.dataset.bookingId!==String(b.id)) return;
+    if(!pt || !pt.partner || !(pt.technicians||[]).length) return;
+    const existingIds=new Set([...stillOpen.options].map(o=>o.value).filter(Boolean));
+    const fresh=pt.technicians.filter(t=>!existingIds.has(t.id));
+    if(!fresh.length) return;
+    const grp=document.createElement('optgroup');
+    grp.label=`${pt.partner.name} (partner)`;
+    fresh.forEach(t=>{
+      const opt=document.createElement('option');
+      opt.value=t.id; opt.textContent=t.name;
+      if(t.id===b.technician_id) opt.selected=true;
+      grp.appendChild(opt);
+    });
+    stillOpen.appendChild(grp);
+  }catch(e){ /* no partner configured, or lookup failed — the dropdown just keeps our own roster */ }
+}
 
 async function updateBooking(payload){
   try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
