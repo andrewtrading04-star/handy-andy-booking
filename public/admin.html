@@ -1813,7 +1813,15 @@ function rangeBounds(dates){
 // (heavy: embeds + per-job economics) re-fetch when nothing actually changed.
 // See calFingerprint() server-side for exactly what this can/can't detect.
 let calFp=null;
+// Guards against an older, slower renderSchedule() call (e.g. from the
+// business RIGHT BEFORE a fast switcher click) resolving AFTER a newer one
+// and clobbering techCache/calBookings with the WRONG business's data —
+// which is exactly how a partner-company tech could end up assignable on a
+// job, or an out-of-market tech offered for a job in a metro they don't
+// cover (both filtered against techCache further down in openBooking()).
+let _scheduleRenderSeq=0;
 async function renderSchedule(silent){
+  const mySeq=++_scheduleRenderSeq;
   const dates = currentWeekDates();
   const [from,to] = rangeBounds(dates);
   const view=document.getElementById('view');
@@ -1821,6 +1829,7 @@ async function renderSchedule(silent){
   if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
   try{
     const d = await api('calendar', { params:{ business: current.slug, from, to } });
+    if(mySeq!==_scheduleRenderSeq) return; // a newer call already landed — this response is stale, discard it
     techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[];
     if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
     calFp=d.fingerprint||null;
@@ -2210,8 +2219,22 @@ function openBooking(b){
   // own roster (techCache) — add them so the dropdown shows the right person.
   const xcoOpt=(b.cross_company && b.technician && !techCache.some(t=>t.id===b.technician_id))
     ? `<option value="${b.technician_id}" selected>${esc(b.technician.name)} (${esc(b.partner_company||'partner')})</option>` : '';
+  // The primary Assign dropdown must NEVER offer a partner-company tech (that's
+  // what the 2nd-tech "partner pool" picker below is for), and should default to
+  // just this job's own metro so an out-of-market tech can't be accidentally
+  // handed a job they don't cover. techCache is already same-business from the
+  // server, but re-filter here too as a second guard against any staleness in
+  // that shared global. If the tech CURRENTLY assigned falls outside the metro
+  // filter, keep them in the list anyway (still shown/selected) rather than
+  // silently hiding an assignment that's already been made.
+  const ownBizTechs = techCache.filter(t=>t.business_id===b.business_id);
+  const ownRoster = ownBizTechs.length ? ownBizTechs : techCache; // fallback if business_id is ever missing on old data
+  let assignableTechs = b.service_area_id ? ownRoster.filter(t=>t.service_area_id===b.service_area_id) : ownRoster;
+  if(!assignableTechs.length) assignableTechs=ownRoster; // no tech tagged to this metro yet — don't leave the dropdown empty
+  const currentTech = ownRoster.find(t=>t.id===b.technician_id);
+  if(currentTech && !assignableTechs.some(t=>t.id===currentTech.id)) assignableTechs=[...assignableTechs, currentTech];
   const techOpts=['<option value="">— Unassigned —</option>', xcoOpt,
-    ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+    ...assignableTechs.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   // A cross-company second tech (e.g. a Doms helper on a Handy Andy job) isn't in
   // our own roster, so add them explicitly — same as the primary's xcoOpt — so the
   // dropdown shows the right person instead of falsely reading "None".

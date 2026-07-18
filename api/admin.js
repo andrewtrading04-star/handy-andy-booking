@@ -833,7 +833,7 @@ async function calendar(req, res, db, auth) {
   if (error) throw error;
 
   const { data: techs } = await db.from('technicians')
-    .select('id, name, status, color, active').eq('business_id', biz.id).eq('active', true).order('name');
+    .select('id, name, status, color, active, service_area_id, business_id').eq('business_id', biz.id).eq('active', true).order('name');
   const { data: areas } = await db.from('service_areas')
     .select('id, name, state, timezone').eq('business_id', biz.id).eq('active', true).order('name');
   // Metro tz per area, so each job's slot renders in its own timezone (Central
@@ -3902,6 +3902,7 @@ function shapeBooking(b) {
     needs_lifting: b.needs_lifting,
     tv_size_category: b.tv_size_category,
     service_area_id: b.service_area_id,
+    business_id: b.business_id,
     // Cross-company: the assigned tech's home business differs from this booking's.
     // partner_company is that tech's company name (e.g. "Doms") for a clear tag.
     cross_company: !!(b.technician?.business_id && b.business_id && b.technician.business_id !== b.business_id),
