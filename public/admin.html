@@ -2770,12 +2770,12 @@ async function loadBookingAuthorization(id){
   const m2=n=>'$'+(Math.round((Number(n)||0)*100)/100).toFixed(2);
   wrap.innerHTML=`<div class="bk-sec"><div class="bk-sec-h">Signed authorization</div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mute);margin-bottom:8px;">
-      <span>Signed by <strong style="color:var(--ink);">${esc(a.customer_name||'—')}</strong></span>
+      <span>Signed by <strong style="color:#eef2f7;">${esc(a.customer_name||'—')}</strong></span>
       ${a.signed_at?`<span>${new Date(a.signed_at).toLocaleString()}</span>`:''}
       ${a.card_last4?`<span>${esc(a.card_brand||'card')} ••${esc(a.card_last4)}</span>`:''}
       ${a.signed_ip?`<span>IP ${esc(a.signed_ip)}</span>`:''}
     </div>
-    <div style="font-size:14px;margin-bottom:8px;color:var(--ink);">${m2(a.ticket_amount)} service${Number(a.tip)>0?` + ${m2(a.tip)} tip`:''} = <strong>${m2(a.amount)}</strong></div>
+    <div style="font-size:14px;margin-bottom:8px;color:#eef2f7;">${m2(a.ticket_amount)} service${Number(a.tip)>0?` + ${m2(a.tip)} tip`:''} = <strong>${m2(a.amount)}</strong></div>
     ${a.signature_url
       ? `<img src="${esc(a.signature_url)}" alt="signature" style="max-height:130px;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px;display:block;">`
       : '<div class="sub" style="font-size:13px;color:var(--mute);">Charged without a signature (phone order).</div>'}
