@@ -1135,8 +1135,8 @@
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
       </div>
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
-      <div id="nbConvertSummary" style="display:none;font-size:13px;color:var(--ink-2);padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:8px;"></div>
-      <div id="nbTotalDisplay" style="font-size:13px;color:var(--ink-2);padding:8px;background:#f9f9f9;border-radius:8px;"></div>
+      <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
+      <div id="nbTotalDisplay" style="font-size:13px;padding:8px;border-radius:8px;"></div>
       <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
@@ -1144,9 +1144,9 @@
         <select class="search" style="margin:0" id="nbSecondTech"></select>
         <div id="nbSecondTechHint" style="font-size:12px;color:var(--mute);margin-top:5px;">Pick anyone from either company. Times shown only when both are available.</div>
       </div>
-      <div id="nbBringsOwnNote" style="display:none;font-size:12px;color:var(--ink-2);margin:8px 0 6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">This technician brings their own second person, so no second tech needs to be scheduled. The two-person fee still applies.</div>
+      <div id="nbBringsOwnNote" style="display:none;font-size:12px;margin:8px 0 6px;padding:8px 10px;border-radius:8px;">This technician brings their own second person, so no second tech needs to be scheduled. The two-person fee still applies.</div>
       <input type="hidden" id="nbDate">
-      <div id="nbRequestedTimes" style="display:none;font-size:13px;padding:10px 12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;margin-bottom:8px;"></div>
+      <div id="nbRequestedTimes" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbCalWrap" style="display:none;">
         <div class="nb-cal-head">
           <button type="button" id="nbCalPrev" class="nb-cal-nav">‹</button>
@@ -6481,6 +6481,12 @@ async function openNewBooking(prefill){
     }
     nbServices = svc.services || [];
     nbSelectedSlot = null;
+    // Prefetch the TV Mounting option groups NOW (fire-and-forget into the
+    // promise cache): 90% of bookings pick this category, and without the
+    // warm-up the first tap paid a blocking round trip (up to 5 sequential
+    // calls on a cold DB) before any option rendered.
+    { const _tv=nbServices.find(s=>s.category==='TV Mounting');
+      if(_tv) nbLoadTvOptions(_tv.id).catch(()=>{}); }
     // Assurion is a Handy-Andy-only channel handled by Steve. Surface it as its
     // own category (built in JS, not from the DB service rows) and stash Steve's
     // id + the existing Asurion service row to link the booking to.
@@ -6725,13 +6731,21 @@ function nbPrimaryBringsOwnSecond(){
 // Fill the PRIMARY technician dropdown (defaults to "Any <own> Technician").
 function nbPopulateTechs(){
   const sel=document.getElementById('nbTech');
+  // Preserve a tech the office already chose: this repopulates on every ZIP
+  // change (partner-roster reload), and blindly resetting to 'any:own' silently
+  // discarded the selection while the calendar kept showing the old tech's
+  // availability — a booked-for-the-wrong-tech trap.
+  const prev=sel.value;
   sel.innerHTML=nbTechOptionsHtml();
-  sel.value='any:own';
+  sel.value = (prev && [...sel.options].some(o=>o.value===prev)) ? prev : 'any:own';
 }
 // Fill the SECOND technician dropdown (no default pick — it's optional).
 // Juan and Zach are excluded from secondary selection but available as primary.
 function nbPopulateSecondTechs(){
-  document.getElementById('nbSecondTech').innerHTML='<option value="">— Select —</option>'+nbTechOptionsHtml(['juan', 'zach']);
+  const sel=document.getElementById('nbSecondTech');
+  const prev=sel.value;   // same preservation rule as the primary picker
+  sel.innerHTML='<option value="">— Select —</option>'+nbTechOptionsHtml(['juan', 'zach']);
+  if(prev && [...sel.options].some(o=>o.value===prev)) sel.value=prev;
 }
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
@@ -6785,7 +6799,17 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
     if(tvMountService){
       // Hidden select is emptied for TV Mounting, so track the id directly.
       nbServiceId=tvMountService.id;
-      nbOptionGroups=await nbLoadTvOptions(tvMountService.id);
+      // Stale-response guard: the FIRST options load can take seconds (the
+      // uncached path is several sequential API calls). If the office switches
+      // category — or closes/reopens the modal — while it's in flight, this
+      // late continuation must not repopulate nbOptionGroups and clobber the
+      // newly chosen flow (it used to overwrite Assurion/GDS steps mid-entry
+      // and hard-block Handyman submits on TV validation). Same token pattern
+      // as the submit handler's nbModalSession check.
+      const mySession=nbModalSession;
+      const groups=await nbLoadTvOptions(tvMountService.id);
+      if(mySession!==nbModalSession || document.getElementById('nbCategory').value!=='TV Mounting') return;
+      nbOptionGroups=groups;
       renderNbSteps();
     }
   }
@@ -6891,11 +6915,27 @@ function syncSecondTech(){
       mode==='mandatory' ? 'Second technician — required (both must be free)' : 'Second technician — optional (helper)';
   }
   if(note) note.style.display=(ownSecond && mode!=='none') ? '' : 'none';
-  if(mode!==nbPrevSecondMode){
-    nbPrevSecondMode=mode;
-    onSecondTechChanged();                       // requirement changed → re-pick date/slot
+  // Only wipe the chosen date/slot when the AVAILABILITY CONSTRAINT actually
+  // changed, not merely the mode label. Picking a 70–85" TV flips the mode
+  // none→optional, but with no second tech chosen the availability query is
+  // byte-identical single-tech — the old mode-based check threw away the
+  // office's already-picked date/slot and refired an identical fetch for
+  // nothing (a mid-call annoyance on nearly every big-TV booking).
+  nbPrevSecondMode=mode;
+  const _k=nbAvailConstraintKey();
+  if(_k!==nbPrevAvailKey){
+    nbPrevAvailKey=_k;
+    onSecondTechChanged();                       // constraint changed → re-pick date/slot
   }
 }
+// What the calendar/slot availability is actually computed FROM: blocked (needs
+// a 2nd-tech pick), a concrete pair, or single-tech. Same-key = same results.
+function nbAvailConstraintKey(){
+  if(nbAvailabilityBlockedReason()) return 'blocked';
+  const sec=nbEffectiveSecondTech();
+  return sec ? ('pair:'+sec.id+':'+sec.pool) : 'single';
+}
+let nbPrevAvailKey='single';
 // A primary/secondary change invalidates the chosen date/slot — clear and reload.
 function onSecondTechChanged(){
   document.getElementById('nbDate').value='';
@@ -6903,7 +6943,12 @@ function onSecondTechChanged(){
   document.getElementById('nbSlotsWrap').style.display='none';
   loadNbCalendar();
 }
-document.getElementById('nbSecondTech').addEventListener('change',onSecondTechChanged);
+document.getElementById('nbSecondTech').addEventListener('change',()=>{
+  // Route through the same constraint-key dedupe: re-selecting the identical
+  // second tech (or blank→blank) shouldn't wipe the date/slot either.
+  const k=nbAvailConstraintKey();
+  if(k!==nbPrevAvailKey){ nbPrevAvailKey=k; onSecondTechChanged(); }
+});
 // Fetch a TV-mounting service's option groups. If the DB only has the size group
 // (Handy Andy DBs that never received migrations 0003/0015 — the public widget
 // hardcodes these so it was never noticed), seed the full set once and re-fetch
@@ -6984,7 +7029,13 @@ let nbAvailDates=new Set();
 function nbMonthKey(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
 function nbTodayStr(){ return new Date().toISOString().split('T')[0]; }
 
+// In-flight guard: rapid tech/zip/month changes fire overlapping
+// available_dates requests, and responses can land out of order — without the
+// seq token, a SLOWER older response overwrote a newer one and the calendar
+// showed the wrong tech's/month's availability.
+let nbCalSeq=0;
 async function loadNbCalendar(){
+  const mySeq=++nbCalSeq;
   const wrap=document.getElementById('nbCalWrap'); wrap.style.display='';
   const prim=nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' };
   document.getElementById('nbCalTitle').textContent=nbCalMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
@@ -7005,8 +7056,9 @@ async function loadNbCalendar(){
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
   try{
     const r=await api('available_dates',{ params });
+    if(mySeq!==nbCalSeq) return;   // superseded by a newer load — discard
     nbAvailDates=new Set(r.dates||[]);
-  }catch(err){ nbAvailDates=new Set(); }
+  }catch(err){ if(mySeq!==nbCalSeq) return; nbAvailDates=new Set(); }
   renderNbCalendar();
 }
 function renderNbCalendar(){
@@ -7060,6 +7112,10 @@ document.getElementById('nbTech').addEventListener('change',()=>{
   // Switching to/from a "brings own helper" tech (Juan/Zach) flips whether the
   // second-tech picker is shown and whether availability is a pair or single.
   syncSecondTech();
+  // This handler reloads unconditionally (the PRIMARY changed) — record the
+  // constraint key so syncSecondTech's dedupe stays in step; the nbCalSeq
+  // guard collapses any doubled load into one render.
+  nbPrevAvailKey=nbAvailConstraintKey();
   loadNbCalendar();
 });
 let nbAutoTravel='';   // last surcharge we auto-filled, so a manual override isn't clobbered
@@ -7067,13 +7123,20 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
-  nbZipAreaId=null; nbAreaName=''; let surcharge=0, otherBiz=null;
-  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }catch(err){} }
+  nbZipAreaId=null; nbAreaName=''; let surcharge=0, otherBiz=null, lookupFailed=false;
+  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }catch(err){ lookupFailed=true; } }
   // Show a live service-area / travel-fee readout next to the ZIP, in the same
   // assistant voice as the question above it.
   { const zr=document.getElementById('nbZipArea');
     if(zr){
       if(!postal){ nbZipReplyIdle(); }
+      else if(lookupFailed){
+        // A transient lookup failure used to fall through to the generic "new
+        // area" copy — silently dropping the travel fee and applying the wrong
+        // (default) minimum with zero visual cue. Say what actually happened.
+        zr.innerHTML=`⚠ Couldn't check this ZIP right now (connection hiccup) — the travel fee and service minimum may be wrong. Re-enter the ZIP to retry, or fill the travel fee manually.`;
+        zr.className='nb-zip-area bad';
+      }
       else if(nbZipAreaId){
         zr.innerHTML = surcharge>0
           ? `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and the travel fee is <b>$${surcharge}</b>. I'll fill it in below.`
@@ -7099,8 +7162,16 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   } else if(surcharge===0 && tf.value.trim()===nbAutoTravel){
     tf.value=''; nbAutoTravel='';
   }
-  updateNbTotal();
-  nbLoadPartnerTechs();   // repopulates both tech dropdowns via nbTechOptionsHtml
+  // Option prices can CHANGE with the metro (Austin overrides) — re-render the
+  // option rows so the price labels match what nbCollectSelections now books;
+  // renderNbSteps ends in updateNbTotal(), covering the plain case too.
+  if(nbOptionGroups.length && !nbHandymanActive && !nbAssurionActive && !nbGdsActive) renderNbSteps();
+  else updateNbTotal();
+  // AWAIT the roster reload before the calendar: it repopulates both tech
+  // dropdowns (now preserving any chosen tech), and loading the calendar in
+  // parallel raced it — availability could render for a tech the repopulation
+  // was about to change out from under it.
+  await nbLoadPartnerTechs();
   // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
@@ -7140,6 +7211,33 @@ let nbOptionGroups=[]; const nbQty={};   // group_id -> { option_id: count }
 // Frame/Gallery TVs carry a flat surcharge (covers the in-box bracket install).
 const FRAME_TV_PRICE = 30;
 let nbFrameTvQty={ regular: 0, frame: 0 };
+// ── Austin pricing overrides ────────────────────────────────────────────────
+// The public widget (public/widget.js SERVICE_CONFIGS.austin) quotes Austin
+// customers LOWER prices for several options than the Denver/default profile,
+// but the admin DB catalog holds a single price per business — so a phone-in
+// Austin booking was silently priced at Denver rates while the same customer
+// booking online paid less. Mirror the widget's austin profile here, keyed by
+// normalized option label, applied whenever the entered ZIP resolves to the
+// Austin service area. Sizes/lifting/dismount/frame-bracket are identical in
+// both profiles, so only the differing options are listed. Keep in sync with
+// widget.js if the owner changes Austin pricing there.
+const NB_AUSTIN_PRICES = {
+  'flat': 35, 'tilting (recommended)': 50, 'full motion': 85,
+  'tv above a fireplace': 35, 'i have 1 tv above a fireplace': 35,
+  'hide wires behind the wall': 65, 'yes, hide the wires behind the wall': 65,
+  'hide wires outside the wall': 30, 'yes, hide the wires outside the wall': 30,
+  'soundbar installation': 45, 'led lights': 45,
+};
+function nbIsAustin(){ return /austin/i.test(nbAreaName||''); }
+// The price an option ACTUALLY books at right now — base catalog price, or the
+// Austin override when the job's ZIP resolved to Austin. Every price read
+// (render labels, totals, collected selections) must go through this.
+function nbOptPrice(o){
+  const base=Number(o&&o.price)||0;
+  if(!nbIsAustin()) return base;
+  const k=((o&&o.label)||'').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(NB_AUSTIN_PRICES,k) ? NB_AUSTIN_PRICES[k] : base;
+}
 // Handyman labor — billed by the hour at a flat rate (no TV option groups).
 const HANDYMAN_HOURLY = 85;
 let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
@@ -7169,7 +7267,7 @@ const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.for
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
 let nbGdsActive=false, nbGdsServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -7197,13 +7295,24 @@ function nbValidateTvMountingRequired(){
     const filled = nbQty[g.id] && Object.values(nbQty[g.id]).some(c => c > 0);
     return filled ? null : `Please select the ${label}.`;
   };
-  return need('size','TV size') || need('fireplace','fireplace option') || need('surface','wall surface');
+  // Lifting help is REQUIRED once any 70"+ TV is on the job — the public
+  // widget forces this answer, and skipping it here let big-TV bookings go
+  // out without the $70 two-person fee (payroll still owes the second pair
+  // of hands either way).
+  const needLifting = () => {
+    if(!nbShowLifting()) return null;
+    return need('lifting','lifting-help option (required for TVs 70" and up)');
+  };
+  return need('size','TV size') || need('fireplace','fireplace option') || need('surface','wall surface') || needLifting();
 }
 // Trim TV-bound groups down when the TV count drops below what's selected.
+// Brackets clamp to the REGULAR TV count (Frame/Gallery use in-box brackets);
+// everything else clamps to the total.
 function nbClampTvBound(){
-  const cap=nbTotalTvs();
+  const total=nbTotalTvs();
   nbOptionGroups.forEach(g=>{
     if(!NB_TV_BOUND.has(g.key) || !nbQty[g.id]) return;
+    const cap = g.key==='bracket' ? nbFrameTvQty.regular : total;
     while(nbGroupCount(g.id)>cap){
       const oid=Object.keys(nbQty[g.id]).find(k=>nbQty[g.id][k]>0); if(!oid) break;
       nbQty[g.id][oid]--; if(nbQty[g.id][oid]<=0) delete nbQty[g.id][oid];
@@ -7461,14 +7570,26 @@ function renderNbSteps(){
     const qtyMode=NB_QTY_KEYS.has(g.key);
     const tvBound=NB_TV_BOUND.has(g.key);
     const gCount=nbGroupCount(g.id);
-    const atCap=tvBound && tvCount>0 && gCount>=tvCount;
-    const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${tvCount} selected</span>` : '';
+    // Brackets are capped at the REGULAR TV count, not the total: Frame/Gallery
+    // TVs use their in-box bracket (that's what the +$30 frame surcharge covers
+    // and why the step hides entirely on frame-only jobs) — the old total-TVs
+    // cap showed "0/2 selected" on a mixed job and cued the office into selling
+    // a paid bracket for a TV that doesn't need one.
+    const capN = g.key==='bracket' ? nbFrameTvQty.regular : tvCount;
+    const atCap=tvBound && capN>0 && gCount>=capN;
+    const capLbl=tvBound ? ` <span class="nb-cap">${gCount}/${capN} selected</span>` : '';
     html+=`<div class="nb-step"><div class="nb-step-t">${esc(nbGroupLabel(g))}${capLbl}</div>`;
     if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Select TV type first</div></div>`; return; }
-    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ html+=`<div class="nb-hint">Select a TV size first</div></div>`; return; }
+    // Same rule as the lifting/only-frame gates above: when the render-level
+    // gate hides this step, any selection inside it must be DELETED, not just
+    // hidden — an "any-size" bracket (own bracket / Mantel Mount $195) survives
+    // every prune helper, so without this a deselected size left it silently
+    // priced into the total (and into sent estimates) behind a "Select a TV
+    // size first" hint.
+    if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ if(nbQty[g.id]) delete nbQty[g.id]; html+=`<div class="nb-hint">Select a TV size first</div></div>`; return; }
     html+='<div class="nb-opts">';
     nbVisibleOptions(g).forEach(o=>{
-      const price=Number(o.price)||0; const priceLbl=price?'+$'+price:'$0';
+      const price=nbOptPrice(o); const priceLbl=price?'+$'+price:'$0';
       if(qtyMode){
         const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
         // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
@@ -7521,8 +7642,12 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
   if(tvQBtn){
     const t=tvQBtn.dataset.t, d=Number(tvQBtn.dataset.d);
     nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
-    nbClampTvBound();
+    // Prune newly-INVISIBLE picks first, THEN clamp to the new caps: clamping
+    // first trimmed an arbitrary (insertion-order) selection, which could drop
+    // a still-valid paid pick while keeping one the visibility prune was about
+    // to delete anyway — quietly shrinking the total by the wrong line.
     nbPruneInvisibleOptions();
+    nbClampTvBound();
     nbPruneBehindWall();
     renderNbSteps();
     return;
@@ -7531,8 +7656,12 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     if(qBtn.disabled) return;
     const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
     const grp=nbOptionGroups.find(g=>g.id===gid);
-    // Cap TV-bound groups at the number of TVs selected.
-    if(d>0 && grp && NB_TV_BOUND.has(grp.key) && nbGroupCount(gid)>=nbTotalTvs()) return;
+    // Cap TV-bound groups at the number of TVs selected — brackets at the
+    // REGULAR TV count (Frame/Gallery TVs use their in-box bracket).
+    if(d>0 && grp && NB_TV_BOUND.has(grp.key)){
+      const cap = grp.key==='bracket' ? nbFrameTvQty.regular : nbTotalTvs();
+      if(nbGroupCount(gid)>=cap) return;
+    }
     // Behind-the-wall wires are capped at the number of TVs not over a fireplace.
     if(d>0 && grp && grp.key==='wires'){
       const o=grp.options.find(x=>x.id===oid);
@@ -7541,7 +7670,8 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
     if(!nbQty[gid]) nbQty[gid]={};
     nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
     if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
-    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbClampTvBound(); nbPruneInvisibleOptions(); }
+    // Prune invisible before clamping — same reasoning as the TV-type handler.
+    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbPruneInvisibleOptions(); nbClampTvBound(); }
     // Marking a TV over a fireplace or on a hard surface can invalidate existing
     // behind-wall picks (both block behind-the-wall routing).
     if(grp&&(grp.key==='fireplace'||grp.key==='surface'||grp.key==='size')) nbPruneBehindWall();
@@ -7609,7 +7739,7 @@ function nbCollectSelections(){
       // carries onto the booking (e.g. "Other: run extra HDMI").
       const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
       const baseLabel=note?`${o.label}: ${note}`:o.label;
-      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:Number(o.price)||0, quantity:ct});
+      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:nbOptPrice(o), quantity:ct});
     } } });
   });
   // Enforce the branch service minimum by topping up to the floor (waivable).
@@ -7618,6 +7748,19 @@ function nbCollectSelections(){
   return out;
 }
 const TAX_RATE = 0.0825;
+// After-hours fee for the currently selected slot: jobs starting 8 PM or later
+// (slot s5) bill $75, or $100 on Sundays — the same rule the public widget and
+// Zenbooker enforce, and payroll ALWAYS pays the tech the +$75 stipend for s5
+// jobs. New Booking never added this line, so every phone-in 8 PM job was
+// undercharged while still costing the extra tech pay. Read by BOTH the total
+// display and the submit path so the screen always matches the booking.
+function nbAfterHoursFee(){
+  if(nbAssurionActive || nbGdsActive || nbHandymanActive) return 0;
+  if(!nbSelectedSlot || nbSelectedSlot.key!=='s5') return 0;
+  const ds=document.getElementById('nbDate').value;
+  const isSunday=ds ? new Date(ds+'T12:00:00').getDay()===0 : false;
+  return isSunday?100:75;
+}
 function updateNbTotal(){
   const warn=document.getElementById('nbMinWarn'); if(warn) warn.style.display='none';
   const selections=nbCollectSelections();
@@ -7628,10 +7771,14 @@ function updateNbTotal(){
     return;
   }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
-  const subtotal=optionsTotal+travelFee;
+  // Same skip rule as the submit path: a converted estimate may already carry
+  // an after-hours line among its selections — never count the fee twice.
+  const afterHours=selections.some(s=>/after.?hours/i.test(s.label||''))?0:nbAfterHoursFee();
+  const subtotal=optionsTotal+travelFee+afterHours;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
-  document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+  const ahNote=afterHours?` (incl. $${afterHours} after-hours)`:'';
+  document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)}${ahNote} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
   renderNbMinWarn(selections);
 }
 // Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,
@@ -7761,11 +7908,17 @@ async function sendEstimateFromBooking(upsells){
 
   const selections=nbCollectSelections();
   if(selections.length===0){ err.textContent='Select at least one service to send'; return; }
+  // The travel fee is part of the price the secretary is looking at — it was
+  // silently dropped from sent estimates, so the customer-approved total never
+  // matched the modal display (or the eventual converted booking).
+  const estTravel=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  if(estTravel!==0) selections.push({option_id:null,label:estTravel>0?'Travel Fee':'Travel discount',price:estTravel,quantity:1});
 
   const withBtn=document.getElementById('nbUpsSendWith');
   const baseBtn=document.getElementById('nbUpsSendBase');
   const prevWith=withBtn.textContent;
   withBtn.disabled=true; baseBtn.disabled=true; withBtn.textContent='Sending…';
+  nbSetMainSubmitDisabled(true);   // no booking Save while the estimate sends
 
   try{
     const res=await api('estimate_create',{ method:'POST', body:{
@@ -7781,15 +7934,33 @@ async function sendEstimateFromBooking(upsells){
         'Custom Service',
       sms_consent: document.getElementById('nbSmsConsent').checked,
     }});
-    const n=(Array.isArray(upsells)?upsells:[]).length;
-    const via=res&&res.texted?'emailed + texted':'emailed';
-    toast(n?`Estimate ${via} with ${n} recommendation${n>1?'s':''} ✓`:`Estimate ${via} to customer ✓`);
+    // estimate_create returns 201 + warning when the estimate ROW saved but
+    // the email didn't go out (send failure / notifications off / no API key).
+    // This used to toast plain success — the office believed the customer had
+    // the estimate when nobody ever received anything.
+    if(res&&res.warning){
+      alert('⚠ Estimate saved, but it was NOT delivered: '+res.warning+'\n\nSend it from the Estimates tab once the issue is fixed.');
+    } else {
+      const n=(Array.isArray(upsells)?upsells:[]).length;
+      const via=res&&res.texted?'emailed + texted':'emailed';
+      toast(n?`Estimate ${via} with ${n} recommendation${n>1?'s':''} ✓`:`Estimate ${via} to customer ✓`);
+    }
     document.getElementById('nbUpsellPanel').classList.add('hidden');
   }catch(e){
     err.textContent=e.message;
   }finally{
     withBtn.disabled=false; baseBtn.disabled=false; withBtn.textContent=prevWith;
+    nbSetMainSubmitDisabled(false);
   }
+}
+// Mutual exclusion between the two submit paths sharing this form: while an
+// estimate is sending, the booking Save must not fire (and vice versa) — the
+// two ran concurrently off the same form state, which could double-contact
+// the customer or book while an estimate for the same job was mid-send.
+function nbSetMainSubmitDisabled(dis){
+  const f=document.getElementById('nbForm');
+  const b=f?f.querySelector('button[type="submit"]'):null;
+  if(b) b.disabled=dis;
 }
 
 // ── Recommend add-ons popover (New Booking → Send estimate) ──────────────────
@@ -7987,7 +8158,17 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
   const travelFee=(assurion||gds)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
-  if(travelFee>0) selections.push({option_id:null,label:'Travel Fee',price:travelFee,quantity:1});
+  // A NEGATIVE travel fee (an office-entered discount) must ride onto the
+  // booking too — it was shown in the displayed total but silently excluded
+  // here (only >0 was pushed), so the booking saved HIGHER than the screen.
+  if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
+  // After-hours fee (8 PM slot): same helper the displayed total uses, so the
+  // booked price always equals what the secretary saw. Skip if a matching fee
+  // line already rode in via a converted estimate's carried lines.
+  const _ah=(assurion||gds)?0:nbAfterHoursFee();
+  if(_ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
+    selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:_ah,quantity:1});
+  }
   const subtotal=assurion?0:selections.reduce((s,x)=>s+x.price*x.quantity,0);
   const tax=assurion?0:Math.round(subtotal*TAX_RATE*100)/100;
   const totalPrice=assurion?0:subtotal+tax;
@@ -8039,6 +8220,10 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // the NEXT New Booking in the same page session opened with a dead
   // "Processing…" button (the "have to reload the page" bug the office hit).
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Processing…'; }
+  // Mirror of nbSetMainSubmitDisabled: the estimate-send buttons must not fire
+  // while the booking is saving (shared form state, same customer contact).
+  const _estBtns=['nbUpsSendWith','nbUpsSendBase','nbSendEstimate'].map(id=>document.getElementById(id)).filter(Boolean);
+  _estBtns.forEach(b=>b.disabled=true);
   const mySession=nbModalSession;   // detect close-and-reopen-for-a-new-job while in flight
   try{
     // Joey/Heather/Admin can book a job as "Credit Card" without having the
@@ -8117,6 +8302,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     }catch(e2){ err.textContent=e2.message; }
   }finally{
     if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Create booking'; }
+    _estBtns.forEach(b=>b.disabled=false);
   }
 });
 

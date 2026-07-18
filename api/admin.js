@@ -1459,6 +1459,52 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
   return taken;
 }
 
+// Batched per-date availability for MANY techs at once: 3 queries TOTAL
+// (recurring, exceptions, bookings) instead of 3 PER TECH. The old per-tech
+// loop made every date click in New Booking's "Any Technician" flow cost
+// ~0.5–2s of sequential round trips; this is the same math over the same
+// rows, just fetched together. Returns Map(techId -> { keys, booked }) with
+// identical semantics to singleTechSlotKeys + bookedSlotKeysForTech
+// (cross-company booked check — no business filter — including jobs where
+// the tech is the SECOND person, and extra_slots block their slots too).
+async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
+  const out = new Map(); techIds.forEach(id => out.set(id, { keys: new Set(), booked: new Set() }));
+  if (!techIds.length) return out;
+  const [avR, excR] = await Promise.all([
+    db.from('technician_availability').select('technician_id, slot_key').in('technician_id', techIds).eq('day_of_week', dow),
+    db.from('technician_availability_exceptions').select('technician_id, slot_key, is_available').in('technician_id', techIds).eq('exception_date', dateStr),
+  ]);
+  for (const r of (avR.data || [])) { const s = out.get(r.technician_id); if (s) s.keys.add(r.slot_key); }
+  for (const e of (excR.data || [])) { const s = out.get(e.technician_id); if (!s) continue; if (e.is_available) s.keys.add(e.slot_key); else s.keys.delete(e.slot_key); }
+  const dayStart = localDateStartUTC(tz, dateStr).toISOString();
+  const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
+  const idList = techIds.join(',');
+  const run = (withSecond) => {
+    let q = db.from('bookings')
+      .select(`id, technician_id${withSecond ? ', secondary_technician_id' : ''}, scheduled_at${esCol()}`)
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .gte('scheduled_at', dayStart).lt('scheduled_at', dayEnd);
+    return withSecond
+      ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
+      : q.in('technician_id', techIds);
+  };
+  let { data, error } = await run(bookingLiftCols);
+  if (error && (/secondary_technician_id/.test(error.message || '') || isExtraSlotsErr(error))) {
+    if (/secondary_technician_id/.test(error.message || '')) bookingLiftCols = false;
+    if (isExtraSlotsErr(error)) extraSlotsCol = false;
+    ({ data, error } = await run(bookingLiftCols));
+  }
+  for (const b of (data || [])) {
+    const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+    for (const tid of [b.technician_id, b.secondary_technician_id]) {
+      const s = tid ? out.get(tid) : null; if (!s) continue;
+      if (key) s.booked.add(key);
+      for (const sk of esOf(b)) s.booked.add(sk);
+    }
+  }
+  return out;
+}
+
 // Set of slot keys a tech (or ANY tech) is available for on an exact date,
 // honouring recurring availability, one-time exceptions, AND existing bookings
 // (a slot a tech is already booked for is no longer offered — no double-booking).
@@ -1468,13 +1514,10 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
   if (!techId || techId === 'any') {
     const { data: techs } = await db.from('technicians')
       .select('id').eq('business_id', bizId).eq('active', true);
+    const ids = (techs || []).map(t => t.id).filter(id => !excludeTechId || id !== excludeTechId);
+    const state = await batchTechSlotState(db, ids, dateStr, dow, tz);
     const union = new Set();
-    for (const t of (techs || [])) {
-      if (excludeTechId && t.id === excludeTechId) continue;
-      const ks = await singleTechSlotKeys(db, t.id, dateStr, dow);
-      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
-      ks.forEach(k => { if (!booked.has(k)) union.add(k); });
-    }
+    for (const [, s] of state) s.keys.forEach(k => { if (!s.booked.has(k)) union.add(k); });
     return union;
   }
   const ks = await singleTechSlotKeys(db, techId, dateStr, dow);
@@ -1500,12 +1543,13 @@ async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaI
   } else {
     techIds = [techId];
   }
+  // Batched (3 queries total) — was 3 sequential queries PER TECH, the other
+  // half of the every-date-click N+1 alongside availableSlotKeys.
+  const state = await batchTechSlotState(db, techIds, dateStr, dow, tz);
   const map = new Map();
-  for (const tid of techIds) {
-    const ks = await singleTechSlotKeys(db, tid, dateStr, dow);
-    const booked = await bookedSlotKeysForTech(db, bizId, tid, dateStr, tz);
-    for (const k of ks) {
-      if (booked.has(k)) continue;
+  for (const [tid, s] of state) {
+    for (const k of s.keys) {
+      if (s.booked.has(k)) continue;
       if (!map.has(k)) map.set(k, new Set());
       map.get(k).add(tid);
     }
@@ -1873,9 +1917,18 @@ async function bookingCreate(req, res, db, auth, body) {
   // tech UUID is used as-is (technician_id is globally unique); 'any' auto-picks
   // from whichever roster the pool points at.
   let technician_id = body.technician_id;
+  let unassignedWarning = null;
   if (technician_id === 'any') {
     const rid = await rosterBizId(db, biz, (body.pool || '').toString());
     technician_id = await pickAvailableTech(db, rid, body.scheduled_date, body.scheduled_slot, tz);
+    // The slot showed as available when the office picked it, but every tech
+    // got booked in the meantime (a two-secretary race). The booking is still
+    // created — losing the customer over a race would be worse — but it lands
+    // UNASSIGNED, and silently: the office had no idea anyone still had to be
+    // assigned. Surface it as a blocking warning on the response.
+    if (!technician_id) {
+      unassignedWarning = 'Heads up: no technician was still free for that slot, so this booking was created UNASSIGNED. Open the job and assign a tech (or move the time) — nobody is scheduled to show up yet.';
+    }
   }
 
   // Does the primary tech bring their own second person (Juan/Zach + spouse)? If
@@ -2028,6 +2081,13 @@ async function bookingCreate(req, res, db, auth, body) {
         .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
       if (winner?.id) return res.status(200).json({ id: winner.id, duplicate: true });
     }
+    // Tech/slot race lost at the DB (bookings_tech_slot_unique, migration 0073):
+    // two offices passed the pre-insert conflict check simultaneously and the
+    // other one's insert won. This surfaced as a raw 500 ("duplicate key…")
+    // instead of the same friendly 409 the pre-check gives.
+    if (bErr.code === '23505' && /bookings_tech_slot_unique/.test(bErr.message || '')) {
+      return res.status(409).json({ error: 'That technician was just booked for this exact time slot by someone else. Refresh the available times and pick another slot or technician.' });
+    }
     const missing = OPTIONAL_INSERT_COLS.find(c => (bErr.message || '').includes(c) && c in insertObj);
     if (!missing) break;                       // not an optional-column problem — give up
     if (missing === 'secondary_technician_id' && wantedSecondTech) {
@@ -2046,8 +2106,9 @@ async function bookingCreate(req, res, db, auth, body) {
   // NOTE: the booking row already exists past this point. NOTHING below may
   // throw a 500 — that would tell the office "booking failed" for a booking
   // that EXISTS, and the natural retry double-books. Failures here are
-  // collected as a warning on the (still-200) response instead.
-  let postInsertWarning = null;
+  // collected as a warning on the (still-200) response instead. Seeded with
+  // the unassigned-race warning from the tech pick above, if any.
+  let postInsertWarning = unassignedWarning;
 
   // Save a tokenized card on file in Stripe so it can be charged at service time.
   // A failure here used to be silently swallowed (console.warn only) — the
@@ -2063,7 +2124,10 @@ async function bookingCreate(req, res, db, auth, body) {
       }).eq('id', bRow.id);
     } catch (e) {
       console.warn('[admin] card-on-file save failed:', e.message);
-      postInsertWarning = `Booking was created, but the card could not be saved (${e.message}). Open the job and use "Change card" to add it before the appointment.`;
+      // Compose (don't clobber) — the unassigned-race warning may already be
+      // set, and both are must-see: no tech AND no card is a double surprise.
+      const cardWarn = `Booking was created, but the card could not be saved (${e.message}). Open the job and use "Change card" to add it before the appointment.`;
+      postInsertWarning = postInsertWarning ? `${postInsertWarning}\n\n${cardWarn}` : cardWarn;
     }
   }
   const selections = Array.isArray(body.selections) ? body.selections : [];
@@ -4774,9 +4838,13 @@ function normalizeTaxRate(raw) {
   return Math.round(r * 100000) / 100000;
 }
 
-// Default sales-tax rate applied to new quotes (8.75%). Mirrors the
-// estimates.tax_rate column default in migration 0028.
-const DEFAULT_EST_TAX_RATE = 0.0875;
+// Tax rate for estimates created from the NEW BOOKING modal's "Send estimate"
+// branch (its only consumer). Must equal the modal's own TAX_RATE (8.25%,
+// public/admin.html) — this used to be 8.75%, so the emailed/texted estimate
+// total never matched what the secretary saw on screen, nor what the booking
+// would charge after conversion. The Estimates-tab quote builder keeps its own
+// separate default (EST_TAX_RATE in admin.html) and per-estimate tax_rate.
+const DEFAULT_EST_TAX_RATE = 0.0825;
 
 // Normalize quote line items to the stored shape: { description, qty, unit_price }.
 // Drops blank rows, clamps to sane numbers, caps the list so a bad client can't
@@ -4960,6 +5028,10 @@ async function estimateCreate(req, res, db, auth, body) {
     description,
     line_items,
     upsells,
+    // Store the rate the email/SMS totals were computed with, so the estimate
+    // card and the customer approve page show the SAME tax the customer was
+    // quoted (previously left null — the card showed no tax at all).
+    tax_rate: DEFAULT_EST_TAX_RATE,
     status: 'new',
     sms_consent: body.sms_consent !== false,
     source: 'manual',
