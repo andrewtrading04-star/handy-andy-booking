@@ -1,0 +1,23 @@
+name: Tech lateness check
+
+# Alerts a late tech + staff (Heather/Joey) when a booking is 30+ minutes past
+# its scheduled start and the tech never tapped "On my way". Runs every 10
+# minutes so the alert lands reasonably close to the 30-minute mark (Vercel
+# Hobby cron only fires once/day, which is why this lives in GitHub Actions —
+# same pattern as appointment-reminders.yml). The endpoint is idempotent — a
+# booking is alerted at most once — so an overlapping or delayed run is
+# harmless.
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # every 10 minutes (UTC)
+  workflow_dispatch: {}       # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger tech lateness check
+        run: |
+          curl -fsS --retry 3 --retry-delay 5 -X GET \
+            "https://handy-andy-booking.vercel.app/api/migrate?action=tech_late_check" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

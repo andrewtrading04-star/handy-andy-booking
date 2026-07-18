@@ -47,8 +47,8 @@ async function insertResilient(db, table, row, returning = 'id') {
   return { data: null, error: new Error(`insert into ${table} failed after stripping unknown columns`) };
 }
 
-// SMS sending (sendSMS) now lives in ./_lib/sms.js — provider-agnostic
-// (SimpleTexting with Twilio fallback), still gated by smsNotificationsOn().
+// SMS sending (sendSMS) now lives in ./_lib/sms.js — Twilio, still gated by
+// smsNotificationsOn().
 
 // Format a US phone number as "(222) 222-2222" for storage/display. Strips a
 // leading country code; leaves anything that isn't a 10-digit US number as-is

@@ -1,19 +1,14 @@
 // api/_lib/sms.js
 // Shared outbound SMS sender for the booking, tech, and estimate flows.
-//
-// Provider-agnostic: sends via SimpleTexting when it's configured, and falls
-// back to Twilio otherwise. Everything stays behind the SMS master switch
+// Twilio only. Everything stays behind the SMS master switch
 // (smsNotificationsOn), so nothing goes out until SMS_NOTIFICATIONS_ENABLED (or
-// the master NOTIFICATIONS_ENABLED) is set. Swapping providers is now just an
-// env-var change — no code edits at the call sites.
+// the master NOTIFICATIONS_ENABLED) is set.
 //
-// Env vars:
-//   SimpleTexting (preferred):  SIMPLETEXTING_API_KEY, SIMPLETEXTING_FROM
-//   Twilio (fallback):          TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
+// Env vars: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
 import { smsNotificationsOn } from './notify.js';
 import { demoMode } from './demo.js';
 
-// Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which both providers require.
+// Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 export function toE164(raw) {
   if (!raw) return null;
   let s = String(raw).trim();
@@ -24,20 +19,17 @@ export function toE164(raw) {
   return d ? `+${d}` : null;
 }
 
-function simpleTextingConfigured() {
-  return !!(process.env.SIMPLETEXTING_API_KEY && process.env.SIMPLETEXTING_FROM);
-}
 function twilioConfigured() {
   return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER);
 }
 
-// True when SOME SMS provider is wired up. The dashboard uses this to show/hide
-// the Send SMS buttons (independent of the on/off switch).
+// True when Twilio is wired up. The dashboard uses this to show/hide the Send
+// SMS buttons (independent of the on/off switch).
 export function smsConfigured() {
-  return demoMode() || simpleTextingConfigured() || twilioConfigured();
+  return demoMode() || twilioConfigured();
 }
 
-// Hard cap on how long a provider call may hang. Sends are now AWAITED on the
+// Hard cap on how long the provider call may hang. Sends are now AWAITED on the
 // tech app's status path (repair #9), so an unresponsive provider would
 // otherwise hold that HTTP response open until Vercel kills the function —
 // the tech would see "failed" for a status change that already committed.
@@ -50,32 +42,6 @@ function smsTimeoutSignal() {
   // Don't let the timer keep the lambda alive after a fast response.
   if (typeof t.unref === 'function') t.unref();
   return c.signal;
-}
-
-// SimpleTexting API v2 — single outbound message. The endpoint + body live here
-// only; confirm the exact request against the live example in your SimpleTexting
-// dashboard (Settings → API) on the first test, and adjust this one function if
-// your account shows a different path/field names.
-async function sendViaSimpleTexting(to, message) {
-  const res = await fetch('https://api-app2.simpletexting.com/v2/api/messages', {
-    method: 'POST',
-    signal: smsTimeoutSignal(),
-    headers: {
-      Authorization: `Bearer ${process.env.SIMPLETEXTING_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      contactPhone: to,
-      accountPhone: process.env.SIMPLETEXTING_FROM,
-      mode: 'AUTO',
-      text: message,
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    return { ok: false, error: `SimpleTexting ${res.status}: ${t.slice(0, 300)}` };
-  }
-  return { ok: true };
 }
 
 async function sendViaTwilio(to, message, statusCallback) {
@@ -106,19 +72,15 @@ async function sendViaTwilio(to, message, statusCallback) {
 // reason. `skipped` is a config/precondition miss; `error` is a live provider
 // failure (the message string is safe to show).
 // opts.statusCallback: a URL for Twilio to POST delivery-status updates to.
-// Only honored on the Twilio path — SimpleTexting has no per-message callback
-// param in its API, so it's silently ignored there.
 export async function sendSMSResult(phoneNumber, message, opts = {}) {
   // Demo mode: pretend the text sent (no provider call, nothing delivered).
   if (demoMode()) { console.log('[sms:demo] pretend-sent to', String(phoneNumber).slice(-4)); return { ok: true, demo: true }; }
   if (!smsNotificationsOn()) return { ok: false, skipped: 'notifications_off' };
   const to = toE164(phoneNumber);
   if (!to) return { ok: false, skipped: 'bad_phone' };
-  if (!simpleTextingConfigured() && !twilioConfigured()) return { ok: false, skipped: 'not_configured' };
+  if (!twilioConfigured()) return { ok: false, skipped: 'not_configured' };
   try {
-    const r = simpleTextingConfigured()
-      ? await sendViaSimpleTexting(to, message)
-      : await sendViaTwilio(to, message, opts.statusCallback);
+    const r = await sendViaTwilio(to, message, opts.statusCallback);
     if (r.ok) console.log('[SMS] Sent to', to.slice(-4));
     return r;
   } catch (e) {

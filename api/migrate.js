@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { runDomsImport, runDomsImportChunk, domsDiag } from './_lib/doms-import.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
+import { checkLateTechs } from './_lib/tech-late.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import fs from 'fs';
 import path from 'path';
@@ -652,6 +653,27 @@ export default async function handler(req, res) {
     }
   }
 
+  // Tech lateness alerts. Fires when a booking is 30+ min past scheduled_at
+  // and the tech never tapped "On my way" (see api/_lib/tech-late.js). Secured
+  // by CRON_SECRET, same as send_reminders — driven by a GitHub Actions
+  // workflow running every ~10 minutes (Vercel Hobby cron is daily-only).
+  //   &dry=1   find + report eligible bookings without sending anything
+  if (action === 'tech_late_check') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await checkLateTechs({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[tech_late_check]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
   // Daily booking digest — ONE 8 PM Denver email summarizing every appointment
   // booked today (replaces the per-booking alerts). Secured by CRON_SECRET.
   // Triggered by a Vercel Cron at 03:00 UTC (reliable; = 8–9 PM Denver year-round)
@@ -793,7 +815,7 @@ export default async function handler(req, res) {
     try {
       const phone = (req.body && req.body.phone || '').toString().trim();
       if (!phone) return res.status(400).json({ error: 'phone required' });
-      if (!smsConfigured()) return res.status(400).json({ error: 'No SMS provider configured (Twilio/SimpleTexting env vars missing).' });
+      if (!smsConfigured()) return res.status(400).json({ error: 'No SMS provider configured (Twilio env vars missing).' });
 
       const templates = [
         { label: 'Customer · booking confirmed',

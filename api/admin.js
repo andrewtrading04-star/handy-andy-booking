@@ -2395,7 +2395,17 @@ async function bookingUpdate(req, res, db, auth, body) {
       if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
       // Changing the PRIMARY tech moves the reserved extra slots to a different
       // person — drop them so they must be re-added (and re-validated) for the new tech.
-      if (body.technician_id !== undefined && (body.technician_id || null) !== (existing.technician_id || null) && extraSlotsCol) patch.extra_slots = [];
+      if (body.technician_id !== undefined && (body.technician_id || null) !== (existing.technician_id || null)) {
+        if (extraSlotsCol) patch.extra_slots = [];
+        // The old tech's lateness alert (if any) doesn't apply to whoever
+        // this job is reassigned to — clear it so the new tech still gets
+        // checked/alerted if THEY end up 30+ min late (see api/_lib/tech-late.js).
+        const existMetaAssign = existing.metadata || {};
+        if (existMetaAssign.late_alert_sent_at) {
+          const { late_alert_sent_at, ...restMeta } = existMetaAssign;
+          patch.metadata = restMeta;
+        }
+      }
       if (body.secondary_technician_id !== undefined && bookingLiftCols) {
         let sec = body.secondary_technician_id || null;
         // 'any' → resolve to the scheduled default (Handy Andy first for Dom's).

@@ -72,8 +72,8 @@ async function fetchMine(build) {
   return r;
 }
 
-// SMS sending (toE164 + sendSMS) now lives in ./_lib/sms.js — provider-agnostic
-// (SimpleTexting with Twilio fallback), still gated by smsNotificationsOn().
+// SMS sending (toE164 + sendSMS) now lives in ./_lib/sms.js — Twilio, still
+// gated by smsNotificationsOn().
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
