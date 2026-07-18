@@ -512,8 +512,6 @@
   .nb-optq.on .nb-optlabel{font-weight:600;}
   .nb-optq .nb-price{color:var(--ink-2);font-size:12.5px;flex-shrink:0;}
   .nb-optq.on .nb-price{color:var(--accent);font-weight:600;}
-  .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;}
-  .nb-optq.on .nb-optdot{background:var(--accent);border-color:var(--accent);}
   .nb-stepper{display:flex;align-items:center;gap:0;flex-shrink:0;}
   .nb-q-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:17px;line-height:1;color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .nb-q-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
@@ -562,26 +560,28 @@
   #modal .nb-opt,#modal .nb-optq,#modal .nb-slot{background:transparent;border:none;border-top:1px solid rgba(255,255,255,.08);border-radius:0;color:#dbe4ee;}
   #modal .nb-opts>.nb-opt:first-child,#modal .nb-opts>.nb-optq:first-child,#modal .nb-opts>.nb-slot:first-child{border-top:none;}
   #modal .nb-opt:hover,#modal .nb-optq:hover,#modal .nb-slot:hover{background:rgba(255,255,255,.04);}
-  #modal .nb-opt.on,#modal .nb-optq.on,#modal .nb-slot.on{background:rgba(59,130,246,.1);color:#fff;font-weight:700;}
+  /* No circle/checkmark indicator — a selected row is shown purely by
+     highlighting the whole row (fill + bold white label), so there's nothing
+     redundant to keep in sync with the highlight. */
+  #modal .nb-opt.on,#modal .nb-optq.on,#modal .nb-slot.on{background:rgba(59,130,246,.16);color:#fff;font-weight:700;}
   /* Fixed-width price/control columns (not "auto") so the price sits on the
      SAME vertical line whether or not the row has grown a stepper — it used to
-     jump ~50px left the instant a row was selected. Dot aligned to the first
-     line of text (align-items:start + a small top offset) so it doesn't float
-     to the vertical center of a wrapped 2-line label (the Frame TV row). */
-  #modal .nb-opt{display:grid;grid-template-columns:20px 1fr 64px;align-items:start;gap:10px;padding:10px 4px;}
+     jump ~50px left the instant a row was selected. */
+  #modal .nb-opt{display:grid;grid-template-columns:1fr 64px;align-items:center;gap:10px;padding:10px 4px;}
   #modal .nb-slot{padding:10px 4px;}
-  #modal .nb-optq{display:grid;grid-template-columns:20px 1fr 64px 84px;align-items:start;gap:10px;padding:9px 4px;}
-  #modal .nb-opt .nb-optlabel,#modal .nb-optq .nb-optlabel{min-width:0;padding-top:1px;}
-  #modal .nb-opt .nb-price,#modal .nb-optq .nb-price{color:#93a6bd;font-size:12.5px;font-weight:600;text-align:right;padding-top:1px;}
+  #modal .nb-optq{display:grid;grid-template-columns:1fr 64px 92px;align-items:center;gap:10px;padding:9px 4px;}
+  #modal .nb-opt .nb-optlabel,#modal .nb-optq .nb-optlabel{min-width:0;}
+  #modal .nb-opt .nb-price,#modal .nb-optq .nb-price{color:#93a6bd;font-size:12.5px;font-weight:600;text-align:right;}
   #modal .nb-opt.on .nb-price,#modal .nb-optq.on .nb-price{color:#eef2f7;font-weight:700;}
-  #modal .nb-optdot{width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.28);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;background:transparent;margin-top:1px;}
-  #modal .nb-opt.on .nb-optdot,#modal .nb-optq.on .nb-optdot{background:#3b82f6;border-color:#3b82f6;}
-  #modal .nb-stepper{display:flex;align-items:center;justify-content:flex-end;gap:2px;flex-shrink:0;}
+  /* Stepper gets real gaps between "−", the count, and "+" instead of sitting
+     flush — the count is bold/bright so it doesn't get lost between two
+     similar-looking buttons. */
+  #modal .nb-stepper{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-shrink:0;}
   #modal .nb-optq>.nb-q-btn{justify-self:end;}
   #modal .nb-q-btn{width:34px;height:34px;border:none;background:rgba(255,255,255,.08);border-radius:9px;font-size:18px;line-height:1;color:#b9c8da;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   #modal .nb-q-btn:hover:not(:disabled){background:rgba(255,255,255,.16);color:#eef2f7;}
   #modal .nb-q-btn:disabled{opacity:.35;cursor:not-allowed;}
-  #modal .nb-qty{width:18px;text-align:center;font-weight:800;font-size:13px;color:#dbe4ee;}
+  #modal .nb-qty{min-width:20px;text-align:center;font-weight:800;font-size:14px;color:#fff;}
   /* Required/Optional tag on section headers. */
   .nb-req-tag{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:99px;margin-left:6px;vertical-align:1px;}
   .nb-req-tag.req{background:rgba(59,130,246,.18);color:#8ec2ff;}
@@ -7513,7 +7513,6 @@ function renderAssurionSteps(){
     g.items.forEach(([name,price])=>{
       const on=nbAssurionSel.has(name); const priceLbl=price?'$'+price:'$0';
       html+=`<button type="button" class="nb-opt${on?' on':''}" data-asrv="${esc(name)}">`+
-            `<span class="nb-optdot">${on?'✓':''}</span>`+
             `<span class="nb-optlabel">${esc(name)}</span><span class="nb-price">${priceLbl}</span></button>`;
     });
     html+='</div>';
@@ -7653,7 +7652,6 @@ function renderNbSteps(){
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
-          `<span class="nb-optdot">${regCt>0?'✓':''}</span>`+
           `<span class="nb-optlabel">Customer has a regular TV</span>`+
           `<span class="nb-price">$0</span>`+
           (regCt>0
@@ -7666,7 +7664,6 @@ function renderNbSteps(){
           )+
         `</div>`+
         `<div class="nb-optq${frameCt>0?' on':''}">`+
-          `<span class="nb-optdot">${frameCt>0?'✓':''}</span>`+
           `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
           `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
           (frameCt>0
@@ -7735,7 +7732,6 @@ function renderNbSteps(){
         const bwMax=bw?nbBehindWallMax():Infinity;
         const plusDis=(atCap || ct>=bwMax)?' disabled':'';
         html+=`<div class="nb-optq${ct>0?' on':''}">`+
-              `<span class="nb-optdot">${ct>0?'✓':''}</span>`+
               `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
               `<span class="nb-price">${priceLbl}</span>`+
               (ct>0
@@ -7756,7 +7752,6 @@ function renderNbSteps(){
       } else {
         const on=nbPickGet(g.id)===o.id;
         html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
-              `<span class="nb-optdot">${on?'✓':''}</span>`+
               `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
       }
     });
