@@ -4672,7 +4672,7 @@ async function estimates(req, res, db, auth) {
       .lt('created_at', sevenDaysAgo);
   } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
 
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -4717,6 +4717,15 @@ async function estimateUpdate(req, res, db, auth, body) {
     const VALID = ['new', 'contacted', 'scheduled', 'closed', 'archived'];
     if (!VALID.includes(body.status)) return res.status(400).json({ error: 'Invalid status' });
     patch.status = body.status;
+    // Manually flipping the status dropdown to "Estimate sent" is the same
+    // real-world event as the Send email/text buttons (markEstimateContacted) —
+    // stamp who/when the same way, so the card always shows it regardless of
+    // which path got it there. The missing-column degrade below (stripAndRetry)
+    // already drops these two if the migration isn't applied yet.
+    if (body.status === 'contacted') {
+      patch.contacted_at = new Date().toISOString();
+      patch.contacted_by = auth.name || adminAuthorName(auth);
+    }
   }
   if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
   if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
@@ -4883,10 +4892,20 @@ function lineItemsTotal(items) {
 
 // Best-effort "mark contacted" after a quote goes out. Never throws — a failed
 // status bump must not turn a successful send into an error for the user.
-async function markEstimateContacted(db, businessId, id) {
+// Stamps WHO sent it and WHEN (migration estimates_contacted_stamp) so the
+// Estimates tab can show "Sent by Heather · Fri, Jul 17, 9:02 AM" instead of
+// just a status label. Degrades to a status-only update if that migration
+// isn't applied yet on some environment.
+async function markEstimateContacted(db, businessId, id, sentBy) {
   try {
     const { error } = await db.from('estimates')
-      .update({ status: 'contacted' }).eq('id', id).eq('business_id', businessId);
+      .update({ status: 'contacted', contacted_at: new Date().toISOString(), contacted_by: sentBy || null })
+      .eq('id', id).eq('business_id', businessId);
+    if (error && missingColumn(error.message)) {
+      const { error: e2 } = await db.from('estimates').update({ status: 'contacted' }).eq('id', id).eq('business_id', businessId);
+      if (e2) console.warn('[estimate] could not mark contacted:', e2.message);
+      return;
+    }
     if (error) console.warn('[estimate] could not mark contacted:', error.message);
   } catch (e) {
     console.warn('[estimate] mark contacted threw:', e.message);
@@ -4967,7 +4986,7 @@ async function estimateCreate(req, res, db, auth, body) {
 
   try {
     await sendEmail({ slug: biz.slug, to: customer_email.trim(), subject, html, throwOnError: true });
-    await markEstimateContacted(db, biz.id, est.id);
+    await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
   } catch (e) {
     console.warn('[estimate_create] email send failed, but estimate created:', e.message);
     return res.status(201).json({ id: est.id, ok: true, warning: `Estimate created but email failed: ${e.message}` });
@@ -5007,7 +5026,7 @@ async function estimateSendSms(req, res, db, auth, body) {
     return res.status(502).json({ error: r.error || 'Text message failed to send.' });
   }
 
-  await markEstimateContacted(db, biz.id, body.id);
+  await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth));
   return res.status(200).json({ ok: true });
 }
 
@@ -5045,7 +5064,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
     return res.status(502).json({ error: `Email failed to send: ${e.message}` });
   }
 
-  await markEstimateContacted(db, biz.id, body.id);
+  await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth));
   return res.status(200).json({ ok: true });
 }
 

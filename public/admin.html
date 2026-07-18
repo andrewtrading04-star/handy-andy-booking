@@ -322,6 +322,8 @@
   .est-approval.not-approved{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;}
   .est-approval-addons{margin-top:6px;font-size:12.5px;font-weight:700;color:#15803d;line-height:1.4;}
   .est-approval-addons b{color:#0f172a;}
+  .est-sent-line{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--mute);}
+  .est-sent-line b{color:var(--ink-2);}
   /* Estimate aging: a "Needs Response" card past EST_STALE_MINUTES turns red and
      pulses, with its age pill flipping from a grey "X ago" to "respond now". */
   .est-toprow{display:flex;align-items:flex-start;gap:8px;}
@@ -5042,6 +5044,11 @@ function estCard(e){
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
       : `<div class="est-approval waiting">⏳ Waiting on approval</div>`);
+  // Who sent this estimate to the customer, and when (email/SMS send, or the
+  // status dropdown manually set to "Estimate sent") — same customer-local
+  // timezone as the "Came in" badge above, for consistency on one card.
+  const sentAt=e.contacted_at?new Date(e.contacted_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  const sentLine=sentAt?`<div class="est-sent-line">✓ Sent to customer by <b>${esc(e.contacted_by||'Office')}</b> · ${esc(sentAt)}</div>`:'';
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);
@@ -5058,6 +5065,7 @@ function estCard(e){
         ${slotChips}
         ${quote}
         ${approved}
+        ${sentLine}
       </div>
       ${photo}
     </div>
