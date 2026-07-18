@@ -838,28 +838,28 @@
   .chk.delivered{background:#e0edff;color:#1d4ed8;}
   .chk.fail{background:#fee2e2;color:#b91c1c;}
   .chk.na{background:#f5f6f8;color:#c4ccd6;}
-  /* Option 4: side-by-side channel tiles — each channel gets its own bordered
-     box so a failed channel (red tile) visually separates from a healthy one,
-     and its resend button sits inside the tile it affects (no ambiguity). */
-  .rev-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
-  .rev-tiles{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
-  .rev-tile{border:1px solid var(--line);background:#fafbfc;border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:7px;}
-  .rev-tile.fail{border-color:#fecaca;background:#fef2f2;}
-  .rev-tile.fail .rev-chan-label{color:#b91c1c;}
-  .rev-pipe-v{display:flex;flex-direction:column;gap:4px;}
-  .rev-tile-foot{display:flex;justify-content:flex-end;margin-top:1px;}
-  @media (max-width:520px){ .rev-tiles{grid-template-columns:1fr;} }
-
-  /* ── Review-requests: Today / Yesterday / weekly groups ──────────────────── */
-  .rq-group{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff;}
-  .rq-group-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line2);
-    font-size:12.5px;font-weight:800;color:var(--ink);}
-  .rq-group-h.clickable{cursor:pointer;user-select:none;}
-  .rq-group-title{flex:1;min-width:0;}
-  .rq-chevron{display:inline-block;font-size:10px;color:var(--mute);transition:transform .15s ease;transform:rotate(0deg);}
-  .rq-group.collapsed .rq-chevron{transform:rotate(-90deg);}
-  .rq-group-body{padding:11px 12px;display:flex;flex-direction:column;gap:9px;}
-  .rq-group.collapsed .rq-group-body{display:none;}
+  /* ── Review-requests: toolbar + table (Select / Customer / Email Status /
+     Text Status / Review / Actions), grouped by Today / Yesterday / week. ── */
+  .rq-toolbar{display:flex;align-items:center;gap:14px;margin:2px 0 10px;flex-wrap:wrap;}
+  .rq-bulk-select{border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink-2);
+    font-size:13px;font-weight:600;padding:7px 10px;}
+  .rq-selall{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);cursor:pointer;user-select:none;}
+  .rq-table-wrap{border:1px solid var(--line);border-radius:12px;overflow:auto;background:#fff;}
+  table.rq-table{width:100%;border-collapse:collapse;font-size:13px;}
+  table.rq-table thead th{text-align:left;padding:10px 12px;font-size:11px;font-weight:800;color:var(--mute);
+    text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;}
+  table.rq-table tbody td{padding:10px 12px;border-bottom:1px solid var(--line2);vertical-align:middle;}
+  table.rq-table tbody tr:last-child td{border-bottom:none;}
+  table.rq-table tbody tr:hover td{background:#fafbfc;}
+  tr.rq-date-hdr td{background:var(--accent-soft);color:var(--ink);font-weight:800;font-size:12.5px;padding:9px 12px;}
+  tr.rq-date-hdr.clickable{cursor:pointer;user-select:none;}
+  .rq-chevron{display:inline-block;font-size:10px;color:var(--accent);transform:rotate(-90deg);transition:transform .15s ease;}
+  .rq-chevron.open{transform:rotate(0deg);}
+  .rq-cust{font-weight:700;color:var(--ink);}
+  .rq-cust-sub{font-size:11.5px;color:var(--mute);margin-top:1px;}
+  .rq-actions{white-space:nowrap;}
+  .rq-actions .btn{margin-right:6px;}
+  .rq-actions .btn:last-child{margin-right:0;}
 
   /* ── Schedule greeting ("Jarvis" intro banner) ─────────────────────────── */
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
@@ -4633,6 +4633,11 @@ let _revReqState={ page:1, limit:25, total:0, rows:[], scoreboard:null };
 // (all weekly buckets default to collapsed). Preserved across re-renders
 // (e.g. after "Load more") since this lives outside paintReviewRequests().
 let _revReqWeekCollapsed={};
+// Ids currently checked in the review-requests table (Select All / bulk
+// actions). Reset whenever a fresh set of rows is loaded (renderReviews);
+// preserved across in-place repaints (row checks, week toggles) same as
+// _revReqWeekCollapsed above.
+let _revReqSelected=new Set();
 
 function revScoreboardHtml(sb){
   if(!sb || !sb.email || !sb.sms) return '';
@@ -4648,60 +4653,35 @@ function revScoreboardHtml(sb){
 
 const REV_FAIL_STATUSES={bounced:'Bounced',complained:'Complained',failed:'Failed',undelivered:'Undelivered'};
 
-// One channel's Sent → Delivered → Opened pipeline as a bordered tile, stacked
-// vertically (not a left-to-right arrow chain) so it reads cleanly at tile
-// width. `chan` is the { eligible, sent_at, delivered_at, status, opened_at }
-// shape the API returns. The resend button lives inside the tile it affects.
-function revChanTileHtml(label, chan, id, channelKey, openedUnknown){
-  if(!chan || !chan.eligible){
-    return `<div class="rev-tile"><div class="rev-chan-label">${label}</div><div class="rev-pipe-v"><span class="chk na">— N/A</span></div></div>`;
-  }
+// One channel's status as a single pill for its table column. `chan` is the
+// { eligible, sent_at, delivered_at, status, opened_at } shape the API
+// returns. `openedUnknown` covers the case where the customer provably
+// opened/reviewed but the channel wasn't recorded — showing "Delivered" or
+// "Sent" then would contradict a 5-star rating sitting in the same row.
+function revChanStatusPill(chan, openedUnknown){
+  if(!chan || !chan.eligible) return `<span class="chk na">N/A</span>`;
   const failed = chan.status && REV_FAIL_STATUSES[chan.status];
-  const sentChip = chan.sent_at ? `<span class="chk done">✓ Sent</span>` : `<span class="chk pending">○ Not sent yet</span>`;
-  // When the customer provably clicked through (or left a review) but the
-  // channel wasn't recorded, "○ Not opened" would contradict the 5 stars
-  // sitting right above it — say what's actually known instead.
-  const notOpened = openedUnknown
-    ? `<span class="chk delivered">✓ Opened · channel unknown</span>`
-    : `<span class="chk pending">○ Not opened</span>`;
-  let midChip, openChip;
-  if(failed){
-    midChip=`<span class="chk fail">✕ ${REV_FAIL_STATUSES[chan.status]}</span>`;
-    openChip=null;
-  } else if(chan.delivered_at){
-    midChip=`<span class="chk delivered">✓ Delivered</span>`;
-    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:notOpened;
-  } else if(chan.sent_at){
-    midChip=`<span class="chk pending">○ Delivery pending</span>`;
-    openChip=chan.opened_at?`<span class="chk done">✓ Opened</span>`:notOpened;
-  } else {
-    midChip=`<span class="chk na">— n/a</span>`;
-    openChip=`<span class="chk na">— n/a</span>`;
-  }
-  const label2 = chan.sent_at ? 'Resend' : 'Send';
-  const btn = `<div class="rev-tile-foot"><button class="btn ghost sm" data-resend="${esc(id)}" data-channel="${channelKey}">${label2} ${channelKey==='email'?'email':'text'}</button></div>`;
-  return `<div class="rev-tile${failed?' fail':''}"><div class="rev-chan-label">${label}</div><div class="rev-pipe-v">${sentChip}${midChip}${openChip||''}</div>${btn}</div>`;
+  if(failed) return `<span class="chk fail">${esc(REV_FAIL_STATUSES[chan.status])}</span>`;
+  if(chan.opened_at) return `<span class="chk done">Opened</span>`;
+  if(chan.delivered_at) return openedUnknown ? `<span class="chk done">Opened*</span>` : `<span class="chk delivered">Delivered</span>`;
+  if(chan.sent_at) return openedUnknown ? `<span class="chk done">Opened*</span>` : `<span class="chk pending">Sent · Pending</span>`;
+  return `<span class="chk na">Not sent</span>`;
 }
 
-function reviewReqCardHtml(r, gByBooking){
+function reviewReqRowHtml(r, gByBooking){
   const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
-  const starsBig = r.rating ? `<span class="stars-big">${'★'.repeat(r.rating)}</span>` : '';
-  const reviewed = r.rating ? '' : `<span class="chk pending">No review yet</span>`;
-  const gpill = gByBooking.has(r.id) ? `<span class="gpill">Left a Google review</span>` : '';
-  return `<div class="job">
-    <div class="rev-card-top">
-      <div style="min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
-        <div class="name">${esc(r.customer_name)}</div>
-        ${starsBig}
-        <div class="meta" style="width:100%;">${esc(r.technician_name)}${when?' · '+esc(when):''}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${gpill}${reviewed}</div>
-    </div>
-    <div class="rev-tiles">
-      ${revChanTileHtml('📧 Email', r.email, r.id, 'email', !!r.opened_unknown_at)}
-      ${revChanTileHtml('💬 Text', r.sms, r.id, 'sms', !!r.opened_unknown_at)}
-    </div>
-  </div>`;
+  const reviewCell = r.rating ? `<span class="stars-big" style="font-size:13px;">${'★'.repeat(r.rating)}</span>` : `<span class="chk">No Review</span>`;
+  const gpill = gByBooking.has(r.id) ? `<div class="gpill" style="margin-top:4px;">Left a Google review</div>` : '';
+  const emailBtn = (r.email && r.email.eligible) ? `<button class="btn ghost sm" data-resend="${esc(r.id)}" data-channel="email">${r.email.sent_at?'Resend Email':'Send Email'}</button>` : '';
+  const smsBtn = (r.sms && r.sms.eligible) ? `<button class="btn ghost sm" data-resend="${esc(r.id)}" data-channel="sms">${r.sms.sent_at?'Resend Text':'Send Text'}</button>` : '';
+  return `<tr data-req-row="${esc(r.id)}">
+    <td><input type="checkbox" data-req-select="${esc(r.id)}"${_revReqSelected.has(r.id)?' checked':''}></td>
+    <td><div class="rq-cust">${esc(r.customer_name)}</div><div class="rq-cust-sub">${esc(r.technician_name)}${when?' · '+esc(when):''}</div></td>
+    <td>${revChanStatusPill(r.email, !!r.opened_unknown_at)}</td>
+    <td>${revChanStatusPill(r.sms, !!r.opened_unknown_at)}</td>
+    <td>${reviewCell}${gpill}</td>
+    <td class="rq-actions">${emailBtn}${smsBtn}</td>
+  </tr>`;
 }
 
 // ── Grouping helpers for the review-requests list: Today / Yesterday / weekly
@@ -4766,39 +4746,83 @@ function groupReviewRequestRows(rows){
   }
   return groups;
 }
-// Renders one group (Today/Yesterday always-expanded, or a collapsible weekly
-// bucket) using the exact same reviewReqCardHtml() card markup.
-function rqGroupHtml(g, gByBooking){
-  const cards=g.rows.map(r=>reviewReqCardHtml(r,gByBooking)).join('');
-  if(g.type!=='week'){
-    return `<div class="rq-group">
-      <div class="rq-group-h"><span class="rq-chevron">▾</span><span class="rq-group-title">${esc(g.label)}</span><span class="chk">${g.rows.length}</span></div>
-      <div class="rq-group-body">${cards}</div>
-    </div>`;
-  }
-  const collapsed = _revReqWeekCollapsed[g.key]!==false; // default: collapsed
-  return `<div class="rq-group${collapsed?' collapsed':''}" data-week-key="${esc(g.key)}">
-    <div class="rq-group-h clickable" data-week-toggle="${esc(g.key)}"><span class="rq-chevron">▾</span><span class="rq-group-title">${esc(g.label)}</span><span class="chk">${g.rows.length}</span></div>
-    <div class="rq-group-body">${cards}</div>
-  </div>`;
+// Renders one date group as table rows: a full-width date header row (Today/
+// Yesterday/Undated always expanded; weekly buckets collapsible, default
+// collapsed) followed by that group's reviewReqRowHtml() rows.
+function rqGroupRowsHtml(g, gByBooking){
+  const isWeek = g.type==='week';
+  const collapsed = isWeek && _revReqWeekCollapsed[g.key]!==false; // weekly default: collapsed
+  const chevron = isWeek ? `<span class="rq-chevron${collapsed?'':' open'}">▾</span> ` : '';
+  const headerRow = `<tr class="rq-date-hdr${isWeek?' clickable':''}"${isWeek?` data-week-toggle="${esc(g.key)}"`:''}><td colspan="6">${chevron}${esc(g.label)} <span class="chk">${g.rows.length}</span></td></tr>`;
+  const bodyRows = (isWeek && collapsed) ? '' : g.rows.map(r=>reviewReqRowHtml(r,gByBooking)).join('');
+  return headerRow+bodyRows;
 }
 
-// Renders the scoreboard + accumulated rows (grouped into Today / Yesterday /
-// weekly buckets) + "Load more" into #revReqWrap, and (re)wires the
-// resend/load-more/week-toggle buttons. Called on first load and after each
-// "Load more" fetch — the container is scoped so this never touches the
-// Google-reviews or in-app-reviews sections above/below it.
+// Renders the scoreboard + toolbar (Bulk Actions / Select All) + table
+// (grouped into Today / Yesterday / weekly buckets) + "Load more" into
+// #revReqWrap, and (re)wires the checkbox/resend/bulk/load-more/week-toggle
+// handlers. Called on first load and after each in-place repaint (row check,
+// week toggle, "Load more") — the container is scoped so this never touches
+// the Google-reviews or in-app-reviews sections above/below it.
 function paintReviewRequests(gByBooking){
   const wrap=document.getElementById('revReqWrap');
   if(!wrap) return;
   const hasMore=_revReqState.rows.length<_revReqState.total;
-  const groupsHtml = _revReqState.rows.length
-    ? groupReviewRequestRows(_revReqState.rows).map(g=>rqGroupHtml(g,gByBooking)).join('')
-    : '<div class="empty">No completed jobs yet.</div>';
+  const allIds=_revReqState.rows.map(r=>r.id);
+  const allSelected = allIds.length>0 && allIds.every(id=>_revReqSelected.has(id));
+  if(!_revReqState.rows.length){
+    wrap.innerHTML = revScoreboardHtml(_revReqState.scoreboard)+'<div class="empty">No completed jobs yet.</div>';
+    return;
+  }
+  const bodyHtml = groupReviewRequestRows(_revReqState.rows).map(g=>rqGroupRowsHtml(g,gByBooking)).join('');
   wrap.innerHTML =
     revScoreboardHtml(_revReqState.scoreboard)+
-    groupsHtml+
+    `<div class="rq-toolbar">
+       <select class="rq-bulk-select" id="revBulkAct">
+         <option value="">Bulk Actions</option>
+         <option value="email">Resend Email</option>
+         <option value="sms">Resend Text</option>
+       </select>
+       <label class="rq-selall"><input type="checkbox" id="revSelectAll"${allSelected?' checked':''}> Select All</label>
+     </div>
+     <div class="rq-table-wrap"><table class="rq-table">
+       <thead><tr>
+         <th><input type="checkbox" id="revSelectAllHead"${allSelected?' checked':''}> Select</th>
+         <th>Customer</th><th>Email Status</th><th>Text Status</th><th>Review</th><th>Actions</th>
+       </tr></thead>
+       <tbody>${bodyHtml}</tbody>
+     </table></div>`+
     (hasMore?`<button type="button" class="btn ghost sm" id="revReqLoadMore" style="width:100%;margin-top:8px;">Load earlier weeks (${_revReqState.rows.length} of ${_revReqState.total})</button>`:'');
+
+  wrap.querySelectorAll('#revSelectAll,#revSelectAllHead').forEach(cb=>cb.addEventListener('change',()=>{
+    if(cb.checked) allIds.forEach(id=>_revReqSelected.add(id));
+    else allIds.forEach(id=>_revReqSelected.delete(id));
+    paintReviewRequests(gByBooking);
+  }));
+  wrap.querySelectorAll('[data-req-select]').forEach(cb=>cb.addEventListener('change',()=>{
+    if(cb.checked) _revReqSelected.add(cb.dataset.reqSelect);
+    else _revReqSelected.delete(cb.dataset.reqSelect);
+    paintReviewRequests(gByBooking); // repaint to sync the Select All checkboxes
+  }));
+  const bulkSel=document.getElementById('revBulkAct');
+  if(bulkSel) bulkSel.addEventListener('change',async()=>{
+    const channel=bulkSel.value;
+    if(!channel) return;
+    const ids=[..._revReqSelected];
+    if(!ids.length){ toast('Select at least one row first'); bulkSel.value=''; return; }
+    const field = channel==='sms' ? 'sms' : 'email';
+    const targets=ids.map(id=>_revReqState.rows.find(r=>r.id===id)).filter(r=>r && r[field] && r[field].eligible);
+    if(!targets.length){ toast(`No selected rows are eligible for ${channel==='sms'?'text':'email'}`); bulkSel.value=''; return; }
+    bulkSel.disabled=true;
+    let ok=0, fail=0;
+    for(const r of targets){
+      try{ await api('review_resend',{ method:'POST', body:{ business:current.slug, id:r.id, channel }}); ok++; }
+      catch(e){ fail++; }
+      _revReqSelected.delete(r.id); // only drop the ones just processed — leaves any rows the admin checked mid-send still selected
+    }
+    toast(`${channel==='sms'?'Text':'Email'} resent to ${ok} customer${ok===1?'':'s'}${fail?` · ${fail} failed`:''} ✓`);
+    if(section==='reviews') renderReviews(); // a long bulk send shouldn't yank the admin back to Reviews if they've since switched tabs
+  });
   wrap.querySelectorAll('[data-resend]').forEach(btn=>btn.addEventListener('click',async()=>{
     const channel = btn.dataset.channel === 'sms' ? 'sms' : 'email';
     btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
@@ -4852,6 +4876,7 @@ async function renderReviews(){
     const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
 
     _revReqState={ page:1, limit:25, total:rq.total||0, rows:rq.requests||[], scoreboard:rq.scoreboard||null };
+    _revReqSelected=new Set();
 
     const revHtml=reviews.map(r=>`
       <div class="job">
