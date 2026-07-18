@@ -1,12 +1,22 @@
 name: Tech lateness check
 
 # Alerts a late tech + staff (Heather/Joey) when a booking is 30+ minutes past
-# its scheduled start and the tech never tapped "On my way". Runs every 10
-# minutes so the alert lands reasonably close to the 30-minute mark (Vercel
-# Hobby cron only fires once/day, which is why this lives in GitHub Actions —
-# same pattern as appointment-reminders.yml). The endpoint is idempotent — a
-# booking is alerted at most once — so an overlapping or delayed run is
-# harmless.
+# its scheduled start and nobody tapped "On my way" yet. Runs every 10 minutes
+# (Vercel Hobby cron only fires once/day, which is why this lives in GitHub
+# Actions — same pattern as appointment-reminders.yml). GitHub's own scheduler
+# is best-effort for high-frequency crons — under load a run can land 10-20+
+# minutes late or get skipped entirely (the next run catches it, since the
+# 24h lookback in tech-late.js keeps a booking eligible) — so treat "30
+# minutes late" as the trigger threshold, not a delivery guarantee; the real
+# text can land anywhere from ~30 to ~60 minutes after the missed start.
+#
+# `concurrency` below makes overlapping runs QUEUE instead of running side by
+# side — the endpoint's per-recipient send-then-mark isn't atomic, so two
+# genuinely concurrent runs could both see a booking as unalerted and each
+# send their own copy of every text before either one marks it done.
+concurrency:
+  group: tech-late-check
+  cancel-in-progress: false
 on:
   schedule:
     - cron: '*/10 * * * *'   # every 10 minutes (UTC) — always the real thing, texts go out

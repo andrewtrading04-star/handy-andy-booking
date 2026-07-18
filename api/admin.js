@@ -2386,26 +2386,29 @@ async function bookingUpdate(req, res, db, auth, body) {
       // A big job's extra slots were reserved for the OLD time — drop them on a
       // reschedule so they can't silently land on another job at the new time.
       if (extraSlotsCol) patch.extra_slots = [];
+      // A lateness alert already sent for the OLD time doesn't mean anything
+      // about the NEW time — clear it so a tech who's late for the rescheduled
+      // slot is still checked/alerted (see api/_lib/tech-late.js). No grace-
+      // period stamp needed here (unlike reassignment): the new scheduled_at
+      // itself is the buffer, since the lateness check only fires 30+ min
+      // after whatever scheduled_at currently says.
+      {
+        const existMetaResched = existing.metadata || {};
+        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMetaResched } = existMetaResched;
+        patch.metadata = restMetaResched;
+      }
       break;
     }
-    case 'assign':
+    case 'assign': {
       // Only touch the field that was actually sent, so changing the second tech
       // doesn't wipe the primary (and vice-versa). Skip the secondary if the DB
       // hasn't been migrated for it yet.
       if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
+      const primaryChanged = body.technician_id !== undefined && (body.technician_id || null) !== (existing.technician_id || null);
       // Changing the PRIMARY tech moves the reserved extra slots to a different
       // person — drop them so they must be re-added (and re-validated) for the new tech.
-      if (body.technician_id !== undefined && (body.technician_id || null) !== (existing.technician_id || null)) {
-        if (extraSlotsCol) patch.extra_slots = [];
-        // The old tech's lateness alert (if any) doesn't apply to whoever
-        // this job is reassigned to — clear it so the new tech still gets
-        // checked/alerted if THEY end up 30+ min late (see api/_lib/tech-late.js).
-        const existMetaAssign = existing.metadata || {};
-        if (existMetaAssign.late_alert_sent_at) {
-          const { late_alert_sent_at, ...restMeta } = existMetaAssign;
-          patch.metadata = restMeta;
-        }
-      }
+      if (primaryChanged && extraSlotsCol) patch.extra_slots = [];
+      let secondaryChanged = false;
       if (body.secondary_technician_id !== undefined && bookingLiftCols) {
         let sec = body.secondary_technician_id || null;
         // 'any' → resolve to the scheduled default (Handy Andy first for Dom's).
@@ -2417,16 +2420,39 @@ async function bookingUpdate(req, res, db, auth, body) {
           sec = await resolveDefaultSecondary(db, biz, existing.postal_code, aDate, aSlot, aTz, effTechId, body.pool2);
         }
         patch.secondary_technician_id = sec;
+        secondaryChanged = (sec || null) !== (existing.secondary_technician_id || null);
+      }
+      // Either tech changing means whoever's newly on the hook for this job
+      // didn't cause any lateness already tracked against it — clear the
+      // lateness-alert state and stamp reassigned_at so tech-late.js gives
+      // them a full fresh 30-minute grace period instead of instantly
+      // flagging them late for a slot that was already overdue when it
+      // landed on them (see api/_lib/tech-late.js). One shared timestamp for
+      // the whole booking is deliberate — simpler than tracking a grace
+      // period per tech slot, and the only cost is a rare few extra minutes
+      // of delay on a legitimately new lateness incident.
+      if (primaryChanged || secondaryChanged) {
+        const existMetaAssign = existing.metadata || {};
+        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMeta } = existMetaAssign;
+        patch.metadata = { ...restMeta, reassigned_at: now };
       }
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
       break;
+    }
     case 'reopen':
       // Reopen a completed job by setting it back to assigned (if tech is assigned)
       // or confirmed (if no tech). Mark it so we never resend the review email.
       if (existing.status !== 'completed') return res.status(400).json({ error: 'Only completed jobs can be reopened' });
       patch.status = newStatus = existing.technician_id ? 'assigned' : 'confirmed';
-      const existMeta = existing.metadata || {};
-      patch.metadata = { ...existMeta, reopened_at: now, reopened_from: 'completed' };
+      {
+        const existMeta = existing.metadata || {};
+        // Any lateness alert already sent belongs to whatever happened before
+        // this reopen — clear it so the reopened job (protected by its own
+        // 30-min reopened_at grace period, see api/_lib/tech-late.js) is still
+        // checked/alerted fresh if it genuinely goes late again.
+        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMeta } = existMeta;
+        patch.metadata = { ...restMeta, reopened_at: now, reopened_from: 'completed' };
+      }
       break;
     case 'status':
       if (!body.status) return res.status(400).json({ error: 'status required' });
