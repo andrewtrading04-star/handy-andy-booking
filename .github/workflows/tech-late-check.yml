@@ -9,8 +9,13 @@ name: Tech lateness check
 # harmless.
 on:
   schedule:
-    - cron: '*/10 * * * *'   # every 10 minutes (UTC)
-  workflow_dispatch: {}       # allow manual "Run workflow" from the Actions tab
+    - cron: '*/10 * * * *'   # every 10 minutes (UTC) — always the real thing, texts go out
+  workflow_dispatch:          # manual "Run workflow" from the Actions tab — defaults to a
+    inputs:                   # safe report-only test; uncheck the box to send real texts.
+      dry:
+        description: 'Dry run (report only — no texts sent)'
+        type: boolean
+        default: true
 
 jobs:
   check:
@@ -18,6 +23,10 @@ jobs:
     steps:
       - name: Trigger tech lateness check
         run: |
+          DRY_PARAM=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry }}" != "false" ]; then
+            DRY_PARAM="&dry=1"
+          fi
           curl -fsS --retry 3 --retry-delay 5 -X GET \
-            "https://handy-andy-booking.vercel.app/api/migrate?action=tech_late_check" \
+            "https://handy-andy-booking.vercel.app/api/migrate?action=tech_late_check${DRY_PARAM}" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
