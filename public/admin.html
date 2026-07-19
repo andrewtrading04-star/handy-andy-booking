@@ -4757,10 +4757,13 @@ function _rqKeyOf(d){
   const p=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 }
-// Buckets an already-newest-first array of review-request rows into
-// { type:'today'|'yesterday'|'week', label, key?, rows } groups, preserving
-// row order and emitting weekly groups in the order they're first encountered
-// (i.e. most-recent week first, since rows arrive sorted newest-first).
+// Buckets a review-request row list into { type:'today'|'yesterday'|'week'|
+// 'undated', label, key?, rows } groups, then explicitly sorts the buckets
+// (Today, Yesterday, weeks newest-to-oldest, Undated last) instead of trusting
+// the input rows to already be perfectly newest-first end-to-end — "Load
+// more" paging in older batches over time is enough to break that assumption
+// a little, which previously left buckets (including Today) appearing in
+// whatever order they were first encountered rather than true date order.
 function groupReviewRequestRows(rows){
   const today=_rqLocalDay(new Date());
   const yesterday=new Date(today); yesterday.setDate(yesterday.getDate()-1);
@@ -4798,6 +4801,16 @@ function groupReviewRequestRows(rows){
       g.rows.push(r);
     }
   }
+  // Sort the buckets themselves rather than trusting encounter order: Today,
+  // then Yesterday, then every weekly range newest-to-oldest (week `key` is a
+  // zero-padded YYYY-MM-DD Monday date, so a plain string compare sorts it
+  // correctly), then Undated last.
+  const RANK={ today:0, yesterday:1, week:2, undated:3 };
+  groups.sort((a,b)=>{
+    if(RANK[a.type]!==RANK[b.type]) return RANK[a.type]-RANK[b.type];
+    if(a.type==='week') return a.key<b.key ? 1 : (a.key>b.key ? -1 : 0);
+    return 0;
+  });
   return groups;
 }
 // Renders one date group as table rows: a full-width date header row (Today/
