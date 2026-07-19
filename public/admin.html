@@ -296,6 +296,8 @@
   .rc-btn.red{border-color:#fecaca;background:#fef2f2;color:#b91c1c;}
   .rc-btn.amber{border-color:#fde68a;background:#fef3c7;color:#92400e;}
   .rc-btn.ghost{border-style:dashed;color:var(--mute);}
+  .rc-outcome-select{border:1px solid var(--line);background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:var(--ink-2);padding:8px 10px;border-radius:8px;cursor:pointer;width:100%;}
+  .rc-outcome-select:hover{border-color:var(--mute);}
   .rc-items{font-size:12.5px;color:var(--ink-2);margin-top:5px;line-height:1.5;}
   .rc-complaint{display:flex;flex-direction:column;gap:8px;}
   .rc-cmp-text{width:100%;min-height:62px;resize:vertical;font:inherit;font-size:13px;padding:9px 11px;border:1.5px solid #fde68a;border-radius:9px;background:#fffbeb;color:var(--ink);}
@@ -4563,6 +4565,16 @@ function paintReviewCalls(){
   view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));
   view.querySelectorAll('[data-rcweek]').forEach(b=>b.addEventListener('click',()=>{ _rcWeekOffset=Math.max(-520,Math.min(0,_rcWeekOffset+parseInt(b.dataset.rcweek))); renderReviewCalls(); }));
   view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz)));
+  // Outcome dropdown (Promised review / Had a complaint / Left a voicemail /
+  // Don't contact) — same rcAction() as the old button row, just triggered by
+  // picking an option instead of a click. Reset back to the placeholder right
+  // away so it never looks "stuck" on the just-picked option while the
+  // request (or, for "Had a complaint", the note-form repaint) is in flight.
+  view.querySelectorAll('.rc-outcome-select').forEach(s=>s.addEventListener('change',()=>{
+    const v=s.value; if(!v) return;
+    rcAction(s.dataset.rcId, v, s.dataset.rcBiz);
+    s.value='';
+  }));
   const badge=document.getElementById('rcBadge');
   if(badge){ if(isToCall && toCall>0){ badge.textContent=toCall; badge.style.display=''; } else if(isToCall) badge.style.display='none'; }
 }
@@ -4635,12 +4647,13 @@ function rcCard(r){
            <button class="rc-btn ghost" data-rc-act="complaint_cancel" data-rc-id="${r.id}">Cancel</button>
          </div>
        </div>`
-    : `<div class="rc-btn-row">
-         <button class="rc-btn green" data-rc-act="promised_review" data-rc-id="${r.id}">✅ Promised review</button>
-         <button class="rc-btn amber" data-rc-act="complaint_open" data-rc-id="${r.id}">📝 Had a complaint</button>
-         <button class="rc-btn" data-rc-act="voicemail" data-rc-id="${r.id}">📭 Left a voicemail</button>
-         <button class="rc-btn red" data-rc-act="do_not_contact" data-rc-id="${r.id}">🚫 Don't contact</button>
-       </div>`;
+    : `<select class="rc-outcome-select" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">
+         <option value="">Log outcome…</option>
+         <option value="promised_review">✅ Promised review</option>
+         <option value="complaint_open">📝 Had a complaint</option>
+         <option value="voicemail">📭 Left a voicemail</option>
+         <option value="do_not_contact">🚫 Don't contact</option>
+       </select>`;
   return `<div class="rc-card">
     <div class="rc-main">
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
