@@ -857,6 +857,8 @@
   .rq-chevron.open{transform:rotate(0deg);}
   .rq-cust{font-weight:700;color:var(--ink);}
   .rq-cust-sub{font-size:11.5px;color:var(--mute);margin-top:1px;}
+  .rq-review-snippet{font-size:12px;color:var(--ink-2);margin-top:3px;max-width:220px;line-height:1.4;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .rq-actions{white-space:nowrap;}
   .rq-actions .btn{margin-right:6px;}
   .rq-actions .btn:last-child{margin-right:0;}
@@ -4747,7 +4749,8 @@ function revChanStatusPill(chan, openedUnknown){
 
 function reviewReqRowHtml(r, gByBooking){
   const when=r.completed_at?new Date(r.completed_at).toLocaleDateString():'';
-  const reviewCell = r.rating ? `<span class="stars-big" style="font-size:13px;">${'★'.repeat(r.rating)}</span>` : `<span class="chk">No Review</span>`;
+  const reviewSnippet = (r.rating && r.review_text) ? `<div class="rq-review-snippet" title="${esc(r.review_text)}">${esc(r.review_text)}</div>` : '';
+  const reviewCell = r.rating ? `<span class="stars-big" style="font-size:13px;">${'★'.repeat(r.rating)}</span>${reviewSnippet}` : `<span class="chk">No Review</span>`;
   const gpill = gByBooking.has(r.id) ? `<div class="gpill" style="margin-top:4px;">Left a Google review</div>` : '';
   const emailBtn = (r.email && r.email.eligible) ? `<button class="btn ghost sm" data-resend="${esc(r.id)}" data-channel="email">${r.email.sent_at?'Resend Email':'Send Email'}</button>` : '';
   const smsBtn = (r.sms && r.sms.eligible) ? `<button class="btn ghost sm" data-resend="${esc(r.id)}" data-channel="sms">${r.sms.sent_at?'Resend Text':'Send Text'}</button>` : '';

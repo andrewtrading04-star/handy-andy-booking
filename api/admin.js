@@ -4196,7 +4196,7 @@ async function reviewRequests(req, res, db, auth) {
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
-  const cols = (t) => `id, scheduled_at, completed_at, review_rating, reviewed_at, review_token, metadata, sms_consent,
+  const cols = (t) => `id, scheduled_at, completed_at, review_rating, review_text, reviewed_at, review_token, metadata, sms_consent,
       ${t ? REVIEW_TRACK_COLS + ', ' : ''}
       customer:customers(name, email, phone), technician:technicians!technician_id(name)`;
   let hasTrack = true;
@@ -4249,6 +4249,7 @@ async function reviewRequests(req, res, db, auth) {
       sms: channelState(hasSms, smsSentAt, hasTrack ? b.review_sms_delivered_at : null, hasTrack ? b.review_sms_status : null, smsOpenedAt),
       opened_unknown_at: openedUnknownAt,
       rating: b.review_rating || null,
+      review_text: b.review_text || null,
       reviewed_at: b.reviewed_at || null,
       tracking: hasTrack,
     };
