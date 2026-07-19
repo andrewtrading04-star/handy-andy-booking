@@ -4564,7 +4564,7 @@ function paintReviewCalls(){
   view.querySelectorAll('[data-rcdays]').forEach(b=>b.addEventListener('click',()=>{ _rcDays=+b.dataset.rcdays; renderReviewCalls(); }));
   view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));
   view.querySelectorAll('[data-rcweek]').forEach(b=>b.addEventListener('click',()=>{ _rcWeekOffset=Math.max(-520,Math.min(0,_rcWeekOffset+parseInt(b.dataset.rcweek))); renderReviewCalls(); }));
-  view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz)));
+  view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz, b.dataset.rcChannel)));
   // Outcome dropdown (Promised review / Had a complaint / Left a voicemail /
   // Don't contact) — same rcAction() as the old button row, just triggered by
   // picking an option instead of a click. Reset back to the placeholder right
@@ -4630,8 +4630,17 @@ function rcCard(r){
   if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at))}`:''}</span>`);
   const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
   const callBtn=tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`;
-  const resend=(r.has_email && r.has_review_link)
-    ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
+  // Email and text each get their own resend button when both are possible
+  // (customer has that contact method + a review link); when only one is,
+  // it gets the full-width label it always had rather than looking like half
+  // a pair with nothing beside it.
+  const canEmailResend=r.has_email && r.has_review_link;
+  const canSmsResend=r.has_sms && r.has_review_link;
+  const resendBtn=(ch,label)=>`<button class="rc-btn ghost" style="flex:1;" data-rc-act="resend" data-rc-channel="${ch}" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">${label}</button>`;
+  let resend='';
+  if(canEmailResend && canSmsResend) resend=`<div class="rc-btn-row" style="gap:9px;">${resendBtn('email','✉️ Email')}${resendBtn('sms','💬 Text')}</div>`;
+  else if(canEmailResend) resend=`<button class="rc-btn ghost" data-rc-act="resend" data-rc-channel="email" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>`;
+  else if(canSmsResend) resend=`<button class="rc-btn ghost" data-rc-act="resend" data-rc-channel="sms" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">💬 Re-send review text</button>`;
   // What the customer purchased, so Joey can reference it on the call — filtered
   // to the real work (TVs, handyman, Assurion, priced add-ons); tax and $0 config
   // answers are dropped as noise.
@@ -4668,9 +4677,10 @@ function rcCard(r){
     </div>
   </div>`;
 }
-async function rcAction(id, act, biz){
+async function rcAction(id, act, biz, channel){
   if(act==='resend'){
-    try{ await api('review_resend',{ method:'POST', body:{ business:biz, id }}); toast('Review email re-sent ✓'); }
+    const ch=channel==='sms'?'sms':'email';
+    try{ await api('review_resend',{ method:'POST', body:{ business:biz, id, channel:ch }}); toast(ch==='sms'?'Review text re-sent ✓':'Review email re-sent ✓'); }
     catch(e){ toast(e.message); }
     return;
   }
