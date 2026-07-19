@@ -348,6 +348,17 @@ async function wirePlateSync(req, res) {
   const order_url      = body.order_url      || null;
 
   const db = serviceClient();
+
+  // The owner explicitly dismissed this order number before (✕ button, or a
+  // manual purge) — respect that forever, even though its confirmation email
+  // is presumably still sitting in the scanned inbox. Degrades gracefully if
+  // the table isn't there yet (pre-migration) rather than blocking sync.
+  const { data: ignored, error: ignoredErr } = await db.from('wire_plate_ignored_orders')
+    .select('amazon_order_num').eq('amazon_order_num', amazon_order_num).maybeSingle();
+  if (!ignoredErr && ignored) {
+    return res.status(200).json({ ok: true, order: amazon_order_num, results: [{ action: 'ignored', reason: 'previously dismissed by owner' }] });
+  }
+
   const { data: businesses, error: bizErr } = await db.from('businesses').select('id, slug').eq('active', true);
   if (bizErr) return res.status(500).json({ error: bizErr.message });
   const slugOf = (id) => (businesses || []).find(b => b.id === id)?.slug || id;
@@ -467,6 +478,16 @@ async function wirePlatePurge(req, res) {
     }
     const { error: delErr } = await db.from('wire_plate_purchases').delete().eq('id', r.id);
     results.push({ order: r.amazon_order_num, action: delErr ? 'delete_failed' : 'deleted', error: delErr?.message });
+  }
+  // Same reasoning as wirePlateRemove (api/admin.js): a bare delete doesn't stop
+  // the email scanner from re-adding this order next pass, since the row was
+  // the only "already handled" signal. Record every requested order number
+  // (not just the ones that had a row) so a purge of a phantom/pre-emptive
+  // order number also sticks.
+  for (const n of nums) {
+    const { error: ignoreErr } = await db.from('wire_plate_ignored_orders')
+      .upsert({ amazon_order_num: n }, { onConflict: 'amazon_order_num' });
+    if (ignoreErr) console.warn('[wire_plate_purge] failed to record ignore for', n, ignoreErr.message);
   }
 
   console.log('[wire_plate_purge]', nums.join(','), `removed ${results.filter(r => r.action === 'deleted').length}/${rows.length}`);

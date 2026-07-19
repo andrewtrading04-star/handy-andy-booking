@@ -6471,5 +6471,14 @@ async function wirePlateRemove(req, res, db, auth, body) {
     const { error: delErr } = await db.from('wire_plate_purchases').delete().eq('id', r.id);
     if (!delErr) removed++;
   }
+  // Deleting the row alone doesn't stop the email scanner from re-adding this
+  // order next pass — the confirmation email is still sitting in the inbox,
+  // and the row itself was the only "already handled" signal. Recording the
+  // order number here so wirePlateSync (api/_lib migrate.js) skips it forever.
+  if (on) {
+    const { error: ignoreErr } = await db.from('wire_plate_ignored_orders')
+      .upsert({ amazon_order_num: on }, { onConflict: 'amazon_order_num' });
+    if (ignoreErr) console.warn('[wire_plate_remove] failed to record ignore for', on, ignoreErr.message);
+  }
   return res.status(200).json({ ok: true, removed, amazon_order_num: on || null });
 }
