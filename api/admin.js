@@ -231,6 +231,7 @@ export default async function handler(req, res) {
       case 'booking_slots':        return await bookingSlots(req, res, db, auth, body);
       case 'booking_card_update': return await bookingCardUpdate(req, res, db, auth, body);
       case 'booking_payment':   return await bookingPayment(req, res, db, auth, body);
+      case 'booking_card':      return await bookingCard(req, res, db, auth);
       case 'disputes':          return await disputes(req, res, db, auth);
       case 'dispute_submit':    return await disputeSubmit(req, res, db, auth, body);
       case 'booking_photos':       return await bookingPhotos(req, res, db, auth);
@@ -2774,6 +2775,43 @@ async function bookingCardUpdate(req, res, db, auth, body) {
   if (upErr) throw upErr;
   if (!upRow) return res.status(409).json({ error: 'The payment state changed while saving the card (a charge may be in progress) — refresh the booking and try again.' });
   return res.status(200).json({ ok: true });
+}
+
+// Read-only "which card is this?" lookup — same resolution order the real
+// charge path uses (stored id -> email lookup -> customer's default payment
+// method), but never charges anything. Lets the office tell a customer which
+// card is on file before/without actually running a charge. Best-effort: any
+// resolution failure just means "no card info to show," never an error the
+// office has to deal with.
+async function bookingCard(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const cols = (withAcct) => `id, ${withAcct ? 'stripe_account, ' : ''}stripe_customer_id, stripe_payment_method_id,
+             customer:customers ( email, stripe_customer_id )`;
+  let { data: b, error } = await db.from('bookings').select(cols(true)).eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (error && missingColumn(error.message) === 'stripe_account') {
+    ({ data: b, error } = await db.from('bookings').select(cols(false)).eq('id', id).eq('business_id', biz.id).maybeSingle());
+  }
+  if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+
+  const acct = { account: b.stripe_account || null, slug: biz.slug };
+  let custId = b.stripe_customer_id || (b.customer && b.customer.stripe_customer_id) || null;
+  let pmId = b.stripe_payment_method_id || null;
+  try {
+    if (!custId && b.customer && b.customer.email) {
+      const r = await findCardOnFileByEmail(b.customer.email, acct);
+      custId = r.customerId; if (r.paymentMethodId) pmId = r.paymentMethodId;
+    }
+    if (custId && !pmId) pmId = await defaultPaymentMethod(custId, acct);
+  } catch (_) { /* no card on file is a normal, common case */ }
+  if (!pmId) return res.status(200).json({ has_card: false });
+
+  let card = { brand: null, last4: null };
+  try { card = await retrieveCard(pmId, acct); } catch (_) { /* Stripe hiccup — just show nothing */ }
+  if (!card.brand && !card.last4) return res.status(200).json({ has_card: false });
+  return res.status(200).json({ has_card: true, brand: card.brand, last4: card.last4 });
 }
 
 // ── Booking payments: charge card on file | mark paid (cash) | refund ────────
