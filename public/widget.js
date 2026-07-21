@@ -1236,21 +1236,34 @@
     // time, even years later, and the TV comes down at no charge), sold like
     // insurance. The FREE promise is the hero of the card.
     return `
-      <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;">Guaranteed Dismount Coverage</h1>
-      <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
+      <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;text-align:center!important;">Guaranteed Dismount Coverage</h1>
+      <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;text-align:center!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
 
-      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid #ff6600!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;">
+      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid #ff6600!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
         <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
         <div style="font-size:10.5px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important;color:#ff9944!important;margin-bottom:10px!important;position:relative!important;">🛡️ TV Removal Coverage</div>
         <div style="background:rgba(34,197,94,0.12)!important;border:1.5px solid rgba(34,197,94,0.5)!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:12px!important;position:relative!important;">
           <div style="font-size:15px!important;font-weight:800!important;color:#fff!important;line-height:1.45!important;">We come back to your home <span style="color:#4ade80!important;">ANYTIME</span>, even years from now, and take your TV down</div>
           <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
         </div>
+        <div style="display:grid!important;grid-template-columns:1fr auto 1fr!important;gap:8px!important;align-items:center!important;margin-bottom:12px!important;position:relative!important;">
+          <div style="background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
+            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:#ff9944!important;">Pay today</div>
+            <div style="font-size:22px!important;font-weight:800!important;color:#fff!important;margin-top:2px!important;">$35</div>
+            <div style="font-size:10.5px!important;color:#a0a0ab!important;margin-top:2px!important;">one time, that's it</div>
+          </div>
+          <div style="font-size:18px!important;color:#71717a!important;">→</div>
+          <div style="background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
+            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:#4ade80!important;">Pay later</div>
+            <div style="font-size:22px!important;font-weight:800!important;color:#4ade80!important;margin-top:2px!important;">$0</div>
+            <div style="font-size:10.5px!important;color:#a0a0ab!important;margin-top:2px!important;">instead of <span style="text-decoration:line-through!important;">several hundred</span></div>
+          </div>
+        </div>
         <div style="font-size:12.5px!important;color:#c7ccd4!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
         <div style="margin-top:12px!important;padding-top:10px!important;border-top:1px dashed #3f3f46!important;font-size:11.5px!important;color:#71717a!important;position:relative!important;">One-time cost: $35 · Added to today's ticket · No expiration</div>
       </div>
 
-      <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Without coverage, professional removal runs $100 or more.</div>
+      <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
 
       <button id="btn-dis-yes" style="background:${yesOn?'#ff6600':'rgba(255,102,0,0.85)'}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
         ${yesOn?'✓ ':''}🛡️ Add coverage to my ticket, $35
