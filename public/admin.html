@@ -8136,9 +8136,18 @@ async function sendEstimateFromBooking(upsells){
       postal_code: document.getElementById('nbZip').value.trim(),
       selections,
       upsells: Array.isArray(upsells)?upsells:[],
-      service_label: document.getElementById('nbService')?.value ?
-        document.querySelector(`#nbService option[value="${document.getElementById('nbService').value}"]`)?.textContent :
-        'Custom Service',
+      // #nbService is hidden/empty for most categories (TV Mounting included —
+      // it only ever gets a value for the few categories that offer a specific
+      // service sub-picker), so this used to fall straight through to the
+      // literal string "Custom Service" for nearly every estimate, regardless
+      // of what was actually selected. Fall back to the category ("TV
+      // Mounting", "Handyman", etc.) before ever using that generic label.
+      service_label: (() => {
+        const svcSel=document.getElementById('nbService');
+        if(svcSel?.value) return document.querySelector(`#nbService option[value="${svcSel.value}"]`)?.textContent || 'Custom Service';
+        const catSel=document.getElementById('nbCategory');
+        return catSel?.value || 'Custom Service';
+      })(),
       sms_consent: document.getElementById('nbSmsConsent').checked,
     }});
     // estimate_create returns 201 + warning when the estimate ROW saved but
