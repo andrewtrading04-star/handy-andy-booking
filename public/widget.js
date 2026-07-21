@@ -623,6 +623,8 @@
     info:'background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#ff9944!important;display:block!important;',
     ok:'background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#4ade80!important;display:block!important;',
     price:p=>p>0?` <span style="color:#a0a0ab!important;font-size:12px!important;">(+$${p})</span>`:'',
+    // Bracket-comparison help link, shown above the bracket step's options only.
+    helpLink:'color:#ff9955!important;font-size:12.5px!important;text-decoration:underline!important;cursor:pointer!important;display:inline-block!important;margin-bottom:14px!important;background:none!important;border:none!important;padding:0!important;font-family:inherit!important;',
     // Sticky running-total footer — bleeds to the host's own edges (host padding
     // is 28px, so -28px margins here reach the card's border) and sits as the
     // last thing on every step so the price a customer is building stays visible
@@ -814,11 +816,168 @@
       </div>`;
     }).join('');
     const ok=brks===tvs&&tvs>0;
-    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${subtitle}</p>${banner}${opts}
+    // Resolve which visible option id is Flat/Tilting/Full Motion (standard or
+    // XL wording both match) so the help popup's "Add to my order" buttons can
+    // target the right option no matter which TV size is in play.
+    const findBracket=name=>{
+      const o=visible.find(o=>o.label===name||o.label.endsWith(name+' Bracket'));
+      return o?o.id:'';
+    };
+    const helpIds=`data-sec="${sec.id}" data-flat="${findBracket('Flat')}" data-tilt="${findBracket('Tilting (recommended)')}" data-full="${findBracket('Full Motion')}"`;
+    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${subtitle}</p>
+      <button id="ha-bracket-help" ${helpIds} style="${S.helpLink}">Which bracket is right for me</button>
+      ${banner}${opts}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${ok?S.btnPri:S.btnDis}" ${!ok?'disabled':''}>Continue →</button>
       </div>`;
+  }
+
+  // ─── Bracket comparison popup ───────────────────────────────────────────────
+  // Educational modal shown from the bracket step so a customer who has never
+  // shopped for a TV mount can see the difference between Flat/Tilting/Full
+  // Motion before picking. Each panel has its own "Add to my order" button that
+  // sets that bracket type's quantity directly (capped at how many are still
+  // needed) so a customer can decide and act without leaving the popup, then
+  // hits Continue back on the step once they close it.
+  function bracketHelpPanel(numLabel,numBg,title,tagBg,tagColor,tagText,barBg,diagramBg,diagramSvg,desc,pros,cons,optId,sectionId,btnLabel){
+    const prosHtml=pros.map(p=>`<li>${p}</li>`).join('');
+    const consHtml=cons.map(c=>`<li>${c}</li>`).join('');
+    const addBtn=optId?`<button class="ha-bracket-add" data-s="${sectionId}" data-o="${optId}" style="margin-top:12px!important;width:100%!important;background:#f07422!important;color:#fff!important;border:none!important;padding:10px!important;border-radius:8px!important;font-weight:700!important;font-size:13px!important;cursor:pointer!important;">${btnLabel}</button>`:'';
+    return `<div style="padding:20px 20px 24px;border-bottom:1px solid #e7eaf3;">
+      <div style="height:5px;border-radius:3px;margin-bottom:14px;background:${barBg};"></div>
+      <div style="border-radius:12px;height:150px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;background:${diagramBg};">${diagramSvg}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="width:22px;height:22px;border-radius:50%;background:${numBg};color:#fff;font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;">${numLabel}</span>
+        <span style="font-size:18px;font-weight:800;color:#1a2f6b;">${title}</span>
+      </div>
+      <span style="display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:4px 11px;border-radius:20px;margin-bottom:12px;text-transform:uppercase;background:${tagBg};color:${tagColor};">${tagText}</span>
+      <div style="font-size:13.5px;line-height:1.4;color:#33415f;margin-bottom:10px;">${desc}</div>
+      <div style="font-size:11px;letter-spacing:.1em;margin:0 0 6px;color:#1e9e5a;">PROS</div>
+      <ul style="list-style:none;margin-bottom:8px;">${prosHtml.replace(/<li>/g,'<li style="font-size:13.5px;line-height:1.4;padding:3px 0 3px 20px;position:relative;color:#33415f;"><span style="position:absolute;left:0;color:#1e9e5a;font-weight:700;">&#10003;</span>')}</ul>
+      <div style="font-size:11px;letter-spacing:.1em;margin:0 0 6px;color:#d94141;">CONS</div>
+      <ul style="list-style:none;">${consHtml.replace(/<li>/g,'<li style="font-size:13.5px;line-height:1.4;padding:3px 0 3px 20px;position:relative;color:#33415f;"><span style="position:absolute;left:0;color:#d94141;font-weight:700;">&#10007;</span>')}</ul>
+      ${addBtn}
+    </div>`;
+  }
+
+  const BRACKET_SVGS={
+    flat:`<svg viewBox="0 0 300 190" width="100%" height="100%">
+      <rect x="20" y="10" width="16" height="170" fill="#8fa2cc"/>
+      <line x1="24" y1="25" x2="32" y2="17" stroke="#748ac0" stroke-width="2"/>
+      <line x1="24" y1="65" x2="32" y2="57" stroke="#748ac0" stroke-width="2"/>
+      <line x1="24" y1="105" x2="32" y2="97" stroke="#748ac0" stroke-width="2"/>
+      <line x1="24" y1="145" x2="32" y2="137" stroke="#748ac0" stroke-width="2"/>
+      <rect x="36" y="55" width="7" height="80" rx="2" fill="#1a2f6b"/>
+      <rect x="43" y="30" width="14" height="130" rx="3" fill="#22304f"/>
+      <rect x="57" y="34" width="4" height="122" rx="2" fill="#3d4f78"/>
+      <line x1="70" y1="95" x2="150" y2="95" stroke="#1a2f6b" stroke-width="2" stroke-dasharray="5 4"/>
+      <polygon points="70,95 80,90 80,100" fill="#1a2f6b"/>
+      <text x="158" y="100" font-size="16" font-weight="700" fill="#1a2f6b" font-family="Arial">FLUSH</text>
+      <text x="158" y="118" font-size="11" fill="#5b6a8c" font-family="Arial">sits about 1 inch from wall</text>
+    </svg>`,
+    tilt:`<svg viewBox="0 0 300 190" width="100%" height="100%">
+      <rect x="20" y="10" width="16" height="170" fill="#e8b48c"/>
+      <line x1="24" y1="25" x2="32" y2="17" stroke="#d99a68" stroke-width="2"/>
+      <line x1="24" y1="65" x2="32" y2="57" stroke="#d99a68" stroke-width="2"/>
+      <line x1="24" y1="105" x2="32" y2="97" stroke="#d99a68" stroke-width="2"/>
+      <line x1="24" y1="145" x2="32" y2="137" stroke="#d99a68" stroke-width="2"/>
+      <rect x="36" y="70" width="14" height="50" rx="3" fill="#f07422"/>
+      <circle cx="56" cy="95" r="7" fill="#c05a10"/>
+      <g transform="rotate(-14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/></g>
+      <g transform="rotate(14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/></g>
+      <rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/>
+      <rect x="69" y="39" width="4" height="112" rx="2" fill="#f5a06a"/>
+      <path d="M 110 55 A 55 55 0 0 1 122 95" fill="none" stroke="#c05a10" stroke-width="4" stroke-linecap="round"/>
+      <polygon points="112,49 100,58 116,64" fill="#c05a10"/>
+      <path d="M 122 95 A 55 55 0 0 1 110 135" fill="none" stroke="#c05a10" stroke-width="4" stroke-linecap="round"/>
+      <polygon points="112,141 100,132 116,126" fill="#c05a10"/>
+      <text x="140" y="70" font-size="14" font-weight="700" fill="#c05a10" font-family="Arial">TILT UP</text>
+      <text x="140" y="130" font-size="14" font-weight="700" fill="#c05a10" font-family="Arial">TILT DOWN</text>
+    </svg>`,
+    full:`<svg viewBox="0 0 300 190" width="100%" height="100%">
+      <rect x="14" y="10" width="16" height="170" fill="#8fa2cc"/>
+      <line x1="18" y1="25" x2="26" y2="17" stroke="#748ac0" stroke-width="2"/>
+      <line x1="18" y1="65" x2="26" y2="57" stroke="#748ac0" stroke-width="2"/>
+      <line x1="18" y1="105" x2="26" y2="97" stroke="#748ac0" stroke-width="2"/>
+      <line x1="18" y1="145" x2="26" y2="137" stroke="#748ac0" stroke-width="2"/>
+      <rect x="30" y="86" width="10" height="20" rx="2" fill="#1a2f6b"/>
+      <line x1="40" y1="96" x2="80" y2="82" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="80" cy="82" r="6" fill="#f07422"/>
+      <line x1="80" y1="82" x2="122" y2="96" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="122" cy="96" r="6" fill="#f07422"/>
+      <g transform="rotate(-8 130 96)">
+        <rect x="126" y="42" width="14" height="108" rx="3" fill="#22304f"/>
+        <rect x="140" y="46" width="4" height="100" rx="2" fill="#3d4f78"/>
+      </g>
+      <line x1="34" y1="170" x2="130" y2="170" stroke="#f07422" stroke-width="2"/>
+      <line x1="34" y1="164" x2="34" y2="176" stroke="#f07422" stroke-width="2"/>
+      <line x1="130" y1="164" x2="130" y2="176" stroke="#f07422" stroke-width="2"/>
+      <text x="52" y="164" font-size="13" font-weight="700" fill="#c05a10" font-family="Arial">16 INCH EXTENSION</text>
+      <path d="M 190 60 A 45 45 0 0 1 200 96" fill="none" stroke="#1a2f6b" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="192,54 181,62 195,68" fill="#1a2f6b"/>
+      <path d="M 200 96 A 45 45 0 0 1 190 132" fill="none" stroke="#1a2f6b" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="192,138 181,130 195,124" fill="#1a2f6b"/>
+      <text x="210" y="66" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT UP</text>
+      <text x="210" y="132" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT DOWN</text>
+      <path d="M 218 90 L 238 90" stroke="#f07422" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="244,90 234,84 234,96" fill="#f07422"/>
+      <path d="M 218 104 L 238 104" stroke="#f07422" stroke-width="3.5" stroke-linecap="round" transform="rotate(180 228 104)"/>
+      <polygon points="212,104 222,98 222,110" fill="#f07422"/>
+      <text x="248" y="88" font-size="11" font-weight="700" fill="#c05a10" font-family="Arial">SWIVEL</text>
+      <text x="248" y="102" font-size="11" font-weight="700" fill="#c05a10" font-family="Arial">L / R</text>
+    </svg>`,
+  };
+
+  function showBracketHelp(sectionId,flatId,tiltId,fullId){
+    const ov=document.createElement('div');
+    ov.id='ha-bracket-help-ov';
+    ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.75)!important;';
+    const panels=
+      bracketHelpPanel('1','#1a2f6b','Flat Brackets','#e8edf9','#1a2f6b','Sleek and Flush','#1a2f6b','#e8edf9',BRACKET_SVGS.flat,
+        'The TV hugs the wall like a picture frame. No movement, just the cleanest, slimmest look you can get. A favorite over fireplaces and on tile.',
+        ['Ultra slim profile, sits tight against the wall','Great for tile installations','Cleanest look of all brackets'],
+        ['Minimal space behind TV for cables','No movement at all'],
+        flatId,sectionId,'Add a Flat Bracket to my order')
+      +bracketHelpPanel('2','#f07422','Tilting Brackets','#fdeadd','#c05a10','Most Popular','#f07422','#fdeadd',BRACKET_SVGS.tilt,
+        'The TV angles up or down on a pivot, perfect for mounting above eye level or killing window glare. It stays put side to side.',
+        ['Most common bracket on the market','Tilts up and down for the perfect angle','Easy cable hiding behind the TV'],
+        ["Doesn't move left or right"],
+        tiltId,sectionId,'Add a Tilting Bracket to my order')
+      +bracketHelpPanel('3','#f07422','Full Motion Brackets','#f07422','#fff','Maximum Flexibility','linear-gradient(90deg,#1a2f6b,#f07422)','#e8edf9',BRACKET_SVGS.full,
+        'An articulating arm does it all: tilts up and down, swivels left and right, and pulls the TV a full 16 inches off the wall so every seat gets the perfect angle.',
+        ['Tilts up and down, swivels left and right','Pulls out 16 inches from the wall','Total viewing flexibility from any seat'],
+        ["Sticks off the wall, doesn't sit flush"],
+        fullId,sectionId,'Add a Full Motion Bracket to my order');
+    ov.innerHTML=`
+      <div style="position:relative!important;width:100%!important;max-width:480px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;background:#fff!important;font-family:'Segoe UI',Arial,Helvetica,sans-serif!important;">
+        <button id="ha-bracket-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.35)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
+        <div style="background:linear-gradient(135deg,#1a2f6b 0%,#12224f 100%);padding:26px 24px 22px;position:relative;overflow:hidden;">
+          <h1 style="color:#fff;font-size:22px;line-height:1.15;font-weight:800;position:relative;margin:0;">The Difference Between<br><span style="color:#f07422;">TV Brackets</span></h1>
+          <p style="color:#c3cdea;margin-top:6px;font-size:13px;position:relative;">Everything you need to know before choosing your mount</p>
+        </div>
+        ${panels}
+        <div style="padding:16px 20px;background:#f2f4f9;">
+          <button id="ha-bracket-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:12px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:14px!important;cursor:pointer!important;">Got it, back to my order</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close=()=>ov.remove();
+    ov.querySelector('#ha-bracket-help-x').addEventListener('click',close);
+    ov.querySelector('#ha-bracket-help-close').addEventListener('click',close);
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+    // "Add to my order" buttons: bump that bracket type's qty (capped at how
+    // many brackets are still needed for the TVs on this order), then close
+    // the popup and re-render so the stepper reflects the pick immediately.
+    ov.querySelectorAll('.ha-bracket-add').forEach(b=>b.addEventListener('click',()=>{
+      const sid=b.dataset.s, oid=b.dataset.o;
+      const tvs=totalTVs();
+      const brksNow=(selections[sid]||[]).reduce((s,x)=>s+x.quantity,0);
+      const remaining=Math.max(0,tvs-brksNow);
+      setQty(sid,oid,getQty(sid,oid)+Math.max(1,remaining||1));
+      close();
+      render();
+    }));
   }
 
   function bGeneric(sec){
@@ -1221,6 +1380,7 @@
     root.querySelector('#btn-zip')?.addEventListener('click',()=>doZip(root));
     root.querySelector('#ha-zip')?.addEventListener('keypress',e=>{if(e.key==='Enter')doZip(root);});
     root.querySelector('#btn-prev')?.addEventListener('click',()=>goBack());
+    { const helpBtn=root.querySelector('#ha-bracket-help'); if(helpBtn) helpBtn.addEventListener('click',()=>showBracketHelp(helpBtn.dataset.sec,helpBtn.dataset.flat,helpBtn.dataset.tilt,helpBtn.dataset.full)); }
     root.querySelector('#btn-next')?.addEventListener('click',()=>goNext());
     root.querySelector('#btn-submit')?.addEventListener('click',()=>doSubmit(root));
     root.querySelector('#btn-date-back')?.addEventListener('click',()=>{selectedDate=null;selectedSlot=null;render();});
