@@ -1016,11 +1016,67 @@
     // ok = required + (TV count match if enforced, else just > 0)
     const countOk=sec.enforceTVCount?(tvs===0||total===tvs):true;
     const ok=(!sec.required||total>0)&&countOk;
-    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${banner}${optsHtml}
+    // Surface step only: photo guide for customers who don't know what
+    // drywall/brick/stucco actually look like. Mirrors the bracket help link.
+    let helpLink='';
+    if(sec.stepKey==='surface'){
+      const findOpt=name=>{ const o=sec.options.find(o=>o.label===name); return o?o.id:''; };
+      helpLink=`<button id="ha-surface-help" data-sec="${sec.id}" data-drywall="${findOpt('Drywall')}" data-brick="${findOpt('Brick')}" data-stone="${findOpt('Uneven Stone or Tile')}" data-stucco="${findOpt('Outdoor/Stucco')}" style="${S.helpLink}">Not sure what your wall is? See pictures</button>`;
+    }
+    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">${sec.subtitle}</p>${helpLink}${banner}${optsHtml}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${ok?S.btnPri:S.btnDis}" ${!ok?'disabled':''}>Continue →</button>
       </div>`;
+  }
+
+  // ─── Wall surface photo guide ───────────────────────────────────────────────
+  // Real photographs (public domain, hosted in this repo's public/ folder) so a
+  // customer who has never heard the word "drywall" can just match their wall
+  // to a picture. "That's my wall" selects that surface (topping up to however
+  // many TVs still need one) and returns to the step.
+  const SURFACE_IMG_BASE='https://handy-andy-booking.vercel.app/';
+  function showSurfaceHelp(sectionId,ids){
+    const ov=document.createElement('div');
+    ov.id='ha-surface-help-ov';
+    ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.78)!important;';
+    const panel=(img,name,price,desc,optId)=>`<div style="border-bottom:1px solid #e7eaf3;">
+      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:100%;height:140px;object-fit:cover;">
+      <div style="padding:13px 20px 16px;">
+        <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}</div>
+        <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
+        ${optId?`<button class="ha-surface-pick" data-s="${sectionId}" data-o="${optId}" style="background:#f07422;color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's my wall</button>`:''}
+      </div>
+    </div>`;
+    ov.innerHTML=`
+      <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
+        <button id="ha-surface-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
+        <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
+          <div style="color:#fff;font-size:19px;font-weight:800;">What kind of wall <span style="color:#f07422;">do you have?</span></div>
+          <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Match your wall to a picture below</div>
+        </div>
+        ${panel('surface-drywall.jpg','Drywall',0,'Smooth painted walls, what most homes have inside. If your wall looks like this (flat paint, maybe an outlet or baseboard), it is drywall.',ids.drywall)}
+        ${panel('surface-brick.jpg','Brick',35,'Hard red or brown blocks with mortar lines between them. Very common around fireplaces. Takes special masonry drill bits, which is the small extra charge.',ids.brick)}
+        ${panel('surface-stone.jpg','Uneven Stone or Tile',50,'Natural rock or stacked stone with a bumpy, uneven face, or tile like a bathroom wall. Common on fireplaces. The uneven surface takes extra care to mount safely.',ids.stone)}
+        ${panel('surface-stucco.jpg','Outdoor/Stucco',45,'Rough, sandy-textured plaster, usually outside: patios, balconies, and the exterior of many Texas homes.',ids.stucco)}
+        <div style="padding:14px 20px;background:#f2f4f9;">
+          <button id="ha-surface-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close=()=>ov.remove();
+    ov.querySelector('#ha-surface-help-x').addEventListener('click',close);
+    ov.querySelector('#ha-surface-help-close').addEventListener('click',close);
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+    ov.querySelectorAll('.ha-surface-pick').forEach(b=>b.addEventListener('click',()=>{
+      const sid=b.dataset.s, oid=b.dataset.o;
+      const tvs=totalTVs();
+      const now=(selections[sid]||[]).reduce((s,x)=>s+x.quantity,0);
+      const remaining=Math.max(0,tvs-now);
+      setQty(sid,oid,getQty(sid,oid)+Math.max(1,remaining||1));
+      close();
+      render();
+    }));
   }
 
   function bWires(){
@@ -1381,6 +1437,7 @@
     root.querySelector('#ha-zip')?.addEventListener('keypress',e=>{if(e.key==='Enter')doZip(root);});
     root.querySelector('#btn-prev')?.addEventListener('click',()=>goBack());
     { const helpBtn=root.querySelector('#ha-bracket-help'); if(helpBtn) helpBtn.addEventListener('click',()=>showBracketHelp(helpBtn.dataset.sec,helpBtn.dataset.flat,helpBtn.dataset.tilt,helpBtn.dataset.full)); }
+    { const sh=root.querySelector('#ha-surface-help'); if(sh) sh.addEventListener('click',()=>showSurfaceHelp(sh.dataset.sec,{drywall:sh.dataset.drywall,brick:sh.dataset.brick,stone:sh.dataset.stone,stucco:sh.dataset.stucco})); }
     root.querySelector('#btn-next')?.addEventListener('click',()=>goNext());
     root.querySelector('#btn-submit')?.addEventListener('click',()=>doSubmit(root));
     root.querySelector('#btn-date-back')?.addEventListener('click',()=>{selectedDate=null;selectedSlot=null;render();});
