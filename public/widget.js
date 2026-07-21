@@ -710,7 +710,7 @@
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:360px!important;background:#18181c!important;border:1px solid #2d2d34!important;border-radius:12px!important;padding:26px 22px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif!important;color:#fff!important;text-align:center!important;">
         <button id="ha-exit-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:12px!important;background:none!important;border:none!important;color:#a0a0ab!important;font-size:18px!important;cursor:pointer!important;padding:4px!important;">✕</button>
-        <div style="font-size:17px!important;font-weight:800!important;margin:0 0 6px!important;">Wait — don't lose your spot</div>
+        <div style="font-size:17px!important;font-weight:800!important;margin:0 0 6px!important;">Wait, don't lose your spot</div>
         <div style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 16px!important;line-height:1.5!important;">Here's $10 off to lock in today's price.</div>
         <div style="font-family:ui-monospace,Menlo,Consolas,monospace!important;font-weight:800!important;letter-spacing:0.05em!important;background:rgba(255,102,0,0.14)!important;border:1px solid rgba(255,102,0,0.4)!important;color:#ff9944!important;padding:7px 15px!important;border-radius:8px!important;display:inline-block!important;margin-bottom:16px!important;font-size:13.5px!important;">${EXIT_COUPON}</div>
         <div>
@@ -801,9 +801,9 @@
       return true;
     });
     const banner=brks<tvs
-      ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong> — select <strong>${tvs-brks}</strong> more bracket${tvs-brks>1?'s':''}.</div>`
+      ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong>, select <strong>${tvs-brks}</strong> more bracket${tvs-brks>1?'s':''}.</div>`
       :`<div style="${S.ok}">✓ All ${tvs} TV${tvs>1?'s':''} have a bracket assigned.</div>`;
-    const subtitle=`You have ${tvs} TV${tvs>1?'s':''} — select ${tvs} bracket${tvs>1?'s':''} total.${mixed?' Both standard and large bracket options are shown for your mixed TV sizes.':''}`;
+    const subtitle=`You have ${tvs} TV${tvs>1?'s':''}, select ${tvs} bracket${tvs>1?'s':''} total.${mixed?' Both standard and large bracket options are shown for your mixed TV sizes.':''}`;
     const opts=visible.map(o=>{
       const q=getQty(sec.id,o.id);
       return `<div style="${S.qRow(q>0)}">
@@ -988,7 +988,7 @@
     let banner='';
     if(sec.enforceTVCount&&tvs>0){
       banner=total<tvs
-        ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong> — select options totalling ${tvs} (${total} of ${tvs} done).</div>`
+        ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong>, select options totalling ${tvs} (${total} of ${tvs} done).</div>`
         :`<div style="${S.ok}">✓ All ${tvs} TV${tvs>1?'s':''} accounted for.</div>`;
     }
     let optsHtml='';
@@ -1149,7 +1149,7 @@
     const wireTotal=(selections[sec.id]||[]).reduce((s,x)=>s+x.quantity,0);
     const wireBanner=tvs>0
       ?(wireTotal<tvs
-        ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong> — select a wire option for each (${wireTotal} of ${tvs} done).</div>`
+        ?`<div style="${S.info}">📺 You have <strong>${tvs} TV${tvs>1?'s':''}</strong>, select a wire option for each (${wireTotal} of ${tvs} done).</div>`
         :`<div style="${S.ok}">✓ All ${tvs} TV${tvs>1?'s':''} have a wire option.</div>`)
       :'';
     const opts=visibleOpts.map(o=>{
@@ -1268,7 +1268,7 @@
       </div>
 
       <button id="btn-dis-yes" style="background:${yesOn?'#ff6600':'rgba(255,102,0,0.85)'}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
-        ${yesOn?'✓ ':''}Add Guaranteed Dismount Service — Only $35
+        ${yesOn?'✓ ':''}Add Guaranteed Dismount Service, Only $35
       </button>
       <div style="text-align:center!important;margin-bottom:8px!important;">
         <button id="btn-dis-no" style="background:${cur===noId?'rgba(255,255,255,0.06)':'transparent'}!important;color:${cur===noId?'#fff':'#71717a'}!important;border:none!important;font-size:13px!important;cursor:pointer!important;text-decoration:underline!important;padding:8px 16px!important;">
@@ -1386,7 +1386,7 @@
         </div>`;
       }).join('');
       timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
-        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date} — select a time:</p>
+        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}, select a time:</p>
         <div style="display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;">${slotBtns}</div>
       </div>`;
     }
@@ -1423,7 +1423,7 @@
       <h1 style="${S.h1};color:#ff6600!important;">Almost Done! Last Step…</h1>
       <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
         💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
-        <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service — your card only holds the appointment.</div>
+        <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service. Your card only holds the appointment.</div>
         We will only charge you after your services have been completed.
       </div>
       <input type="text"  id="c-fn" style="${S.inputL}" placeholder="First Name"     value="${customer.first_name}">
@@ -1671,7 +1671,7 @@
     if(!customer.email){logEvent('form_error','customer',null,'missing email');return alert('Please enter your email address.');}
     if(!customer.phone){logEvent('form_error','customer',null,'missing phone');return alert('Please enter your phone number.');}
     if(!customer.address){logEvent('form_error','customer',null,'missing address');return alert('Please enter your street address.');}
-    if(/@/.test(customer.address)||!/\d/.test(customer.address)||customer.address.length<5){logEvent('form_error','customer',null,'invalid address');return alert('Please enter a valid street address with a house number — not an email or phone number.');}
+    if(/@/.test(customer.address)||!/\d/.test(customer.address)||customer.address.length<5){logEvent('form_error','customer',null,'invalid address');return alert('Please enter a valid street address with a house number, not an email or phone number.');}
     if(couponCode&&!(couponCode in COUPONS)){logEvent('form_error','customer',null,'invalid coupon: '+couponCode);return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');}
     if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
     if(couponCode)logEvent('answer','coupon:'+couponCode);
@@ -1805,7 +1805,7 @@
       // the button locked and tell the customer not to click again.
       if(submitBtn){submitBtn.textContent='Confirming your booking…';submitBtn.disabled=true;}
       logEvent('booking_failed','customer',null,'connection error (locked to avoid duplicate booking)');
-      alert('Your booking is being confirmed and may already be received — please do NOT submit again. Check your email for a confirmation, or call us at 713-876-9032 to verify.');
+      alert('Your booking is being confirmed and may already be received. Please do NOT submit again. Check your email for a confirmation, or call us at 713-876-9032 to verify.');
     }
   }
 
