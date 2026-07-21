@@ -1057,7 +1057,7 @@
         </div>
         ${panel('surface-drywall.jpg','Drywall',0,'Smooth painted walls, what most homes have inside. If your wall looks like this (flat paint, maybe an outlet or baseboard), it is drywall.',ids.drywall)}
         ${panel('surface-brick.jpg','Brick',35,'Hard red or brown blocks with mortar lines between them. Very common around fireplaces. Takes special masonry drill bits, which is the small extra charge.',ids.brick)}
-        ${panel('surface-stone.jpg','Uneven Stone or Tile',50,'Natural rock or stacked stone with a bumpy, uneven face, or tile like a bathroom wall. Common on fireplaces. The uneven surface takes extra care to mount safely.',ids.stone)}
+        ${panel('surface-stone.jpg','Uneven Stone or Tile',50,'Tile or polished marble panels like this, or bumpy natural rock. Common on fireplace walls. This surface takes extra care to mount safely.',ids.stone)}
         ${panel('surface-stucco.jpg','Outdoor/Stucco',45,'Rough, sandy-textured plaster, usually outside: patios, balconies, and the exterior of many Texas homes.',ids.stucco)}
         <div style="padding:14px 20px;background:#f2f4f9;">
           <button id="ha-surface-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
