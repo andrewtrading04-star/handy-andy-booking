@@ -5570,6 +5570,7 @@ async function renderBrackets(){
       api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})),
     ]);
     window._bracketInv=inv.inventory||[];   // tech list for the Assign modal
+    attachIncomingStock(inv.inventory, purch.purchases, wpPend.orders);
 
     let html=`<div class="wrap">
       <div class="bracket-section">
@@ -5978,8 +5979,11 @@ function invBracketTotal(t){ return (t.flat||0)+(t.tilting||0)+(t.full_motion||0
 // A tech is "low" when ANY single bracket TYPE hits the threshold (≤2) — not the
 // combined total. Running out of Full Motion specifically means you can't do a
 // full-motion job even if your flat/tilting stock is high, so each type warns on
-// its own. Returns the list of low types (empty = not low).
-function invLowType(t,type){ return (t[type]||0)<=LOW_BRACKETS_MAX; }
+// its own. Returns the list of low types (empty = not low). Suppressed once a
+// restock for that type is already assigned to the tech and just waiting on
+// delivery (see attachIncomingStock) — the shortage is already being fixed,
+// so it shouldn't keep nagging the owner to reorder something they already did.
+function invLowType(t,type){ return (t[`_incoming_${type}`]||0)<=0 && (t[type]||0)<=LOW_BRACKETS_MAX; }
 function invLowBracketTypes(t){ return BRACKET_TYPES.filter(ty=>invLowType(t,ty)); }
 function invLowBrackets(t){ return invLowBracketTypes(t).length>0; }
 // Juan is excluded from wire-concealment (plate) low-stock warnings, per owner —
@@ -5991,9 +5995,34 @@ function invIgnorePlates(t){ return /\bjuan\b/i.test(t.technician_name||''); }
 // never ordered wire-concealment plates — their 0 is "not tracked", not "low",
 // so they're excluded. This kills the permanent false alarm for businesses that
 // don't do behind-the-wall wire concealment (e.g. Handy Andy) without hiding a
-// real shortage: a tracked tech who burns down to 0 still warns.
-function invLowPlates(t){ return !invIgnorePlates(t) && !!t.wire_plate_tracked && (t.wire_plate||0)<=LOW_PLATES_MAX; }
+// real shortage: a tracked tech who burns down to 0 still warns. Same restock-
+// already-incoming suppression as invLowType, above.
+function invLowPlates(t){ return !invIgnorePlates(t) && !!t.wire_plate_tracked && (t.wire_plate||0)<=LOW_PLATES_MAX && (t._incomingPlates||0)<=0; }
 function invIsLow(t){ return invLowBrackets(t)||invLowPlates(t); }
+// Annotates each tech's inventory row with restock that's already assigned to
+// them but not yet delivered (bracket_purchases.technician matched by NAME —
+// the bracket_purchases API only returns technician_name, not id, same as the
+// existing "Brackets In Route" grouping a few lines up already does; wire
+// plates carry technician_id directly so those match by id). Mutates `inv` in
+// place; call this BEFORE anything reads invLowType/invLowPlates/invIsLow on it.
+function attachIncomingStock(inv, bracketPurchases, wireOrders){
+  const NOT_DELIVERED=new Set(['in_route','ordered']);
+  for(const t of inv||[]){ t._incoming_flat=0; t._incoming_tilting=0; t._incoming_full_motion=0; t._incomingPlates=0; }
+  const byName=new Map((inv||[]).map(t=>[t.technician_name,t]));
+  for(const p of bracketPurchases||[]){
+    if(!p.technician_name || p.technician_name==='Unassigned') continue;
+    if(!NOT_DELIVERED.has((p.status||'in_route').toLowerCase())) continue;
+    const t=byName.get(p.technician_name); if(!t) continue;
+    t._incoming_flat+=p.flat_qty||0; t._incoming_tilting+=p.tilting_qty||0; t._incoming_full_motion+=p.full_motion_qty||0;
+  }
+  const byId=new Map((inv||[]).map(t=>[t.technician_id,t]));
+  for(const o of wireOrders||[]){
+    if(!o.technician_id || o.credited) continue;
+    if(!NOT_DELIVERED.has((o.status||'in_route').toLowerCase())) continue;
+    const t=byId.get(o.technician_id); if(!t) continue;
+    t._incomingPlates+=o.plates||0;
+  }
+}
 function lowStockCount(inv){ return (inv||[]).filter(invIsLow).length; }
 // Jump to the Bracket Inventory section (reuses the sidebar nav button).
 function goToBrackets(){ const b=document.querySelector('[data-nav="brackets"]'); if(b) b.click(); }
@@ -6015,10 +6044,13 @@ async function renderGreeting(){
     if(role==='owner'){
       reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
       reqs.push(api('bracket_inventory',{ params:{ business:current.slug }}).catch(()=>({inventory:[]})));
+      reqs.push(api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}).catch(()=>({purchases:[]})));
+      reqs.push(api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})));
     }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
+    if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
