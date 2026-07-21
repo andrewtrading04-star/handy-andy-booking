@@ -1079,6 +1079,55 @@
     }));
   }
 
+  // ─── Wire hiding photo guide ────────────────────────────────────────────────
+  // Real photos from our own completed jobs (hosted in this repo's public/
+  // folder) showing where the wires end up with each choice. Panels only render
+  // for options the customer can actually pick right now; "That's what I want"
+  // selects it (topping up to however many TVs still need a wire option).
+  function showWireHelp(sectionId,ids){
+    const ov=document.createElement('div');
+    ov.id='ha-wire-help-ov';
+    ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.78)!important;';
+    const panel=(img,name,price,badge,desc,optId)=>optId?`<div style="border-bottom:1px solid #e7eaf3;">
+      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:100%;height:160px;object-fit:cover;">
+      <div style="padding:13px 20px 16px;">
+        <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}
+        ${badge?`<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:12px;background:#f07422;color:#fff;vertical-align:1px;">${badge}</span>`:''}</div>
+        <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
+        <button class="ha-wire-pick" data-s="${sectionId}" data-o="${optId}" style="background:#f07422;color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's what I want</button>
+      </div>
+    </div>`:'';
+    ov.innerHTML=`
+      <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
+        <button id="ha-wire-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
+        <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
+          <div style="color:#fff;font-size:19px;font-weight:800;">Where do the wires <span style="color:#f07422;">end up?</span></div>
+          <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Real photos from our own installs</div>
+        </div>
+        ${panel('wire-behind.jpg','Hide them BEHIND the wall',75,'Cleanest look','We route the cords through the inside of the wall so nothing shows at all, like this fireplace install we did. The most popular choice for a showcase wall. Works on drywall only.',ids.behind)}
+        ${panel('wire-outside.jpg','Hide them OUTSIDE the wall',25,'','The cords run inside a slim white cover attached to the wall, like this one from a recent job. You can paint it to match your wall. Works on any wall type.',ids.outside)}
+        ${panel('wire-plug.jpg','My wall already has a plug behind the TV',0,'','If there is already an outlet right behind where the TV goes, the cords plug in back there and nothing shows, like this install.',ids.plug)}
+        ${panel('wire-hang.jpg','Let the wires hang under the TV',0,'','No hiding at all. The cords run straight down from the TV in plain sight, like this. Totally fine over a media console that covers them.',ids.hang)}
+        <div style="padding:14px 20px;background:#f2f4f9;">
+          <button id="ha-wire-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close=()=>ov.remove();
+    ov.querySelector('#ha-wire-help-x').addEventListener('click',close);
+    ov.querySelector('#ha-wire-help-close').addEventListener('click',close);
+    ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+    ov.querySelectorAll('.ha-wire-pick').forEach(b=>b.addEventListener('click',()=>{
+      const sid=b.dataset.s, oid=b.dataset.o;
+      const tvs=totalTVs();
+      const now=(selections[sid]||[]).reduce((s,x)=>s+x.quantity,0);
+      const remaining=Math.max(0,tvs-now);
+      setQty(sid,oid,getQty(sid,oid)+Math.max(1,remaining||1));
+      close();
+      render();
+    }));
+  }
+
   function bWires(){
     const sec=getSec('wires');
     const tvs=totalTVs();
@@ -1116,7 +1165,12 @@
       </div>`;
     }).join('');
     const wireOk=tvs===0||wireTotal===tvs;
-    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">Select one per TV.</p>${wireBanner}${opts}
+    // Photo guide: real photos from our own completed jobs showing where the
+    // wires end up with each choice. Only offers panels for options actually
+    // visible right now (BEHIND disappears on brick/stone walls, etc.).
+    const findWire=name=>{ const o=visibleOpts.find(o=>o.label===name); return o?o.id:''; };
+    const wireHelpLink=`<button id="ha-wire-help" data-sec="${sec.id}" data-behind="${findWire('Yes, hide the wires BEHIND the wall')}" data-outside="${findWire('Yes, hide the wires OUTSIDE the wall')}" data-plug="${findWire('My wall already has a plug behind the TV')}" data-hang="${findWire('I want my wires to hang under the TV')}" style="${S.helpLink}">Not sure which to pick? See real examples</button>`;
+    return `<h1 style="${S.h1}">${sec.title}</h1><p style="${S.sub}">Select one per TV.</p>${wireHelpLink}${wireBanner}${opts}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${wireOk?S.btnPri:S.btnDis}" ${!wireOk?'disabled':''}>Continue →</button>
@@ -1438,6 +1492,7 @@
     root.querySelector('#btn-prev')?.addEventListener('click',()=>goBack());
     { const helpBtn=root.querySelector('#ha-bracket-help'); if(helpBtn) helpBtn.addEventListener('click',()=>showBracketHelp(helpBtn.dataset.sec,helpBtn.dataset.flat,helpBtn.dataset.tilt,helpBtn.dataset.full)); }
     { const sh=root.querySelector('#ha-surface-help'); if(sh) sh.addEventListener('click',()=>showSurfaceHelp(sh.dataset.sec,{drywall:sh.dataset.drywall,brick:sh.dataset.brick,stone:sh.dataset.stone,stucco:sh.dataset.stucco})); }
+    { const wh=root.querySelector('#ha-wire-help'); if(wh) wh.addEventListener('click',()=>showWireHelp(wh.dataset.sec,{behind:wh.dataset.behind,outside:wh.dataset.outside,plug:wh.dataset.plug,hang:wh.dataset.hang})); }
     root.querySelector('#btn-next')?.addEventListener('click',()=>goNext());
     root.querySelector('#btn-submit')?.addEventListener('click',()=>doSubmit(root));
     root.querySelector('#btn-date-back')?.addEventListener('click',()=>{selectedDate=null;selectedSlot=null;render();});
