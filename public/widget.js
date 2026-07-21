@@ -1040,8 +1040,8 @@
     const ov=document.createElement('div');
     ov.id='ha-surface-help-ov';
     ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.78)!important;';
-    const panel=(img,name,price,desc,optId)=>`<div style="border-bottom:1px solid #e7eaf3;">
-      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:100%;height:140px;object-fit:cover;">
+    const panel=(img,name,price,desc,optId)=>`<div style="border-bottom:1px solid #e7eaf3;padding-top:14px;">
+      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:calc(100% - 40px);margin:0 20px;border-radius:8px;height:140px;object-fit:cover;">
       <div style="padding:13px 20px 16px;">
         <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}</div>
         <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
