@@ -1232,47 +1232,32 @@
     const cur=(selections[sec.id]||[])[0]?.option_id;
     const yesId=sec.options[0].id, noId=sec.options[1].id;
     const yesOn=cur===yesId;
-    const gold='#f59e0b';
+    // Coverage-certificate design: this is prepaid FUTURE removal (call any
+    // time, even years later, and the TV comes down at no charge), sold like
+    // insurance. The FREE promise is the hero of the card.
     return `
-      <h1 style="margin:0 0 10px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;">Dismount Service</h1>
-      <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;">
-        <strong style="color:#fff!important;">Removing a TV can cost you over $100!</strong> However, you can have your TV removed <strong style="color:${gold}!important;">completely free of charge</strong> when you choose our Guaranteed Dismount Service.
-      </p>
+      <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;">Guaranteed Dismount Coverage</h1>
+      <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
 
-      <div style="background:#1f1f23!important;border:1px solid #3f3f46!important;border-radius:10px!important;padding:14px!important;margin-bottom:12px!important;">
-        <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;margin-bottom:10px!important;">How It Works</div>
-        ${['We remove your TV at <strong style="color:#fff!important;">no additional cost</strong>','We even patch the bolt holes for you!'].map(t=>`<div style="display:flex!important;gap:8px!important;align-items:flex-start!important;font-size:13px!important;color:#d4d4d8!important;margin-bottom:7px!important;"><span style="color:${gold}!important;font-size:15px!important;line-height:1.3!important;flex-shrink:0!important;">✔</span><span>${t}</span></div>`).join('')}
+      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid #ff6600!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;">
+        <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
+        <div style="font-size:10.5px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important;color:#ff9944!important;margin-bottom:10px!important;position:relative!important;">🛡️ TV Removal Coverage</div>
+        <div style="background:rgba(34,197,94,0.12)!important;border:1.5px solid rgba(34,197,94,0.5)!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:12px!important;position:relative!important;">
+          <div style="font-size:15px!important;font-weight:800!important;color:#fff!important;line-height:1.45!important;">We come back to your home <span style="color:#4ade80!important;">ANYTIME</span>, even years from now, and take your TV down</div>
+          <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
+        </div>
+        <div style="font-size:12.5px!important;color:#c7ccd4!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
+        <div style="margin-top:12px!important;padding-top:10px!important;border-top:1px dashed #3f3f46!important;font-size:11.5px!important;color:#71717a!important;position:relative!important;">One-time cost: $35 · Added to today's ticket · No expiration</div>
       </div>
 
-      <div style="display:grid!important;grid-template-columns:1fr 1fr 1fr!important;gap:8px!important;margin-bottom:12px!important;">
-        <div style="background:#1f1f23!important;border:1.5px solid ${gold}!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
-          <div style="font-size:20px!important;font-weight:800!important;color:${gold}!important;">$0</div>
-          <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Removal Cost</div>
-        </div>
-        <div style="background:#1f1f23!important;border:1.5px solid ${gold}!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
-          <div style="font-size:13px!important;font-weight:700!important;color:${gold}!important;line-height:1.3!important;">Professional</div>
-          <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Dismounting</div>
-        </div>
-        <div style="background:#1f1f23!important;border:1.5px solid ${gold}!important;border-radius:8px!important;padding:12px 6px!important;text-align:center!important;">
-          <div style="font-size:18px!important;color:${gold}!important;line-height:1.2!important;">✓</div>
-          <div style="font-size:10px!important;color:#a0a0ab!important;margin-top:3px!important;">Holes Patched Free</div>
-        </div>
-      </div>
-
-      <div style="border:1px solid #3f3f46!important;border-radius:10px!important;padding:12px 14px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important;">
-        <span style="font-size:20px!important;">🛡️</span>
-        <div>
-          <div style="font-size:13px!important;font-weight:700!important;color:#fff!important;">No Catch. No Fees. No Charge.</div>
-          <div style="font-size:11px!important;color:#a0a0ab!important;">Our commitment to exceptional service and peace of mind.</div>
-        </div>
-      </div>
+      <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Without coverage, professional removal runs $100 or more.</div>
 
       <button id="btn-dis-yes" style="background:${yesOn?'#ff6600':'rgba(255,102,0,0.85)'}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
-        ${yesOn?'✓ ':''}Add Guaranteed Dismount Service, Only $35
+        ${yesOn?'✓ ':''}🛡️ Add coverage to my ticket, $35
       </button>
       <div style="text-align:center!important;margin-bottom:8px!important;">
         <button id="btn-dis-no" style="background:${cur===noId?'rgba(255,255,255,0.06)':'transparent'}!important;color:${cur===noId?'#fff':'#71717a'}!important;border:none!important;font-size:13px!important;cursor:pointer!important;text-decoration:underline!important;padding:8px 16px!important;">
-          ${cur===noId?'✓ ':''}No thanks, I'll handle TV removal myself
+          ${cur===noId?'✓ ':''}No thanks, I'll handle TV removal when the time comes
         </button>
       </div>
       <div style="${S.actions}">
