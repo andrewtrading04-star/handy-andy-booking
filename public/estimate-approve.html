@@ -132,7 +132,7 @@
     <div id="addonsBox"></div>
     <div id="availBox"></div>
     <div id="summaryBox"></div>
-    <button class="btn" id="approveBtn">&#10003; Approve</button>
+    <button class="btn" id="approveBtn" disabled>&#10003; Approve</button>
     <div class="fine">This is an estimate, not a final invoice. Final pricing is confirmed on-site.</div>
   </div>
 
@@ -289,6 +289,15 @@ function grandTotal(){
   const tax = Math.round(sub*taxRate*100)/100;
   return Math.round((sub+tax)*100)/100;
 }
+// Approving books the job — a time must be picked first. Disabled with a hint
+// until the customer taps a slot in the availability picker below.
+function updateApproveState(){
+  const btn = $('approveBtn');
+  if (!btn) return;
+  const has = pickedSlots.length > 0;
+  btn.disabled = !has;
+  btn.title = has ? '' : 'Pick an appointment time below first';
+}
 function renderSummary(){
   const add = addedTotal();
   const total = grandTotal();
@@ -305,6 +314,7 @@ function renderSummary(){
   html += `<div class="sline grand"><span>Estimated total</span><span class="sv tabnums">${money(total)}</span></div></div>`;
   $('summaryBox').innerHTML = html;
   $('approveBtn').innerHTML = `&#10003; Approve — <span class="tabnums" style="margin-left:2px;">${money(total)}</span>`;
+  updateApproveState();
 }
 
 // ── Confirmation recap (accepted add-ons + total) ──
@@ -330,18 +340,21 @@ async function loadAvail(){
     AVAIL_DAYS = (Array.isArray(data.days)?data.days:[]).filter(d=>d.timeslots && d.timeslots.length).slice(0,45);
     availTz = data.timezone || '';
     if (!AVAIL_DAYS.length){
-      $('availBox').innerHTML = `<div class="avail"><div class="avail-h">Preferred times</div><div class="avail-empty">We'll reach out to find a time that works for you.</div></div>`;
+      $('availBox').innerHTML = `<div class="avail"><div class="avail-h">Appointment time</div><div class="avail-empty">We don't have any open times to show right now — please call us to book instead of using this form.</div></div>`;
+      updateApproveState();
       return;
     }
     selectedDate = AVAIL_DAYS[0].date;
     renderAvail();
-  }catch(e){ /* non-fatal — approval still works without a time pick */ }
+    updateApproveState();
+  }catch(e){ /* leave the button disabled — a slot pick is required to approve */ }
 }
 function toggleSlot(slot_key, label){
   const idx = pickedSlots.findIndex(p=>p.date===selectedDate && p.slot_key===slot_key);
   if (idx>=0){ pickedSlots.splice(idx,1); }
-  else { if (pickedSlots.length>=3){ renderAvail(); return; } pickedSlots.push({ date:selectedDate, slot_key, label }); }
+  else { pickedSlots = [{ date:selectedDate, slot_key, label }]; } // single pick — this IS the booking, not a preference
   renderAvail();
+  updateApproveState();
 }
 function renderAvail(){
   const box = $('availBox');
@@ -360,15 +373,15 @@ function renderAvail(){
     return `<button type="button" class="slotbtn${on?' on':''}" data-slot="${esc(s.slot_key)}" data-label="${esc(lbl)}"><span>${esc(lbl)}</span><span class="tick">${on?'&#10003;':''}</span></button>`;
   }).join('');
   const picksHtml = pickedSlots.length
-    ? `<div class="picks"><span class="picks-lbl">Your picks:</span>${pickedSlots.map((p,i)=>`<span class="pickchip">${esc(whenLabel(p))}<button data-rm="${i}" aria-label="remove">&times;</button></span>`).join('')}</div>`
+    ? `<div class="picks"><span class="picks-lbl">Your appointment:</span>${pickedSlots.map((p,i)=>`<span class="pickchip">${esc(whenLabel(p))}<button data-rm="${i}" aria-label="remove">&times;</button></span>`).join('')}</div>`
     : '';
   box.innerHTML = `<div class="avail">
-    <div class="avail-h">Pick a few times that work for you</div>
-    <div class="avail-p">Tap up to 3 — we'll confirm one of them with you.</div>
+    <div class="avail-h">Pick your appointment time</div>
+    <div class="avail-p">Choose a date and time below — this books your job instantly.</div>
     <div class="dates">${datesHtml}</div>
     <div class="slots">${slotsHtml}</div>
     ${picksHtml}
-    <div class="avail-hint">${pickedSlots.length>=3?"That's the max — remove one to swap it.":'Optional, but it helps us get you scheduled faster.'}</div>
+    <div class="avail-hint">${pickedSlots.length?'Tap it again to change your pick.':'A time must be selected to approve.'}</div>
   </div>`;
   box.querySelectorAll('.datepill').forEach(el=>el.addEventListener('click',()=>{ selectedDate=el.dataset.date; renderAvail(); }));
   box.querySelectorAll('.slotbtn').forEach(el=>el.addEventListener('click',()=>toggleSlot(el.dataset.slot, el.dataset.label)));
@@ -468,15 +481,34 @@ $('confirmBtn').addEventListener('click', async ()=>{
     const data = await res.json();
     if (!res.ok){
       btn.disabled=false; btn.innerHTML=prev; saving=false;
+      if (data.conflict){
+        // Someone else took that exact time between page-load and this click —
+        // reload live availability so the customer can pick a different slot
+        // instead of hitting a dead end.
+        errEl.textContent = data.error || 'That time was just booked. Please pick another time below.';
+        pickedSlots = [];
+        show('approveSection');
+        await loadAvail();
+        return;
+      }
       errEl.textContent = data.error || 'We could not record your approval. Please try again.';
       return;
     }
     const chosen = Array.isArray(data.accepted) ? data.accepted : [];
     const total = data.approved_total != null ? data.approved_total : grandTotal();
     if (data.already){ $('alreadyRecap').innerHTML = recapHtml(chosen, total); show('alreadySection'); return; }
-    $('doneMsg').textContent = `You're approved and your card is on file. We'll be in touch shortly to lock in your time.`;
-    const timesHtml = pickedSlots.length
-      ? `<div class="recap" style="margin-top:12px;"><div class="rr" style="font-weight:800;color:var(--ink);">Your preferred times</div>${pickedSlots.map(p=>`<div class="rr"><span>&#128197; ${esc(whenLabel(p))}</span></div>`).join('')}</div>`
+    let whenText = '';
+    if (data.scheduled_at){
+      try{
+        const dt = new Date(data.scheduled_at);
+        const dateStr = dt.toLocaleDateString('en-US', { timeZone: data.timezone||undefined, weekday:'long', month:'short', day:'numeric' });
+        // doneMsg is set via textContent below, so no HTML-escaping needed here.
+        whenText = ` ${data.business_name||'We'} will see you ${dateStr}${data.slot_label?' · '+data.slot_label:''}${data.technician_name?' with '+data.technician_name:''}.`;
+      }catch(e){ /* fall through to generic message below */ }
+    }
+    $('doneMsg').textContent = `You're booked!${whenText || " We'll be in touch to confirm your time."}`;
+    const timesHtml = data.scheduled_at
+      ? `<div class="recap" style="margin-top:12px;"><div class="rr" style="font-weight:800;color:var(--ink);">Your appointment</div><div class="rr"><span>&#128197; ${esc(whenLabel(pickedSlots[0]||{}))}</span></div>${data.technician_name?`<div class="rr"><span>&#128119; ${esc(data.technician_name)}</span></div>`:''}</div>`
       : '';
     $('doneRecap').innerHTML = recapHtml(chosen, total) + timesHtml;
     show('doneSection');

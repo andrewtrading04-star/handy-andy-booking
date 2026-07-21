@@ -5268,7 +5268,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
+  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -5294,7 +5294,7 @@ async function fetchEstimateAnyBiz(db, id) {
   // never surface until a Doms charge attempt failed at time of service.
   // Fail loud instead: a customer seeing an error on the approve page is far
   // better than their card silently ending up in the wrong company's account.
-  const { data: biz, error: bizErr } = await db.from('businesses').select('slug, name').eq('id', data.business_id).maybeSingle();
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id, slug, name, timezone').eq('id', data.business_id).maybeSingle();
   if (bizErr) throw bizErr;
   if (!biz) throw new Error(`Estimate ${id} references a business (${data.business_id}) that could not be found.`);
   data.business = biz;
@@ -5384,6 +5384,149 @@ function upsellsAsLineItems(accepted) {
   }));
 }
 
+// Auto-book the customer's chosen slot the moment they approve an estimate —
+// no staffer re-enters their info or re-picks the time. Re-validates
+// availability at THIS instant (not just when the page loaded) and picks the
+// tech itself, the same way the public widget does. Throws a plain Error with
+// `.conflict = true` when the slot is gone, which the caller turns into a 409
+// so the customer can pick a different time instead of hitting a dead end.
+async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot, cust, card) {
+  const tz = await areaTimezone(db, null, biz.timezone || 'America/Denver').catch(() => biz.timezone || 'America/Denver');
+  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, cust.zip);
+  const areaTz = bookingAreaId ? await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver') : tz;
+
+  const slotDef = SLOTS.find(s => s.key === slot.slot_key);
+  if (!slotDef) { const e = new Error('That time slot is no longer valid — please pick another.'); e.conflict = true; throw e; }
+  const [hh, mm] = slotDef.start.split(':').map(Number);
+  const midnight = localDateStartUTC(areaTz, slot.date);
+  const scheduled_at = new Date(midnight.getTime() + (hh * 60 + mm) * 60000).toISOString();
+
+  // Re-check availability RIGHT NOW — the page may have loaded minutes ago.
+  const technician_id = await pickAvailableTech(db, biz.id, slot.date, slot.slot_key, areaTz);
+  if (!technician_id) {
+    const e = new Error("That time was just booked by someone else. Please pick another time.");
+    e.conflict = true;
+    throw e;
+  }
+
+  // Reuse an existing customer (by phone, then email) or create one — same
+  // lookup order as the dashboard's booking_create.
+  let customer_id = null;
+  if (cust.phone) {
+    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', cust.phone).maybeSingle();
+    if (data?.id) customer_id = data.id;
+  }
+  if (!customer_id && cust.email) {
+    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', cust.email).maybeSingle();
+    if (data?.id) customer_id = data.id;
+  }
+  if (!customer_id) {
+    const { data, error } = await db.from('customers').insert({
+      business_id: biz.id, name: cust.name || 'Customer', phone: cust.phone || null, email: cust.email || null,
+      address_line1: cust.line1 || null, city: cust.city || null, state: cust.state || null, postal_code: cust.zip || null,
+    }).select('id').single();
+    if (error) throw error;
+    customer_id = data.id;
+  } else {
+    const patch = {};
+    if (cust.email) patch.email = cust.email;
+    if (cust.name) patch.name = cust.name;
+    if (cust.phone) patch.phone = cust.phone;
+    if (cust.line1) patch.address_line1 = cust.line1;
+    if (cust.city) patch.city = cust.city;
+    if (cust.state) patch.state = cust.state;
+    if (cust.zip) patch.postal_code = cust.zip;
+    if (Object.keys(patch).length) await db.from('customers').update(patch).eq('id', customer_id).eq('business_id', biz.id);
+  }
+
+  const bookingInsert = {
+    business_id: biz.id, customer_id, technician_id,
+    service_id: est.service_id || null,
+    service_area_id: bookingAreaId || null,
+    status: 'assigned', source: 'estimate',
+    scheduled_at,
+    subtotal: totals.subtotal, price: totals.total,
+    notes: est.description || null,
+    address_line1: cust.line1 || null, city: cust.city || null, state: cust.state || null, postal_code: cust.zip || null,
+    payment_required: true, payment_method: 'card',
+    sms_consent: true,
+    stripe_customer_id: card.customerId, stripe_payment_method_id: card.pmId || null,
+    metadata: { booked_by: 'Estimate approval (auto-booked)', source_estimate_id: est.id },
+  };
+  const OPTIONAL = ['sms_consent'];
+  let insertObj = { ...bookingInsert };
+  let bRow, bErr;
+  for (let attempt = 0; attempt < OPTIONAL.length + 1; attempt++) {
+    ({ data: bRow, error: bErr } = await db.from('bookings').insert(insertObj).select('id').single());
+    if (!bErr) break;
+    if (bErr.code === '23505' && /bookings_tech_slot_unique/.test(bErr.message || '')) {
+      const e = new Error('That technician was just booked for this exact time by someone else. Please pick another time.');
+      e.conflict = true; throw e;
+    }
+    const missing = OPTIONAL.find(c => (bErr.message || '').includes(c) && c in insertObj);
+    if (!missing) break;
+    delete insertObj[missing];
+  }
+  if (bErr) throw bErr;
+
+  const rows = combinedItems.map(it => ({
+    booking_id: bRow.id, business_id: biz.id, kind: 'option', name: it.description || 'Item',
+    quantity: Number(it.qty) || 1, unit_price: Number(it.unit_price) || 0,
+    line_total: (Number(it.qty) || 1) * (Number(it.unit_price) || 0),
+  }));
+  if (rows.length) await db.from('booking_line_items').insert(rows).then(({ error }) => { if (error) console.error('[estimate_approve] line items insert failed:', error.message); });
+  if (totals.tax > 0) {
+    await db.from('booking_line_items').insert({
+      booking_id: bRow.id, business_id: biz.id, kind: 'fee', name: 'Tax',
+      quantity: 1, unit_price: totals.tax, line_total: totals.tax, taxable: false,
+    }).then(({ error }) => { if (error) console.error('[estimate_approve] tax line item insert failed:', error.message); });
+  }
+
+  await db.from('booking_status_events').insert({
+    booking_id: bRow.id, business_id: biz.id, technician_id,
+    status: 'assigned', note: 'Auto-booked from estimate approval',
+  });
+
+  const { data: techInfo } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+  notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz).catch(console.error);
+
+  if (cust.phone) {
+    const _d = new Date(scheduled_at);
+    const dateStr = _d.toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'short', month: 'short', day: 'numeric' });
+    const timeStr = _d.toLocaleTimeString('en-US', { timeZone: areaTz, hour: 'numeric', minute: '2-digit' });
+    sendSMS(cust.phone, `You're booked! ✅ ${biz.name} will see you ${dateStr} at ${timeStr}. We'll text you when your tech is on the way. Reply STOP to opt out.`).catch(console.error);
+  }
+
+  if (cust.email) {
+    (async () => {
+      try {
+        const dateLong = new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'long', month: 'short', day: 'numeric' });
+        const timeWindow = slotDef.label;
+        const startEpoch = Math.floor(new Date(scheduled_at).getTime() / 1000);
+        const [sh, sm] = slotDef.start.split(':').map(Number);
+        const [eh, em] = slotDef.end.split(':').map(Number);
+        const endEpoch = startEpoch + ((eh * 60 + em) - (sh * 60 + sm)) * 60;
+        const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+        const emailLines = combinedItems.map(it => ({ label: it.description || 'Item', qty: Number(it.qty) || 1, amount: (Number(it.qty) || 1) * (Number(it.unit_price) || 0) }));
+        if (totals.tax > 0) emailLines.push({ label: 'Tax', qty: 1, amount: totals.tax });
+        const { subject, html } = bookingConfirmationEmail({
+          firstName: (cust.name || '').trim().split(/\s+/)[0] || '',
+          dateLong, timeWindow,
+          technicianName: techInfo?.name || null, technicianPhotoUrl: techInfo?.photo_url || null,
+          technicianBioYears: techInfo?.bio_years || null, technicianBioBlurb: techInfo?.bio_blurb || null,
+          address: { line1: cust.line1, city: cust.city, state: cust.state, zip: cust.zip },
+          lines: emailLines, total: totals.total, tip: 0, twoTechs: false,
+          startEpoch, endEpoch, baseUrl, jobId: bRow.id,
+        }, brandFor(biz.slug));
+        const { from } = emailConfig(biz.slug);
+        await sendEmail({ slug: biz.slug, to: cust.email, subject, html, replyTo: from });
+      } catch (e) { console.error('[estimate_approve] confirmation email error:', e.message); }
+    })();
+  }
+
+  return { bookingId: bRow.id, technicianName: techInfo?.name || null, scheduledAt: scheduled_at, tz: areaTz, slotLabel: slotDef.label };
+}
+
 async function estimateApprove(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const token = ((body && body.token) || req.query.token || '').toString();
@@ -5437,6 +5580,11 @@ async function estimateApprove(req, res, body) {
   if (!pmId) {
     return res.status(400).json({ error: 'Please add a card to hold on file to approve.' });
   }
+  const prefSlots = sanitizePreferredSlots(body && body.selected_slots);
+  const chosenSlot = prefSlots[0] || null;
+  if (!chosenSlot) {
+    return res.status(400).json({ error: 'Please pick an appointment time to approve.' });
+  }
   // Save the card on file in the business's Stripe account (tokenized client-side).
   let card = null;
   try {
@@ -5448,18 +5596,30 @@ async function estimateApprove(req, res, body) {
     return res.status(402).json({ error: 'Card entry is not set up for this business yet — please contact us to book.' });
   }
 
+  // Book the job right now, using the slot the customer picked from live
+  // availability. If someone else grabbed that slot in the meantime, this
+  // throws a `.conflict` error instead of silently double-booking a tech.
+  let booking;
+  try {
+    booking = await bookEstimateAppointment(
+      db, est.business, est, combined, totals, chosenSlot,
+      { name: custName, phone: custPhone, email: custEmail, line1, city, state: stateAbbr, zip },
+      card
+    );
+  } catch (e) {
+    if (e.conflict) return res.status(409).json({ error: e.message, conflict: true });
+    console.error('[estimate_approve] auto-book failed:', e.message);
+    return res.status(500).json({ error: 'We saved your approval, but could not book your appointment automatically. We will reach out to schedule you.' });
+  }
+
   const now = new Date().toISOString();
   const patch = {
     approved_at: now, accepted_upsells: accepted, approved_total: totals.total,
     customer_name: custName || est.customer_name, customer_phone: custPhone || est.customer_phone,
     customer_address: line1, customer_city: city, customer_state: stateAbbr, customer_zip: zip,
     stripe_customer_id: card.customerId, card_brand: card.brand, card_last4: card.last4,
+    preferred_slots: [chosenSlot], status: 'archived',
   };
-  // The customer's preferred appointment times, picked on the approve page from
-  // real availability. Saved into preferred_slots so the office sees them on the
-  // estimate card. Only overwrite when the customer actually chose some.
-  const prefSlots = sanitizePreferredSlots(body && body.selected_slots);
-  if (prefSlots.length) patch.preferred_slots = prefSlots;
   // Strip columns the schema doesn't have yet (0048 not applied) and retry, so an
   // approval is always recorded even if only approved_at exists.
   let error;
@@ -5480,6 +5640,11 @@ async function estimateApprove(req, res, body) {
     accepted: publicUpsells(accepted),
     accepted_ids: accepted.map(u => u.id),
     approved_total: totals.total,
+    booking_id: booking.bookingId,
+    scheduled_at: booking.scheduledAt,
+    slot_label: booking.slotLabel,
+    technician_name: booking.technicianName,
+    timezone: booking.tz,
   });
 }
 
