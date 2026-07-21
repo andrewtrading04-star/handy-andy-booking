@@ -1088,8 +1088,8 @@
     const ov=document.createElement('div');
     ov.id='ha-wire-help-ov';
     ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.78)!important;';
-    const panel=(img,name,price,badge,desc,optId)=>optId?`<div style="border-bottom:1px solid #e7eaf3;">
-      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:100%;height:160px;object-fit:cover;">
+    const panel=(img,name,price,badge,desc,optId)=>optId?`<div style="border-bottom:1px solid #e7eaf3;padding-top:14px;">
+      <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:calc(100% - 40px);margin:0 20px;border-radius:8px;height:160px;object-fit:cover;">
       <div style="padding:13px 20px 16px;">
         <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}
         ${badge?`<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:12px;background:#f07422;color:#fff;vertical-align:1px;">${badge}</span>`:''}</div>
