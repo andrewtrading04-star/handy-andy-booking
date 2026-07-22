@@ -6,35 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert } from './_lib/owner-notify.js';
-import { sendSMS } from './_lib/sms.js';
-
-// ── Big-bracket-job SMS alert ────────────────────────────────────────────────
-// The owner wants a text whenever a single booked ticket carries 4+ brackets
-// (a big multi-TV job worth eyeballing for stock and staffing). Counts bracket
-// line items by name; "I have my own bracket" is the customer's own hardware,
-// so it never counts.
-const BIG_BRACKET_ALERT_PHONE = process.env.BIG_BRACKET_ALERT_PHONE || '3374997817';
-const BIG_BRACKET_THRESHOLD = 4;
-function bracketCountFromLines(lines) {
-  return (Array.isArray(lines) ? lines : []).reduce((n, l) => {
-    const name = String(l.name || l.label || '');
-    if (/i have my own bracket/i.test(name)) return n;
-    const isBracket = /\bbracket\b/i.test(name)
-      || /^flat$/i.test(name.trim())
-      || /^tilting/i.test(name.trim())
-      || /^full motion/i.test(name.trim());
-    return isBracket ? n + (Number(l.quantity ?? l.qty) || 1) : n;
-  }, 0);
-}
-function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
-  try {
-    const count = bracketCountFromLines(lines);
-    if (count < BIG_BRACKET_THRESHOLD) return;
-    const msg = `Attention: job with ${customerName || 'a customer'} has ${count} brackets on it. It is scheduled for ${whenStr || 'an upcoming date'}.`;
-    sendSMS(BIG_BRACKET_ALERT_PHONE, msg).catch(e => console.warn('[book] big-bracket alert SMS failed:', e.message));
-  } catch (e) { console.warn('[book] big-bracket alert error:', e.message); }
-}
+import { sendCardSaveFailedAlert, maybeSendBigBracketAlert } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 

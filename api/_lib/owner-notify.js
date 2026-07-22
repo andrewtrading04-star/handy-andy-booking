@@ -5,6 +5,35 @@
 // override with the OWNER_NOTIFY_EMAIL env var.
 import { emailConfig, sendEmail } from './email.js';
 import { emailNotificationsOn } from './notify.js';
+import { sendSMS } from './sms.js';
+
+// ── Big-bracket-job SMS alert ────────────────────────────────────────────────
+// The owner wants a text whenever a single booked ticket carries 4+ brackets
+// (a big multi-TV job worth eyeballing for stock and staffing). Counts bracket
+// line items by name; "I have my own bracket" is the customer's own hardware,
+// so it never counts. Shared by the public widget bookings (api/book.js) and
+// the dashboard's manual booking_create (api/admin.js).
+const BIG_BRACKET_ALERT_PHONE = process.env.BIG_BRACKET_ALERT_PHONE || '3374997817';
+const BIG_BRACKET_THRESHOLD = 4;
+export function bracketCountFromLines(lines) {
+  return (Array.isArray(lines) ? lines : []).reduce((n, l) => {
+    const name = String(l.name || l.label || '');
+    if (/i have my own bracket/i.test(name)) return n;
+    const isBracket = /\bbracket\b/i.test(name)
+      || /^flat$/i.test(name.trim())
+      || /^tilting/i.test(name.trim())
+      || /^full motion/i.test(name.trim());
+    return isBracket ? n + (Number(l.quantity ?? l.qty) || 1) : n;
+  }, 0);
+}
+export function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
+  try {
+    const count = bracketCountFromLines(lines);
+    if (count < BIG_BRACKET_THRESHOLD) return;
+    const msg = `Attention: job with ${customerName || 'a customer'} has ${count} brackets on it. It is scheduled for ${whenStr || 'an upcoming date'}.`;
+    sendSMS(BIG_BRACKET_ALERT_PHONE, msg).catch(e => console.warn('[big-bracket] alert SMS failed:', e.message));
+  } catch (e) { console.warn('[big-bracket] alert error:', e.message); }
+}
 
 function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 

@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
-import { sendOwnerBookingAlert } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -2197,6 +2197,16 @@ async function bookingCreate(req, res, db, auth, body) {
   // Notify the technician if one was assigned at creation time (job-local tz).
   if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at, tz).catch(console.error);
   if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at, tz).catch(console.error);
+
+  // Owner SMS when this ticket carries 4+ brackets (same alert as widget bookings).
+  maybeSendBigBracketAlert({
+    lines: selections,
+    customerName: c.name || '',
+    whenStr: (() => {
+      try { return scheduled_at ? new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }) : null; }
+      catch { return body.scheduled_date || null; }
+    })(),
+  });
 
   // ---- Branded booking-confirmation email (best-effort; never fails the booking) ----
   // Mirrors the public widget's confirmation so phone-in jobs the office books
