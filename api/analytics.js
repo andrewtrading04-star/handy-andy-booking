@@ -293,7 +293,7 @@ export default async function handler(req, res) {
           id: e.session_id,
           visitor: e.session_id.includes('.') ? e.session_id.split('.')[0] : e.session_id,
           firstTs: null, lastTs: null,
-          device: null, source: null, browser: null, customer: null, coupon: null,
+          device: null, source: null, browser: null, customer: null, coupon: null, couponSeen: false,
           city: null, state: null, zip: null,
           maxStep: -1, booked: false, bookedValue: null, bookedTs: null,
           priceShown: false, lastPrice: null,
@@ -335,6 +335,10 @@ export default async function handler(req, res) {
         // Coupon events are tracked as "coupon:CODE" (see widget.js logEvent
         // call at checkout) — keep the latest one applied this session.
         if (e.step_name.startsWith('coupon:')) s.coupon = e.step_name.slice(7);
+        // The exit-intent coupon popup was shown to this visitor ("coupon seen").
+        // exit_intent_shown fires the moment the popup renders; applied/dismissed
+        // follow it, so shown alone is the trigger signal.
+        if (e.step_name === 'exit_intent_shown') s.couponSeen = true;
       } else if (t === 'booking_failed' || t === 'error' || t === 'form_error') {
         s.errors.push({ type: t, step: e.step_name, message: e.error_message, at: e.created_at });
         if (t === 'booking_failed') s.failed = true;
@@ -466,7 +470,7 @@ export default async function handler(req, res) {
       .slice(0, 30)
       .map(s => ({
         when: new Date(s.lastTs).toISOString(),
-        device: s.device, source: s.source, browser: s.browser, customer: s.customer, coupon: s.coupon,
+        device: s.device, source: s.source, browser: s.browser, customer: s.customer, coupon: s.coupon, couponSeen: s.couponSeen,
         city: s.city, zip: s.zip,
         furthest: s.booked ? 'Booked' : (STEPS[s.maxStep]?.label || '—'),
         booked: s.booked,
