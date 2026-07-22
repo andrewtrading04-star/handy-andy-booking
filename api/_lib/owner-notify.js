@@ -35,6 +35,27 @@ export function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
   } catch (e) { console.warn('[big-bracket] alert error:', e.message); }
 }
 
+// ── One-time "first ever use" SMS alerts ────────────────────────────────────
+// Fires an SMS exactly once, ever, no matter how many serverless cold-starts
+// or duplicate calls happen afterward — claimed atomically via a primary-key
+// insert into system_flags (migration 0074). If two bookings somehow trigger
+// this in the same instant, only the one that wins the insert sends the text.
+async function claimOnce(db, key) {
+  const { error } = await db.from('system_flags').insert({ key, value: { at: new Date().toISOString() } });
+  return !error; // true only for whoever actually inserted the row first
+}
+
+const MULTI_TV_DISCOUNT_ALERT_PHONE = process.env.BIG_BRACKET_ALERT_PHONE || '3374997817';
+export async function maybeSendFirstMultiTvDiscountAlert(db, { discountAmt, customerName, whenStr }) {
+  try {
+    if (!discountAmt || discountAmt <= 0) return;
+    const first = await claimOnce(db, 'multi_tv_discount_first_used');
+    if (!first) return; // already notified once before — never again
+    const msg = `Heads up: the multi-TV discount was just used for the first time — ${customerName || 'a customer'}'s job (scheduled ${whenStr || 'soon'}) saved $${discountAmt.toFixed(2)}.`;
+    sendSMS(MULTI_TV_DISCOUNT_ALERT_PHONE, msg).catch(e => console.warn('[multi-tv-discount] alert SMS failed:', e.message));
+  } catch (e) { console.warn('[multi-tv-discount] alert error:', e.message); }
+}
+
 function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 export async function sendOwnerBookingAlert(d = {}) {

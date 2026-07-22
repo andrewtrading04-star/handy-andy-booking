@@ -6,7 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert, maybeSendBigBracketAlert } from './_lib/owner-notify.js';
+import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -565,6 +565,7 @@ async function bookHandyAndy(req, res) {
   // cut, since that is exactly the case where the fee is the reason a big job
   // gets skipped. Zone with no travel fee instead gets a flat $10 off PER TV.
   // Mirrored client-side in public/widget.js (multiTvDiscount) — keep in sync.
+  let multiTvDiscountAmt = 0;
   if (!lines.some(l => /multi-tv discount/i.test(l.name))) {
     const tvCount = lines.reduce((n, l) => {
       const nm = String(l.name || '');
@@ -575,11 +576,13 @@ async function bookHandyAndy(req, res) {
       if (surcharge <= 0) {
         const perTvAmt = 10 * tvCount;
         lines.push({ kind: 'coupon', name: `Multi-TV discount (-$10 × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
+        multiTvDiscountAmt = perTvAmt;
       } else {
         const cutPct = surcharge === 15 ? 1.00 : (surcharge === 65 || surcharge === 100) ? 0.60 : 0;
         if (cutPct > 0) {
           const cutAmt = Math.round(surcharge * cutPct * 100) / 100;
           lines.push({ kind: 'coupon', name: 'Multi-TV discount', quantity: 1, unit_price: -cutAmt, line_total: -cutAmt });
+          multiTvDiscountAmt = cutAmt;
         }
       }
     }
@@ -683,6 +686,11 @@ async function bookHandyAndy(req, res) {
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   });
+  maybeSendFirstMultiTvDiscountAlert(db, {
+    discountAmt: multiTvDiscountAmt,
+    customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
+  }).catch(e => console.warn('[book-ha] multi-tv-discount alert error:', e.message));
 
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
