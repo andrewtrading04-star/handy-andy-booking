@@ -639,7 +639,16 @@
      full-width row, like the reference mockup, instead of sharing space
      with the smaller secondary buttons. */
   #bkModal .bk-actions .btn#bkComplete,
-  #bkModal .bk-actions .btn#bkCharge{flex:1 1 100%;}
+  #bkModal .bk-actions .btn#bkCharge,
+  #bkModal .bk-actions .btn#bkMarkPaid,
+  #bkModal .bk-actions .btn#bkChangeCard{flex:1 1 100%;}
+  /* Payment mini-card: card-on-file sits as its own labeled line under the
+     header (not squeezed into the badge row, and never repeated a second
+     time next to the Charge button) with the total below it. */
+  #bkModal .bk-pay-cardline{display:flex;align-items:center;gap:7px;font-size:13px;color:#9fb0c3;margin:-4px 0 10px;}
+  #bkModal .bk-pay-cardline .bk-card-chip{display:inline-flex;}
+  #bkModal .bk-pay-total{font-size:20px;font-weight:800;color:#eef2f7;margin-bottom:12px;}
+  #bkModal .bk-pay-total span{color:#93a6bd;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:2px;}
   #bkModal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #bkModal .bk-assign{color:#eef2f7;font-weight:600;}
   /* Nested mini-cards (Assignment / Job / Payment) — each group gets its own
@@ -2317,10 +2326,11 @@ function openBooking(b){
       </div>
     </div>
     <div class="bk-minicard">
-      <div class="bk-minicard-head"><span class="bk-badge bk-badge-pay">💳</span><span class="bk-minicard-label">Payment</span><span id="bkCardChip" class="bk-card-chip" style="display:none;" data-booking-id="${esc(b.id)}"></span></div>
-      <div style="font-weight:700;margin-bottom:10px;">Total: <span id="bkLiTotal"></span></div>
+      <div class="bk-minicard-head"><span class="bk-badge bk-badge-pay">💳</span><span class="bk-minicard-label">Payment</span></div>
+      <div id="bkCardChip" class="bk-pay-cardline" style="display:none;" data-booking-id="${esc(b.id)}"></div>
+      <div class="bk-pay-total"><span>Total</span><span id="bkLiTotal"></span></div>
       <div class="bk-actions">
-        ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button><span id="bkChargeCardInfo" class="bk-card-chip" style="display:none;" data-booking-id="${esc(b.id)}"></span>`:''}
+        ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkChangeCard">💳 Change card</button>`:''}
         ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓${b.amount_refunded>0?` <span style="color:#b45309;">(${money2(b.amount_refunded)} refunded)</span>`:''}</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
@@ -2862,27 +2872,20 @@ async function loadBkPartnerAssignOptions(b){
 }
 
 // "Which card is this?" — fetches the card on file (brand + last4) without
-// charging anything, and fills in both chips: the always-visible one in the
-// Payment section header, and the one next to the Charge button itself (so
-// the office can answer a customer's "is that the right card?" without
-// having to start the charge flow to find out). Fetched after paint, same
+// charging anything, and fills the one card-on-file line under the Payment
+// header (so the office can answer a customer's "is that the right card?"
+// without starting the charge flow to find out). Fetched after paint, same
 // "don't block the modal opening" pattern as loadBkPartnerAssignOptions.
 async function loadBkCardInfo(b){
   try{
     const r=await api('booking_card',{ params:{ business:current.slug, id:b.id }});
     // Bail if the admin closed this job or opened a different one meanwhile.
-    const headerChip=document.getElementById('bkCardChip');
-    if(!headerChip || headerChip.dataset.bookingId!==String(b.id)) return;
+    const line=document.getElementById('bkCardChip');
+    if(!line || line.dataset.bookingId!==String(b.id)) return;
     if(!r || !r.has_card) return;
-    const label=`💳 ${esc(r.brand||'Card')} ••${esc(r.last4||'????')}`;
-    headerChip.innerHTML=label;
-    headerChip.style.display='';
-    const chargeChip=document.getElementById('bkChargeCardInfo');
-    if(chargeChip && chargeChip.dataset.bookingId===String(b.id)){
-      chargeChip.innerHTML=label;
-      chargeChip.style.display='';
-    }
-  }catch(e){ /* no card on file, or lookup failed — chips just stay hidden */ }
+    line.innerHTML=`Card on file: <span class="bk-card-chip">💳 ${esc(r.brand||'Card')} ••${esc(r.last4||'????')}</span>`;
+    line.style.display='';
+  }catch(e){ /* no card on file, or lookup failed — line just stays hidden */ }
 }
 
 async function updateBooking(payload){
