@@ -2320,7 +2320,10 @@ function openBooking(b){
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Line items</div>
       <div id="bkLineItems"></div>
-      <button type="button" class="btn ghost sm" id="bkLiAdd" style="margin-top:8px;">+ Add line item</button>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="button" class="btn ghost sm" id="bkLiAdd">+ Add line item</button>
+        <button type="button" class="btn ghost sm" id="bkLiDiscount" style="color:#4ade80;border-color:rgba(74,222,128,.4);">💲 Add discount</button>
+      </div>
       <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:12px;">
         <button type="button" class="btn sm" id="bkLiSave">Save line items</button>
       </div>
@@ -2637,6 +2640,18 @@ function mountLineItemsEditor(b){
   };
   render();
   document.getElementById('bkLiAdd').onclick=()=>{ rows.push({ name:'', display:'', unit:0, qty:1, kind:'service' }); render(); };
+  // Discount row: pre-filled so it's obviously a discount at a glance (negative
+  // price, "Discount" name) rather than a blank line the office has to fill in
+  // from scratch. It's just a normal line item under the hood — Save persists
+  // it exactly like any other — so it shows on the ticket, the total, and any
+  // printed/emailed receipt the same way a coupon line already does.
+  document.getElementById('bkLiDiscount').onclick=()=>{
+    rows.push({ name:'Discount', display:'Discount', unit:-10, qty:1, kind:'coupon' });
+    render(); recalc();
+    const inputs=wrap.querySelectorAll('input[data-f="unit"]');
+    const last=inputs[inputs.length-1];
+    if(last){ last.focus(); last.select(); }
+  };
   document.getElementById('bkLiSave').onclick=async()=>{
     // Save the original (untidied) names + the hidden default-type lines, so the
     // stored ticket keeps its full labels (payroll/receipts) even though the
