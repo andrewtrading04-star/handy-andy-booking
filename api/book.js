@@ -556,6 +556,34 @@ async function bookHandyAndy(req, res) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
+  // Multi-TV batching discount (3+ TVs on one ticket): rewards big jobs since
+  // mounting several TVs in one drive is highly profitable. Computed
+  // server-side from the REAL line items (never trusts the client's TV count),
+  // so a stale/tampered widget can never grant a bigger discount than earned.
+  // The cut depends on the travel-fee zone (`surcharge`, resolved above from
+  // this customer's real zip) — the bigger the existing fee, the bigger the
+  // cut, since that is exactly the case where the fee is the reason a big job
+  // gets skipped. Zone with no travel fee instead gets a flat $10 off PER TV.
+  // Mirrored client-side in public/widget.js (multiTvDiscount) — keep in sync.
+  if (!lines.some(l => /multi-tv discount/i.test(l.name))) {
+    const tvCount = lines.reduce((n, l) => {
+      const nm = String(l.name || '');
+      if (/"/.test(nm) || /or less/i.test(nm) || /^98\+/i.test(nm.trim())) return n + (Number(l.quantity) || 1);
+      return n;
+    }, 0);
+    if (tvCount >= 3) {
+      if (surcharge <= 0) {
+        const perTvAmt = 10 * tvCount;
+        lines.push({ kind: 'coupon', name: `Multi-TV discount (-$10 × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
+      } else {
+        const cutPct = surcharge === 15 ? 1.00 : (surcharge === 65 || surcharge === 100) ? 0.60 : 0;
+        if (cutPct > 0) {
+          const cutAmt = Math.round(surcharge * cutPct * 100) / 100;
+          lines.push({ kind: 'coupon', name: 'Multi-TV discount', quantity: 1, unit_price: -cutAmt, line_total: -cutAmt });
+        }
+      }
+    }
+  }
   // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
   // an existing tax line) — added server-side so a stale/tampered widget can't
   // drop it. Placed before the coupon so tax is on the pre-discount amount.
