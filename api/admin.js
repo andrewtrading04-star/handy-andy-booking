@@ -855,13 +855,14 @@ async function calendar(req, res, db, auth) {
         .filter(pt => nameByLower[pt.name.trim().toLowerCase()])
         .map(pt => pt.id);
       if (sharedPartnerIds.length) {
-        const { data: pbk } = await db.from('bookings')
+        const { data: pbk, error: pbkErr } = await db.from('bookings')
           .select('id, technician_id, scheduled_at, duration_minutes, status')
           .eq('business_id', partner.id)
           .in('technician_id', sharedPartnerIds)
-          .not('status', 'in', '("cancelled","no_show")')
+          .not('status', 'in', '(cancelled,no_show)')
           .gte('scheduled_at', from).lt('scheduled_at', to)
           .limit(2000);
+        if (pbkErr) throw pbkErr;
         const partnerTechName = {};
         for (const pt of partnerTechs) partnerTechName[pt.id] = pt.name;
         ghostBookings = (pbk || []).map(b => ({
