@@ -422,38 +422,15 @@ export function computeJobPay(job, techName) {
   const tip = tipFor(job);
   const special = detectSpecial(job);
 
-  // ── Special services short-circuit the line-item walk where the rule says so.
-  if (special === 'tv_swap') {
-    breakdown.push({ label: 'TV Swap (flat)', amount: 60 });
-    let pay = 60 + tip;
-    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
-  }
-  if (special === 'prepaid') {
-    return { pay: round0(tip), breakdown: tip ? [{ label: 'Tip (100%)', amount: tip }] : [], flags: ['Pre-paid service — base pay $0 per owner'], state: 'paid' };
-  }
-  if (special === 'estimate') {
-    const customerPaid = (Number(job.price) || 0) > 0;
-    const amt = customerPaid ? 50 : 0;
-    if (!customerPaid) flags.push('Unpaid estimate — flagged ($0)');
-    breakdown.push({ label: 'Estimate', amount: amt });
-    let pay = amt + tip;
-    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    return { pay: round0(pay), breakdown, flags, state: 'paid' };
-  }
-  if (special === 'handyman') {
-    // Tech paid $65/hr, 2-hr minimum. Hours inferred from customer subtotal @ $85/hr.
-    const subtotal = Number(job.subtotal) || Number(job.price) || 0;
-    const hours = Math.max(2, Math.round(subtotal / 85));
-    const amt = hours * 65;
-    breakdown.push({ label: `Handyman ${hours}h @ $65`, amount: amt });
-    let pay = amt + tip;
-    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
-  }
-
-  // ── Multi-tech: a job's base splits 50/50 ONLY when the customer actually booked
-  // a two-person job — a "lift help"/two-person-fee line, an 86"+ TV, etc. That's
+  // ── Multi-tech detection, computed up-front so BOTH the special-service paths
+  // (handyman) and the standard TV-mounting walk can share the same 50/50-split
+  // tail below. Moved here (used to sit after the special-case returns) because
+  // a pure-handyman job with a real second tech was hitting the 'handyman'
+  // return below and skipping the split entirely — both techs got paid the
+  // FULL handyman rate instead of half each (Christopher Dickens job, Jul 2026).
+  //
+  // A job's base splits 50/50 ONLY when the customer actually booked a
+  // two-person job — a "lift help"/two-person-fee line, an 86"+ TV, etc. That's
   // what detectMultiTech reads from the line items. Merely ASSIGNING a helper to a
   // normal one-person job must NOT halve the base: the lead keeps the full base and
   // the assigned helper earns $0 for that job (handled just below).
@@ -497,13 +474,45 @@ export function computeJobPay(job, techName) {
     }
   }
 
-
+  // ── Special services short-circuit the line-item walk where the rule says so.
+  if (special === 'tv_swap') {
+    breakdown.push({ label: 'TV Swap (flat)', amount: 60 });
+    let pay = 60 + tip;
+    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
+    return { pay: round0(pay), breakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
+  }
+  if (special === 'prepaid') {
+    return { pay: round0(tip), breakdown: tip ? [{ label: 'Tip (100%)', amount: tip }] : [], flags: ['Pre-paid service — base pay $0 per owner'], state: 'paid' };
+  }
+  if (special === 'estimate') {
+    const customerPaid = (Number(job.price) || 0) > 0;
+    const amt = customerPaid ? 50 : 0;
+    if (!customerPaid) flags.push('Unpaid estimate — flagged ($0)');
+    breakdown.push({ label: 'Estimate', amount: amt });
+    let pay = amt + tip;
+    if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
+    return { pay: round0(pay), breakdown, flags, state: 'paid' };
+  }
   // ── Standard TV-mounting walk: base (by size) + each add-on line item.
+  // A pure-handyman job skips the line-item walk (there's no TV base to price)
+  // and instead prices its hours up front — but importantly no longer RETURNS
+  // here: it falls through to the shared second-tech split tail below, same as
+  // every other job, so a two-tech handyman job actually splits 50/50 instead
+  // of paying both techs the full handyman rate (Christopher Dickens job, Jul
+  // 2026 — Kregg + Steve were each about to get the full $130 instead of $120
+  // each on a $240 pool).
   let pay = 0;
   let sawSize = false;
   const businessSlug = String(job.business_slug || '').toLowerCase();
 
-  for (const li of job.line_items || []) {
+  if (special === 'handyman') {
+    // Tech paid $65/hr, 2-hr minimum. Hours inferred from customer subtotal @ $85/hr.
+    const subtotal = Number(job.subtotal) || Number(job.price) || 0;
+    const hours = Math.max(2, Math.round(subtotal / 85));
+    const amt = hours * 65;
+    breakdown.push({ label: `Handyman ${hours}h @ $65`, amount: amt });
+    pay += amt;
+  } else for (const li of job.line_items || []) {
     const name = li.name || '';
     const lt = Number(li.line_total) || 0;
 
@@ -984,6 +993,16 @@ function runSelfTests() {
   // Handyman $65/hr, 2h min.
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 255 -> 3h*65=195');
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 50, line_items: [] }), 'Kregg').pay, 130, 'handyman min 2h = 130');
+  // Two-tech HANDYMAN job (Christopher Dickens, Jul 2026): used to pay BOTH
+  // techs the full handyman rate (the special-case return skipped the split
+  // entirely). Now splits like any other two-tech job: 2h*$65=$130 handyman
+  // pay + $60 second-tech bonus = $190 pool -> $95 each.
+  const handymanTwoTech = { service_name: 'Handyman Services', subtotal: 75, second_tech: true, line_items: [
+    { name: 'Handyman Labor', quantity: 2, unit_price: 85, line_total: 170 },
+    { name: 'Second Technician', line_total: 70 },
+  ] };
+  eq(computeJobPay(job({ ...handymanTwoTech }), 'Kregg').pay, 95, 'two-tech handyman splits: (130+60)/2 = 95');
+  eq(computeJobPay(job({ ...handymanTwoTech, is_secondary: true }), 'Steve').pay, 95, 'second of two-tech handyman also gets 95');
 
   // Dismount (rate sheet §5): plain charge >$60 -> $60, <=$60 -> $50; Guaranteed
   // Dismount SOLD ($ line) -> $0, REDEEMED ($0 standalone) -> $60; xN multiplies.
