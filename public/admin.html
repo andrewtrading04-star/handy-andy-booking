@@ -5065,11 +5065,12 @@ async function renderReviews(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="revWrap"><div class="empty">Loading…</div></div>';
   try{
-    const [d, rq, gr, tl]=await Promise.all([
+    const [d, rq, gr, tl, pt]=await Promise.all([
       api('reviews',{ params:{ business:current.slug }}),
       api('review_requests',{ params:{ business:current.slug, page:1, limit:25 }}).catch(()=>({requests:[],total:0,scoreboard:null})),
       api('google_reviews',{ params:{ business:current.slug }}).catch(()=>({reviews:[]})),
       api('technicians',{ params:{ business:current.slug }}).catch(()=>({technicians:[]})),
+      api('partner_technicians',{ params:{ business:current.slug }}).catch(()=>({partner:null,technicians:[]})),
     ]);
     // A newer renderReviews() invocation has started (or already finished)
     // since this one began — bail out so we don't overwrite fresher DOM with
@@ -5079,7 +5080,14 @@ async function renderReviews(){
     const reviews=d.reviews||[];
     const gReviews=gr.reviews||[];
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
+    // Include the partner company's roster too — a review can legitimately
+    // credit a cross-hire tech (e.g. a Dom's tech who helped on a Handy Andy
+    // job), and without this they simply don't appear in the dropdown at all.
     const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
+    if(pt && pt.partner && (pt.technicians||[]).length){
+      const haveIds=new Set(revTechs.map(t=>t.id));
+      pt.technicians.forEach(t=>{ if(!haveIds.has(t.id)) revTechs.push({id:t.id,name:`${t.name} (${pt.partner.name})`}); });
+    }
 
     _revReqState={ page:1, limit:25, total:rq.total||0, rows:rq.requests||[], scoreboard:rq.scoreboard||null };
     _revReqSelected=new Set();

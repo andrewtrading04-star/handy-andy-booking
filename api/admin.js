@@ -4673,7 +4673,17 @@ async function googleReviewUpdate(req, res, db, auth, body) {
   if (body.technician_id !== undefined) {
     const tid = (body.technician_id || '').toString() || null;
     if (tid) {
-      const { data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', biz.id).maybeSingle();
+      let { data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', biz.id).maybeSingle();
+      // A review can legitimately credit a cross-hire tech from the partner
+      // company (e.g. a Dom's tech who helped on a Handy Andy job) — the
+      // dropdown already offers them (public/admin.html renderReviews), so
+      // the same id must be accepted here instead of 404ing.
+      if (!t) {
+        const partner = await partnerBusiness(db, biz.slug);
+        if (partner) {
+          ({ data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', partner.id).maybeSingle());
+        }
+      }
       if (!t) return res.status(404).json({ error: 'Technician not found' });
     }
     patch.technician_id = tid;
