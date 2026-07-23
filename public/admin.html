@@ -7040,7 +7040,7 @@ function nbTechOptionsHtml(excludeNames = []){
   // a second copy of any job — this stays a single scheduling pick, not a
   // duplicate booking.
   const anyCross = (nbPartner && nbIsDenver())
-    ? `<option value="any:cross">Any Technician</option>` : '';
+    ? `<option value="any:cross" style="font-weight:800;">Any Technician</option>` : '';
   return anyCross + nbPoolList().map(g=>{
     // Own team is narrowed to the zip's metro; the partner pool is already
     // filtered server-side by postal code in nbLoadPartnerTechs.
@@ -7090,7 +7090,11 @@ function nbPopulateTechs(){
   // availability — a booked-for-the-wrong-tech trap.
   const prev=sel.value;
   sel.innerHTML=nbTechOptionsHtml();
-  sel.value = (prev && [...sel.options].some(o=>o.value===prev)) ? prev : 'any:own';
+  // Denver default is the cross-company "Any Technician" — the office's
+  // fastest path for a caller who'll take anyone, ASAP. Elsewhere (no partner
+  // in this metro) it falls back to "Any <own> Technician" as before.
+  const denverDefault = (nbPartner && nbIsDenver()) ? 'any:cross' : 'any:own';
+  sel.value = (prev && [...sel.options].some(o=>o.value===prev)) ? prev : denverDefault;
 }
 // Fill the SECOND technician dropdown (no default pick — it's optional).
 // Juan and Zach are excluded from secondary selection but available as primary.
