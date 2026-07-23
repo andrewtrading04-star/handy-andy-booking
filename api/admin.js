@@ -837,6 +837,42 @@ async function calendar(req, res, db, auth) {
     .select('id, name, status, color, active, service_area_id, business_id').eq('business_id', biz.id).eq('active', true).order('name');
   const { data: areas } = await db.from('service_areas')
     .select('id, name, state, timezone').eq('business_id', biz.id).eq('active', true).order('name');
+
+  // Ghost bookings: a shared tech (matched by name, since each business keeps
+  // its own `technicians` row) can be booked on a partner-company job at the
+  // same time — Heather has no visibility into that from this business's own
+  // schedule. Surface it as a separate read-only list, never merged into
+  // `bookings`, so it can never be double-counted in payroll or job counts.
+  let ghostBookings = [];
+  try {
+    const partner = await partnerBusiness(db, biz.slug);
+    if (partner && (techs || []).length) {
+      const nameByLower = {};
+      for (const t of techs) nameByLower[t.name.trim().toLowerCase()] = t;
+      const { data: partnerTechs } = await db.from('technicians')
+        .select('id, name').eq('business_id', partner.id).eq('active', true);
+      const sharedPartnerIds = (partnerTechs || [])
+        .filter(pt => nameByLower[pt.name.trim().toLowerCase()])
+        .map(pt => pt.id);
+      if (sharedPartnerIds.length) {
+        const { data: pbk } = await db.from('bookings')
+          .select('id, technician_id, scheduled_at, duration_minutes, status')
+          .eq('business_id', partner.id)
+          .in('technician_id', sharedPartnerIds)
+          .not('status', 'in', '("cancelled","no_show")')
+          .gte('scheduled_at', from).lt('scheduled_at', to)
+          .limit(2000);
+        const partnerTechName = {};
+        for (const pt of partnerTechs) partnerTechName[pt.id] = pt.name;
+        ghostBookings = (pbk || []).map(b => ({
+          technician_id: nameByLower[partnerTechName[b.technician_id].trim().toLowerCase()].id,
+          scheduled_at: b.scheduled_at,
+          duration_minutes: b.duration_minutes || 60,
+          partner_company: partner.name,
+        }));
+      }
+    }
+  } catch (e) { console.warn('[admin] calendar ghost bookings failed:', e.message); ghostBookings = []; }
   // Metro tz per area, so each job's slot renders in its own timezone (Central
   // for Houston/Austin) instead of the single business (Mountain) clock.
   const areaTzById = {};
@@ -862,6 +898,7 @@ async function calendar(req, res, db, auth) {
     bookings,
     technicians: techs || [],
     areas: areas || [],
+    ghost_bookings: ghostBookings,
     fingerprint: calFingerprint(bk || []),
   });
 }
