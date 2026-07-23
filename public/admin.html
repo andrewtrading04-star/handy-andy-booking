@@ -749,8 +749,16 @@
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
   .gal-item{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05);}
   .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer;}
-  .gal-del{position:absolute;top:7px;right:7px;width:26px;height:26px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;}
+  .gal-del{position:absolute;top:7px;left:7px;width:26px;height:26px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;}
   .gal-del:hover{background:#dc2626;}
+  .gal-check{position:absolute;top:7px;right:7px;width:24px;height:24px;border-radius:6px;background:#fff;border:1.5px solid rgba(0,0,0,.25);box-shadow:0 1px 3px rgba(0,0,0,.35);cursor:pointer;z-index:2;accent-color:var(--accent);}
+  .gal-item.gal-selected{outline:3px solid var(--accent);outline-offset:-3px;}
+  .gal-bulkbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;background:var(--accent);color:#fff;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13.5px;font-weight:700;flex-wrap:wrap;}
+  .gal-bulkbar select{border-radius:7px;border:none;padding:6px 10px;font-size:13px;font-weight:700;color:var(--ink);}
+  .gal-bulkbar button{border:none;border-radius:7px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer;}
+  .gal-bulkbar .gal-bulk-apply{background:#fff;color:var(--accent);}
+  .gal-bulkbar .gal-bulk-del{background:#dc2626;color:#fff;}
+  .gal-bulkbar .gal-bulk-clear{background:rgba(255,255,255,.18);color:#fff;margin-left:auto;}
   .gal-tabs{display:flex;gap:8px;margin-bottom:14px;}
   .gal-tab{background:#fff;border:1px solid var(--line);color:var(--mute);padding:7px 15px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;}
   .gal-tab.on{background:var(--accent);border-color:var(--accent);color:#fff;}
@@ -3235,6 +3243,9 @@ document.getElementById('custForm').addEventListener('submit',async e=>{
 // each one. New uploads default to 'new'; legacy 'private' photos fold into New.
 let galleryPhotos=[];
 let galleryGroup='new';
+// Multi-select for bulk move/delete. Cleared on tab switch (selections don't
+// carry across categories — a photo picked in New has nothing to do with To Post).
+let gallerySelected=new Set();
 // Photo categories (manual triage buckets). Order = the owner's pipeline.
 // Legacy 'private' photos fold into the New inbox until re-filed.
 const PHOTO_CATS=[
@@ -3262,11 +3273,17 @@ function drawGallery(){
   const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=0);
   galleryPhotos.forEach(p=>{ counts[photoCat(p)]++; });
   const shown=galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
+  const shownIds=new Set(shown.map(p=>String(p.id)));
+  // Drop any selected id that scrolled out of the current tab (e.g. it got
+  // moved by someone else / a stale selection from before a tab switch).
+  [...gallerySelected].forEach(id=>{ if(!shownIds.has(id)) gallerySelected.delete(id); });
   const card=p=>{
     const cur=photoCat(p);
     const opts=PHOTO_CATS.map(c=>`<option value="${c.key}" ${c.key===cur?'selected':''}>${c.label}</option>`).join('');
-    return `<figure class="gal-item" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
+    const checked=gallerySelected.has(String(p.id));
+    return `<figure class="gal-item${checked?' gal-selected':''}" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
         <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
+        <input type="checkbox" class="gal-check" data-pid="${esc(p.id)}" title="Select photo" ${checked?'checked':''}>
         <img src="${esc(p.url)}" loading="lazy" alt="job photo">
         <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
           <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span><br>
@@ -3274,16 +3291,31 @@ function drawGallery(){
         </figcaption>
       </figure>`;
   };
+  const selCount=gallerySelected.size;
+  const bulkBar=selCount ? `<div class="gal-bulkbar">
+      <span>${selCount} selected</span>
+      <select id="galBulkMove">${PHOTO_CATS.map(c=>`<option value="${c.key}">Move to ${c.label}</option>`).join('')}</select>
+      <button type="button" class="gal-bulk-apply" id="galBulkApply">Apply</button>
+      <button type="button" class="gal-bulk-del" id="galBulkDelete">Delete selected</button>
+      <button type="button" class="gal-bulk-clear" id="galBulkClear">Clear</button>
+    </div>` : '';
   view.innerHTML=`<div class="wrap">
     <div class="gal-tabs">
       ${PHOTO_CATS.map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
     </div>
+    ${bulkBar}
     ${shown.length
       ? `<div class="gallery">${shown.map(card).join('')}</div>`
       : `<div class="empty">No photos in ${esc(photoCatLabel(galleryGroup))}.</div>`}
   </div>`;
-  view.querySelectorAll('.gal-tab').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; drawGallery(); }));
+  view.querySelectorAll('.gal-tab').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery(); }));
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
+  view.querySelectorAll('.gal-check').forEach(chk=>chk.addEventListener('click',e=>{
+    e.stopPropagation();
+    const id=String(chk.dataset.pid);
+    if(chk.checked) gallerySelected.add(id); else gallerySelected.delete(id);
+    drawGallery();
+  }));
   view.querySelectorAll('.gal-del').forEach(btn=>btn.addEventListener('click',async(e)=>{
     e.stopPropagation();
     if(!confirm('Delete this photo?')) return;
@@ -3292,6 +3324,7 @@ function drawGallery(){
       await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid }});
       toast('Photo deleted');
       galleryPhotos=galleryPhotos.filter(p=>String(p.id)!==String(btn.dataset.pid));
+      gallerySelected.delete(String(btn.dataset.pid));
       drawGallery();
     }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
   }));
@@ -3307,6 +3340,37 @@ function drawGallery(){
       drawGallery();   // photo leaves the current tab and appears under the target
     }catch(err){ sel.disabled=false; if(prev) prev.status=before; sel.value=photoCat({status:before}); toast(err.message||'Could not move photo'); }
   }));
+  // ── Bulk actions (act on every currently-selected photo in this tab) ──────
+  document.getElementById('galBulkClear')?.addEventListener('click',()=>{ gallerySelected.clear(); drawGallery(); });
+  document.getElementById('galBulkApply')?.addEventListener('click',async()=>{
+    const to=document.getElementById('galBulkMove').value;
+    const ids=[...gallerySelected];
+    const targets=ids.map(id=>galleryPhotos.find(p=>String(p.id)===id)).filter(Boolean);
+    const btn=document.getElementById('galBulkApply'); btn.disabled=true; btn.textContent='Moving…';
+    const results=await Promise.allSettled(targets.map(p=>
+      api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:p.booking_id, photo_id:p.id, status:to }})
+    ));
+    const failed=results.filter(r=>r.status==='rejected').length;
+    targets.forEach((p,i)=>{ if(results[i].status==='fulfilled') p.status=to; });
+    gallerySelected.clear();
+    toast(failed ? `Moved ${targets.length-failed} of ${targets.length} — ${failed} failed` : `Moved ${targets.length} photo${targets.length===1?'':'s'} to ${photoCatLabel(to)}`);
+    drawGallery();
+  });
+  document.getElementById('galBulkDelete')?.addEventListener('click',async()=>{
+    const ids=[...gallerySelected];
+    if(!confirm(`Delete ${ids.length} photo${ids.length===1?'':'s'}? This can't be undone.`)) return;
+    const targets=ids.map(id=>galleryPhotos.find(p=>String(p.id)===id)).filter(Boolean);
+    const btn=document.getElementById('galBulkDelete'); btn.disabled=true; btn.textContent='Deleting…';
+    const results=await Promise.allSettled(targets.map(p=>
+      api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:p.booking_id, photo_id:p.id }})
+    ));
+    const failedIds=new Set(targets.filter((p,i)=>results[i].status==='rejected').map(p=>String(p.id)));
+    galleryPhotos=galleryPhotos.filter(p=>!ids.includes(String(p.id))||failedIds.has(String(p.id)));
+    const failed=failedIds.size;
+    gallerySelected.clear();
+    toast(failed ? `Deleted ${targets.length-failed} of ${targets.length} — ${failed} failed` : `Deleted ${targets.length} photo${targets.length===1?'':'s'}`);
+    drawGallery();
+  });
 }
 
 // ── Booking Analytics ───────────────────────────────────────────────────────
