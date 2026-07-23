@@ -5222,7 +5222,7 @@ const EST_STALE_MINUTES = 60;
 function estAgeMinutes(e){ return e&&e.created_at ? (Date.now()-new Date(e.created_at).getTime())/60000 : 0; }
 function isStaleEstimate(e){ return e && e.status==='new' && estAgeMinutes(e)>=EST_STALE_MINUTES; }
 function fmtWaitMinutes(mins){ mins=Math.max(0,Math.round(mins)); const h=Math.floor(mins/60), m=mins%60; return h>0?`${h}h${m?` ${m}m`:''}`:`${m}m`; }
-let estFilter = 'all';
+let estFilter = 'new';
 let estCache = {};   // id -> estimate row, so the quote modal can open without a refetch
 const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
@@ -5239,7 +5239,7 @@ function estTotals(items, taxRate){
 
 async function renderEstimates(){
   const view=document.getElementById('view');
-  const filters=Object.entries({all:'All',...EST_STATUS,not_approved:'Not approved',archived:'Archived'}).map(([k,v])=>
+  const filters=Object.entries({all:'All',...EST_STATUS,archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <div class="est-filters" id="estFilters">${filters}</div>
@@ -5247,18 +5247,16 @@ async function renderEstimates(){
   </div>`;
   document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
   try{
-    // "Not approved" is a virtual folder over sent ("contacted") estimates that
-    // have aged past NOT_APPROVED_DAYS without approval — ask the server for the
-    // sent ones, then bucket client-side so aged-out quotes leave the "Estimate
-    // sent" tab and appear only under "Not approved".
-    const serverStatus = (estFilter==='not_approved') ? 'contacted' : estFilter;
-    const d=await api('estimates',{ params:{ business:current.slug, status:serverStatus }});
+    // A sent estimate the customer hasn't approved stays right here in "Estimate
+    // sent" no matter how old it gets — there's no separate "not approved" folder
+    // (there's no way for a customer to actively decline, so aging quotes just
+    // get a "🚫 Not approved · no response in Nd+ days" badge on the card below,
+    // via isNotApproved/NOT_APPROVED_DAYS, instead of being hidden away.
+    const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
     let items=d.estimates||[];
-    if(estFilter==='not_approved') items=items.filter(isNotApproved);
-    else if(estFilter==='contacted') items=items.filter(e=>!isNotApproved(e));
     refreshEstimateBadge();
     estCache={}; items.forEach(it=>{ estCache[it.id]=it; });
-    if(!items.length){ document.getElementById('estWrap').innerHTML=`<div class="empty">${estFilter==='not_approved'?'No unapproved estimates past '+NOT_APPROVED_DAYS+' days. 🎉':'No estimate requests yet.'}</div>`; return; }
+    if(!items.length){ document.getElementById('estWrap').innerHTML=`<div class="empty">No estimate requests yet.</div>`; return; }
     document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
     // wire controls
     document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{

@@ -4836,15 +4836,18 @@ async function estimates(req, res, db, auth) {
   // Select with the full column set; if an optional column (e.g. customer_zip
   // from a not-yet-applied migration) is missing from the schema cache, drop it
   // and retry so the Estimates list still loads instead of erroring outright.
-  // Auto-archive: estimates older than 7 days drop into the Archived folder so the
-  // working list only shows the last week. APPROVED estimates (status 'scheduled')
-  // are exempt — a customer-approved estimate is a job waiting to be booked, so it
-  // stays visible (and keeps its "book ASAP" alert) until it's actually converted.
+  // Auto-archive: UNSENT requests (status 'new') older than 7 days drop into the
+  // Archived folder, since nobody ever quoted them and the working "Needs
+  // Response" list should only show the last week's worth. Once an estimate has
+  // been SENT ('contacted') or APPROVED ('scheduled') it is exempt and stays
+  // visible indefinitely under "Estimate sent" — the office wants to keep
+  // seeing it (with its "no response in Nd+ days" badge) rather than have it
+  // silently vanish into Archived while still awaiting the customer.
   // Idempotent (skips already-archived); best-effort so it never blocks the list.
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   try {
     await db.from('estimates').update({ status: 'archived' })
-      .eq('business_id', biz.id).neq('status', 'archived').neq('status', 'scheduled')
+      .eq('business_id', biz.id).eq('status', 'new')
       .lt('created_at', sevenDaysAgo);
   } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
 
