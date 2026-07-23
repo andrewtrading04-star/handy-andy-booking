@@ -277,7 +277,7 @@
             {id:'1698905037955x771952325080383500',label:'Soundbar Installation',                             price:50},
             {id:'1698905090848x173584167038615550',label:'Install shelf under TV',                            price:45},
             {id:'1698905111338x528324964985864200',label:'LED Lights',                                        price:50},
-            {id:'1715820772054x920882061736149000',label:'1 hour of Handyman Labor',                          price:85,allowText:true},
+            {id:'1715820772054x920882061736149000',label:'1 hour of Handyman Labor',                          price:85,allowText:true,requireText:true},
             {id:'1698905159794x117137493532868600',label:'Other',                                             price:0,allowText:true},
           ]
         },
@@ -389,7 +389,7 @@
             {id:'1724797768116x299580540855954900',label:'Soundbar Installation', price:45},
             {id:'1724797768116x917721356073396700',label:'Install shelf under TV', price:45},
             {id:'1724797768116x423659180367796740',label:'LED Lights',             price:45},
-            {id:'1724797768116x234539799179230620',label:'1 hour of Handyman Labor',price:85,allowText:true},
+            {id:'1724797768116x234539799179230620',label:'1 hour of Handyman Labor',price:85,allowText:true,requireText:true},
             {id:'1724797768116x790768026842265000',label:'Other',                  price:0,allowText:true},
           ]
         },
@@ -1313,9 +1313,14 @@
         </div>
       </div>`;
       const showText=o.allowText&&q>0;
-      const ph=o.label==='Other'?'e.g. I need some curtains hung...':'Tell us what you need the handyman for...';
+      const ph=o.label==='Other'?'e.g. I need some curtains hung...':'e.g. hang a curtain rod above the window';
+      const empty=o.requireText&&!(optionComments[o.id]||'').trim();
+      const errId=`err-${o.id}`;
+      const labelText=o.requireText?`Briefly describe the task <span style="color:#a0a0ab!important;font-weight:400!important;">(required)</span>`:'';
       const textBox=showText?`<div style="margin:-2px 0 10px 0!important;">
-        <textarea class="ha-comment" data-o="${o.id}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid #ff6600!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
+        ${labelText?`<p style="color:#fff!important;font-size:12.5px!important;font-weight:600!important;margin:0 0 6px!important;">${labelText}</p>`:''}
+        <textarea class="ha-comment" data-o="${o.id}" data-required="${o.requireText?1:0}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid ${empty?'#ef4444':'#ff6600'}!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
+        <p id="${errId}" style="color:#ef4444!important;font-size:12px!important;margin:4px 0 0!important;display:none!important;">Let us know what needs doing so the tech shows up ready.</p>
       </div>`:'';
       return row+textBox;
     }).join('');
@@ -1557,7 +1562,13 @@
     root.querySelectorAll('.ha-sel').forEach(c=>c.addEventListener('click',()=>{selectOnly(c.dataset.s,c.dataset.o);render();}));
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
-    root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{optionComments[e.target.dataset.o]=e.target.value;}));
+    root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{
+      optionComments[e.target.dataset.o]=e.target.value;
+      if(e.target.value.trim()){
+        e.target.style.setProperty('border-color','#ff6600','important');
+        root.querySelector(`#err-${e.target.dataset.o}`)?.style.setProperty('display','none','important');
+      }
+    }));
     // Capture the customer's name as soon as they type it (on blur) so the booking
     // analytics shows who the session belongs to, even if they don't finish booking.
     const fnEl=root.querySelector('#c-fn'), lnEl=root.querySelector('#c-ln');
@@ -1609,7 +1620,25 @@
   }
 
   // ─── Navigation ───────────────────────────────────────────────────────────
+  function validateExtrasText(){
+    const sec=getSec('extras');
+    const missing=sec.options.filter(o=>o.requireText&&getQty(sec.id,o.id)>0&&!(optionComments[o.id]||'').trim());
+    if(!missing.length)return true;
+    const root=document.getElementById(TARGET_ID);
+    missing.forEach(o=>{
+      const ta=root?.querySelector(`.ha-comment[data-o="${o.id}"]`);
+      const err=root?.querySelector(`#err-${o.id}`);
+      if(ta)ta.style.setProperty('border-color','#ef4444','important');
+      if(err)err.style.setProperty('display','block','important');
+    });
+    const first=root?.querySelector(`.ha-comment[data-o="${missing[0].id}"]`);
+    first?.focus();
+    first?.scrollIntoView({behavior:'smooth',block:'center'});
+    return false;
+  }
+
   function goNext(){
+    if(STEP_KEYS[stepIdx]==='extras'&&!validateExtrasText())return;
     logStepAnswers(STEP_KEYS[stepIdx]);
     let ni=stepIdx+1;
     while(ni<STEP_KEYS.length&&shouldSkip(STEP_KEYS[ni]))ni++;
