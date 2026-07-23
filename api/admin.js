@@ -2674,7 +2674,7 @@ function sanitizeBookingLineItems(arr) {
     // (price / line_total) divided by the quantity. Backward-compatible with
     // callers that only send a single total and no quantity (qty defaults to 1).
     let unit;
-    if (it && it.unit_price != null && Number(it.unit_price) >= 0) {
+    if (it && it.unit_price != null && Number.isFinite(Number(it.unit_price))) {
       unit = Number(it.unit_price);
     } else {
       const total = Number(it && (it.price != null ? it.price : it.line_total)) || 0;
