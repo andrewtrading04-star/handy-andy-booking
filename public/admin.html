@@ -2248,7 +2248,7 @@ async function renderBkSlots(b){
 async function setBkSlots(b, slots){
   const el=document.getElementById('bkSlots'); if(el) el.style.opacity='.5';
   try{
-    const r=await api('booking_slots',{ method:'POST', body:{ business:current.slug, id:b.id, slots }});
+    const r=await apiConfirmUnavailable('booking_slots',{ business:current.slug, id:b.id, slots });
     b.extra_slots=r.extra_slots||[];
     toast('Time slots updated');
     await renderBkSlots(b);
@@ -2797,7 +2797,7 @@ document.getElementById('rsSave').onclick=async()=>{
   const btn=document.getElementById('rsSave'); btn.disabled=true;
   const onDone=rsState.onDone;
   try{
-    await api('booking_update',{ method:'POST', body:{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot }});
+    await apiConfirmUnavailable('booking_update',{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot });
     toast('Rescheduled ✓');
     closeRsModal();
     if(onDone) onDone();        // close the booking detail modal too
@@ -2928,16 +2928,33 @@ async function loadBkCardInfo(b){
   }catch(e){ /* no card on file, or lookup failed — line just stays hidden */ }
 }
 
-async function updateBooking(payload){
-  try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
-  catch(err){
-    if(err.code==='tech_unavailable' && confirm(`${err.message}\n\nBook them anyway?`)){
-      try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload, force_unavailable:true }}); toast('Updated'); refreshCurrent(); }
-      catch(err2){ toast(err2.message); }
-      return;
+// Shared confirm-and-retry for the "tech isn't scheduled" guard. Confirms
+// PER-TECHNICIAN (the server names exactly which one via err.tech_id) rather
+// than a blanket bypass — so confirming one conflict never silently waves
+// through an unrelated conflict on the OTHER tech in the same request. If the
+// side that tripped it was sent as 'any', pins the id the server actually
+// resolved so a retry can't silently land on someone different than what the
+// office just confirmed. Loops (up to 3x) in case fixing one side surfaces a
+// conflict on the other.
+async function apiConfirmUnavailable(action, body){
+  let curBody={...body};
+  const forced=[];
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      return await api(action,{ method:'POST', body:{...curBody, force_unavailable_ids:forced} });
+    }catch(err){
+      if(err.code!=='tech_unavailable' || !err.tech_id) throw err;
+      if(!confirm(`${err.message}\n\nBook them anyway?`)) throw err;
+      forced.push(err.tech_id);
+      const anySides=['technician_id','secondary_technician_id'].filter(k=>curBody[k]==='any');
+      if(anySides.length===1) curBody={...curBody, [anySides[0]]:err.tech_id};
     }
-    toast(err.message);
   }
+  throw new Error('Could not save after multiple availability conflicts — please try again.');
+}
+async function updateBooking(payload){
+  try{ await apiConfirmUnavailable('booking_update',{ business:current.slug, ...payload }); toast('Updated'); refreshCurrent(); }
+  catch(err){ toast(err.message); }
 }
 // Show the signed authorization captured at charge time (signature image, tip,
 // total, signer, time, IP) so the office can see the chargeback evidence on file.
@@ -7016,7 +7033,15 @@ async function nbLoadPartnerTechs(){
   nbPopulateSecondTechs();
 }
 function nbTechOptionsHtml(excludeNames = []){
-  return nbPoolList().map(g=>{
+  // Cross-company "Any Technician" — Denver only (the only metro both HA and
+  // Dom's operate in), and only once the partner roster is loaded. For the
+  // office's "someone will take anyone, ASAP" caller: real combined
+  // availability across BOTH companies (see rosterBizId pool='cross'), never
+  // a second copy of any job — this stays a single scheduling pick, not a
+  // duplicate booking.
+  const anyCross = (nbPartner && nbIsDenver())
+    ? `<option value="any:cross">Any Technician</option>` : '';
+  return anyCross + nbPoolList().map(g=>{
     // Own team is narrowed to the zip's metro; the partner pool is already
     // filtered server-side by postal code in nbLoadPartnerTechs.
     const techs = g.pool==='own' ? nbFilterOwn(g.techs) : g.techs;
@@ -7379,7 +7404,7 @@ async function loadNbCalendar(){
   }
   document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
   const params={ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:prim.id };
-  if(prim.pool==='partner') params.pool='partner';
+  if(prim.pool==='partner'||prim.pool==='cross') params.pool=prim.pool;
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
   try{
@@ -7419,7 +7444,7 @@ async function loadNbSlots(date){
   if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
   const prim=nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' };
   const params={ business:current.slug, date, technician_id:prim.id };
-  if(prim.pool==='partner') params.pool='partner';
+  if(prim.pool==='partner'||prim.pool==='cross') params.pool=prim.pool;
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
   const postalCode=document.getElementById('nbZip').value.trim();
@@ -7557,6 +7582,7 @@ const NB_AUSTIN_PRICES = {
   'soundbar installation': 45, 'led lights': 45,
 };
 function nbIsAustin(){ return /austin/i.test(nbAreaName||''); }
+function nbIsDenver(){ return /denver/i.test(nbAreaName||''); }
 // The price an option ACTUALLY books at right now — base catalog price, or the
 // Austin override when the job's ZIP resolved to Austin. Every price read
 // (render labels, totals, collected selections) must go through this.
@@ -8648,13 +8674,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       sms_consent: document.getElementById('nbSmsConsent').checked,
     };
     try{
-      let resp;
-      try{ resp=await api('booking_create',{ method:'POST', body:nbBody}); }
-      catch(eAvail){
-        if(eAvail.code==='tech_unavailable' && confirm(`${eAvail.message}\n\nBook them anyway?`)){
-          resp=await api('booking_create',{ method:'POST', body:{...nbBody, force_unavailable:true}});
-        } else throw eAvail;
-      }
+      const resp=await apiConfirmUnavailable('booking_create', nbBody);
       nbKeyCache.delete(fp);
       // Converted from an estimate? Archive it now that the job exists, so it leaves
       // the estimates list. Best-effort — the booking is already created either way.

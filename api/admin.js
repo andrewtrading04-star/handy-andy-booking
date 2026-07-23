@@ -87,14 +87,23 @@ async function partnerBusiness(db, hostSlug) {
   return data || null;
 }
 
-// Which business's technician roster an "Any Technician" / auto-pick should scan:
-// the partner company when pool==='partner' (and one exists), else the host.
+// Which business(es)' technician roster an "Any Technician" / auto-pick should
+// scan: the partner company alone when pool==='partner', BOTH companies (host
+// first) when pool==='cross' (the office's "Any Technician" — anyone from
+// either company, Denver-only — falling into the partner roster only when no
+// one at the host company is free), else just the host. Always returns an
+// ARRAY — every consumer (pickAvailableTech, availableSlotKeys,
+// freeSlotTechMap, and availableDates' local rosterIds) accepts one.
 async function rosterBizId(db, hostBiz, pool) {
+  if (pool === 'cross') {
+    const p = await partnerBusiness(db, hostBiz.slug);
+    return p ? [hostBiz.id, p.id] : [hostBiz.id];
+  }
   if (pool === 'partner') {
     const p = await partnerBusiness(db, hostBiz.slug);
-    if (p) return p.id;
+    if (p) return [p.id];
   }
-  return hostBiz.id;
+  return [hostBiz.id];
 }
 
 // Look up the service_area_id for a postal code in a given business.
@@ -1167,6 +1176,14 @@ async function bookingSlots(req, res, db, auth, body) {
 
   if (!extraSlotsCol) return res.status(400).json({ error: 'Extra time slots need migration 0052 applied first.' });
   const requested = Array.isArray(body && body.slots) ? body.slots.map(String) : [];
+  const forcedIds = new Set((body && body.force_unavailable_ids || []).map(String));
+  const dow = dayOfWeekFor(dateStr);
+  // Every tech on this job must have ALREADY marked an extra slot available —
+  // reserving it just because the main slot is theirs would silently extend
+  // the job into hours they never agreed to work. Per-tech override only
+  // (never bypasses the "already booked by someone else" conflict above).
+  const techSlotKeys = {};
+  for (const tid of techIds) techSlotKeys[tid] = await singleTechSlotKeys(db, tid, dateStr, dow);
   const clean = [];
   for (const sk of requested) {
     if (!SLOT_KEYS.has(sk)) return res.status(400).json({ error: `Invalid time slot: ${sk}` });
@@ -1174,6 +1191,14 @@ async function bookingSlots(req, res, db, auth, body) {
     if (takenByOthers.has(sk)) {
       const lab = (SLOTS.find(s => s.key === sk) || {}).label || sk;
       return res.status(409).json({ error: `${lab} is already booked for this technician — can't add it.` });
+    }
+    for (const tid of techIds) {
+      if (forcedIds.has(tid)) continue;
+      if (!techSlotKeys[tid].has(sk)) {
+        const { data: t } = await db.from('technicians').select('name').eq('id', tid).maybeSingle();
+        const lab = (SLOTS.find(s => s.key === sk) || {}).label || sk;
+        return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work ${lab} — they may have requested it off. Confirm to add it anyway.`, code: 'tech_unavailable', tech_id: tid });
+      }
     }
     if (!clean.includes(sk)) clean.push(sk);
   }
@@ -1493,6 +1518,9 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
     if (isExtraSlotsErr(error)) extraSlotsCol = false;
     ({ data, error } = await run(bookingLiftCols));
   }
+  // A genuinely unexpected error must THROW, not silently read as "this tech
+  // has no bookings today" — that would fail the double-booking guard OPEN.
+  if (error) throw error;
   const taken = new Set();
   for (const b of (data || [])) {
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
@@ -1553,10 +1581,11 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
 // (a slot a tech is already booked for is no longer offered — no double-booking).
 // excludeTechId drops one tech from the "ANY" union, so the SAME person can't be
 // counted as both the primary and the second technician on a two-tech job.
-async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTechId = null) {
+async function availableSlotKeys(db, bizIdOrIds, techId, dateStr, dow, tz, excludeTechId = null) {
+  const bizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
   if (!techId || techId === 'any') {
     const { data: techs } = await db.from('technicians')
-      .select('id').eq('business_id', bizId).eq('active', true);
+      .select('id').in('business_id', bizIds).eq('active', true);
     const ids = (techs || []).map(t => t.id).filter(id => !excludeTechId || id !== excludeTechId);
     const state = await batchTechSlotState(db, ids, dateStr, dow, tz);
     const union = new Set();
@@ -1564,7 +1593,7 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
     return union;
   }
   const ks = await singleTechSlotKeys(db, techId, dateStr, dow);
-  const booked = await bookedSlotKeysForTech(db, bizId, techId, dateStr, tz);
+  const booked = await bookedSlotKeysForTech(db, null, techId, dateStr, tz);
   booked.forEach(k => ks.delete(k));
   return ks;
 }
@@ -1573,11 +1602,12 @@ async function availableSlotKeys(db, bizId, techId, dateStr, dow, tz, excludeTec
 // that is either a concrete tech or "any" of a roster (recurring ± exceptions −
 // existing bookings). Used to match a DISTINCT two-tech pair for big-TV jobs:
 // the union of the two sides' free techs in a slot must be ≥ 2 distinct people.
-async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaId = null, excludeIneligibleSecondary = false) {
+async function freeSlotTechMap(db, bizIdOrIds, techId, dateStr, dow, tz, serviceAreaId = null, excludeIneligibleSecondary = false) {
+  const bizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
   let techIds;
   if (!techId || techId === 'any') {
     let query = db.from('technicians')
-      .select('id, name').eq('business_id', bizId).eq('active', true);
+      .select('id, name').in('business_id', bizIds).eq('active', true);
     if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
     const { data: techs } = await query;
     let pool = techs || [];
@@ -1606,35 +1636,61 @@ async function freeSlotTechMap(db, bizId, techId, dateStr, dow, tz, serviceAreaI
 // excludeTechId skips one tech (e.g. the primary, when auto-picking the second).
 // serviceAreaId restricts to techs in a specific service area (for cross-company secondary tech selection).
 // excludeIneligibleSecondary drops techs who can never be a second tech (Juan/Zach).
-async function pickAvailableTech(db, bizId, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null, excludeIneligibleSecondary = false) {
-  let query = db.from('technicians')
-    .select('id, name').eq('business_id', bizId).eq('active', true)
-    .order('created_at', { ascending: true });
-  if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
-  const { data: techs } = await query;
-  let list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
-  if (excludeIneligibleSecondary) list = list.filter(t => !isSecondaryIneligibleName(t.name));
-  if (!list.length) return null;
+// bizIdOrIds is normally a single business id, but for the cross-company "Any
+// Technician" pool it's an ORDERED array of scopes (e.g. [ownBizId, partnerBizId])
+// — each scope is tried to exhaustion before falling to the next, so "Any
+// Technician" prefers keeping the job in-house and only reaches into the
+// partner company when nobody home is free.
+// strict=true skips the off-schedule "second choice" fallback entirely — for
+// callers with no human in the loop to confirm an override (e.g. a customer's
+// own estimate-approval auto-book), silently handing the job to someone who
+// never marked that slot available is never acceptable; better to come back
+// null and tell the customer to pick another time.
+async function pickAvailableTech(db, bizIdOrIds, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null, excludeIneligibleSecondary = false, strict = false) {
+  const scopeBizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
+  const scopeLists = [];
+  for (const bizId of scopeBizIds) {
+    let query = db.from('technicians')
+      .select('id, name').eq('business_id', bizId).eq('active', true)
+      .order('created_at', { ascending: true });
+    if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
+    const { data: techs } = await query;
+    let list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
+    if (excludeIneligibleSecondary) list = list.filter(t => !isSecondaryIneligibleName(t.name));
+    scopeLists.push(list);
+  }
+  if (!scopeLists.some(l => l.length)) return null;
   if (dateStr && slotKey) {
     const dow = dayOfWeekFor(dateStr);
-    // First choice: scheduled-available AND free in this slot.
-    for (const t of list) {
-      const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
-      if (!keys.has(slotKey)) continue;
-      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
-      if (!booked.has(slotKey)) return t.id;
+    // First choice: scheduled-available AND free in this slot — scope by
+    // scope, in priority order.
+    for (const list of scopeLists) {
+      for (const t of list) {
+        const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
+        if (!keys.has(slotKey)) continue;
+        const booked = await bookedSlotKeysForTech(db, null, t.id, dateStr, tz);
+        if (!booked.has(slotKey)) return t.id;
+      }
     }
     // Second choice: any active tech who is at least free in this slot, even if
     // not on their normal schedule — still never returns an already-booked tech.
-    for (const t of list) {
-      const booked = await bookedSlotKeysForTech(db, bizId, t.id, dateStr, tz);
-      if (!booked.has(slotKey)) return t.id;
+    // Same scope priority order as above. Skipped entirely in strict mode.
+    if (!strict) {
+      for (const list of scopeLists) {
+        for (const t of list) {
+          const booked = await bookedSlotKeysForTech(db, null, t.id, dateStr, tz);
+          if (!booked.has(slotKey)) return t.id;
+        }
+      }
     }
     // Everyone is booked for this slot — leave unassigned rather than stack a
     // second job on a tech. bookingCreate will create it as 'confirmed'/unassigned.
     return null;
   }
-  return list[0].id;
+  // No date/slot to check against — we can't verify anyone's actual schedule,
+  // so leave the job unassigned rather than gamble on a blind pick who might be
+  // busy or off that day. The office (or a follow-up guard) assigns explicitly.
+  return null;
 }
 
 // Pick a SECONDARY tech who is genuinely SCHEDULED to work AND free in this exact
@@ -1686,11 +1742,16 @@ async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz
 }
 
 async function singleTechSlotKeys(db, techId, dateStr, dow) {
-  const { data: av } = await db.from('technician_availability')
+  // Errors THROW rather than silently reading as "zero availability" — a
+  // transient DB hiccup here must never look identical to a real day off (that
+  // would train the office to reflexively force-override past real conflicts).
+  const { data: av, error: avErr } = await db.from('technician_availability')
     .select('slot_key').eq('technician_id', techId).eq('day_of_week', dow);
+  if (avErr) throw avErr;
   const slots = new Set((av || []).map(x => x.slot_key));
-  const { data: exc } = await db.from('technician_availability_exceptions')
+  const { data: exc, error: excErr } = await db.from('technician_availability_exceptions')
     .select('slot_key, is_available').eq('technician_id', techId).eq('exception_date', dateStr);
+  if (excErr) throw excErr;
   for (const e of (exc || [])) {
     if (e.is_available) slots.add(e.slot_key); else slots.delete(e.slot_key);
   }
@@ -1713,8 +1774,8 @@ async function availableDates(req, res, db, auth) {
   // technician ids to consider. Each side has its own company pool: pool drives
   // the primary, pool2 the second tech. A side that is "any" expands to that
   // pool's whole active roster.
-  const rosterIds = async (rid) => {
-    const { data } = await db.from('technicians').select('id').eq('business_id', rid).eq('active', true);
+  const rosterIds = async (bizIds) => {
+    const { data } = await db.from('technicians').select('id').in('business_id', bizIds).eq('active', true);
     return (data || []).map(t => t.id);
   };
   const primaryIds = (techId && techId !== 'any')
@@ -2024,17 +2085,43 @@ async function bookingCreate(req, res, db, auth, body) {
     return res.status(400).json({ error: 'The two technicians must be different.' });
   }
 
-  // Guard against double-booking: if a specific tech ends up assigned to a slot
-  // they already have a non-cancelled booking in, reject the create. This backs
-  // up the UI (which no longer offers booked slots) against stale forms / races.
-  if (scheduled_at) {
+  // Guard against double-booking AND against booking a tech during a time
+  // they've marked unavailable (a requested day off, or off their recurring
+  // schedule). Picking a CONCRETE tech from the dropdown used to skip the
+  // availability half entirely — only the 'any'-pick path (pickAvailableTech)
+  // ever consulted the exceptions table. Double-booking can never be
+  // overridden (a tech can't be in two places at once); the availability half
+  // can be, per-technician, via force_unavailable_ids (the office confirming
+  // "book them anyway" for THAT specific person only — not a blanket bypass
+  // that would also silently wave through an unrelated conflict on the OTHER
+  // tech in the same request).
+  if (scheduled_at && (technician_id || secondary_technician_id)) {
     const conflictDate = body.scheduled_date || localDateStr(tz, scheduled_at);
     const conflictSlot = body.scheduled_slot || slotKeyForLocalTime(localHHMM(tz, scheduled_at));
-    if (conflictSlot) {
+    const forcedIds = new Set((body.force_unavailable_ids || []).map(String));
+    if (!conflictSlot) {
+      // Can't place this time inside one of the 5 fixed slots, so nothing below
+      // can be verified — fail CLOSED (require an explicit override) instead of
+      // silently skipping every check for an off-grid time.
+      const uncheckedId = technician_id && !forcedIds.has(String(technician_id)) ? technician_id
+        : (secondary_technician_id && !forcedIds.has(String(secondary_technician_id)) ? secondary_technician_id : null);
+      if (uncheckedId) {
+        const { data: t } = await db.from('technicians').select('name').eq('id', uncheckedId).maybeSingle();
+        return res.status(409).json({ error: `Couldn't verify ${t?.name || 'this technician'}'s schedule for this time — it doesn't line up with one of the standard time slots. Confirm to book anyway.`, code: 'tech_unavailable', tech_id: uncheckedId });
+      }
+    } else {
+      const dow = dayOfWeekFor(conflictDate);
       if (technician_id) {
         const taken = await bookedSlotKeysForTech(db, biz.id, technician_id, conflictDate, tz);
         if (taken.has(conflictSlot)) {
           return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+        }
+        if (!forcedIds.has(String(technician_id))) {
+          const keys = await singleTechSlotKeys(db, technician_id, conflictDate, dow);
+          if (!keys.has(conflictSlot)) {
+            const { data: t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle();
+            return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable', tech_id: technician_id });
+          }
         }
       }
       if (secondary_technician_id) {
@@ -2042,27 +2129,11 @@ async function bookingCreate(req, res, db, auth, body) {
         if (taken2.has(conflictSlot)) {
           return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
         }
-      }
-      // Guard against booking a tech during a time they've marked unavailable
-      // (a requested day off, or just not on their recurring schedule). Picking
-      // a CONCRETE tech from the dropdown used to skip this entirely — only the
-      // 'any'-pick path (pickAvailableTech) ever consulted the exceptions table.
-      // Soft block: office can override via force_unavailable if the tech agreed
-      // to come in anyway despite the day off.
-      if (!body.force_unavailable) {
-        const dow = dayOfWeekFor(conflictDate);
-        if (technician_id) {
-          const keys = await singleTechSlotKeys(db, technician_id, conflictDate, dow);
-          if (!keys.has(conflictSlot)) {
-            const { data: t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle();
-            return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
-          }
-        }
-        if (secondary_technician_id) {
+        if (!forcedIds.has(String(secondary_technician_id))) {
           const keys2 = await singleTechSlotKeys(db, secondary_technician_id, conflictDate, dow);
           if (!keys2.has(conflictSlot)) {
             const { data: t2 } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
-            return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+            return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable', tech_id: secondary_technician_id });
           }
         }
       }
@@ -2489,7 +2560,9 @@ async function bookingUpdate(req, res, db, auth, body) {
         let sec = body.secondary_technician_id || null;
         // 'any' → resolve to the scheduled default (Handy Andy first for Dom's).
         if (sec === 'any') {
-          const aTz = biz.timezone || 'America/Denver';
+          // METRO tz (Central for Houston/Austin), not the single business tz —
+          // see the guard block below for why this distinction matters.
+          const aTz = await areaTimezone(db, await serviceAreaIdFromPostal(db, biz.id, existing.postal_code), biz.timezone || 'America/Denver');
           const effTechId = (body.technician_id !== undefined ? patch.technician_id : existing.technician_id) || null;
           const aDate = existing.scheduled_at ? localDateStr(aTz, existing.scheduled_at) : null;
           const aSlot = existing.scheduled_at ? slotKeyForLocalTime(localHHMM(aTz, existing.scheduled_at)) : null;
@@ -2537,10 +2610,17 @@ async function bookingUpdate(req, res, db, auth, body) {
       return res.status(400).json({ error: `Unknown booking action "${body.action}"` });
   }
 
-  // Double-booking guard for reschedule / reassign: don't let an edit drop a tech
-  // onto a slot they already have another non-cancelled booking in.
+  // Double-booking guard for reschedule / reassign, PLUS a guard against
+  // dropping a tech onto a time they've marked unavailable. Double-booking can
+  // never be overridden; the availability half can be, per-technician, via
+  // force_unavailable_ids — see the matching comment in bookingCreate.
   if (body.action === 'reschedule' || body.action === 'assign') {
-    const tz = biz.timezone || 'America/Denver';
+    // METRO tz (Central for Houston/Austin), not the single business tz — a
+    // booking's wall-clock time is always anchored in the metro it's in (see
+    // bookingCreate / the reschedule branch above), so slot-key math here must
+    // match or it silently computes the WRONG slot (or none at all, which used
+    // to make every guard below no-op for every Houston/Austin booking).
+    const tz = await areaTimezone(db, await serviceAreaIdFromPostal(db, biz.id, existing.postal_code), biz.timezone || 'America/Denver');
     const effTech = ('technician_id' in patch) ? patch.technician_id : existing.technician_id;
     const effSecondTech = ('secondary_technician_id' in patch) ? patch.secondary_technician_id : existing.secondary_technician_id;
     // The same person can't be both technicians on one job.
@@ -2548,45 +2628,46 @@ async function bookingUpdate(req, res, db, auth, body) {
       return res.status(400).json({ error: 'The two technicians must be different.' });
     }
     const effAt = patch.scheduled_at || existing.scheduled_at;
-    if (effTech && effAt) {
-      const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
-      if (slotKey) {
-        const taken = await bookedSlotKeysForTech(db, biz.id, effTech, localDateStr(tz, effAt), tz, id);
-        if (taken.has(slotKey)) {
-          return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
-        }
-      }
-    }
-    // Also check secondary technician if one is assigned
-    if (effSecondTech && effAt) {
-      const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
-      if (slotKey) {
-        const taken = await bookedSlotKeysForTech(db, biz.id, effSecondTech, localDateStr(tz, effAt), tz, id);
-        if (taken.has(slotKey)) {
-          return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
-        }
-      }
-    }
-    // Guard against reassigning/rescheduling onto a tech's marked day off — see
-    // the matching check in bookingCreate for why this is needed (the concrete-
-    // tech dropdown path never consulted the exceptions table before).
-    if (!body.force_unavailable && effAt) {
+    if (effAt && (effTech || effSecondTech)) {
       const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
       const effDate = localDateStr(tz, effAt);
-      const dow = dayOfWeekFor(effDate);
-      if (slotKey) {
+      const forcedIds = new Set((body.force_unavailable_ids || []).map(String));
+      if (!slotKey) {
+        // Can't place this time inside one of the 5 fixed slots — fail CLOSED
+        // (require an explicit override) instead of silently skipping every
+        // check for an off-grid time.
+        const uncheckedId = effTech && !forcedIds.has(String(effTech)) ? effTech
+          : (effSecondTech && !forcedIds.has(String(effSecondTech)) ? effSecondTech : null);
+        if (uncheckedId) {
+          const { data: t } = await db.from('technicians').select('name').eq('id', uncheckedId).maybeSingle();
+          return res.status(409).json({ error: `Couldn't verify ${t?.name || 'this technician'}'s schedule for this time — it doesn't line up with one of the standard time slots. Confirm to book anyway.`, code: 'tech_unavailable', tech_id: uncheckedId });
+        }
+      } else {
+        const dow = dayOfWeekFor(effDate);
         if (effTech) {
-          const keys = await singleTechSlotKeys(db, effTech, effDate, dow);
-          if (!keys.has(slotKey)) {
-            const { data: t } = await db.from('technicians').select('name').eq('id', effTech).maybeSingle();
-            return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          const taken = await bookedSlotKeysForTech(db, biz.id, effTech, effDate, tz, id);
+          if (taken.has(slotKey)) {
+            return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+          }
+          if (!forcedIds.has(String(effTech))) {
+            const keys = await singleTechSlotKeys(db, effTech, effDate, dow);
+            if (!keys.has(slotKey)) {
+              const { data: t } = await db.from('technicians').select('name').eq('id', effTech).maybeSingle();
+              return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable', tech_id: effTech });
+            }
           }
         }
         if (effSecondTech) {
-          const keys2 = await singleTechSlotKeys(db, effSecondTech, effDate, dow);
-          if (!keys2.has(slotKey)) {
-            const { data: t2 } = await db.from('technicians').select('name').eq('id', effSecondTech).maybeSingle();
-            return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          const taken2 = await bookedSlotKeysForTech(db, biz.id, effSecondTech, effDate, tz, id);
+          if (taken2.has(slotKey)) {
+            return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
+          }
+          if (!forcedIds.has(String(effSecondTech))) {
+            const keys2 = await singleTechSlotKeys(db, effSecondTech, effDate, dow);
+            if (!keys2.has(slotKey)) {
+              const { data: t2 } = await db.from('technicians').select('name').eq('id', effSecondTech).maybeSingle();
+              return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable', tech_id: effSecondTech });
+            }
           }
         }
       }
@@ -5505,9 +5586,13 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   const scheduled_at = new Date(midnight.getTime() + (hh * 60 + mm) * 60000).toISOString();
 
   // Re-check availability RIGHT NOW — the page may have loaded minutes ago.
-  const technician_id = await pickAvailableTech(db, biz.id, slot.date, slot.slot_key, areaTz);
+  // strict:true — this is a fully automated, customer-triggered booking with
+  // no office staffer to confirm an override, so it must never fall back to a
+  // tech who merely has no conflicting job (pickAvailableTech's off-schedule
+  // second choice) — only someone actually scheduled to work that slot.
+  const technician_id = await pickAvailableTech(db, biz.id, slot.date, slot.slot_key, areaTz, null, null, false, true);
   if (!technician_id) {
-    const e = new Error("That time was just booked by someone else. Please pick another time.");
+    const e = new Error("That time isn't available anymore — please pick another time.");
     e.conflict = true;
     throw e;
   }
