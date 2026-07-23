@@ -2047,6 +2047,29 @@ async function bookingCreate(req, res, db, auth, body) {
           return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
         }
       }
+      // Guard against booking a tech during a time they've marked unavailable
+      // (a requested day off, or just not on their recurring schedule). Picking
+      // a CONCRETE tech from the dropdown used to skip this entirely — only the
+      // 'any'-pick path (pickAvailableTech) ever consulted the exceptions table.
+      // Soft block: office can override via force_unavailable if the tech agreed
+      // to come in anyway despite the day off.
+      if (!body.force_unavailable) {
+        const dow = dayOfWeekFor(conflictDate);
+        if (technician_id) {
+          const keys = await singleTechSlotKeys(db, technician_id, conflictDate, dow);
+          if (!keys.has(conflictSlot)) {
+            const { data: t } = await db.from('technicians').select('name').eq('id', technician_id).maybeSingle();
+            return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          }
+        }
+        if (secondary_technician_id) {
+          const keys2 = await singleTechSlotKeys(db, secondary_technician_id, conflictDate, dow);
+          if (!keys2.has(conflictSlot)) {
+            const { data: t2 } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
+            return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          }
+        }
+      }
     }
   }
 
@@ -2545,6 +2568,30 @@ async function bookingUpdate(req, res, db, auth, body) {
         const taken = await bookedSlotKeysForTech(db, biz.id, effSecondTech, localDateStr(tz, effAt), tz, id);
         if (taken.has(slotKey)) {
           return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
+        }
+      }
+    }
+    // Guard against reassigning/rescheduling onto a tech's marked day off — see
+    // the matching check in bookingCreate for why this is needed (the concrete-
+    // tech dropdown path never consulted the exceptions table before).
+    if (!body.force_unavailable && effAt) {
+      const slotKey = slotKeyForLocalTime(localHHMM(tz, effAt));
+      const effDate = localDateStr(tz, effAt);
+      const dow = dayOfWeekFor(effDate);
+      if (slotKey) {
+        if (effTech) {
+          const keys = await singleTechSlotKeys(db, effTech, effDate, dow);
+          if (!keys.has(slotKey)) {
+            const { data: t } = await db.from('technicians').select('name').eq('id', effTech).maybeSingle();
+            return res.status(409).json({ error: `${t?.name || 'This technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          }
+        }
+        if (effSecondTech) {
+          const keys2 = await singleTechSlotKeys(db, effSecondTech, effDate, dow);
+          if (!keys2.has(slotKey)) {
+            const { data: t2 } = await db.from('technicians').select('name').eq('id', effSecondTech).maybeSingle();
+            return res.status(409).json({ error: `${t2?.name || 'The second technician'} isn't scheduled to work that day/time — they may have requested it off. Pick another technician or time, or confirm to book anyway.`, code: 'tech_unavailable' });
+          }
         }
       }
     }

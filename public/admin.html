@@ -1458,7 +1458,7 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
     logout(); throw new Error('Session expired — please sign in again');
   }
   const data = await res.json().catch(()=>({}));
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (!res.ok) { const e=new Error(data.error || 'Request failed'); if(data.code) e.code=data.code; throw e; }
   return data;
 }
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
@@ -2930,7 +2930,14 @@ async function loadBkCardInfo(b){
 
 async function updateBooking(payload){
   try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Updated'); refreshCurrent(); }
-  catch(err){ toast(err.message); }
+  catch(err){
+    if(err.code==='tech_unavailable' && confirm(`${err.message}\n\nBook them anyway?`)){
+      try{ await api('booking_update',{ method:'POST', body:{ business:current.slug, ...payload, force_unavailable:true }}); toast('Updated'); refreshCurrent(); }
+      catch(err2){ toast(err2.message); }
+      return;
+    }
+    toast(err.message);
+  }
 }
 // Show the signed authorization captured at charge time (signature image, tip,
 // total, signer, time, IP) so the office can see the chargeback evidence on file.
@@ -8609,33 +8616,40 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     const fp=[current.slug,date,nbSelectedSlot.key,phone||email||name].join('|');
     const key=nbKeyCache.get(fp)||nbNewKey();
     nbKeyCache.set(fp,key);
+    const nbBody={
+      business: current.slug,
+      idempotency_key: key,
+      customer:{ name, phone, email,
+        address_line1:document.getElementById('nbAddr').value.trim(),
+        city:document.getElementById('nbCity').value.trim(),
+        state:document.getElementById('nbState').value.trim(),
+        postal_code:document.getElementById('nbZip').value.trim() },
+      service_id: nbServiceId || document.getElementById('nbService').value || null,
+      technician_id: prim.id || 'any',
+      pool: prim.pool,
+      secondary_technician_id: sec ? sec.id : null,
+      pool2: sec ? sec.pool : 'own',
+      needs_lifting: secondMode==='mandatory',
+      tv_size_category: nbSelectedLiftingKind()||null,
+      scheduled_date: date,
+      scheduled_slot: nbSelectedSlot.key,
+      selections,
+      subtotal,
+      tax,
+      price: totalPrice,
+      notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
+      payment_method: paymentMethod || null,
+      payment_method_id: paymentMethodId,
+      sms_consent: document.getElementById('nbSmsConsent').checked,
+    };
     try{
-      const resp=await api('booking_create',{ method:'POST', body:{
-        business: current.slug,
-        idempotency_key: key,
-        customer:{ name, phone, email,
-          address_line1:document.getElementById('nbAddr').value.trim(),
-          city:document.getElementById('nbCity').value.trim(),
-          state:document.getElementById('nbState').value.trim(),
-          postal_code:document.getElementById('nbZip').value.trim() },
-        service_id: nbServiceId || document.getElementById('nbService').value || null,
-        technician_id: prim.id || 'any',
-        pool: prim.pool,
-        secondary_technician_id: sec ? sec.id : null,
-        pool2: sec ? sec.pool : 'own',
-        needs_lifting: secondMode==='mandatory',
-        tv_size_category: nbSelectedLiftingKind()||null,
-        scheduled_date: date,
-        scheduled_slot: nbSelectedSlot.key,
-        selections,
-        subtotal,
-        tax,
-        price: totalPrice,
-        notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
-        payment_method: paymentMethod || null,
-        payment_method_id: paymentMethodId,
-        sms_consent: document.getElementById('nbSmsConsent').checked,
-      }});
+      let resp;
+      try{ resp=await api('booking_create',{ method:'POST', body:nbBody}); }
+      catch(eAvail){
+        if(eAvail.code==='tech_unavailable' && confirm(`${eAvail.message}\n\nBook them anyway?`)){
+          resp=await api('booking_create',{ method:'POST', body:{...nbBody, force_unavailable:true}});
+        } else throw eAvail;
+      }
       nbKeyCache.delete(fp);
       // Converted from an estimate? Archive it now that the job exists, so it leaves
       // the estimates list. Best-effort — the booking is already created either way.
