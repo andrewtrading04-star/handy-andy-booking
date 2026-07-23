@@ -838,39 +838,34 @@ async function calendar(req, res, db, auth) {
   const { data: areas } = await db.from('service_areas')
     .select('id, name, state, timezone').eq('business_id', biz.id).eq('active', true).order('name');
 
-  // Ghost bookings: a shared tech (matched by name, since each business keeps
-  // its own `technicians` row) can be booked on a partner-company job at the
-  // same time — Heather has no visibility into that from this business's own
-  // schedule. Surface it as a separate read-only list, never merged into
-  // `bookings`, so it can never be double-counted in payroll or job counts.
+  // Ghost bookings: a cross-hired tech keeps ONE technician row, referenced
+  // directly by technician_id/secondary_technician_id on bookings that belong
+  // to the OTHER business (e.g. Kregg — a Handy Andy tech — picking up a Dom's
+  // job). So the match is by id, not name: this business's own tech ids,
+  // looked up against the partner's bookings. Surface it as a separate
+  // read-only list, never merged into `bookings`, so it can never be
+  // double-counted in payroll or job counts.
   let ghostBookings = [];
   try {
     const partner = await partnerBusiness(db, biz.slug);
-    if (partner && (techs || []).length) {
-      const nameByLower = {};
-      for (const t of techs) nameByLower[t.name.trim().toLowerCase()] = t;
-      const { data: partnerTechs } = await db.from('technicians')
-        .select('id, name').eq('business_id', partner.id).eq('active', true);
-      const sharedPartnerIds = (partnerTechs || [])
-        .filter(pt => nameByLower[pt.name.trim().toLowerCase()])
-        .map(pt => pt.id);
-      if (sharedPartnerIds.length) {
-        const { data: pbk, error: pbkErr } = await db.from('bookings')
-          .select('id, technician_id, scheduled_at, duration_minutes, status')
-          .eq('business_id', partner.id)
-          .in('technician_id', sharedPartnerIds)
-          .not('status', 'in', '(cancelled,no_show)')
-          .gte('scheduled_at', from).lt('scheduled_at', to)
-          .limit(2000);
-        if (pbkErr) throw pbkErr;
-        const partnerTechName = {};
-        for (const pt of partnerTechs) partnerTechName[pt.id] = pt.name;
-        ghostBookings = (pbk || []).map(b => ({
-          technician_id: nameByLower[partnerTechName[b.technician_id].trim().toLowerCase()].id,
-          scheduled_at: b.scheduled_at,
-          duration_minutes: b.duration_minutes || 60,
-          partner_company: partner.name,
-        }));
+    const ownTechIds = (techs || []).map(t => t.id);
+    if (partner && ownTechIds.length) {
+      const { data: pbk, error: pbkErr } = await db.from('bookings')
+        .select('id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status')
+        .eq('business_id', partner.id)
+        .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
+        .not('status', 'in', '(cancelled,no_show)')
+        .gte('scheduled_at', from).lt('scheduled_at', to)
+        .limit(2000);
+      if (pbkErr) throw pbkErr;
+      const ownTechIdSet = new Set(ownTechIds);
+      for (const b of (pbk || [])) {
+        if (ownTechIdSet.has(b.technician_id)) {
+          ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: partner.name });
+        }
+        if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
+          ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: partner.name });
+        }
       }
     }
   } catch (e) { console.warn('[admin] calendar ghost bookings failed:', e.message); ghostBookings = []; }
