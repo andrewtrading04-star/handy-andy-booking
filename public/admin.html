@@ -552,7 +552,7 @@
   #modal #nbConvertSummary{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#c7dcff;}
   #modal #nbBringsOwnNote{background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.35);color:#fdba74;}
   #modal #nbRequestedTimes{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
-  #modal #nbTotalDisplay{background:rgba(255,255,255,.05);color:#eef2f7;}
+  #modal #nbTotalDisplay{background:#16213f;color:#eef2f7;}
   #modal .nb-min-warn.floored{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.4);color:#fca5a5;}
   #modal .nb-min-warn.waived{background:rgba(251,146,60,.14);border-color:rgba(251,146,60,.4);color:#fdba74;}
   #modal .nb-cust{background:#16273f;border-color:rgba(255,255,255,.14);}
@@ -1182,7 +1182,7 @@
       </div>
       <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
-      <div id="nbTotalDisplay" style="font-size:13px;padding:8px;border-radius:8px;"></div>
+      <div id="nbTotalDisplay" style="font-size:13px;padding:12px 14px;border-radius:10px;"></div>
       <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
@@ -8120,7 +8120,9 @@ function updateNbTotal(){
   const optionsTotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
   // Assurion: customer pays $0; the total shown is Steve's payout.
   if(nbAssurionActive){
-    document.getElementById('nbTotalDisplay').innerHTML=`Customer pays: $0.00 | <span style="font-size:130%;font-weight:800;">Steve’s payout: $${optionsTotal.toFixed(2)}</span>`;
+    document.getElementById('nbTotalDisplay').innerHTML=`
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Customer pays</span><span>$0.00</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:#eef2f7;border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:8px;"><span>Steve's payout</span><span style="color:#4ade80;">$${optionsTotal.toFixed(2)}</span></div>`;
     return;
   }
   const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
@@ -8130,8 +8132,11 @@ function updateNbTotal(){
   const subtotal=optionsTotal+travelFee+afterHours;
   const tax=Math.round(subtotal*TAX_RATE*100)/100;
   const total=subtotal+tax;
-  const ahNote=afterHours?` (incl. $${afterHours} after-hours)`:'';
-  document.getElementById('nbTotalDisplay').innerHTML=`Subtotal: $${subtotal.toFixed(2)}${ahNote} | Tax (8.25%): $${tax.toFixed(2)} | <span style="font-size:130%;font-weight:800;">Total: $${total.toFixed(2)}</span>`;
+  const ahNote=afterHours?` <span style="color:#6b7f9c;">(incl. $${afterHours} after-hours)</span>`:'';
+  document.getElementById('nbTotalDisplay').innerHTML=`
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Subtotal${ahNote}</span><span>$${subtotal.toFixed(2)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Tax (8.25%)</span><span>$${tax.toFixed(2)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:#eef2f7;border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:8px;"><span>Total</span><span style="color:#4ade80;">$${total.toFixed(2)}</span></div>`;
   renderNbMinWarn(selections);
 }
 // Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,
