@@ -506,9 +506,16 @@ export function computeJobPay(job, techName) {
   const businessSlug = String(job.business_slug || '').toLowerCase();
 
   if (special === 'handyman') {
-    // Tech paid $65/hr, 2-hr minimum. Hours inferred from customer subtotal @ $85/hr.
-    const subtotal = Number(job.subtotal) || Number(job.price) || 0;
-    const hours = Math.max(2, Math.round(subtotal / 85));
+    // Tech paid $65/hr, 2-hr minimum. Hours come from the LABOR LINE'S OWN
+    // quantity (same payQty() every other line item uses), never from the
+    // job's total subtotal/price — that also includes the travel fee and tax,
+    // which have nothing to do with hours worked. Archie Maharhaj job, Jul
+    // 2026: a 2-hr ($170) labor line plus $65 travel + $19.39 tax summed to a
+    // $254.39 ticket; dividing THAT by $85/hr inflated it to 3 "hours" ($195)
+    // instead of the correct 2 ($130). detectSpecial() only classifies a job
+    // as 'handyman' when a line name matches /handyman/, so this is always found.
+    const laborLine = (job.line_items || []).find(li => /handyman/i.test(li.name || ''));
+    const hours = Math.max(2, laborLine ? payQty(laborLine) : Math.round((Number(job.subtotal) || Number(job.price) || 0) / 85));
     const amt = hours * 65;
     breakdown.push({ label: `Handyman ${hours}h @ $65`, amount: amt });
     pay += amt;
@@ -990,9 +997,21 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: [{ name: '70"-85"', line_total: 149 }, { name: 'Outside wire concealment', line_total: 25 }] }), 'Juan').pay, 105, 'same, Juan = 90+15');
   eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 }, { name: 'Wire concealment', line_total: 60 }] }), 'Zach').pay, 95, 'hand-typed "wire concealment" alone defaults to behind-wall = 60+35');
 
-  // Handyman $65/hr, 2h min.
-  eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 255 -> 3h*65=195');
+  // Handyman $65/hr, 2h min. Hours come from the labor line's own quantity —
+  // NOT the job subtotal, which was the bug (see below).
+  eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 255, line_items: [{ name: 'Handyman Labor', quantity: 3, unit_price: 85, line_total: 255 }] }), 'Kregg').pay, 195, 'handyman 3h line qty -> 3h*65=195');
   eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 50, line_items: [] }), 'Kregg').pay, 130, 'handyman min 2h = 130');
+  // Archie Maharhaj job, Jul 2026: a 2-hr ($170) labor line plus $65 travel fee
+  // and $19.39 tax summed to a $254.39 ticket. The old code divided that WHOLE
+  // total by $85/hr and got 3 "hours" (195) instead of the correct 2 (130) — it
+  // was pricing the travel fee and tax as if they were labor hours. 130 handyman
+  // + 52 travel share (80% of the $65 fee, same tiered share as every other job
+  // via the shared tail) = 182 — the fee is still paid, just not AS hours.
+  eq(computeJobPay(job({ service_name: 'Handyman Services', subtotal: 254.39, line_items: [
+    { name: 'Handyman Labor: Furniture Assembly — 2 hours', quantity: 2, unit_price: 85, line_total: 170 },
+    { name: 'Travel Fee', kind: 'addon', line_total: 65 },
+    { name: 'Tax (8.25%)', kind: 'fee', line_total: 19.39 },
+  ] }), 'Steve').pay, 182, 'handyman 2h labor line + travel fee + tax -> 2h*65=130 + $52 travel share = 182, not inflated by folding the fee/tax into "hours"');
   // Two-tech HANDYMAN job (Christopher Dickens, Jul 2026): used to pay BOTH
   // techs the full handyman rate (the special-case return skipped the split
   // entirely). Now splits like any other two-tech job: 2h*$65=$130 handyman
