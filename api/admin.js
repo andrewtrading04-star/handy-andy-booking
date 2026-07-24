@@ -5795,9 +5795,25 @@ async function estimateApprove(req, res, body) {
       card
     );
   } catch (e) {
+    // Neither branch below writes anything to the `estimates` row — approval
+    // isn't recorded until AFTER a successful booking, further down. Without an
+    // alert here, a customer who hits this (a slot conflict, or anything else
+    // going wrong) leaves zero trace: the estimate just sits "pending," looking
+    // exactly like one nobody has looked at yet, and no one at the office knows
+    // to follow up — which is exactly the gap that put a customer's card and
+    // approval intent in limbo with no human ever notified.
+    const ownerPhone = process.env.OWNER_PHONE_NUMBER;
+    if (ownerPhone) {
+      const reason = e.conflict ? 'their picked time was just taken' : `a booking error (${e.message || 'unknown'})`;
+      const slotLabel = chosenSlot ? `${chosenSlot.date || ''} ${chosenSlot.slot_key || ''}`.trim() : 'an unspecified time';
+      const msg = `⚠ ${businessName}: ${custName || 'A customer'} (${custPhone || 'no phone on file'}) tried to approve estimate #${est.id} for ${slotLabel} but it failed — ${reason}. They were told someone would reach out. Please call them to finish booking.`;
+      sendSMS(ownerPhone, msg).catch(err => console.warn('[estimate_approve] owner alert SMS failed:', err));
+    } else {
+      console.warn('[estimate_approve] no OWNER_PHONE_NUMBER configured — failed approval attempt went unnotified:', est.id, e.message);
+    }
     if (e.conflict) return res.status(409).json({ error: e.message, conflict: true });
     console.error('[estimate_approve] auto-book failed:', e.message);
-    return res.status(500).json({ error: 'We saved your approval, but could not book your appointment automatically. We will reach out to schedule you.' });
+    return res.status(500).json({ error: "We couldn't book your appointment automatically — we've been notified and someone will reach out to finish scheduling you." });
   }
 
   const now = new Date().toISOString();
