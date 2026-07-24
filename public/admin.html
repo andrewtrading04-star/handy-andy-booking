@@ -2896,18 +2896,28 @@ async function loadBkPartnerAssignOptions(b){
     const stillOpen=document.getElementById('bkAssign');
     if(!stillOpen || stillOpen.dataset.bookingId!==String(b.id)) return;
     if(!pt || !pt.partner || !(pt.technicians||[]).length) return;
-    const existingIds=new Set([...stillOpen.options].map(o=>o.value).filter(Boolean));
-    const fresh=pt.technicians.filter(t=>!existingIds.has(t.id));
-    if(!fresh.length) return;
-    const grp=document.createElement('optgroup');
-    grp.label=`${pt.partner.name} (partner)`;
-    fresh.forEach(t=>{
-      const opt=document.createElement('option');
-      opt.value=t.id; opt.textContent=t.name;
-      if(t.id===b.technician_id) opt.selected=true;
-      grp.appendChild(opt);
-    });
-    stillOpen.appendChild(grp);
+    const appendPartnerGroup=(selectEl, selectedId)=>{
+      const existingIds=new Set([...selectEl.options].map(o=>o.value).filter(Boolean));
+      const fresh=pt.technicians.filter(t=>!existingIds.has(t.id));
+      if(!fresh.length) return;
+      const grp=document.createElement('optgroup');
+      grp.label=`${pt.partner.name} (partner)`;
+      fresh.forEach(t=>{
+        const opt=document.createElement('option');
+        opt.value=t.id; opt.textContent=t.name;
+        if(t.id===selectedId) opt.selected=true;
+        grp.appendChild(opt);
+      });
+      selectEl.appendChild(grp);
+    };
+    appendPartnerGroup(stillOpen, b.technician_id);
+    // The 2nd-tech dropdown only ever listed our own roster — a partner tech
+    // (e.g. a Dom's helper on a Handy Andy job) had no way to be picked here at
+    // all, even though the primary slot already supported it. Same append-when-
+    // ready pattern, same booking-id staleness guard (borrowed from bkAssign —
+    // this select has none of its own since it doesn't need one elsewhere).
+    const sel2=document.getElementById('bkSecondAssign');
+    if(sel2) appendPartnerGroup(sel2, b.secondary_technician_id);
   }catch(e){ /* no partner configured, or lookup failed — the dropdown just keeps our own roster */ }
 }
 
