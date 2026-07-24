@@ -308,6 +308,15 @@ function displayNameFor(scope) {
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_NAME || 'Joey';
   return process.env.ADMIN_NAME || 'Andrew';
 }
+// The secretary who actually runs each business day-to-day (Heather/Handy
+// Andy, Joey/Dom's) — office alerts (e.g. a failed estimate-approval booking)
+// go to WHICHEVER company the job belongs to, never a single shared owner
+// number, since the two businesses are staffed by different people.
+function secretaryPhoneFor(scope) {
+  if (scope === 'handy-andy') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  if (scope === 'doms')       return process.env.DOMS_SECRETARY_PHONE || '';
+  return '';
+}
 
 async function login(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -5802,14 +5811,16 @@ async function estimateApprove(req, res, body) {
     // exactly like one nobody has looked at yet, and no one at the office knows
     // to follow up — which is exactly the gap that put a customer's card and
     // approval intent in limbo with no human ever notified.
-    const ownerPhone = process.env.OWNER_PHONE_NUMBER;
-    if (ownerPhone) {
+    // Goes to whichever secretary actually runs THIS business (Heather for
+    // Handy Andy, Joey for Dom's) — not the owner. Andrew doesn't work these.
+    const secretaryPhone = secretaryPhoneFor(est.business?.slug);
+    if (secretaryPhone) {
       const reason = e.conflict ? 'their picked time was just taken' : `a booking error (${e.message || 'unknown'})`;
       const slotLabel = chosenSlot ? `${chosenSlot.date || ''} ${chosenSlot.slot_key || ''}`.trim() : 'an unspecified time';
       const msg = `⚠ ${businessName}: ${custName || 'A customer'} (${custPhone || 'no phone on file'}) tried to approve estimate #${est.id} for ${slotLabel} but it failed — ${reason}. They were told someone would reach out. Please call them to finish booking.`;
-      sendSMS(ownerPhone, msg).catch(err => console.warn('[estimate_approve] owner alert SMS failed:', err));
+      sendSMS(secretaryPhone, msg).catch(err => console.warn('[estimate_approve] secretary alert SMS failed:', err));
     } else {
-      console.warn('[estimate_approve] no OWNER_PHONE_NUMBER configured — failed approval attempt went unnotified:', est.id, e.message);
+      console.warn(`[estimate_approve] no secretary phone configured for ${est.business?.slug || 'this business'} — failed approval attempt went unnotified:`, est.id, e.message);
     }
     if (e.conflict) return res.status(409).json({ error: e.message, conflict: true });
     console.error('[estimate_approve] auto-book failed:', e.message);
