@@ -172,6 +172,20 @@
   function multiTvPerTvAmount(){ const d=multiTvDiscount(); return d.perTv*totalTVs(); }
   function multiTvFeeAmount(){ const d=multiTvDiscount(); return Math.round(territoryAdjustment()*d.feeCutPct*100)/100; }
 
+  // ── Multi-TV PRICE discount (stacks on top of the travel-fee cut above) ────
+  // Flip this to false to turn the whole thing off — nothing else to touch.
+  // TV #1–2 stay full price; TV #3 is -$20, TV #4 is -$25, TV #5+ is -$30 each.
+  // Mirrored server-side in api/book.js (steppedMultiTvPriceDiscount) — keep in sync.
+  const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+  function steppedMultiTvPriceDiscount(){
+    if(!MULTI_TV_PRICE_DISCOUNT_ENABLED) return 0;
+    const tvs=totalTVs();
+    if(tvs<3) return 0;
+    let total=0;
+    for(let i=3;i<=tvs;i++) total += (i===3?20:i===4?25:30);
+    return total;
+  }
+
   const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','customer'];
 
   // ─── Service configs (sections in DISPLAY order — surface before wires) ───
@@ -600,7 +614,7 @@
   // subtotal, so the number the customer watches grow never disagrees with the
   // one they see at checkout.
   function footerTotal(){
-    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge()-multiTvPerTvAmount()-multiTvFeeAmount();
+    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount();
   }
   function slotSurcharge(sl,ds){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
@@ -676,7 +690,7 @@
       case 'extras':   body=bExtras();   break;
       case 'terms':    body=bTerms();    break;
       case 'slots':    body=bSlots();    break;
-      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()); break;
+      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
     }
     // Running total on every step except 'zip' (service area/pricing profile
     // isn't known yet) and 'customer' (bCustomer() already shows its own full
@@ -1437,7 +1451,8 @@
     const ah=selectedSlotSurcharge();
     const mtvPerTv=multiTvPerTvAmount();
     const mtvFee=multiTvFeeAmount();
-    const base=calcTotal()+adj-zipDisc+ah-mtvPerTv-mtvFee;
+    const mtvPriceDisc=steppedMultiTvPriceDiscount();
+    const base=calcTotal()+adj-zipDisc+ah-mtvPerTv-mtvFee-mtvPriceDisc;
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
@@ -1492,6 +1507,10 @@
           ${mtvPerTv>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Multi-TV discount (${totalTVs()} TVs)</span>
             <span style="color:#4ade80!important;">-$${mtvPerTv}</span>
+          </div>`:''}
+          ${mtvPriceDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Multi-TV price discount (${totalTVs()} TVs)</span>
+            <span style="color:#4ade80!important;">-$${mtvPriceDisc}</span>
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax (8.25%)</span>
@@ -1802,10 +1821,12 @@
     if(zipDiscount()>0)_lines.push({label:'Location',qty:1,amount:-zipDiscount()});
     const _mtvFee=multiTvFeeAmount();
     const _mtvPerTv=multiTvPerTvAmount();
+    const _mtvPriceDisc=steppedMultiTvPriceDiscount();
     if(_mtvFee>0)_lines.push({label:'Multi-TV discount',qty:1,amount:-_mtvFee});
     if(_mtvPerTv>0)_lines.push({label:`Multi-TV discount (${totalTVs()} TVs)`,qty:1,amount:-_mtvPerTv});
+    if(_mtvPriceDisc>0)_lines.push({label:`Multi-TV price discount (${totalTVs()} TVs)`,qty:1,amount:-_mtvPriceDisc});
     // Sales tax on the taxable subtotal (matches the checkout screen's base).
-    const _taxBase=calcTotal()+territoryAdjustment()+_ahFee-zipDiscount()-_mtvFee-_mtvPerTv;
+    const _taxBase=calcTotal()+territoryAdjustment()+_ahFee-zipDiscount()-_mtvFee-_mtvPerTv-_mtvPriceDisc;
     const _tax=Math.round(_taxBase*TAX_RATE*100)/100;
     if(_tax>0)_lines.push({label:'Tax (8.25%)',qty:1,amount:_tax});
     const _couponDisc=COUPONS[couponCode]||0;
@@ -1847,7 +1868,7 @@
             ts:Date.now()
           }));
         }catch(e){}
-        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0)-multiTvPerTvAmount()-multiTvFeeAmount());
+        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0)-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount());
         window.location.href=THANKYOU_URL;
       }else{
         // Server returned an error status — the job was not created, so it's safe

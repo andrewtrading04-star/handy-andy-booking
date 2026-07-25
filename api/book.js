@@ -587,6 +587,28 @@ async function bookHandyAndy(req, res) {
       }
     }
   }
+  // Multi-TV PRICE discount (stacks on top of the travel-fee cut above): TV
+  // #1-2 stay full price, TV #3 is -$20, TV #4 is -$25, TV #5+ is -$30 each.
+  // Flip MULTI_TV_PRICE_DISCOUNT_ENABLED to false to turn the whole thing off.
+  // Computed server-side from the REAL line items (never trusts the client),
+  // so a stale/tampered widget can never grant a bigger discount than earned.
+  // Mirrored client-side in public/widget.js (steppedMultiTvPriceDiscount) —
+  // keep in sync.
+  const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+  if (MULTI_TV_PRICE_DISCOUNT_ENABLED && !lines.some(l => /multi-tv price discount/i.test(l.name))) {
+    const tvCount = lines.reduce((n, l) => {
+      const nm = String(l.name || '');
+      if (/"/.test(nm) || /or less/i.test(nm) || /^98\+/i.test(nm.trim())) return n + (Number(l.quantity) || 1);
+      return n;
+    }, 0);
+    if (tvCount >= 3) {
+      let priceDiscAmt = 0;
+      for (let i = 3; i <= tvCount; i++) priceDiscAmt += (i === 3 ? 20 : i === 4 ? 25 : 30);
+      if (priceDiscAmt > 0) {
+        lines.push({ kind: 'coupon', name: `Multi-TV price discount (${tvCount} TVs)`, quantity: 1, unit_price: -priceDiscAmt, line_total: -priceDiscAmt });
+      }
+    }
+  }
   // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
   // an existing tax line) — added server-side so a stale/tampered widget can't
   // drop it. Placed before the coupon so tax is on the pre-discount amount.
