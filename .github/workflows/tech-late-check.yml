@@ -1,14 +1,21 @@
 name: Tech lateness check
 
 # Alerts a late tech + staff (Heather/Joey) when a booking is 30+ minutes past
-# its scheduled start and nobody tapped "On my way" yet. Runs every 10 minutes
-# (Vercel Hobby cron only fires once/day, which is why this lives in GitHub
-# Actions — same pattern as appointment-reminders.yml). GitHub's own scheduler
-# is best-effort for high-frequency crons — under load a run can land 10-20+
-# minutes late or get skipped entirely (the next run catches it, since the
-# 24h lookback in tech-late.js keeps a booking eligible) — so treat "30
-# minutes late" as the trigger threshold, not a delivery guarantee; the real
-# text can land anywhere from ~30 to ~60 minutes after the missed start.
+# its scheduled start and nobody tapped "On my way" yet. Runs every 10 minutes.
+#
+# NOT the primary trigger anymore — that's Vercel's own Cron (vercel.json),
+# reliable now that the project is on Pro. This workflow is a redundant
+# backup in case Vercel Cron ever has an outage; the endpoint is idempotent
+# (metadata.tech_late_notified_ids / staff_late_notified_at) so both firing
+# around the same time can never double-text anyone.
+#
+# Why it moved off being the primary: GitHub's own scheduler is best-effort
+# for high-frequency crons, and it showed — measured over 98 runs, the real
+# gap between runs averaged ~88 minutes (not 10), with a recurring nightly
+# stretch over 200 minutes with no run at all. That's what was turning a
+# "30 minutes late" alert into a text that actually arrived 90-105 minutes
+# after the missed start. Left running here at 10 min anyway since a slow,
+# unreliable backup still beats no backup, and it costs nothing extra.
 #
 # `concurrency` below makes overlapping runs QUEUE instead of running side by
 # side — the endpoint's per-recipient send-then-mark isn't atomic, so two

@@ -676,8 +676,15 @@ export default async function handler(req, res) {
 
   // Tech lateness alerts. Fires when a booking is 30+ min past scheduled_at
   // and the tech never tapped "On my way" (see api/_lib/tech-late.js). Secured
-  // by CRON_SECRET, same as send_reminders — driven by a GitHub Actions
-  // workflow running every ~10 minutes (Vercel Hobby cron is daily-only).
+  // by CRON_SECRET, same as send_reminders. Primary trigger is Vercel's own
+  // Cron (vercel.json, every 10 min — reliable now that the project is on
+  // Pro). The GitHub Actions workflow (tech-late-check.yml) still runs on the
+  // same 10-min schedule too, purely as a redundant backup if Vercel Cron
+  // ever has an outage — this handler is idempotent (metadata.tech_late_
+  // notified_ids / staff_late_notified_at), so two overlapping triggers can
+  // never double-text anyone. GitHub's own scheduler used to be the ONLY
+  // trigger and was measured firing every ~88 min on average instead of 10 —
+  // that's why alerts were arriving 90-105 minutes late instead of ~30.
   //   &dry=1   find + report eligible bookings without sending anything
   if (action === 'tech_late_check') {
     const secret = process.env.CRON_SECRET;
