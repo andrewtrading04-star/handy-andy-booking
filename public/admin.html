@@ -1636,6 +1636,7 @@ function enterApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = userName || (role==='owner' ? 'Owner' : 'Secretary');
   current = businesses[0] || null;
+  if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
   applyIconTheme();
   // Booking Analytics is owner-only (Andrew); secretaries don't see it.
@@ -1765,6 +1766,7 @@ function renderSwitcher(){
     `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
   el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
     current = businesses.find(b=>b.slug===btn.dataset.slug);
+    if(current) nbWarmDataCache(current.slug);
     // See the matching comment in openAlertJob — navTo(section) already covers
     // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
     availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); loadGoodAlerts();
@@ -6756,12 +6758,14 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 
 // ── New booking modal ──────────────────────────────────────────────────────
 document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
+// mousedown fires before click — a few extra ms head start on the same warm-up,
+// and re-primes the cache if the 60s TTL lapsed since the last business switch.
+document.getElementById('newBookingBtn').addEventListener('mousedown', ()=>{ if(current) nbWarmDataCache(current.slug); });
 // Close New Booking by clicking the backdrop (no Cancel button needed).
 document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 // "Send estimate" now opens the recommend-add-ons popover first (it does NOT
 // send immediately). The popover's own buttons do the actual send.
 document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpsellPanel);
-document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 async function openNewBooking(prefill){
   if(!current) return;
   closeSidebar();
@@ -6815,19 +6819,9 @@ async function openNewBooking(prefill){
     // Services + technicians change rarely; a 60s per-business cache makes
     // repeat opens instant. Safe: the picked tech/slot is re-validated
     // server-side at create time, so a briefly-stale roster can't mis-book.
-    const cached = nbDataCache.get(current.slug);
-    let svc, tech;
-    if(cached && (Date.now()-cached.at)<60000){
-      ({ svc, tech } = cached);
-    } else {
-      [svc, tech] = await Promise.all([
-        api('services',{ params:{ business:current.slug }}),
-        // Full fetch (not techCache) so each tech carries service_area_id for
-        // the zip-based metro filter on the tech dropdowns.
-        api('technicians',{ params:{ business:current.slug }}),
-      ]);
-      nbDataCache.set(current.slug, { at: Date.now(), svc, tech });
-    }
+    // nbEnsureDataCached also gets kicked off early (login, business switch)
+    // so this usually resolves from cache with zero network wait.
+    const { svc, tech } = await nbEnsureDataCached(current.slug);
     nbServices = svc.services || [];
     nbSelectedSlot = null;
     // Prefetch the TV Mounting option groups NOW (fire-and-forget into the
@@ -6936,7 +6930,29 @@ const nbKeyCache=new Map();
 // 60s per-business cache of the services + technicians responses so reopening
 // the New Booking modal is instant instead of re-paying two round-trips. Staleness
 // is bounded and harmless: tech/slot choices are re-validated server-side on create.
+// Entries are either { at, svc, tech } (settled) or { promise } (in flight) —
+// the promise form de-dupes a warm-up call racing an actual modal open so they
+// never both fire the same two network requests.
 const nbDataCache=new Map();
+async function nbEnsureDataCached(slug){
+  if(!slug) return { svc:{services:[]}, tech:{technicians:[]} };
+  const cached=nbDataCache.get(slug);
+  if(cached && cached.promise) return cached.promise;
+  if(cached && (Date.now()-cached.at)<60000) return { svc:cached.svc, tech:cached.tech };
+  const p=Promise.all([
+    api('services',{ params:{ business:slug }}),
+    // Full fetch (not techCache) so each tech carries service_area_id for
+    // the zip-based metro filter on the tech dropdowns.
+    api('technicians',{ params:{ business:slug }}),
+  ]).then(([svc,tech])=>{ nbDataCache.set(slug,{ at:Date.now(), svc, tech }); return { svc, tech }; })
+    .catch(err=>{ nbDataCache.delete(slug); throw err; });
+  nbDataCache.set(slug, { promise:p });
+  return p;
+}
+// Fire-and-forget warm-up: call as soon as we know which business the office is
+// looking at (login, business switch) so by the time someone actually clicks
+// "New Booking" the services/technicians round trip has often already finished.
+function nbWarmDataCache(slug){ if(slug) nbEnsureDataCached(slug).catch(()=>{}); }
 // Bumped on every modal open, so a late success from a previous attempt can tell
 // the modal was reopened for a NEW job and must not yank it shut.
 let nbModalSession=0;
@@ -7036,12 +7052,24 @@ function nbPoolList(){
   return list;
 }
 // Load/reload partner technicians, optionally filtered by postal code
+// 60s cache, keyed by business+postal — the roster for a given metro doesn't
+// change within a booking session, and re-entering/correcting the same ZIP
+// shouldn't re-pay the round trip. Availability itself is never cached here,
+// only WHO is on the partner roster; the actual slot check still happens live.
+const nbPartnerTechCache=new Map();
+async function nbPartnerTechLookup(slug, postal){
+  const key=slug+':'+(postal||'');
+  const c=nbPartnerTechCache.get(key);
+  if(c && (Date.now()-c.at)<60000) return c.data;
+  const params={ business:slug }; if(postal) params.postal_code=postal;
+  const data=await api('partner_technicians',{ params });
+  nbPartnerTechCache.set(key,{ at:Date.now(), data });
+  return data;
+}
 async function nbLoadPartnerTechs(){
   try{
-    const params={ business:current.slug };
     const postalCode=document.getElementById('nbZip').value.trim();
-    if(postalCode) params.postal_code=postalCode;
-    const pt = await api('partner_technicians',{ params });
+    const pt = await nbPartnerTechLookup(current.slug, postalCode);
     if(pt && pt.partner && (pt.technicians||[]).length){
       nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
     }
@@ -7493,12 +7521,32 @@ document.getElementById('nbTech').addEventListener('change',()=>{
   loadNbCalendar();
 });
 let nbAutoTravel='';   // last surcharge we auto-filled, so a manual override isn't clobbered
+// 60s cache, keyed by business+postal. Bounded TTL because the surcharge here
+// auto-fills the charged Travel Fee — this must never go stale for long.
+const nbZipAreaCache=new Map();
+async function nbZipAreaLookup(slug, postal){
+  const key=slug+':'+postal;
+  const c=nbZipAreaCache.get(key);
+  if(c && (Date.now()-c.at)<60000) return c.data;
+  const data=await api('zip_area',{ params:{ business:slug, postal_code:postal }});
+  nbZipAreaCache.set(key,{ at:Date.now(), data });
+  return data;
+}
 document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
   nbZipAreaId=null; nbAreaName=''; let surcharge=0, otherBiz=null, lookupFailed=false;
-  if(postal){ try{ const a=await api('zip_area',{ params:{ business:current.slug, postal_code:postal }}); nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }catch(err){ lookupFailed=true; } }
+  // The metro lookup and the partner-roster reload both only depend on `postal`
+  // (never on each other's result), so run them concurrently instead of one
+  // after the other. nbLoadPartnerTechs is self-contained — it sets nbPartner
+  // and repopulates both tech dropdowns itself once its own fetch resolves.
+  const zipPromise = postal
+    ? nbZipAreaLookup(current.slug, postal).catch(()=>{ lookupFailed=true; return null; })
+    : Promise.resolve(null);
+  const partnerPromise = nbLoadPartnerTechs();
+  const a = await zipPromise;
+  if(a){ nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }
   // Show a live service-area / travel-fee readout next to the ZIP, in the same
   // assistant voice as the question above it.
   { const zr=document.getElementById('nbZipArea');
@@ -7544,8 +7592,9 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // AWAIT the roster reload before the calendar: it repopulates both tech
   // dropdowns (now preserving any chosen tech), and loading the calendar in
   // parallel raced it — availability could render for a tech the repopulation
-  // was about to change out from under it.
-  await nbLoadPartnerTechs();
+  // was about to change out from under it. (Kicked off above, concurrently
+  // with the zip_area lookup — just waiting on it here, not starting it.)
+  await partnerPromise;
   // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;

@@ -414,11 +414,24 @@ async function sessionStatus(req, res) {
 }
 
 // Resolve the requested business and enforce the token's scope.
+// Module-scope, short-TTL memo: resolveBusiness runs 4-5x on a single New
+// Booking open (services, TV options, calendar, partner roster, …), all for
+// the same slug, and only survives across requests on a warm serverless
+// container — never a substitute for a real cache layer. The scope check
+// still runs on every call BEFORE the memo lookup, so a memo hit can never
+// leak a business the caller isn't authorized for. Errors/not-found are
+// never cached, and the 60s TTL keeps a renamed business or changed
+// timezone from staying stale for more than a minute.
+const _bizCache = new Map(); // slug -> { biz, at }
+const BIZ_CACHE_TTL_MS = 60_000;
 async function resolveBusiness(db, auth, slug) {
   if (!slug) { const e = new Error('business is required'); e.status = 400; throw e; }
   if (auth.scope !== 'all' && auth.scope !== slug) { const e = new Error('Forbidden for this business'); e.status = 403; throw e; }
+  const cached = _bizCache.get(slug);
+  if (cached && (Date.now() - cached.at) < BIZ_CACHE_TTL_MS) return cached.biz;
   const { data, error } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', slug).single();
   if (error || !data) { const e = new Error('Business not found'); e.status = 404; throw e; }
+  _bizCache.set(slug, { biz: data, at: Date.now() });
   return data;
 }
 
@@ -1803,21 +1816,8 @@ async function availableDates(req, res, db, auth) {
   if (!primaryIds.length || (wantPair && !secondaryIds.length)) return res.status(200).json({ dates: [], month });
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
 
-  const { data: av } = await db.from('technician_availability')
-    .select('technician_id, day_of_week, slot_key').in('technician_id', techIds);
-  const recurring = {};   // `${techId}:${dow}` -> Set(slot_key)
-  for (const r of (av || [])) {
-    const k = `${r.technician_id}:${r.day_of_week}`;
-    (recurring[k] = recurring[k] || new Set()).add(r.slot_key);
-  }
   const monthStart = `${month}-01`;
   const monthEnd = `${month}-${String(daysInMonth).padStart(2, '0')}`;
-  const { data: exc } = await db.from('technician_availability_exceptions')
-    .select('technician_id, exception_date, slot_key, is_available')
-    .in('technician_id', techIds).gte('exception_date', monthStart).lte('exception_date', monthEnd);
-  const excByDate = {};   // `${date}` -> [{tech,slot,is_available}]
-  for (const e of (exc || [])) (excByDate[e.exception_date] = excByDate[e.exception_date] || []).push(e);
-
   // Existing bookings this month so fully-booked days don't show as available.
   const tz = biz.timezone || 'America/Denver';
   const winStart = localDateStartUTC(tz, monthStart);
@@ -1836,12 +1836,34 @@ async function availableDates(req, res, db, auth) {
       ? q.or(`technician_id.in.(${tidList}),secondary_technician_id.in.(${tidList})`)
       : q.in('technician_id', techIds);
   };
-  let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
-  if (bkErr && (/secondary_technician_id/.test(bkErr.message || '') || isExtraSlotsErr(bkErr))) {
-    if (/secondary_technician_id/.test(bkErr.message || '')) bookingLiftCols = false;
-    if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
-    ({ data: bk } = await runBk(bookingLiftCols));
+  // The three reads below (recurring availability, one-off exceptions, this
+  // month's bookings) are mutually independent — nothing here reads a result
+  // from another — so run them concurrently instead of one-at-a-time. The
+  // bookings query keeps its own retry-on-schema-error self-contained inside
+  // its promise so the Promise.all still resolves once every branch is done.
+  const [{ data: av }, { data: exc }, bkResult] = await Promise.all([
+    db.from('technician_availability').select('technician_id, day_of_week, slot_key').in('technician_id', techIds),
+    db.from('technician_availability_exceptions')
+      .select('technician_id, exception_date, slot_key, is_available')
+      .in('technician_id', techIds).gte('exception_date', monthStart).lte('exception_date', monthEnd),
+    (async () => {
+      let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
+      if (bkErr && (/secondary_technician_id/.test(bkErr.message || '') || isExtraSlotsErr(bkErr))) {
+        if (/secondary_technician_id/.test(bkErr.message || '')) bookingLiftCols = false;
+        if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
+        ({ data: bk } = await runBk(bookingLiftCols));
+      }
+      return bk;
+    })(),
+  ]);
+  const bk = bkResult;
+  const recurring = {};   // `${techId}:${dow}` -> Set(slot_key)
+  for (const r of (av || [])) {
+    const k = `${r.technician_id}:${r.day_of_week}`;
+    (recurring[k] = recurring[k] || new Set()).add(r.slot_key);
   }
+  const excByDate = {};   // `${date}` -> [{tech,slot,is_available}]
+  for (const e of (exc || [])) (excByDate[e.exception_date] = excByDate[e.exception_date] || []).push(e);
   const techIdSet = new Set(techIds);
   const occ = {};   // `${techId}:${date}` -> Set(slot_key)
   const addOcc = (tid, date, key) => { (occ[`${tid}:${date}`] = occ[`${tid}:${date}`] || new Set()).add(key); };
@@ -3807,8 +3829,19 @@ async function technicians(req, res, db, auth) {
 // (the caller's own) — only names + ids are returned for the picker.
 // When postal_code is provided, filters to techs in that service area.
 async function partnerTechnicians(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const partner = await partnerBusiness(db, biz.slug);
+  const slug = (req.query.business || '').toString();
+  // Same scope check resolveBusiness does, run BEFORE either query fires — so
+  // an unauthorized caller can't trigger the partner lookup by racing it
+  // alongside resolveBusiness in Promise.all below.
+  if (!slug) return bail(res, Object.assign(new Error('business is required'), { status: 400 }));
+  if (auth.scope !== 'all' && auth.scope !== slug) return bail(res, Object.assign(new Error('Forbidden for this business'), { status: 403 }));
+  let partner;
+  try {
+    // resolveBusiness still runs (confirms the business actually exists) but
+    // partnerBusiness only needs the slug string itself, not biz's DB row, so
+    // it doesn't have to wait for resolveBusiness to finish first.
+    [, partner] = await Promise.all([resolveBusiness(db, auth, slug), partnerBusiness(db, slug)]);
+  } catch (e) { return bail(res, e); }
   if (!partner) return res.status(200).json({ partner: null, technicians: [] });
 
   // Resolve the zip against the PARTNER's own service-area table, not the
