@@ -529,8 +529,14 @@
   .bk-row{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:6px 0;color:var(--ink-2);}
   .bk-row span:first-child{width:18px;flex-shrink:0;}
   .bk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center;}
-  .bk-assign{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);}
-  .bk-assign select{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;}
+  /* Label sits ABOVE its own select rather than inline before it — inline
+     labels of different lengths ("Assign" vs "2nd Tech") pushed the two
+     selects to different x-positions, so the row never actually lined up.
+     flex:1 1 100% makes each field claim its own full-width row inside the
+     flex-wrap .bk-actions container it shares with plain button rows elsewhere. */
+  .bk-assign{display:flex;flex-direction:column;align-items:stretch;gap:6px;flex:1 1 100%;}
+  .bk-assign .bk-assign-label{font-size:11px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;}
+  .bk-assign select{width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-size:13px;}
   /* Extra time slots (big jobs) */
   .bk-slots{border-top:1px solid var(--line2);padding-top:12px;margin-top:12px;}
   .bk-slotchips{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
@@ -655,6 +661,7 @@
   #bkModal .bk-pay-total span{color:#93a6bd;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:2px;}
   #bkModal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #bkModal .bk-assign{color:#eef2f7;font-weight:600;}
+  #bkModal .bk-assign .bk-assign-label{color:#93a6bd;}
   /* Nested mini-cards (Assignment / Job / Payment) — each group gets its own
      subtly-raised card with a colored icon badge, instead of one long
      undifferentiated stack of buttons. */
@@ -2321,8 +2328,8 @@ function openBooking(b){
     ${canAssign?`<div class="bk-minicard">
       <div class="bk-minicard-head"><span class="bk-badge bk-badge-assign">👤</span><span class="bk-minicard-label">Assignment</span></div>
       <div class="bk-actions">
-        <label class="bk-assign">Assign <select id="bkAssign" data-booking-id="${esc(b.id)}">${techOpts}</select></label>
-        ${showSecond?`<label class="bk-assign">2nd Tech <select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}
+        <label class="bk-assign"><span class="bk-assign-label">Assign</span><select id="bkAssign" data-booking-id="${esc(b.id)}">${techOpts}</select></label>
+        ${showSecond?`<label class="bk-assign"><span class="bk-assign-label">2nd Tech</span><select id="bkSecondAssign">${secondTechOpts}</select></label>`:''}
       </div>
     </div>`:''}
     <div class="bk-minicard">
