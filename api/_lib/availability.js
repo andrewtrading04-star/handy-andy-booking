@@ -341,6 +341,14 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
     }
   }
 
+  // A customer can't book a slot that starts within the next hour — not enough
+  // notice for a tech to actually get there. Only ever trims today (and maybe
+  // tomorrow very late at night); every later date is already hours out. Strict
+  // "> 60 min", not ">=": at 1:00pm the 2:00pm slot is EXACTLY 60 minutes away
+  // and must still be blocked, leaving 5:00pm as the next real option.
+  const MIN_LEAD_MS = 60 * 60 * 1000;
+  const earliestBookableMs = Date.now() + MIN_LEAD_MS;
+
   const out = [];
   for (let i = 0; i < horizon; i++) {
     const dateStr = addDaysStr(start, i);
@@ -356,14 +364,17 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
       for (const sk of set) if (!booked.has(`${tid}:${dateStr}:${sk}`)) open.add(sk);
     }
     if (!open.size) continue;
-    const timeslots = SLOTS.filter(s => open.has(s.key)).map(s => ({
-      id: `${businessSlug}_${dateStr}_${s.key}`,
-      slot_key: s.key,
-      formatted: s.label,
-      start: slotStartUTC(tz, dateStr, s.key).toISOString(),
-      end: slotEndUTC(tz, dateStr, s.key).toISOString(),
-      bonus: s.bonus || 0,
-    }));
+    const timeslots = SLOTS.filter(s => open.has(s.key))
+      .map(s => ({
+        id: `${businessSlug}_${dateStr}_${s.key}`,
+        slot_key: s.key,
+        formatted: s.label,
+        start: slotStartUTC(tz, dateStr, s.key).toISOString(),
+        end: slotEndUTC(tz, dateStr, s.key).toISOString(),
+        bonus: s.bonus || 0,
+      }))
+      .filter(s => new Date(s.start).getTime() > earliestBookableMs);
+    if (!timeslots.length) continue;
     out.push({ date: dateStr, day_of_week: dow, timeslots });
   }
   return { days: out, timezone: tz };

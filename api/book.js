@@ -10,6 +10,19 @@ import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiT
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
+// Best-effort record of whether the confirmation email actually sent, so the
+// booking detail card can show real status instead of nothing at all. Never
+// allowed to affect the booking itself — swallow a missing-column error the
+// same way every other optimistic-column write in this codebase does (migration
+// 0075 not applied yet).
+async function persistConfirmationEmailStatus(db, bookingId, status) {
+  try {
+    await db.from('bookings')
+      .update({ confirmation_email_status: status, confirmation_email_sent_at: new Date().toISOString() })
+      .eq('id', bookingId);
+  } catch (e) { /* migration 0075 not applied yet — status just won't show */ }
+}
+
 // Public Google Places proxy for the booking widget's address autocomplete (the
 // admin's places endpoint requires a login). No auth: it only reads address
 // suggestions. Lives here to stay under Vercel's function cap.
@@ -263,6 +276,14 @@ async function bookDoms(req, res) {
   const startUTC = slotStartUTC(tz, dateStr, slotKey);
   const endUTC   = slotEndUTC(tz, dateStr, slotKey);
   if (!startUTC) return res.status(400).json({ error: 'Invalid time slot' });
+  // The public slot list already omits anything starting within the next hour
+  // (publicOpenSlots), but a page can sit open long enough for a slot that WAS
+  // fine when it loaded to cross that line by the time they actually submit —
+  // re-check here so a stale page can never book a same-hour job. Strict "not
+  // more than 60 min out", matching the listing filter exactly.
+  if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
+    return res.status(409).json({ error: "That time is too soon to book now — please pick a later slot.", conflict: true });
+  }
 
   let db;
   try { db = serviceClient(); }
@@ -456,8 +477,10 @@ async function bookDoms(req, res) {
       }, brandFor('doms'));
       const sent = await sendEmail({ slug: 'doms', to: customer.email, subject, html, replyTo: domsEmail.from });
       if (!sent.sent) console.warn('[book-doms] confirmation email not sent:', sent.skipped || sent.error);
+      await persistConfirmationEmailStatus(db, bookingId, sent.sent ? 'sent' : 'failed');
     } catch (e) {
       console.error('[book-doms] confirmation email error:', e.message);
+      await persistConfirmationEmailStatus(db, bookingId, 'failed');
     }
   }
 
@@ -516,6 +539,14 @@ async function bookHandyAndy(req, res) {
   const startUTC = slotStartUTC(tz, dateStr, slotKey);
   const endUTC   = slotEndUTC(tz, dateStr, slotKey);
   if (!startUTC) return res.status(400).json({ error: 'Invalid time slot' });
+  // The public slot list already omits anything starting within the next hour
+  // (publicOpenSlots), but a page can sit open long enough for a slot that WAS
+  // fine when it loaded to cross that line by the time they actually submit —
+  // re-check here so a stale page can never book a same-hour job. Strict "not
+  // more than 60 min out", matching the listing filter exactly.
+  if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
+    return res.status(409).json({ error: "That time is too soon to book now — please pick a later slot.", conflict: true });
+  }
 
   // After-hours fee: the 8 PM slot (s5) is charged $100 on Sundays, $75 otherwise.
   const dow = dayOfWeekFor(dateStr);
@@ -753,8 +784,10 @@ async function bookHandyAndy(req, res) {
       }, brandFor('handy-andy'));
       const sent = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });
       if (!sent.sent) console.warn('[book-ha] confirmation email not sent:', sent.skipped || sent.error);
+      await persistConfirmationEmailStatus(db, bookingId, sent.sent ? 'sent' : 'failed');
     } catch (e) {
       console.error('[book-ha] confirmation email error:', e.message);
+      await persistConfirmationEmailStatus(db, bookingId, 'failed');
     }
   }
 

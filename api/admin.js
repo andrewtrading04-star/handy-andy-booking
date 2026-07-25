@@ -437,6 +437,19 @@ async function resolveBusiness(db, auth, slug) {
 
 function bail(res, err) { return res.status(err.status || 500).json({ error: err.message }); }
 
+// Best-effort record of whether the confirmation email actually sent, so the
+// booking detail card can show real status instead of nothing at all. Never
+// allowed to affect the booking itself — swallow a missing-column error the
+// same way every other optimistic-column write in this codebase does
+// (migration 0075 not applied yet). Mirrors the identical helper in book.js.
+async function persistConfirmationEmailStatus(db, bookingId, status) {
+  try {
+    await db.from('bookings')
+      .update({ confirmation_email_status: status, confirmation_email_sent_at: new Date().toISOString() })
+      .eq('id', bookingId);
+  } catch (e) { /* migration 0075 not applied yet — status just won't show */ }
+}
+
 // Pull a missing-column name out of either error wording Supabase can surface:
 //   PostgREST schema cache: Could not find the 'customer_zip' column of 'estimates' …
 //   Raw Postgres (42703):   column estimates.customer_zip does not exist
@@ -2442,8 +2455,10 @@ async function bookingCreate(req, res, db, auth, body) {
       const result = await sendEmail({ slug: biz.slug, to: c.email, subject, html, replyTo: from });
       if (result.sent) console.log(`[admin] confirmation email SENT to ${c.email} (${biz.slug}) id=${result.id || '?'}`);
       else console.warn(`[admin] confirmation email NOT sent to ${c.email} (${biz.slug}):`, result.skipped || result.error);
+      await persistConfirmationEmailStatus(db, bRow.id, result.sent ? 'sent' : 'failed');
     } catch (e) {
       console.error('[admin] confirmation email error:', e.message);
+      await persistConfirmationEmailStatus(db, bRow.id, 'failed');
     }
   })();
 
@@ -4034,6 +4049,13 @@ const isAmountRefundedErr = (e) => /amount_refunded/.test((e && e.message) || ''
 // whatever order the DB naturally returns, same as before this feature existed).
 let sortOrderCol = true;
 const isSortOrderErr = (e) => /sort_order/.test((e && e.message) || '');
+// Migration 0075 — same optimistic pattern as every other column above: assume
+// present, flip false and retry without it the first time a read reports it
+// missing. review_sms_*/review_email_* (migration 0063) are already selected
+// unconditionally elsewhere in this file (reviewCalls), so those are treated
+// as long-since-applied and don't need their own flag.
+let confirmationEmailCol = true;
+const isConfirmationEmailErr = (e) => /confirmation_email_status|confirmation_email_sent_at/.test((e && e.message) || '');
 function bookingSelect() {
   // The technician embeds are disambiguated by FK column (technician_id /
   // secondary_technician_id) because bookings has TWO foreign keys to
@@ -4042,6 +4064,8 @@ function bookingSelect() {
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at, zenbooker_job_number${esCol()}${arCol()},
           on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
+          review_sms_status, review_sms_sent_at, review_sms_delivered_at,
+          review_email_sent_at, review_email_delivered_at, review_email_clicked_at${confirmationEmailCol ? ', confirmation_email_status, confirmation_email_sent_at' : ''},
           address_line1, address_line2, city, state, postal_code,
           business:businesses ( slug ),
           customer:customers ( id, name, phone, email ),
@@ -4068,6 +4092,7 @@ async function fetchBookingRows(makeQuery) {
   };
   let { data, error } = await run();
   if (error && isSortOrderErr(error)) { sortOrderCol = false; ({ data, error } = await run()); }
+  if (error && isConfirmationEmailErr(error)) { confirmationEmailCol = false; ({ data, error } = await run()); }
   if (error && (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '') || isExtraSlotsErr(error) || isAmountRefundedErr(error))) {
     if (/secondary_technician_id|needs_lifting|tv_size_category/.test(error.message || '')) bookingLiftCols = false;
     if (isExtraSlotsErr(error)) extraSlotsCol = false;
@@ -4139,11 +4164,19 @@ function shapeBooking(b) {
     payment_status: b.payment_status,
     amount_refunded: amountRefundedCol ? (b.amount_refunded || null) : null,
     paid_at: b.paid_at,
-    // "On the way" text delivery — admin/secretary dashboard only, never sent to
+    // Full notification timeline — admin/secretary dashboard only, never sent to
     // the tech app's own booking read (that's a separate query in tech.js).
+    confirmation_email_status: b.confirmation_email_status || null,
+    confirmation_email_sent_at: b.confirmation_email_sent_at || null,
     on_the_way_sms_status: b.on_the_way_sms_status || null,
     on_the_way_sms_sent_at: b.on_the_way_sms_sent_at || null,
     on_the_way_sms_delivered_at: b.on_the_way_sms_delivered_at || null,
+    review_sms_status: b.review_sms_status || null,
+    review_sms_sent_at: b.review_sms_sent_at || null,
+    review_sms_delivered_at: b.review_sms_delivered_at || null,
+    review_email_sent_at: b.review_email_sent_at || null,
+    review_email_delivered_at: b.review_email_delivered_at || null,
+    review_email_clicked_at: b.review_email_clicked_at || null,
     notes: b.notes,
     customer_notes: b.customer_notes,
     review_rating: b.review_rating,
