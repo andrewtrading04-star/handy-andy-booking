@@ -7647,6 +7647,31 @@ function nbTotalTvs(){
   // (size, bracket, fireplace, wires, surface) is capped to this number.
   return nbFrameTvQty.regular + nbFrameTvQty.frame;
 }
+// ── Multi-TV discount for phone-in bookings — mirrors public/widget.js +
+// api/book.js exactly, so a job booked here gets the same deal as one booked
+// online. Previously this only existed in the customer widget; a secretary
+// booking a 5-TV job by hand had no automatic discount to match it with.
+// Flip MULTI_TV_PRICE_DISCOUNT_ENABLED to false to turn off just the price-tier
+// piece (same toggle name/pattern as the other two files) — the travel-fee cut
+// has no toggle, matching its original widget implementation.
+const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+function nbMultiTvFeeDiscount(){
+  const tvs=nbTotalTvs();
+  if(tvs<3) return 0;
+  const fee=parseFloat(document.getElementById('nbTravelFee')?.value)||0;
+  if(fee<=0) return 10*tvs;
+  if(fee===15) return fee;
+  if(fee===65||fee===100) return Math.round(fee*0.60*100)/100;
+  return 0;
+}
+function nbMultiTvPriceDiscount(){
+  if(!MULTI_TV_PRICE_DISCOUNT_ENABLED) return 0;
+  const tvs=nbTotalTvs();
+  if(tvs<3) return 0;
+  let total=0;
+  for(let i=3;i<=tvs;i++) total += (i===3?20:i===4?25:30);
+  return total;
+}
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }
 function nbValidateTvMountingRequired(){
   // Only applies to TV Mounting bookings — detected by the per-TV option groups
@@ -8138,6 +8163,13 @@ function nbCollectSelections(){
   // Enforce the branch service minimum by topping up to the floor (waivable).
   const _topup=nbMinimumTopUp(out);
   if(_topup>0) out.push({option_id:null, label:'Service minimum', price:_topup, quantity:1});
+  // Multi-TV discount — computed against the pre-discount job (above), same as
+  // the online widget, so it never itself triggers or offsets the minimum-floor
+  // top-up.
+  const _mtvFee=nbMultiTvFeeDiscount();
+  if(_mtvFee>0) out.push({option_id:null, label:'Multi-TV discount', price:-_mtvFee, quantity:1});
+  const _mtvPrice=nbMultiTvPriceDiscount();
+  if(_mtvPrice>0) out.push({option_id:null, label:`Multi-TV price discount (${nbTotalTvs()} TVs)`, price:-_mtvPrice, quantity:1});
   return out;
 }
 const TAX_RATE = 0.0825;
@@ -8184,7 +8216,7 @@ function updateNbTotal(){
 function renderNbMinWarn(selections){
   const warn=document.getElementById('nbMinWarn'); if(!warn) return;
   const min=nbCurrentMinimum();
-  const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum').reduce((s,x)=>s+x.price*x.quantity,0);
+  const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum'&&!/^multi-tv discount$|^multi-tv price discount/i.test(s.label||'')).reduce((s,x)=>s+x.price*x.quantity,0);
   const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && rawSum>0 && min>0;
   if(!applies || rawSum>=min){ warn.style.display='none'; warn.innerHTML=''; return; }
   const metro=nbAreaName?esc(nbAreaName)+' ':'';
