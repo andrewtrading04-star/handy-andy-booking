@@ -64,7 +64,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     // Everything BOOKED (created) during today's Denver day, any business, minus
     // cancellations.
     const { data: rows } = await db.from('bookings')
-      .select(`id, created_at, scheduled_at, price, status, service_area_id, source, metadata,
+      .select(`id, created_at, scheduled_at, price, status, service_area_id, source, metadata, customer_id,
                business:businesses ( name, timezone ),
                customer:customers ( name, phone, email ),
                technician:technicians!technician_id ( id, name ),
@@ -87,9 +87,43 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       return li ? li.name.replace(/^Coupon\s+/i, '') : null;
     };
 
-    if (dryRun) return { would_send: bookings.length, to, denverHour: hour };
-    // Nothing booked today → no email (keeps the inbox quiet on slow days).
-    if (!bookings.length) return { sent: false, count: 0, reason: 'no new bookings today' };
+    // ── Overdue jobs — NOT limited to today's bookings. Any job, from any
+    // day, whose scheduled time has passed by 24+ hours but is still sitting
+    // in an active (non-completed, non-cancelled) status: the tech never
+    // marked it done, or something fell through the cracks entirely. Checked
+    // even on a day with zero new bookings, since a stale job from days ago
+    // is exactly the kind of thing this email exists to surface.
+    let overdue = [];
+    try {
+      const overdueThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: overdueRows } = await db.from('bookings')
+        .select(`id, scheduled_at, status,
+                 business:businesses ( name ),
+                 customer:customers ( name ),
+                 technician:technicians!technician_id ( name )`)
+        .lt('scheduled_at', overdueThreshold)
+        .not('status', 'in', '(completed,cancelled)')
+        .order('scheduled_at', { ascending: true })
+        .limit(50);
+      overdue = overdueRows || [];
+    } catch (e) {
+      console.warn('[daily-digest] overdue-jobs check failed (non-fatal):', e.message);
+    }
+
+    if (dryRun) return { would_send: bookings.length, overdue: overdue.length, to, denverHour: hour };
+    // Nothing booked today AND nothing overdue → no email (keeps the inbox
+    // quiet on slow, clean days). Either one alone still sends.
+    if (!bookings.length && !overdue.length) return { sent: false, count: 0, reason: 'no new bookings and nothing overdue' };
+
+    const hoursLate = (iso) => Math.round((Date.now() - new Date(iso).getTime()) / (60 * 60 * 1000));
+    const overdueBlock = overdue.length
+      ? `<div style="margin:0 0 20px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;">
+          <div style="font-weight:800;color:#9a3412;font-size:15px;margin-bottom:10px;">&#9203; ${overdue.length} job${overdue.length === 1 ? '' : 's'} overdue for completion</div>
+          <ul style="margin:0;padding-left:18px;color:#9a4a1f;font-size:13px;line-height:1.7;">
+            ${overdue.map(o => `<li><strong>${escHtml(o.customer?.name || 'A customer')}</strong> (${escHtml(o.business?.name || '')}) &mdash; scheduled ${hoursLate(o.scheduled_at)}h ago, still "${escHtml(o.status)}", tech: ${escHtml(o.technician?.name || 'unassigned')}.</li>`).join('')}
+          </ul>
+        </div>`
+      : '';
 
     // Per-booking metro timezone (Central for Houston/Austin) so the scheduled
     // time reads correctly.
@@ -113,6 +147,14 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     // matching issue (a bare $0 booking would otherwise also trip "low profit"
     // and "no line items" — one clear flag beats three redundant ones).
     const who = (b) => b.customer?.name || 'A customer';
+    // Customer ids that show up more than once among today's bookings — a
+    // second job for the same person on the same day, which is either a
+    // legitimate repeat customer or an accidental double-book worth a glance.
+    const customerIdCounts = new Map();
+    for (const b of bookings) {
+      if (!b.customer_id) continue;
+      customerIdCounts.set(b.customer_id, (customerIdCounts.get(b.customer_id) || 0) + 1);
+    }
     const issueChecks = [
       {
         key: 'bare',
@@ -157,6 +199,18 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
         test: (b) => !(b.customer?.phone || '').trim(),
         detail: (b) => `${who(b)} has no phone number — no on-the-way text, no review request.`,
       },
+      {
+        key: 'pending',
+        label: 'Still pending at end of day',
+        test: (b) => b.status === 'pending',
+        detail: (b) => `${who(b)}'s job was never confirmed — still sitting in "pending" status.`,
+      },
+      {
+        key: 'duplicate_customer',
+        label: 'Same customer booked twice today',
+        test: (b) => b.customer_id && customerIdCounts.get(b.customer_id) > 1,
+        detail: (b) => `${who(b)} has ${customerIdCounts.get(b.customer_id)} bookings created today — confirm this isn't an accidental double-book.`,
+      },
     ];
     const issues = [];
     for (const b of bookings) {
@@ -200,10 +254,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       </tr>`;
     }).join('');
 
-    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;max-width:680px;">
-      <h2 style="margin:0 0 2px;">${bookings.length} new appointment${bookings.length === 1 ? '' : 's'} booked today</h2>
-      <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${escHtml(dateLabel)} · daily summary</div>
-      ${issuesBlock}
+    const bookingsTable = bookings.length ? `
       <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
         <thead><tr style="background:#f9fafb;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">
           <th style="padding:9px 10px;">Customer</th><th style="padding:9px 10px;">Appointment</th>
@@ -213,17 +264,25 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
         </tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-      <div style="margin-top:14px;font-size:15px;"><b>Total booked value:</b> ${money(total)}</div>
+      <div style="margin-top:14px;font-size:15px;"><b>Total booked value:</b> ${money(total)}</div>` : `
+      <div style="color:#6b7280;font-size:14px;">No new bookings today.</div>`;
+
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;max-width:680px;">
+      <h2 style="margin:0 0 2px;">${bookings.length} new appointment${bookings.length === 1 ? '' : 's'} booked today</h2>
+      <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${escHtml(dateLabel)} · daily summary</div>
+      ${issuesBlock}
+      ${overdueBlock}
+      ${bookingsTable}
       <div style="margin-top:18px;font-size:12px;color:#9ca3af;">You're getting one summary a day instead of an email per booking. Sent at 8 PM Denver.</div>
     </div>`;
 
     await sendEmail({
       slug: 'handy-andy', to,
-      subject: `Daily booking summary — ${bookings.length} new appointment${bookings.length === 1 ? '' : 's'}`,
+      subject: `Daily booking summary — ${bookings.length} new appointment${bookings.length === 1 ? '' : 's'}${overdue.length ? `, ${overdue.length} overdue` : ''}`,
       html, replyTo: cfg.from,
       idempotencyKey: `daily-digest-${dayKey}`,   // exactly one delivery per Denver day
     });
-    return { sent: true, count: bookings.length, to, dayKey };
+    return { sent: true, count: bookings.length, overdue: overdue.length, to, dayKey };
   } catch (e) {
     console.warn('[daily-digest] non-fatal:', e.message);
     return { sent: false, error: e.message };
