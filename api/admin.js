@@ -6437,20 +6437,20 @@ async function secretaryWorkDaysInWeek(db, bizSlug, weekStart) {
   }
   return workDays;
 }
-// Heather is paid in US dollars; Joey is paid in Mexican pesos. Each
+// Heather is paid in US dollars; Joey is paid in Philippine pesos (PHP). Each
 // secretary's daily rate carries its own currency — these are NEVER added
 // together, and never folded into the technicians' USD payroll total (see
 // the currency-aware sum in payroll()/payrollCombined() below).
 const SECRETARY_RATE = {
   'handy-andy': { daily: 95, currency: 'USD' },
-  'doms': { daily: 2083, currency: 'MXN' },
+  'doms': { daily: 2083, currency: 'PHP' },
 };
-// Approximate MXN -> USD reference rate, for display only (never touches what
+// Approximate PHP -> USD reference rate, for display only (never touches what
 // Joey is actually paid — he's paid in pesos, full stop). Update this number
 // as the real exchange rate drifts; there's no live FX feed wired in, so it's
 // a plain constant rather than silently going stale against a forgotten API.
-const MXN_PER_USD = 18.2;
-function mxnToUsd(mxn) { return Math.round((Number(mxn) || 0) / MXN_PER_USD * 100) / 100; }
+const PHP_PER_USD = 56.5;
+function phpToUsd(php) { return Math.round((Number(php) || 0) / PHP_PER_USD * 100) / 100; }
 
 // Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
 // computed pay — but the owner runs payroll for them too. Always shows a row
@@ -6463,7 +6463,7 @@ async function officePayRows(db, weekStart) {
   const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
   const mk = async (name, slug, saved) => {
     const currency = SECRETARY_RATE[slug].currency;
-    const usdEq = (total) => currency === 'MXN' ? mxnToUsd(total) : null;
+    const usdEq = (total) => currency === 'PHP' ? phpToUsd(total) : null;
     if (saved != null) {
       const total = Number(saved);
       return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: false, currency, usd_equivalent: usdEq(total) };

@@ -4317,10 +4317,10 @@ async function loadPayroll(){
 }
 
 function payFmtUSD(n){ return '$'+Number(n||0).toLocaleString('en-US'); }
-// Joey is paid in Mexican pesos, Heather in US dollars — each secretary row
-// carries its own `currency` (see office_pay_weekly / SECRETARY_RATE in
+// Joey is paid in Philippine pesos, Heather in US dollars — each secretary
+// row carries its own `currency` (see office_pay_weekly / SECRETARY_RATE in
 // admin.js), so amounts are never silently mixed into one $ figure.
-function payFmtMoney(n, currency){ return currency==='MXN' ? 'MX$'+Number(n||0).toLocaleString('en-US') : payFmtUSD(n); }
+function payFmtMoney(n, currency){ return currency==='PHP' ? '₱'+Number(n||0).toLocaleString('en-US') : payFmtUSD(n); }
 function payFmtDateUTC(ds,opts){ return new Date(ds+'T00:00:00Z').toLocaleDateString('en-US', Object.assign({timeZone:'UTC'},opts)); }
 
 function renderPayrollData(d){
@@ -4405,7 +4405,7 @@ function renderPayrollData(d){
   // (KPIs, per-person table, daily breakdown, job breakdown, deferred) to just
   // that one technician.
   const techs = payrollTechFilter ? allTechs.filter(t=>t.name===payrollTechFilter) : allTechs;
-  const total = payrollTechFilter ? techs.filter(t=>t.currency!=='MXN').reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
+  const total = payrollTechFilter ? techs.filter(t=>t.currency!=='PHP').reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
 
   const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
   const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
@@ -4443,23 +4443,23 @@ function renderPayrollData(d){
     // instead of the Jobs/Deferred columns.
     if(t.is_office){
       const field=t.name==='Heather'?'heather_pay':'joey_pay';
-      const isMxn=t.currency==='MXN';
-      const rateLbl=isMxn?'MX$2,083/day':'$95/day';
+      const isPhp=t.currency==='PHP';
+      const rateLbl=isPhp?'₱2,083/day':'$95/day';
       const note=t.is_suggested
         ? `Suggested: ${t.work_days??0} day${t.work_days===1?'':'s'} worked × ${rateLbl} — not saved yet`
-        : `Saved for this week${isMxn?' (pesos)':''}`;
+        : `Saved for this week${isPhp?' (pesos)':''}`;
       // Quick USD reference next to Joey's peso pay — purely informational
       // (he's paid in pesos, that never changes); updates live as the amount
       // is typed, using the same approximate rate the server used to compute
       // usd_equivalent on load.
-      const usdHint=isMxn?`<span class="office-usd-hint" data-office-field="${field}" style="font-size:12px;color:var(--mute);white-space:nowrap;">≈ ${payFmtUSD(t.usd_equivalent??0)} USD</span>`:'';
+      const usdHint=isPhp?`<span class="office-usd-hint" data-office-field="${field}" style="font-size:12px;color:var(--mute);white-space:nowrap;">≈ ${payFmtUSD(t.usd_equivalent??0)} USD</span>`:'';
       html+=`<tr class="${i%2?'z':''}">
-        <td class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office${isMxn?' · MXN':''})</span></td>
+        <td class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office${isPhp?' · PHP':''})</span></td>
         <td class="r" colspan="2" style="color:var(--mute);font-size:12.5px;">${esc(note)}</td>
         <td class="r">
           <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
-            <span style="color:var(--mute);">${isMxn?'MX$':'$'}</span>
-            <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input${isMxn?' mxn-input':''}" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
+            <span style="color:var(--mute);">${isPhp?'₱':'$'}</span>
+            <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input${isPhp?' php-input':''}" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
             ${usdHint}
             <button class="btn ghost sm office-pay-save" data-office-field="${field}" style="width:auto;padding:6px 10px;">Save</button>
             <span class="office-pay-status" data-office-field="${field}" style="font-size:12px;color:var(--mute);"></span>
@@ -4477,8 +4477,8 @@ function renderPayrollData(d){
   });
   html+=`<tr class="pr-total"><td>TOTAL</td><td class="r">${jobsCount}</td><td class="r">${deferredCount||'—'}</td><td class="r">${payFmtUSD(total)}</td></tr>`;
   html+=`</tbody></table>`;
-  if(techs.some(t=>t.currency==='MXN')){
-    html+=`<div class="pr-note" style="margin-top:6px;">Joey is paid in Mexican pesos — his row is shown above but kept out of the dollar TOTAL so the two currencies never get added together.</div>`;
+  if(techs.some(t=>t.currency==='PHP')){
+    html+=`<div class="pr-note" style="margin-top:6px;">Joey is paid in Philippine pesos — his row is shown above but kept out of the dollar TOTAL so the two currencies never get added together.</div>`;
   }
 
   // ── Daily Breakdown ──────────────────────────────────────────────────────
@@ -4603,12 +4603,12 @@ function renderPayrollData(d){
   // Live USD reference next to Joey's peso input — updates as he types, no
   // save/round-trip needed. Same approximate rate the server used for the
   // initial usd_equivalent; purely a reference, never what he's actually paid.
-  const MXN_PER_USD=18.2;
-  content.querySelectorAll('.mxn-input').forEach(inp=>{
+  const PHP_PER_USD=56.5;
+  content.querySelectorAll('.php-input').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const field=inp.dataset.officeField;
       const hint=content.querySelector(`.office-usd-hint[data-office-field="${field}"]`);
-      if(hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(inp.value)||0)/MXN_PER_USD*100)/100)} USD`;
+      if(hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(inp.value)||0)/PHP_PER_USD*100)/100)} USD`;
     });
   });
   content.querySelectorAll('.office-pay-save').forEach(btn=>{
