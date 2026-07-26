@@ -6,6 +6,7 @@
 import { emailConfig, sendEmail } from './email.js';
 import { emailNotificationsOn } from './notify.js';
 import { sendSMS } from './sms.js';
+import { computeJobPay } from './payroll.js';
 
 // ── Big-bracket-job SMS alert ────────────────────────────────────────────────
 // The owner wants a text whenever a single booked ticket carries 4+ brackets
@@ -54,6 +55,50 @@ export async function maybeSendFirstMultiTvDiscountAlert(db, { discountAmt, cust
     const msg = `Heads up: the multi-TV discount was just used for the first time — ${customerName || 'a customer'}'s job (scheduled ${whenStr || 'soon'}) saved $${discountAmt.toFixed(2)}.`;
     sendSMS(MULTI_TV_DISCOUNT_ALERT_PHONE, msg).catch(e => console.warn('[multi-tv-discount] alert SMS failed:', e.message));
   } catch (e) { console.warn('[multi-tv-discount] alert error:', e.message); }
+}
+
+// ── $0 non-GDS / low-profit SMS alert ──────────────────────────────────────
+// The owner wants a text the moment a job books in that's either priced at $0
+// without being a real Guaranteed Dismount Service (a likely mis-priced or
+// bare ticket), or whose estimated profit (price minus estimated tech payout)
+// comes in under $20 — including negative. Detected the same way tech.js's
+// isDismountLi does (pattern match, not an exact string, so a category prefix
+// or wording variant is still caught). Profit is an ESTIMATE at booking time:
+// computeJobPay only pays out on a *completed* job, so this runs the real
+// rate table against a synthetic "already completed & paid" copy of the job
+// just to price it out — never touches or reads the real booking's status.
+const GDS_ALERT_RE = /guarante\w*\s+dismount|dismount\s+service|\btv removal\b/i;
+export function linesHaveGds(lines) {
+  return (Array.isArray(lines) ? lines : []).some(l => GDS_ALERT_RE.test(String((l && (l.name || l.label)) || '')));
+}
+export function estimateJobProfit({ price, lines, techName }) {
+  try {
+    const synthetic = {
+      status: 'completed', payment_status: 'paid',
+      price, subtotal: price, amount_paid: price,
+      line_items: Array.isArray(lines) ? lines : [],
+    };
+    const result = computeJobPay(synthetic, techName || '');
+    return (Number(price) || 0) - (Number(result.pay) || 0);
+  } catch (e) { console.warn('[low-profit] estimate error:', e.message); return null; }
+}
+export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customerName, whenStr }) {
+  try {
+    const phone = process.env.OWNER_PHONE_NUMBER;
+    if (!phone) return;
+    const p = Number(price) || 0;
+    const isGds = linesHaveGds(lines);
+    if (p === 0 && !isGds) {
+      const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) was booked at $0 and is NOT Guaranteed Dismount Service — worth checking it's priced correctly.`;
+      sendSMS(phone, msg).catch(e => console.warn('[zero-profit] alert SMS failed:', e.message));
+      return; // one heads-up per job — don't also fire the low-profit text below
+    }
+    const profit = estimateJobProfit({ price, lines, techName });
+    if (profit != null && profit < 20) {
+      const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) has an estimated profit of $${profit.toFixed(2)} — under $20.`;
+      sendSMS(phone, msg).catch(e => console.warn('[low-profit] alert SMS failed:', e.message));
+    }
+  } catch (e) { console.warn('[zero/low-profit] alert error:', e.message); }
 }
 
 function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

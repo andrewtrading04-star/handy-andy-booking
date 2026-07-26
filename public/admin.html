@@ -7724,7 +7724,7 @@ function nbOptPrice(o){
 }
 // Handyman labor — billed by the hour at a flat rate (no TV option groups).
 const HANDYMAN_HOURLY = 85;
-let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='';
+let nbHandymanActive=false, nbHandymanHours=0, nbHandymanLabel='', nbHandymanNote='';
 function isHandymanService(svc){ return !!(svc && svc.category==='Handyman'); }
 
 // ── Assurion (Handy Andy only) ──────────────────────────────────────────────
@@ -7751,7 +7751,7 @@ const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.for
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
 let nbGdsActive=false, nbGdsServiceId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -8038,6 +8038,8 @@ function renderNbSteps(){
           `<button type="button" class="nb-hm-btn" data-d="1">+</button>`+
         `</span></div></div>`+
       `<div class="nb-hint" style="margin-top:8px;font-weight:700;color:var(--ink);">${hrs} hour${hrs===1?'':'s'} × $${HANDYMAN_HOURLY} = $${lineTotal}</div>`+
+      `<textarea class="search nb-handyman-note" style="margin-top:8px;min-height:60px;width:100%;resize:vertical;" `+
+        `placeholder="Describe the work needed (e.g. hang shelves, assemble furniture, patch drywall)…">${esc(nbHandymanNote)}</textarea>`+
     `</div>`;
     updateNbTotal();
     syncSecondTech();
@@ -8053,7 +8055,7 @@ function renderNbSteps(){
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
       `<div class="nb-opts">`+
         `<div class="nb-optq${regCt>0?' on':''}">`+
-          `<span class="nb-optlabel">Customer has a regular TV</span>`+
+          `<span class="nb-optlabel">Regular TV</span>`+
           `<span class="nb-price">$0</span>`+
           (regCt>0
             ? `<span class="nb-stepper">`+
@@ -8065,7 +8067,7 @@ function renderNbSteps(){
           )+
         `</div>`+
         `<div class="nb-optq${frameCt>0?' on':''}">`+
-          `<span class="nb-optlabel">Customer has a Samsung Frame TV or LG Gallery TV</span>`+
+          `<span class="nb-optlabel">Samsung Frame TV or LG Gallery TV</span>`+
           `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
           (frameCt>0
             ? `<span class="nb-stepper">`+
@@ -8166,6 +8168,8 @@ function renderNbSteps(){
 document.getElementById('nbSteps').addEventListener('input',e=>{
   const note=e.target.closest('.nb-other-note');
   if(note){ nbOptionNotes[note.dataset.o]=note.value; }
+  const hmNote=e.target.closest('.nb-handyman-note');
+  if(hmNote){ nbHandymanNote=hmNote.value; }
 });
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
@@ -8260,7 +8264,7 @@ function nbCollectSelections(){
   const ci=nbCustomItem(); if(ci) out.push({option_id:null, label:ci.label, price:ci.price, quantity:1});
   // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
   if(nbHandymanActive){
-    if(nbHandymanHours>0) out.push({option_id:null, label:`Handyman Labor: ${nbHandymanLabel} — ${nbHandymanHours} hour${nbHandymanHours===1?'':'s'}`, price:HANDYMAN_HOURLY, quantity:nbHandymanHours});
+    if(nbHandymanHours>0) out.push({option_id:null, label:`Handyman Labor: ${nbHandymanLabel} — ${nbHandymanHours} hour${nbHandymanHours===1?'':'s'}${nbHandymanNote.trim()?` (${nbHandymanNote.trim()})`:''}`, price:HANDYMAN_HOURLY, quantity:nbHandymanHours});
     return out;
   }
   // Record the TV type ($0) so it's visible on the job — important for

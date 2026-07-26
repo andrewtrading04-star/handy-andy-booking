@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
-import { sendOwnerBookingAlert, maybeSendBigBracketAlert } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -2388,6 +2388,18 @@ async function bookingCreate(req, res, db, auth, body) {
   // Owner SMS when this ticket carries 4+ brackets (same alert as widget bookings).
   maybeSendBigBracketAlert({
     lines: selections,
+    customerName: c.name || '',
+    whenStr: (() => {
+      try { return scheduled_at ? new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }) : null; }
+      catch { return body.scheduled_date || null; }
+    })(),
+  });
+
+  // Owner SMS when this ticket is $0 and not GDS, or its estimated profit is under $20.
+  maybeSendZeroOrLowProfitAlert({
+    price: Number(body.price) || 0,
+    lines: selections,
+    techName: primaryTechInfo?.name || '',
     customerName: c.name || '',
     whenStr: (() => {
       try { return scheduled_at ? new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }) : null; }

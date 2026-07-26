@@ -6,7 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert } from './_lib/owner-notify.js';
+import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -438,6 +438,12 @@ async function bookDoms(req, res) {
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   });
 
+  maybeSendZeroOrLowProfitAlert({
+    price, lines, techName: technicianName || '',
+    customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
+  });
+
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
       slug: 'doms', businessName: "Dom's TV Mounting",
@@ -744,6 +750,12 @@ async function bookHandyAndy(req, res) {
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   }).catch(e => console.warn('[book-ha] multi-tv-discount alert error:', e.message));
+
+  maybeSendZeroOrLowProfitAlert({
+    price, lines, techName: technicianName || '',
+    customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
+  });
 
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
