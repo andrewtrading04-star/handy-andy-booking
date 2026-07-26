@@ -1117,6 +1117,8 @@
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
+      <button data-nav="secretaries" id="navSecretaries"><span class="ic" data-ico="secretaries">🗂️</span> Secretaries</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="other" id="navOther"><span class="ic" data-ico="other">⋯</span> Other <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
     </nav>
@@ -1664,6 +1666,13 @@ function enterApp(){
   if(navHandy) navHandy.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
+  // his on Dom's — same per-business login scoping the whole feature rides
+  // on). Secretaries: owner only, read-only view of both.
+  const navMyAvail=document.getElementById('navMyAvailability');
+  if(navMyAvail) navMyAvail.style.display = role==='secretary' ? '' : 'none';
+  const navSecs=document.getElementById('navSecretaries');
+  if(navSecs) navSecs.style.display = role==='owner' ? '' : 'none';
   const navOther=document.getElementById('navOther');
   if(navOther) navOther.style.display = role==='owner' ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
@@ -1801,7 +1810,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -1817,6 +1826,8 @@ function navTo(s){
     else if(s==='handyman') renderHandymanAnalytics();
     else if(s==='webanalytics') renderWebAnalytics();
     else if(s==='payroll') renderPayroll();
+    else if(s==='myavailability') renderMyAvailability();
+    else if(s==='secretaries') renderSecretaries();
     else if(s==='other') renderOther();
   }
 }
@@ -1833,6 +1844,8 @@ function refreshCurrent(){
   else if(section==='handyman') renderHandymanAnalytics();
   else if(section==='webanalytics') renderWebAnalytics();
   else if(section==='payroll') renderPayroll();
+  else if(section==='myavailability') renderMyAvailability();
+  else if(section==='secretaries') renderSecretaries();
   else if(section==='other') renderOther();
 }
 
@@ -4426,9 +4439,12 @@ function renderPayrollData(d){
     // instead of the Jobs/Deferred columns.
     if(t.is_office){
       const field=t.name==='Heather'?'heather_pay':'joey_pay';
+      const note=t.is_suggested
+        ? `Suggested: ${t.work_days??0} day${t.work_days===1?'':'s'} worked × $95 — not saved yet`
+        : 'Saved for this week';
       html+=`<tr class="${i%2?'z':''}">
         <td class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office)</span></td>
-        <td class="r" colspan="2" style="color:var(--mute);font-size:12.5px;">Hand-entered weekly pay</td>
+        <td class="r" colspan="2" style="color:var(--mute);font-size:12.5px;">${esc(note)}</td>
         <td class="r">
           <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
             <span style="color:var(--mute);">$</span>
@@ -4585,6 +4601,99 @@ function renderPayrollData(d){
       finally{ btn.disabled=false; }
     });
   });
+}
+
+// ── My Availability (secretary) ─────────────────────────────────────────────
+// Whole-day on/off toggle for whichever secretary is logged in (Heather on
+// Handy Andy, Joey on Dom's) — the server scopes this to auth.scope, so
+// there's no business picker here at all; a secretary only ever sees/edits
+// their own week.
+async function renderMyAvailability(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('secretary_availability');
+    const patternByDow={}; (d.pattern||[]).forEach(p=>{ patternByDow[p.day_of_week]=p.is_available; });
+    const excByDate={}; (d.exceptions||[]).forEach(e=>{ excByDate[e.exception_date]=e.is_available; });
+    const dayRow=(dow)=>{
+      const on=!!patternByDow[dow];
+      return `<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="name">${esc(d.day_names[dow])}</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <span class="meta">${on?'Working':'Off'}</span>
+          <input type="checkbox" data-dow="${dow}" class="my-avail-toggle" ${on?'checked':''} style="width:20px;height:20px;">
+        </label>
+      </div>`;
+    };
+    // Upcoming one-off exceptions (next 14 days) so a secretary can see/clear
+    // a specific-date override without it getting lost among the weekly grid.
+    const today=todayStr();
+    const upcoming=Object.keys(excByDate).filter(dt=>dt>=today).sort();
+    const excHtml=upcoming.length
+      ? `<div class="side-section" style="margin-top:18px;">Upcoming exceptions</div>` +
+        upcoming.map(dt=>`<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="name">${esc(dt)}</div>
+          <div class="meta">${excByDate[dt]?'Working (override)':'Off (override)'}</div>
+        </div>`).join('')
+      : '';
+    view.innerHTML=`<div class="wrap">
+      <div style="margin-bottom:14px;">
+        <h2 style="margin:0 0 4px;">${esc(d.name)}'s Weekly Availability</h2>
+        <div class="meta">Toggle the days you normally work. Paid $95/day — this drives the weekly payroll suggestion.</div>
+      </div>
+      ${[0,1,2,3,4,5,6].map(dayRow).join('')}
+      ${excHtml}
+    </div>`;
+    view.querySelectorAll('.my-avail-toggle').forEach(cb=>{
+      cb.addEventListener('change', async()=>{
+        const dow=parseInt(cb.dataset.dow,10);
+        cb.disabled=true;
+        try{ await api('secretary_availability_set',{ method:'POST', body:{ day_of_week:dow, is_available:cb.checked } }); toast('Saved'); renderMyAvailability(); }
+        catch(err){ toast(err.message); cb.checked=!cb.checked; }
+        finally{ cb.disabled=false; }
+      });
+    });
+  }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
+}
+
+// ── Secretaries (owner) ──────────────────────────────────────────────────────
+// Read-only: Heather's and Joey's weekly work/off pattern side by side, plus
+// any upcoming date-specific exceptions. Editing happens only from each
+// secretary's own "My Availability" tab.
+async function renderSecretaries(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('secretaries_list');
+    const today=todayStr();
+    const cardFor=(s)=>{
+      const patternByDow={}; (s.pattern||[]).forEach(p=>{ patternByDow[p.day_of_week]=p.is_available; });
+      const rows=[0,1,2,3,4,5,6].map(dow=>{
+        const on=!!patternByDow[dow];
+        return `<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="name">${esc(d.day_names[dow])}</div>
+          <div class="meta" style="font-weight:700;color:${on?'var(--accent)':'var(--mute)'};">${on?'Working':'Off'}</div>
+        </div>`;
+      }).join('');
+      const upcoming=(s.exceptions||[]).filter(e=>e.exception_date>=today).sort((a,b)=>a.exception_date.localeCompare(b.exception_date));
+      const excHtml=upcoming.length
+        ? `<div class="side-section" style="margin-top:14px;">Upcoming exceptions</div>` +
+          upcoming.map(e=>`<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="name">${esc(e.exception_date)}</div>
+            <div class="meta">${e.is_available?'Working (override)':'Off (override)'}</div>
+          </div>`).join('')
+        : '';
+      return `<div style="flex:1;min-width:260px;">
+        <h2 style="margin:0 0 10px;">${esc(s.name)} <span class="meta" style="font-weight:400;">(${s.business_slug==='handy-andy'?'Handy Andy':"Dom's"})</span></h2>
+        ${rows}
+        ${excHtml}
+      </div>`;
+    };
+    view.innerHTML=`<div class="wrap">
+      <div style="margin-bottom:14px;"><div class="meta">Each secretary's own work/off days — set from their own "My Availability" tab.</div></div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;">${(d.secretaries||[]).map(cardFor).join('')}</div>
+    </div>`;
+  }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
 
 // ── Technicians ────────────────────────────────────────────────────────────

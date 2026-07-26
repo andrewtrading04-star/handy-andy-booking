@@ -297,6 +297,10 @@ export default async function handler(req, res) {
       case 'payroll_combined': return await payrollCombined(req, res, db, auth);
       case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
       case 'office_pay_save': return await officePaySave(req, res, db, auth);
+      case 'secretary_availability': return await secretaryAvailability(req, res, db, auth);
+      case 'secretary_availability_set': return await secretaryAvailabilitySet(req, res, db, auth, body);
+      case 'secretary_availability_exception_set': return await secretaryAvailabilityExceptionSet(req, res, db, auth, body);
+      case 'secretaries_list': return await secretariesList(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -6413,18 +6417,45 @@ function sortForPayroll(data) {
   });
 }
 
+// Heather ($95/day) — how many of the 7 days in this Sun-Sat week her
+// availability says she worked, checking the date-specific exception first
+// and falling back to the recurring weekly pattern. Powers the payroll
+// suggestion below so a week's pay reflects her ACTUAL schedule instead of
+// always assuming a full 5-day week.
+async function secretaryWorkDaysInWeek(db, bizSlug, weekStart) {
+  const { data: biz } = await db.from('businesses').select('id').eq('slug', bizSlug).maybeSingle();
+  if (!biz) return 0;
+  const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
+  const patternByDow = new Map(pattern.map(p => [p.day_of_week, p.is_available]));
+  const excByDate = new Map(exceptions.map(e => [e.exception_date, e.is_available]));
+  let workDays = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysStr(weekStart, i);
+    const dow = dayOfWeekFor(d);
+    const avail = excByDate.has(d) ? excByDate.get(d) : (patternByDow.get(dow) ?? false);
+    if (avail) workDays++;
+  }
+  return workDays;
+}
+const SECRETARY_DAILY_RATE = 95;
+
 // Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
-// computed pay — but the owner runs payroll for them too. One hand-entered
-// number per week, shown as its own row on the Weekly Payroll screen right
-// alongside the techs (see PAYROLL_LAST_NAME) instead of living only in the
-// owner's head or a separate spreadsheet.
+// computed pay — but the owner runs payroll for them too. Always shows a row
+// for each: a hand-entered number wins if one was saved for this week;
+// otherwise a SUGGESTED total from her actual "My Availability" schedule
+// (work days × $95/day) — clearly marked as a suggestion, not silently
+// treated as final, so the owner can always override it.
 async function officePayRows(db, weekStart) {
   const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
-  const mk = (name, pay) => ({ name, jobs: [], deferred: [], total: Number(pay) || 0, is_office: true });
-  const rows = [];
-  if (row?.heather_pay != null) rows.push(mk('Heather', row.heather_pay));
-  if (row?.joey_pay != null) rows.push(mk('Joey', row.joey_pay));
-  return rows;
+  const mk = async (name, slug, saved) => {
+    if (saved != null) return { name, jobs: [], deferred: [], total: Number(saved), is_office: true, is_suggested: false };
+    const workDays = await secretaryWorkDaysInWeek(db, slug, weekStart);
+    return { name, jobs: [], deferred: [], total: workDays * SECRETARY_DAILY_RATE, is_office: true, is_suggested: true, work_days: workDays };
+  };
+  return Promise.all([
+    mk('Heather', 'handy-andy', row?.heather_pay),
+    mk('Joey', 'doms', row?.joey_pay),
+  ]);
 }
 
 async function officePaySave(req, res, db, auth) {
@@ -6557,6 +6588,102 @@ async function actualProfitSave(req, res, db, auth) {
   if (error) throw error;
 
   return res.status(200).json({ ok: true, pay_date, field, amount: Number(amount) });
+}
+
+// ── Secretary availability ("My Availability" / "Secretaries") ─────────────
+// Whole-day on/off per business (Heather = Handy Andy, Joey = Dom's) — no
+// time-of-day slots, since a secretary is paid a flat $95/day, not per job.
+// A secretary's own login is already scoped to exactly one business (see
+// login(): the shared per-business password sets role:'secretary',
+// scope:'<slug>'), so "Heather only sees her own availability" and "Joey
+// only sees his" fall out of that scoping for free — no new identity system
+// needed. The owner (role:'owner', scope:'all') can view (not edit) both
+// under the "Secretaries" menu.
+const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+async function fetchSecretaryAvailability(db, bizId) {
+  const { data: pattern, error: pErr } = await db.from('secretary_availability')
+    .select('day_of_week, is_available').eq('business_id', bizId).order('day_of_week');
+  if (pErr) throw pErr;
+  const { data: exceptions, error: eErr } = await db.from('secretary_availability_exceptions')
+    .select('exception_date, is_available').eq('business_id', bizId)
+    .gte('exception_date', new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10))
+    .order('exception_date');
+  if (eErr) throw eErr;
+  return { pattern: pattern || [], exceptions: exceptions || [] };
+}
+
+// GET — a secretary sees their OWN business (from their token's scope); the
+// owner must pass ?business= to pick which one.
+async function secretaryAvailability(req, res, db, auth) {
+  let slug;
+  if (auth.role === 'secretary') slug = auth.scope;
+  else if (auth.role === 'owner') slug = (req.query.business || '').toString();
+  else return res.status(403).json({ error: 'Not authorized' });
+  if (!slug || !['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business required' });
+
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id, slug').eq('slug', slug).maybeSingle();
+  if (bizErr) throw bizErr;
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+  const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
+  return res.status(200).json({ business_slug: slug, name: displayNameFor(slug), pattern, exceptions, day_names: DOW_NAMES });
+}
+
+// POST — set the recurring weekly pattern for ONE day. Secretary-only, and
+// always scoped to THEIR OWN business (auth.scope) — a request body business
+// field is never trusted, so Heather's session can never edit Joey's days.
+async function secretaryAvailabilitySet(req, res, db, auth) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'secretary') return res.status(403).json({ error: 'Secretary only' });
+  const dayOfWeek = parseInt(req.body?.day_of_week, 10);
+  const isAvailable = !!(req.body || {}).is_available;
+  if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return res.status(400).json({ error: 'day_of_week (0-6) required' });
+
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', auth.scope).maybeSingle();
+  if (bizErr) throw bizErr;
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+  const { error } = await db.from('secretary_availability')
+    .upsert({ business_id: biz.id, day_of_week: dayOfWeek, is_available: isAvailable, updated_at: new Date().toISOString() },
+      { onConflict: 'business_id,day_of_week' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, day_of_week: dayOfWeek, is_available: isAvailable });
+}
+
+// POST — a one-off exception for a specific date (e.g. a day off this week
+// only). Same secretary-only, own-business-only scoping as the weekly set.
+async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'secretary') return res.status(403).json({ error: 'Secretary only' });
+  const date = (req.body?.date || '').toString();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
+  const isAvailable = !!(req.body || {}).is_available;
+
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', auth.scope).maybeSingle();
+  if (bizErr) throw bizErr;
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+  const { error } = await db.from('secretary_availability_exceptions')
+    .upsert({ business_id: biz.id, exception_date: date, is_available: isAvailable, updated_at: new Date().toISOString() },
+      { onConflict: 'business_id,exception_date' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, date, is_available: isAvailable });
+}
+
+// GET — owner-only "Secretaries" admin view: both Heather's and Joey's
+// weekly pattern + upcoming exceptions side by side.
+async function secretariesList(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data: bizRows, error: bizErr } = await db.from('businesses')
+    .select('id, slug').in('slug', ['handy-andy', 'doms']);
+  if (bizErr) throw bizErr;
+
+  const secretaries = await Promise.all((bizRows || []).map(async biz => {
+    const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
+    return { business_slug: biz.slug, name: displayNameFor(biz.slug), pattern, exceptions };
+  }));
+  return res.status(200).json({ secretaries, day_names: DOW_NAMES });
 }
 
 // ── Bracket Inventory ────────────────────────────────────────────────────────
