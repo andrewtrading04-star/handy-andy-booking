@@ -669,7 +669,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
       qty: Number(it && it.qty) || 0,
       unit_price: Number(it && it.unit_price) || 0,
     }))
-    .filter(it => it.description || it.unit_price > 0);
+    .filter(it => (it.description || it.unit_price > 0) && !isDefaultTypeLabel(it.description));
   const hasLineItems = lineItems.length > 0;
   const subtotal = Math.round(lineItems.reduce((t, it) => t + it.qty * it.unit_price, 0) * 100) / 100;
   const taxRate = Number(details.taxRate) > 0 ? Number(details.taxRate) : 0;
@@ -725,8 +725,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
           <td style="padding:14px 0 0;font-size:15px;font-weight:800;color:#11181c;">Estimated total</td>
           <td style="padding:14px 0 0;font-size:18px;font-weight:800;color:${accent};text-align:right;white-space:nowrap;">${money(total)}</td>
         </tr>
-      </table>
-      <div style="font-size:12px;color:#9ca3af;line-height:1.6;margin-top:12px;">This is an estimate, not a final invoice. Final pricing may vary based on on-site conditions.</div>`;
+      </table>`;
   } else {
     bodyRow = description
       ? `<div style="font-size:14px;color:#3a4453;line-height:1.6;white-space:pre-wrap;">${esc(description)}</div>`

@@ -133,7 +133,6 @@
     <div id="availBox"></div>
     <div id="summaryBox"></div>
     <button class="btn" id="approveBtn" disabled>&#10003; Approve</button>
-    <div class="fine">This is an estimate, not a final invoice. Final pricing is confirmed on-site.</div>
   </div>
 
   <!-- Confirm details: card on file + service address (required to book) -->
@@ -226,7 +225,7 @@ function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'
 
 // ── Base quote (locked) ──
 function renderQuote(info){
-  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)) : [];
+  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
   const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
   let body;
   if (items.length){
