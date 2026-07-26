@@ -6445,6 +6445,12 @@ const SECRETARY_RATE = {
   'handy-andy': { daily: 95, currency: 'USD' },
   'doms': { daily: 2083, currency: 'MXN' },
 };
+// Approximate MXN -> USD reference rate, for display only (never touches what
+// Joey is actually paid — he's paid in pesos, full stop). Update this number
+// as the real exchange rate drifts; there's no live FX feed wired in, so it's
+// a plain constant rather than silently going stale against a forgotten API.
+const MXN_PER_USD = 18.2;
+function mxnToUsd(mxn) { return Math.round((Number(mxn) || 0) / MXN_PER_USD * 100) / 100; }
 
 // Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
 // computed pay — but the owner runs payroll for them too. Always shows a row
@@ -6457,9 +6463,14 @@ async function officePayRows(db, weekStart) {
   const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
   const mk = async (name, slug, saved) => {
     const currency = SECRETARY_RATE[slug].currency;
-    if (saved != null) return { name, jobs: [], deferred: [], total: Number(saved), is_office: true, is_suggested: false, currency };
+    const usdEq = (total) => currency === 'MXN' ? mxnToUsd(total) : null;
+    if (saved != null) {
+      const total = Number(saved);
+      return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: false, currency, usd_equivalent: usdEq(total) };
+    }
     const workDays = await secretaryWorkDaysInWeek(db, slug, weekStart);
-    return { name, jobs: [], deferred: [], total: workDays * SECRETARY_RATE[slug].daily, is_office: true, is_suggested: true, work_days: workDays, currency };
+    const total = workDays * SECRETARY_RATE[slug].daily;
+    return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: true, work_days: workDays, currency, usd_equivalent: usdEq(total) };
   };
   return Promise.all([
     mk('Heather', 'handy-andy', row?.heather_pay),

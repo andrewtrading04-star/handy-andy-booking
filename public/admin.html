@@ -4448,13 +4448,19 @@ function renderPayrollData(d){
       const note=t.is_suggested
         ? `Suggested: ${t.work_days??0} day${t.work_days===1?'':'s'} worked × ${rateLbl} — not saved yet`
         : `Saved for this week${isMxn?' (pesos)':''}`;
+      // Quick USD reference next to Joey's peso pay — purely informational
+      // (he's paid in pesos, that never changes); updates live as the amount
+      // is typed, using the same approximate rate the server used to compute
+      // usd_equivalent on load.
+      const usdHint=isMxn?`<span class="office-usd-hint" data-office-field="${field}" style="font-size:12px;color:var(--mute);white-space:nowrap;">≈ ${payFmtUSD(t.usd_equivalent??0)} USD</span>`:'';
       html+=`<tr class="${i%2?'z':''}">
         <td class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office${isMxn?' · MXN':''})</span></td>
         <td class="r" colspan="2" style="color:var(--mute);font-size:12.5px;">${esc(note)}</td>
         <td class="r">
-          <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
+          <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
             <span style="color:var(--mute);">${isMxn?'MX$':'$'}</span>
-            <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
+            <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input${isMxn?' mxn-input':''}" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
+            ${usdHint}
             <button class="btn ghost sm office-pay-save" data-office-field="${field}" style="width:auto;padding:6px 10px;">Save</button>
             <span class="office-pay-status" data-office-field="${field}" style="font-size:12px;color:var(--mute);"></span>
           </div>
@@ -4594,6 +4600,17 @@ function renderPayrollData(d){
     if(payrollRawData) renderPayrollData(payrollRawData);
   });
   wireActualProfit();
+  // Live USD reference next to Joey's peso input — updates as he types, no
+  // save/round-trip needed. Same approximate rate the server used for the
+  // initial usd_equivalent; purely a reference, never what he's actually paid.
+  const MXN_PER_USD=18.2;
+  content.querySelectorAll('.mxn-input').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const field=inp.dataset.officeField;
+      const hint=content.querySelector(`.office-usd-hint[data-office-field="${field}"]`);
+      if(hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(inp.value)||0)/MXN_PER_USD*100)/100)} USD`;
+    });
+  });
   content.querySelectorAll('.office-pay-save').forEach(btn=>{
     btn.addEventListener('click', async()=>{
       const field=btn.dataset.officeField;
