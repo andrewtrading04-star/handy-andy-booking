@@ -2720,9 +2720,17 @@ function mountLineItemsEditor(b){
     const visible=rows.map(r=>({ name:(r.name||'').trim(), quantity:qOf(r), unit_price:Number(r.unit)||0, kind:r.kind||'service' }))
                       .filter(r=>r.name||r.unit_price);
     const items=[...visible, ...hiddenItems];
+    // Emptying a ticket that had items is almost never intentional — the server
+    // rejects it outright unless this explicit flag is sent, and we only send it
+    // after the office confirms a plainly-worded warning.
+    let confirmEmpty=false;
+    if(!items.length && Array.isArray(b.line_items) && b.line_items.length){
+      if(!confirm('This will remove EVERY line item from this ticket and set its price to $0.\n\nAre you sure?')) return;
+      confirmEmpty=true;
+    }
     const btn=document.getElementById('bkLiSave'); btn.disabled=true;
     try{
-      const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items }});
+      const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, ...(confirmEmpty&&{confirm_empty:true}) }});
       // Reflect the saved state locally so the modal stays in sync, then refresh
       // the underlying schedule (prices/totals) without closing the modal.
       b.line_items=items.map(it=>{

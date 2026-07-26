@@ -2902,6 +2902,31 @@ function sanitizeBookingLineItems(arr) {
 // booking's price to the sum of the lines so the total can never drift from the
 // items it's made of. Works on any job, including imported (Zenbooker) jobs that
 // arrived with no line items at all — the editor seeds one line from the price.
+// Snapshot a booking's current line items into its metadata (ring buffer of the
+// last 5 saves) BEFORE any rewrite touches them. This is the permanent undo
+// trail for the Lucinda Simpson incident (Jul 2026): a ticket's entire item set
+// was replaced with a near-empty list and there was NOTHING anywhere recording
+// what had been on it. Best-effort — a snapshot failure never blocks the save,
+// but it's loudly logged because it means the safety net is down.
+async function snapshotLineItems(db, bookingId, meta, oldRows, actor) {
+  try {
+    const backups = Array.isArray(meta?.li_backups) ? meta.li_backups : [];
+    backups.push({
+      at: new Date().toISOString(), by: actor || 'unknown',
+      items: (oldRows || []).map(r => ({
+        kind: r.kind, name: r.name, quantity: r.quantity,
+        unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable,
+      })),
+    });
+    const newMeta = { ...(meta || {}), li_backups: backups.slice(-5) };
+    await db.from('bookings').update({ metadata: newMeta }).eq('id', bookingId);
+    return newMeta;
+  } catch (e) {
+    console.error(`[line_items] SNAPSHOT FAILED for booking ${bookingId} — saving without a safety net:`, e.message);
+    return meta;
+  }
+}
+
 async function bookingLineItemsSave(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -2909,16 +2934,38 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
 
   const { data: existing, error: e0 } = await db.from('bookings')
-    .select('id').eq('id', id).eq('business_id', biz.id).single();
+    .select('id, metadata').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
   const items = sanitizeBookingLineItems(body.items);
 
-  // Replace the whole set: drop the current rows, insert the edited ones.
-  const { error: delErr } = await db.from('booking_line_items')
-    .delete().eq('booking_id', id).eq('business_id', biz.id);
-  if (delErr) throw delErr;
+  // Current rows: the snapshot source AND the exact ids we'll delete after the
+  // new rows are safely in.
+  const { data: oldRows, error: oldErr } = await db.from('booking_line_items')
+    .select('id, kind, name, quantity, unit_price, line_total, taxable')
+    .eq('booking_id', id).eq('business_id', biz.id);
+  if (oldErr) throw oldErr;
 
+  // A save that would EMPTY a ticket that currently has items is almost always
+  // a client-side bug (a modal that rendered before its data arrived), not an
+  // office intention — require an explicit confirmation flag the UI only sends
+  // after a typed-out warning. (Lucinda Simpson incident, Jul 2026.)
+  if (!items.length && (oldRows || []).length && body.confirm_empty !== true) {
+    return res.status(400).json({
+      error: 'This would remove EVERY line item from the ticket. If that is really what you want, confirm it in the dialog.',
+      code: 'confirm_empty_required',
+    });
+  }
+
+  console.log(`[line_items] save booking=${id} by=${auth.name || auth.role || 'office'} before=${(oldRows || []).length} after=${items.length}`);
+  await snapshotLineItems(db, id, existing.metadata, oldRows, `office:${auth.name || auth.role || '?'}`);
+
+  // INSERT the new rows FIRST, then delete the old ones BY ID. The two steps
+  // are separate transactions (PostgREST), so this order is what makes failure
+  // non-destructive: if the insert dies, the old ticket is untouched; if the
+  // delete dies, the ticket briefly shows duplicates — annoying, visible, and
+  // fixable, unlike the old delete-first order where an insert failure had
+  // already destroyed every row with nothing to recover from.
   if (items.length) {
     // sort_order = the array's index, so however the office dragged the rows
     // into order on save is exactly how they read back next time (migration
@@ -2935,6 +2982,15 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
       ({ error: insErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
     }
     if (insErr) throw insErr;
+  }
+
+  const oldIds = (oldRows || []).map(r => r.id);
+  if (oldIds.length) {
+    const { error: delErr } = await db.from('booking_line_items').delete().in('id', oldIds);
+    if (delErr) {
+      console.error(`[line_items] delete-after-insert failed for booking ${id} — ticket has duplicate rows, resave to fix:`, delErr.message);
+      throw delErr;
+    }
   }
 
   const price = Math.round(items.reduce((t, it) => t + it.line_total, 0) * 100) / 100;

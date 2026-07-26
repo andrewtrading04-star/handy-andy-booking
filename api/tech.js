@@ -640,7 +640,7 @@ async function jobLineItemsSave(req, res, db, auth, body) {
   // Job must belong to this tech. Pull the current line items (with ids + kind)
   // so we know which are hidden (keep) vs visible work (replace).
   const build = () => scopeMine(db.from('bookings')
-    .select('id, business_id, line_items:booking_line_items ( id, kind, name, line_total )'), auth)
+    .select('id, business_id, metadata, line_items:booking_line_items ( id, kind, name, quantity, unit_price, line_total, taxable )'), auth)
     .eq('id', id).maybeSingle();
   const { data: bk, error } = await fetchMine(build);
   if (error || !bk) return res.status(404).json({ error: 'Job not found' });
@@ -649,14 +649,36 @@ async function jobLineItemsSave(req, res, db, auth, body) {
   const existing = Array.isArray(bk.line_items) ? bk.line_items : [];
   const visibleIds = existing.filter(li => !isHiddenLi(li)).map(li => li.id);
 
-  // Replace only the visible work lines; the hidden fee/tip/coupon/dismount rows
-  // stay exactly as they were.
-  if (visibleIds.length) {
-    const { error: delErr } = await db.from('booking_line_items').delete().in('id', visibleIds);
-    if (delErr) throw delErr;
+  const items = sanitizeWorkLineItems(body.items);
+
+  // A tech's phone has no business zeroing out a ticket: an empty list arriving
+  // while the job HAS work lines is a glitched/stale app screen, not an edit
+  // (the Lucinda Simpson incident, Jul 2026 — an entire ticket's items were
+  // silently replaced with nothing). The office dashboard is the only place a
+  // ticket can be deliberately emptied, and even there it takes a confirm.
+  if (!items.length && visibleIds.length) {
+    return res.status(400).json({ error: 'This would remove every work item from the job. Pull down to refresh and try again, or ask the office to edit the ticket.' });
   }
 
-  const items = sanitizeWorkLineItems(body.items);
+  // Snapshot the CURRENT full item set into booking metadata (ring buffer of 5)
+  // before anything is rewritten, so any future bad save is recoverable.
+  try {
+    const backups = Array.isArray(bk.metadata?.li_backups) ? bk.metadata.li_backups : [];
+    backups.push({
+      at: new Date().toISOString(), by: `tech:${auth.tech_id || auth.name || '?'}`,
+      items: existing.map(r => ({ kind: r.kind, name: r.name, quantity: r.quantity, unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable })),
+    });
+    await db.from('bookings').update({ metadata: { ...(bk.metadata || {}), li_backups: backups.slice(-5) } }).eq('id', id);
+  } catch (e) {
+    console.error(`[tech line_items] SNAPSHOT FAILED for booking ${id} — saving without a safety net:`, e.message);
+  }
+  console.log(`[tech line_items] save booking=${id} by=tech:${auth.tech_id || '?'} visibleBefore=${visibleIds.length} after=${items.length}`);
+
+  // INSERT the replacement rows FIRST, then delete the old visible rows BY ID.
+  // Two separate transactions, so this order makes failure non-destructive: an
+  // insert failure leaves the old ticket untouched; a delete failure leaves
+  // visible duplicates — annoying but recoverable, unlike the old delete-first
+  // order where an insert failure had already destroyed the work lines.
   if (items.length) {
     const rows = items.map(it => ({
       booking_id: id, business_id: bizId,
@@ -666,6 +688,14 @@ async function jobLineItemsSave(req, res, db, auth, body) {
     }));
     const { error: insErr } = await db.from('booking_line_items').insert(rows);
     if (insErr) throw insErr;
+  }
+
+  if (visibleIds.length) {
+    const { error: delErr } = await db.from('booking_line_items').delete().in('id', visibleIds);
+    if (delErr) {
+      console.error(`[tech line_items] delete-after-insert failed for booking ${id} — duplicate rows visible, resave to fix:`, delErr.message);
+      throw delErr;
+    }
   }
 
   // Recompute the booking total from every remaining line (preserved hidden + new
