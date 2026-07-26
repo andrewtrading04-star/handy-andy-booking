@@ -296,6 +296,7 @@ export default async function handler(req, res) {
       case 'payroll': return await payroll(req, res, db, auth);
       case 'payroll_combined': return await payrollCombined(req, res, db, auth);
       case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
+      case 'office_pay_save': return await officePaySave(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -6395,6 +6396,58 @@ async function actualProfitFor(db, payDate) {
   };
 }
 
+// Payroll displays people the way the owner actually runs payroll (matches
+// the contractor list in the payroll processor, sorted by LAST name) rather
+// than first-name alphabetical or job-count order. Anyone not in this map
+// (a new hire) falls back to sorting by their own first name so they still
+// land somewhere sane instead of erroring.
+const PAYROLL_LAST_NAME = {
+  'TK': 'Adeshewo', 'Juan': 'Beltran', 'Zach': 'Benaya', 'Kregg': 'Buesig',
+  'Steve': 'Burns', 'Gregory': 'Gadlin', 'Heather': 'Gonzalez',
+};
+function sortForPayroll(data) {
+  return [...data].sort((a, b) => {
+    const la = PAYROLL_LAST_NAME[a.name] || a.name;
+    const lb = PAYROLL_LAST_NAME[b.name] || b.name;
+    return la.localeCompare(lb);
+  });
+}
+
+// Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
+// computed pay — but the owner runs payroll for them too. One hand-entered
+// number per week, shown as its own row on the Weekly Payroll screen right
+// alongside the techs (see PAYROLL_LAST_NAME) instead of living only in the
+// owner's head or a separate spreadsheet.
+async function officePayRows(db, weekStart) {
+  const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
+  const mk = (name, pay) => ({ name, jobs: [], deferred: [], total: Number(pay) || 0, is_office: true });
+  const rows = [];
+  if (row?.heather_pay != null) rows.push(mk('Heather', row.heather_pay));
+  if (row?.joey_pay != null) rows.push(mk('Joey', row.joey_pay));
+  return rows;
+}
+
+async function officePaySave(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { week_start, field, amount } = req.body || {};
+  const validFields = ['heather_pay', 'joey_pay'];
+  if (!week_start || !/^\d{4}-\d{2}-\d{2}$/.test(week_start)) return res.status(400).json({ error: 'week_start (YYYY-MM-DD) required' });
+  if (!validFields.includes(field)) return res.status(400).json({ error: `field must be one of ${validFields.join(', ')}` });
+  if (amount == null || isNaN(Number(amount))) return res.status(400).json({ error: 'amount required' });
+
+  const { data: existing } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', week_start).maybeSingle();
+  const row = {
+    week_start,
+    heather_pay: existing?.heather_pay ?? null,
+    joey_pay: existing?.joey_pay ?? null,
+    [field]: Number(amount),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await db.from('office_pay_weekly').upsert(row, { onConflict: 'week_start' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, week_start, field, amount: Number(amount) });
+}
+
 async function payroll(req, res, db, auth) {
   if (auth.role !== 'owner') {
     return res.status(403).json({ error: 'Owner only' });
@@ -6413,12 +6466,20 @@ async function payroll(req, res, db, auth) {
   const data = await computeBizPayroll(db, biz, parsedWeek, weekEnd);
   const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
 
+  // Office staff aren't technicians (no jobs), but the owner runs payroll for
+  // them too — add just THIS business's secretary row (Heather for Handy
+  // Andy, Joey for Dom's), not both, so a single-business view never shows
+  // someone who doesn't work there.
+  const officeRows = (await officePayRows(db, parsedWeek))
+    .filter(r => (biz.slug === 'handy-andy' && r.name === 'Heather') || (biz.slug === 'doms' && r.name === 'Joey'));
+  const allRows = sortForPayroll([...data, ...officeRows]);
+
   return res.status(200).json({
     week_start: parsedWeek,
     week_end: weekEnd,
     pay_date: payDate,
-    techs: data,
-    total: data.reduce((sum, t) => sum + t.total, 0),
+    techs: allRows,
+    total: allRows.reduce((sum, t) => sum + t.total, 0),
     actual_profit: await actualProfitFor(db, payDate),
   });
 }
@@ -6454,8 +6515,9 @@ async function payrollCombined(req, res, db, auth) {
       m.total += t.total;
     }
   }
-  const data = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
+  const officeRows = await officePayRows(db, parsedWeek);   // both Heather and Joey — combined view spans both businesses
+  const data = sortForPayroll([...merged.values(), ...officeRows]);
 
   return res.status(200).json({
     week_start: parsedWeek,
