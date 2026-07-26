@@ -4216,6 +4216,7 @@ function webDrawCharts(d,brand){
 let payrollWeek = null;
 let payrollTechFilter = null;   // null = all techs; set to a tech name to show just them
 let payrollRawData = null;      // last fetched payroll response, cached so the tech filter can re-render without a refetch
+let payrollCombinedMode = false; // true = one merged view across Handy Andy + Dom's (cross-hired techs summed into one line)
 async function renderPayroll(){
   const view=document.getElementById('view');
   if(!payrollWeek) payrollWeek = sundayOf(todayStr());
@@ -4227,7 +4228,10 @@ async function renderPayroll(){
           <h1>Weekly Payroll</h1>
           <div class="ana-sub" id="payUpdated">Loading…</div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; color:var(--mute); cursor:pointer; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff;">
+            <input type="checkbox" id="payCombined" ${payrollCombinedMode?'checked':''} style="margin:0;">Combine both businesses
+          </label>
           <span style="font-size:13px; font-weight:700; color:var(--mute);">Week of</span>
           <button class="arrow" id="payPrev" title="Previous week">‹</button>
           <input type="date" id="payWeekInput" value="${payrollWeek}" title="Pick any day — it snaps to that week (Sun–Sat)" style="padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; color:var(--ink); background:#fff;">
@@ -4248,6 +4252,11 @@ async function renderPayroll(){
   document.getElementById('payPrev').addEventListener('click', ()=>{ payrollWeek=addDays(payrollWeek,-7); document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
   document.getElementById('payNext').addEventListener('click', ()=>{ payrollWeek=addDays(payrollWeek,7); document.getElementById('payWeekInput').value=payrollWeek; loadPayroll(); });
   document.getElementById('payRefresh').addEventListener('click', loadPayroll);
+  document.getElementById('payCombined').addEventListener('change', e=>{
+    payrollCombinedMode = e.target.checked;
+    payrollTechFilter = null;   // a filtered tech name from one business's view could be stale in the other
+    loadPayroll();
+  });
 
   await loadPayroll();
 }
@@ -4258,9 +4267,10 @@ async function loadPayroll(){
   if(!payrollWeek){ if(upd) upd.textContent='Select a week'; return; }
 
   try{
-    const d=await api('payroll',{ params:{ business:current.slug, week_start:payrollWeek } });
+    const action = payrollCombinedMode ? 'payroll_combined' : 'payroll';
+    const d=await api(action,{ params:{ business:current.slug, week_start:payrollWeek } });
     if(upd){
-      const bizName = (current && current.name) ? current.name : '';
+      const bizName = payrollCombinedMode ? "All businesses (Handy Andy + Dom's)" : ((current && current.name) ? current.name : '');
       upd.innerHTML=`Pay period: <strong>${payFmtDateUTC(d.week_start,{month:'long',day:'numeric'})} – ${payFmtDateUTC(d.week_end,{month:'long',day:'numeric',year:'numeric'})}</strong>${bizName?` · ${esc(bizName)}`:''}`;
     }
     payrollRawData = d;
@@ -4281,6 +4291,10 @@ function renderPayrollData(d){
   content.className='payrep';
   const allTechs=d.techs||[];
   const payDateLbl = payFmtDateUTC(d.pay_date,{month:'short',day:'numeric',year:'numeric'});
+  // Only meaningful in the combined view — a single-business fetch never sets
+  // job.business_name inconsistently, so this badge would be redundant noise there.
+  const bizBadge = (job) => (d.combined && job.business_name)
+    ? `<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--mute);background:var(--line2);padding:2px 6px;border-radius:6px;vertical-align:middle;">${esc(job.business_name)}</span>` : '';
 
   // ── Actual Profit (owner-only; this whole page is owner-gated) ──────────
   // Hand-entered: each business's Stripe payout, plus total tech pay across
@@ -4447,7 +4461,7 @@ function renderPayrollData(d){
         html+=`<tr class="${idx%2?'z':''}">
           <td style="font-weight:600;">${esc(job.tech_name)}</td>
           <td style="color:var(--mute);">${esc(job.time)}</td>
-          <td>${esc(job.customer_name)}</td>
+          <td>${esc(job.customer_name)}${bizBadge(job)}</td>
           <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span></td>
         </tr>`;
       });
@@ -4471,7 +4485,7 @@ function renderPayrollData(d){
           : '—';
         html+=`<tr class="${i%2?'z':''}">
           <td style="white-space:nowrap; color:var(--mute);">${esc(job.time)}</td>
-          <td><span class="pr-name">${esc(job.customer_name)}</span><div class="pr-li">${esc(job.service)}</div></td>
+          <td><span class="pr-name">${esc(job.customer_name)}</span>${bizBadge(job)}<div class="pr-li">${esc(job.service)}</div></td>
           <td><div class="pr-li" style="margin-top:0;">${bd}</div></td>
           <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span>${job.needs_review?`<span class="pr-flag-ic">⚠️</span>`:''}</td>
         </tr>`;
@@ -4499,7 +4513,7 @@ function renderPayrollData(d){
     deferRows.forEach((j,i)=>{
       html+=`<tr class="${i%2?'z':''}">
         <td style="white-space:nowrap; color:var(--mute);">${esc(j.time)}</td>
-        <td class="pr-name">${esc(j.customer_name)}</td>
+        <td class="pr-name">${esc(j.customer_name)}${bizBadge(j)}</td>
         <td>${esc(j.service)}</td>
         <td>${esc(j.tech)}</td>
         <td class="r"><span class="pr-defer-amt">${payFmtUSD(j.customer_due)}</span></td>

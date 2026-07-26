@@ -294,6 +294,7 @@ export default async function handler(req, res) {
       case 'wire_plate_remove': return await wirePlateRemove(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
+      case 'payroll_combined': return await payrollCombined(req, res, db, auth);
       case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
@@ -6257,21 +6258,12 @@ async function emailQuota(req, res, auth) {
 // ── Payroll Report ──────────────────────────────────────────────────────────
 // Owner-only: show tech earnings for a week across all technicians in the business.
 // Returns per-tech breakdown with job details, flags, and payment states.
-async function payroll(req, res, db, auth) {
-  if (auth.role !== 'owner') {
-    return res.status(403).json({ error: 'Owner only' });
-  }
-
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-
-  const weekStart = (req.query.week_start || '').toString();
-  // Always run on a whole Sun–Sat week: take the requested date (or today) and
-  // snap it back to that week's Sunday, so a stray weekday can't yield a partial
-  // period. addDaysStr(date, -dayOfWeekFor(date)) lands on the preceding Sunday.
-  const rawWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC(biz.timezone || 'America/Denver').toISOString().split('T')[0];
-  const parsedWeek = addDaysStr(rawWeek, -dayOfWeekFor(rawWeek));
-  const weekEnd = addDaysStr(parsedWeek, 6);
-
+// Runs the payroll computation for ONE business over a given Sun–Sat week.
+// Shared by payroll() (single-business view) and payrollCombined() (both
+// businesses merged into one screen) so the two never drift apart. Each job
+// carries business_name/business_slug so a combined, multi-business list can
+// still show which company it came from.
+async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
   // All active technicians for this business
   const { data: techs, error: techErr } = await db.from('technicians')
     .select('id, name').eq('business_id', biz.id).eq('active', true).order('name');
@@ -6361,6 +6353,8 @@ async function payroll(req, res, db, auth) {
         service: b.services?.name || 'Service',
         time: new Date(b.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
         scheduled_at: b.scheduled_at,
+        business_name: biz.name,
+        business_slug: biz.slug,
       };
 
       if (result.state === 'deferred') {
@@ -6378,22 +6372,46 @@ async function payroll(req, res, db, auth) {
     }
   }
 
-  // Format response
-  const data = Object.values(techPayroll).filter(t => t.jobs.length > 0 || t.deferred.length > 0);
-  const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
+  return Object.entries(techPayroll)
+    .map(([id, t]) => ({ ...t, _id: id }))
+    .filter(t => t.jobs.length > 0 || t.deferred.length > 0);
+}
 
-  // Owner-only "actual profit" — one row per pay date with three hand-entered
-  // figures (Dom's Stripe payout, Handy Andy Stripe payout, total tech pay
-  // across both businesses) plus a computed 4th: what the owner actually
-  // made. Same row shown on both businesses' payroll pages. This function is
-  // already gated to auth.role === 'owner' above, so it's never sent to a
-  // secretary or tech — no extra check needed here.
+// Shared "actual profit" lookup — same hand-entered row shown on both the
+// single-business and combined payroll screens (one row per pay_date, not
+// per business). Owner-gated by both callers already.
+async function actualProfitFor(db, payDate) {
   const { data: profitRow } = await db.from('actual_profit_weekly')
     .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay').eq('pay_date', payDate).maybeSingle();
   const domsStripe = profitRow?.doms_stripe_payout != null ? Number(profitRow.doms_stripe_payout) : null;
   const haStripe = profitRow?.handy_andy_stripe_payout != null ? Number(profitRow.handy_andy_stripe_payout) : null;
   const techPay = profitRow?.tech_pay != null ? Number(profitRow.tech_pay) : null;
   const allThreeSet = domsStripe != null && haStripe != null && techPay != null;
+  return {
+    doms_stripe_payout: domsStripe,
+    handy_andy_stripe_payout: haStripe,
+    tech_pay: techPay,
+    total_made: allThreeSet ? (domsStripe + haStripe - techPay) : null,
+  };
+}
+
+async function payroll(req, res, db, auth) {
+  if (auth.role !== 'owner') {
+    return res.status(403).json({ error: 'Owner only' });
+  }
+
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+
+  const weekStart = (req.query.week_start || '').toString();
+  // Always run on a whole Sun–Sat week: take the requested date (or today) and
+  // snap it back to that week's Sunday, so a stray weekday can't yield a partial
+  // period. addDaysStr(date, -dayOfWeekFor(date)) lands on the preceding Sunday.
+  const rawWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC(biz.timezone || 'America/Denver').toISOString().split('T')[0];
+  const parsedWeek = addDaysStr(rawWeek, -dayOfWeekFor(rawWeek));
+  const weekEnd = addDaysStr(parsedWeek, 6);
+
+  const data = await computeBizPayroll(db, biz, parsedWeek, weekEnd);
+  const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
 
   return res.status(200).json({
     week_start: parsedWeek,
@@ -6401,12 +6419,52 @@ async function payroll(req, res, db, auth) {
     pay_date: payDate,
     techs: data,
     total: data.reduce((sum, t) => sum + t.total, 0),
-    actual_profit: {
-      doms_stripe_payout: domsStripe,
-      handy_andy_stripe_payout: haStripe,
-      tech_pay: techPay,
-      total_made: allThreeSet ? (domsStripe + haStripe - techPay) : null,
-    },
+    actual_profit: await actualProfitFor(db, payDate),
+  });
+}
+
+// One combined payroll screen for BOTH businesses — so the owner never has to
+// flip tabs to find what a cross-hired tech's actual total is for the week.
+// Same job-level computation as the single-business view (computeBizPayroll),
+// run once per business and merged by technician id — cross-hired techs (e.g.
+// Kregg working both Handy Andy and Dom's jobs) share ONE technicians row, so
+// merging by id naturally sums their pay across both companies into one line.
+async function payrollCombined(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  const weekStart = (req.query.week_start || '').toString();
+  const rawWeek = weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart) ? weekStart : startOfWeekUTC('America/Denver').toISOString().split('T')[0];
+  const parsedWeek = addDaysStr(rawWeek, -dayOfWeekFor(rawWeek));
+  const weekEnd = addDaysStr(parsedWeek, 6);
+
+  const { data: bizRows, error: bizErr } = await db.from('businesses')
+    .select('id, slug, name, timezone').in('slug', ['handy-andy', 'doms']);
+  if (bizErr) throw bizErr;
+
+  const perBiz = await Promise.all((bizRows || []).map(biz => computeBizPayroll(db, biz, parsedWeek, weekEnd)));
+
+  // Merge by tech id (the field stashed as _id in computeBizPayroll's result).
+  const merged = new Map();
+  for (const bizTechs of perBiz) {
+    for (const t of bizTechs) {
+      if (!merged.has(t._id)) merged.set(t._id, { name: t.name, jobs: [], deferred: [], total: 0 });
+      const m = merged.get(t._id);
+      m.jobs.push(...t.jobs);
+      m.deferred.push(...t.deferred);
+      m.total += t.total;
+    }
+  }
+  const data = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);
+
+  return res.status(200).json({
+    week_start: parsedWeek,
+    week_end: weekEnd,
+    pay_date: payDate,
+    techs: data,
+    total: data.reduce((sum, t) => sum + t.total, 0),
+    actual_profit: await actualProfitFor(db, payDate),
+    combined: true,
   });
 }
 
