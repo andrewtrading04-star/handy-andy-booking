@@ -1117,9 +1117,9 @@
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
-      <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
       <button data-nav="secretaries" id="navSecretaries"><span class="ic" data-ico="secretaries">🗂️</span> Secretaries</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
+      <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
       <button data-nav="other" id="navOther"><span class="ic" data-ico="other">⋯</span> Other <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
     </nav>
 
@@ -4651,15 +4651,23 @@ async function renderMyAvailability(){
         </label>
       </div>`;
     };
-    // Upcoming one-off exceptions (next 14 days) so a secretary can see/clear
-    // a specific-date override without it getting lost among the weekly grid.
     const today=todayStr();
+    // What the recurring pattern says for a given date (before any exception
+    // override) — this is what "Revert to normal" restores.
+    const recurringForDate=(dateStr)=>{
+      const dow=new Date(dateStr+'T00:00:00').getDay();
+      return !!patternByDow[dow];
+    };
+    const dateLabel=(dateStr)=>{ try{ return new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }catch{ return dateStr; } };
     const upcoming=Object.keys(excByDate).filter(dt=>dt>=today).sort();
-    const excHtml=upcoming.length
+    const excListHtml=upcoming.length
       ? `<div class="side-section" style="margin-top:18px;">Upcoming exceptions</div>` +
         upcoming.map(dt=>`<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
-          <div class="name">${esc(dt)}</div>
-          <div class="meta">${excByDate[dt]?'Working (override)':'Off (override)'}</div>
+          <div class="name">${esc(dateLabel(dt))}</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="meta">${excByDate[dt]?'Working (override)':'Off (override)'}</div>
+            <button type="button" class="btn ghost sm my-avail-revert" data-date="${esc(dt)}" style="width:auto;padding:6px 10px;">Revert to normal</button>
+          </div>
         </div>`).join('')
       : '';
     view.innerHTML=`<div class="wrap">
@@ -4668,7 +4676,18 @@ async function renderMyAvailability(){
         <div class="meta">Toggle the days you normally work. Paid ${payFmtMoney(d.daily_rate,d.currency)}/day — this drives the weekly payroll suggestion.</div>
       </div>
       ${[0,1,2,3,4,5,6].map(dayRow).join('')}
-      ${excHtml}
+
+      <div class="job" style="margin-top:18px;">
+        <div class="name" style="margin-bottom:6px;">Request a day off</div>
+        <div class="meta" style="margin-bottom:10px;">Working a normal day but need this ONE date off? Pick it here — your regular weekly schedule above stays the same.</div>
+        <input type="date" id="myAvailOffDate" min="${today}" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+        <div id="myAvailOffStatus" style="margin-top:8px;font-size:13px;color:var(--mute);"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button type="button" class="btn sm" id="myAvailOffSave" style="width:auto;padding:8px 14px;" disabled>Request this day off</button>
+          <button type="button" class="btn ghost sm" id="myAvailOffWorking" style="width:auto;padding:8px 14px;" disabled>Mark working instead</button>
+        </div>
+      </div>
+      ${excListHtml}
     </div>`;
     view.querySelectorAll('.my-avail-toggle').forEach(cb=>{
       cb.addEventListener('change', async()=>{
@@ -4677,6 +4696,40 @@ async function renderMyAvailability(){
         try{ await api('secretary_availability_set',{ method:'POST', body:{ day_of_week:dow, is_available:cb.checked } }); toast('Saved'); renderMyAvailability(); }
         catch(err){ toast(err.message); cb.checked=!cb.checked; }
         finally{ cb.disabled=false; }
+      });
+    });
+    const offDateEl=document.getElementById('myAvailOffDate');
+    const offSaveBtn=document.getElementById('myAvailOffSave');
+    const offWorkingBtn=document.getElementById('myAvailOffWorking');
+    const offStatusEl=document.getElementById('myAvailOffStatus');
+    const refreshOffStatus=()=>{
+      const dt=offDateEl.value;
+      const has=dt&&(dt in excByDate);
+      offSaveBtn.disabled=!dt; offWorkingBtn.disabled=!dt;
+      if(!dt){ offStatusEl.textContent=''; return; }
+      const currentlyWorking=has?excByDate[dt]:recurringForDate(dt);
+      offStatusEl.textContent=`${dateLabel(dt)}: currently ${currentlyWorking?'Working':'Off'}${has?' (already an override)':''}`;
+    };
+    offDateEl.addEventListener('change', refreshOffStatus);
+    const saveOff=async(isAvailable)=>{
+      const dt=offDateEl.value; if(!dt) return;
+      offSaveBtn.disabled=true; offWorkingBtn.disabled=true;
+      try{
+        await api('secretary_availability_exception_set',{ method:'POST', body:{ date:dt, is_available:isAvailable } });
+        toast(isAvailable?'Marked working ✓':'Day off requested ✓');
+        renderMyAvailability();
+      }catch(err){ toast(err.message); offSaveBtn.disabled=false; offWorkingBtn.disabled=false; }
+    };
+    offSaveBtn.addEventListener('click', ()=>saveOff(false));
+    offWorkingBtn.addEventListener('click', ()=>saveOff(true));
+    view.querySelectorAll('.my-avail-revert').forEach(btn=>{
+      btn.addEventListener('click', async()=>{
+        const dt=btn.dataset.date; btn.disabled=true;
+        try{
+          await api('secretary_availability_exception_set',{ method:'POST', body:{ date:dt, is_available:recurringForDate(dt) } });
+          toast('Reverted '+dateLabel(dt));
+          renderMyAvailability();
+        }catch(err){ toast(err.message); btn.disabled=false; }
       });
     });
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
