@@ -15,6 +15,7 @@ import { serviceClient } from './supabase.js';
 import { emailConfig, sendEmail } from './email.js';
 import { emailNotificationsOn } from './notify.js';
 import { localDayStartUTC } from './time.js';
+import { linesHaveGds, estimateJobProfit } from './owner-notify.js';
 
 const DIGEST_TZ = 'America/Denver';
 
@@ -66,8 +67,8 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       .select(`id, created_at, scheduled_at, price, status, service_area_id, source, metadata,
                business:businesses ( name, timezone ),
                customer:customers ( name, phone, email ),
-               technician:technicians!technician_id ( name ),
-               booking_line_items ( kind, name ),
+               technician:technicians!technician_id ( id, name ),
+               booking_line_items ( kind, name, quantity, unit_price, line_total ),
                address_line1, city, state, postal_code`)
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
@@ -106,6 +107,81 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     const total = bookings.reduce((s, b) => s + (Number(b.price) || 0), 0);
     const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: DIGEST_TZ, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(start);
 
+    // ── Issues — the whole point of opening this email: surface anything that
+    // looks wrong about TODAY's bookings without having to open the dashboard.
+    // Checked in priority order per booking; a booking only shows its FIRST
+    // matching issue (a bare $0 booking would otherwise also trip "low profit"
+    // and "no line items" — one clear flag beats three redundant ones).
+    const who = (b) => b.customer?.name || 'A customer';
+    const issueChecks = [
+      {
+        key: 'bare',
+        label: 'Bare booking — no line items at all',
+        test: (b) => !(b.booking_line_items || []).length,
+        detail: (b) => `${who(b)}'s job has zero line items — likely never got a service selected. This is exactly the failure mode that caused a real data-loss incident before the booking-form guard was added.`,
+      },
+      {
+        key: 'zero_not_gds',
+        label: 'Booked at $0 and not Guaranteed Dismount',
+        test: (b) => (Number(b.price) || 0) === 0 && !linesHaveGds(b.booking_line_items),
+        detail: (b) => `${who(b)}'s job is priced at $0 but isn't a GDS ticket — check it's not missing its price.`,
+      },
+      {
+        key: 'low_profit',
+        label: 'Low or negative estimated profit',
+        test: (b) => {
+          if ((Number(b.price) || 0) === 0) return false; // already covered by zero_not_gds
+          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name });
+          return p != null && p < 20;
+        },
+        detail: (b) => {
+          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name });
+          return `${who(b)}'s job has an estimated profit of ${money(p)} — under $20.`;
+        },
+      },
+      {
+        key: 'no_tech',
+        label: 'No technician assigned',
+        test: (b) => !b.technician,
+        detail: (b) => `${who(b)}'s job has nobody assigned yet.`,
+      },
+      {
+        key: 'no_address',
+        label: 'Missing service address',
+        test: (b) => !(b.address_line1 || '').trim(),
+        detail: (b) => `${who(b)}'s job has no address on file — can't be dispatched as-is.`,
+      },
+      {
+        key: 'no_phone',
+        label: "No customer phone on file",
+        test: (b) => !(b.customer?.phone || '').trim(),
+        detail: (b) => `${who(b)} has no phone number — no on-the-way text, no review request.`,
+      },
+    ];
+    const issues = [];
+    for (const b of bookings) {
+      for (const check of issueChecks) {
+        if (check.test(b)) { issues.push({ key: check.key, label: check.label, text: check.detail(b) }); break; }
+      }
+    }
+    const issuesByType = new Map();
+    for (const iss of issues) {
+      if (!issuesByType.has(iss.key)) issuesByType.set(iss.key, { label: iss.label, items: [] });
+      issuesByType.get(iss.key).items.push(iss.text);
+    }
+    const issuesBlock = issues.length
+      ? `<div style="margin:0 0 20px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px 18px;">
+          <div style="font-weight:800;color:#991b1b;font-size:15px;margin-bottom:10px;">&#9888; ${issues.length} issue${issues.length === 1 ? '' : 's'} found today</div>
+          ${[...issuesByType.values()].map(g => `
+            <div style="margin:0 0 10px;">
+              <div style="font-weight:700;color:#7f1d1d;font-size:13px;margin-bottom:3px;">${escHtml(g.label)} (${g.items.length})</div>
+              <ul style="margin:0;padding-left:18px;color:#b4453f;font-size:13px;line-height:1.6;">
+                ${g.items.map(t => `<li>${escHtml(t)}</li>`).join('')}
+              </ul>
+            </div>`).join('')}
+        </div>`
+      : `<div style="margin:0 0 20px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 18px;color:#166534;font-weight:700;font-size:14px;">&#9989; No issues found in today's bookings.</div>`;
+
     const rowsHtml = bookings.map(b => {
       const addr = [b.address_line1, b.city, b.state, b.postal_code].filter(Boolean).join(', ');
       const coupon = couponLabel(b);
@@ -127,6 +203,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;max-width:680px;">
       <h2 style="margin:0 0 2px;">${bookings.length} new appointment${bookings.length === 1 ? '' : 's'} booked today</h2>
       <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${escHtml(dateLabel)} · daily summary</div>
+      ${issuesBlock}
       <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
         <thead><tr style="background:#f9fafb;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">
           <th style="padding:9px 10px;">Customer</th><th style="padding:9px 10px;">Appointment</th>
