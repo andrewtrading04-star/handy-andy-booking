@@ -45,7 +45,10 @@ export async function sendAppointmentReminders(opts = {}) {
   // Candidate bookings: upcoming within the next 24h, not yet started/cancelled.
   const { data: rows, error } = await db
     .from('bookings')
-    .select('id, business_id, status, scheduled_at, created_at, metadata, address_line1, city, state, postal_code, customer:customers ( name, email )')
+    .select(`id, business_id, status, scheduled_at, created_at, metadata, address_line1, city, state, postal_code,
+      customer:customers ( name, email ),
+      service:services ( name ),
+      technician:technicians!technician_id ( name, photo_url, bio_years, bio_blurb )`)
     .in('status', REMINDER_STATUSES)
     .gt('scheduled_at', nowISO)
     .lte('scheduled_at', windowEndISO);
@@ -92,11 +95,20 @@ export async function sendAppointmentReminders(opts = {}) {
     } catch { /* leave blank */ }
 
     const firstName = (b.customer?.name || '').trim().split(/\s+/)[0] || '';
+    const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
     const { subject, html } = appointmentReminderEmail({
       firstName,
       dateLong,
       timeWindow,
+      serviceName: b.service?.name || null,
+      technicianName: b.technician?.name || null,
+      technicianPhotoUrl: b.technician?.photo_url || null,
+      technicianBioYears: b.technician?.bio_years || null,
+      technicianBioBlurb: b.technician?.bio_blurb || null,
       address: { line1: b.address_line1, city: b.city, state: b.state, zip: b.postal_code },
+      startEpoch: Math.floor(schedMs / 1000),
+      endEpoch: Math.floor((schedMs + 2 * HOUR) / 1000),
+      baseUrl,
     }, brand);
 
     if (dryRun) {

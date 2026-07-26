@@ -148,6 +148,69 @@ function cleanLineLabel(name) {
 // Frame and other non-default TV types still show.
 function isDefaultTypeLabel(name) { return /^\s*tv\s*type\s*:\s*regular\b/i.test(String(name || '')); }
 
+// ── "Add to calendar" buttons (Google + Apple + Outlook) ────────────────────
+// Rendered only when the caller passes machine-readable start/end epochs
+// (sec). Google uses its render URL (pre-fills the event); Outlook uses its
+// web deep-link; Apple downloads an .ics from our own /api/book endpoint so a
+// tap opens the native add-to-calendar sheet. Shared by the confirmation and
+// 24-hour reminder emails so both offer the same one-tap calendar add.
+function buildCalendarBlock({ startEpoch, endEpoch, businessName, addressLine, timeWindow, serviceName, baseUrl }) {
+  const startSec = Number(startEpoch), endSec = Number(endEpoch);
+  if (!startSec || !endSec) return '';
+  const stamp = (sec) => {
+    const d = new Date(sec * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}00Z`;
+  };
+  const calTitle = `${businessName} - ${serviceName || 'TV Installation'}`;
+  const calLoc   = addressLine;
+  const calDesc  = `Your ${businessName} appointment${timeWindow ? ` (arrival window ${timeWindow})` : ''}. Reply to your confirmation email with any questions.`;
+  const gcal = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+    + `&text=${encodeURIComponent(calTitle)}`
+    + `&dates=${stamp(startSec)}/${stamp(endSec)}`
+    + `&details=${encodeURIComponent(calDesc)}`
+    + `&location=${encodeURIComponent(calLoc)}`;
+  const base = String(baseUrl || '').replace(/\/$/, '');
+  const icsUrl = `${base}/api/book?action=ics&title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
+    + `&location=${encodeURIComponent(calLoc)}&details=${encodeURIComponent(calDesc)}`;
+  const isoStamp = (sec) => new Date(sec * 1000).toISOString();
+  const outlook = 'https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent'
+    + `&subject=${encodeURIComponent(calTitle)}`
+    + `&startdt=${encodeURIComponent(isoStamp(startSec))}`
+    + `&enddt=${encodeURIComponent(isoStamp(endSec))}`
+    + `&body=${encodeURIComponent(calDesc)}`
+    + `&location=${encodeURIComponent(calLoc)}`;
+
+  // Provider logos: served from Google's stable favicon CDN so the recipient's
+  // mail client renders the real Google / Outlook / Apple marks. If a client
+  // blocks images, each row still reads as plain text (the provider name).
+  const favicon = (domain) => `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
+  const calRow = (href, iconUrl, label, first) => `
+            <a href="${esc(href)}" style="display:block;text-decoration:none;${first ? '' : 'border-top:1px solid #eef0f2;'}">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+                <td width="44" valign="middle" style="padding:15px 0 15px 18px;"><img src="${esc(iconUrl)}" width="26" height="26" alt="" style="display:block;border:0;"></td>
+                <td valign="middle" style="padding:15px 18px 15px 12px;font-size:16px;font-weight:600;color:#11181c;">${label}</td>
+              </tr></table>
+            </a>`;
+  const rows = [
+    calRow(gcal, favicon('calendar.google.com'), 'Google Calendar', true),
+    calRow(outlook, favicon('outlook.com'), 'Outlook Calendar', false),
+  ];
+  if (base) rows.push(calRow(icsUrl, favicon('apple.com'), 'Apple Calendar', false));
+
+  return `
+      <tr><td style="padding:24px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr><td align="center" style="padding-bottom:12px;">
+            <span style="display:inline-block;border:1px solid #e5e7eb;border-radius:999px;padding:12px 26px;font-size:16px;font-weight:600;color:#11181c;">&#128197;&nbsp;&nbsp;Add to Calendar</span>
+          </td></tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e9ebee;border-radius:16px;">
+          <tr><td>${rows.join('')}</td></tr>
+        </table>
+      </td></tr>`;
+}
+
 // ── Branded booking-confirmation email ──────────────────────────────────────
 // `details` mirrors the booking summary the widget shows on the thank-you page:
 //   firstName, dateLong, timeWindow, serviceName,
@@ -242,68 +305,12 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       </td></tr>`;
   }
 
-  // ── "Add to calendar" buttons (Google + Apple) ──────────────────────────────
-  // Rendered only when the caller passes machine-readable start/end epochs (sec).
-  // Google uses its render URL (pre-fills the event); Apple downloads an .ics from
-  // our own /api/calendar endpoint so a tap opens the native add-to-calendar sheet.
-  let calendarBlock = '';
-  const startSec = Number(details.startEpoch), endSec = Number(details.endEpoch);
-  if (startSec && endSec) {
-    const stamp = (sec) => {
-      const d = new Date(sec * 1000);
-      const p = (n) => String(n).padStart(2, '0');
-      return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}00Z`;
-    };
-    const calTitle = `${b.name} - ${details.serviceName || 'TV Installation'}`;
-    const calLoc   = addressLine;
-    const calDesc  = `Your ${b.name} appointment${details.timeWindow ? ` (arrival window ${details.timeWindow})` : ''}. Reply to your confirmation email with any questions.`;
-    const gcal = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-      + `&text=${encodeURIComponent(calTitle)}`
-      + `&dates=${stamp(startSec)}/${stamp(endSec)}`
-      + `&details=${encodeURIComponent(calDesc)}`
-      + `&location=${encodeURIComponent(calLoc)}`;
-    const base = String(details.baseUrl || '').replace(/\/$/, '');
-    const icsUrl = `${base}/api/book?action=ics&title=${encodeURIComponent(calTitle)}&start=${startSec}&end=${endSec}`
-      + `&location=${encodeURIComponent(calLoc)}&details=${encodeURIComponent(calDesc)}`;
-    // Outlook (web) deep-link — prefills a new event. Works without a base URL.
-    const isoStamp = (sec) => new Date(sec * 1000).toISOString();
-    const outlook = 'https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent'
-      + `&subject=${encodeURIComponent(calTitle)}`
-      + `&startdt=${encodeURIComponent(isoStamp(startSec))}`
-      + `&enddt=${encodeURIComponent(isoStamp(endSec))}`
-      + `&body=${encodeURIComponent(calDesc)}`
-      + `&location=${encodeURIComponent(calLoc)}`;
-
-    // Provider logos: served from Google's stable favicon CDN so the recipient's
-    // mail client renders the real Google / Outlook / Apple marks. If a client
-    // blocks images, each row still reads as plain text (the provider name).
-    const favicon = (domain) => `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
-    const calRow = (href, iconUrl, label, first) => `
-            <a href="${esc(href)}" style="display:block;text-decoration:none;${first ? '' : 'border-top:1px solid #eef0f2;'}">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-                <td width="44" valign="middle" style="padding:15px 0 15px 18px;"><img src="${esc(iconUrl)}" width="26" height="26" alt="" style="display:block;border:0;"></td>
-                <td valign="middle" style="padding:15px 18px 15px 12px;font-size:16px;font-weight:600;color:#11181c;">${label}</td>
-              </tr></table>
-            </a>`;
-    const rows = [
-      calRow(gcal, favicon('calendar.google.com'), 'Google Calendar', true),
-      calRow(outlook, favicon('outlook.com'), 'Outlook Calendar', false),
-    ];
-    // Apple row only when we have an absolute base URL to serve the .ics from.
-    if (base) rows.push(calRow(icsUrl, favicon('apple.com'), 'Apple Calendar', false));
-
-    calendarBlock = `
-      <tr><td style="padding:24px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-          <tr><td align="center" style="padding-bottom:12px;">
-            <span style="display:inline-block;border:1px solid #e5e7eb;border-radius:999px;padding:12px 26px;font-size:16px;font-weight:600;color:#11181c;">&#128197;&nbsp;&nbsp;Add to Calendar</span>
-          </td></tr>
-        </table>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e9ebee;border-radius:16px;">
-          <tr><td>${rows.join('')}</td></tr>
-        </table>
-      </td></tr>`;
-  }
+  // ── "Add to calendar" buttons (Google + Apple + Outlook) ────────────────────
+  const calendarBlock = buildCalendarBlock({
+    startEpoch: details.startEpoch, endEpoch: details.endEpoch,
+    businessName: b.name, addressLine, timeWindow: details.timeWindow,
+    serviceName: details.serviceName, baseUrl: details.baseUrl,
+  });
 
   // ── "Meet your tech" — a photo + short intro for the assigned technician.
   // Only renders when BOTH a name and a photo are on file (set from the
@@ -470,134 +477,141 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 
 // ── 24-hour appointment reminder email ──────────────────────────────────────
 // Sent when appointment is exactly 24 hours away. `details` includes:
-//   firstName, dateLong, timeWindow, address: { line1, city, state, zip }
+//   firstName, dateLong, timeWindow, serviceName,
+//   address: { line1, city, state, zip },
+//   technicianName, technicianPhotoUrl, technicianBioYears, technicianBioBlurb,
+//   startEpoch, endEpoch, baseUrl   (all optional — each block hides itself if missing)
+// Same dark "ticket stub" visual family as bookingConfirmationEmail, so the
+// two emails read as one connected system.
 // Returns { subject, html }.
 export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   const b = brand || EMAIL_BRANDS['handy-andy'];
   const accent = b.accent;
-  const rgb = hexRgb(accent);                  // "r, g, b" for tints
-  const tintBg   = `rgba(${rgb},0.06)`;         // very light accent wash
-  const tintCard = `rgba(${rgb},0.10)`;         // badge / icon background
-  const accentDk = shade(accent, -0.22);        // darker accent for depth
+  const rgb = hexRgb(accent);
   const firstName = (details.firstName || '').trim();
   const a = details.address || {};
   const addressLine = [a.line1, [a.city, a.state].filter(Boolean).join(', '), a.zip]
     .filter(Boolean).join(', ');
+  const mapsUrl = addressLine ? `https://maps.google.com/?q=${encodeURIComponent(addressLine)}` : null;
 
-  // One step in the "What to expect" timeline: numbered accent badge + title/body.
-  const step = (n, icon, title, body) => `
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;">
+  const row = (label, valHtml) => !valHtml ? '' : `
+        <tr>
+          <td style="padding:6px 0;font-size:12.5px;color:#8a8274;text-transform:uppercase;letter-spacing:.04em;vertical-align:top;">${esc(label)}</td>
+          <td align="right" style="padding:6px 0;font-size:14.5px;color:#ffffff;font-weight:700;vertical-align:top;">${valHtml}</td>
+        </tr>`;
+  const detailRows =
+    row('Date', details.dateLong ? esc(details.dateLong) : '') +
+    row('Arrival window', details.timeWindow ? esc(details.timeWindow) : '') +
+    row('Service', details.serviceName ? esc(details.serviceName) : '') +
+    row('Technician', details.technicianName ? esc(details.technicianName) : '') +
+    row('Address', addressLine ? (mapsUrl ? `<a href="${esc(mapsUrl)}" style="color:#ffffff;text-decoration:underline;">${esc(addressLine)}</a>` : esc(addressLine)) : '');
+
+  let meetTechBlock = '';
+  if (details.technicianName && details.technicianPhotoUrl) {
+    const techName = esc(details.technicianName);
+    let bioText;
+    if (details.technicianBioBlurb) bioText = esc(details.technicianBioBlurb);
+    else if (Number(details.technicianBioYears) > 0) bioText = `${techName} has been doing this for over ${Number(details.technicianBioYears)} years, so you're in good hands.`;
+    else bioText = `${techName} is your installer for this job.`;
+    meetTechBlock = `
+      <tr><td style="padding:20px 26px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#231d16;border-radius:16px;">
           <tr>
-            <td width="48" valign="top" style="padding:6px 0;">
-              <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-                <td align="center" valign="middle" width="38" height="38" style="width:38px;height:38px;background:${tintCard};border-radius:19px;font-size:18px;line-height:38px;">${icon}</td>
-              </tr></table>
+            <td width="148" valign="top" style="padding:18px 0 18px 18px;">
+              <img src="${esc(details.technicianPhotoUrl)}" width="130" height="130" alt="${techName}" style="display:block;width:130px;height:130px;border-radius:20px;object-fit:cover;">
             </td>
-            <td valign="top" style="padding:6px 0 6px 6px;">
-              <div style="font-size:14.5px;font-weight:800;color:#11181c;margin:0 0 2px;">${esc(title)}</div>
-              <div style="font-size:13px;color:#5b6470;line-height:1.55;">${body}</div>
+            <td valign="top" style="padding:18px 18px 18px 14px;">
+              <div style="margin:0 0 7px;">
+                <span style="font-size:16.5px;font-weight:800;color:#ffffff;">${techName}</span>
+                <span style="display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${accent};background:rgba(${rgb},0.16);padding:3px 9px;border-radius:100px;vertical-align:middle;">Your installer</span>
+              </div>
+              <div style="font-size:14px;color:#a89f8f;line-height:1.6;">${bioText}</div>
             </td>
           </tr>
-        </table>`;
+        </table>
+      </td></tr>`;
+  }
+
+  const calendarBlock = buildCalendarBlock({
+    startEpoch: details.startEpoch, endEpoch: details.endEpoch,
+    businessName: b.name, addressLine, timeWindow: details.timeWindow,
+    serviceName: details.serviceName, baseUrl: details.baseUrl,
+  });
 
   const subject = `Your appointment is 24 hours away!`;
 
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
-<body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:#f4f1ea;-webkit-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your appointment with ${esc(b.name)} is 24 hours away. Here's everything you need to know.</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f1ea;padding:24px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 
-        <!-- Header -->
-        <tr><td style="background:${accent};padding:18px 28px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</td>
-            <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:rgba(255,255,255,.82);">Appointment Reminder</td>
-          </tr></table>
-        </td></tr>
-
-        <!-- Countdown hero -->
-        <tr><td style="background:${tintBg};padding:34px 28px 30px;text-align:center;">
-          <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto 16px;"><tr>
-            <td align="center" valign="middle" width="104" height="104" style="width:104px;height:104px;background:${accent};border-radius:52px;text-align:center;">
-              <div style="font-size:34px;font-weight:800;color:#ffffff;line-height:1;">24</div>
-              <div style="font-size:11px;font-weight:700;letter-spacing:.14em;color:rgba(255,255,255,.85);margin-top:3px;">HOURS</div>
-            </td>
-          </tr></table>
-          <div style="font-size:23px;font-weight:800;color:#11181c;margin:0 0 6px;">Your appointment is almost here!</div>
-          <div style="font-size:14.5px;color:#5b6470;line-height:1.55;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')}, you're just one day away. Here's everything you need to know before your technician arrives.</div>
-        </td></tr>
-
-        <!-- Appointment details card -->
-        <tr><td style="padding:24px 28px 4px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e8ebef;border-radius:12px;">
-            <tr>
-              <td width="56" valign="middle" style="padding:14px 0 14px 16px;">
-                <table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" valign="middle" width="40" height="40" style="width:40px;height:40px;background:${tintCard};border-radius:20px;font-size:18px;line-height:40px;">&#128197;</td></tr></table>
-              </td>
-              <td valign="middle" style="padding:14px 16px 14px 8px;">
-                <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa2ad;margin:0 0 2px;">When</div>
-                <div style="font-size:15px;font-weight:700;color:#11181c;">${esc(details.dateLong || '')}</div>
-                <div style="font-size:13.5px;color:#5b6470;margin-top:1px;">${esc(details.timeWindow || '')}</div>
-              </td>
-            </tr>
-            <tr><td colspan="2" style="padding:0 16px;"><div style="border-top:1px solid #eef0f2;"></div></td></tr>
-            <tr>
-              <td width="56" valign="middle" style="padding:14px 0 14px 16px;">
-                <table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" valign="middle" width="40" height="40" style="width:40px;height:40px;background:${tintCard};border-radius:20px;font-size:18px;line-height:40px;">&#128205;</td></tr></table>
-              </td>
-              <td valign="middle" style="padding:14px 16px 14px 8px;">
-                <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9aa2ad;margin:0 0 2px;">Where</div>
-                <div style="font-size:14.5px;font-weight:700;color:#11181c;line-height:1.45;">${esc(addressLine)}</div>
-              </td>
-            </tr>
+        <!-- Hero ticket card: countdown, details, tech -->
+        <tr><td style="background:#181410;border-radius:22px;overflow:hidden;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:28px 26px 0;">
+              <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:${accent};">Tomorrow${details.timeWindow ? ' &middot; ' + esc(details.timeWindow) : ''}</div>
+              <div style="font-size:24px;font-weight:900;color:#fff;margin-top:6px;line-height:1.25;">${esc(firstName || 'Hey')}, we'll see you tomorrow.</div>
+            </td></tr>
+            <tr><td style="padding:20px 26px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#231d16;border-radius:16px;">
+                <tr><td style="padding:16px 20px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    ${detailRows}
+                  </table>
+                </td></tr>
+              </table>
+            </td></tr>
+            ${meetTechBlock}
+            <tr><td style="padding:0 26px;"><div style="border-top:2px dashed #3a3127;margin:22px 0;"></div></td></tr>
+            <tr><td style="padding:0 26px 26px;">
+              <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a8274;margin-bottom:12px;">On the day</div>
+              <div style="font-size:14px;color:#d8d2c6;line-height:1.7;margin-bottom:6px;"><strong style="color:#fff;">1.</strong> Arrival within your 2-hour window.</div>
+              <div style="font-size:14px;color:#d8d2c6;line-height:1.7;margin-bottom:6px;"><strong style="color:#fff;">2.</strong> An "on-my-way" text with ETA once your tech is en route.</div>
+              <div style="font-size:14px;color:#d8d2c6;line-height:1.7;">${details.technicianName ? esc(details.technicianName) : 'Your tech'} is ready to start as soon as they arrive &mdash; please have the install area clear.</div>
+            </td></tr>
           </table>
         </td></tr>
 
-        <!-- What to expect timeline -->
-        <tr><td style="padding:26px 28px 2px;">
-          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${accentDk};margin:0 0 10px;">On the day</div>
-          ${step('1', '&#128663;', 'Arrival window', 'Your technician will arrive within the <strong>2-hour window</strong> of your scheduled time.')}
-          ${step('2', '&#128241;', 'On-my-way text', 'When the technician is en route, they’ll send an <strong>"on-my-way" text</strong> with their estimated time of arrival (ETA).')}
-          ${step('3', '&#9989;', 'Be prepared', 'Please be ready for their arrival so the installation can start right on time.')}
-        </td></tr>
+        <tr><td style="height:16px;"></td></tr>
 
-        <!-- Important notice -->
-        <tr><td style="padding:18px 28px 0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;">
-            <tr>
-              <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#9888;&#65039;</td>
-              <td valign="top" style="padding:15px 16px 15px 6px;">
-                <div style="font-size:14px;font-weight:800;color:#92400e;margin:0 0 4px;">Choose your TV placement carefully</div>
-                <div style="font-size:13px;color:#9a6a13;line-height:1.6;">Once the installation is complete and the technician leaves, they can't adjust the TV position or change the bracket without a new scheduled appointment, and a <strong>full charge</strong> applies. Please confirm the exact location before they leave. Your technician is happy to help you choose the perfect height.</div>
-              </td>
-            </tr>
+        <!-- Everything-else card: calendar + policy notices -->
+        <tr><td style="background:#ffffff;border-radius:22px;overflow:hidden;box-shadow:0 2px 10px rgba(16,24,40,.06);">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${calendarBlock}
+
+            <tr><td style="padding:24px 28px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;">
+                <tr>
+                  <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#9888;&#65039;</td>
+                  <td valign="top" style="padding:15px 16px 15px 6px;">
+                    <div style="font-size:14px;font-weight:800;color:#92400e;margin:0 0 4px;">Choose your TV placement carefully</div>
+                    <div style="font-size:13px;color:#9a6a13;line-height:1.6;">Once the installation is complete and the technician leaves, they can't adjust the TV position or change the bracket without a new scheduled appointment, and a <strong>full charge</strong> applies. Please confirm the exact location before they leave.</div>
+                  </td>
+                </tr>
+              </table>
+            </td></tr>
+
+            <tr><td style="padding:14px 28px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;">
+                <tr>
+                  <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#128222;</td>
+                  <td valign="top" style="padding:15px 16px 15px 6px;">
+                    <div style="font-size:14px;font-weight:800;color:#991b1b;margin:0 0 4px;">Within the 24-hour window</div>
+                    <div style="font-size:13px;color:#b4453f;line-height:1.6;">Your appointment is <strong>no longer cancelable online</strong>. If you still need to cancel, please call us and a <strong>$50 late cancellation fee</strong> will be applied to your card.</div>
+                  </td>
+                </tr>
+              </table>
+            </td></tr>
+
+            <tr><td style="padding:24px 28px 30px;">
+              <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;font-size:12px;color:#9ca3af;">${esc(b.website)}</div>
+            </td></tr>
+
           </table>
-        </td></tr>
-
-        <!-- Cancellation policy -->
-        <tr><td style="padding:14px 28px 0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;">
-            <tr>
-              <td width="50" valign="top" style="padding:15px 0 15px 16px;font-size:20px;">&#128222;</td>
-              <td valign="top" style="padding:15px 16px 15px 6px;">
-                <div style="font-size:14px;font-weight:800;color:#991b1b;margin:0 0 4px;">Within the 24-hour window</div>
-                <div style="font-size:13px;color:#b4453f;line-height:1.6;">Your appointment is <strong>no longer cancelable online</strong>. If you still need to cancel, please call us and a <strong>$50 late cancellation fee</strong> will be applied to your card. Give us a call for any further information.</div>
-              </td>
-            </tr>
-          </table>
-        </td></tr>
-
-        <!-- Footer -->
-        <tr><td style="padding:26px 28px 32px;">
-          <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;">
-            <div style="font-size:14px;font-weight:700;color:#11181c;margin:0 0 3px;">Questions or need to reschedule?</div>
-            <div style="font-size:13px;color:#6b7280;line-height:1.6;">Just give us a call and our team will be glad to help.</div>
-            <div style="font-size:12px;color:#9ca3af;margin-top:10px;">${esc(b.website)}</div>
-          </div>
         </td></tr>
 
       </table>
