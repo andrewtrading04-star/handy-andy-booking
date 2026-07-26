@@ -286,6 +286,7 @@ export default async function handler(req, res) {
       case 'wire_plate_pending': return await wirePlatePending(req, res, db, auth);
       case 'wire_plate_orders': return await wirePlateOrders(req, res, db, auth);
       case 'wire_plate_assign': return await wirePlateAssign(req, res, db, auth, body);
+      case 'wire_plate_set_status': return await wirePlateSetStatus(req, res, db, auth, body);
       case 'wire_plate_remove': return await wirePlateRemove(req, res, db, auth, body);
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
@@ -6323,6 +6324,86 @@ async function bracketPurchases(req, res, db, auth) {
 // Manually set an order's delivery status (in_route | delivered | canceled).
 // Applies to EVERY row of that Walmart order across businesses so both
 // platforms stay in sync. Owner-only.
+// Add/subtract PLATES on a tech's on-hand count (delta can be negative). This
+// is the crediting-side helper — NOT the same as adjustWirePlateInventory
+// below, which only ever DEDUCTS for job usage. Mirrors api/migrate.js's
+// adjustWirePlateInv exactly (that one isn't importable from here — separate
+// serverless function — so the logic is duplicated on purpose; keep them in
+// sync if this ever changes).
+async function creditWirePlateInv(db, businessId, technicianId, delta) {
+  if (!delta) return;
+  const { data: inv, error } = await db.from('bracket_inventory')
+    .select('id, wire_plate_qty').eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
+  if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
+  if (!inv) {
+    await db.from('bracket_inventory').insert({
+      business_id: businessId, technician_id: technicianId, wire_plate_qty: Math.max(0, delta),
+    });
+    return;
+  }
+  await db.from('bracket_inventory')
+    .update({ wire_plate_qty: Math.max(0, (inv.wire_plate_qty || 0) + delta) })
+    .eq('id', inv.id);
+}
+
+// Owner-only manual override for one wire-plate (Amazon) order's status. The
+// automated path (scripts/bracket-email-sync.mjs) only ever learns of a
+// delivery if Amazon actually SENDS a "Delivered" email to the scanned
+// mailbox — it doesn't always (often it's an app-only push notification, no
+// email at all) — so an order Amazon's own site shows as delivered can sit
+// stuck "En route" here forever with nothing to fix it. The Walmart bracket
+// table already had this exact control (bracketSetStatus below); the Amazon
+// wire-plate table never got one. Mirrors wirePlateSync's (api/migrate.js)
+// own crediting rule: plates only count toward a tech's on-hand total the
+// moment the order is DELIVERED, and only once (credited is a one-way latch
+// until a cancel/return claws them back out).
+async function wirePlateSetStatus(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change plate order status.' });
+  const id = (body.id || '').toString().trim();
+  const status = (body.status || '').toString().trim();
+  if (!['in_route', 'delivered', 'canceled'].includes(status)) {
+    return res.status(400).json({ error: 'status must be in_route, delivered, or canceled' });
+  }
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  let hasCredited = true;
+  let { data: row, error: rowErr } = await db.from('wire_plate_purchases')
+    .select('id, business_id, status, plates, technician_id, credited').eq('id', id).maybeSingle();
+  if (rowErr && /credited/.test(rowErr.message || '')) {
+    hasCredited = false;
+    ({ data: row, error: rowErr } = await db.from('wire_plate_purchases')
+      .select('id, business_id, status, plates, technician_id').eq('id', id).maybeSingle());
+  }
+  if (rowErr) throw rowErr;
+  if (!row) return res.status(404).json({ error: 'Order not found' });
+
+  const wasCredited = hasCredited && !!row.credited;
+  if (wasCredited) {
+    // Already counted toward a tech's on-hand total — a status change from here
+    // is cosmetic EXCEPT a cancel/return, which claws the credited plates back.
+    if (status === 'canceled' && row.status !== 'canceled') {
+      await creditWirePlateInv(db, row.business_id, row.technician_id, -(row.plates || 0));
+      await db.from('wire_plate_purchases').update({ status: 'canceled', credited: false }).eq('id', id);
+      return res.status(200).json({ ok: true, status: 'canceled', plates_removed: row.plates || 0 });
+    }
+    const { error } = await db.from('wire_plate_purchases').update({ status }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true, status });
+  }
+
+  const patch = { status, delivered_date: status === 'delivered' ? new Date().toISOString().slice(0, 10) : null };
+  let credited = false;
+  if (hasCredited && status === 'delivered' && row.technician_id) {
+    await creditWirePlateInv(db, row.business_id, row.technician_id, row.plates || 0);
+    patch.credited = true;
+    credited = true;
+  }
+  const { error } = await db.from('wire_plate_purchases').update(patch).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true, status, credited });
+}
+
 async function bracketSetStatus(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change bracket status.' });

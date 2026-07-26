@@ -5726,6 +5726,17 @@ async function setBracketStatus(orderNum, id, status){
     renderBrackets();
   }catch(e){ toast('Error: '+e.message); }
 }
+// Amazon wire-plate orders never had a manual status control — only Amazon's
+// own "Delivered" email (parsed by the bracket tracker) could ever flip one out
+// of "En route", and Amazon doesn't always send that email (often it's an
+// app-only push notification). Mirrors setBracketStatus above.
+async function setWirePlateStatus(id, status){
+  try{
+    await api('wire_plate_set_status',{ method:'POST', body:{ business:current.slug, id, status }});
+    toast('Status updated');
+    renderBrackets();
+  }catch(e){ toast('Error: '+e.message); }
+}
 async function confirmAssign(purchaseId){
   const sel=document.getElementById('modalAssignTech'); const techId=sel?sel.value:'';
   if(!techId){ toast('Pick a technician first'); return; }
@@ -5863,6 +5874,20 @@ async function renderBrackets(){
       if(st==='canceled'||st==='cancelled') return `<span style="color:var(--mute);font-size:12px;">Canceled</span>`;
       return `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">🚚 En route</span>`;
     };
+    // Owner-editable version of wpBadge: Amazon doesn't always email a
+    // "Delivered" notice (often it's app-only), so an order that Amazon's own
+    // site shows as delivered can otherwise sit stuck here forever with no way
+    // to fix it. Read-only badge for secretaries, matching the Walmart table's
+    // existing owner-only edit convention.
+    const wpStatusCell=(o)=>{
+      if(role!=='owner') return wpBadge(o);
+      const st=(o.status||'in_route').toLowerCase();
+      return `<select onchange="setWirePlateStatus('${esc(o.id)}',this.value)" title="Change delivery status" style="padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:#fff;">
+                <option value="in_route" ${st==='in_route'?'selected':''}>🚚 En route</option>
+                <option value="delivered" ${st==='delivered'?'selected':''}>✓ Delivered</option>
+                <option value="canceled" ${(st==='canceled'||st==='cancelled')?'selected':''}>Canceled</option>
+              </select>`;
+    };
     html+=`<div style="margin-top:14px;"><strong style="font-size:13px;">📦 Recent Amazon Orders</strong>
       <table class="bracket-table" style="margin-top:8px;">
         <thead><tr><th>Plates</th><th>Status</th><th>Technician</th><th>Order #</th><th>Date</th></tr></thead>
@@ -5888,7 +5913,7 @@ async function renderBrackets(){
             : `<span style="color:var(--mute);">Unassigned</span>`);
       html+=`<tr>
         <td class="bracket-qty"><strong>${o.plates}</strong> <span style="color:var(--mute);font-size:11px;">(${o.units}×5)</span></td>
-        <td>${wpBadge(o)}</td>
+        <td>${wpStatusCell(o)}</td>
         <td>${techCell}</td>
         <td>${orderCell}</td>
         <td>${when||'-'}${role==='owner'?` <button class="seg-btn" title="Remove this order from tracking" onclick="removeWirePlateOrder('${esc(o.id)}','${esc(o.amazon_order_num||'')}')" style="margin-left:6px;color:#dc2626;border-color:#fecaca;padding:2px 7px;">✕</button>`:''}</td>
