@@ -130,6 +130,8 @@ export default async function handler(req, res) {
       case 'availability_exception_set': return await setAvailabilityException(req, res, db, auth, body);
       case 'tech_payroll':     return await techPayroll(req, res, db, auth);
       case 'tech_reviews':     return await techReviews(req, res, db, auth);
+      case 'tech_google_reviews_unseen': return await techGoogleReviewsUnseen(req, res, db, auth);
+      case 'tech_google_review_dismiss': return await techGoogleReviewDismiss(req, res, db, auth, body);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
       case 'wire_plate_set': return await wirePlateSet(req, res, db, auth, body);
@@ -1914,6 +1916,33 @@ async function techReviews(req, res, db, auth) {
   });
 
   return res.status(200).json({ average, total, week_count: weekCount, reviews });
+}
+
+// ── Google review notifications (main Jobs screen banner) ──────────────────
+// Unseen Google Business Profile reviews matched to this tech (google_reviews
+// table, populated by migrate.js's googleReviewSync from the Google Business
+// Profile scan). "Unseen" is per-review, not per-session — dismissing (the X)
+// sets seen=true permanently so it never resurfaces on any device.
+async function techGoogleReviewsUnseen(req, res, db, auth) {
+  const { data, error } = await db.from('google_reviews')
+    .select('id, rating, reviewer_name, review_text, review_date')
+    .eq('technician_id', auth.tech_id)
+    .eq('seen', false)
+    .order('review_date', { ascending: false, nullsFirst: false })
+    .limit(20);
+  if (error) throw error;
+  return res.status(200).json({ reviews: data || [] });
+}
+
+async function techGoogleReviewDismiss(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  // technician_id scoped so a tech can only dismiss their OWN review notices.
+  const { error } = await db.from('google_reviews')
+    .update({ seen: true }).eq('id', id).eq('technician_id', auth.tech_id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // ── Bracket inventory (read-only) ────────────────────────────────────────────
