@@ -222,13 +222,23 @@ function afterPrefix(name) {
 // bracket in the box", "I will be using the bracket that comes in the box",
 // "Samsung Frame / LG Gallery (in-box bracket)"). "In the box" or a Frame/Gallery
 // name is enough; we don't rely on an exact label match.
-function isFrameInBoxBracket(name) {
+// `lt` (the line's actual charge) gates this: a genuine in-box-bracket line
+// never charges more than ~$40 (typically $25, sometimes $0). A line that
+// merely CONTAINS "samsung frame" wording but charges far more (e.g. a
+// mislabeled $350 OneConnect-box install — real incident, Jane Kamneva job,
+// Jul 2026: the line got saved as plain "Samsung Frame TV" instead of
+// "Install Samsung Frame OneConnect box behind the TV", which silently paid
+// Juan $15 instead of his real $170) must NOT match here — falling through
+// lets the custom-job $85/hr inference below flag it for review instead of
+// confidently paying the wrong flat rate.
+function isFrameInBoxBracket(name, lt) {
+  if (Number(lt) > 40) return false;
   const n = String(name || '').toLowerCase();
   if (/\b(samsung\s*frame|lg\s*gallery|frame\s*\/?\s*gallery)\b/.test(n)) return true;
   // "…bracket…in the box…" (or "in box"), in either order.
   return /bracket/.test(n) && /\bin\b[\s\S]{0,6}\bbox\b/.test(n);
 }
-function matchItem(name) {
+function matchItem(name, lt) {
   // Try the full name and the part after a "Category:" prefix, each also with a
   // baked-in "×N" quantity suffix stripped, so e.g. "Bracket: Full Motion ×3"
   // still resolves to the 'full motion' rate.
@@ -251,7 +261,7 @@ function matchItem(name) {
   // (5 boards @ $170 would read as 10 hrs). Pin it to 1 hr each.
   if (/dry\s*erase\s*board/i.test(name)) return { key: 'dry erase board', juan: 65, other: 65 };
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
-  if (isFrameInBoxBracket(name)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
+  if (isFrameInBoxBracket(name, lt)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   // Wire/cord concealment worded outside the standard keys ("Hide Cords in Wall",
   // "Cords in the wall", or a manually-typed line item like "Outside wire
   // concealment" that never says "wall" at all — the office types these free-hand
@@ -604,7 +614,7 @@ export function computeJobPay(job, techName) {
     }
 
     // Known add-on / wire / surface / bracket — paid per unit (3 brackets -> ×3).
-    const item = matchItem(name);
+    const item = matchItem(name, lt);
     if (item) {
       const n = payQty(li);
       const amt = rate(item) * n;
@@ -939,6 +949,26 @@ function runSelfTests() {
     { name: 'Bracket: Samsung Frame / LG Gallery (in-box bracket)', line_total: 0 }] }), 'Juan').pay, 75, 'frame bracket Juan too = 60 + 15');
   eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 },
     { name: 'Use the bracket in the box', line_total: 0 }] }), 'Zach').pay, 75, 'bare "use the bracket in the box" = 60 + 15');
+  // REGRESSION (Jane Kamneva job, Jul 2026): the OneConnect box line got saved
+  // as plain "Samsung Frame TV" instead of its real catalog name — the $15
+  // in-box-bracket hard rule used to match on wording alone and silently paid
+  // Juan $15 for a $350 job that should've paid $170. The rule is now gated on
+  // the line's actual charge (>$40 means it's NOT a bracket), so a mislabeled
+  // expensive line falls through to the custom-job inference and gets FLAGGED
+  // instead of confidently mispaid.
+  {
+    const r = computeJobPay(job({ line_items: [
+      { name: '60"-69"', line_total: 119 },
+      { name: 'Samsung Frame TV', line_total: 350 },
+    ] }), 'Juan');
+    eq(r.pay !== 80 + 15, true, 'mislabeled $350 "Samsung Frame TV" line must NOT resolve to the $15 in-box-bracket rate');
+    eq(r.flags.length > 0, true, 'mislabeled $350 "Samsung Frame TV" line is flagged for owner review');
+  }
+  // A genuinely small ($0/$25) Samsung Frame in-box bracket line still gets
+  // its flat $15 exactly as before — the price gate only excludes implausibly
+  // large charges, never the real, cheap accessory line.
+  eq(computeJobPay(job({ line_items: [{ name: '60"-69"', line_total: 119 },
+    { name: 'Samsung Frame TV', line_total: 25 }] }), 'Juan').pay, 95, 'a real $25 Samsung Frame in-box bracket line still pays its flat $15');
 
   // The Joseph job for TK (Doms, zip 80401 tier-3 travel $50): 3× 60-69 base
   // (210) + 1 dry-erase board (65) + full-motion brackets ×3 ($0, not Juan) +

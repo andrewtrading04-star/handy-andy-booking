@@ -3037,6 +3037,13 @@ async function loadBookingAuthorization(id){
     return; // table exists but this booking has no authorization → show nothing
   }
   const m2=n=>'$'+(Math.round((Number(n)||0)*100)/100).toFixed(2);
+  // The header "Total" above (bkLiTotal) is the line-items subtotal only — it
+  // doesn't know about the tip, which is captured later at charge time. Once a
+  // signed authorization exists, a.amount IS what was actually charged
+  // (service + tip), so sync the header to match — otherwise the card shows
+  // two different "totals" a few lines apart (e.g. $613 vs $663.42 charged).
+  const totalEl=document.getElementById('bkLiTotal');
+  if(totalEl && a.amount!=null) totalEl.textContent=m2(a.amount);
   // Renders as a CONTINUATION of the merged Payment & Authorization card (see
   // the .bk-minicard markup above) — a dashed divider instead of its own
   // bordered box, so the charge total above and the signed proof below read
