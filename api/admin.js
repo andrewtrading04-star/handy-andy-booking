@@ -297,6 +297,8 @@ export default async function handler(req, res) {
       case 'payroll_combined': return await payrollCombined(req, res, db, auth);
       case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
       case 'office_pay_save': return await officePaySave(req, res, db, auth);
+      case 'office_pay_rate_save': return await officePayRateSave(req, res, db, auth);
+      case 'view_as': return await viewAs(req, res, db, auth);
       case 'secretary_availability': return await secretaryAvailability(req, res, db, auth);
       case 'secretary_availability_set': return await secretaryAvailabilitySet(req, res, db, auth, body);
       case 'secretary_availability_exception_set': return await secretaryAvailabilityExceptionSet(req, res, db, auth, body);
@@ -388,6 +390,37 @@ async function login(req, res, body) {
     maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
   return res.status(200).json({ token, role, scope, name, config, businesses: businesses || [] });
+}
+
+// Owner-only "View As" — mints a REAL secretary session token, identical in
+// shape to what login() gives Heather/Joey when they enter their own business
+// password, so the owner can see the dashboard exactly as one of them does
+// (their nav items, their own business scope) without ever knowing or typing
+// that password. Every existing role/scope check downstream (nav visibility,
+// business-scoped queries, "My Availability" gating) treats this token no
+// differently from a real secretary login — there's no separate
+// impersonation code path to keep in sync or get wrong.
+async function viewAs(req, res, db, auth) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const slug = (req.body?.business || '').toString();
+  if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy or doms' });
+
+  const { data: businesses, error } = await db.from('businesses')
+    .select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).eq('slug', slug);
+  if (error) throw error;
+  for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
+
+  const name = displayNameFor(slug);
+  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name });
+  const config = {
+    email: demoMode() || !!process.env.RESEND_API_KEY,
+    sms: smsConfigured(),
+    demo: demoMode(),
+    maps_key: process.env.GOOGLE_MAPS_API_KEY || null,
+    maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
+  };
+  return res.status(200).json({ token, role: 'secretary', scope: slug, name, config, businesses: businesses || [] });
 }
 
 // Validate the current session token and return user data. Called by tryAutoLogin()
@@ -6461,22 +6494,47 @@ function phpToUsd(php) { return Math.round((Number(php) || 0) / PHP_PER_USD * 10
 // computed number for a one-off adjustment (a partial day, a correction);
 // absent that, the automatic total is what's owed.
 async function officePayRows(db, weekStart) {
-  const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
+  const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay, php_rate').eq('week_start', weekStart).maybeSingle();
+  // Owner can type in the real PHP->USD rate per week (office_pay_weekly.php_rate);
+  // falls back to the plain PHP_PER_USD constant when nothing's been entered.
+  const effectiveRate = Number(row?.php_rate) > 0 ? Number(row.php_rate) : PHP_PER_USD;
   const mk = async (name, slug, saved) => {
     const currency = SECRETARY_RATE[slug].currency;
-    const usdEq = (total) => currency === 'PHP' ? phpToUsd(total) : null;
+    const usdEq = (total) => currency === 'PHP' ? Math.round((Number(total) || 0) / effectiveRate * 100) / 100 : null;
     if (saved != null) {
       const total = Number(saved);
-      return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: false, currency, usd_equivalent: usdEq(total) };
+      return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: false, currency, usd_equivalent: usdEq(total), fx_rate: currency === 'PHP' ? effectiveRate : null };
     }
     const workDays = await secretaryWorkDaysInWeek(db, slug, weekStart);
     const total = workDays * SECRETARY_RATE[slug].daily;
-    return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: true, work_days: workDays, currency, usd_equivalent: usdEq(total) };
+    return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: true, work_days: workDays, currency, usd_equivalent: usdEq(total), fx_rate: currency === 'PHP' ? effectiveRate : null };
   };
   return Promise.all([
     mk('Heather', 'handy-andy', row?.heather_pay),
     mk('Joey', 'doms', row?.joey_pay),
   ]);
+}
+
+// Owner-only: set the PHP->USD reference rate for one pay week. Independent
+// of the pay amount override — the owner can correct the exchange rate
+// without also having to hand-enter Joey's whole week's pay.
+async function officePayRateSave(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { week_start, php_rate } = req.body || {};
+  if (!week_start || !/^\d{4}-\d{2}-\d{2}$/.test(week_start)) return res.status(400).json({ error: 'week_start (YYYY-MM-DD) required' });
+  if (php_rate == null || isNaN(Number(php_rate)) || Number(php_rate) <= 0) return res.status(400).json({ error: 'php_rate must be a positive number' });
+
+  const { data: existing } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', week_start).maybeSingle();
+  const row = {
+    week_start,
+    heather_pay: existing?.heather_pay ?? null,
+    joey_pay: existing?.joey_pay ?? null,
+    php_rate: Number(php_rate),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await db.from('office_pay_weekly').upsert(row, { onConflict: 'week_start' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, week_start, php_rate: Number(php_rate) });
 }
 
 async function officePaySave(req, res, db, auth) {

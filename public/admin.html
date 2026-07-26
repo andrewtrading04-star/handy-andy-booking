@@ -1117,7 +1117,6 @@
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
       <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
-      <button data-nav="secretaries" id="navSecretaries"><span class="ic" data-ico="secretaries">🗂️</span> Secretaries</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
       <button data-nav="other" id="navOther"><span class="ic" data-ico="other">⋯</span> Other <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
@@ -1132,9 +1131,21 @@
       <div class="side-list" id="assignList"></div>
     </div>
 
-    <div class="side-foot">
-      <span class="who" id="who"></span>
-      <button class="btn ghost sm" id="logout">Log out</button>
+    <div id="viewAsBanner" class="hidden" style="background:#fff7ed;border-top:1px solid #fed7aa;border-bottom:1px solid #fed7aa;padding:8px 14px;font-size:12px;color:#9a3412;font-weight:700;display:flex;align-items:center;gap:8px;">
+      👀 Viewing as <span id="viewAsBannerName"></span>
+      <button id="viewAsBackBtn" style="margin-left:auto;background:#9a3412;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">Back to Admin</button>
+    </div>
+    <div class="side-foot" style="position:relative;">
+      <div id="whoRow" style="display:flex;align-items:center;gap:10px;cursor:pointer;flex:1;padding:4px 6px;border-radius:8px;min-width:0;">
+        <div id="whoAv" style="width:30px;height:30px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12.5px;color:#fff;background:#111;">A</div>
+        <span class="who" id="who" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        <span id="whoChevron" style="color:var(--mute);font-size:11px;flex:none;">▾</span>
+      </div>
+      <button class="btn ghost sm" id="logout" style="width:auto;">Log out</button>
+      <div id="viewAsPopover" class="hidden" style="position:absolute;bottom:56px;left:8px;right:8px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 28px rgba(16,24,40,.14);padding:6px;z-index:20;">
+        <div style="font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);padding:8px 10px 4px;">Switch view</div>
+        <div id="viewAsList"></div>
+      </div>
     </div>
   </aside>
   <div id="navScrim" class="nav-scrim"></div>
@@ -1636,6 +1647,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 function logout(){
   token=''; role=''; userName=''; scope=''; appConfig={}; businesses=[]; current=null;
   lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
+  lsDel('ha_owner_token'); lsDel('ha_owner_role'); lsDel('ha_owner_name'); lsDel('ha_owner_scope'); lsDel('ha_owner_config'); lsDel('ha_owner_biz');
   if(pollTimer) clearInterval(pollTimer);
   if(alertTimer){ clearInterval(alertTimer); alertTimer=null; }
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
@@ -1646,10 +1658,96 @@ function logout(){
 }
 document.getElementById('logout').addEventListener('click', logout);
 
+// ── View As (owner switching into Heather's/Joey's platform without signing
+// in) ────────────────────────────────────────────────────────────────────
+const VIEW_AS_PEOPLE = {
+  admin:       { name:'Andrew', av:'A', bg:'#111111', sub:'Admin — full access' },
+  'handy-andy':{ name:'Heather', av:'H', bg:'#f59e0b', sub:'Handy Andy secretary' },
+  doms:        { name:'Joey',   av:'J', bg:'#2563eb', sub:"Dom's secretary" },
+};
+function currentPersonKey(){ return role==='owner' ? 'admin' : scope; }
+function updateWhoAvatar(){
+  const key = currentPersonKey();
+  const p = VIEW_AS_PEOPLE[key] || VIEW_AS_PEOPLE.admin;
+  const av = document.getElementById('whoAv');
+  if(av){ av.textContent = p.av; av.style.background = p.bg; }
+  const banner = document.getElementById('viewAsBanner');
+  const owned = lsGet('ha_owner_token');
+  if(banner){
+    banner.classList.toggle('hidden', !owned);
+    if(owned) document.getElementById('viewAsBannerName').textContent = p.name;
+  }
+}
+function renderViewAsPopoverList(){
+  const list = document.getElementById('viewAsList');
+  if(!list) return;
+  const owned = lsGet('ha_owner_token');
+  const canSwitch = role==='owner' || !!owned;
+  if(!canSwitch){ list.innerHTML=''; return; }
+  const activeKey = currentPersonKey();
+  list.innerHTML = ['admin','handy-andy','doms'].map(key=>{
+    const p = VIEW_AS_PEOPLE[key];
+    const active = key===activeKey;
+    return `<div class="viewas-item" data-key="${key}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;${active?'background:#eaf1ff;':''}">
+      <div style="width:26px;height:26px;border-radius:50%;background:${p.bg};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;flex:none;">${p.av}</div>
+      <div><div style="font-size:13.5px;font-weight:700;color:var(--ink);">${esc(p.name)}</div><div style="font-size:11px;color:var(--mute);">${esc(p.sub)}</div></div>
+      ${active?'<div style="margin-left:auto;color:var(--accent);font-size:14px;font-weight:900;">✓</div>':''}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.viewas-item').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      document.getElementById('viewAsPopover').classList.add('hidden');
+      const key = item.dataset.key;
+      if(key===activeKey) return;
+      if(key==='admin') backToAdmin(); else switchToViewAs(key);
+    });
+  });
+}
+async function switchToViewAs(slug){
+  try{
+    if(!lsGet('ha_owner_token')){
+      // Stash the real owner session so "Back to Admin" (and a page refresh
+      // while viewing-as) can restore it without re-login.
+      lsSet('ha_owner_token', token); lsSet('ha_owner_role', role); lsSet('ha_owner_name', userName);
+      lsSet('ha_owner_scope', scope); lsSet('ha_owner_config', JSON.stringify(appConfig||{})); lsSet('ha_owner_biz', JSON.stringify(businesses||[]));
+    }
+    const d = await api('view_as', { method:'POST', body:{ business: slug } });
+    token=d.token; role=d.role; userName=d.name||''; scope=d.scope||''; appConfig=d.config||{}; businesses=d.businesses||[];
+    lsSet('ha_admin_token',token); lsSet('ha_admin_role',role); lsSet('ha_admin_name',userName); lsSet('ha_admin_scope',scope);
+    lsSet('ha_admin_config',JSON.stringify(appConfig||{})); lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
+    enterApp();
+  }catch(e){ toast(e.message||'Could not switch view'); }
+}
+function backToAdmin(){
+  const ot = lsGet('ha_owner_token');
+  if(!ot) return;
+  token=ot; role=lsGet('ha_owner_role')||''; userName=lsGet('ha_owner_name')||''; scope=lsGet('ha_owner_scope')||'';
+  appConfig=lsJSON('ha_owner_config',{}); businesses=lsJSON('ha_owner_biz',[]);
+  lsSet('ha_admin_token',token); lsSet('ha_admin_role',role); lsSet('ha_admin_name',userName); lsSet('ha_admin_scope',scope);
+  lsSet('ha_admin_config',JSON.stringify(appConfig||{})); lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
+  lsDel('ha_owner_token'); lsDel('ha_owner_role'); lsDel('ha_owner_name'); lsDel('ha_owner_scope'); lsDel('ha_owner_config'); lsDel('ha_owner_biz');
+  enterApp();
+}
+document.getElementById('whoRow')?.addEventListener('click', ()=>{
+  const pop = document.getElementById('viewAsPopover');
+  if(!pop) return;
+  const owned = lsGet('ha_owner_token');
+  if(role!=='owner' && !owned) return; // real secretary login: no switcher
+  renderViewAsPopoverList();
+  pop.classList.toggle('hidden');
+});
+document.addEventListener('click', (e)=>{
+  const pop = document.getElementById('viewAsPopover');
+  if(!pop || pop.classList.contains('hidden')) return;
+  if(!pop.contains(e.target) && !document.getElementById('whoRow')?.contains(e.target)) pop.classList.add('hidden');
+});
+document.getElementById('viewAsBackBtn')?.addEventListener('click', backToAdmin);
+
 function enterApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = userName || (role==='owner' ? 'Owner' : 'Secretary');
+  updateWhoAvatar();
   current = businesses[0] || null;
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
@@ -1671,8 +1769,6 @@ function enterApp(){
   // on). Secretaries: owner only, read-only view of both.
   const navMyAvail=document.getElementById('navMyAvailability');
   if(navMyAvail) navMyAvail.style.display = role==='secretary' ? '' : 'none';
-  const navSecs=document.getElementById('navSecretaries');
-  if(navSecs) navSecs.style.display = role==='owner' ? '' : 'none';
   const navOther=document.getElementById('navOther');
   if(navOther) navOther.style.display = role==='owner' ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
@@ -4456,18 +4552,30 @@ function renderPayrollData(d){
       // Only offer "Reset to automatic" when a manual override is actually in
       // effect — the normal state (is_suggested) has nothing to reset FROM.
       const resetBtn=(!t.is_suggested)?`<button class="btn ghost sm office-pay-reset" data-office-field="${field}" style="width:auto;padding:6px 10px;" title="Clear this override and go back to automatic (days worked × rate)">Reset to automatic</button>`:'';
+      const rateRow=isPhp?`<div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);">
+            <span style="font-size:12px;color:var(--mute);">Exchange rate: ₱</span>
+            <input type="number" step="0.01" min="0.01" class="office-fx-input" value="${t.fx_rate||''}" placeholder="56.50" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:13px;text-align:right;">
+            <span style="font-size:12px;color:var(--mute);">= $1 USD</span>
+            <button class="btn ghost sm office-fx-save" style="width:auto;padding:5px 9px;">Save rate</button>
+            <span class="office-fx-status" style="font-size:12px;color:var(--mute);"></span>
+          </div>`:'';
       html+=`<tr class="${i%2?'z':''}">
-        <td class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office${isPhp?' · PHP':''})</span></td>
-        <td class="r" colspan="2" style="color:var(--mute);font-size:12.5px;">${esc(note)}</td>
-        <td class="r">
-          <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
-            <span style="color:var(--mute);">${isPhp?'₱':'$'}</span>
-            <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input${isPhp?' php-input':''}" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
-            ${usdHint}
-            <button class="btn ghost sm office-pay-save" data-office-field="${field}" style="width:auto;padding:6px 10px;">Save override</button>
-            ${resetBtn}
-            <span class="office-pay-status" data-office-field="${field}" style="font-size:12px;color:var(--mute);"></span>
+        <td colspan="4" style="padding:14px 12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+              <div class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office${isPhp?' · PHP':''})</span></div>
+              <div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${esc(note)}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span style="color:var(--mute);">${isPhp?'₱':'$'}</span>
+              <input type="number" step="0.01" data-office-field="${field}" class="office-pay-input${isPhp?' php-input':''}" value="${t.total||''}" placeholder="0.00" style="width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;text-align:right;">
+              ${usdHint}
+              <button class="btn ghost sm office-pay-save" data-office-field="${field}" style="width:auto;padding:6px 10px;">Save override</button>
+              ${resetBtn}
+              <span class="office-pay-status" data-office-field="${field}" style="font-size:12px;color:var(--mute);"></span>
+            </div>
           </div>
+          ${rateRow}
         </td>
       </tr>`;
       return;
@@ -4605,14 +4713,42 @@ function renderPayrollData(d){
   });
   wireActualProfit();
   // Live USD reference next to Joey's peso input — updates as he types, no
-  // save/round-trip needed. Same approximate rate the server used for the
-  // initial usd_equivalent; purely a reference, never what he's actually paid.
-  const PHP_PER_USD=56.5;
+  // save/round-trip needed. Uses the server-provided fx_rate (the manual
+  // override rate if the owner set one, else the built-in default) rather
+  // than a hardcoded constant, so it stays consistent with the saved rate.
   content.querySelectorAll('.php-input').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const field=inp.dataset.officeField;
+      const row=inp.closest('td');
+      const rateInp=row?.querySelector('.office-fx-input');
+      const rate=Number(rateInp?.value)||56.5;
       const hint=content.querySelector(`.office-usd-hint[data-office-field="${field}"]`);
-      if(hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(inp.value)||0)/PHP_PER_USD*100)/100)} USD`;
+      if(hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(inp.value)||0)/rate*100)/100)} USD`;
+    });
+  });
+  content.querySelectorAll('.office-fx-input').forEach(rateInp=>{
+    rateInp.addEventListener('input', ()=>{
+      const row=rateInp.closest('td');
+      const payInp=row?.querySelector('.php-input');
+      const hint=row?.querySelector('.office-usd-hint');
+      const rate=Number(rateInp.value)||56.5;
+      if(payInp && hint) hint.textContent = `≈ ${payFmtUSD(Math.round((Number(payInp.value)||0)/rate*100)/100)} USD`;
+    });
+  });
+  content.querySelectorAll('.office-fx-save').forEach(btn=>{
+    btn.addEventListener('click', async()=>{
+      const row=btn.closest('td');
+      const rateInp=row?.querySelector('.office-fx-input');
+      const statusEl=row?.querySelector('.office-fx-status');
+      const val=rateInp?.value;
+      if(!val||isNaN(Number(val))||Number(val)<=0){ if(statusEl) statusEl.textContent='Enter a rate'; return; }
+      btn.disabled=true;
+      try{
+        await api('office_pay_rate_save',{ method:'POST', body:{ week_start:d.week_start, php_rate:Number(val) } });
+        if(statusEl) statusEl.textContent='Saved';
+        if(payrollRawData) loadPayroll();
+      }catch(err){ if(statusEl) statusEl.textContent=err.message; }
+      finally{ btn.disabled=false; }
     });
   });
   content.querySelectorAll('.office-pay-save').forEach(btn=>{
@@ -4780,6 +4916,7 @@ async function renderSecretaries(){
       </div>`;
     };
     view.innerHTML=`<div class="wrap">
+      <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
       <div style="margin-bottom:14px;"><div class="meta">Each secretary's own work/off days — set from their own "My Availability" tab.</div></div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;">${(d.secretaries||[]).map(cardFor).join('')}</div>
     </div>`;
@@ -4885,9 +5022,14 @@ async function renderOther(){
         <div><div style="font-weight:700;">🛡️ Disputes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Respond to card chargebacks using the signed authorization on file.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDispCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
+      <div id="otherSecretaries" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Heather's and Joey's weekly work/off schedule, side by side.</div></div>
+        <span style="color:var(--mute);font-size:20px;">›</span>
+      </div>
     </div>
   </div>`;
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
+  document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   // Best-effort: show how many chargebacks are open (also updates the nav badge).
   try{
     const d=await api('disputes',{ params:{ business:current.slug }});
