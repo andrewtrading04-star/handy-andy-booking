@@ -714,6 +714,19 @@
   #bkModal .bk-badge-assign{background:rgba(143,163,189,.16);color:#c7d4e5;}
   #bkModal .bk-badge-job{background:rgba(34,197,94,.16);color:#22c55e;}
   #bkModal .bk-badge-pay{background:rgba(59,130,246,.16);color:#3b82f6;}
+  /* Payment & Authorization — merged into one "receipt" card (Payment header
+     + charge/tip breakdown + signed-authorization proof + actions), read
+     top-to-bottom as a single document instead of two separately-bordered
+     sections. */
+  #bkModal .bk-pay-badge{margin-left:auto;font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:3px 9px;border-radius:100px;white-space:nowrap;}
+  #bkModal .bk-pay-badge-paid{color:#22c55e;background:rgba(34,197,94,.14);}
+  #bkModal .bk-pay-badge-refunded{color:#f59e0b;background:rgba(245,158,11,.14);}
+  #bkModal .bk-auth-divider{border-top:1px dashed rgba(255,255,255,.14);margin:14px 0;}
+  #bkModal .bk-auth-meta{font-size:12.5px;color:#93a6bd;margin-bottom:10px;line-height:1.6;}
+  #bkModal .bk-auth-meta strong{color:#eef2f7;}
+  #bkModal .bk-auth-breakdown{font-size:13.5px;color:#c8d3e0;margin-bottom:10px;}
+  #bkModal .bk-auth-breakdown strong{color:#fff;}
+  #bkModal .bk-auth-sig{max-height:110px;max-width:100%;background:#fff;border-radius:8px;padding:6px;display:block;margin-bottom:4px;}
   /* "Which card is this?" chip — shown in the Payment section header (always,
      once loaded) and again next to the Charge button (so it's visible right
      where the office is about to tap it, no scrolling up to check). */
@@ -2390,27 +2403,29 @@ function openBooking(b){
       </div>
     </div>
     <div class="bk-minicard">
-      <div class="bk-minicard-head"><span class="bk-badge bk-badge-pay">💳</span><span class="bk-minicard-label">Payment</span></div>
+      <div class="bk-minicard-head"><span class="bk-badge bk-badge-pay">💳</span><span class="bk-minicard-label">Payment &amp; Authorization</span>
+        ${b.payment_status==='paid'?`<span class="bk-pay-badge bk-pay-badge-paid">✓ Paid${b.amount_refunded>0?` · ${money2(b.amount_refunded)} refunded`:''}</span>`:''}
+        ${b.payment_status==='refunded'?`<span class="bk-pay-badge bk-pay-badge-refunded">Refunded</span>`:''}
+      </div>
       <div id="bkCardChip" class="bk-pay-cardline" style="display:none;" data-booking-id="${esc(b.id)}"></div>
       <div class="bk-pay-total"><span>Total</span><span id="bkLiTotal"></span></div>
+      <div id="bkCardBox" class="hidden" style="margin-top:0;margin-bottom:12px;">
+        <div class="sub" style="font-size:13px;color:var(--mute);margin-bottom:8px;">Enter the card the customer wants to use:</div>
+        <div id="bkCardEl" style="padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;"></div>
+        <div id="bkCardErr" style="color:#dc2626;font-size:13px;margin-top:8px;"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn sm" id="bkCardSave">Save card</button>
+          <button class="btn ghost sm" id="bkCardCancel">Cancel</button>
+        </div>
+      </div>
+      <div id="bkAuthWrap"></div>
       <div class="bk-actions">
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn sm" id="bkCharge">Charge card${b.price?' '+money(b.price):''}</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkChangeCard">💳 Change card</button>`:''}
-        ${b.payment_status==='paid'?`<span class="sub" style="font-size:13px;align-self:center;font-weight:700;color:#15803d;">Paid ✓${b.amount_refunded>0?` <span style="color:#b45309;">(${money2(b.amount_refunded)} refunded)</span>`:''}</span><button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
-        ${b.payment_status==='refunded'?`<span class="sub" style="font-size:13px;align-self:center;">Refunded</span>`:''}
+        ${b.payment_status==='paid'?`<button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
       </div>
     </div>
-    <div id="bkCardBox" class="hidden" style="margin-top:0;">
-      <div class="sub" style="font-size:13px;color:var(--mute);margin-bottom:8px;">Enter the card the customer wants to use:</div>
-      <div id="bkCardEl" style="padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;"></div>
-      <div id="bkCardErr" style="color:#dc2626;font-size:13px;margin-top:8px;"></div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button class="btn sm" id="bkCardSave">Save card</button>
-        <button class="btn ghost sm" id="bkCardCancel">Cancel</button>
-      </div>
-    </div>
-    <div id="bkAuthWrap"></div>
     <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
       <input type="file" id="bkPhotoInput" accept="image/*" multiple style="display:none">
       <button class="btn ghost sm" id="bkAddPhoto" style="margin-top:8px;">${ic('camera')} Add photo</button>
@@ -3018,23 +3033,21 @@ async function loadBookingAuthorization(id){
   let d; try{ d=await api('booking_authorization',{ params:{ business:current.slug, id }}); }catch(_){ return; }
   const a=d&&d.authorization;
   if(!a){
-    if(d&&d.table_missing) wrap.innerHTML=`<div class="bk-sec"><div class="bk-sec-h">Signed authorization</div><div class="sub" style="font-size:13px;color:var(--mute);">Signature capture isn’t switched on yet — run migration 0046 in Supabase and future charges will store the signed authorization here.</div></div>`;
+    if(d&&d.table_missing) wrap.innerHTML=`<div class="bk-auth-divider"></div><div class="sub" style="font-size:13px;color:var(--mute);">Signature capture isn’t switched on yet — run migration 0046 in Supabase and future charges will store the signed authorization here.</div>`;
     return; // table exists but this booking has no authorization → show nothing
   }
   const m2=n=>'$'+(Math.round((Number(n)||0)*100)/100).toFixed(2);
-  wrap.innerHTML=`<div class="bk-sec"><div class="bk-sec-h">Signed authorization</div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mute);margin-bottom:8px;">
-      <span>Signed by <strong style="color:#eef2f7;">${esc(a.customer_name||'—')}</strong></span>
-      ${a.signed_at?`<span>${new Date(a.signed_at).toLocaleString()}</span>`:''}
-      ${a.card_last4?`<span>${esc(a.card_brand||'card')} ••${esc(a.card_last4)}</span>`:''}
-      ${a.signed_ip?`<span>IP ${esc(a.signed_ip)}</span>`:''}
-    </div>
-    <div style="font-size:14px;margin-bottom:8px;color:#eef2f7;">${m2(a.ticket_amount)} service${Number(a.tip)>0?` + ${m2(a.tip)} tip`:''} = <strong>${m2(a.amount)}</strong></div>
+  // Renders as a CONTINUATION of the merged Payment & Authorization card (see
+  // the .bk-minicard markup above) — a dashed divider instead of its own
+  // bordered box, so the charge total above and the signed proof below read
+  // as one receipt rather than two stacked sections.
+  wrap.innerHTML=`<div class="bk-auth-divider"></div>
+    <div class="bk-auth-meta">Signed by <strong>${esc(a.customer_name||'—')}</strong>${a.signed_at?` · ${new Date(a.signed_at).toLocaleString()}`:''}${a.signed_ip?` · IP ${esc(a.signed_ip)}`:''}</div>
+    <div class="bk-auth-breakdown">${m2(a.ticket_amount)} service${Number(a.tip)>0?` + ${m2(a.tip)} tip`:''} = <strong>${m2(a.amount)}</strong></div>
     ${a.signature_url
-      ? `<img src="${esc(a.signature_url)}" alt="signature" style="max-height:130px;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px;display:block;">`
-      : '<div class="sub" style="font-size:13px;color:var(--mute);">Charged without a signature (phone order).</div>'}
-    ${a.terms_text?`<details style="margin-top:8px;"><summary style="cursor:pointer;color:var(--mute);font-size:13px;">View signed terms</summary><div style="white-space:pre-wrap;font-size:12px;color:var(--mute);margin-top:6px;line-height:1.5;">${esc(a.terms_text)}</div></details>`:''}
-  </div>`;
+      ? `<img src="${esc(a.signature_url)}" alt="signature" class="bk-auth-sig">`
+      : '<div class="sub" style="font-size:13px;color:var(--mute);margin-bottom:4px;">Charged without a signature (phone order).</div>'}
+    ${a.terms_text?`<details style="margin-top:6px;"><summary style="cursor:pointer;color:#93a6bd;font-size:12.5px;">View signed terms</summary><div style="white-space:pre-wrap;font-size:12px;color:#93a6bd;margin-top:6px;line-height:1.5;">${esc(a.terms_text)}</div></details>`:''}`;
 }
 
 async function paymentAction(id, action, amount){
