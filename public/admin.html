@@ -8710,6 +8710,16 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(gds && !gdsPhone){ err.textContent='Enter the phone number the customer used.'; return; }
   const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
   if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
+  // A completely bare booking — no category chosen at all, so nbOptionGroups
+  // never loaded and nbValidateTvMountingRequired below has nothing to check —
+  // used to submit silently: no service, no price, no line items, no error.
+  // (Lucinda Simpson job, Jul 2026: created this exact way on Jul 19, sat
+  // invisible for a week, and read as "all the line items got removed" when it
+  // was actually never itemized in the first place.) Every legitimate $0 flow
+  // already guarantees at least one selection line (GDS pushes its own,
+  // Assurion is checked just above), so this can only fire on a genuinely
+  // empty pick.
+  if(!assurion && !gds && selections.length===0){ err.textContent='Choose a service category and at least one option before creating this booking.'; return; }
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
   const travelFee=(assurion||gds)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);

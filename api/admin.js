@@ -2208,6 +2208,21 @@ async function bookingCreate(req, res, db, auth, body) {
     } catch { /* dedupe is best-effort — never block a legitimate booking on it */ }
   }
 
+  // Reject a completely bare booking — no service, no selections, no notes at
+  // all. Every legitimate flow (TV Mounting, Handyman, Assurion, GDS) always
+  // supplies at least ONE of these three; a booking with none of them means
+  // nothing was actually chosen before the office hit Create. Client-side
+  // validation (admin.html) should already stop this, but the server is the
+  // authoritative check — this codebase's whole pattern is that money/data
+  // guards never rely on the client alone. (Lucinda Simpson job, Jul 2026:
+  // created exactly this way — no service_id, no line items, $0 — sat
+  // invisible for a week and read as "the line items got removed" when they
+  // had never actually been entered.)
+  const hasSelections = Array.isArray(body.selections) && body.selections.length > 0;
+  if (!body.service_id && !hasSelections && !(body.notes || '').toString().trim()) {
+    return res.status(400).json({ error: 'Choose a service category and at least one option before creating this booking — nothing was selected.' });
+  }
+
   // Signed review-link token (30-day TTL) so the completion follow-up can point
   // the customer at the review widget. booking_id is patched in after insert.
   const bookingInsert = {
