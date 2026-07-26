@@ -668,12 +668,8 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
           <a href="${esc(clickUrl)}" style="display:inline-block;background:#1a73e8;color:#ffffff;text-decoration:none;font-size:14.5px;font-weight:500;padding:12px 28px;border-radius:24px;letter-spacing:.15px;">Share your feedback &rarr;</a>
         </td></tr>
 
-        <tr><td style="padding:10px 32px 30px;text-align:center;">
+        <tr><td style="padding:10px 32px 34px;text-align:center;">
           <div style="font-size:12px;color:#80868b;">Takes about 10 seconds</div>
-        </td></tr>
-
-        <tr><td style="padding:0 32px 26px;">
-          <div style="border-top:1px solid #e8eaed;padding-top:18px;text-align:center;font-size:12px;color:#80868b;">Thanks for choosing ${esc(b.name)}.<br>${esc(b.website)}</div>
         </td></tr>
 
       </table>
