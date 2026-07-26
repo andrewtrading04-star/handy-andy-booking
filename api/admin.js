@@ -4394,6 +4394,20 @@ async function reviewCheck(req, res, body) {
   const reviewToken = verifyToken(token);
   if (!reviewToken || !reviewToken.booking_id) return res.status(401).json({ error: 'Invalid token' });
 
+  // Review-email tester (public/review-email-tester.html): a real, fully-live
+  // token that carries the sentinel booking_id 'TEST' instead of a real
+  // booking, so clicking the button/stars in a test email exercises the
+  // ACTUAL review_click -> review.html -> review flow end to end, without
+  // ever touching (or requiring) a real booking row.
+  if (reviewToken.booking_id === 'TEST') {
+    const slug = reviewToken.business_slug === 'doms' ? 'doms' : 'handy-andy';
+    const reviewUrl = resolveGoogleReviewUrl({ slug, techName: 'Kregg', areaName: '', bookingId: 'TEST' });
+    return res.status(200).json({
+      booking_id: 'TEST', already_reviewed: false, review_url: reviewUrl,
+      business_slug: slug, business_name: slug === 'doms' ? "Dom's TV Mounting" : 'Handy Andy',
+    });
+  }
+
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
     .select('id, reviewed_at, service_area:service_areas(name), technician:technicians!technician_id(name), business:businesses(slug, name)')
@@ -4437,6 +4451,11 @@ async function reviewSubmit(req, res, body) {
 
   const reviewToken = verifyToken(token);
   if (!reviewToken || !reviewToken.booking_id) return res.status(401).json({ error: 'Invalid token' });
+
+  // Review-email tester — see the matching branch in reviewCheck. A no-op
+  // "success" so the test flow completes end to end, but nothing is ever
+  // written anywhere (there's no real booking to write to).
+  if (reviewToken.booking_id === 'TEST') return res.status(200).json({ ok: true, test: true });
 
   const db = serviceClient();
 
@@ -5792,16 +5811,23 @@ async function gdsUpsellAdd(req, res, body) {
 // The preview action returns the REAL rendered output of reviewEmail() (not
 // a hand-copied mockup), so what's shown is byte-for-byte what a customer
 // would receive.
-const REVIEW_TESTER_SAMPLE = {
-  firstName: 'Marcus',
-  technicianName: 'Kregg Daniels',
-  clickUrl: '#',
-};
+// Real, live token (sentinel booking_id 'TEST' — see reviewCheck/reviewSubmit)
+// so the button/stars in a test email go through the ACTUAL review_click ->
+// review.html -> review flow, not a dead '#' link.
+function testReviewClickUrl(bizSlug) {
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const token = signToken({ kind: 'review', booking_id: 'TEST', business_slug: bizSlug }, 3600);
+  return `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(token)}&ch=email`;
+}
+
+function reviewTesterSample(bizSlug) {
+  return { firstName: 'Marcus', technicianName: 'Kregg Daniels', clickUrl: testReviewClickUrl(bizSlug) };
+}
 
 async function reviewEmailPreview(req, res) {
   const slug = (req.query.business || 'handy-andy').toString();
-  const brand = brandFor(slug === 'doms' ? 'doms' : 'handy-andy');
-  const { subject, html } = reviewEmail(REVIEW_TESTER_SAMPLE, brand);
+  const bizSlug = slug === 'doms' ? 'doms' : 'handy-andy';
+  const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brandFor(bizSlug));
   return res.status(200).json({ subject, html });
 }
 
@@ -5814,7 +5840,7 @@ async function sendTestReviewEmail(req, res, body) {
   const slug = ((body && body.business) || 'handy-andy').toString();
   const bizSlug = slug === 'doms' ? 'doms' : 'handy-andy';
   const brand = brandFor(bizSlug);
-  const { subject, html } = reviewEmail(REVIEW_TESTER_SAMPLE, brand);
+  const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brand);
   const { from } = emailConfig(bizSlug);
   const result = await sendEmail({ slug: bizSlug, to: TEST_EMAIL_RECIPIENT, subject: `[TEST] ${subject}`, html, replyTo: from });
   if (!result.sent) return res.status(500).json({ error: result.error || result.skipped || 'Email did not send.' });

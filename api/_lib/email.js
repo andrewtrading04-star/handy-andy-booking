@@ -653,14 +653,14 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
           <div style="font-size:14px;color:#5f6368;line-height:1.6;margin-top:8px;max-width:400px;margin-left:auto;margin-right:auto;">${techFirst ? `${esc(techFirst)} just finished your job.` : 'Your job is complete.'} Tap a star to leave a quick review.</div>
         </td></tr>
 
-        <!-- Star row: outlined gray, gold on the happy-path end -->
+        <!-- Star row: all five neutral gray until the customer actually rates on review.html -->
         <tr><td style="padding:26px 20px 6px;text-align:center;">
           <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>
             <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
             <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
             <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
-            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#fbbc05;display:inline-block;">&#9733;</a></td>
-            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#fbbc05;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
           </tr></table>
         </td></tr>
 
