@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
-import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -212,6 +212,8 @@ export default async function handler(req, res) {
     if (action === 'estimate_approve') return await estimateApprove(req, res, body);
     if (action === 'estimate_approve_info') return await estimateApproveInfo(req, res, body);
     if (action === 'estimate_slots') return await estimateSlots(req, res);
+    if (action === 'gds_upsell_info') return await gdsUpsellInfo(req, res, body);
+    if (action === 'gds_upsell_add') return await gdsUpsellAdd(req, res, body);
     if (action === 'session_status') return await sessionStatus(req, res);
 
     // Everything below requires a valid admin token.
@@ -2471,6 +2473,10 @@ async function bookingCreate(req, res, db, auth, body) {
         twoTechs: !!body.needs_lifting,
         startEpoch, endEpoch, baseUrl,
         jobId: bRow.id,
+        gdsUpsellUrl: gdsUpsellUrlFor({
+          lines: selections, bookingId: bRow.id, baseUrl,
+          eligible: selections.some(s => /^tv size\s*:/i.test((s.label || s.name || '').toString())),
+        }),
       }, brandFor(biz.slug));
       const { from } = emailConfig(biz.slug);
       // TEMP diagnostic: reveal which Resend key path is in use (no secrets logged).
@@ -5678,6 +5684,106 @@ async function estimateSlots(req, res) {
   }
 }
 
+// ── Guaranteed Dismount Service upsell (confirmation-email button) ─────────
+// The "Want to upgrade?" button in the booking-confirmation email links to
+// /add-gds.html with a signed token (kind=add_gds, booking_id). That page
+// shows a one-tap confirm (never mutates on the GET — a mail client or bot
+// prefetching the link must not silently add a charge), and the POST here
+// is what actually writes the line item onto the customer's real ticket.
+const GDS_LINE_NAME = 'Guaranteed Dismount Service';
+const GDS_PRICE = 35;
+const GDS_RE = /guarante\w*\s+dismount|dismount\s+service|\btv removal\b/i;
+
+function gdsTokenBookingId(raw) {
+  const t = verifyToken((raw || '').toString());
+  if (!t || t.kind !== 'add_gds' || !t.booking_id) return null;
+  return t.booking_id;
+}
+
+async function fetchBookingForGds(db, id) {
+  const { data, error } = await db.from('bookings')
+    .select(`id, business_id, price, status, service:services ( name ), customer:customers ( name )`)
+    .eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id, slug, name').eq('id', data.business_id).maybeSingle();
+  if (bizErr) throw bizErr;
+  data.business = biz || null;
+  const { data: lines, error: liErr } = await db.from('booking_line_items')
+    .select('id, name, kind, quantity, unit_price, line_total, taxable').eq('booking_id', id);
+  if (liErr) throw liErr;
+  data.line_items = lines || [];
+  return data;
+}
+
+async function gdsUpsellInfo(req, res, body) {
+  const token = (req.query.token || (body && body.token) || '').toString();
+  const id = gdsTokenBookingId(token);
+  if (!id) return res.status(401).json({ error: 'This link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const est = await fetchBookingForGds(db, id);
+  if (!est) return res.status(404).json({ error: 'Booking not found.' });
+
+  const alreadyHasGds = est.line_items.some(li => GDS_RE.test(li.name || ''));
+  return res.status(200).json({
+    already_has_gds: alreadyHasGds,
+    customer_name: est.customer?.name || '',
+    service_label: est.service?.name || 'Service',
+    current_total: Number(est.price) || 0,
+    gds_price: GDS_PRICE,
+    business_slug: est.business?.slug || 'handy-andy',
+    business_name: est.business?.name || 'Handy Andy',
+  });
+}
+
+async function gdsUpsellAdd(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const token = (body.token || '').toString();
+  const id = gdsTokenBookingId(token);
+  if (!id) return res.status(401).json({ error: 'This link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const est = await fetchBookingForGds(db, id);
+  if (!est) return res.status(404).json({ error: 'Booking not found.' });
+
+  if (est.line_items.some(li => GDS_RE.test(li.name || ''))) {
+    // Already added (a prior click, or the office added it manually) — no-op,
+    // not an error, so a double-tap or refresh doesn't look broken.
+    return res.status(200).json({ ok: true, already: true, new_total: Number(est.price) || 0 });
+  }
+
+  const { error: insErr } = await db.from('booking_line_items').insert({
+    booking_id: id, business_id: est.business_id, kind: 'service',
+    name: GDS_LINE_NAME, quantity: 1, unit_price: GDS_PRICE, line_total: GDS_PRICE,
+    service_id: null, option_id: null, taxable: true,
+  });
+  if (insErr) return res.status(500).json({ error: 'Could not add this to your ticket. Please try again.' });
+
+  // Bump the existing tax line (if any) by the same rate rather than
+  // re-deriving a rate from scratch — matches how tax is stored everywhere
+  // else in this codebase (a flat 'fee' line item, not a stored rate column).
+  const taxLine = est.line_items.find(li => /^tax\s*\(/i.test(li.name || ''));
+  let taxAdd = 0;
+  if (taxLine) {
+    const rateMatch = /\(([\d.]+)%\)/.exec(taxLine.name || '');
+    const rate = rateMatch ? Number(rateMatch[1]) / 100 : 0;
+    taxAdd = Math.round(GDS_PRICE * rate * 100) / 100;
+    if (taxAdd > 0) {
+      await db.from('booking_line_items').update({
+        unit_price: Number(taxLine.unit_price) + taxAdd,
+        line_total: Number(taxLine.line_total) + taxAdd,
+      }).eq('id', taxLine.id);
+    }
+  }
+
+  const newTotal = Math.round(((Number(est.price) || 0) + GDS_PRICE + taxAdd) * 100) / 100;
+  const { error: updErr } = await db.from('bookings').update({ price: newTotal }).eq('id', id);
+  if (updErr) return res.status(500).json({ error: 'Added the service, but could not update the ticket total. We will fix this shortly.' });
+
+  return res.status(200).json({ ok: true, already: false, new_total: newTotal });
+}
+
 async function estimateApproveInfo(req, res, body) {
   const token = (req.query.token || (body && body.token) || '').toString();
   const id = approveTokenEstimateId(token);
@@ -5864,6 +5970,10 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
           address: { line1: cust.line1, city: cust.city, state: cust.state, zip: cust.zip },
           lines: emailLines, total: totals.total, tip: 0, twoTechs: false,
           startEpoch, endEpoch, baseUrl, jobId: bRow.id,
+          gdsUpsellUrl: gdsUpsellUrlFor({
+            lines: emailLines, bookingId: bRow.id, baseUrl,
+            eligible: /tv/i.test(est.service_label || ''),
+          }),
         }, brandFor(biz.slug));
         const { from } = emailConfig(biz.slug);
         await sendEmail({ slug: biz.slug, to: cust.email, subject, html, replyTo: from });

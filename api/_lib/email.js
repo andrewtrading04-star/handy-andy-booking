@@ -98,6 +98,11 @@ export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError
   }
 }
 
+// Matches the real GDS line-item price used everywhere else (widget.js
+// dismount step, api/admin.js gdsUpsellAdd) — kept in one place here too so
+// the email copy can never drift from what the confirm page actually charges.
+const GDS_UPSELL_PRICE = 35;
+
 // ── Helpers (pure) ──────────────────────────────────────────────────────────
 function money(n) {
   const v = Number(n) || 0;
@@ -161,8 +166,8 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 
   const row = (label, val) => !val ? '' : `
         <tr>
-          <td style="padding:9px 16px;font-size:13px;color:#6b7280;width:118px;vertical-align:top;">${esc(label)}</td>
-          <td style="padding:9px 16px;font-size:14px;color:#11181c;font-weight:600;vertical-align:top;">${esc(val)}</td>
+          <td style="padding:6px 0;font-size:12.5px;color:#8a8274;text-transform:uppercase;letter-spacing:.04em;vertical-align:top;">${esc(label)}</td>
+          <td align="right" style="padding:6px 0;font-size:14.5px;color:#ffffff;font-weight:700;vertical-align:top;">${esc(val)}</td>
         </tr>`;
 
   const detailRows =
@@ -180,24 +185,24 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
   if (lines.length && details.total != null) {
     const lineRows = lines.map(li => `
           <tr>
-            <td style="padding:7px 0;font-size:14px;color:#374151;">${esc(cleanLineLabel(li.label))}${Number(li.qty) > 1 ? ` &times; ${Number(li.qty)}` : ''}</td>
-            <td align="right" style="padding:7px 0;font-size:14px;color:#374151;white-space:nowrap;">${money(li.amount)}</td>
+            <td style="padding:5px 0;font-size:14px;color:#d8d2c6;">${esc(cleanLineLabel(li.label))}${Number(li.qty) > 1 ? ` &times; ${Number(li.qty)}` : ''}</td>
+            <td align="right" style="padding:5px 0;font-size:14px;color:#d8d2c6;white-space:nowrap;">${money(li.amount)}</td>
           </tr>`).join('');
     const tipRow = Number(details.tip) > 0 ? `
           <tr>
-            <td style="padding:7px 0;font-size:14px;color:#374151;">Tip for technician</td>
-            <td align="right" style="padding:7px 0;font-size:14px;color:#374151;white-space:nowrap;">${money(details.tip)}</td>
+            <td style="padding:5px 0;font-size:14px;color:#d8d2c6;">Tip for technician</td>
+            <td align="right" style="padding:5px 0;font-size:14px;color:#d8d2c6;white-space:nowrap;">${money(details.tip)}</td>
           </tr>` : '';
     const grand = (Number(details.total) || 0) + (Number(details.tip) || 0);
     priceBlock = `
-      <tr><td style="padding:6px 28px 0;">
-        <div style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9ca3af;margin:14px 0 4px;">Summary</div>
+      <tr><td style="padding:0 26px;"><div style="border-top:2px dashed #3a3127;margin:22px 0;"></div></td></tr>
+      <tr><td style="padding:0 26px;">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a8274;margin-bottom:10px;">Your quote</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           ${lineRows}${tipRow}
-          <tr><td colspan="2" style="border-top:1px solid #eceef1;padding-top:0;"></td></tr>
           <tr>
-            <td style="padding:10px 0 0;font-size:16px;font-weight:800;color:#11181c;">Total</td>
-            <td align="right" style="padding:10px 0 0;font-size:16px;font-weight:800;color:${accent};white-space:nowrap;">${money(grand)}</td>
+            <td style="padding:10px 0 0;font-size:15px;font-weight:900;color:#fff;">Total</td>
+            <td align="right" style="padding:10px 0 0;font-size:17px;font-weight:900;color:${accent};white-space:nowrap;">${money(grand)}</td>
           </tr>
         </table>
       </td></tr>`;
@@ -205,10 +210,37 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
 
   const twoTechNote = details.twoTechs ? `
       <tr><td style="padding:14px 28px 0;">
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;font-size:13px;color:#9a3412;line-height:1.5;">
+        <div style="background:#2a2118;border:1px solid #4a3a28;border-radius:10px;padding:12px 14px;font-size:13px;color:#f2c98a;line-height:1.5;">
           <strong>Two technicians</strong> are scheduled for this job to safely handle the larger TV.
         </div>
       </td></tr>` : '';
+
+  // ── "Want to upgrade?" GDS upsell — shown only when the caller (book.js /
+  // admin.js) determined this is a TV-mounting job that didn't already add
+  // Guaranteed Dismount Service. gdsUpsellUrl is a signed one-time link to
+  // /add-gds.html; the button never mutates the ticket itself — it just
+  // opens a confirm page (see api/admin.js gdsUpsellAdd) so a mail client
+  // prefetching this link can't silently add a charge to the customer.
+  let gdsUpsellBlock = '';
+  if (details.gdsUpsellUrl) {
+    gdsUpsellBlock = `
+      <tr><td style="padding:22px 28px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0f3d3a,#155e4f);border-radius:16px;">
+          <tr><td style="padding:20px 22px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+              <td width="34" valign="top" style="padding-top:1px;font-size:20px;">&#128737;&#65039;</td>
+              <td valign="top">
+                <div style="font-size:15px;font-weight:900;color:#fff;margin-bottom:5px;">Never worry about moving this TV again</div>
+                <div style="font-size:13.5px;color:#c9ece3;line-height:1.55;margin-bottom:6px;">Add <strong>Guaranteed Dismount Service</strong> &mdash; whenever you move or need it taken down, we'll come remove it for free. Most customers add this.</div>
+                <div style="font-size:12.5px;color:#8fd4c4;font-weight:700;margin-bottom:14px;">Just ${money(GDS_UPSELL_PRICE)} &middot; one-time</div>
+                <a href="${esc(details.gdsUpsellUrl)}" style="display:inline-block;text-decoration:none;font-weight:800;border-radius:10px;padding:13px 22px;font-size:14.5px;background:#ffffff;color:#0f3d3a;">Add Guaranteed Dismount &rarr;</a>
+                <div style="font-size:11.5px;color:#8fbfb2;line-height:1.5;margin-top:10px;">Click this button and confirm and we will add it to your ticket. No need to call us.</div>
+              </td>
+            </tr></table>
+          </td></tr>
+        </table>
+      </td></tr>`;
+  }
 
   // ── "Add to calendar" buttons (Google + Apple) ──────────────────────────────
   // Rendered only when the caller passes machine-readable start/end epochs (sec).
@@ -291,18 +323,18 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       bioText = `${techName} is your installer for this job.`;
     }
     meetTechBlock = `
-      <tr><td style="padding:20px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eceef1;border-radius:16px;">
+      <tr><td style="padding:20px 26px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#231d16;border-radius:16px;">
           <tr>
             <td width="148" valign="top" style="padding:18px 0 18px 18px;">
               <img src="${esc(details.technicianPhotoUrl)}" width="130" height="130" alt="${techName}" style="display:block;width:130px;height:130px;border-radius:20px;object-fit:cover;">
             </td>
             <td valign="top" style="padding:18px 18px 18px 14px;">
               <div style="margin:0 0 7px;">
-                <span style="font-size:16.5px;font-weight:800;color:#11181c;">${techName}</span>
-                <span style="display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#a1490f;background:#ffe4cf;padding:3px 9px;border-radius:100px;vertical-align:middle;">Lead installer</span>
+                <span style="font-size:16.5px;font-weight:800;color:#ffffff;">${techName}</span>
+                <span style="display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${accent};background:rgba(${rgb},0.16);padding:3px 9px;border-radius:100px;vertical-align:middle;">Lead installer</span>
               </div>
-              <div style="font-size:14px;color:#4b5563;line-height:1.6;">${bioText}</div>
+              <div style="font-size:14px;color:#a89f8f;line-height:1.6;">${bioText}</div>
             </td>
           </tr>
         </table>
@@ -381,34 +413,52 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
-<body style="margin:0;padding:0;background:#f4f5f7;-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:#f4f1ea;-webkit-text-size-adjust:100%;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">You're booked with ${esc(b.name)}${details.dateLong ? ' - ' + esc(details.dateLong) : ''}.</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f1ea;padding:24px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 2px 10px rgba(16,24,40,.06);">
-        <tr><td style="background:${accent};padding:22px 28px;">
-          <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</div>
-        </td></tr>
-        <tr><td style="padding:30px 28px 6px;">
-          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 7px;">You're booked! &#9989;</div>
-          <div style="font-size:15px;color:#4b5563;line-height:1.55;">Hi ${esc(firstName || 'there')}, thanks for booking with ${esc(b.name)}. Here are your appointment details. We'll see you soon.</div>
-        </td></tr>
-        <tr><td style="padding:18px 28px 2px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #eceef1;border-radius:10px;">
-            ${detailRows}
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+
+        <!-- Hero ticket card: confirmation, details, quote, upgrade, tech -->
+        <tr><td style="background:#181410;border-radius:22px;overflow:hidden;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:28px 26px 0;">
+              <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:${accent};">Booking confirmed</div>
+              <div style="font-size:24px;font-weight:900;color:#fff;margin-top:6px;letter-spacing:-.01em;line-height:1.25;">${esc(firstName || 'there')}, you're on the schedule.</div>
+            </td></tr>
+            <tr><td style="padding:20px 26px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#231d16;border-radius:16px;">
+                <tr><td style="padding:16px 20px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    ${detailRows}
+                  </table>
+                </td></tr>
+              </table>
+            </td></tr>
+            ${priceBlock}
+            ${gdsUpsellBlock}
+            ${twoTechNote}
+            ${meetTechBlock}
+            <tr><td style="height:26px;"></td></tr>
           </table>
         </td></tr>
-        ${priceBlock}
-        ${twoTechNote}
-        ${calendarBlock}
-        ${meetTechBlock}
-        ${expectBlock}
-        <tr><td style="padding:24px 28px 30px;">
-          <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
-            Need to make a change or have a question? Just <strong>reply to this email</strong> and our team will help.<br>
-            <span style="color:#9ca3af;">${esc(b.website)}</span>
-          </div>
+
+        <tr><td style="height:16px;"></td></tr>
+
+        <!-- Everything-else card: calendar, what to expect, footer -->
+        <tr><td style="background:#ffffff;border-radius:22px;overflow:hidden;box-shadow:0 2px 10px rgba(16,24,40,.06);">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${calendarBlock}
+            ${expectBlock}
+            <tr><td style="padding:24px 28px 30px;">
+              <div style="border-top:1px solid #eef0f2;padding-top:18px;font-size:13px;color:#6b7280;line-height:1.65;">
+                Need to make a change or have a question? Just <strong>reply to this email</strong> and our team will help.<br>
+                <span style="color:#9ca3af;">${esc(b.website)}</span>
+              </div>
+            </td></tr>
+          </table>
         </td></tr>
+
       </table>
     </td></tr>
   </table>

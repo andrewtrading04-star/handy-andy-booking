@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Add Guaranteed Dismount Service</title>
+<link rel="icon" type="image/svg+xml" href="/favicon-tech.svg">
+<link rel="apple-touch-icon" href="/favicon-tech.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#155e4f; --accent-soft:#e9f5f1;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-h1:clamp(24px,5.5vw,30px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px;letter-spacing:-.01em;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:30px 26px;width:100%;max-width:460px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;position:relative;margin:12px 0;}
+  h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:8px;}
+  .hl{color:var(--accent);}
+  .sub{color:var(--mute);font-size:15px;margin-bottom:8px;line-height:1.55;}
+  .card{margin:20px 0 6px;background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:18px;text-align:left;}
+  .card .row{display:flex;justify-content:space-between;gap:12px;font-size:14.5px;color:var(--ink-2);padding:5px 0;}
+  .card .row b{color:var(--ink);font-weight:700;}
+  .card .total{font-size:17px;font-weight:800;color:var(--ink);border-top:1px solid var(--line);margin-top:8px;padding-top:10px;}
+  .card .total b{color:var(--accent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:16px 24px;font-size:16.5px;font-weight:800;cursor:pointer;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;margin-top:18px;letter-spacing:.2px;transition:filter .15s;}
+  .btn:hover{filter:brightness(1.08);}
+  .btn:disabled{opacity:.6;cursor:default;}
+  .fine{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:12px;text-align:center;}
+  .state{display:none;}
+  .state.show{display:block;}
+  .check{width:64px;height:64px;border-radius:50%;background:color-mix(in srgb,var(--accent) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:var(--accent);}
+  .state h2{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:8px;}
+  .state p{color:var(--mute);font-size:14px;line-height:1.55;}
+  .error{display:none;color:#dc2626;font-size:14px;margin-top:18px;font-weight:600;}
+  .error.show{display:block;}
+  #loading{color:var(--mute);font-size:15px;padding:24px 0;}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div id="loading">Loading…</div>
+
+  <div class="state" id="confirmSection">
+    <h1>Add <span class="hl">Guaranteed Dismount</span> Service?</h1>
+    <p class="sub" id="confirmSub">Whenever you move or need your TV taken down, we'll come remove it for free.</p>
+    <div class="card">
+      <div class="row"><span>Service</span><b id="svcLabel">&mdash;</b></div>
+      <div class="row"><span>Current total</span><b id="curTotal">&mdash;</b></div>
+      <div class="row"><span>Guaranteed Dismount</span><b id="gdsPrice">&mdash;</b></div>
+      <div class="row total"><span>New total</span><b id="newTotal">&mdash;</b></div>
+    </div>
+    <button class="btn" id="confirmBtn">&#10003; Confirm &amp; add to my ticket</button>
+    <div class="fine">This adds directly to your existing appointment &mdash; no new booking, no need to call.</div>
+  </div>
+
+  <div class="state" id="doneSection">
+    <div class="check">&#10003;</div>
+    <h2>Added to your ticket!</h2>
+    <p id="doneMsg">Guaranteed Dismount Service is on your job now. We'll see you at your scheduled time.</p>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+</div>
+
+<script>
+const API = '/api/admin';
+const token = new URLSearchParams(location.search).get('token');
+const $ = (id) => document.getElementById(id);
+function money(n){ return '$' + (Math.round((Number(n)||0)*100)/100).toFixed(2); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function show(id){ ['confirmSection','doneSection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
+function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
+
+let INFO = null;
+let saving = false;
+
+async function load(){
+  if (!token){ showError('This link is missing its token. Please use the button in your confirmation email.'); return; }
+  try{
+    const res = await fetch(`${API}?action=gds_upsell_info&token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+    if (!res.ok){ showError(data.error || 'We could not load this.'); return; }
+    INFO = data;
+    $('loading').style.display='none';
+
+    if (data.already_has_gds){
+      $('doneMsg').textContent = "Guaranteed Dismount Service is already on your ticket — you're all set.";
+      show('doneSection');
+      return;
+    }
+
+    $('svcLabel').textContent = data.service_label || 'Service';
+    $('curTotal').textContent = money(data.current_total);
+    $('gdsPrice').textContent = '+' + money(data.gds_price);
+    $('newTotal').textContent = money(Number(data.current_total) + Number(data.gds_price));
+    show('confirmSection');
+  }catch(e){ showError('Network error. Please try again.'); }
+}
+
+$('confirmBtn').addEventListener('click', async ()=>{
+  if (saving) return;
+  saving = true;
+  const btn = $('confirmBtn'); const prev = btn.innerHTML;
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try{
+    const res = await fetch(`${API}?action=gds_upsell_add`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (!res.ok){
+      btn.disabled=false; btn.innerHTML=prev; saving=false;
+      showError(data.error || 'We could not add this to your ticket. Please try again.');
+      return;
+    }
+    $('doneMsg').textContent = data.already
+      ? "Guaranteed Dismount Service is already on your ticket — you're all set."
+      : `Guaranteed Dismount Service is on your job now. Your new total is ${money(data.new_total)}.`;
+    show('doneSection');
+  }catch(e){
+    btn.disabled=false; btn.innerHTML=prev; saving=false;
+    showError('Network error. Please try again.');
+  }
+});
+
+load();
+</script>
+</body>
+</html>

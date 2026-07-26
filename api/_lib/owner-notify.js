@@ -7,6 +7,7 @@ import { emailConfig, sendEmail } from './email.js';
 import { emailNotificationsOn } from './notify.js';
 import { sendSMS } from './sms.js';
 import { computeJobPay } from './payroll.js';
+import { signToken } from './auth.js';
 
 // ── Big-bracket-job SMS alert ────────────────────────────────────────────────
 // The owner wants a text whenever a single booked ticket carries 4+ brackets
@@ -70,6 +71,18 @@ export async function maybeSendFirstMultiTvDiscountAlert(db, { discountAmt, cust
 const GDS_ALERT_RE = /guarante\w*\s+dismount|dismount\s+service|\btv removal\b/i;
 export function linesHaveGds(lines) {
   return (Array.isArray(lines) ? lines : []).some(l => GDS_ALERT_RE.test(String((l && (l.name || l.label)) || '')));
+}
+
+// ── "Want to upgrade?" GDS upsell link for the confirmation email ──────────
+// Returns null when the job already has GDS, isn't eligible (not a TV
+// mounting job), or there's no base URL to build an absolute link from —
+// bookingConfirmationEmail simply omits the block in any of those cases.
+// The 90-day token mirrors the estimate-approve link's TTL/shape.
+export function gdsUpsellUrlFor({ lines, bookingId, baseUrl, eligible = true }) {
+  if (!eligible || !bookingId || !baseUrl) return null;
+  if (linesHaveGds(lines)) return null;
+  const token = signToken({ kind: 'add_gds', booking_id: bookingId }, 7776000);
+  return `${String(baseUrl).replace(/\/$/, '')}/add-gds.html?token=${token}`;
 }
 export function estimateJobProfit({ price, lines, techName }) {
   try {
