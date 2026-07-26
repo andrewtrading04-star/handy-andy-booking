@@ -6453,12 +6453,13 @@ const PHP_PER_USD = 56.5;
 function phpToUsd(php) { return Math.round((Number(php) || 0) / PHP_PER_USD * 100) / 100; }
 
 // Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
-// computed pay — but the owner runs payroll for them too. Always shows a row
-// for each: a hand-entered number wins if one was saved for this week;
-// otherwise a SUGGESTED total from her actual "My Availability" schedule
-// (work days × daily rate, in HER OWN currency) — clearly marked as a
-// suggestion, not silently treated as final, so the owner can always
-// override it.
+// per-job pay — but they ARE real payroll: paid their daily rate for every
+// day their "My Availability" schedule (weekly pattern + exceptions) says
+// they worked that week, $0 for any day they didn't. That's computed here
+// automatically and IS the real payroll figure — no manual step required.
+// A hand-entered office_pay_weekly value, if one exists, overrides the
+// computed number for a one-off adjustment (a partial day, a correction);
+// absent that, the automatic total is what's owed.
 async function officePayRows(db, weekStart) {
   const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
   const mk = async (name, slug, saved) => {
@@ -6480,23 +6481,25 @@ async function officePayRows(db, weekStart) {
 
 async function officePaySave(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-  const { week_start, field, amount } = req.body || {};
+  const { week_start, field, amount, clear } = req.body || {};
   const validFields = ['heather_pay', 'joey_pay'];
   if (!week_start || !/^\d{4}-\d{2}-\d{2}$/.test(week_start)) return res.status(400).json({ error: 'week_start (YYYY-MM-DD) required' });
   if (!validFields.includes(field)) return res.status(400).json({ error: `field must be one of ${validFields.join(', ')}` });
-  if (amount == null || isNaN(Number(amount))) return res.status(400).json({ error: 'amount required' });
+  if (!clear && (amount == null || isNaN(Number(amount)))) return res.status(400).json({ error: 'amount required' });
 
   const { data: existing } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', week_start).maybeSingle();
   const row = {
     week_start,
     heather_pay: existing?.heather_pay ?? null,
     joey_pay: existing?.joey_pay ?? null,
-    [field]: Number(amount),
+    // `clear` removes a manual override so payroll goes back to the
+    // automatic (days worked × daily rate) figure for this week.
+    [field]: clear ? null : Number(amount),
     updated_at: new Date().toISOString(),
   };
   const { error } = await db.from('office_pay_weekly').upsert(row, { onConflict: 'week_start' });
   if (error) throw error;
-  return res.status(200).json({ ok: true, week_start, field, amount: Number(amount) });
+  return res.status(200).json({ ok: true, week_start, field, amount: clear ? null : Number(amount) });
 }
 
 async function payroll(req, res, db, auth) {
