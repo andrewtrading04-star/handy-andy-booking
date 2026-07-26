@@ -214,6 +214,8 @@ export default async function handler(req, res) {
     if (action === 'estimate_slots') return await estimateSlots(req, res);
     if (action === 'gds_upsell_info') return await gdsUpsellInfo(req, res, body);
     if (action === 'gds_upsell_add') return await gdsUpsellAdd(req, res, body);
+    if (action === 'review_email_preview') return await reviewEmailPreview(req, res);
+    if (action === 'send_test_review_email') return await sendTestReviewEmail(req, res, body);
     if (action === 'session_status') return await sessionStatus(req, res);
 
     // Everything below requires a valid admin token.
@@ -5782,6 +5784,41 @@ async function gdsUpsellAdd(req, res, body) {
   if (updErr) return res.status(500).json({ error: 'Added the service, but could not update the ticket total. We will fix this shortly.' });
 
   return res.status(200).json({ ok: true, already: false, new_total: newTotal });
+}
+
+// ── Review-email tester (public/review-email-tester.html) ─────────────────
+// No admin auth — this only ever renders sample data or sends to a single
+// hardcoded inbox, so there's nothing here worth gating behind a login.
+// The preview action returns the REAL rendered output of reviewEmail() (not
+// a hand-copied mockup), so what's shown is byte-for-byte what a customer
+// would receive.
+const REVIEW_TESTER_SAMPLE = {
+  firstName: 'Marcus',
+  technicianName: 'Kregg Daniels',
+  clickUrl: '#',
+};
+
+async function reviewEmailPreview(req, res) {
+  const slug = (req.query.business || 'handy-andy').toString();
+  const brand = brandFor(slug === 'doms' ? 'doms' : 'handy-andy');
+  const { subject, html } = reviewEmail(REVIEW_TESTER_SAMPLE, brand);
+  return res.status(200).json({ subject, html });
+}
+
+// Fixed recipient — deliberately ignores anything the client sends, so this
+// endpoint can never be used to relay mail to an arbitrary address.
+const TEST_EMAIL_RECIPIENT = 'andrewtrading04@gmail.com';
+
+async function sendTestReviewEmail(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const slug = ((body && body.business) || 'handy-andy').toString();
+  const bizSlug = slug === 'doms' ? 'doms' : 'handy-andy';
+  const brand = brandFor(bizSlug);
+  const { subject, html } = reviewEmail(REVIEW_TESTER_SAMPLE, brand);
+  const { from } = emailConfig(bizSlug);
+  const result = await sendEmail({ slug: bizSlug, to: TEST_EMAIL_RECIPIENT, subject: `[TEST] ${subject}`, html, replyTo: from });
+  if (!result.sent) return res.status(500).json({ error: result.error || result.skipped || 'Email did not send.' });
+  return res.status(200).json({ ok: true, to: TEST_EMAIL_RECIPIENT });
 }
 
 async function estimateApproveInfo(req, res, body) {

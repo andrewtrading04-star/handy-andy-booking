@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Review email tester</title>
+<link rel="icon" type="image/svg+xml" href="/favicon-tech.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#f5f6f8;--panel:#ffffff;--line:#e7e9ee;--ink:#222a35;--mute:#7a8694;--accent:#1a73e8;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);min-height:100vh;padding:28px 16px;}
+  .wrap{max-width:640px;margin:0 auto;}
+  h1{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-bottom:6px;}
+  .sub{color:var(--mute);font-size:14.5px;margin-bottom:22px;line-height:1.5;}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
+  .seg{display:flex;background:#eceef1;border-radius:10px;padding:3px;}
+  .seg button{border:none;background:transparent;padding:9px 16px;border-radius:8px;font-family:inherit;font-size:13.5px;font-weight:700;color:var(--mute);cursor:pointer;}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(16,24,40,.12);}
+  .frame-wrap{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(16,24,40,.06);}
+  iframe{width:100%;height:640px;border:none;display:block;background:#eef1f5;}
+  .actions{display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap;}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:13px 22px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn:hover{filter:brightness(1.08);}
+  .btn:disabled{opacity:.6;cursor:default;}
+  .status{font-size:13.5px;font-weight:600;}
+  .status.ok{color:#1a8b4c;}
+  .status.err{color:#dc2626;}
+  .note{font-size:12.5px;color:var(--mute);margin-top:10px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Review email tester</h1>
+  <div class="sub">This renders the real, live review-request email template — exactly what a customer sees when their job is marked complete. Switch brands below, then send yourself a live test.</div>
+
+  <div class="bar">
+    <div class="seg">
+      <button class="on" data-biz="handy-andy">Handy Andy</button>
+      <button data-biz="doms">Dom's</button>
+    </div>
+  </div>
+
+  <div class="frame-wrap">
+    <iframe id="preview" title="Review email preview"></iframe>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="sendBtn">Send test email to andrewtrading04@gmail.com</button>
+    <span class="status" id="statusEl"></span>
+  </div>
+  <div class="note">Sample data (Marcus / Kregg Daniels) — the buttons and stars in the preview aren't wired to a real booking, so clicking them inside the iframe won't do anything.</div>
+</div>
+
+<script>
+const API = '/api/admin';
+let biz = 'handy-andy';
+
+async function loadPreview(){
+  const res = await fetch(`${API}?action=review_email_preview&business=${biz}`);
+  const data = await res.json();
+  const iframe = document.getElementById('preview');
+  iframe.srcdoc = data.html || '<p style="padding:20px;font-family:sans-serif;">Could not load preview.</p>';
+}
+
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click', ()=>{
+  document.querySelectorAll('.seg button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  biz = b.dataset.biz;
+  loadPreview();
+}));
+
+document.getElementById('sendBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('sendBtn');
+  const status = document.getElementById('statusEl');
+  btn.disabled = true; btn.textContent = 'Sending…'; status.textContent=''; status.className='status';
+  try{
+    const res = await fetch(`${API}?action=send_test_review_email`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ business: biz }),
+    });
+    const data = await res.json();
+    if (!res.ok){ status.textContent = data.error || 'Could not send.'; status.className='status err'; }
+    else { status.textContent = `Sent to ${data.to} ✓`; status.className='status ok'; }
+  }catch(e){ status.textContent = 'Network error.'; status.className='status err'; }
+  btn.disabled = false; btn.textContent = 'Send test email to andrewtrading04@gmail.com';
+});
+
+loadPreview();
+</script>
+</body>
+</html>

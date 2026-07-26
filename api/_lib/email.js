@@ -626,9 +626,15 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   // Accept the legacy `reviewUrl` param too so an out-of-date caller can never
   // produce an email whose button goes nowhere.
   const clickUrl = details.clickUrl || details.reviewUrl || '#';
+  const techFirst = (details.technicianName || '').trim().split(/\s+/)[0] || '';
 
   const subject = `How did we do?`;
 
+  // Deliberately familiar rather than official-looking: a clean white card,
+  // an outlined-then-gold 5-star row, and a blue rounded "pill" button in the
+  // same family of blue review platforms use — but no borrowed logos or marks
+  // of any kind, so it reads as "this looks like the reviews I already know"
+  // without ever claiming to BE Google (or anyone else's) UI.
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
@@ -636,52 +642,38 @@ export function reviewEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">How did we do? ${esc(b.name)} would love to hear from you.</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;font-family:'Segoe UI',Roboto,-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;box-shadow:0 2px 10px rgba(16,24,40,.08);border:1px solid #e1e4e8;">
 
-        <!-- Header -->
-        <tr><td style="background:${accent};padding:18px 28px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</td>
-            <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:rgba(255,255,255,.82);">Feedback Request</td>
+        <tr><td style="padding:30px 32px 0;text-align:center;">
+          <div style="font-size:14px;color:#5f6368;font-weight:500;">${esc(b.name)}</div>
+        </td></tr>
+
+        <tr><td style="padding:8px 32px 0;text-align:center;">
+          <div style="font-size:22px;font-weight:700;color:#202124;line-height:1.35;">How was your service${firstName ? ', ' + esc(firstName) : ''}?</div>
+          <div style="font-size:14px;color:#5f6368;line-height:1.6;margin-top:8px;max-width:400px;margin-left:auto;margin-right:auto;">${techFirst ? `${esc(techFirst)} just finished your job.` : 'Your job is complete.'} Tap a star to leave a quick review.</div>
+        </td></tr>
+
+        <!-- Star row: outlined gray, gold on the happy-path end -->
+        <tr><td style="padding:26px 20px 6px;text-align:center;">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#dadce0;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#fbbc05;display:inline-block;">&#9733;</a></td>
+            <td style="padding:0 4px;"><a href="${esc(clickUrl)}" style="text-decoration:none;font-size:36px;line-height:1;color:#fbbc05;display:inline-block;">&#9733;</a></td>
           </tr></table>
         </td></tr>
 
-        <!-- Main content -->
-        <tr><td style="background:${tintBg};padding:34px 28px 30px;text-align:center;">
-          <div style="font-size:26px;font-weight:800;color:#11181c;margin:0 0 12px;">How was your experience?</div>
-          <div style="font-size:15px;color:#5b6470;line-height:1.6;max-width:420px;margin:0 auto;">Hi ${esc(firstName || 'there')}, your job is complete! We'd love to hear about your experience. Your feedback helps us serve you better.</div>
+        <tr><td style="padding:20px 32px 4px;text-align:center;">
+          <a href="${esc(clickUrl)}" style="display:inline-block;background:#1a73e8;color:#ffffff;text-decoration:none;font-size:14.5px;font-weight:500;padding:12px 28px;border-radius:24px;letter-spacing:.15px;">Share your feedback &rarr;</a>
         </td></tr>
 
-        <!-- Call-to-action button -->
-        <tr><td style="padding:28px 28px 8px;text-align:center;">
-          <a href="${esc(clickUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 32px;border-radius:10px;letter-spacing:.3px;">Share Your Feedback</a>
+        <tr><td style="padding:10px 32px 30px;text-align:center;">
+          <div style="font-size:12px;color:#80868b;">Takes about 10 seconds</div>
         </td></tr>
 
-        <!-- Info -->
-        <tr><td style="padding:16px 28px 28px;text-align:center;">
-          <div style="font-size:13px;color:#6b7280;line-height:1.6;">Click the button above to rate your experience and leave feedback. Your response is reviewed daily and helps us improve.</div>
-        </td></tr>
-
-        <!-- Why we ask -->
-        <tr><td style="padding:0 28px 28px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;">
-            <tr><td style="padding:16px;">
-              <div style="font-size:13px;font-weight:700;color:#11181c;margin:0 0 8px;">Why your feedback matters</div>
-              <ul style="margin:0;padding-left:18px;font-size:13px;color:#5b6470;line-height:1.6;">
-                <li style="margin:4px 0;">Your honest experience helps us identify what we're doing well</li>
-                <li style="margin:4px 0;">We use your suggestions to improve our service quality</li>
-                <li style="margin:4px 0;">Your review is seen and acted on by our team daily</li>
-              </ul>
-            </td></tr>
-          </table>
-        </td></tr>
-
-        <!-- Footer -->
-        <tr><td style="padding:24px 28px 32px;">
-          <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;">
-            <div style="font-size:13px;color:#6b7280;line-height:1.6;">Thank you for choosing ${esc(b.name)}!</div>
-            <div style="font-size:12px;color:#9ca3af;margin-top:10px;">${esc(b.website)}</div>
-          </div>
+        <tr><td style="padding:0 32px 26px;">
+          <div style="border-top:1px solid #e8eaed;padding-top:18px;text-align:center;font-size:12px;color:#80868b;">Thanks for choosing ${esc(b.name)}.<br>${esc(b.website)}</div>
         </td></tr>
 
       </table>
