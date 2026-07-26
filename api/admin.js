@@ -6437,20 +6437,29 @@ async function secretaryWorkDaysInWeek(db, bizSlug, weekStart) {
   }
   return workDays;
 }
-const SECRETARY_DAILY_RATE = 95;
+// Heather is paid in US dollars; Joey is paid in Mexican pesos. Each
+// secretary's daily rate carries its own currency — these are NEVER added
+// together, and never folded into the technicians' USD payroll total (see
+// the currency-aware sum in payroll()/payrollCombined() below).
+const SECRETARY_RATE = {
+  'handy-andy': { daily: 95, currency: 'USD' },
+  'doms': { daily: 2083, currency: 'MXN' },
+};
 
 // Heather (Handy Andy) / Joey (Dom's) aren't technicians — no jobs, no
 // computed pay — but the owner runs payroll for them too. Always shows a row
 // for each: a hand-entered number wins if one was saved for this week;
 // otherwise a SUGGESTED total from her actual "My Availability" schedule
-// (work days × $95/day) — clearly marked as a suggestion, not silently
-// treated as final, so the owner can always override it.
+// (work days × daily rate, in HER OWN currency) — clearly marked as a
+// suggestion, not silently treated as final, so the owner can always
+// override it.
 async function officePayRows(db, weekStart) {
   const { data: row } = await db.from('office_pay_weekly').select('heather_pay, joey_pay').eq('week_start', weekStart).maybeSingle();
   const mk = async (name, slug, saved) => {
-    if (saved != null) return { name, jobs: [], deferred: [], total: Number(saved), is_office: true, is_suggested: false };
+    const currency = SECRETARY_RATE[slug].currency;
+    if (saved != null) return { name, jobs: [], deferred: [], total: Number(saved), is_office: true, is_suggested: false, currency };
     const workDays = await secretaryWorkDaysInWeek(db, slug, weekStart);
-    return { name, jobs: [], deferred: [], total: workDays * SECRETARY_DAILY_RATE, is_office: true, is_suggested: true, work_days: workDays };
+    return { name, jobs: [], deferred: [], total: workDays * SECRETARY_RATE[slug].daily, is_office: true, is_suggested: true, work_days: workDays, currency };
   };
   return Promise.all([
     mk('Heather', 'handy-andy', row?.heather_pay),
@@ -6510,7 +6519,10 @@ async function payroll(req, res, db, auth) {
     week_end: weekEnd,
     pay_date: payDate,
     techs: allRows,
-    total: allRows.reduce((sum, t) => sum + t.total, 0),
+    // USD only — Joey's peso row is never added into the technicians' dollar
+    // total (see currency tag on each row; the client keeps his figure
+    // displayed separately instead of folding mismatched currencies together).
+    total: allRows.filter(t => (t.currency || 'USD') === 'USD').reduce((sum, t) => sum + t.total, 0),
     actual_profit: await actualProfitFor(db, payDate),
   });
 }
@@ -6555,7 +6567,7 @@ async function payrollCombined(req, res, db, auth) {
     week_end: weekEnd,
     pay_date: payDate,
     techs: data,
-    total: data.reduce((sum, t) => sum + t.total, 0),
+    total: data.filter(t => (t.currency || 'USD') === 'USD').reduce((sum, t) => sum + t.total, 0),
     actual_profit: await actualProfitFor(db, payDate),
     combined: true,
   });
@@ -6627,7 +6639,10 @@ async function secretaryAvailability(req, res, db, auth) {
   if (!biz) return res.status(404).json({ error: 'Business not found' });
 
   const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
-  return res.status(200).json({ business_slug: slug, name: displayNameFor(slug), pattern, exceptions, day_names: DOW_NAMES });
+  return res.status(200).json({
+    business_slug: slug, name: displayNameFor(slug), pattern, exceptions, day_names: DOW_NAMES,
+    daily_rate: SECRETARY_RATE[slug].daily, currency: SECRETARY_RATE[slug].currency,
+  });
 }
 
 // POST — set the recurring weekly pattern for ONE day. Secretary-only, and
@@ -6681,7 +6696,10 @@ async function secretariesList(req, res, db, auth) {
 
   const secretaries = await Promise.all((bizRows || []).map(async biz => {
     const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
-    return { business_slug: biz.slug, name: displayNameFor(biz.slug), pattern, exceptions };
+    return {
+      business_slug: biz.slug, name: displayNameFor(biz.slug), pattern, exceptions,
+      daily_rate: SECRETARY_RATE[biz.slug].daily, currency: SECRETARY_RATE[biz.slug].currency,
+    };
   }));
   return res.status(200).json({ secretaries, day_names: DOW_NAMES });
 }
