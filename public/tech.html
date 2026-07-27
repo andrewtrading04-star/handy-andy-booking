@@ -196,6 +196,22 @@
   .slotpill.main{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotpill-x{background:transparent;border:none;color:var(--mute);font-size:17px;line-height:1;padding:0 2px;font-weight:700;}
   .slotpill-x:hover{color:var(--red);}
+
+  /* Help & Training */
+  .help-search{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:13px 14px;font-size:15px;margin-bottom:16px;}
+  .help-search:focus{outline:none;border-color:var(--orange);}
+  .help-cat{margin-bottom:22px;}
+  .help-cat.hidden{display:none;}
+  .help-cat-h{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--orange);margin:0 2px 8px;}
+  .help-item{background:var(--navy-2);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;overflow:hidden;}
+  .help-item.hidden{display:none;}
+  .help-item>summary{cursor:pointer;list-style:none;padding:13px 14px;font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.4;}
+  .help-item>summary::-webkit-details-marker{display:none;}
+  .help-item>summary::before{content:"\25B8";color:var(--orange);font-size:13px;margin-right:9px;display:inline-block;transition:transform .15s;}
+  .help-item[open]>summary::before{transform:rotate(90deg);}
+  .help-item .help-body{padding:0 14px 15px;margin-top:-2px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;line-height:1.6;color:var(--mute);}
+  .help-body b,.help-body strong{color:var(--ink);}
+  .help-body ul{padding-left:20px;margin:6px 0;}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -225,6 +241,7 @@
         <button id="reviewsBtn">⭐ Reviews</button>
         <button id="payrollBtn">💵 Payroll</button>
         <button id="inventoryBtn">📦 Inventory</button>
+        <button id="helpBtn">❓ Help</button>
         <button id="logout">Log out</button>
       </div>
     </div>
@@ -259,6 +276,9 @@
 
   <!-- Bracket inventory (read-only) -->
   <div id="inventoryView" class="hidden"></div>
+
+  <!-- Help & Training -->
+  <div id="helpView" class="hidden"></div>
 
 </div>
 
@@ -437,6 +457,162 @@ function applyIconTheme(){
   });
 }
 
+// ── Help & Training content ──────────────────────────────────────────────────
+// EDIT THIS BLOCK to add/change topics — nothing else needs to change. Same
+// content for every technician (Handy Andy and Dom's); the Help tab itself
+// re-brands automatically the same way the rest of the app does (CSS vars +
+// isDoms()), so never fork this data by company.
+// Shape per category: { id, label, icon, entries:[ {id, q, tags, body, extra?} ] }
+//   id    - stable slug, never shown, just needs to stay unique within its array
+//   q     - the tappable question/topic (shown collapsed)
+//   tags  - extra search-only words/synonyms a tech might type instead of q
+//   body  - the answer, plain HTML (same convention as photoGuideHtml() below)
+//   extra - optional function returning extra HTML, for the rare entry that
+//           needs to render something dynamic (e.g. reusing photoGuideHtml())
+const HELP_CONTENT = [
+  { id:'jobs', label:"Today's Jobs & Calendar", icon:'🗂️', entries:[
+    { id:'jobs-overview', q:'What am I looking at when I open the app?',
+      tags:['home','week strip','job list'],
+      body:`The row of days at the top is your week. Tap any day to see that day's jobs below it. The day you're on is highlighted.` },
+    { id:'jobs-week', q:'How do I look at a different day or a different week?',
+      tags:['calendar','next week','today'],
+      body:`Tap any day in the strip to jump to it. Use the ‹ › arrows to move a whole week at a time, and tap <b>Today</b> to snap straight back to now.` },
+    { id:'jobs-badges', q:'What do the colored badges on a job mean?',
+      tags:['badge','color','status','assigned','confirmed','completed'],
+      body:`<b>Blue</b> = assigned to you. <b>Amber</b> = confirmed / pending. <b>Orange</b> = on the way, arrived, or in progress. <b>Green</b> = completed. The badge always matches the button you'd tap next on that job.` },
+    { id:'jobs-xco', q:'A job has a gold border and says it’s from the other company. What is that?',
+      tags:['cross company','xco','doms','handy andy','partner'],
+      body:`That's a cross-company job. Handy Andy and Dom's occasionally borrow each other's technicians when the home company is fully booked. It works exactly like any other job, just booked by the other business.` },
+    { id:'jobs-critical', q:'What’s the red pulsing alert at the top of my job list?',
+      tags:['critical','missing address','alert','red'],
+      body:`Something important is missing on a job, most often an address. Don't head out until it's fixed. Tap the alert to call the office right away.` },
+    { id:'jobs-overdue', q:'What’s the bar stuck to the bottom of my screen?',
+      tags:['overdue','stuck','nag bar'],
+      body:`A job is still marked "On the Way" or "In Progress" past its scheduled end time. Tap the bar to jump straight to that job and update its real status.` },
+    { id:'jobs-notice', q:'Why do I sometimes see an amber notice banner on my job list?',
+      tags:['notice','banner','coverage'],
+      body:`That's a one-off heads-up from the office for something specific to you that week, for example a coverage note. It clears on its own once it no longer applies.` },
+  ]},
+  { id:'detail', label:'Job Detail & Status Updates', icon:'🧰', entries:[
+    { id:'detail-flow', q:'What order do I update a job’s status in?',
+      tags:['status','on my way','arrived','in progress','completed','flow'],
+      body:`<b>On My Way</b> &rarr; <b>Arrived</b> &rarr; <b>In Progress</b> &rarr; <b>Completed</b>. Tap whichever button matches what's actually happening right now. The customer gets updates as you go, so keep it current rather than batching it all at the end.` },
+    { id:'detail-eta', q:'Why does it ask me for an ETA when I tap On My Way?',
+      tags:['eta','30 minutes','45 minutes','60 minutes','on the way'],
+      body:`Whatever you pick (30 / 45 / 60 minutes) gets texted to the customer automatically. Give your honest best guess. If you're going to run later than that, a quick call to the customer goes a long way.` },
+    { id:'detail-bracket', q:'A popup reminded me about a bracket box before I could go On My Way. What was that?',
+      tags:['bracket box','discretion','popup'],
+      body:`A reminder for jobs using a company-supplied bracket: leave the bracket box inside your vehicle. The customer shouldn't see the box the bracket came in.` },
+    { id:'detail-notes', q:'How do I leave a note on a job?',
+      tags:['notes','internal note'],
+      body:`Every job detail screen has a Notes box. Use it for anything the office or another tech should know, for example a rescheduled bracket delivery, or something worth flagging about the property or the customer.` },
+    { id:'detail-navigate', q:'How do I call or get directions to the customer?',
+      tags:['call','navigate','directions','street view'],
+      body:`The customer's phone number and address on the job detail screen are both tappable, one calls, one opens directions. There's also a Street View photo of the property so you know what you're pulling up to.` },
+    { id:'detail-payment', q:'How does the customer actually pay?',
+      tags:['payment','charge','card on file','cash'],
+      body:`Once a job is marked Completed, you'll walk the customer through a short on-screen charge flow: review the price, get a signature, then tips. Payment goes through the card on file (or in person if that's how it was set up), you don't need to collect or carry cash for the job itself.` },
+    { id:'detail-tip', q:'Do I keep the tip?',
+      tags:['tip','gratuity','keep'],
+      body:`Yes. <b>100% of every tip goes to you</b>, the technician. The charge screen offers the customer preset amounts, a custom amount, or no tip, whatever they choose is added on top of the job price and paid out to you.` },
+  ]},
+  { id:'photos', label:'Taking Job Photos', icon:'📸', entries:[
+    { id:'photos-required', q:'Do I have to take photos before I can complete a job?',
+      tags:['required','minimum','2 photos'],
+      body:`Yes. Every job needs at least <b>2 photos</b> before you can mark it Completed. The Photos card shows you how many you have so far.` },
+    { id:'photos-guide', q:'What should the photos actually show?',
+      tags:['photo quality','social media','plastic','logo'],
+      body:`Sometimes these photos go on our social media, so quality matters.`, extra:()=>photoGuideHtml() },
+    { id:'photos-delete', q:'I took a bad photo, can I delete it?',
+      tags:['delete photo','retake'],
+      body:`Yes, tap the × on the thumbnail to remove it and take another.` },
+  ]},
+  { id:'availability', label:'My Availability', icon:'📅', entries:[
+    { id:'avail-weekly', q:'How do I set my normal weekly schedule?',
+      tags:['weekly schedule','recurring'],
+      body:`Open <b>My Availability</b> from the header. Tap a time slot on any day to turn it on or off, then hit <b>Save Weekly Schedule</b>. This is your default pattern, it repeats every week until you change it again.` },
+    { id:'avail-exception', q:'I need one specific day off (or want to pick up an extra slot), without changing my whole schedule. How?',
+      tags:['one time','day off','exception','date'],
+      body:`Under <b>One-time changes</b>, pick the date, adjust just that day's slots, and save. Your regular weekly schedule is untouched, this only overrides that one date. You can revert it back to normal anytime from the list of upcoming changes.` },
+    { id:'avail-bonus', q:'What’s the green "+$ bonus" tag on some slots?',
+      tags:['bonus','slot bonus','extra pay'],
+      body:`Some time slots (for example, a late-evening slot) carry an extra pay bonus if you work them. It's shown right on the slot itself so you know before you commit to it.` },
+    { id:'avail-why-matters', q:'Why does keeping this accurate matter?',
+      tags:['why','matters','get jobs'],
+      body:`You can only be offered jobs for the slots you've actually marked yourself available for. If a slot isn't lit up here, the system won't hand you a job in it, so an out-of-date schedule directly means fewer (or the wrong) jobs land on your calendar.` },
+  ]},
+  { id:'payroll', label:'Payroll', icon:'💵', entries:[
+    { id:'payroll-week', q:'What week does my payroll cover?',
+      tags:['pay week','sunday','saturday'],
+      body:`Each payroll week runs Sunday through Saturday. The Payroll tab shows the current week's earnings and your next payout date right at the top.` },
+    { id:'payroll-breakdown', q:'How do I see how a job’s pay was calculated?',
+      tags:['breakdown','how much','per job'],
+      body:`Tap into the Payroll tab and each paid job lists its own breakdown underneath it, so you can see exactly what added up to that job's total.` },
+    { id:'payroll-deferred', q:'A job I completed isn’t showing up in payroll yet. Why?',
+      tags:['awaiting payment','deferred','not paid yet'],
+      body:`If the customer's payment hasn't gone through yet, the job sits under <b>Awaiting Payment</b> instead. Once it's actually paid, it moves into that week's payroll automatically, nothing you need to do.` },
+    { id:'payroll-review-flag', q:'What does a "REVIEW" flag on a job mean in Payroll?',
+      tags:['review flag','needs review'],
+      body:`The office wants a second look at that one, usually something about the price or the job details. It doesn't mean anything is wrong with your work, just contact the office if you're not sure why it's flagged.` },
+  ]},
+  { id:'reviews', label:'Reviews', icon:'⭐', entries:[
+    { id:'reviews-source', q:'Where do my reviews come from?',
+      tags:['google reviews','customer reviews'],
+      body:`After a job is completed, the customer is invited to leave a Google review. Whatever they submit shows up here, tied to that job.` },
+    { id:'reviews-week', q:'What’s the difference between "This week" and the rest?',
+      tags:['this week','older','recent'],
+      body:`Reviews are grouped so you can quickly see what came in most recently versus everything else, all-time. Your overall star average up top always covers every review you've ever gotten.` },
+  ]},
+  { id:'inventory', label:'Bracket Inventory', icon:'📦', entries:[
+    { id:'inv-onhand', q:'Can I edit my bracket counts?',
+      tags:['edit','on hand','read only'],
+      body:`Your Flat / Tilting / Full Motion counts are read-only, the office manages them. If a count looks wrong, let the office know rather than trying to fix it here.` },
+    { id:'inv-inroute', q:'What does "In Route" mean?',
+      tags:['in route','shipment','on the way'],
+      body:`Brackets the office has sent you that haven't arrived yet. Once delivered, they get added to your on-hand count automatically.` },
+    { id:'inv-plates', q:'What are wire plates, and why can I edit that number myself?',
+      tags:['wire plate','wire concealment'],
+      body:`Wire plates are the one count you manage yourself, since they get used up on behind-the-wall wire jobs without a separate delivery to track. The count should drop by 1 each time you finish that kind of job, fix the number here if it ever looks off.` },
+  ]},
+  { id:'policy', label:'Company Policy & Expectations', icon:'📋', entries:[
+    { id:'policy-reschedule', q:'What’s the cancellation / reschedule policy?',
+      tags:['24 hour','$50','trip fee','reschedule','cancel'],
+      body:`Customers can cancel or reschedule at no charge up to 24 hours before their appointment. Inside that 24-hour window, or if we can't get access to the property at the scheduled time, a trip fee of up to $50 may apply. If a customer tries to cancel or move a job day-of, that's the policy to point to.` },
+    { id:'policy-guarantee', q:'What’s our workmanship guarantee?',
+      tags:['guarantee','warranty','30 days','failed mount'],
+      body:`If a mount we installed fails due to our workmanship within 30 days, we return and fix it at no charge. This does <b>not</b> cover customer-supplied brackets or hardware, pre-existing wall or structural issues, or damage from something changed after the install.` },
+    { id:'policy-refund', q:'A customer says they’re not happy with the work. What now?',
+      tags:['refund','complaint','not satisfied'],
+      body:`Have them contact the office within 3 days and we'll work to make it right first. Any refund is limited to labor performed, it doesn't cover brackets, materials already installed, or travel/trip fees. Don't offer a refund or a price change yourself on-site, that's an office decision.` },
+    { id:'policy-tips', q:'Just to confirm again: who keeps the tip?',
+      tags:['tip','100%'],
+      body:`You do, 100% of it. This is the same answer as the Job Detail section, it's repeated here because it's a real policy, not just an app quirk.` },
+    { id:'policy-bracket-discretion', q:'What’s our policy on the bracket box customers can see?',
+      tags:['bracket box','discretion'],
+      body:`Keep the bracket box in your vehicle. The customer should never see the actual box the bracket came in, this is a standing rule, not a one-off reminder.` },
+    { id:'policy-gds', q:'A job’s line items show "GDS". What is that?',
+      tags:['gds','guaranteed dismount'],
+      body:`GDS stands for Guaranteed Dismount Service, an add-on some customers buy so that a future dismount (if they move, or want the TV taken down) is already paid for. If you're at a job for a dismount and GDS shows on the line items, that work is prepaid, don't charge the customer again for it.` },
+    { id:'policy-professionalism', q:'What’s expected of me on-site?',
+      tags:['professionalism','communication','expectations'],
+      body:`[DRAFT, Andrew to confirm/edit] Show up on time or communicate early if you're running behind. Keep the customer updated at each step. Leave the work area as clean as you found it. Represent the company well, you're often the only person from the business a customer ever actually meets.` },
+    { id:'policy-noshow', q:'What do I do if a customer doesn’t answer or isn’t home?',
+      tags:['no show','not home','no answer'],
+      body:`[DRAFT, Andrew to confirm/edit] Try calling and texting the customer first. If you still can't reach them after a reasonable wait, contact the office before you leave, don't just mark the job and drive off.` },
+  ]},
+  { id:'contacts', label:'Getting Help', icon:'☎️', entries:[
+    { id:'contacts-office', q:'Who do I contact with a question this Help tab doesn’t answer?',
+      tags:['contact office','phone number','support'],
+      body:`[DRAFT, Andrew to add the real number/contact here] Call or text the office at [office phone number].` },
+    { id:'contacts-app-issue', q:'The app won’t load, or I can’t log in. What do I do?',
+      tags:['app broken','cant log in','login issue'],
+      body:`First try closing and reopening the app, or reloading the page. If that doesn't fix it, contact the office, most login issues just need a quick reset on their end.` },
+    { id:'contacts-emergency', q:'Something feels unsafe on a job site. What’s the policy?',
+      tags:['safety','unsafe','emergency'],
+      body:`[DRAFT, Andrew to confirm/edit] Your safety comes first, always. Leave the situation if you need to, then contact the office as soon as you're somewhere safe to let them know what happened.` },
+  ]},
+];
+
 // Login
 document.getElementById('loginForm').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -454,7 +630,7 @@ document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
   if(which!=='detailView' && detailPoll){ clearInterval(detailPoll); detailPoll=null; }
-  for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView','inventoryView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+  for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView','inventoryView','helpView']) document.getElementById(id).classList.toggle('hidden',id!==which);
 }
 
 // All day math runs in the BUSINESS timezone so the tech app's calendar lines
@@ -1367,6 +1543,7 @@ document.getElementById('availBtn').addEventListener('click',showAvailability);
 document.getElementById('payrollBtn').addEventListener('click',showPayroll);
 document.getElementById('reviewsBtn').addEventListener('click',showReviews);
 document.getElementById('inventoryBtn').addEventListener('click',showInventory);
+document.getElementById('helpBtn').addEventListener('click',showHelp);
 
 let payrollWeekStart='';            // 'YYYY-MM-DD' for Sunday of current week
 
@@ -1800,6 +1977,64 @@ function renderInventory(data){
     }catch(e){ toast(e.message||'Could not save'); }
     finally{ wpSave.disabled=false; wpSave.textContent='Save plate count'; }
   });
+}
+
+// ── Help & Training ──────────────────────────────────────────────────────────
+// Static reference content (HELP_CONTENT, defined near the top of this script)
+// — unlike every other section here, there's no api() call, so no loading/
+// error state is needed.
+// Search haystack for one entry: its question, its (invisible) search tags,
+// and its body with HTML tags stripped, all lowercased.
+function helpHaystack(e){
+  return (e.q+' '+(e.tags||[]).join(' ')+' '+String(e.body).replace(/<[^>]+>/g,' ')).toLowerCase();
+}
+function showHelp(){
+  show('helpView');
+  renderHelp();
+}
+function renderHelp(){
+  const v=document.getElementById('helpView');
+  const catsHtml = HELP_CONTENT.map(cat=>`
+    <div class="help-cat" data-cat="${esc(cat.id)}">
+      <div class="help-cat-h">${cat.icon||''} ${esc(cat.label)}</div>
+      ${cat.entries.map(e=>`
+        <details class="help-item" data-hay="${esc(helpHaystack(e))}">
+          <summary>${esc(e.q)}</summary>
+          <div class="help-body">${e.body}${typeof e.extra==='function' ? e.extra() : ''}</div>
+        </details>`).join('')}
+    </div>`).join('');
+
+  v.innerHTML=`<div class="detail help">
+    <button class="back" id="helpBack">‹ Today's jobs</button>
+    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">Help &amp; Training</div>
+      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">How the app works, plus company policy. Search or tap a topic.</div></div>
+    <input type="search" id="helpSearch" class="help-search" autocomplete="off" placeholder="Search (e.g. &quot;reschedule&quot;, &quot;tip&quot;, &quot;photo&quot;)">
+    <div id="helpEmpty" class="empty hidden">No matching topics. Try a different word, or contact the office.</div>
+    <div id="helpList">${catsHtml}</div>
+    <div style="height:40px;"></div>
+  </div>`;
+
+  document.getElementById('helpBack').addEventListener('click',showJobs);
+  let t;
+  document.getElementById('helpSearch').addEventListener('input',e=>{
+    clearTimeout(t); t=setTimeout(()=>filterHelp(e.target.value),150);
+  });
+}
+function filterHelp(raw){
+  const q=(raw||'').trim().toLowerCase();
+  const catHit={};
+  document.querySelectorAll('#helpList .help-item').forEach(it=>{
+    const hit = !q || it.dataset.hay.includes(q);
+    it.classList.toggle('hidden', !hit);
+    it.open = !!(q && hit);              // auto-expand matches while searching
+    const catId = it.closest('.help-cat').dataset.cat;
+    catHit[catId] = catHit[catId] || hit;
+  });
+  let anyVisible=false;
+  document.querySelectorAll('#helpList .help-cat').forEach(c=>{
+    const show=!!catHit[c.dataset.cat]; c.classList.toggle('hidden', !show); if(show) anyVisible=true;
+  });
+  document.getElementById('helpEmpty').classList.toggle('hidden', anyVisible || !q);
 }
 
 // Lightbox close (tap backdrop or ×)
