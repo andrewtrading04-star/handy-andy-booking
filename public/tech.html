@@ -91,12 +91,27 @@
   .overdue-bar .ob-ic{flex:none;font-size:16px;}
   .overdue-bar .ob-t{flex:1;min-width:0;line-height:1.35;}
   .overdue-bar .ob-go{flex:none;font-size:12px;opacity:.8;white-space:nowrap;}
+  /* When the bottom tab bar is showing, the overdue nag stacks just above it
+     instead of covering it — see body.has-bottombar below. */
+  body.has-bottombar .overdue-bar{bottom:64px;}
   .hdr{position:sticky;top:0;background:var(--navy-2);border-bottom:1px solid var(--line);padding:16px 18px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center;z-index:10;gap:8px;}
   .hdr .name{font-weight:800;font-size:17px;}
   .hdr .sub{font-size:12px;color:var(--mute);}
   .hdr button{background:transparent;border:1px solid var(--line);color:var(--mute);padding:7px 12px;border-radius:8px;font-size:13px;}
   .hdr button:hover{border-color:var(--ink);color:var(--ink);}
-  .hdr-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+  .hdr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+  .hdr-actions .icbtn{width:32px;height:32px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;}
+
+  /* Bottom tab bar — Jobs/Availability/Payroll/Reviews/Inventory only. Hidden
+     on Login, Job Detail, and Help (back-arrow screens, not tabs). */
+  body.has-bottombar .wrap{padding-bottom:64px;}
+  .bottombar{position:fixed;left:0;right:0;bottom:0;z-index:40;max-width:520px;margin:0 auto;
+    background:var(--navy-2);border-top:1px solid var(--line);display:flex;
+    padding:8px 4px calc(8px + env(safe-area-inset-bottom, 0px));}
+  .bottombar.hidden{display:none;}
+  .bbtab{flex:1;background:none;border:none;color:var(--mute);font-size:10.5px;font-weight:600;font-family:inherit;padding:4px 2px;}
+  .bbtab .bb-ic{font-size:18px;display:block;margin-bottom:2px;line-height:1;}
+  .bbtab.active{color:var(--orange);}
 
   /* Week calendar strip */
   .weekbar{background:var(--navy-2);border-bottom:1px solid var(--line);padding:10px 8px;}
@@ -154,6 +169,10 @@
   body.doms .b-on_the_way, body.doms .b-arrived, body.doms .b-in_progress{background:rgba(0,71,171,.16);}
   .notes{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:10px;padding:12px;color:var(--amber);font-size:15px;line-height:1.5;}
   .statusbar{position:sticky;bottom:0;background:var(--navy);border-top:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;}
+  /* Availability's "Save Weekly Schedule" bar is the only .statusbar user that
+     also lives on a bottom-tab-bar screen — push it up so the fixed tab bar
+     never covers it. */
+  body.has-bottombar .statusbar{bottom:64px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
 
   /* Targeted notice banner (e.g. coverage notes for specific techs) */
@@ -237,12 +256,8 @@
     <div class="hdr">
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
       <div class="hdr-actions">
-        <button id="availBtn">My Availability</button>
-        <button id="reviewsBtn">⭐ Reviews</button>
-        <button id="payrollBtn">💵 Payroll</button>
-        <button id="inventoryBtn">📦 Inventory</button>
-        <button id="helpBtn">❓ Help</button>
-        <button id="logout">Log out</button>
+        <button id="helpBtn" class="icbtn" title="Help">❓</button>
+        <button id="logout" class="icbtn" title="Log out">⏻</button>
       </div>
     </div>
     <div id="critAlert"></div>
@@ -286,6 +301,20 @@
      time. Lives outside the view-switcher (show()) so it stays pinned across
      every screen, not just the jobs list, until the job is actually completed. -->
 <div id="overdueBar" class="overdue-bar hidden"></div>
+
+<!-- Bottom tab bar: the 5 daily sections (Jobs/Availability/Payroll/Reviews/
+     Inventory). Lives outside the view-switcher, same as #overdueBar, so it's
+     bound once and never torn down/rebuilt on a view swap — show() just calls
+     setBottomTab() to update which tab is active and whether the bar shows at
+     all (hidden on Login, Job Detail, and Help, which use a back arrow instead
+     of a tab concept). -->
+<div id="bottomTabBar" class="bottombar hidden">
+  <button type="button" class="bbtab" data-view="jobsView"><span class="bb-ic">🗂️</span>Jobs</button>
+  <button type="button" class="bbtab" data-view="availabilityView"><span class="bb-ic">📅</span>Avail.</button>
+  <button type="button" class="bbtab" data-view="payrollView"><span class="bb-ic">💵</span>Payroll</button>
+  <button type="button" class="bbtab" data-view="reviewsView"><span class="bb-ic">⭐</span>Reviews</button>
+  <button type="button" class="bbtab" data-view="inventoryView"><span class="bb-ic">📦</span>Stock</button>
+</div>
 
 <!-- Photo lightbox -->
 <div id="lightbox" class="lightbox hidden"><button class="lb-close" id="lbClose">×</button><img id="lightboxImg" src="" alt="photo"></div>
@@ -631,6 +660,19 @@ document.getElementById('logout').addEventListener('click',logout);
 function show(which){
   if(which!=='detailView' && detailPoll){ clearInterval(detailPoll); detailPoll=null; }
   for(const id of ['login','jobsView','detailView','availabilityView','payrollView','reviewsView','inventoryView','helpView']) document.getElementById(id).classList.toggle('hidden',id!==which);
+  setBottomTab(which);
+}
+// The bottom tab bar shows only for the 5 daily sections (Login, Job Detail,
+// and Help use a back arrow instead of a tab concept, so it hides there).
+// Single chokepoint, called from show() — can never drift out of sync with
+// whichever view is actually visible.
+const BOTTOM_TAB_VIEWS=['jobsView','availabilityView','payrollView','reviewsView','inventoryView'];
+function setBottomTab(which){
+  const bar=document.getElementById('bottomTabBar');
+  const onTabView=BOTTOM_TAB_VIEWS.includes(which);
+  bar.classList.toggle('hidden',!onTabView);
+  document.body.classList.toggle('has-bottombar',onTabView);
+  bar.querySelectorAll('.bbtab').forEach(b=>b.classList.toggle('active',b.dataset.view===which));
 }
 
 // All day math runs in the BUSINESS timezone so the tech app's calendar lines
@@ -1539,11 +1581,14 @@ let availDefs=null;                 // { slots, days } from the server
 let availState=new Set();           // selected "day:slot_key" keys (recurring)
 let availExceptions=[];             // [{date, slot_key, is_available}] one-time overrides
 let exEditState=new Set();          // slot keys selected in the open date editor
-document.getElementById('availBtn').addEventListener('click',showAvailability);
-document.getElementById('payrollBtn').addEventListener('click',showPayroll);
-document.getElementById('reviewsBtn').addEventListener('click',showReviews);
-document.getElementById('inventoryBtn').addEventListener('click',showInventory);
 document.getElementById('helpBtn').addEventListener('click',showHelp);
+// Bottom tab bar — Availability/Payroll/Reviews/Inventory moved here from the
+// header (see setBottomTab() near show()). Jobs itself is also a tab, so
+// tapping it just calls showJobs() same as the old "‹ Today's jobs" buttons did.
+const BOTTOM_TAB_ACTIONS = { jobsView:showJobs, availabilityView:showAvailability, payrollView:showPayroll, reviewsView:showReviews, inventoryView:showInventory };
+document.querySelectorAll('#bottomTabBar .bbtab').forEach(b=>{
+  b.addEventListener('click',()=>{ const fn=BOTTOM_TAB_ACTIONS[b.dataset.view]; if(fn) fn(); });
+});
 
 let payrollWeekStart='';            // 'YYYY-MM-DD' for Sunday of current week
 
@@ -1558,8 +1603,7 @@ async function showAvailability(){
     availExceptions=d.exceptions||[];
     renderAvailability();
   }catch(e){
-    v.innerHTML=`<div class="avail"><button class="back" id="availBack">‹ Today's jobs</button><div class="empty">${esc(e.message)}</div></div>`;
-    document.getElementById('availBack').addEventListener('click',showJobs);
+    v.innerHTML=`<div class="avail"><div class="empty">${esc(e.message)}</div></div>`;
   }
 }
 
@@ -1572,7 +1616,6 @@ function renderAvailability(){
       ).join('')}</div>
     </div>`).join('');
   v.innerHTML=`<div class="avail">
-      <button class="back" id="availBack">‹ Today's jobs</button>
       <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Availability</div>
         <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Your normal weekly schedule — set it once. Tap a slot to add or remove it.</div></div>
       <div id="weeklyCards">${rows}</div>
@@ -1593,7 +1636,6 @@ function renderAvailability(){
     </div>
     <div class="statusbar"><button class="btn big" id="availSave">Save Weekly Schedule</button></div>`;
 
-  document.getElementById('availBack').addEventListener('click',showJobs);
   // Weekly toggles (scoped so the one-time editor's chips aren't affected).
   v.querySelectorAll('#weeklyCards .slotchip').forEach(ch=>ch.addEventListener('click',()=>{
     const k=ch.dataset.day+':'+ch.dataset.key;
@@ -1704,8 +1746,7 @@ async function showPayroll(){
     const d=await api('tech_payroll',{params:{week_start:payrollWeekStart}});
     renderPayroll(d);
   }catch(e){
-    v.innerHTML=`<div class="detail"><button class="back" id="payrollBack">‹ Back</button><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
-    document.getElementById('payrollBack').addEventListener('click',showJobs);
+    v.innerHTML=`<div class="detail"><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
   }
 }
 
@@ -1757,8 +1798,6 @@ function renderPayroll(data){
     </div>` : '';
 
   v.innerHTML=`<div class="detail">
-    <button class="back" id="payrollBack">‹ Today's jobs</button>
-
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">Payroll</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">Weekly earnings</div></div>
 
@@ -1798,7 +1837,6 @@ function renderPayroll(data){
     <button class="btn ghost" id="payrollNext">Next week ›</button>
   </div>`;
 
-  document.getElementById('payrollBack').addEventListener('click',showJobs);
   document.getElementById('payrollPrev').addEventListener('click',()=>{
     payrollWeekStart=addDaysStr(payrollWeekStart,-7);
     showPayroll();
@@ -1847,8 +1885,7 @@ async function showReviews(){
     const d=await api('tech_reviews');
     renderReviews(d);
   }catch(e){
-    v.innerHTML=`<div class="detail"><button class="back" id="reviewsBack">‹ Today's jobs</button><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
-    document.getElementById('reviewsBack').addEventListener('click',showJobs);
+    v.innerHTML=`<div class="detail"><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
   }
 }
 
@@ -1861,8 +1898,6 @@ function renderReviews(data){
   const sectionHead=(t)=>`<div style="font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin:14px 2px 8px;">${esc(t)}</div>`;
 
   v.innerHTML=`<div class="detail">
-    <button class="back" id="reviewsBack">‹ Today's jobs</button>
-
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Reviews</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">What your customers are saying</div></div>
 
@@ -1884,7 +1919,6 @@ function renderReviews(data){
 
     <div style="height:40px;"></div>
   </div>`;
-  document.getElementById('reviewsBack').addEventListener('click',showJobs);
 }
 
 // ── Bracket inventory (read-only) ─────────────────────────────────────────────
@@ -1898,8 +1932,7 @@ async function showInventory(){
     const d=await api('bracket_inventory');
     renderInventory(d);
   }catch(e){
-    v.innerHTML=`<div class="detail"><button class="back" id="invBack">‹ Today's jobs</button><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
-    document.getElementById('invBack').addEventListener('click',showJobs);
+    v.innerHTML=`<div class="detail"><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
   }
 }
 
@@ -1938,8 +1971,6 @@ function renderInventory(data){
       ${inRouteLines.join('')}
     </div>` : '';
   v.innerHTML=`<div class="detail">
-    <button class="back" id="invBack">‹ Today's jobs</button>
-
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Inventory</div></div>
 
     <div style="padding:0 2px 6px;"><div style="font-weight:800;font-size:15px;">Brackets</div>
@@ -1964,7 +1995,6 @@ function renderInventory(data){
 
     <div style="height:40px;"></div>
   </div>`;
-  document.getElementById('invBack').addEventListener('click',showJobs);
   const wpSave=document.getElementById('wpSave');
   wpSave.addEventListener('click',async()=>{
     const target=Math.max(0,Math.floor(Number(document.getElementById('wpQty').value)||0));
