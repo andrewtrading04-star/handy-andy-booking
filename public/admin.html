@@ -2739,7 +2739,14 @@ function liIsDismountAnswer(name){
 // same size prices); `base`/`baseJuan` mirror payroll.js TV_SIZE_RATES. Keep all
 // three in sync if the rate sheet or widget prices change.
 const TV_SIZES = [
-  { label:'32" Or Less', price:99,  base:50,  baseJuan:50,  test:/\b32\b|less|under/i },
+  // The 32" test REQUIRES a 32 near the "or less"/"under" — it used to be
+  // /\b32\b|less|under/i, which matched the bare word "under" ANYWHERE, so
+  // "Install shelf under TV" ($45) and "Wire Hiding: Wires hang under the TV"
+  // ($0) both rendered as a phantom `32" Or Less` size dropdown on the ticket.
+  // Worse, nudging that dropdown (a mouse-wheel over it is enough) rewrote the
+  // line to a real 32" TV at $99, silently replacing the actual service. Now
+  // mirrors payroll.js matchSize's stricter form, which never had this bug.
+  { label:'32" Or Less', price:99,  base:50,  baseJuan:50,  test:/(?:32|thirty.?two).*(?:less|under|below)|under.*32|32"?\s*or\s*less/i },
   { label:'33"-59"',     price:109, base:60,  baseJuan:60,  test:/33.*59/ },
   { label:'60"-69"',     price:119, base:70,  baseJuan:80,  test:/60.*69/ },
   { label:'70"-84"',     price:149, base:80,  baseJuan:90,  test:/70.*8[45]/ },
@@ -2752,6 +2759,11 @@ const TV_SIZES = [
 function tvSizeIndex(name){
   const n=String(name||'').toLowerCase();
   if(/my tv is|\b(?:lift|help|larger)\b/.test(n)) return -1;
+  // A line that describes WORK is never a TV-size selection, even when it
+  // happens to contain a number that looks like one ("Correction of Previous
+  // Job - 60 - 69"", "TV Install 33-59""). Without this, such a line renders
+  // as a size dropdown and one nudge rewrites its label AND its price.
+  if(/\b(?:install|shelf|hang|wire|hiding|conceal(?:ment)?|correction|bracket|soundbar|dismount|fireplace|surcharge|coupon|tax|tip|handyman|recycle|swap|remount)\b/.test(n)) return -1;
   for(let i=0;i<TV_SIZES.length;i++) if(TV_SIZES[i].test.test(n)) return i;
   const bare=n.match(/^\s*(\d{2,3})\s*(?:"|inch(?:es)?|in|”|″)?\s*$/);
   if(bare){ const v=parseInt(bare[1],10);
