@@ -1359,6 +1359,17 @@
   </div>
 </div>
 
+<!-- Customer detail (CRM history) modal -->
+<div id="custDetailModal" class="modal hidden">
+  <div class="sheet" style="max-width:720px;">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+      <h2 id="cdName" style="margin:0;">Customer</h2>
+      <button class="btn ghost sm" type="button" id="cdClose" style="width:auto;">Close</button>
+    </div>
+    <div id="cdBody"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
 <!-- Estimate / quote-builder modal -->
 <div id="estModal" class="modal hidden">
   <div class="sheet">
@@ -3333,12 +3344,16 @@ async function renderCustomers(){
     try{
       const d=await api('customers',{ params:{ business:current.slug, q }});
       custCache={}; d.customers.forEach(c=>custCache[c.id]=c);
-      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th><th></th></tr></thead><tbody>${
-        d.customers.map(c=>`<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td style="text-align:right;white-space:nowrap;"><button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`).join('')
+      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th><th style="text-align:right;">Jobs</th><th style="text-align:right;">Lifetime Value</th><th>Last Job</th><th>GDS</th><th></th></tr></thead><tbody>${
+        d.customers.map(c=>{
+          const lastJob=c.last_job_at ? payFmtDateUTC(c.last_job_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
+          const gdsBadge=c.has_gds ? `<span class="badge" style="background:#eaf6ec;color:#1a7a34;">✓ GDS</span>` : `<span class="meta">—</span>`;
+          return `<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td style="text-align:right;">${c.jobs_count||0}</td><td style="text-align:right;">${payFmtUSD(c.lifetime_value||0)}</td><td>${lastJob}</td><td>${gdsBadge}</td><td style="text-align:right;white-space:nowrap;"><button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`;
+        }).join('')
       }</tbody></table>` : '<div class="empty">No customers found.</div>';
       list.querySelectorAll('[data-newappt]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const c=custCache[b.dataset.newappt]; if(c) openNewBooking(c); }));
       list.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openCustomerEdit(b.dataset.edit); }));
-      list.querySelectorAll('tr[data-cid]').forEach(r=>r.addEventListener('click',()=>openCustomerEdit(r.dataset.cid)));
+      list.querySelectorAll('tr[data-cid]').forEach(r=>r.addEventListener('click',()=>openCustomerDetail(r.dataset.cid)));
     }catch(err){ list.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
   };
   custReload=()=>load(document.getElementById('custSearch')?.value||'');
@@ -3460,6 +3475,97 @@ document.getElementById('custForm').addEventListener('submit',async e=>{
     if(custReload) custReload();
   }catch(err){ document.getElementById('cuErr').textContent=err.message; }
 });
+
+// ── Customer detail (CRM history: every job, every estimate, GDS, reviews) ──
+async function openCustomerDetail(id){
+  const modal=document.getElementById('custDetailModal');
+  const body=document.getElementById('cdBody');
+  const c=custCache[id];
+  document.getElementById('cdName').textContent = c ? c.name : 'Customer';
+  body.innerHTML='<div class="empty">Loading…</div>';
+  modal.classList.remove('hidden');
+  try{
+    const d=await api('customer_detail',{ params:{ business:current.slug, id }});
+    renderCustomerDetail(d);
+  }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+}
+function cdStars(n){ return n ? '⭐'.repeat(Math.max(1,Math.min(5,Math.round(n)))) : ''; }
+function renderCustomerDetail(d){
+  const { customer, jobs, estimates, stats } = d;
+  document.getElementById('cdName').textContent = customer.name;
+  const body=document.getElementById('cdBody');
+  const since = customer.created_at ? payFmtDateUTC(customer.created_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
+
+  const kpi=(label,val,accent)=>`<div style="flex:1 1 0;min-width:100px;padding:10px 12px;background:var(--line2);border-radius:10px;">
+    <div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;font-weight:700;">${label}</div>
+    <div style="font-size:19px;font-weight:800;margin-top:2px;${accent?`color:${accent};`:''}">${val}</div>
+  </div>`;
+
+  let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 16px;">
+    ${kpi('Total Jobs', stats.jobs_count)}
+    ${kpi('Lifetime Value', payFmtUSD(stats.lifetime_value), '#1a7a34')}
+    ${kpi('Cancelled', stats.cancelled_count, stats.cancelled_count?'#b45309':null)}
+    ${kpi('Avg. Review', stats.avg_rating!=null?`${stats.avg_rating} ★ (${stats.reviews_count})`:'—')}
+    ${kpi('GDS Purchased', stats.has_gds?'✓ Yes':'No', stats.has_gds?'#1a7a34':'#8a94a3')}
+  </div>`;
+
+  html += `<div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--mute);margin-bottom:16px;">
+    <span>📞 ${esc(customer.phone||'—')}</span>
+    <span>✉️ ${esc(customer.email||'—')}</span>
+    <span>📍 ${esc([customer.address_line1,customer.city,customer.state,customer.postal_code].filter(Boolean).join(', ')||'—')}</span>
+    <span>Customer since ${since}</span>
+    <span>First job ${stats.first_job_at?payFmtDateUTC(stats.first_job_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}):'—'}</span>
+    <span>Last job ${stats.last_job_at?payFmtDateUTC(stats.last_job_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}):'—'}</span>
+  </div>`;
+
+  html += `<div style="font-weight:800;font-size:14px;margin:18px 0 8px;">Job History (${jobs.length})</div>`;
+  if(!jobs.length){
+    html += `<div class="empty" style="padding:14px 0;">No jobs yet.</div>`;
+  } else {
+    html += `<table style="width:100%;font-size:13px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--mute);">
+        <th style="padding:5px 6px;">Date</th><th>Service</th><th>Tech</th><th style="text-align:right;">Price</th><th>Status</th><th>Review</th><th>GDS</th>
+      </tr></thead><tbody>`;
+    jobs.forEach((j,i)=>{
+      const dt = j.scheduled_at ? payFmtDateUTC(j.scheduled_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
+      const review = j.review_rating ? `${cdStars(j.review_rating)}${j.review_text?` <span style="color:var(--mute);" title="${esc(j.review_text)}">💬</span>`:''}` : '<span style="color:var(--mute);">—</span>';
+      const gds = j.has_gds ? '<span class="badge" style="background:#eaf6ec;color:#1a7a34;">✓</span>' : '<span style="color:var(--mute);">—</span>';
+      html += `<tr style="border-top:1px solid var(--line);${i%2?'background:var(--line2);':''}">
+        <td style="padding:7px 6px;white-space:nowrap;">${dt}</td>
+        <td>${esc(j.service_name||'—')}</td>
+        <td>${esc(j.technician_name||'—')}</td>
+        <td style="text-align:right;">${payFmtUSD(j.price||0)}</td>
+        <td>${statusBadge(j.status)}</td>
+        <td>${review}</td>
+        <td>${gds}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  html += `<div style="font-weight:800;font-size:14px;margin:20px 0 8px;">Estimates Sent (${estimates.length})</div>`;
+  if(!estimates.length){
+    html += `<div class="empty" style="padding:14px 0;">No estimates on file.</div>`;
+  } else {
+    html += `<table style="width:100%;font-size:13px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--mute);">
+        <th style="padding:5px 6px;">Date</th><th>Service</th><th style="text-align:right;">Subtotal</th><th>Status</th><th>GDS Offered</th>
+      </tr></thead><tbody>`;
+    estimates.forEach((e,i)=>{
+      const dt = e.created_at ? payFmtDateUTC(e.created_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
+      html += `<tr style="border-top:1px solid var(--line);${i%2?'background:var(--line2);':''}">
+        <td style="padding:7px 6px;white-space:nowrap;">${dt}</td>
+        <td>${esc(e.service_label||'—')}</td>
+        <td style="text-align:right;">${payFmtUSD(e.approved_total??e.subtotal)}</td>
+        <td>${esc((e.status||'').replace(/_/g,' '))}</td>
+        <td>${e.has_gds?'<span class="badge" style="background:#eaf6ec;color:#1a7a34;">✓</span>':'<span style="color:var(--mute);">—</span>'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  body.innerHTML = html;
+}
+document.getElementById('cdClose').addEventListener('click',()=>document.getElementById('custDetailModal').classList.add('hidden'));
+document.getElementById('custDetailModal').addEventListener('click',e=>{ if(e.target.id==='custDetailModal') document.getElementById('custDetailModal').classList.add('hidden'); });
 
 // ── Photo gallery (every job photo for this business) ───────────────────────
 // Photos are triaged into four categories (New / To Post / Posted / Records).

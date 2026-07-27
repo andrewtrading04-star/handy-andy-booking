@@ -257,6 +257,7 @@ export default async function handler(req, res) {
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
+      case 'customer_detail':   return await customerDetail(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
@@ -3756,6 +3757,13 @@ async function bookingPhotoSetStatus(req, res, db, auth, body) {
 }
 
 // ── Customers (search) ───────────────────────────────────────────────────────
+// A booking counts toward "purchased GDS" if any of its line items is the
+// Guaranteed Dismount Service upsell — same name the confirmation-email
+// upsell button and gds_upsell_add() write (see GDS_LINE_NAME below).
+function jobHasGds(lineItems) {
+  return (lineItems || []).some(li => /guaranteed dismount/i.test(li.name || li.description || ''));
+}
+
 async function customers(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const term = (req.query.q || '').toString().trim();
@@ -3769,7 +3777,128 @@ async function customers(req, res, db, auth) {
   }
   const { data, error } = await q.order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
-  return res.status(200).json({ customers: data || [] });
+  const customerRows = data || [];
+
+  // One extra query for every customer's job history, aggregated here in JS
+  // (no per-customer round-trip) — this is what turns the list from a bare
+  // contact book into an actual CRM: jobs count, lifetime spend, GDS flag, and
+  // last-seen date shown right in the table, before ever opening a detail view.
+  if (customerRows.length) {
+    const { data: jobRows } = await db.from('bookings')
+      .select('customer_id, price, status, scheduled_at, review_rating, line_items:booking_line_items ( name )')
+      .eq('business_id', biz.id)
+      .in('customer_id', customerRows.map(c => c.id));
+    const byCust = {};
+    (jobRows || []).forEach(j => {
+      const b = byCust[j.customer_id] || (byCust[j.customer_id] = {
+        jobs: 0, completed: 0, cancelled: 0, lifetime_value: 0, last_job_at: null, has_gds: false, ratings: [],
+      });
+      b.jobs += 1;
+      if (j.status === 'cancelled') b.cancelled += 1;
+      if (j.status === 'completed') { b.completed += 1; b.lifetime_value += Number(j.price) || 0; }
+      if (j.scheduled_at && (!b.last_job_at || j.scheduled_at > b.last_job_at)) b.last_job_at = j.scheduled_at;
+      if (jobHasGds(j.line_items)) b.has_gds = true;
+      if (j.review_rating) b.ratings.push(j.review_rating);
+    });
+    customerRows.forEach(c => {
+      const b = byCust[c.id];
+      c.jobs_count = b ? b.jobs : 0;
+      c.completed_count = b ? b.completed : 0;
+      c.cancelled_count = b ? b.cancelled : 0;
+      c.lifetime_value = b ? Math.round(b.lifetime_value * 100) / 100 : 0;
+      c.last_job_at = b ? b.last_job_at : null;
+      c.has_gds = b ? b.has_gds : false;
+      c.avg_rating = b && b.ratings.length ? Math.round((b.ratings.reduce((s, r) => s + r, 0) / b.ratings.length) * 10) / 10 : null;
+    });
+  }
+  return res.status(200).json({ customers: customerRows });
+}
+
+// Full history for one customer: every job (with tech/service/pay/review/GDS),
+// every estimate ever sent to them (matched by email or phone, since an
+// estimate is created before a customers row may even exist), and rollup
+// stats — the actual point of a CRM's customer tab.
+async function customerDetail(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const { data: customer, error: custErr } = await db.from('customers')
+    .select('id, name, phone, email, address_line1, city, state, postal_code, created_at')
+    .eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (custErr) throw custErr;
+  if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+  const { data: jobRows, error: jobsErr } = await db.from('bookings')
+    .select(`id, status, payment_status, scheduled_at, completed_at, cancelled_at, price, subtotal, tip,
+              amount_paid, amount_refunded, review_rating, review_text, address_line1, city, state, postal_code,
+              service:services ( name ),
+              technician:technicians!technician_id ( name ),
+              line_items:booking_line_items ( name, kind, quantity, unit_price, line_total )`)
+    .eq('business_id', biz.id).eq('customer_id', id)
+    .order('scheduled_at', { ascending: false });
+  if (jobsErr) throw jobsErr;
+  const jobs = (jobRows || []).map(j => ({
+    id: j.id,
+    status: j.status,
+    payment_status: j.payment_status,
+    scheduled_at: j.scheduled_at,
+    completed_at: j.completed_at,
+    cancelled_at: j.cancelled_at,
+    price: j.price,
+    amount_paid: j.amount_paid,
+    amount_refunded: j.amount_refunded,
+    service_name: j.service?.name || null,
+    technician_name: j.technician?.name || null,
+    review_rating: j.review_rating,
+    review_text: j.review_text,
+    address: [j.address_line1, j.city, j.state, j.postal_code].filter(Boolean).join(', ') || null,
+    has_gds: jobHasGds(j.line_items),
+    line_items: (j.line_items || []).map(li => ({ name: li.name, quantity: li.quantity, unit_price: li.unit_price, line_total: li.line_total })),
+  }));
+
+  // Estimates aren't linked by customer_id (an estimate can predate the
+  // customers row, or never convert into one) — match by email/phone instead,
+  // same identity signal the rest of the app uses for this customer.
+  const orParts = [];
+  if (customer.email) orParts.push(`customer_email.eq.${customer.email}`);
+  if (customer.phone) orParts.push(`customer_phone.eq.${customer.phone}`);
+  let estimates = [];
+  if (orParts.length) {
+    const { data: estRows } = await db.from('estimates')
+      .select('id, status, service_label, line_items, approved_total, tax_rate, created_at, approved_at, contacted_at')
+      .eq('business_id', biz.id)
+      .or(orParts.join(','))
+      .order('created_at', { ascending: false })
+      .then(r => r, () => ({ data: [] }));
+    estimates = (estRows || []).map(e => {
+      const subtotal = (e.line_items || []).reduce((s, li) => s + (Number(li.unit_price) || 0) * (Number(li.qty) || 1), 0);
+      return {
+        id: e.id, status: e.status, service_label: e.service_label,
+        subtotal: Math.round(subtotal * 100) / 100,
+        approved_total: e.approved_total,
+        created_at: e.created_at, approved_at: e.approved_at, contacted_at: e.contacted_at,
+        has_gds: (e.line_items || []).some(li => /guaranteed dismount/i.test(li.description || '')),
+      };
+    });
+  }
+
+  const completedJobs = jobs.filter(j => j.status === 'completed');
+  const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
+  const ratings = jobs.map(j => j.review_rating).filter(Boolean);
+  const stats = {
+    jobs_count: jobs.length,
+    completed_count: completedJobs.length,
+    cancelled_count: cancelledJobs.length,
+    lifetime_value: Math.round(completedJobs.reduce((s, j) => s + (Number(j.price) || 0), 0) * 100) / 100,
+    first_job_at: jobs.length ? jobs[jobs.length - 1].scheduled_at : null,
+    last_job_at: jobs.length ? jobs[0].scheduled_at : null,
+    has_gds: jobs.some(j => j.has_gds) || estimates.some(e => e.has_gds),
+    avg_rating: ratings.length ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10 : null,
+    reviews_count: ratings.length,
+  };
+
+  return res.status(200).json({ customer, jobs, estimates, stats });
 }
 
 async function customerUpdate(req, res, db, auth, body) {
