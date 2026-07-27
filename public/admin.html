@@ -558,6 +558,8 @@
   #modal h2{color:#fff;}
   #modal .search{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #modal .search::placeholder{color:#6b7f9c;}
+  #modal #nbTravelFee::placeholder{color:#6b7f9c;}
+  #modal #nbTravelFee:focus{outline:none;}
   #modal .search:focus{border-color:#3b82f6;outline:none;}
   #modal .btn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #modal #nbConvertSummary{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#c7dcff;}
@@ -1218,7 +1220,10 @@
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
         <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal" autocomplete="off">
       </div>
-      <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-filled" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill">
+      <div style="display:flex;align-items:center;background:#16273f;border:1px solid rgba(255,255,255,.18);border-radius:10px;margin:10px 0 12px;overflow:hidden;">
+        <span style="padding:11px 13px;font-size:13px;font-weight:700;color:#9fb0c3;white-space:nowrap;border-right:1px solid rgba(255,255,255,.14);">Travel fee</span>
+        <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="flex:1;min-width:0;background:transparent;border:none;color:#eef2f7;padding:11px 13px;font-size:14px;outline:none;">
+      </div>
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbTotalDisplay" style="font-size:13px;padding:12px 14px;border-radius:10px;"></div>
       <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
