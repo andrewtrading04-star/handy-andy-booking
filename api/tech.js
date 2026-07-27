@@ -1872,48 +1872,69 @@ async function techPayroll(req, res, db, auth) {
 
 // ── Reviews Report ───────────────────────────────────────────────────────────
 // The customer reviews this tech has earned: all-time average + count, how many
-// landed this week (business-tz Sun–Sat), and a recent list. Each review carries
-// the star rating, the customer's comment, and which job/service it was for.
-// Reviews live on bookings (review_rating 1-5, review_text, reviewed_at).
+// landed this week (business-tz Sun–Sat), and a full list. TWO entirely separate
+// sources feed a tech's real track record — in-app/CRM reviews (bookings.
+// review_rating, left through our own post-job review flow) and actual Google
+// Business Profile reviews (google_reviews, synced by migrate.js's
+// googleReviewSync and otherwise only ever surfaced as a one-time dismissible
+// banner on the Jobs screen). A customer might leave one, the other, or both —
+// neither is a subset of the other — so both are queried and merged into one
+// combined average/count/list here instead of silently showing just the CRM
+// side (which is what happened before: a Google review vanished from the
+// tech's stats forever the moment its banner was dismissed).
 async function techReviews(req, res, db, auth) {
   const { data: biz } = await db.from('businesses').select('timezone').eq('id', auth.business_id).single();
   const tz = biz?.timezone || 'America/Denver';
   const weekStartMs = startOfWeekUTC(tz).getTime();
 
-  // technician_id alone so reviews earned on cross-company jobs count too.
-  const { data, error } = await db.from('bookings')
-    .select(`id, scheduled_at, reviewed_at, review_rating, review_text,
-             customer:customers ( name ),
-             service:services ( name )`)
-    .eq('technician_id', auth.tech_id)
-    .not('review_rating', 'is', null)
-    .order('reviewed_at', { ascending: false, nullsFirst: false })
-    .limit(100);
-  if (error) throw error;
+  // technician_id alone (not business-scoped) so reviews earned on cross-company jobs count too.
+  const [crmRes, googleRes] = await Promise.all([
+    db.from('bookings')
+      .select(`id, scheduled_at, reviewed_at, review_rating, review_text,
+               customer:customers ( name ),
+               service:services ( name )`)
+      .eq('technician_id', auth.tech_id)
+      .not('review_rating', 'is', null)
+      .order('reviewed_at', { ascending: false, nullsFirst: false })
+      .limit(100),
+    db.from('google_reviews')
+      .select('id, rating, reviewer_name, review_text, review_date')
+      .eq('technician_id', auth.tech_id)
+      .limit(100),
+  ]);
+  if (crmRes.error) throw crmRes.error;
+  if (googleRes.error) throw googleRes.error;
 
-  const all = data || [];
+  const crm = (crmRes.data || []).map(r => ({
+    id: `b_${r.id}`, source: 'crm',
+    rating: r.review_rating, text: r.review_text || '',
+    service: r.service?.name || null, customer_name: r.customer?.name || 'Customer',
+    reviewed_at: r.reviewed_at, scheduled_at: r.scheduled_at,
+  }));
+  const google = (googleRes.data || []).map(r => ({
+    id: `g_${r.id}`, source: 'google',
+    rating: r.rating, text: r.review_text || '',
+    service: null, customer_name: r.reviewer_name || 'Google user',
+    // Google reviews have no associated booking, so review_date fills both roles.
+    reviewed_at: r.review_date, scheduled_at: r.review_date,
+  }));
+
+  const all = [...crm, ...google];
   const total = all.length;
-  const sum = all.reduce((a, r) => a + (Number(r.review_rating) || 0), 0);
+  const sum = all.reduce((a, r) => a + (Number(r.rating) || 0), 0);
   const average = total ? Math.round((sum / total) * 10) / 10 : 0;
 
   let weekCount = 0;
-  const reviews = all.map(r => {
-    // reviewed_at can be null for reviews imported without a timestamp; those
-    // simply don't count toward "this week".
-    const ts = r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
-    const this_week = ts >= weekStartMs;
-    if (this_week) weekCount++;
-    return {
-      id: r.id,
-      rating: r.review_rating,
-      text: r.review_text || '',
-      service: r.service?.name || null,
-      customer_name: r.customer?.name || 'Customer',
-      reviewed_at: r.reviewed_at,
-      scheduled_at: r.scheduled_at,
-      this_week,
-    };
-  });
+  const reviews = all
+    .map(r => {
+      // reviewed_at can be null/missing for reviews imported without a
+      // timestamp; those simply don't count toward "this week".
+      const ts = r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
+      const this_week = ts >= weekStartMs;
+      if (this_week) weekCount++;
+      return { ...r, this_week };
+    })
+    .sort((a, b) => (new Date(b.reviewed_at || 0).getTime()) - (new Date(a.reviewed_at || 0).getTime()));
 
   return res.status(200).json({ average, total, week_count: weekCount, reviews });
 }

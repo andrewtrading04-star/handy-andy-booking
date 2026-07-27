@@ -231,6 +231,39 @@
   .help-item .help-body{padding:0 14px 15px;margin-top:-2px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;line-height:1.6;color:var(--mute);}
   .help-body b,.help-body strong{color:var(--ink);}
   .help-body ul{padding-left:20px;margin:6px 0;}
+
+  /* Reviews — Google-style rating breakdown + review cards */
+  .rs-card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:18px;}
+  .rs-top{display:flex;gap:18px;align-items:center;}
+  .rs-avgcol{flex:none;text-align:center;}
+  .rs-avg{font-size:40px;font-weight:900;color:var(--ink);line-height:1;}
+  .rs-stars{margin-top:5px;}
+  .rs-total{color:var(--mute);font-size:11.5px;margin-top:6px;}
+  .rs-bars{flex:1;display:flex;flex-direction:column;gap:5px;}
+  .rs-bar-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mute);background:none;border:none;font-family:inherit;padding:3px 0;width:100%;}
+  .rs-bar-row .rs-n{width:9px;text-align:right;}
+  .rs-bar-track{flex:1;height:6px;background:var(--navy);border-radius:4px;overflow:hidden;}
+  .rs-bar-fill{height:100%;background:var(--amber);border-radius:4px;}
+  .rs-bar-row.zero{color:var(--line);cursor:default;}
+  .rs-bar-row.zero .rs-bar-fill{background:var(--line);}
+  .rs-bar-row .rs-c{width:14px;color:var(--mute);text-align:right;}
+  .rs-bar-row.active{color:var(--orange);font-weight:700;}
+  .rs-bar-row.active .rs-bar-fill{background:var(--orange);}
+  .rs-sortrow{display:flex;justify-content:space-between;align-items:center;margin:16px 2px 4px;gap:8px;}
+  .rs-label-btn{background:none;border:none;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:700;font-family:inherit;padding:4px 0;}
+  .rs-label-btn.filtered{color:var(--orange);}
+  .rs-sortpill{background:var(--navy);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:600;padding:6px 10px;border-radius:8px;font-family:inherit;}
+  .gcard{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:10px;}
+  .gcard.flagged{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset;}
+  .gtop{display:flex;gap:10px;align-items:flex-start;}
+  .gavatar{width:36px;height:36px;border-radius:50%;background:var(--navy-3);color:var(--ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none;}
+  .gname{font-weight:700;font-size:13.5px;color:var(--ink);}
+  .gsrc{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#4285F4;color:#fff;font-size:9.5px;font-weight:800;margin-left:6px;vertical-align:middle;}
+  .gmeta{display:flex;align-items:center;gap:7px;margin-top:2px;}
+  .gdate{color:var(--mute);font-size:11.5px;}
+  .gtext{font-size:13px;color:var(--ink);line-height:1.5;margin-top:9px;}
+  .gtext.empty{color:var(--mute);font-style:italic;}
+  .gflag{display:inline-block;background:rgba(255,176,32,.15);color:var(--amber);font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:8px;}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -1862,18 +1895,46 @@ function reviewWhen(r){
   try{ return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:bizTz}); }
   catch{ return ''; }
 }
-// One review card: stars, the service/job it was for, the customer, and the comment.
-function reviewCard(r){
-  return `<div class="card" style="margin-bottom:10px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-      ${starRow(r.rating,17)}
-      <span class="note-t">${esc(reviewWhen(r))}</span>
+// Google-style relative time ("2 weeks ago") instead of a calendar date — the
+// same convention a real Google review shows, which is the point of this screen.
+function relativeTime(iso){
+  if(!iso) return '';
+  const then=new Date(iso).getTime(); if(isNaN(then)) return '';
+  const days=Math.floor((Date.now()-then)/86400000);
+  if(days<=0) return 'Today';
+  if(days===1) return '1 day ago';
+  if(days<7) return `${days} days ago`;
+  const weeks=Math.floor(days/7);
+  if(weeks<5) return weeks===1?'1 week ago':`${weeks} weeks ago`;
+  const months=Math.floor(days/30);
+  if(months<12) return months===1?'1 month ago':`${months} months ago`;
+  const years=Math.floor(days/365);
+  return years===1?'1 year ago':`${years} years ago`;
+}
+// One review card, styled like an actual Google review: initial avatar, name,
+// stars + relative time, then the comment. Anything under 5 stars gets an
+// amber outline + tag so it's unmistakable once you land on it — the whole
+// point of the breakdown/filter above is to get a tech TO this exact card.
+function reviewCardGoogle(r){
+  const initial=(String(r.customer_name||'?').trim().charAt(0)||'?').toUpperCase();
+  const rating=Math.round(Number(r.rating)||0);
+  const flagged=rating>0 && rating<5;
+  // Two entirely separate review sources feed this list (see techReviews() on
+  // the server) — a small "G" tag marks the ones that came from an actual
+  // Google review, since a customer might have left one, the other, or both.
+  const sourceTag = r.source==='google' ? '<span class="gsrc" title="Google review">G</span>' : '';
+  return `<div class="gcard${flagged?' flagged':''}">
+    <div class="gtop">
+      <div class="gavatar">${esc(initial)}</div>
+      <div>
+        <div class="gname">${esc(r.customer_name||'Customer')}${sourceTag}</div>
+        <div class="gmeta">${starRow(r.rating,12)}<span class="gdate">${esc(relativeTime(r.reviewed_at||r.scheduled_at))}</span></div>
+      </div>
     </div>
-    <div class="kv" style="margin:9px 0 2px;font-weight:700;">${ic('wrench')} ${esc(r.service||'Service')}</div>
-    <div class="sub" style="color:var(--mute);font-size:13px;">${esc(r.customer_name||'Customer')}</div>
     ${r.text
-      ? `<div class="note-b" style="margin-top:9px;background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:11px 12px;">“${esc(r.text)}”</div>`
-      : '<div class="sub" style="color:var(--mute);font-size:13px;margin-top:7px;font-style:italic;">No comment left.</div>'}
+      ? `<div class="gtext">${esc(r.text)}</div>`
+      : '<div class="gtext empty">No comment left.</div>'}
+    ${flagged?'<span class="gflag">Below 5 stars</span>':''}
   </div>`;
 }
 
@@ -1889,36 +1950,86 @@ async function showReviews(){
   }
 }
 
+// Reviews — redesigned to work like Google's own review breakdown: a bar per
+// star count next to the average (so "why isn't this 5.0" is answered without
+// scrolling), tappable to filter the list down to just that rating, plus a
+// sort toggle. activeFilter/sortMode are local to one render (reset each time
+// the tech re-opens the tab); tapping a bar or the sort pill just repaints the
+// two dynamic pieces (bars + list) rather than the whole screen.
 function renderReviews(data){
   const v=document.getElementById('reviewsView');
-  const avg=Number(data.average)||0, total=Number(data.total)||0, wk=Number(data.week_count)||0;
+  const avg=Number(data.average)||0, total=Number(data.total)||0;
   const reviews=data.reviews||[];
-  const weekReviews=reviews.filter(r=>r.this_week);
-  const olderReviews=reviews.filter(r=>!r.this_week);
-  const sectionHead=(t)=>`<div style="font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin:14px 2px 8px;">${esc(t)}</div>`;
+  const counts=[0,0,0,0,0,0]; // index 1..5, index 0 unused
+  reviews.forEach(r=>{ const rt=Math.round(Number(r.rating)||0); if(rt>=1&&rt<=5) counts[rt]++; });
+  const maxCount=Math.max(1,...counts.slice(1));
+  let activeFilter=null;  // null = all, else 1..5
+  let sortMode='newest';  // 'newest' | 'lowest'
+
+  const barsHtml=()=>[5,4,3,2,1].map(n=>{
+    const c=counts[n], pct=Math.round(c/maxCount*100);
+    return `<button type="button" class="rs-bar-row${c===0?' zero':''}${activeFilter===n?' active':''}" data-star="${n}" ${c===0?'disabled':''}>
+      <span class="rs-n">${n}</span><div class="rs-bar-track"><div class="rs-bar-fill" style="width:${pct}%;"></div></div><span class="rs-c">${c}</span>
+    </button>`;
+  }).join('');
+
+  const sortedFilteredList=()=>{
+    let list = activeFilter ? reviews.filter(r=>Math.round(Number(r.rating)||0)===activeFilter) : reviews.slice();
+    const whenMs=r=>new Date(r.reviewed_at||r.scheduled_at||0).getTime()||0;
+    list = list.slice().sort((a,b)=>{
+      if(sortMode==='lowest'){
+        const ra=Number(a.rating)||0, rb=Number(b.rating)||0;
+        if(ra!==rb) return ra-rb;
+      }
+      return whenMs(b)-whenMs(a);
+    });
+    return list;
+  };
+  const listHtml=()=>{
+    const list=sortedFilteredList();
+    if(!reviews.length) return '<div class="empty">No reviews yet.<br>Complete jobs and customers will be invited to leave one. ⭐</div>';
+    if(!list.length) return `<div class="empty">No ${activeFilter}-star reviews.</div>`;
+    return list.map(reviewCardGoogle).join('');
+  };
+
+  function paint(){
+    document.getElementById('rsBars').innerHTML=barsHtml();
+    document.getElementById('rsLabel').textContent = activeFilter ? `Showing ${activeFilter} ★ only ✕` : 'All reviews';
+    document.getElementById('rsLabel').classList.toggle('filtered', !!activeFilter);
+    document.getElementById('rsSortPill').textContent = sortMode==='lowest' ? 'Lowest rating ▾' : 'Newest ▾';
+    document.getElementById('rsList').innerHTML=listHtml();
+    document.getElementById('rsBars').querySelectorAll('.rs-bar-row').forEach(b=>b.addEventListener('click',()=>{
+      const n=Number(b.dataset.star); activeFilter=(activeFilter===n?null:n); paint();
+    }));
+  }
 
   v.innerHTML=`<div class="detail">
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Reviews</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">What your customers are saying</div></div>
 
-    <div class="card" style="text-align:center;">
-      <div style="font-size:46px;font-weight:900;line-height:1;">${total?avg.toFixed(1):'—'}</div>
-      <div style="margin:10px 0 6px;">${starRow(avg,24)}</div>
-      <div class="sub" style="color:var(--mute);font-size:13px;">${total} review${total===1?'':'s'} all-time</div>
-      <div style="display:flex;justify-content:center;gap:10px;margin-top:16px;">
-        <div style="background:var(--navy);border:1px solid var(--line);border-radius:12px;padding:12px 22px;">
-          <div style="font-size:24px;font-weight:800;color:var(--green);">${wk}</div>
-          <div class="sub" style="color:var(--mute);font-size:12px;">This week</div>
+    <div class="rs-card">
+      <div class="rs-top">
+        <div class="rs-avgcol">
+          <div class="rs-avg">${total?avg.toFixed(1):'—'}</div>
+          <div class="rs-stars">${starRow(avg,17)}</div>
+          <div class="rs-total">${total} review${total===1?'':'s'}</div>
         </div>
+        <div class="rs-bars" id="rsBars"></div>
       </div>
     </div>
 
-    ${weekReviews.length?sectionHead('This week')+weekReviews.map(reviewCard).join(''):''}
-    ${olderReviews.length?sectionHead(weekReviews.length?'Earlier':'Recent')+olderReviews.map(reviewCard).join(''):''}
-    ${!reviews.length?'<div class="empty">No reviews yet.<br>Complete jobs and customers will be invited to leave one. ⭐</div>':''}
+    <div class="rs-sortrow">
+      <button type="button" class="rs-label-btn" id="rsLabel">All reviews</button>
+      <button type="button" class="rs-sortpill" id="rsSortPill">Newest ▾</button>
+    </div>
+    <div id="rsList"></div>
 
     <div style="height:40px;"></div>
   </div>`;
+
+  document.getElementById('rsLabel').addEventListener('click',()=>{ if(activeFilter){ activeFilter=null; paint(); } });
+  document.getElementById('rsSortPill').addEventListener('click',()=>{ sortMode = sortMode==='newest' ? 'lowest' : 'newest'; paint(); });
+  paint();
 }
 
 // ── Bracket inventory (read-only) ─────────────────────────────────────────────
