@@ -313,6 +313,16 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       </td></tr>`;
   }
 
+  // ── Self-serve reschedule button — lives in the hero card, right below the
+  // GDS upsell and above the "Add to calendar" card, per request (it used to
+  // be buried at the bottom of "What to expect", well past where anyone
+  // scrolled). Same signed link as before (api/admin.js reschedule_info/
+  // reschedule_submit) — this only moved WHERE it renders, not what it does.
+  const rescheduleBlock = details.rescheduleUrl ? `
+      <tr><td style="padding:16px 28px 0;text-align:center;">
+        <a href="${esc(details.rescheduleUrl)}" style="display:inline-block;text-decoration:none;font-weight:700;border-radius:10px;padding:12px 24px;font-size:13.5px;background:transparent;border:1px solid rgba(255,255,255,.22);color:#eef2f7;">Reschedule this appointment &rarr;</a>
+      </td></tr>` : '';
+
   // ── "Add to calendar" buttons (Google + Apple + Outlook) ────────────────────
   const calendarBlock = buildCalendarBlock({
     startEpoch: details.startEpoch, endEpoch: details.endEpoch,
@@ -411,7 +421,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
                 <li style="${li}">You can cancel or reschedule any time, as long as it's not within 24 hours of your scheduled time.</li>
                 <li style="${li}">Cancellations or last-minute rescheduling within 24 hours incur an automatic $50 charge.</li>
               </ul>
-              ${details.rescheduleUrl ? `<a href="${esc(details.rescheduleUrl)}" style="display:inline-block;margin-top:10px;background:#ffffff;color:#11181c;border:1px solid #d7dbe0;text-decoration:none;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;">Reschedule this appointment &rarr;</a>` : `<div style="${para}">To make changes, just reply to this email or give us a call and we'll take care of it.</div>`}`)}
+              <div style="${para}margin-top:8px;">${details.rescheduleUrl ? 'Use the "Reschedule this appointment" button near the top of this email to pick a new time yourself.' : "To make changes, just reply to this email or give us a call and we'll take care of it."}</div>`)}
       <tr><td style="padding:14px 28px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;">
           <tr>
@@ -452,6 +462,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
             </td></tr>
             ${priceBlock}
             ${gdsUpsellBlock}
+            ${rescheduleBlock}
             ${twoTechNote}
             ${meetTechBlock}
             <tr><td style="height:26px;"></td></tr>
