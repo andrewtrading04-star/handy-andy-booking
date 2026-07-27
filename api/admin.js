@@ -20,6 +20,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
+import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -181,37 +182,13 @@ async function travelPayoutMap(db, businessId) {
 // Display label for an internal note/photo authored from the dashboard.
 function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
 
-// Notify a technician by SMS that they've been assigned a job. Fire-and-forget;
-// safe to call even if the tech has no phone (sendSMS no-ops). `scheduledAtISO`
-// may be null (unscheduled job) — we fall back to a generic line.
-async function notifyTechAssigned(db, biz, technicianId, scheduledAtISO, areaTz) {
-  if (!technicianId) return;
-  // Look up by id ALONE (not business) so a cross-company tech — whose home
-  // business differs from this booking's — is still found and texted.
-  const { data: tech } = await db.from('technicians')
-    .select('phone, business_id').eq('id', technicianId).maybeSingle();
-  if (!tech?.phone) return;
-  // The time must be the JOB's local time (an Austin job is Central), not the
-  // business's home tz — else the tech is told an hour off. Caller passes the
-  // service-area tz; fall back to the business tz only when it's unknown.
-  const tz = areaTz || biz.timezone || 'America/Denver';
-  let whenTxt = 'a new job';
-  if (scheduledAtISO) {
-    try {
-      whenTxt = new Date(scheduledAtISO).toLocaleString('en-US', {
-        timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-      });
-    } catch { /* keep generic */ }
-  }
-  // Cross-company: the tech works for the other company today. Make it
-  // unmistakable which business this job belongs to.
-  const appLink = (process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')) + '/tech.html';
-  const crossCompany = tech.business_id && tech.business_id !== biz.id;
-  const msg = crossCompany
-    ? `You got a job for ${String(biz.name || '').toUpperCase()} (not your own company)! ${whenTxt}. Address & details in the app: ${appLink}`
-    : `You got a job! ${whenTxt}. Address & details in the app: ${appLink}`;
-  sendSMS(tech.phone, msg).catch(console.error);
-}
+// notifyTechAssigned now lives in api/_lib/tech-notify.js (imported at the top
+// of this file). It used to be private to admin.js, which is exactly why the
+// PUBLIC booking endpoint (api/book.js) never texted the tech it auto-assigned:
+// the function was physically unimportable from there. It is also now AWAITED
+// at every call site below and records each attempt in app.tech_sms_log — the
+// old fire-and-forget version could be frozen by Vercel before Twilio was ever
+// called, and left no trace when it failed.
 
 export default async function handler(req, res) {
   applyCors(req, res);
@@ -1207,7 +1184,7 @@ async function bookings(req, res, db, auth) {
     const { data, error } = await fetchBookingRows((sel) =>
       db.from('bookings').select(sel).eq('business_id', biz.id).eq('id', oneId).limit(1));
     if (error) throw error;
-    return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
+    return res.status(200).json({ bookings: await withTechSms(db, (data || []).map(shapeBooking)) });
   }
 
   const makeQ = (sel) => {
@@ -1226,7 +1203,35 @@ async function bookings(req, res, db, auth) {
 
   const { data, error } = await fetchBookingRows(makeQ);
   if (error) throw error;
-  return res.status(200).json({ bookings: (data || []).map(shapeBooking) });
+  return res.status(200).json({ bookings: await withTechSms(db, (data || []).map(shapeBooking)) });
+}
+
+// Attach each booking's technician-notification status (app.tech_sms_log) so the
+// schedule/detail UI can show whether the assigned tech was actually TOLD about
+// the job. One batched query for the whole page — never per booking. Entirely
+// best-effort: if the table isn't there yet (migration not applied) the
+// bookings still render, just without the badge.
+async function withTechSms(db, rows) {
+  const ids = rows.map(r => r.id).filter(Boolean);
+  if (!ids.length) return rows;
+  try {
+    const { data, error } = await db.from('tech_sms_log')
+      .select('booking_id, technician_id, kind, status, skip_reason, error, sent_at, delivered_at, technician:technicians ( name )')
+      .in('booking_id', ids)
+      .order('sent_at', { ascending: false });
+    if (error) throw error;
+    const byBooking = new Map();
+    for (const r of (data || [])) {
+      const row = { ...r, tech_name: r.technician?.name || null };
+      delete row.technician;
+      if (!byBooking.has(row.booking_id)) byBooking.set(row.booking_id, []);
+      byBooking.get(row.booking_id).push(row);
+    }
+    for (const b of rows) b.tech_sms = byBooking.get(b.id) || [];
+  } catch (e) {
+    console.warn('[tech_sms_log] attach skipped:', e.message);
+  }
+  return rows;
 }
 
 // ── Extra time slots on a booking (big jobs) ─────────────────────────────────
@@ -2725,8 +2730,16 @@ async function bookingCreate(req, res, db, auth, body) {
   }
 
   // Notify the technician if one was assigned at creation time (job-local tz).
-  if (technician_id) notifyTechAssigned(db, biz, technician_id, scheduled_at, tz).catch(console.error);
-  if (secondary_technician_id) notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at, tz).catch(console.error);
+  // AWAITED: unawaited, Vercel can freeze the lambda when the response goes out
+  // and the Twilio call never happens.
+  if (technician_id) {
+    await notifyTechAssigned(db, biz, technician_id, scheduled_at, tz, { bookingId: bRow.id })
+      .catch(e => console.error('[tech-notify]', e.message));
+  }
+  if (secondary_technician_id) {
+    await notifyTechAssigned(db, biz, secondary_technician_id, scheduled_at, tz, { bookingId: bRow.id })
+      .catch(e => console.error('[tech-notify]', e.message));
+  }
 
   // Owner SMS when this ticket carries 4+ brackets (same alert as widget bookings).
   maybeSendBigBracketAlert({
@@ -3230,15 +3243,31 @@ async function bookingUpdate(req, res, db, auth, body) {
   // tech actually changed, so re-saving the same assignment doesn't re-text them).
   // Resolve the JOB's local tz from its zip so the texted time is the job's local
   // time (an Austin job is Central), not the business's Mountain time.
-  const assignTz = (body.action === 'assign')
+  // AWAITED (not fire-and-forget): unawaited, the `return res.json()` on the
+  // very next line lets Vercel freeze the lambda before Twilio is ever called.
+  const notifyTz = (body.action === 'assign' || body.action === 'reschedule')
     ? await areaTimezone(db, await serviceAreaIdFromPostal(db, biz.id, existing.postal_code), biz.timezone || 'America/Denver')
     : (biz.timezone || 'America/Denver');
   if (body.action === 'assign' && patch.technician_id && patch.technician_id !== existing.technician_id) {
-    notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at, assignTz).catch(console.error);
+    await notifyTechAssigned(db, biz, patch.technician_id, existing.scheduled_at, notifyTz, { bookingId: id })
+      .catch(e => console.error('[tech-notify]', e.message));
   }
   // Also notify secondary technician if assigned
   if (body.action === 'assign' && 'secondary_technician_id' in patch && patch.secondary_technician_id && patch.secondary_technician_id !== existing.secondary_technician_id) {
-    notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at, assignTz).catch(console.error);
+    await notifyTechAssigned(db, biz, patch.secondary_technician_id, existing.scheduled_at, notifyTz, { bookingId: id })
+      .catch(e => console.error('[tech-notify]', e.message));
+  }
+  // A RESCHEDULE moves an already-assigned tech's job to a new time but used to
+  // notify nobody — the notify above was gated on action==='assign' only, so a
+  // tech kept the old time in their head and showed up wrong (or not at all).
+  // patch.scheduled_at is the new time; existing.technician_id is unchanged by
+  // this action, which is exactly why it needs telling.
+  if (body.action === 'reschedule' && patch.scheduled_at && patch.scheduled_at !== existing.scheduled_at) {
+    for (const techId of [existing.technician_id, existing.secondary_technician_id]) {
+      if (!techId) continue;
+      await notifyTechAssigned(db, biz, techId, patch.scheduled_at, notifyTz, { bookingId: id, kind: 'rescheduled' })
+        .catch(e => console.error('[tech-notify]', e.message));
+    }
   }
   return res.status(200).json({ ok: true });
 }
@@ -6494,15 +6523,26 @@ async function rescheduleSubmit(req, res, body) {
   }).then(({ error }) => { if (error) console.warn('[reschedule_submit] note insert failed:', error.message); })
     .catch(e => console.warn('[reschedule_submit] note insert failed:', e.message));
 
+  // Every send below is AWAITED: this handler returns on the next statement,
+  // and an unawaited send lets Vercel freeze the lambda before Twilio is called.
   const ownerPhone = process.env.OWNER_PHONE_NUMBER;
   if (ownerPhone) {
-    sendSMS(ownerPhone, `${b.customer?.name || 'A customer'} just rescheduled their ${b.business?.name || ''} appointment: ${oldLabel} → ${newLabel}.`)
+    await sendSMS(ownerPhone, `${b.customer?.name || 'A customer'} just rescheduled their ${b.business?.name || ''} appointment: ${oldLabel} → ${newLabel}.`)
       .catch(e => console.warn('[reschedule_submit] owner SMS failed:', e.message));
+  }
+  const bizForNotify = b.business || { id: b.business_id };
+  // The customer's new slot can land on a DIFFERENT tech than the one who had
+  // the job. Tell the previous tech it's off their plate — otherwise they still
+  // believe they're working it and may drive out to a job that isn't theirs.
+  if (b.technician_id && b.technician_id !== technician_id) {
+    await notifyTechAssigned(db, bizForNotify, b.technician_id, b.scheduled_at, tz, { bookingId: id, kind: 'unassigned' })
+      .catch(e => console.warn('[reschedule_submit] prior-tech SMS failed:', e.message));
   }
   // Text the newly assigned tech the same way office assignment does — they
   // may be a different person than before, and even the same tech needs to
   // know the job moved.
-  notifyTechAssigned(db, b.business || { id: b.business_id }, technician_id, startUTC.toISOString(), tz)
+  await notifyTechAssigned(db, bizForNotify, technician_id, startUTC.toISOString(), tz,
+    { bookingId: id, kind: b.technician_id === technician_id ? 'rescheduled' : 'assigned' })
     .catch(e => console.warn('[reschedule_submit] tech SMS failed:', e.message));
 
   return res.status(200).json({ ok: true, new_date: dateStr, new_time: slotTimeLabel(tz, startUTC.toISOString()) });
@@ -6709,7 +6749,8 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   });
 
   const { data: techInfo } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
-  notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz).catch(console.error);
+  await notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz, { bookingId: bRow.id })
+    .catch(e => console.error('[tech-notify]', e.message));
 
   if (cust.phone) {
     const _d = new Date(scheduled_at);

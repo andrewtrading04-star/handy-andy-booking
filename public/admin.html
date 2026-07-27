@@ -2346,6 +2346,19 @@ function notificationLog(b){
       ? notifPill('Booking confirmation (email)','✓','#4ade80','Sent',b.confirmation_email_sent_at)
       : notifPill('Booking confirmation (email)','✕','#f87171','Not sent',b.confirmation_email_sent_at));
   }
+  // Technician "You got a job!" texts (app.tech_sms_log). One row per attempt,
+  // so a re-assignment or a reschedule each get their own line. This is the
+  // notification that used to be completely invisible — a tech never being told
+  // about a job left no trace anywhere before this.
+  for(const t of (b.tech_sms||[])){
+    const who=t.tech_name?` — ${t.tech_name}`:'';
+    const label=(t.kind==='rescheduled'?'Tech notified: job moved':t.kind==='unassigned'?'Tech notified: job reassigned away':'Tech notified: new job')+who;
+    const when=t.delivered_at||t.sent_at;
+    if(t.status==='delivered') rows.push(notifPill(label,'✓','#4ade80','Delivered',when));
+    else if(t.status==='failed'||t.status==='undelivered') rows.push(notifPill(label,'✕','#f87171',t.error?`Not delivered (${t.error})`:'Not delivered',when));
+    else if(t.status==='skipped') rows.push(notifPill(label,'✕','#f87171',t.skip_reason==='no_phone'?'No phone on file':t.skip_reason==='notifications_off'?'Texting is turned off':`Not sent (${t.skip_reason||'skipped'})`,when));
+    else rows.push(notifPill(label,'…','#fbbf24','Sending',when));
+  }
   if(b.on_the_way_sms_status){
     const st=b.on_the_way_sms_status, when=b.on_the_way_sms_delivered_at||b.on_the_way_sms_sent_at;
     if(st==='delivered') rows.push(notifPill('On the way (text)','✓','#4ade80','Delivered',when));

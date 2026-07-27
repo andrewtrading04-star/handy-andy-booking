@@ -7,6 +7,7 @@ import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
+import { notifyTechAssigned } from './_lib/tech-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -458,6 +459,18 @@ async function bookDoms(req, res) {
     technicianName = null; technicianPhoto = null;
   }
 
+  // Text the assigned tech. This is the whole reason techs stopped hearing about
+  // website bookings: this path auto-assigns (pickOpenTech above) and writes
+  // status:'assigned', but for its entire existence never notified anyone — the
+  // notify helper was private to admin.js and unimportable from here. Keyed off
+  // result.technician_id (not the locally picked id) so a tech who LOST the
+  // slot race just above is never told about a job that isn't theirs.
+  if (result.technician_id) {
+    await notifyTechAssigned(db, { id: biz.id, name: "Dom's TV Mounting", timezone: tz },
+      result.technician_id, startUTC.toISOString(), tz, { bookingId })
+      .catch(e => console.error('[book-doms] tech notify failed:', e.message));
+  }
+
   maybeSendBigBracketAlert({
     lines,
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -766,6 +779,15 @@ async function bookHandyAndy(req, res) {
   // Same race-fallback check as bookDoms above — see the comment there.
   if (technician_id && result.technician_id !== technician_id) {
     technicianName = null; technicianPhoto = null;
+  }
+
+  // Text the assigned tech — see the matching comment in bookDoms. `tz` here is
+  // the METRO's timezone (an Austin job is Central), so the tech is told the
+  // job's real local time rather than the company's Mountain clock.
+  if (result.technician_id) {
+    await notifyTechAssigned(db, { id: biz.id, name: 'Handy Andy', timezone: tz },
+      result.technician_id, startUTC.toISOString(), tz, { bookingId })
+      .catch(e => console.error('[book-ha] tech notify failed:', e.message));
   }
 
   maybeSendBigBracketAlert({

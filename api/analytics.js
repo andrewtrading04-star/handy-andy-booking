@@ -157,6 +157,25 @@ async function handleTwilioStatus(req, res) {
       } else if (status === 'failed' || status === 'undelivered') {
         await db.from('bookings').update({ on_the_way_sms_status: status }).eq('id', t.booking_id);
       }
+    } else if (t && t.kind === 'tech_sms' && t.tech_sms_log_id) {
+      // The "You got a job!" text to a TECHNICIAN (api/_lib/tech-notify.js).
+      // Until this existed, tech texts had no delivery tracking at all — a
+      // failed send left no trace anywhere the owner could see it.
+      const status = (params.MessageStatus || '').toLowerCase();
+      const db = serviceClient();
+      if (status === 'delivered') {
+        await db.from('tech_sms_log')
+          .update({ status: 'delivered', delivered_at: new Date().toISOString() })
+          .eq('id', t.tech_sms_log_id).is('delivered_at', null);
+      } else if (status === 'failed' || status === 'undelivered') {
+        // ErrorCode is the actionable part (30034 = unregistered A2P 10DLC,
+        // 21610 = the tech replied STOP) — without it a carrier block looks
+        // identical to any other failure.
+        const errCode = (params.ErrorCode || '').toString();
+        await db.from('tech_sms_log')
+          .update({ status, error: errCode ? `Twilio ErrorCode ${errCode}` : null })
+          .eq('id', t.tech_sms_log_id);
+      }
     }
   } catch (e) {
     console.error('[sms_status] error:', e.message);
