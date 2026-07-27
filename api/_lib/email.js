@@ -284,22 +284,30 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
   // /add-gds.html; the button never mutates the ticket itself — it just
   // opens a confirm page (see api/admin.js gdsUpsellAdd) so a mail client
   // prefetching this link can't silently add a charge to the customer.
+  // Styled as a continuation of the "Your quote" receipt above it (option 3
+  // of 3 shown) rather than a separate colored banner — same card tone
+  // (#181410), same uppercase label convention, price right-aligned like a
+  // real line item, single accent-colored button.
   let gdsUpsellBlock = '';
   if (details.gdsUpsellUrl) {
     gdsUpsellBlock = `
       <tr><td style="padding:22px 28px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#0f3d3a,#155e4f);border-radius:16px;">
-          <tr><td style="padding:20px 22px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#20190f;border:1px solid #3a3127;border-radius:14px;">
+          <tr><td style="padding:18px 20px;">
+            <div style="font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a8274;margin-bottom:12px;">Add to your ticket</div>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-              <td width="34" valign="top" style="padding-top:1px;font-size:20px;">&#128737;&#65039;</td>
               <td valign="top">
-                <div style="font-size:15px;font-weight:900;color:#fff;margin-bottom:5px;">Never worry about moving this TV again</div>
-                <div style="font-size:13.5px;color:#c9ece3;line-height:1.55;margin-bottom:6px;">Add <strong>Guaranteed Dismount Service</strong> &mdash; whenever you move or need it taken down, we'll come remove it for free. Most customers add this.</div>
-                <div style="font-size:12.5px;color:#8fd4c4;font-weight:700;margin-bottom:14px;">Just ${money(GDS_UPSELL_PRICE)} &middot; one-time</div>
-                <a href="${esc(details.gdsUpsellUrl)}" style="display:inline-block;text-decoration:none;font-weight:800;border-radius:10px;padding:13px 22px;font-size:14.5px;background:#ffffff;color:#0f3d3a;">Add Guaranteed Dismount &rarr;</a>
-                <div style="font-size:11.5px;color:#8fbfb2;line-height:1.5;margin-top:10px;">Click this button and confirm and we will add it to your ticket. No need to call us.</div>
+                <div style="font-size:14.5px;font-weight:800;color:#fff;margin-bottom:4px;">Guaranteed Dismount Service</div>
+                <div style="font-size:12.5px;color:#d8d2c6;line-height:1.5;">Free removal whenever you move or need this TV taken down.</div>
+              </td>
+              <td valign="top" align="right" style="padding-left:14px;white-space:nowrap;">
+                <span style="font-size:16px;font-weight:900;color:#fff;">${money(GDS_UPSELL_PRICE)}</span>
               </td>
             </tr></table>
+            <div style="margin-top:14px;">
+              <a href="${esc(details.gdsUpsellUrl)}" style="display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:10px;padding:13px 22px;font-size:14.5px;background:${accent};color:#ffffff;">Add Guaranteed Dismount &rarr;</a>
+              <div style="font-size:11.5px;color:#8a8274;line-height:1.5;margin-top:10px;text-align:center;">Click this button and confirm and we will add it to your ticket. No need to call us.</div>
+            </div>
           </td></tr>
         </table>
       </td></tr>`;
