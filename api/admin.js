@@ -2121,6 +2121,43 @@ async function saveCardOnFile(pmId, cust, slug = null) {
   return { customerId, pmId, brand: pm?.card?.brand || null, last4: pm?.card?.last4 || null };
 }
 
+// ── Price sanity ceiling (circuit breaker against absurd amounts) ──────────
+// Added after a real incident: a browser's own address-autofill matched the
+// word "zip" in the Travel Fee field's placeholder and silently stuffed a
+// 5-digit ZIP code into it as a dollar amount, creating an $86,889 booking
+// nobody had typed. No real job at either business has ever run more than a
+// few hundred dollars. These ceilings are generous relative to that reality
+// specifically so a genuinely large one-off job still goes through — with an
+// explicit, unmissable confirmation — while a stray 5-figure number from a
+// typo, paste, or autofill bug can never silently become a real booking,
+// estimate, or (most importantly) an actual card charge.
+const PRICE_SANITY_LINE_CEILING = 2000;   // per line item / per fee, in dollars
+const PRICE_SANITY_TOTAL_CEILING = 5000;  // whole booking / estimate / charge
+
+// Returns null when everything is within the sane range; otherwise a short,
+// specific message naming the exact absurd number and line — reused as both
+// the 409 error text and (verbatim) the client's confirmation-dialog text, so
+// what the office sees exactly matches what would have gotten billed.
+// `lines` accepts either shape used across this file: { unit_price } (booking
+// line items, estimate line items) or { price } (New Booking's `selections`).
+function priceSanityIssue({ lines, total } = {}) {
+  if (Array.isArray(lines)) {
+    for (const l of lines) {
+      if (!l) continue;
+      const amt = Math.abs(Number(l.unit_price ?? l.price) || 0);
+      if (amt > PRICE_SANITY_LINE_CEILING) {
+        const label = (l.name || l.label || l.description || 'A line item').toString().slice(0, 60);
+        return `"${label}" is $${amt.toFixed(2)} — that's far outside any real charge for this business. Double-check the amount before continuing.`;
+      }
+    }
+  }
+  const t = Math.abs(Number(total) || 0);
+  if (t > PRICE_SANITY_TOTAL_CEILING) {
+    return `This total is $${t.toFixed(2)} — that's far outside any real job for this business. Double-check the amount before continuing.`;
+  }
+  return null;
+}
+
 // ── Create a manual / phone booking ──────────────────────────────────────────
 async function bookingCreate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -2405,6 +2442,15 @@ async function bookingCreate(req, res, db, auth, body) {
   const hasSelections = Array.isArray(body.selections) && body.selections.length > 0;
   if (!body.service_id && !hasSelections && !(body.notes || '').toString().trim()) {
     return res.status(400).json({ error: 'Choose a service category and at least one option before creating this booking — nothing was selected.' });
+  }
+
+  // Sanity ceiling on the price BEFORE any row is created (real incident: a
+  // browser autofilled a 5-digit ZIP into the Travel Fee box and an $86,889
+  // booking was created with nobody having typed that number). See
+  // priceSanityIssue() for the thresholds and rationale.
+  if (body.confirm_high_price !== true) {
+    const issue = priceSanityIssue({ lines: body.selections, total: body.price });
+    if (issue) return res.status(409).json({ error: issue, code: 'high_price_confirm_required' });
   }
 
   // Signed review-link token (30-day TTL) so the completion follow-up can point
@@ -3155,6 +3201,13 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
 
   const items = sanitizeBookingLineItems(body.items);
 
+  // Same sanity ceiling as booking_create — an edit can introduce an absurd
+  // line item just as easily as the original create (see priceSanityIssue).
+  if (body.confirm_high_price !== true) {
+    const issue = priceSanityIssue({ lines: items });
+    if (issue) return res.status(409).json({ error: issue, code: 'high_price_confirm_required' });
+  }
+
   // Current rows: the snapshot source AND the exact ids we'll delete after the
   // new rows are safely in.
   const { data: oldRows, error: oldErr } = await db.from('booking_line_items')
@@ -3504,6 +3557,13 @@ async function bookingPayment(req, res, db, auth, body) {
 
     const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
     if (!ticketAmount || ticketAmount <= 0) { const e = new Error('Enter an amount greater than $0.'); e.status = 400; throw e; }
+    // Sanity ceiling — this is the step that actually moves real money, so it
+    // gets the same circuit breaker as booking_create/line_items_save (see
+    // priceSanityIssue) with the highest stakes of any of them.
+    if (body.confirm_high_price !== true) {
+      const issue = priceSanityIssue({ total: ticketAmount });
+      if (issue) { const e = new Error(issue); e.status = 409; e.code = 'high_price_confirm_required'; throw e; }
+    }
     // Optional tip (e.g. the office runs the signed flow on a tablet too).
     const tip = Math.max(0, Math.round((Number(body.tip) || 0) * 100) / 100);
     // No ceiling here means a fat-fingered tip (e.g. $1500 instead of $15)
@@ -3577,7 +3637,9 @@ async function bookingPayment(req, res, db, auth, body) {
     // Release the lock on any failure so the booking can be retried (or paid
     // with cash) instead of being stuck on 'charging'.
     try { await db.from('bookings').update({ payment_status: priorPaymentStatus }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
-    return res.status(e.status || 500).json({ error: e.message });
+    const payload = { error: e.message };
+    if (e.code) payload.code = e.code;
+    return res.status(e.status || 500).json(payload);
   }
 }
 
@@ -5598,6 +5660,15 @@ async function estimateUpdate(req, res, db, auth, body) {
   if (body.tax_rate !== undefined) patch.tax_rate = normalizeTaxRate(body.tax_rate);
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
 
+  // Same sanity ceiling as booking_create/line_items_save — an estimate a
+  // customer approves converts straight into a real booking (see
+  // estimate_approve), so an absurd quoted line here has the same real-world
+  // consequence as an absurd booking price.
+  if (patch.line_items && body.confirm_high_price !== true) {
+    const issue = priceSanityIssue({ lines: patch.line_items });
+    if (issue) return res.status(409).json({ error: issue, code: 'high_price_confirm_required' });
+  }
+
   // line_items / tax_rate / upsells come from not-yet-applied migrations on some
   // databases. If the missing column is one of those, drop it and retry so the
   // rest of the update still lands (upsells silently no-ops until 0048 is applied).
@@ -5802,6 +5873,12 @@ async function estimateCreate(req, res, db, auth, body) {
       qty: s.quantity || 1,
       unit_price: s.price || 0,
     })));
+  }
+  // Same sanity ceiling as booking_create — an estimate the customer approves
+  // converts straight into a real booking (estimate_approve).
+  if (body.confirm_high_price !== true) {
+    const issue = priceSanityIssue({ lines: line_items });
+    if (issue) return res.status(409).json({ error: issue, code: 'high_price_confirm_required' });
   }
   // Don't also store a comma-joined dump of the selections as the description —
   // it just duplicated the line items on the estimate card. Only keep a

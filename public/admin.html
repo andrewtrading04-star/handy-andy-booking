@@ -1207,7 +1207,7 @@
       <div class="nb-ziplead">
         <div class="nb-lead-q">What's the customer's <b>ZIP Code</b>?</div>
         <div class="nb-ziprow">
-          <input class="search" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
+          <input class="search" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
         </div>
         <div id="nbZipArea" class="nb-zip-area"></div>
       </div>
@@ -1216,9 +1216,9 @@
       <div id="nbSteps"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
         <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
-        <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal">
+        <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal" autocomplete="off">
       </div>
-      <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-fills by zip" inputmode="decimal">
+      <input class="search" style="margin:0;margin-top:10px" id="nbTravelFee" placeholder="Travel / service-area fee ($) — auto-filled" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill">
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbTotalDisplay" style="font-size:13px;padding:12px 14px;border-radius:10px;"></div>
       <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
@@ -2869,8 +2869,24 @@ function mountLineItemsEditor(b){
       confirmEmpty=true;
     }
     const btn=document.getElementById('bkLiSave'); btn.disabled=true;
+    let confirmHighPrice=false;
     try{
-      const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, ...(confirmEmpty&&{confirm_empty:true}) }});
+      let resp;
+      for(;;){
+        try{
+          resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, ...(confirmEmpty&&{confirm_empty:true}), ...(confirmHighPrice&&{confirm_high_price:true}) }});
+          break;
+        }catch(err){
+          // Same implausible-amount guard as New Booking (see
+          // apiConfirmUnavailable) — an edited line item can introduce the
+          // same kind of absurd number just as easily as the original create.
+          if(err.code==='high_price_confirm_required' && !confirmHighPrice){
+            if(!confirm(`${err.message}\n\nSave it anyway as entered?`)) return;
+            confirmHighPrice=true; continue;
+          }
+          throw err;
+        }
+      }
       // Reflect the saved state locally so the modal stays in sync, then refresh
       // the underlying schedule (prices/totals) without closing the modal.
       b.line_items=items.map(it=>{
@@ -3137,6 +3153,17 @@ async function apiConfirmUnavailable(action, body){
     try{
       return await api(action,{ method:'POST', body:{...curBody, force_unavailable_ids:forced} });
     }catch(err){
+      // A price/total the server flagged as implausible (e.g. a $80,123
+      // "fee" — the real incident this guards against was a browser
+      // silently autofilling a ZIP code into a dollar field). Show the
+      // EXACT number the server would have charged/booked and require an
+      // explicit yes before retrying with the override flag — never a
+      // silent pass-through, no matter how many times this loop runs.
+      if(err.code==='high_price_confirm_required'){
+        if(!confirm(`${err.message}\n\nSave it anyway as entered?`)) throw err;
+        curBody={...curBody, confirm_high_price:true};
+        continue;
+      }
       if(err.code!=='tech_unavailable' || !err.tech_id) throw err;
       if(!confirm(`${err.message}\n\nBook them anyway?`)) throw err;
       forced.push(err.tech_id);
