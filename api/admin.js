@@ -298,6 +298,8 @@ export default async function handler(req, res) {
       case 'secretary_availability': return await secretaryAvailability(req, res, db, auth);
       case 'secretary_availability_set': return await secretaryAvailabilitySet(req, res, db, auth, body);
       case 'secretary_availability_exception_set': return await secretaryAvailabilityExceptionSet(req, res, db, auth, body);
+      case 'secretary_changes':      return await secretaryChanges(req, res, db, auth);
+      case 'secretary_changes_seen': return await secretaryChangesSeen(req, res, db, auth, body);
       case 'secretaries_list': return await secretariesList(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
@@ -7444,11 +7446,52 @@ async function secretaryAvailabilitySet(req, res, db, auth) {
   if (bizErr) throw bizErr;
   if (!biz) return res.status(404).json({ error: 'Business not found' });
 
+  // Read the prior value BEFORE the upsert so the owner's feed can describe a
+  // real change ("was working -> now off") instead of just the end state.
+  const { data: prevRow } = await db.from('secretary_availability')
+    .select('is_available').eq('business_id', biz.id).eq('day_of_week', dayOfWeek).maybeSingle();
+
   const { error } = await db.from('secretary_availability')
     .upsert({ business_id: biz.id, day_of_week: dayOfWeek, is_available: isAvailable, updated_at: new Date().toISOString() },
       { onConflict: 'business_id,day_of_week' });
   if (error) throw error;
+
+  await recordSecretaryChange(db, {
+    biz, scope: auth.scope, kind: 'weekly',
+    dayOfWeek, isAvailable, previous: prevRow ? prevRow.is_available : null,
+  });
   return res.status(200).json({ ok: true, day_of_week: dayOfWeek, is_available: isAvailable });
+}
+
+// Record a secretary schedule change for the owner's dashboard feed, and text
+// the owner. Best-effort throughout: the schedule change itself is already
+// committed by the time this runs, so a logging or SMS failure must never turn
+// a successful save into an error for Heather/Joey.
+async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, dateStr = null, isAvailable, previous }) {
+  // Nothing actually changed (re-saving the same value) — don't cry wolf.
+  if (previous !== null && previous === isAvailable) return;
+  const who = displayNameFor(scope);
+  try {
+    await db.from('secretary_schedule_changes').insert({
+      business_id: biz.id, changed_by: who, kind,
+      day_of_week: kind === 'weekly' ? dayOfWeek : null,
+      exception_date: kind === 'exception' ? dateStr : null,
+      is_available: isAvailable, previous_available: previous,
+    });
+  } catch (e) { console.warn('[secretary-change] log failed:', e.message); }
+
+  try {
+    const ownerPhone = process.env.OWNER_PHONE_NUMBER;
+    if (!ownerPhone) return;
+    const when = kind === 'weekly'
+      ? `every ${DOW_NAMES[dayOfWeek] || `day ${dayOfWeek}`}`
+      : (() => { try { return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }); }
+                 catch { return dateStr; } })();
+    const what = isAvailable
+      ? (kind === 'weekly' ? `is now WORKING ${when}` : `is now WORKING on ${when}`)
+      : (kind === 'weekly' ? `is now OFF ${when}` : `took ${when} OFF`);
+    await sendSMS(ownerPhone, `Schedule change: ${who} ${what}.`);
+  } catch (e) { console.warn('[secretary-change] owner SMS failed:', e.message); }
 }
 
 // POST — a one-off exception for a specific date (e.g. a day off this week
@@ -7464,11 +7507,67 @@ async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
   if (bizErr) throw bizErr;
   if (!biz) return res.status(404).json({ error: 'Business not found' });
 
+  // Prior state for this exact date: an existing exception if there is one,
+  // otherwise what their recurring weekly pattern says for that weekday — so
+  // "took Friday off" is only reported when Friday was actually a work day.
+  const { data: prevEx } = await db.from('secretary_availability_exceptions')
+    .select('is_available').eq('business_id', biz.id).eq('exception_date', date).maybeSingle();
+  let previous = prevEx ? prevEx.is_available : null;
+  if (previous === null) {
+    try {
+      const dow = dayOfWeekFor(date);
+      const { data: pat } = await db.from('secretary_availability')
+        .select('is_available').eq('business_id', biz.id).eq('day_of_week', dow).maybeSingle();
+      if (pat) previous = pat.is_available;
+    } catch { /* fall back to "no prior state" */ }
+  }
+
   const { error } = await db.from('secretary_availability_exceptions')
     .upsert({ business_id: biz.id, exception_date: date, is_available: isAvailable, updated_at: new Date().toISOString() },
       { onConflict: 'business_id,exception_date' });
   if (error) throw error;
+
+  await recordSecretaryChange(db, {
+    biz, scope: auth.scope, kind: 'exception',
+    dateStr: date, isAvailable, previous,
+  });
   return res.status(200).json({ ok: true, date, is_available: isAvailable });
+}
+
+// GET — owner-only feed of secretary schedule changes, newest first, with an
+// unread count for the nav badge. Read-only; marking read is a separate POST
+// so simply opening the page doesn't silently clear the badge.
+async function secretaryChanges(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data, error } = await db.from('secretary_schedule_changes')
+    .select('id, business_id, changed_by, kind, day_of_week, exception_date, is_available, previous_available, seen_at, created_at, business:businesses ( slug, name )')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  const changes = (data || []).map(c => ({
+    id: c.id, changed_by: c.changed_by, kind: c.kind,
+    day_of_week: c.day_of_week, day_name: c.day_of_week != null ? DOW_NAMES[c.day_of_week] : null,
+    exception_date: c.exception_date, is_available: c.is_available,
+    previous_available: c.previous_available, seen: !!c.seen_at, created_at: c.created_at,
+    business_slug: c.business?.slug || null, business_name: c.business?.name || null,
+  }));
+  return res.status(200).json({ changes, unseen: changes.filter(c => !c.seen).length });
+}
+
+// POST — mark schedule changes read. { id } for one, or { all:true } for the lot.
+async function secretaryChangesSeen(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const now = new Date().toISOString();
+  let q = db.from('secretary_schedule_changes').update({ seen_at: now }).is('seen_at', null);
+  if (!body.all) {
+    const id = (body.id || '').toString();
+    if (!id) return res.status(400).json({ error: 'id or all:true required' });
+    q = q.eq('id', id);
+  }
+  const { error } = await q;
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // GET — owner-only "Secretaries" admin view: both Heather's and Joey's
