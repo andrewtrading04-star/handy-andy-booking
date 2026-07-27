@@ -87,23 +87,28 @@ async function partnerBusiness(db, hostSlug) {
   return data || null;
 }
 
-// Which business(es)' technician roster an "Any Technician" / auto-pick should
-// scan: the partner company alone when pool==='partner', BOTH companies (host
-// first) when pool==='cross' (the office's "Any Technician" — anyone from
-// either company, Denver-only — falling into the partner roster only when no
-// one at the host company is free), else just the host. Always returns an
-// ARRAY — every consumer (pickAvailableTech, availableSlotKeys,
-// freeSlotTechMap, and availableDates' local rosterIds) accepts one.
-async function rosterBizId(db, hostBiz, pool) {
-  if (pool === 'cross') {
-    const p = await partnerBusiness(db, hostBiz.slug);
-    return p ? [hostBiz.id, p.id] : [hostBiz.id];
-  }
-  if (pool === 'partner') {
-    const p = await partnerBusiness(db, hostBiz.slug);
-    if (p) return [p.id];
-  }
-  return [hostBiz.id];
+// Which technician rosters an "Any Technician" / auto-pick may scan, as an
+// ORDERED array of scopes [{ bizId, serviceAreaId }] — host first, partner
+// (pool 'partner'/'cross') after. Every scope is pinned to that business's
+// OWN service area for the booking's zip, so an auto-pick can never hand a
+// Denver job to the Austin/Houston tech: slot keys (s1–s5) carry no location,
+// which once let Zach's Austin schedule satisfy a Denver 2 PM check. A null
+// serviceAreaId (zip missing/unknown to the HOST) leaves that one scope
+// unscoped — legacy leniency for odd zips — but a KNOWN zip the PARTNER
+// doesn't serve drops the partner scope entirely: never reach into the other
+// company for a metro they don't cover. Consumers: pickAvailableTech,
+// availableSlotKeys, freeSlotTechMap, and availableDates' local rosterIds.
+async function rosterScopes(db, hostBiz, pool, postalCode) {
+  const zip = (postalCode || '').toString().trim();
+  const hostArea = zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null;
+  const host = { bizId: hostBiz.id, serviceAreaId: hostArea };
+  if (pool !== 'cross' && pool !== 'partner') return [host];
+  const p = await partnerBusiness(db, hostBiz.slug);
+  if (!p) return [host];
+  const partnerArea = zip ? await serviceAreaIdFromPostal(db, p.id, zip) : null;
+  const partnerScope = (!zip || partnerArea) ? [{ bizId: p.id, serviceAreaId: partnerArea }] : [];
+  if (pool === 'partner') return partnerScope;
+  return [host, ...partnerScope];
 }
 
 // Look up the service_area_id for a postal code in a given business.
@@ -1498,29 +1503,27 @@ async function availableSlots(req, res, db, auth) {
   const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
   // Each technician can come from a different company pool: pool drives the
   // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
-  const ridPrimary = await rosterBizId(db, biz, (req.query.pool || '').toString());
+  // Every scope is pinned to that company's own metro for this zip — an "any"
+  // side must never offer (or later book) a slot only an out-of-metro tech has.
+  const scopesPrimary = await rosterScopes(db, biz, (req.query.pool || '').toString(), postalCode);
   // Want a two-tech pair whenever a second tech is requested — unless it's the
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
 
-  // For cross-company secondary tech selection, match techs to the customer's
-  // service area (already resolved from the postal code above).
-  const serviceAreaId = (wantPair && techId2 === 'any') ? bookingAreaId : null;
-
   let keys;
   if (!wantPair) {
-    keys = await availableSlotKeys(db, ridPrimary, techId, dateStr, dow, tz);
+    keys = await availableSlotKeys(db, scopesPrimary, techId, dateStr, dow, tz);
   } else {
     // Two-technician job (e.g. a large-TV lift): only offer slots where a
     // DISTINCT pair is free — one tech from the primary side and a different
     // tech from the second side. Each side may be a concrete person OR "any" of
     // a (possibly different) company pool.
-    const ridSecondary = await rosterBizId(db, biz, (req.query.pool2 || '').toString());
-    const pMap = await freeSlotTechMap(db, ridPrimary, techId, dateStr, dow, tz);
-    // Pass serviceAreaId + ineligible-secondary filter to the SECOND-tech side so
-    // an "Any <company>" pick never offers a slot only Juan/Zach can cover.
-    const sMap = await freeSlotTechMap(db, ridSecondary, techId2, dateStr, dow, tz, serviceAreaId, true);
+    const scopesSecondary = await rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode);
+    const pMap = await freeSlotTechMap(db, scopesPrimary, techId, dateStr, dow, tz);
+    // Ineligible-secondary filter on the SECOND-tech side so an "Any <company>"
+    // pick never offers a slot only Juan/Zach can cover.
+    const sMap = await freeSlotTechMap(db, scopesSecondary, techId2, dateStr, dow, tz, true);
     keys = new Set();
     for (const [k, P] of pMap) {
       const S = sMap.get(k);
@@ -1663,12 +1666,31 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
 // (a slot a tech is already booked for is no longer offered — no double-booking).
 // excludeTechId drops one tech from the "ANY" union, so the SAME person can't be
 // counted as both the primary and the second technician on a two-tech job.
-async function availableSlotKeys(db, bizIdOrIds, techId, dateStr, dow, tz, excludeTechId = null) {
-  const bizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
+// Normalize a roster argument to [{ bizId, serviceAreaId }] scopes — accepts
+// the rosterScopes() shape, a bare biz id, or an array of bare ids (legacy).
+function normalizeRosterScopes(bizIdOrScopes) {
+  const arr = Array.isArray(bizIdOrScopes) ? bizIdOrScopes : [bizIdOrScopes];
+  return arr.filter(Boolean).map(s => (typeof s === 'object' ? s : { bizId: s, serviceAreaId: null }));
+}
+// All active tech ids across the given scopes, each scope filtered to its own
+// service area (metro) when one is known — the shared guard that keeps every
+// "any"-side availability scan and auto-pick inside the booking's metro.
+async function scopedRosterTechs(db, scopes, cols = 'id') {
+  const lists = [];
+  for (const sc of normalizeRosterScopes(scopes)) {
+    let q = db.from('technicians').select(cols).eq('business_id', sc.bizId).eq('active', true)
+      .order('created_at', { ascending: true });
+    if (sc.serviceAreaId) q = q.eq('service_area_id', sc.serviceAreaId);
+    const { data } = await q;
+    lists.push(data || []);
+  }
+  return lists;
+}
+
+async function availableSlotKeys(db, bizIdOrScopes, techId, dateStr, dow, tz, excludeTechId = null) {
   if (!techId || techId === 'any') {
-    const { data: techs } = await db.from('technicians')
-      .select('id').in('business_id', bizIds).eq('active', true);
-    const ids = (techs || []).map(t => t.id).filter(id => !excludeTechId || id !== excludeTechId);
+    const lists = await scopedRosterTechs(db, bizIdOrScopes);
+    const ids = lists.flat().map(t => t.id).filter(id => !excludeTechId || id !== excludeTechId);
     const state = await batchTechSlotState(db, ids, dateStr, dow, tz);
     const union = new Set();
     for (const [, s] of state) s.keys.forEach(k => { if (!s.booked.has(k)) union.add(k); });
@@ -1684,15 +1706,11 @@ async function availableSlotKeys(db, bizIdOrIds, techId, dateStr, dow, tz, exclu
 // that is either a concrete tech or "any" of a roster (recurring ± exceptions −
 // existing bookings). Used to match a DISTINCT two-tech pair for big-TV jobs:
 // the union of the two sides' free techs in a slot must be ≥ 2 distinct people.
-async function freeSlotTechMap(db, bizIdOrIds, techId, dateStr, dow, tz, serviceAreaId = null, excludeIneligibleSecondary = false) {
-  const bizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
+async function freeSlotTechMap(db, bizIdOrScopes, techId, dateStr, dow, tz, excludeIneligibleSecondary = false) {
   let techIds;
   if (!techId || techId === 'any') {
-    let query = db.from('technicians')
-      .select('id, name').in('business_id', bizIds).eq('active', true);
-    if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
-    const { data: techs } = await query;
-    let pool = techs || [];
+    const lists = await scopedRosterTechs(db, bizIdOrScopes, 'id, name');
+    let pool = lists.flat();
     if (excludeIneligibleSecondary) pool = pool.filter(t => !isSecondaryIneligibleName(t.name));
     techIds = pool.map(t => t.id);
   } else {
@@ -1716,31 +1734,26 @@ async function freeSlotTechMap(db, bizIdOrIds, techId, dateStr, dow, tz, service
 // one-time exception) who is NOT already booked for that slot. Falls back to any
 // active tech who is free in that slot so we never auto-create a double-booking.
 // excludeTechId skips one tech (e.g. the primary, when auto-picking the second).
-// serviceAreaId restricts to techs in a specific service area (for cross-company secondary tech selection).
 // excludeIneligibleSecondary drops techs who can never be a second tech (Juan/Zach).
-// bizIdOrIds is normally a single business id, but for the cross-company "Any
-// Technician" pool it's an ORDERED array of scopes (e.g. [ownBizId, partnerBizId])
-// — each scope is tried to exhaustion before falling to the next, so "Any
-// Technician" prefers keeping the job in-house and only reaches into the
-// partner company when nobody home is free.
+// bizIdOrScopes is the rosterScopes() shape ([{ bizId, serviceAreaId }], ORDERED
+// host-first for the cross-company "Any Technician" pool) — each scope is tried
+// to exhaustion before falling to the next, so "Any Technician" prefers keeping
+// the job in-house and only reaches into the partner company when nobody home
+// is free. Each scope is filtered to its own metro (service area): an Austin
+// tech's schedule must never satisfy a Denver job's slot check just because
+// slot keys carry no location. Bare biz ids still accepted (unscoped).
 // strict=true skips the off-schedule "second choice" fallback entirely — for
 // callers with no human in the loop to confirm an override (e.g. a customer's
 // own estimate-approval auto-book), silently handing the job to someone who
 // never marked that slot available is never acceptable; better to come back
 // null and tell the customer to pick another time.
-async function pickAvailableTech(db, bizIdOrIds, dateStr, slotKey, tz, excludeTechId = null, serviceAreaId = null, excludeIneligibleSecondary = false, strict = false) {
-  const scopeBizIds = Array.isArray(bizIdOrIds) ? bizIdOrIds : [bizIdOrIds];
-  const scopeLists = [];
-  for (const bizId of scopeBizIds) {
-    let query = db.from('technicians')
-      .select('id, name').eq('business_id', bizId).eq('active', true)
-      .order('created_at', { ascending: true });
-    if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
-    const { data: techs } = await query;
-    let list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
+async function pickAvailableTech(db, bizIdOrScopes, dateStr, slotKey, tz, excludeTechId = null, excludeIneligibleSecondary = false, strict = false) {
+  const rawLists = await scopedRosterTechs(db, bizIdOrScopes, 'id, name');
+  const scopeLists = rawLists.map(techs => {
+    let list = techs.filter(t => !excludeTechId || t.id !== excludeTechId);
     if (excludeIneligibleSecondary) list = list.filter(t => !isSecondaryIneligibleName(t.name));
-    scopeLists.push(list);
-  }
+    return list;
+  });
   if (!scopeLists.some(l => l.length)) return null;
   if (dateStr && slotKey) {
     const dow = dayOfWeekFor(dateStr);
@@ -1818,9 +1831,13 @@ async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz
       { bizId: biz.id,     serviceAreaId: ownArea },   // fallback: any available Dom's tech
     ], dateStr, slotKey, tz, primaryTechId);
   }
-  const rid2 = await rosterBizId(db, biz, (pool2 || '').toString());
-  const serviceAreaId = pool2 === 'partner' ? await serviceAreaIdFromPostal(db, biz.id, postalCode) : null;
-  return await pickAvailableTech(db, rid2, dateStr, slotKey, tz, primaryTechId, serviceAreaId, true);
+  // Each scope carries its own business's area id for this zip (the old code
+  // applied the HOST's area id to the PARTNER roster, which matches nobody —
+  // partner techs carry the partner's own area ids — silently killing the
+  // pool-based partner auto-pick). strict: a silently off-schedule SECOND tech
+  // is never acceptable — same doctrine as the Dom's branch above.
+  const scopes2 = await rosterScopes(db, biz, (pool2 || '').toString(), postalCode);
+  return await pickAvailableTech(db, scopes2, dateStr, slotKey, tz, primaryTechId, true, true);
 }
 
 async function singleTechSlotKeys(db, techId, dateStr, dow) {
@@ -1855,14 +1872,18 @@ async function availableDates(req, res, db, auth) {
   // Resolve each side (primary, optional second tech) to a concrete list of
   // technician ids to consider. Each side has its own company pool: pool drives
   // the primary, pool2 the second tech. A side that is "any" expands to that
-  // pool's whole active roster.
-  const rosterIds = async (bizIds) => {
-    const { data } = await db.from('technicians').select('id').in('business_id', bizIds).eq('active', true);
-    return (data || []).map(t => t.id);
+  // pool's active roster, scoped to each company's own metro for the booking's
+  // zip — otherwise the date picker lights up days only an out-of-metro tech
+  // has open, which the slot/booking steps would then (rightly) refuse.
+  const postalCode = (req.query.postal_code || '').toString();
+  const rosterIds = async (pool) => {
+    const scopes = await rosterScopes(db, biz, pool, postalCode);
+    const lists = await scopedRosterTechs(db, scopes);
+    return lists.flat().map(t => t.id);
   };
   const primaryIds = (techId && techId !== 'any')
     ? [techId]
-    : await rosterIds(await rosterBizId(db, biz, (req.query.pool || '').toString()));
+    : await rosterIds((req.query.pool || '').toString());
   // Want a two-tech pair whenever a second tech is requested — unless it's the
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: distinctness is enforced per-slot below, not by filtering rosters.
@@ -1871,7 +1892,7 @@ async function availableDates(req, res, db, auth) {
   if (wantPair) {
     secondaryIds = (techId2 && techId2 !== 'any')
       ? [techId2]
-      : await rosterIds(await rosterBizId(db, biz, (req.query.pool2 || '').toString()));
+      : await rosterIds((req.query.pool2 || '').toString());
   }
   if (!primaryIds.length || (wantPair && !secondaryIds.length)) return res.status(200).json({ dates: [], month });
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
@@ -2114,8 +2135,13 @@ async function bookingCreate(req, res, db, auth, body) {
   let technician_id = body.technician_id;
   let unassignedWarning = null;
   if (technician_id === 'any') {
-    const rid = await rosterBizId(db, biz, (body.pool || '').toString());
-    technician_id = await pickAvailableTech(db, rid, body.scheduled_date, body.scheduled_slot, tz);
+    // Scoped to each company's own metro for this zip (the unscoped roster
+    // once handed a Denver Dom's job to Zach in Austin), and strict: never
+    // silently book a tech who didn't mark the slot available — if nobody
+    // scheduled is free, the job lands UNASSIGNED with the loud warning
+    // below instead of on someone who never opted into that time.
+    const scopes = await rosterScopes(db, biz, (body.pool || '').toString(), c.postal_code);
+    technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
     // The slot showed as available when the office picked it, but every tech
     // got booked in the meantime (a two-secretary race). The booking is still
     // created — losing the customer over a race would be worse — but it lands
@@ -6289,8 +6315,10 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   // strict:true — this is a fully automated, customer-triggered booking with
   // no office staffer to confirm an override, so it must never fall back to a
   // tech who merely has no conflicting job (pickAvailableTech's off-schedule
-  // second choice) — only someone actually scheduled to work that slot.
-  const technician_id = await pickAvailableTech(db, biz.id, slot.date, slot.slot_key, areaTz, null, null, false, true);
+  // second choice) — only someone actually scheduled to work that slot, and
+  // only from THIS metro's roster (a multi-metro business must never book its
+  // Austin tech onto a Denver estimate just because slot keys match).
+  const technician_id = await pickAvailableTech(db, [{ bizId: biz.id, serviceAreaId: bookingAreaId }], slot.date, slot.slot_key, areaTz, null, false, true);
   if (!technician_id) {
     const e = new Error("That time isn't available anymore — please pick another time.");
     e.conflict = true;

@@ -8071,6 +8071,10 @@ async function loadNbCalendar(){
   document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:var(--ink-2);font-size:12px;padding:10px;">Loading…</div>';
   const params={ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:prim.id };
   if(prim.pool==='partner'||prim.pool==='cross') params.pool=prim.pool;
+  // The zip scopes each roster to its own metro server-side — without it an
+  // "any" side lights up days only an out-of-metro tech has open.
+  const calZip=document.getElementById('nbZip').value.trim();
+  if(calZip) params.postal_code=calZip;
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
   try{
