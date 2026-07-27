@@ -3787,12 +3787,23 @@ async function customers(req, res, db, auth) {
   // contact book into an actual CRM: jobs count, lifetime spend, GDS flag, and
   // last-seen date shown right in the table, before ever opening a detail view.
   if (customerRows.length) {
-    const { data: jobRows } = await db.from('bookings')
-      .select('customer_id, price, status, scheduled_at, review_rating, line_items:booking_line_items ( name )')
-      .eq('business_id', biz.id)
-      .in('customer_id', customerRows.map(c => c.id));
+    // Paged fetch: PostgREST silently caps un-ranged selects at its max-rows
+    // setting (1000 by default), which would quietly undercount every stat
+    // once the 200 listed customers collectively pass that many bookings.
+    const jobRows = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: pageErr } = await db.from('bookings')
+        .select('customer_id, price, status, scheduled_at, review_rating, line_items:booking_line_items ( name )')
+        .eq('business_id', biz.id)
+        .in('customer_id', customerRows.map(c => c.id))
+        .range(from, from + PAGE - 1);
+      if (pageErr) { console.warn('[customers] job aggregate failed:', pageErr.message); break; }
+      jobRows.push(...(page || []));
+      if (!page || page.length < PAGE) break;
+    }
     const byCust = {};
-    (jobRows || []).forEach(j => {
+    jobRows.forEach(j => {
       const b = byCust[j.customer_id] || (byCust[j.customer_id] = {
         jobs: 0, completed: 0, cancelled: 0, lifetime_value: 0, last_job_at: null, has_gds: false, ratings: [],
       });
@@ -3800,7 +3811,9 @@ async function customers(req, res, db, auth) {
       if (j.status === 'cancelled') b.cancelled += 1;
       if (j.status === 'completed') { b.completed += 1; b.lifetime_value += Number(j.price) || 0; }
       if (j.scheduled_at && (!b.last_job_at || j.scheduled_at > b.last_job_at)) b.last_job_at = j.scheduled_at;
-      if (jobHasGds(j.line_items)) b.has_gds = true;
+      // "Purchased" must mean a sale that actually stands — a GDS line on a
+      // job the customer cancelled (or no-showed) never happened.
+      if (!['cancelled', 'no_show'].includes(j.status) && jobHasGds(j.line_items)) b.has_gds = true;
       if (j.review_rating) b.ratings.push(j.review_rating);
     });
     customerRows.forEach(c => {
@@ -3839,7 +3852,9 @@ async function customerDetail(req, res, db, auth) {
               technician:technicians!technician_id ( name ),
               line_items:booking_line_items ( name, kind, quantity, unit_price, line_total )`)
     .eq('business_id', biz.id).eq('customer_id', id)
-    .order('scheduled_at', { ascending: false });
+    // nullsFirst:false — Postgres puts NULLs first on DESC by default, which
+    // would float a dateless draft booking to the top and null out last_job_at.
+    .order('scheduled_at', { ascending: false, nullsFirst: false });
   if (jobsErr) throw jobsErr;
   const jobs = (jobRows || []).map(j => ({
     id: j.id,
@@ -3862,19 +3877,28 @@ async function customerDetail(req, res, db, auth) {
 
   // Estimates aren't linked by customer_id (an estimate can predate the
   // customers row, or never convert into one) — match by email/phone instead,
-  // same identity signal the rest of the app uses for this customer.
-  const orParts = [];
-  if (customer.email) orParts.push(`customer_email.eq.${customer.email}`);
-  if (customer.phone) orParts.push(`customer_phone.eq.${customer.phone}`);
+  // same identity signal the rest of the app uses for this customer. Two
+  // separate .eq() queries rather than one .or(): PostgREST's or= parser
+  // treats , ( ) as syntax, and phones are stored as "(303) 555-1234" — an
+  // interpolated .or() string would 400 on every such customer and silently
+  // show "No estimates on file". .eq() values are URL-encoded, so they're safe.
+  const estSelect = 'id, status, service_label, line_items, approved_total, tax_rate, created_at, approved_at, contacted_at';
+  const estQueries = [];
+  if (customer.email) estQueries.push(db.from('estimates').select(estSelect).eq('business_id', biz.id).eq('customer_email', customer.email));
+  if (customer.phone) estQueries.push(db.from('estimates').select(estSelect).eq('business_id', biz.id).eq('customer_phone', customer.phone));
   let estimates = [];
-  if (orParts.length) {
-    const { data: estRows } = await db.from('estimates')
-      .select('id, status, service_label, line_items, approved_total, tax_rate, created_at, approved_at, contacted_at')
-      .eq('business_id', biz.id)
-      .or(orParts.join(','))
-      .order('created_at', { ascending: false })
-      .then(r => r, () => ({ data: [] }));
-    estimates = (estRows || []).map(e => {
+  if (estQueries.length) {
+    const settled = await Promise.all(estQueries);
+    const seen = new Set();
+    const estRows = [];
+    for (const r of settled) {
+      if (r.error) { console.warn('[customer_detail] estimates lookup failed:', r.error.message); continue; }
+      for (const row of (r.data || [])) {
+        if (!seen.has(row.id)) { seen.add(row.id); estRows.push(row); }
+      }
+    }
+    estRows.sort((a, b2) => (b2.created_at || '').localeCompare(a.created_at || ''));
+    estimates = estRows.map(e => {
       const subtotal = (e.line_items || []).reduce((s, li) => s + (Number(li.unit_price) || 0) * (Number(li.qty) || 1), 0);
       return {
         id: e.id, status: e.status, service_label: e.service_label,
@@ -3889,14 +3913,18 @@ async function customerDetail(req, res, db, auth) {
   const completedJobs = jobs.filter(j => j.status === 'completed');
   const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
   const ratings = jobs.map(j => j.review_rating).filter(Boolean);
+  const datedJobs = jobs.filter(j => j.scheduled_at);
   const stats = {
     jobs_count: jobs.length,
     completed_count: completedJobs.length,
     cancelled_count: cancelledJobs.length,
     lifetime_value: Math.round(completedJobs.reduce((s, j) => s + (Number(j.price) || 0), 0) * 100) / 100,
-    first_job_at: jobs.length ? jobs[jobs.length - 1].scheduled_at : null,
-    last_job_at: jobs.length ? jobs[0].scheduled_at : null,
-    has_gds: jobs.some(j => j.has_gds) || estimates.some(e => e.has_gds),
+    first_job_at: datedJobs.length ? datedJobs[datedJobs.length - 1].scheduled_at : null,
+    last_job_at: datedJobs.length ? datedJobs[0].scheduled_at : null,
+    // "Purchased" = a GDS line on a job that actually stands. A cancelled/
+    // no-show job's GDS never happened, and an estimate merely OFFERING it
+    // (the detail view's own column is labeled "GDS Offered") isn't a sale.
+    has_gds: jobs.some(j => j.has_gds && !['cancelled', 'no_show'].includes(j.status)),
     avg_rating: ratings.length ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10 : null,
     reviews_count: ratings.length,
   };
@@ -5985,8 +6013,11 @@ async function gdsUpsellAdd(req, res, body) {
 // token (kind=reschedule, booking_id). GET (rescheduleInfo) shows the current
 // time plus real open slots (same publicOpenSlots engine the booking widget
 // itself uses); POST (rescheduleSubmit) moves the booking and re-assigns a
-// tech via the SAME pickOpenTech() call the original booking used, so a
-// reschedule can never land on a slot no tech actually marked available.
+// tech via the SAME pickOpenTech() call the original booking used. If NO tech
+// is open for the requested slot (availability changed between page load and
+// confirm, or a crafted request names a slot nobody works), the submit is
+// REJECTED — a staffed job is never silently converted into an unstaffed one,
+// and a job never lands on a slot no tech marked available.
 const RESCHEDULE_CUTOFF_MS = 24 * 60 * 60 * 1000; // matches the email's "not within 24 hours" policy
 
 function rescheduleTokenBookingId(raw) {
@@ -5998,6 +6029,7 @@ function rescheduleTokenBookingId(raw) {
 async function fetchBookingForReschedule(db, id) {
   const { data, error } = await db.from('bookings')
     .select(`id, business_id, status, scheduled_at, scheduled_end, duration_minutes, service_area_id, postal_code,
+             technician_id, secondary_technician_id, extra_slots,
              service:services ( name ), customer:customers ( name )`)
     .eq('id', id).maybeSingle();
   if (error) throw error;
@@ -6007,6 +6039,16 @@ async function fetchBookingForReschedule(db, id) {
   data.business = biz || null;
   return data;
 }
+
+// A two-tech (lifting) job or a big job holding extra time slots can't be
+// safely moved by the single-slot self-serve flow: the second tech and the
+// extra slots would either be silently dragged to an unvalidated time or
+// silently dropped, both of which break real scheduling. Those customers are
+// asked to call — the office reschedule path handles the extra moving parts.
+function rescheduleNeedsOffice(b) {
+  return !!(b.secondary_technician_id || (Array.isArray(b.extra_slots) && b.extra_slots.length));
+}
+const RESCHEDULE_CALL_US = 'This appointment has multiple technicians or extra time reserved — please call or text us to reschedule it.';
 
 async function rescheduleInfo(req, res, body) {
   const token = (req.query.token || (body && body.token) || '').toString();
@@ -6021,10 +6063,16 @@ async function rescheduleInfo(req, res, body) {
   const serviceAreaId = b.service_area_id || await serviceAreaIdFromPostal(db, b.business_id, b.postal_code);
   const tz = await areaTimezone(db, serviceAreaId, b.business?.timezone || 'America/Denver');
 
-  if (['cancelled', 'completed', 'no_show'].includes(b.status)) {
+  const blockedReason =
+    b.status === 'cancelled' ? 'This appointment has already been cancelled.'
+    : b.status === 'completed' ? 'This appointment has already been completed.'
+    : b.status === 'no_show' ? 'This appointment can no longer be rescheduled online — please call or text us.'
+    : rescheduleNeedsOffice(b) ? RESCHEDULE_CALL_US
+    : null;
+  if (blockedReason) {
     return res.status(200).json({
       can_reschedule: false,
-      reason: b.status === 'cancelled' ? 'This appointment has already been cancelled.' : 'This appointment has already been completed.',
+      reason: blockedReason,
       customer_name: b.customer?.name || '', service_label: b.service?.name || 'Service',
       business_name: b.business?.name || '', current_date: null, current_time: null, days: [], timezone: tz,
     });
@@ -6044,7 +6092,9 @@ async function rescheduleInfo(req, res, body) {
     customer_name: b.customer?.name || '',
     service_label: b.service?.name || 'Service',
     business_name: b.business?.name || '',
-    current_date: b.scheduled_at ? b.scheduled_at.slice(0, 10) : null,
+    // Metro-LOCAL date, not a UTC slice — an 8 PM Denver job is stored as
+    // 02:00 UTC the next day, so slicing the ISO string shows the wrong day.
+    current_date: b.scheduled_at ? localDateStr(tz, b.scheduled_at) : null,
     current_time: slotTimeLabel(tz, b.scheduled_at),
     business_slug: slug,
     days, timezone: tz,
@@ -6062,6 +6112,9 @@ async function rescheduleSubmit(req, res, body) {
   if (!b) return res.status(404).json({ error: 'Booking not found.' });
   if (['cancelled', 'completed', 'no_show'].includes(b.status)) {
     return res.status(409).json({ error: 'This appointment can no longer be rescheduled online — please call or text us.' });
+  }
+  if (rescheduleNeedsOffice(b)) {
+    return res.status(409).json({ error: RESCHEDULE_CALL_US });
   }
   const scheduledMs = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
   if (scheduledMs && (scheduledMs - Date.now() < RESCHEDULE_CUTOFF_MS)) {
@@ -6085,15 +6138,21 @@ async function rescheduleSubmit(req, res, body) {
   let technician_id = null;
   try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
   catch (e) { console.warn('[reschedule_submit] tech pick failed:', e.message); }
+  if (!technician_id) {
+    // Hard rule: a job never lands on a slot no tech marked available, and a
+    // currently-staffed job is never traded for an unstaffed one. Refuse and
+    // let the customer pick again (the page refreshes availability on this).
+    return res.status(409).json({ error: 'That time was just taken — please pick a different time.', slot_taken: true });
+  }
 
-  const oldLabel = `${b.scheduled_at ? b.scheduled_at.slice(0, 10) : '?'} ${slotTimeLabel(tz, b.scheduled_at) || ''}`.trim();
+  const oldLabel = `${b.scheduled_at ? localDateStr(tz, b.scheduled_at) : '?'} ${slotTimeLabel(tz, b.scheduled_at) || ''}`.trim();
   const newLabel = `${dateStr} ${slotTimeLabel(tz, startUTC.toISOString()) || ''}`.trim();
 
   const { error: updErr } = await db.from('bookings').update({
     scheduled_at: startUTC.toISOString(),
     scheduled_end: endUTC ? endUTC.toISOString() : null,
     technician_id,
-    status: technician_id ? 'assigned' : 'confirmed',
+    status: 'assigned',
   }).eq('id', id);
   if (updErr) return res.status(500).json({ error: 'Could not reschedule this appointment. Please try again.' });
 
@@ -6109,6 +6168,11 @@ async function rescheduleSubmit(req, res, body) {
     sendSMS(ownerPhone, `${b.customer?.name || 'A customer'} just rescheduled their ${b.business?.name || ''} appointment: ${oldLabel} → ${newLabel}.`)
       .catch(e => console.warn('[reschedule_submit] owner SMS failed:', e.message));
   }
+  // Text the newly assigned tech the same way office assignment does — they
+  // may be a different person than before, and even the same tech needs to
+  // know the job moved.
+  notifyTechAssigned(db, b.business || { id: b.business_id }, technician_id, startUTC.toISOString(), tz)
+    .catch(e => console.warn('[reschedule_submit] tech SMS failed:', e.message));
 
   return res.status(200).json({ ok: true, new_date: dateStr, new_time: slotTimeLabel(tz, startUTC.toISOString()) });
 }

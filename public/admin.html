@@ -3574,21 +3574,34 @@ function renderCustomerDetail(d){
 // than building a second, read-only copy of that detail view here. Hides the
 // customer modal underneath and restores it when the booking modal closes, so
 // the office never loses their place in the customer's history.
+//
+// Restore mechanism: openBooking() and its action buttons (Mark complete,
+// Cancel, Confirm, Refund, assign, …) close the modal through a private
+// close() we can't wrap, so instead of chasing every close path we watch
+// #bkModal's class for 'hidden' appearing. Whatever closed it, if we came
+// from the customer panel we bring that panel back — unless a deeper modal
+// (office reschedule flow, lightbox) is now open, in which case the office
+// has moved on and we stand down rather than fight it for the screen.
+let cdReturnPending=false;
+new MutationObserver(()=>{
+  const bk=document.getElementById('bkModal');
+  if(!cdReturnPending || !bk.classList.contains('hidden')) return;
+  cdReturnPending=false;
+  setTimeout(()=>{
+    const other=[...document.querySelectorAll('.modal:not(.hidden)')]
+      .filter(m=>m.id!=='custDetailModal');
+    if(other.length) return;
+    document.getElementById('custDetailModal').classList.remove('hidden');
+  },60);
+}).observe(document.getElementById('bkModal'),{ attributes:true, attributeFilter:['class'] });
 async function openCustomerJobBooking(jobId){
   try{
     const d=await api('bookings',{ params:{ business:current.slug, id:jobId }});
     const b=(d.bookings||[])[0];
     if(!b){ toast('Could not open that job'); return; }
     document.getElementById('custDetailModal').classList.add('hidden');
+    cdReturnPending=true;
     openBooking(b);
-    const bkModal=document.getElementById('bkModal');
-    const reopenCustomer=()=>document.getElementById('custDetailModal').classList.remove('hidden');
-    // openBooking() just rebound #bkClose/#bkModal's own close handlers — wrap
-    // them (rather than replace) so the booking modal still closes normally,
-    // it just also brings the customer modal back afterward.
-    const prevClose=document.getElementById('bkClose').onclick;
-    document.getElementById('bkClose').onclick=()=>{ if(prevClose) prevClose(); reopenCustomer(); };
-    bkModal.onclick=e=>{ if(e.target===bkModal){ bkModal.classList.add('hidden'); reopenCustomer(); } };
   }catch(err){ toast(err.message); }
 }
 document.getElementById('cdClose').addEventListener('click',()=>document.getElementById('custDetailModal').classList.add('hidden'));
@@ -5867,7 +5880,7 @@ const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
 // Sum of qty × unit price across line items, rounded to cents.
 function estLineTotal(items){ return Math.round((Array.isArray(items)?items:[]).reduce((t,it)=>t+(Number(it.qty)||0)*(Number(it.unit_price)||0),0)*100)/100; }
-function money2(n){ return '$'+(Math.round((Number(n)||0)*100)/100).toFixed(2); }
+function money2(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
 // { subtotal, tax, total } for a set of line items at a tax rate (fraction).
 function estTotals(items, taxRate){
   const subtotal=estLineTotal(items);
@@ -5942,7 +5955,7 @@ function estCard(e){
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const receivedBadge=created?`<div style="display:inline-block;font-size:13px;font-weight:800;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:8px;padding:5px 11px;margin-bottom:9px;">📥 Came in ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
   // Priced quote summary (line items). Shown when the office has built a quote.
-  const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)):[];
+  const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)!==0)):[];
   const eTax=(e.tax_rate==null)?0:Number(e.tax_rate);
   const t=estTotals(lines,eTax);
   const taxLines=eTax>0?
@@ -6011,7 +6024,7 @@ function estCard(e){
 let nbSourceEstimateId=null;   // estimate this new-booking was converted from (archived on save)
 function convertEstimateToJob(id){
   const e=estCache[id]; if(!e){ toast('Estimate not found — refresh and try again.'); return; }
-  const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(it.description||Number(it.unit_price)>0));
+  const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(it.description||Number(it.unit_price)!==0));
   // Fold the add-ons the customer accepted into the job's line items so they carry
   // through to scheduling, the invoice, and payroll (each keeps its price/qty).
   (Array.isArray(e.accepted_upsells)?e.accepted_upsells:[]).filter(Boolean).forEach(u=>{

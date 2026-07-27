@@ -712,16 +712,23 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
   const serviceLabel = (details.serviceLabel || '').trim();
   const description = (details.description || '').trim();
   const approveUrl = (details.approveUrl || '').trim();
-  const money = n => '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+  // Sign-aware: discount lines are legitimately negative and must read
+  // "-$30.00", never "$-30.00".
+  const money = n => {
+    const v = Math.round((Number(n) || 0) * 100) / 100;
+    return (v < 0 ? '-$' : '$') + Math.abs(v).toFixed(2);
+  };
 
-  // Keep only line items that have a description or a price.
+  // Keep only line items that have a description or a nonzero price — same
+  // keep-rule as the server's sanitizeLineItems, so a negative (discount)
+  // line is counted by BOTH this email's total and every other total.
   const lineItems = (Array.isArray(details.lineItems) ? details.lineItems : [])
     .map(it => ({
       description: String((it && it.description) || '').trim(),
       qty: Number(it && it.qty) || 0,
       unit_price: Number(it && it.unit_price) || 0,
     }))
-    .filter(it => (it.description || it.unit_price > 0) && !isDefaultTypeLabel(it.description));
+    .filter(it => (it.description || it.unit_price !== 0) && !isDefaultTypeLabel(it.description));
   const hasLineItems = lineItems.length > 0;
   const subtotal = Math.round(lineItems.reduce((t, it) => t + it.qty * it.unit_price, 0) * 100) / 100;
   const taxRate = Number(details.taxRate) > 0 ? Number(details.taxRate) : 0;

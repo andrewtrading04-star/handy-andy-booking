@@ -154,6 +154,16 @@ $('confirmBtn').addEventListener('click', async ()=>{
       $('errorBox').textContent=d.error||'Could not reschedule. Please try again.';
       $('errorBox').classList.add('show');
       btn.disabled=false; btn.textContent='Confirm new time';
+      if(d.slot_taken){
+        // Availability changed under them — refresh the open-slot list so the
+        // next pick is from live data instead of the stale grid.
+        selDay=null; selSlot=null; updateBtn();
+        try{
+          const r2=await fetch(`${API}?action=reschedule_info&token=${encodeURIComponent(token)}`);
+          const d2=await r2.json();
+          if(r2.ok && d2.can_reschedule){ days=d2.days||[]; renderDays(); renderSlots(); }
+        }catch(e){/* keep the stale grid; the error text still guides them */}
+      }
       return;
     }
     $('doneMsg').textContent=`Your appointment is now ${fmtLong(d.new_date)}${d.new_time?' at '+d.new_time:''}. You'll get the usual reminders before your new time.`;

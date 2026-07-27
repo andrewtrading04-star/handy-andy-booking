@@ -212,7 +212,7 @@ let baseSubtotal = 0;
 let taxRate = 0;
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function money(n){ return '$' + (Math.round((Number(n)||0)*100)/100).toFixed(2); }
+function money(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$') + Math.abs(v).toFixed(2); }
 function applyBrand(slug){
   const brand = BRANDS[slug] || BRANDS['handy-andy'];
   document.documentElement.style.setProperty('--accent', brand.accent);
@@ -225,7 +225,7 @@ function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'
 
 // ── Base quote (locked) ──
 function renderQuote(info){
-  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)>0)&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
+  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)!==0)&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
   const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
   let body;
   if (items.length){
