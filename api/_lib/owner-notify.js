@@ -84,6 +84,18 @@ export function gdsUpsellUrlFor({ lines, bookingId, baseUrl, eligible = true }) 
   const token = signToken({ kind: 'add_gds', booking_id: bookingId }, 7776000);
   return `${String(baseUrl).replace(/\/$/, '')}/add-gds.html?token=${token}`;
 }
+
+// ── Self-serve reschedule link for the confirmation email ──────────────────
+// Signed link to /reschedule.html (kind=reschedule, booking_id) -- mirrors the
+// GDS upsell/estimate-approve tokens' shape and 90-day TTL. The page itself
+// (api/admin.js reschedule_info/reschedule_submit) is what actually enforces
+// the 24-hour cutoff and blocks a completed/cancelled booking -- this helper
+// just builds the link, so it's safe to always include on every confirmation.
+export function rescheduleUrlFor({ bookingId, baseUrl }) {
+  if (!bookingId || !baseUrl) return null;
+  const token = signToken({ kind: 'reschedule', booking_id: bookingId }, 7776000);
+  return `${String(baseUrl).replace(/\/$/, '')}/reschedule.html?token=${token}`;
+}
 export function estimateJobProfit({ price, lines, techName }) {
   try {
     const synthetic = {

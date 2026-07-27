@@ -401,9 +401,9 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
       ${card('&#128197;', 'Cancellation &amp; rescheduling', `
               <ul style="${ul}">
                 <li style="${li}">You can cancel or reschedule any time, as long as it's not within 24 hours of your scheduled time.</li>
-                <li style="${li}">To make changes, just reply to this email or give us a call and we'll take care of it.</li>
                 <li style="${li}">Cancellations or last-minute rescheduling within 24 hours incur an automatic $50 charge.</li>
-              </ul>`)}
+              </ul>
+              ${details.rescheduleUrl ? `<a href="${esc(details.rescheduleUrl)}" style="display:inline-block;margin-top:10px;background:#ffffff;color:#11181c;border:1px solid #d7dbe0;text-decoration:none;font-size:13px;font-weight:700;padding:10px 16px;border-radius:8px;">Reschedule this appointment &rarr;</a>` : `<div style="${para}">To make changes, just reply to this email or give us a call and we'll take care of it.</div>`}`)}
       <tr><td style="padding:14px 28px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;">
           <tr>

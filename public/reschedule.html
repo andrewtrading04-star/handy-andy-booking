@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Reschedule your appointment</title>
+<link rel="icon" type="image/svg+xml" href="/favicon-tech.svg">
+<link rel="apple-touch-icon" href="/favicon-tech.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#1d4ed8; --accent-soft:#e8efff;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --fs-h1:clamp(23px,5.5vw,29px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px;letter-spacing:-.01em;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 24px;width:100%;max-width:520px;box-shadow:0 18px 50px rgba(20,30,50,.10);position:relative;margin:12px 0;}
+  h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;text-align:center;}
+  .hl{color:var(--accent);}
+  .sub{color:var(--mute);font-size:14.5px;margin-bottom:6px;line-height:1.55;text-align:center;}
+  .current{margin:18px 0 4px;background:#f9fafb;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:14px;color:var(--ink-2);text-align:center;}
+  .current b{color:var(--ink);}
+  .sec-label{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);margin:20px 0 8px;}
+  .days{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch;}
+  .day{flex:0 0 auto;border:1.5px solid var(--line);border-radius:12px;padding:9px 13px;text-align:center;cursor:pointer;background:#fff;min-width:74px;}
+  .day.on{border-color:var(--accent);background:var(--accent-soft);}
+  .day .dw{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);}
+  .day.on .dw{color:var(--accent);}
+  .day .dn{font-size:16px;font-weight:800;margin-top:2px;}
+  .slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:4px;}
+  .slot{border:1.5px solid var(--line);border-radius:10px;padding:11px 8px;text-align:center;font-size:13.5px;font-weight:700;cursor:pointer;background:#fff;color:var(--ink-2);}
+  .slot.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:15px 24px;font-size:16px;font-weight:800;cursor:pointer;width:100%;margin-top:20px;letter-spacing:.2px;transition:filter .15s;}
+  .btn:hover{filter:brightness(1.08);}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .fine{font-size:12px;color:#9ca3af;line-height:1.55;margin-top:12px;text-align:center;}
+  .state{display:none;}
+  .state.show{display:block;}
+  .check{width:64px;height:64px;border-radius:50%;background:color-mix(in srgb,var(--accent) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:var(--accent);}
+  .done h2{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:8px;text-align:center;}
+  .done p{color:var(--mute);font-size:14px;line-height:1.55;text-align:center;}
+  .error{display:none;color:#dc2626;font-size:14px;margin-top:18px;font-weight:600;text-align:center;}
+  .error.show{display:block;}
+  #loading{color:var(--mute);font-size:15px;padding:24px 0;text-align:center;}
+  .blocked{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;color:#9a3412;font-size:14px;line-height:1.6;margin-top:16px;}
+  .empty-slots{color:var(--mute);font-size:13.5px;padding:14px 4px;}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div id="loading">Loading your appointment…</div>
+
+  <div class="state" id="pickSection">
+    <h1>Reschedule your <span class="hl">appointment</span></h1>
+    <p class="sub" id="pickSub">Pick a new day and time below — it updates instantly, no need to call.</p>
+    <div class="current" id="currentBox"></div>
+    <div class="sec-label">Pick a day</div>
+    <div class="days" id="dayRow"></div>
+    <div class="sec-label">Pick a time</div>
+    <div class="slots" id="slotGrid"><div class="empty-slots">Choose a day first.</div></div>
+    <button class="btn" id="confirmBtn" disabled>Confirm new time</button>
+    <div class="fine">Your original time is released and the new one is locked in as soon as you confirm.</div>
+  </div>
+
+  <div class="state done" id="doneSection">
+    <div class="check">&#10003;</div>
+    <h2>You're rescheduled!</h2>
+    <p id="doneMsg"></p>
+  </div>
+
+  <div class="state" id="blockedSection">
+    <h1>Reschedule your <span class="hl">appointment</span></h1>
+    <div class="blocked" id="blockedMsg"></div>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+</div>
+
+<script>
+const API = '/api/admin';
+const token = new URLSearchParams(location.search).get('token');
+const $ = (id) => document.getElementById(id);
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function show(id){ ['pickSection','doneSection','blockedSection'].forEach(s=>$(s).classList.toggle('show', s===id)); }
+function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
+
+let days=[], selDay=null, selSlot=null;
+
+function fmtDay(dateStr){
+  const d=new Date(dateStr+'T12:00:00Z');
+  return {
+    dw:d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'}),
+    dn:d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'}),
+  };
+}
+function fmtLong(dateStr){
+  return new Date(dateStr+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'long',day:'numeric',year:'numeric'});
+}
+function renderDays(){
+  const row=$('dayRow');
+  const avail=days.filter(d=>(d.timeslots||[]).length);
+  if(!avail.length){ row.innerHTML='<div class="empty-slots">No open times in the next 45 days — please call or text us.</div>'; return; }
+  row.innerHTML=avail.map(d=>{
+    const f=fmtDay(d.date);
+    return `<div class="day${selDay===d.date?' on':''}" data-date="${esc(d.date)}"><div class="dw">${f.dw}</div><div class="dn">${f.dn}</div></div>`;
+  }).join('');
+  row.querySelectorAll('.day').forEach(el=>el.addEventListener('click',()=>{ selDay=el.dataset.date; selSlot=null; renderDays(); renderSlots(); updateBtn(); }));
+}
+function renderSlots(){
+  const grid=$('slotGrid');
+  const d=days.find(x=>x.date===selDay);
+  if(!d){ grid.innerHTML='<div class="empty-slots">Choose a day first.</div>'; return; }
+  grid.innerHTML=(d.timeslots||[]).map(t=>`<div class="slot${selSlot===t.id?' on':''}" data-id="${esc(t.id)}">${esc(t.formatted)}</div>`).join('');
+  grid.querySelectorAll('.slot').forEach(el=>el.addEventListener('click',()=>{ selSlot=el.dataset.id; renderSlots(); updateBtn(); }));
+}
+function updateBtn(){ $('confirmBtn').disabled=!(selDay&&selSlot); }
+
+async function load(){
+  if(!token){ showError('This link is missing its token. Please use the link from your confirmation email.'); return; }
+  try{
+    const r=await fetch(`${API}?action=reschedule_info&token=${encodeURIComponent(token)}`);
+    const d=await r.json();
+    if(!r.ok){ showError(d.error||'Could not load your appointment.'); return; }
+    $('loading').style.display='none';
+    if(!d.can_reschedule){
+      $('blockedMsg').textContent=d.reason||'This appointment cannot be rescheduled online — please call or text us.';
+      show('blockedSection'); return;
+    }
+    $('currentBox').innerHTML=`Current appointment: <b>${esc(fmtLong(d.current_date))}${d.current_time?' at '+esc(d.current_time):''}</b><br><span style="font-size:12.5px;color:var(--mute);">${esc(d.service_label)} · ${esc(d.business_name)}</span>`;
+    days=d.days||[];
+    show('pickSection');
+    renderDays();
+  }catch(e){ showError('Could not load your appointment. Please try again.'); }
+}
+
+$('confirmBtn').addEventListener('click', async ()=>{
+  if(!(selDay&&selSlot)) return;
+  const btn=$('confirmBtn'); btn.disabled=true; btn.textContent='Rescheduling…';
+  $('errorBox').classList.remove('show');
+  try{
+    const r=await fetch(`${API}?action=reschedule_submit`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ token, selected_slot: selSlot }),
+    });
+    const d=await r.json();
+    if(!r.ok){
+      $('errorBox').textContent=d.error||'Could not reschedule. Please try again.';
+      $('errorBox').classList.add('show');
+      btn.disabled=false; btn.textContent='Confirm new time';
+      return;
+    }
+    $('doneMsg').textContent=`Your appointment is now ${fmtLong(d.new_date)}${d.new_time?' at '+d.new_time:''}. You'll get the usual reminders before your new time.`;
+    show('doneSection');
+  }catch(e){
+    $('errorBox').textContent='Network error — please try again.';
+    $('errorBox').classList.add('show');
+    btn.disabled=false; btn.textContent='Confirm new time';
+  }
+});
+
+load();
+</script>
+</body>
+</html>

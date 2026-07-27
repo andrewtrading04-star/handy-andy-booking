@@ -6,7 +6,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor } from './_lib/owner-notify.js';
+import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -481,6 +481,7 @@ async function bookDoms(req, res) {
         endEpoch:    endUTC ? Math.floor(endUTC.getTime() / 1000) : null,
         baseUrl, jobId: bookingId,
         gdsUpsellUrl: gdsUpsellUrlFor({ lines, bookingId, baseUrl }),
+        rescheduleUrl: rescheduleUrlFor({ bookingId, baseUrl }),
       }, brandFor('doms'));
       const sent = await sendEmail({ slug: 'doms', to: customer.email, subject, html, replyTo: domsEmail.from });
       if (!sent.sent) console.warn('[book-doms] confirmation email not sent:', sent.skipped || sent.error);
@@ -795,6 +796,7 @@ async function bookHandyAndy(req, res) {
         endEpoch:    endUTC ? Math.floor(endUTC.getTime() / 1000) : null,
         baseUrl, jobId: bookingId,
         gdsUpsellUrl: gdsUpsellUrlFor({ lines, bookingId, baseUrl }),
+        rescheduleUrl: rescheduleUrlFor({ bookingId, baseUrl }),
       }, brandFor('handy-andy'));
       const sent = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });
       if (!sent.sent) console.warn('[book-ha] confirmation email not sent:', sent.skipped || sent.error);

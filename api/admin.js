@@ -19,9 +19,9 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
-import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -214,6 +214,8 @@ export default async function handler(req, res) {
     if (action === 'estimate_slots') return await estimateSlots(req, res);
     if (action === 'gds_upsell_info') return await gdsUpsellInfo(req, res, body);
     if (action === 'gds_upsell_add') return await gdsUpsellAdd(req, res, body);
+    if (action === 'reschedule_info') return await rescheduleInfo(req, res, body);
+    if (action === 'reschedule_submit') return await rescheduleSubmit(req, res, body);
     if (action === 'review_email_preview') return await reviewEmailPreview(req, res);
     if (action === 'send_test_review_email') return await sendTestReviewEmail(req, res, body);
     if (action === 'session_status') return await sessionStatus(req, res);
@@ -2519,6 +2521,7 @@ async function bookingCreate(req, res, db, auth, body) {
           lines: selections, bookingId: bRow.id, baseUrl,
           eligible: selections.some(s => /^tv size\s*:/i.test((s.label || s.name || '').toString())),
         }),
+        rescheduleUrl: rescheduleUrlFor({ bookingId: bRow.id, baseUrl }),
       }, brandFor(biz.slug));
       const { from } = emailConfig(biz.slug);
       // TEMP diagnostic: reveal which Resend key path is in use (no secrets logged).
@@ -5977,6 +5980,139 @@ async function gdsUpsellAdd(req, res, body) {
   return res.status(200).json({ ok: true, already: false, new_total: newTotal });
 }
 
+// ── Self-serve reschedule (confirmation-email button) ──────────────────────
+// The "Reschedule this appointment" link opens /reschedule.html with a signed
+// token (kind=reschedule, booking_id). GET (rescheduleInfo) shows the current
+// time plus real open slots (same publicOpenSlots engine the booking widget
+// itself uses); POST (rescheduleSubmit) moves the booking and re-assigns a
+// tech via the SAME pickOpenTech() call the original booking used, so a
+// reschedule can never land on a slot no tech actually marked available.
+const RESCHEDULE_CUTOFF_MS = 24 * 60 * 60 * 1000; // matches the email's "not within 24 hours" policy
+
+function rescheduleTokenBookingId(raw) {
+  const t = verifyToken((raw || '').toString());
+  if (!t || t.kind !== 'reschedule' || !t.booking_id) return null;
+  return t.booking_id;
+}
+
+async function fetchBookingForReschedule(db, id) {
+  const { data, error } = await db.from('bookings')
+    .select(`id, business_id, status, scheduled_at, scheduled_end, duration_minutes, service_area_id, postal_code,
+             service:services ( name ), customer:customers ( name )`)
+    .eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id, slug, name, timezone').eq('id', data.business_id).maybeSingle();
+  if (bizErr) throw bizErr;
+  data.business = biz || null;
+  return data;
+}
+
+async function rescheduleInfo(req, res, body) {
+  const token = (req.query.token || (body && body.token) || '').toString();
+  const id = rescheduleTokenBookingId(token);
+  if (!id) return res.status(401).json({ error: 'This link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const b = await fetchBookingForReschedule(db, id);
+  if (!b) return res.status(404).json({ error: 'Booking not found.' });
+
+  const slug = b.business?.slug || 'handy-andy';
+  const serviceAreaId = b.service_area_id || await serviceAreaIdFromPostal(db, b.business_id, b.postal_code);
+  const tz = await areaTimezone(db, serviceAreaId, b.business?.timezone || 'America/Denver');
+
+  if (['cancelled', 'completed', 'no_show'].includes(b.status)) {
+    return res.status(200).json({
+      can_reschedule: false,
+      reason: b.status === 'cancelled' ? 'This appointment has already been cancelled.' : 'This appointment has already been completed.',
+      customer_name: b.customer?.name || '', service_label: b.service?.name || 'Service',
+      business_name: b.business?.name || '', current_date: null, current_time: null, days: [], timezone: tz,
+    });
+  }
+  const scheduledMs = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
+  const tooSoon = scheduledMs && (scheduledMs - Date.now() < RESCHEDULE_CUTOFF_MS);
+
+  let days = [];
+  try {
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, timezone: tz, crossHire: true });
+    days = result.days || [];
+  } catch (e) { console.warn('[reschedule_info] availability lookup failed:', e.message); }
+
+  return res.status(200).json({
+    can_reschedule: !tooSoon,
+    reason: tooSoon ? "This appointment is within 24 hours — please call or text us to reschedule; a $50 late-change fee applies." : null,
+    customer_name: b.customer?.name || '',
+    service_label: b.service?.name || 'Service',
+    business_name: b.business?.name || '',
+    current_date: b.scheduled_at ? b.scheduled_at.slice(0, 10) : null,
+    current_time: slotTimeLabel(tz, b.scheduled_at),
+    business_slug: slug,
+    days, timezone: tz,
+  });
+}
+
+async function rescheduleSubmit(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const token = (body.token || '').toString();
+  const id = rescheduleTokenBookingId(token);
+  if (!id) return res.status(401).json({ error: 'This link is invalid or has expired.' });
+
+  const db = serviceClient();
+  const b = await fetchBookingForReschedule(db, id);
+  if (!b) return res.status(404).json({ error: 'Booking not found.' });
+  if (['cancelled', 'completed', 'no_show'].includes(b.status)) {
+    return res.status(409).json({ error: 'This appointment can no longer be rescheduled online — please call or text us.' });
+  }
+  const scheduledMs = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
+  if (scheduledMs && (scheduledMs - Date.now() < RESCHEDULE_CUTOFF_MS)) {
+    return res.status(409).json({ error: 'This appointment is within 24 hours — please call or text us to reschedule; a $50 late-change fee applies.' });
+  }
+
+  const parsed = parseSlotId((body.selected_slot || '').toString());
+  const slug = b.business?.slug || 'handy-andy';
+  if (!parsed || parsed.businessSlug !== slug) return res.status(400).json({ error: 'Please pick a valid time slot.' });
+  const { dateStr, slotKey } = parsed;
+
+  const serviceAreaId = b.service_area_id || await serviceAreaIdFromPostal(db, b.business_id, b.postal_code);
+  const tz = await areaTimezone(db, serviceAreaId, b.business?.timezone || 'America/Denver');
+  const startUTC = slotStartUTC(tz, dateStr, slotKey);
+  const endUTC = slotEndUTC(tz, dateStr, slotKey);
+  if (!startUTC) return res.status(400).json({ error: 'Invalid time slot.' });
+  if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
+    return res.status(409).json({ error: 'That time is too soon — please pick a later slot.' });
+  }
+
+  let technician_id = null;
+  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+  catch (e) { console.warn('[reschedule_submit] tech pick failed:', e.message); }
+
+  const oldLabel = `${b.scheduled_at ? b.scheduled_at.slice(0, 10) : '?'} ${slotTimeLabel(tz, b.scheduled_at) || ''}`.trim();
+  const newLabel = `${dateStr} ${slotTimeLabel(tz, startUTC.toISOString()) || ''}`.trim();
+
+  const { error: updErr } = await db.from('bookings').update({
+    scheduled_at: startUTC.toISOString(),
+    scheduled_end: endUTC ? endUTC.toISOString() : null,
+    technician_id,
+    status: technician_id ? 'assigned' : 'confirmed',
+  }).eq('id', id);
+  if (updErr) return res.status(500).json({ error: 'Could not reschedule this appointment. Please try again.' });
+
+  await db.from('booking_notes').insert({
+    business_id: b.business_id, booking_id: id,
+    author_kind: 'customer', author_id: null, author_name: 'Customer (self-service reschedule)',
+    body: `Rescheduled from ${oldLabel} to ${newLabel}.`,
+  }).then(({ error }) => { if (error) console.warn('[reschedule_submit] note insert failed:', error.message); })
+    .catch(e => console.warn('[reschedule_submit] note insert failed:', e.message));
+
+  const ownerPhone = process.env.OWNER_PHONE_NUMBER;
+  if (ownerPhone) {
+    sendSMS(ownerPhone, `${b.customer?.name || 'A customer'} just rescheduled their ${b.business?.name || ''} appointment: ${oldLabel} → ${newLabel}.`)
+      .catch(e => console.warn('[reschedule_submit] owner SMS failed:', e.message));
+  }
+
+  return res.status(200).json({ ok: true, new_date: dateStr, new_time: slotTimeLabel(tz, startUTC.toISOString()) });
+}
+
 // ── Review-email tester (public/review-email-tester.html) ─────────────────
 // No admin auth — this only ever renders sample data or sends to a single
 // hardcoded inbox, so there's nothing here worth gating behind a login.
@@ -6209,6 +6345,7 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
             lines: emailLines, bookingId: bRow.id, baseUrl,
             eligible: /tv/i.test(est.service_label || ''),
           }),
+          rescheduleUrl: rescheduleUrlFor({ bookingId: bRow.id, baseUrl }),
         }, brandFor(biz.slug));
         const { from } = emailConfig(biz.slug);
         await sendEmail({ slug: biz.slug, to: cust.email, subject, html, replyTo: from });
