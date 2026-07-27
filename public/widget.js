@@ -1682,6 +1682,26 @@
     stepIdx=Math.max(0,pi); render();
   }
 
+  // Overlay admin-editable prices (app.widget_prices, edited from the admin
+  // dashboard's Other -> Widget Pricing page, served by api/book.js's public
+  // widget_prices action) onto the static SERVICE_CONFIGS numbers above, so a
+  // price change there takes effect immediately without a widget deploy.
+  // Failure here is silent and total — the hardcoded numbers above are always
+  // a safe fallback; a price-fetch hiccup must never block a real booking.
+  async function applyWidgetPriceOverrides(cityKey){
+    if(!serviceConfig) return;
+    try{
+      const r=await fetch(`${API_BASE}/book?action=widget_prices&business=handy-andy&city=${encodeURIComponent(cityKey)}`);
+      const d=await r.json();
+      const overrides=(d&&d.prices)||{};
+      for(const sec of serviceConfig.sections){
+        for(const opt of sec.options){
+          if(Object.prototype.hasOwnProperty.call(overrides,opt.id)) opt.price=overrides[opt.id];
+        }
+      }
+    }catch(e){ /* keep the built-in hardcoded prices */ }
+  }
+
   // ─── Zip check ────────────────────────────────────────────────────────────
   async function doZip(root){
     const zip=root.querySelector('#ha-zip')?.value.trim();
@@ -1695,14 +1715,17 @@
       if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
+      let cityKey='default';
       if(NATIVE){
         // Native: the surcharge + metro come from the CRM zip check, and the
         // pricing profile is chosen by metro name (Austin is cheaper).
         serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; areaName=d.territory_name||'';
-        serviceConfig=SERVICE_CONFIGS[/austin/i.test(areaName)?'austin':'default'];
+        cityKey=/austin/i.test(areaName)?'austin':'default';
       } else {
-        serviceConfig=SERVICE_CONFIGS[TERRITORY_CONFIG_MAP[territoryId]||'default'];
+        cityKey=TERRITORY_CONFIG_MAP[territoryId]||'default';
       }
+      serviceConfig=SERVICE_CONFIGS[cityKey];
+      await applyWidgetPriceOverrides(cityKey);
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}

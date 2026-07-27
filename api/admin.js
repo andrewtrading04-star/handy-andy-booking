@@ -244,6 +244,8 @@ export default async function handler(req, res) {
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
+      case 'widget_prices_list': return await widgetPricesList(req, res, db, auth);
+      case 'widget_prices_save': return await widgetPricesSave(req, res, db, auth, body);
       case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
       case 'relabel_tv_size':   return await relabelTvSize(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
@@ -1337,6 +1339,45 @@ async function serviceOptions(req, res, db, auth) {
   for (const o of options) (byGroup[o.group_id] = byGroup[o.group_id] || []).push(o);
   const result = (groups || []).map(g => ({ ...g, options: byGroup[g.id] || [] }));
   return res.status(200).json({ groups: result });
+}
+
+// ── Public widget pricing (Other -> Widget Pricing) ──────────────────────────
+// Every price the customer-facing booking widget (public/widget.js) charges,
+// self-serve editable here instead of requiring a code change + deploy. See
+// api/book.js's widgetPricesPublic() for how the widget actually consumes
+// these at load time — this is just the admin read/write side.
+const WIDGET_PRICE_CEILING = 2000;   // dollars — a fat-fingered price never silently saves
+async function widgetPricesList(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data, error } = await db.from('widget_prices')
+    .select('id, city_key, section_key, option_id, label, price, sort_order')
+    .eq('business_id', biz.id)
+    .order('city_key').order('sort_order');
+  if (error) throw error;
+  return res.status(200).json({ prices: data || [] });
+}
+async function widgetPricesSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const updates = Array.isArray(body.updates) ? body.updates : [];
+  if (!updates.length) return res.status(400).json({ error: 'updates required' });
+  for (const u of updates) {
+    const price = Number(u.price);
+    if (!u.id || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Each update needs a valid id and a non-negative price' });
+    if (price > WIDGET_PRICE_CEILING) return res.status(400).json({ error: `$${price} is above the $${WIDGET_PRICE_CEILING} sanity ceiling for a single widget price — double-check this isn't a typo.` });
+  }
+  // One update at a time (small list, correctness over round-trip count) so a
+  // bad id in the middle of a batch can't half-save silently. business_id in
+  // the WHERE clause is a belt-and-suspenders scope check — the id itself is
+  // already a random uuid, but this ensures a row can never be updated across
+  // businesses even given a stale/forged id.
+  for (const u of updates) {
+    const { error } = await db.from('widget_prices')
+      .update({ price: Number(u.price), updated_at: new Date().toISOString() })
+      .eq('id', u.id).eq('business_id', biz.id);
+    if (error) throw error;
+  }
+  return res.status(200).json({ ok: true, updated: updates.length });
 }
 
 // ── Seed / repair the Handy Andy "TV Installation" option groups ─────────────

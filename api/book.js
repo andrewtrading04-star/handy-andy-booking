@@ -73,6 +73,32 @@ async function placeDetailsPublic(req, res) {
     return res.status(200).json({ address: null });
   }
 }
+// Public price overrides for the booking widget (app.widget_prices, edited from
+// the admin dashboard's Other -> Widget Pricing page). No auth: it only reads
+// prices, same trust level as the static numbers it's replacing. Returns
+// {option_id: price} — the widget overlays this onto its own hardcoded
+// SERVICE_CONFIGS at load, so a fetch failure or an empty/new deploy just
+// falls back to the widget's built-in numbers instead of breaking checkout.
+async function widgetPricesPublic(req, res) {
+  const business = ((req.query || {}).business || 'handy-andy').toString().trim();
+  const city = ((req.query || {}).city || 'default').toString().trim();
+  try {
+    const db = serviceClient();
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', business).maybeSingle();
+    if (!biz) return res.status(200).json({ prices: {} });
+    const { data, error } = await db.from('widget_prices')
+      .select('option_id, price')
+      .eq('business_id', biz.id)
+      .eq('city_key', city);
+    if (error) throw error;
+    const prices = {};
+    for (const r of (data || [])) prices[r.option_id] = Number(r.price) || 0;
+    return res.status(200).json({ prices });
+  } catch (e) {
+    console.warn('[book] widget_prices lookup failed:', e.message);
+    return res.status(200).json({ prices: {} });
+  }
+}
 
 // GET/POST /api/book?action=review_click&token=<review_token>&ch=email|sms
 // Records the first time a customer clicks the review link from either channel,
@@ -833,6 +859,8 @@ export default async function handler(req, res) {
   // Public address-autocomplete proxy for the booking widget.
   if (req.method === 'GET' && (req.query || {}).action === 'places_autocomplete') return placesAutocompletePublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'place_details') return placeDetailsPublic(req, res);
+  // Public price overrides for the booking widget — see widgetPricesPublic() below.
+  if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.
