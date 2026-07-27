@@ -2607,7 +2607,12 @@ async function bookingCreate(req, res, db, auth, body) {
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
     const timeStr = _d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
-    const msg = `You're booked! ✅ ${biz.name} will see you ${dateStr} at ${timeStr}. We'll text you when your tech is on the way. Reply STOP to opt out.`;
+    // "He" is a simplification (a technician could be any gender) — matches
+    // the exact wording requested; revisit if the roster ever needs it neutral.
+    const techLine = primaryTechInfo?.name
+      ? `${primaryTechInfo.name} will text you when he's on the way.`
+      : `We'll text you when your tech is on the way.`;
+    const msg = `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`;
     sendSMS(c.phone, msg).catch(console.error);
   }
 
@@ -6599,7 +6604,12 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'short', month: 'short', day: 'numeric' });
     const timeStr = _d.toLocaleTimeString('en-US', { timeZone: areaTz, hour: 'numeric', minute: '2-digit' });
-    sendSMS(cust.phone, `You're booked! ✅ ${biz.name} will see you ${dateStr} at ${timeStr}. We'll text you when your tech is on the way. Reply STOP to opt out.`).catch(console.error);
+    // "He" is a simplification (a technician could be any gender) — matches
+    // the exact wording requested; revisit if the roster ever needs it neutral.
+    const techLine = techInfo?.name
+      ? `${techInfo.name} will text you when he's on the way.`
+      : `We'll text you when your tech is on the way.`;
+    sendSMS(cust.phone, `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`).catch(console.error);
   }
 
   if (cust.email) {
