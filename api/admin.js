@@ -102,9 +102,14 @@ async function partnerBusiness(db, hostSlug) {
 // is blank, unmapped for everyone, or a real zip the partner just doesn't
 // serve. Consumers: pickAvailableTech, availableSlotKeys, freeSlotTechMap,
 // pickAvailableTechPair, and availableDates' local rosterIds.
-async function rosterScopes(db, hostBiz, pool, postalCode) {
+// hostAreaOverride: a precomputed service_area_id for hostBiz+postalCode, when
+// the caller already looked it up (availableSlots does, for its own tz lookup)
+// — skips repeating the exact same service_area_zips query.
+async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   const zip = (postalCode || '').toString().trim();
-  const hostArea = zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null;
+  const hostArea = hostAreaOverride !== undefined
+    ? hostAreaOverride
+    : (zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null);
   const host = { bizId: hostBiz.id, serviceAreaId: hostArea };
   if (pool !== 'cross' && pool !== 'partner') return [host];
   const p = await partnerBusiness(db, hostBiz.slug);
@@ -1496,7 +1501,7 @@ async function availableSlots(req, res, db, auth) {
   const dateStr = (req.query.date || '').toString();
   const techId = (req.query.technician_id || '').toString();
   const techId2 = (req.query.secondary_technician_id || '').toString();
-  const postalCode = (req.query.postal_code || '').toString();
+  const postalCode = (req.query.postal_code || '').toString().trim();
   if (!dateStr) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
 
   const dow = dayOfWeekFor(dateStr);
@@ -1509,25 +1514,46 @@ async function availableSlots(req, res, db, auth) {
   // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
   // Every scope is pinned to that company's own metro for this zip — an "any"
   // side must never offer (or later book) a slot only an out-of-metro tech has.
-  const scopesPrimary = await rosterScopes(db, biz, (req.query.pool || '').toString(), postalCode);
+  // bookingAreaId is passed through as the host area — rosterScopes would
+  // otherwise repeat the exact same business+zip lookup we just did above.
+  const scopesPrimary = await rosterScopes(db, biz, (req.query.pool || '').toString(), postalCode, bookingAreaId);
   // Want a two-tech pair whenever a second tech is requested — unless it's the
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
+  const primaryAny = !techId || techId === 'any';
+
+  // The primary side's full roster + per-tech slot state, fetched ONCE. It's
+  // needed to answer "is anyone free" whenever the primary is "any" tech, AND
+  // to build the "who's free" circles below (always the full roster,
+  // regardless of which concrete tech is picked) — one query round now
+  // answers both instead of two separate ones (this used to be computed, then
+  // thrown away, then recomputed from scratch a few lines later — the actual
+  // cost behind every slow date-click on "Any Technician"). Resolved alongside
+  // the secondary scope (independent lookup) instead of after it.
+  const [primaryRSS, scopesSecondary] = await Promise.all([
+    rosterSlotState(db, scopesPrimary, dateStr, dow, tz)
+      .catch(e => { console.warn('[available_slots] roster/slot-state lookup failed:', e.message); return null; }),
+    wantPair ? rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode) : Promise.resolve(null),
+  ]);
 
   let keys;
   if (!wantPair) {
-    keys = await availableSlotKeys(db, scopesPrimary, techId, dateStr, dow, tz);
+    keys = (primaryAny && primaryRSS) ? freeKeysFromState(primaryRSS)
+      : await availableSlotKeys(db, scopesPrimary, techId, dateStr, dow, tz);
   } else {
     // Two-technician job (e.g. a large-TV lift): only offer slots where a
     // DISTINCT pair is free — one tech from the primary side and a different
     // tech from the second side. Each side may be a concrete person OR "any" of
-    // a (possibly different) company pool.
-    const scopesSecondary = await rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode);
-    const pMap = await freeSlotTechMap(db, scopesPrimary, techId, dateStr, dow, tz);
-    // Ineligible-secondary filter on the SECOND-tech side so an "Any <company>"
-    // pick never offers a slot only Juan/Zach can cover.
-    const sMap = await freeSlotTechMap(db, scopesSecondary, techId2, dateStr, dow, tz, true);
+    // a (possibly different) company pool. The two sides are unrelated, so
+    // fetch them concurrently rather than one after the other.
+    const [pMap, sMap] = await Promise.all([
+      (primaryAny && primaryRSS) ? Promise.resolve(freeMapFromState(primaryRSS))
+        : freeSlotTechMap(db, scopesPrimary, techId, dateStr, dow, tz),
+      // Ineligible-secondary filter on the SECOND-tech side so an "Any <company>"
+      // pick never offers a slot only Juan/Zach can cover.
+      freeSlotTechMap(db, scopesSecondary, techId2, dateStr, dow, tz, true),
+    ]);
     keys = new Set();
     for (const [k, P] of pMap) {
       const S = sMap.get(k);
@@ -1548,10 +1574,19 @@ async function availableSlots(req, res, db, auth) {
   // Who's actually free for each offered slot — purely informational (shown as
   // small circles next to the slot button); always the PRIMARY side's full
   // roster regardless of which concrete tech is currently picked, so the
-  // office can see at a glance who else is around before committing.
+  // office can see at a glance who else is around before committing. If the
+  // shared primaryRSS fetch above hit a transient failure, this gets its own
+  // independent retry rather than silently going blank — the bookability
+  // check (`keys`) already had its own fallback fetch when primaryRSS failed,
+  // so the circles deserve the same second chance instead of riding on that
+  // one failed attempt.
   let freeTechsByKey = {};
-  try { freeTechsByKey = await slotFreeTechsByKey(db, scopesPrimary, dateStr, dow, tz); }
-  catch (e) { console.warn('[available_slots] free-techs lookup failed:', e.message); }
+  if (primaryRSS) {
+    freeTechsByKey = freeTechsByKeyFromState(primaryRSS);
+  } else {
+    try { freeTechsByKey = freeTechsByKeyFromState(await rosterSlotState(db, scopesPrimary, dateStr, dow, tz)); }
+    catch (e) { console.warn('[available_slots] free-techs lookup failed:', e.message); }
+  }
   const available = SLOTS.filter(s => keys.has(s.key))
     .filter(s => !isToday || s.start > nowHHMM)
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end, free_techs: freeTechsByKey[s.key] || [] }));
@@ -1672,16 +1707,48 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
   return out;
 }
 
-// slot_key -> [{ id, name, color }] of every tech genuinely free that slot
-// (scheduled + not booked), roster order (host company first). Purely
-// informational for the New Booking slot list's "who's free" circles — never
-// used to decide bookability, so it can't introduce a new booking path.
-async function slotFreeTechsByKey(db, scopes, dateStr, dow, tz) {
+// Roster + per-tech slot state for a scope, in ONE round of queries (a
+// technicians fetch plus the batched availability/exceptions/bookings read) —
+// the shared foundation for every "who's free" computation over the same
+// scope+date: whether anyone is bookable, a two-tech pair match, and the
+// informational "who's free" circles all derive from this same result instead
+// of each re-fetching the roster and re-running batchTechSlotState.
+async function rosterSlotState(db, scopes, dateStr, dow, tz) {
   const lists = await scopedRosterTechs(db, scopes, 'id, name, color');
-  const allTechs = lists.flat();
-  const state = await batchTechSlotState(db, allTechs.map(t => t.id), dateStr, dow, tz);
+  const techs = lists.flat();
+  const state = await batchTechSlotState(db, techs.map(t => t.id), dateStr, dow, tz);
+  return { techs, state };
+}
+// Set of slot keys where at least one tech in a precomputed rosterSlotState is free.
+function freeKeysFromState({ techs, state }) {
+  const keys = new Set();
+  for (const t of techs) {
+    const s = state.get(t.id); if (!s) continue;
+    for (const k of s.keys) if (!s.booked.has(k)) keys.add(k);
+  }
+  return keys;
+}
+// Map slot_key -> Set(techId) of every free tech, from a precomputed rosterSlotState.
+function freeMapFromState({ techs, state }) {
+  const map = new Map();
+  for (const t of techs) {
+    const s = state.get(t.id); if (!s) continue;
+    for (const k of s.keys) {
+      if (s.booked.has(k)) continue;
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k).add(t.id);
+    }
+  }
+  return map;
+}
+// slot_key -> [{ id, name, color }] of every tech genuinely free that slot
+// (scheduled + not booked), roster order (host company first), from a
+// precomputed rosterSlotState. Purely informational for the New Booking slot
+// list's "who's free" circles — never used to decide bookability, so it can't
+// introduce a new booking path.
+function freeTechsByKeyFromState({ techs, state }) {
   const byKey = {};
-  for (const t of allTechs) {
+  for (const t of techs) {
     const s = state.get(t.id);
     if (!s) continue;
     for (const k of s.keys) {
