@@ -1355,7 +1355,7 @@ const WIDGET_PRICE_CEILING = 2000;   // dollars — a fat-fingered price never s
 async function widgetPricesList(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const { data, error } = await db.from('widget_prices')
-    .select('id, city_key, section_key, option_id, label, price, sort_order')
+    .select('id, city_key, section_key, option_id, label, price, sort_order, row_key')
     .eq('business_id', biz.id)
     .order('city_key').order('sort_order');
   if (error) throw error;

@@ -44,6 +44,13 @@
   const TERRITORY_CONFIG_MAP = {
     '1724797832896x339501352491155460': 'austin',
   };
+  // Which admin-editable price set (app.widget_prices.city_key) a territory
+  // uses. Separate from TERRITORY_CONFIG_MAP above because Houston uses the
+  // 'default' question/option STRUCTURE but has its own PRICES.
+  const TERRITORY_PRICE_CITY = {
+    '1724797832896x339501352491155460': 'austin',
+    '1707514546803x280800015001583600': 'houston',   // Houston #1
+  };
 
   // Valid coupon codes → discount in dollars. Must match HA_COUPONS in
   // api/book.js, which is the enforcing copy — this one only gives instant
@@ -1715,17 +1722,26 @@
       if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
-      let cityKey='default';
+      // Two DIFFERENT keys, deliberately:
+      //   configKey — which SERVICE_CONFIGS structure (questions, option ids,
+      //               labels) to use. Only 'default' and 'austin' exist.
+      //   priceCity — which admin-editable price set to overlay on top of it
+      //               (app.widget_prices.city_key). Houston shares Denver's
+      //               STRUCTURE but has its own PRICES, so it is its own price
+      //               city while still using the 'default' config.
+      let configKey='default', priceCity='default';
       if(NATIVE){
         // Native: the surcharge + metro come from the CRM zip check, and the
         // pricing profile is chosen by metro name (Austin is cheaper).
         serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; areaName=d.territory_name||'';
-        cityKey=/austin/i.test(areaName)?'austin':'default';
+        if(/austin/i.test(areaName)){ configKey='austin'; priceCity='austin'; }
+        else if(/houston/i.test(areaName)){ configKey='default'; priceCity='houston'; }
       } else {
-        cityKey=TERRITORY_CONFIG_MAP[territoryId]||'default';
+        configKey=TERRITORY_CONFIG_MAP[territoryId]||'default';
+        priceCity=TERRITORY_PRICE_CITY[territoryId]||configKey;
       }
-      serviceConfig=SERVICE_CONFIGS[cityKey];
-      await applyWidgetPriceOverrides(cityKey);
+      serviceConfig=SERVICE_CONFIGS[configKey];
+      await applyWidgetPriceOverrides(priceCity);
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}
