@@ -5343,7 +5343,10 @@ const DEFAULT_EST_TAX_RATE = 0.0825;
 
 // Normalize quote line items to the stored shape: { description, qty, unit_price }.
 // Drops blank rows, clamps to sane numbers, caps the list so a bad client can't
-// bloat a row. qty/unit_price are coerced to non-negative numbers.
+// bloat a row. qty is coerced non-negative; unit_price may be NEGATIVE (discount/
+// coupon lines like "Multi-TV discount" are legitimate here — this list only
+// ever comes from an authenticated office user's own nb selections, never raw
+// public input) but is clamped to a sane floor so a typo can't wipe out a quote.
 function sanitizeLineItems(items) {
   return (Array.isArray(items) ? items : [])
     .slice(0, 50)
@@ -5352,13 +5355,14 @@ function sanitizeLineItems(items) {
       let qty = Number(it && it.qty);
       let unit_price = Number(it && it.unit_price);
       if (!Number.isFinite(qty) || qty < 0) qty = 0;
-      if (!Number.isFinite(unit_price) || unit_price < 0) unit_price = 0;
+      if (!Number.isFinite(unit_price)) unit_price = 0;
+      if (unit_price < -5000) unit_price = -5000;
       // round qty to 2 decimals (allows "1.5 hrs"), price to cents
       qty = Math.round(qty * 100) / 100;
       unit_price = Math.round(unit_price * 100) / 100;
       return { description, qty, unit_price };
     })
-    .filter(it => it.description || it.unit_price > 0);
+    .filter(it => it.description || it.unit_price !== 0);
 }
 
 // Normalize the recommended-add-on menu the office attaches to an estimate.
