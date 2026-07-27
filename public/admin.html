@@ -486,9 +486,13 @@
   .nb-opt.on{border-color:var(--accent);background:#fef5f0;font-weight:600;}
   .nb-opt .nb-price{color:var(--ink-2);font-weight:600;flex-shrink:0;}
   .nb-opt.on .nb-price{color:var(--accent);}
-  .nb-slot{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
+  .nb-slot{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);cursor:pointer;width:100%;text-align:left;}
   .nb-slot:hover{border-color:var(--accent);}
   .nb-slot.on{border-color:var(--accent);background:#fef5f0;font-weight:600;}
+  .nb-slot-label{flex:1;}
+  .nb-slot-techs{display:flex;flex-shrink:0;}
+  .nb-slot-tech{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff;margin-left:-8px;}
+  .nb-slot-tech:first-child{margin-left:0;}
   /* Reschedule modal */
   .rs-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
   .rs-slots{display:grid;gap:8px;}
@@ -8109,6 +8113,9 @@ document.getElementById('nbCalGrid').addEventListener('click',async e=>{
   renderNbCalendar();
   await loadNbSlots(date);
 });
+// First two letters of a tech's name, uppercased — "Juan" -> "JU". Matches the
+// slot-picker circle badges; falls back to "?" for an unnamed/blank row.
+function nbInitials(name){ const n=(name||'').trim(); return n ? n.slice(0,2).toUpperCase() : '?'; }
 async function loadNbSlots(date){
   nbSelectedSlot=null;
   if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
@@ -8122,7 +8129,10 @@ async function loadNbSlots(date){
   try{
     const r=await api('available_slots',{ params });
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:var(--ink-2);font-size:13px;">No available times for this date.</div>'; }
-    else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
+    else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>{
+      const techs=(s.free_techs||[]).map(t=>`<span class="nb-slot-tech" style="background:${esc(t.color||'#8a94a3')};" title="${esc(t.name)}">${esc(nbInitials(t.name))}</span>`).join('');
+      return `<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}"><span class="nb-slot-label">${esc(s.label)}</span><span class="nb-slot-techs">${techs}</span></button>`;
+    }).join('');
     document.getElementById('nbSlotsWrap').style.display='';
     updateNbTotal();
   }catch(err){ document.getElementById('nbErr').textContent=err.message; }

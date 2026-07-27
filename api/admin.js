@@ -92,12 +92,16 @@ async function partnerBusiness(db, hostSlug) {
 // (pool 'partner'/'cross') after. Every scope is pinned to that business's
 // OWN service area for the booking's zip, so an auto-pick can never hand a
 // Denver job to the Austin/Houston tech: slot keys (s1–s5) carry no location,
-// which once let Zach's Austin schedule satisfy a Denver 2 PM check. A null
-// serviceAreaId (zip missing/unknown to the HOST) leaves that one scope
-// unscoped — legacy leniency for odd zips — but a KNOWN zip the PARTNER
-// doesn't serve drops the partner scope entirely: never reach into the other
-// company for a metro they don't cover. Consumers: pickAvailableTech,
-// availableSlotKeys, freeSlotTechMap, and availableDates' local rosterIds.
+// which once let Zach's Austin schedule satisfy a Denver 2 PM check.
+// serviceAreaId is null whenever the zip is blank OR unknown to that
+// business — scopedRosterTechs() treats ANY null-area scope as contributing
+// zero candidates (never an unfiltered whole-company fallback), so this
+// function doesn't need to special-case "unmapped zip" itself: a host that
+// can't resolve an area yields no host candidates, a partner that can't
+// yields no partner candidates, symmetrically, whether that's because the zip
+// is blank, unmapped for everyone, or a real zip the partner just doesn't
+// serve. Consumers: pickAvailableTech, availableSlotKeys, freeSlotTechMap,
+// pickAvailableTechPair, and availableDates' local rosterIds.
 async function rosterScopes(db, hostBiz, pool, postalCode) {
   const zip = (postalCode || '').toString().trim();
   const hostArea = zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null;
@@ -106,9 +110,9 @@ async function rosterScopes(db, hostBiz, pool, postalCode) {
   const p = await partnerBusiness(db, hostBiz.slug);
   if (!p) return [host];
   const partnerArea = zip ? await serviceAreaIdFromPostal(db, p.id, zip) : null;
-  const partnerScope = (!zip || partnerArea) ? [{ bizId: p.id, serviceAreaId: partnerArea }] : [];
-  if (pool === 'partner') return partnerScope;
-  return [host, ...partnerScope];
+  const partnerScope = { bizId: p.id, serviceAreaId: partnerArea };
+  if (pool === 'partner') return [partnerScope];
+  return [host, partnerScope];
 }
 
 // Look up the service_area_id for a postal code in a given business.
@@ -1541,9 +1545,16 @@ async function availableSlots(req, res, db, auth) {
   const nowISO = new Date().toISOString();
   const isToday = dateStr === localDateStr(tz, nowISO);
   const nowHHMM = isToday ? localHHMM(tz, nowISO) : null;
+  // Who's actually free for each offered slot — purely informational (shown as
+  // small circles next to the slot button); always the PRIMARY side's full
+  // roster regardless of which concrete tech is currently picked, so the
+  // office can see at a glance who else is around before committing.
+  let freeTechsByKey = {};
+  try { freeTechsByKey = await slotFreeTechsByKey(db, scopesPrimary, dateStr, dow, tz); }
+  catch (e) { console.warn('[available_slots] free-techs lookup failed:', e.message); }
   const available = SLOTS.filter(s => keys.has(s.key))
     .filter(s => !isToday || s.start > nowHHMM)
-    .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end }));
+    .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end, free_techs: freeTechsByKey[s.key] || [] }));
   return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
 }
 
@@ -1661,13 +1672,35 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
   return out;
 }
 
+// slot_key -> [{ id, name, color }] of every tech genuinely free that slot
+// (scheduled + not booked), roster order (host company first). Purely
+// informational for the New Booking slot list's "who's free" circles — never
+// used to decide bookability, so it can't introduce a new booking path.
+async function slotFreeTechsByKey(db, scopes, dateStr, dow, tz) {
+  const lists = await scopedRosterTechs(db, scopes, 'id, name, color');
+  const allTechs = lists.flat();
+  const state = await batchTechSlotState(db, allTechs.map(t => t.id), dateStr, dow, tz);
+  const byKey = {};
+  for (const t of allTechs) {
+    const s = state.get(t.id);
+    if (!s) continue;
+    for (const k of s.keys) {
+      if (s.booked.has(k)) continue;
+      (byKey[k] || (byKey[k] = [])).push({ id: t.id, name: t.name, color: t.color || null });
+    }
+  }
+  return byKey;
+}
+
 // Set of slot keys a tech (or ANY tech) is available for on an exact date,
 // honouring recurring availability, one-time exceptions, AND existing bookings
 // (a slot a tech is already booked for is no longer offered — no double-booking).
 // excludeTechId drops one tech from the "ANY" union, so the SAME person can't be
 // counted as both the primary and the second technician on a two-tech job.
 // Normalize a roster argument to [{ bizId, serviceAreaId }] scopes — accepts
-// the rosterScopes() shape, a bare biz id, or an array of bare ids (legacy).
+// the rosterScopes() shape or (unused today, kept for shape safety) a bare
+// biz id, which normalizes to serviceAreaId:null and is therefore dropped
+// entirely by scopedRosterTechs() — there is no unscoped path anymore.
 function normalizeRosterScopes(bizIdOrScopes) {
   const arr = Array.isArray(bizIdOrScopes) ? bizIdOrScopes : [bizIdOrScopes];
   return arr.filter(Boolean).map(s => (typeof s === 'object' ? s : { bizId: s, serviceAreaId: null }));
@@ -1678,10 +1711,19 @@ function normalizeRosterScopes(bizIdOrScopes) {
 async function scopedRosterTechs(db, scopes, cols = 'id') {
   const lists = [];
   for (const sc of normalizeRosterScopes(scopes)) {
-    let q = db.from('technicians').select(cols).eq('business_id', sc.bizId).eq('active', true)
+    // A scope with NO resolvable service area contributes NOTHING — it must
+    // never fall back to an unfiltered scan of the whole company. That
+    // "legacy leniency" fallback was the actual bug: an unmapped/blank ZIP
+    // left the scope unfiltered, so Zach's (Austin) genuine recurring
+    // availability satisfied a Denver slot check purely because slot keys
+    // (s1-s5) carry no location. The safe failure mode for "we don't know
+    // this booking's metro" is "nobody is a candidate" (the auto-pick then
+    // comes back null and the job lands UNASSIGNED with a loud warning for a
+    // human to place) — never "everybody in the company is a candidate".
+    if (!sc.serviceAreaId) continue;
+    const { data } = await db.from('technicians').select(cols)
+      .eq('business_id', sc.bizId).eq('active', true).eq('service_area_id', sc.serviceAreaId)
       .order('created_at', { ascending: true });
-    if (sc.serviceAreaId) q = q.eq('service_area_id', sc.serviceAreaId);
-    const { data } = await q;
     lists.push(data || []);
   }
   return lists;
@@ -1739,9 +1781,11 @@ async function freeSlotTechMap(db, bizIdOrScopes, techId, dateStr, dow, tz, excl
 // host-first for the cross-company "Any Technician" pool) — each scope is tried
 // to exhaustion before falling to the next, so "Any Technician" prefers keeping
 // the job in-house and only reaches into the partner company when nobody home
-// is free. Each scope is filtered to its own metro (service area): an Austin
-// tech's schedule must never satisfy a Denver job's slot check just because
-// slot keys carry no location. Bare biz ids still accepted (unscoped).
+// is free. Each scope is filtered to its own metro (service area); a scope
+// with no resolvable area contributes zero candidates (see scopedRosterTechs)
+// rather than an unfiltered whole-company scan — an Austin tech's schedule
+// must never satisfy a Denver job's slot check just because slot keys carry
+// no location.
 // strict=true skips the off-schedule "second choice" fallback entirely — for
 // callers with no human in the loop to confirm an override (e.g. a customer's
 // own estimate-approval auto-book), silently handing the job to someone who
@@ -1786,6 +1830,32 @@ async function pickAvailableTech(db, bizIdOrScopes, dateStr, slotKey, tz, exclud
   // so leave the job unassigned rather than gamble on a blind pick who might be
   // busy or off that day. The office (or a follow-up guard) assigns explicitly.
   return null;
+}
+
+// Pair-aware auto-pick for a two-tech job where BOTH primary and secondary are
+// 'any'. Picking the primary alone first (pickAvailableTech, greedily) can
+// consume the secondary pool's only scheduled-and-free tech and leave no valid
+// secondary — even when availableSlots had just offered this exact slot as
+// bookable because a DIFFERENT pairing exists (e.g. TK+Steve are both free;
+// greedily taking TK as primary leaves no HA-Denver secondary, when Steve
+// primary + TK secondary works). Mirrors availableSlots' own pair-matching
+// (freeSlotTechMap union) so "offered" and "actually bookable" always agree.
+// excludeIneligibleSecondary is implicit on the secondary side (Juan/Zach can
+// never be a second tech). Returns { primaryId, secondaryId }, both null if no
+// distinct pair exists for this exact date+slot.
+async function pickAvailableTechPair(db, scopesPrimary, scopesSecondary, dateStr, slotKey, tz) {
+  if (!dateStr || !slotKey) return { primaryId: null, secondaryId: null };
+  const dow = dayOfWeekFor(dateStr);
+  const pMap = await freeSlotTechMap(db, scopesPrimary, 'any', dateStr, dow, tz);
+  const sMap = await freeSlotTechMap(db, scopesSecondary, 'any', dateStr, dow, tz, true);
+  const pSet = pMap.get(slotKey) || new Set();
+  const sSet = sMap.get(slotKey) || new Set();
+  for (const p of pSet) {
+    for (const s of sSet) {
+      if (s !== p) return { primaryId: p, secondaryId: s };
+    }
+  }
+  return { primaryId: null, secondaryId: null };
 }
 
 // Pick a SECONDARY tech who is genuinely SCHEDULED to work AND free in this exact
@@ -1900,7 +1970,12 @@ async function availableDates(req, res, db, auth) {
   const monthStart = `${month}-01`;
   const monthEnd = `${month}-${String(daysInMonth).padStart(2, '0')}`;
   // Existing bookings this month so fully-booked days don't show as available.
-  const tz = biz.timezone || 'America/Denver';
+  // Bucketed in the booking's METRO tz (from the zip), same as availableSlots —
+  // the single business tz drifts a Central (Houston/Austin) evening booking
+  // onto the wrong slot key (and near-midnight ones onto the wrong date),
+  // which can light up a day whose only slot is actually taken.
+  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+  const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
   const winStart = localDateStartUTC(tz, monthStart);
   const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
   // No business filter: a partner tech's jobs in their OWN company must also
@@ -2068,17 +2143,24 @@ async function bookingCreate(req, res, db, auth, body) {
     if (dupe?.id) return res.status(200).json({ id: dupe.id, duplicate: true });
   }
 
-  // Reuse an existing customer (by phone, then email) or create one.
+  // Reuse an existing customer (by phone, then email) or create one. Also pull
+  // back their ZIP on file: a repeat customer booked by phone lookup often has
+  // the address field left blank on THIS submission even though a real one is
+  // already stored — without this, the metro-scoped auto-pick below sees a
+  // blank zip and (correctly, per the hard rule) refuses to guess a metro,
+  // leaving an otherwise-routine repeat booking UNASSIGNED for no real reason.
   let customer_id = c.id || null;
   let matchedExisting = !!c.id;
+  let matchedPostalCode = null;
   if (!customer_id && c.phone) {
-    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
-    if (data?.id) { customer_id = data.id; matchedExisting = true; }
+    const { data } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
+    if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
   if (!customer_id && c.email) {
-    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
-    if (data?.id) { customer_id = data.id; matchedExisting = true; }
+    const { data } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
+    if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
+  const effectivePostalCode = (c.postal_code || '').toString().trim() || matchedPostalCode || null;
   if (!customer_id) {
     const { data, error } = await db.from('customers').insert({
       business_id: biz.id, name: c.name || 'Customer', phone: c.phone || null, email: c.email || null,
@@ -2109,7 +2191,7 @@ async function bookingCreate(req, res, db, auth, body) {
   // here — the slot's wall-clock time, availability picks, and the confirmation's
   // displayed time — never the single business tz, so a Central 8am slot is truly
   // stored and shown as 8am Central. Also stamps service_area_id on the booking.
-  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, c.postal_code);
+  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, effectivePostalCode);
   const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
 
   // Convert scheduled_date + scheduled_slot to scheduled_at timestamp. The slot
@@ -2134,17 +2216,47 @@ async function bookingCreate(req, res, db, auth, body) {
   // from whichever roster the pool points at.
   let technician_id = body.technician_id;
   let unassignedWarning = null;
+  // Read the secondary request now (before the primary pick) — a mandatory
+  // two-tech job needs the PAIR resolved together, not the primary greedily
+  // assigned first and the secondary left to pick over the leftovers.
+  const secondaryRaw = body.secondary_technician_id || null;
+  const secondaryConcreteId = (secondaryRaw && secondaryRaw !== 'any') ? secondaryRaw : null;
   if (technician_id === 'any') {
     // Scoped to each company's own metro for this zip (the unscoped roster
     // once handed a Denver Dom's job to Zach in Austin), and strict: never
     // silently book a tech who didn't mark the slot available — if nobody
     // scheduled is free, the job lands UNASSIGNED with the loud warning
     // below instead of on someone who never opted into that time.
-    const scopes = await rosterScopes(db, biz, (body.pool || '').toString(), c.postal_code);
-    technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
+    const scopes = await rosterScopes(db, biz, (body.pool || '').toString(), effectivePostalCode);
+    if (secondaryRaw === 'any') {
+      // BOTH sides need auto-resolving. Picking the primary alone first (the
+      // old behavior) could greedily consume the secondary pool's only
+      // scheduled tech and then refuse the booking outright, even though
+      // availableSlots had just offered this exact slot as a valid pair (e.g.
+      // TK+Steve both free — picking TK primary first leaves no HA-Denver
+      // secondary, when Steve-primary+TK-secondary would have worked). Match
+      // the offered pair, not just the first primary candidate.
+      const scopesSecondary = await rosterScopes(db, biz, (body.pool2 || '').toString(), effectivePostalCode);
+      const pair = await pickAvailableTechPair(db, scopes, scopesSecondary, body.scheduled_date, body.scheduled_slot, tz);
+      technician_id = pair.primaryId;
+      if (pair.secondaryId) body.secondary_technician_id = pair.secondaryId; // resolved below; skips the redundant 'any' branch
+      if (!technician_id) {
+        // No valid pair — still try to staff SOMEONE for the primary role
+        // alone rather than losing the booking entirely; the needs_lifting
+        // check further down still refuses if a second tech is mandatory.
+        technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
+      }
+    } else {
+      // excludeTechId=secondaryConcreteId so an 'any' primary can never land
+      // on the exact person the office already picked as the second tech
+      // (which used to trip the "must be different" refusal on a slot that
+      // was, in fact, bookable with a different primary).
+      technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, secondaryConcreteId, false, true);
+    }
     // The slot showed as available when the office picked it, but every tech
-    // got booked in the meantime (a two-secretary race). The booking is still
-    // created — losing the customer over a race would be worse — but it lands
+    // got booked in the meantime (a two-secretary race), or no ZIP/metro
+    // could be resolved for this booking. The booking is still created —
+    // losing the customer over a race would be worse — but it lands
     // UNASSIGNED, and silently: the office had no idea anyone still had to be
     // assigned. Surface it as a blocking warning on the response.
     if (!technician_id) {
@@ -2181,7 +2293,7 @@ async function bookingCreate(req, res, db, auth, body) {
     // scheduled to work that day; otherwise the existing pool-based pick. Never
     // auto-picks Juan/Zach, and never picks a tech who isn't scheduled+free.
     secondary_technician_id = await resolveDefaultSecondary(
-      db, biz, c.postal_code, body.scheduled_date, body.scheduled_slot, tz, technician_id, body.pool2);
+      db, biz, effectivePostalCode, body.scheduled_date, body.scheduled_slot, tz, technician_id, body.pool2);
   }
   // Backstop: a concrete second tech (or one that slipped through) must never be
   // an out-of-town, primary-only tech (Juan/Zach). Verify by name before saving.
