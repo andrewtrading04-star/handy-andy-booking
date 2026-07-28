@@ -86,6 +86,10 @@
   @media(prefers-reduced-motion:reduce){.nav-badge.urgent{animation:none;}}
 
   .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
+  .side-section.collapsible{cursor:pointer;display:flex;align-items:center;gap:6px;list-style:none;user-select:none;}
+  .side-section.collapsible::-webkit-details-marker{display:none;}
+  .side-section.collapsible::before{content:"\25B8";display:inline-block;font-size:10px;color:var(--mute);transition:transform .15s;}
+  details[open]>.side-section.collapsible::before{transform:rotate(90deg);}
   .side-list{display:flex;flex-direction:column;gap:1px;padding:0 8px;}
   .sl{display:flex;align-items:center;gap:8px;background:transparent;border:none;color:var(--ink-2);padding:8px 10px;border-radius:8px;font-size:13.5px;font-weight:600;text-align:left;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .sl:hover{background:var(--line2);}
@@ -1134,11 +1138,15 @@
 
     <div id="schedSidebar">
       <div id="territoriesSection">
-        <div class="side-section">Territories</div>
-        <div class="side-list" id="territoryList"></div>
+        <details>
+          <summary class="side-section collapsible">Territories</summary>
+          <div class="side-list" id="territoryList"></div>
+        </details>
       </div>
-      <div class="side-section">Jobs Assigned To</div>
-      <div class="side-list" id="assignList"></div>
+      <details>
+        <summary class="side-section collapsible">Jobs Assigned To</summary>
+        <div class="side-list" id="assignList"></div>
+      </details>
     </div>
 
     <div id="viewAsBanner" class="hidden" style="background:#fff7ed;border-top:1px solid #fed7aa;border-bottom:1px solid #fed7aa;padding:8px 14px;font-size:12px;color:#9a3412;font-weight:700;display:flex;align-items:center;gap:8px;">
