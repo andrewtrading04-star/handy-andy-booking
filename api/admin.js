@@ -7025,7 +7025,7 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
   // Completed jobs for all techs in the week with payroll computation
   const { data: jobs, error: jobErr } = await db.from('bookings')
     .select(`
-      id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
+      id, scheduled_at, status, subtotal, price, payment_status, amount_paid, payment_method,
       tip, notes, customer_notes, zenbooker_job_number, postal_code,
       technician_id, secondary_technician_id,
       customers(name), services(name),
@@ -7113,14 +7113,30 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
       if (result.state === 'deferred') {
         techPayroll[techId].deferred.push({ ...jobBase, customer_due: Math.floor((Number(b.price) || 0) - (Number(b.amount_paid) || 0)) });
       } else if (result.state !== 'excluded') {
+        // CASH JOB: the tech collected the customer's money and kept it, so the
+        // business's share comes back out of their pay. The job's own economics
+        // are unchanged (profit is still price − pay elsewhere) — this is purely
+        // "pay the tech less because they're already holding the cash", which is
+        // why it lives here in payroll and NOT in computeJobPay (profit shares
+        // that engine and must not see the deduction).
+        //
+        // Only the PRIMARY tech is deducted: they're the one who took the money.
+        // A helper on the same job is paid normally.
+        const collected = (b.payment_method === 'cash' && techId === b.technician_id)
+          ? Math.round(Number(b.amount_paid) || Number(b.price) || 0)
+          : 0;
+        const breakdown = [...(result.breakdown || [])];
+        if (collected > 0) breakdown.push({ label: `Cash collected from customer (kept by tech)`, amount: -collected });
+        const netPay = result.pay - collected;
         techPayroll[techId].jobs.push({
           ...jobBase,
-          tech_pay: result.pay,
-          breakdown: result.breakdown,
+          tech_pay: netPay,
+          cash_collected: collected || undefined,
+          breakdown,
           flags: result.flags,
           needs_review: result.flags.length > 0 || result.state === 'partial',
         });
-        techPayroll[techId].total += result.pay;
+        techPayroll[techId].total += netPay;
       }
     }
   }

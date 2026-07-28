@@ -1133,13 +1133,45 @@ async function jobPayment(req, res, db, auth, body) {
           warning: `This job's card charge actually WENT THROUGH ($${landed.amount.toFixed(2)}) on an earlier attempt that looked like it failed. It's been recorded as a CARD payment — do NOT take cash from the customer.` });
       }
     }
+    // ── Cash payment ─────────────────────────────────────────────────────────
+    // A cash customer is NOT charged sales tax (owner rule), so taking cash
+    // strips the tax line and re-prices the ticket to the remaining lines
+    // before anything is marked paid — otherwise the tech would collect, and
+    // payroll would deduct, tax money that was never actually owed.
+    let cashPrice = Number(b.price) || 0;
+    if (act === 'mark_paid' && body.cash) {
+      const { data: liRows } = await db.from('booking_line_items')
+        .select('id, name, line_total').eq('booking_id', id);
+      const taxRows = (liRows || []).filter(li => /\btax\b/i.test(String(li.name || '')));
+      if (taxRows.length) {
+        await db.from('booking_line_items').delete().in('id', taxRows.map(r => r.id));
+        const removed = taxRows.reduce((s, r) => s + (Number(r.line_total) || 0), 0);
+        cashPrice = Math.round((cashPrice - removed) * 100) / 100;
+        await db.from('bookings').update({ price: cashPrice }).eq('id', id);
+      }
+    }
+
     const patch = act === 'mark_paid'
-      ? { payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }
+      ? { payment_status: 'paid', paid_at: now, amount_paid: cashPrice,
+          ...(body.cash ? { payment_method: 'cash', price: cashPrice } : {}) }
       : { payment_status: 'unpaid', paid_at: null };
     const { data: updated } = await db.from('bookings').update(patch)
       .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
     if (!updated) return res.status(409).json({ error: 'The payment state just changed (maybe a charge finished) — refresh and check before marking it.' });
-    return res.status(200).json({ ok: true, payment_status: patch.payment_status });
+
+    // Capture the customer's signature for a cash job exactly like a card job.
+    // The tech couldn't previously complete a cash job at all because the only
+    // signature path ran through the card charge — this is the whole point of
+    // the cash flow. Best-effort: a storage hiccup must not un-take the money.
+    if (act === 'mark_paid' && body.cash && body.signature) {
+      try {
+        await saveAuthorization(db, req, b, {
+          businessId: b.business_id, total: cashPrice, ticketAmount: cashPrice,
+          tip: 0, card: {}, pi: null, chargeId: null, body,
+        });
+      } catch (e) { console.warn('[cash auth] save failed:', e.message); }
+    }
+    return res.status(200).json({ ok: true, payment_status: patch.payment_status, price: cashPrice, cash: !!body.cash });
   }
 
   // Refunds are office-only. Techs must never issue refunds (owner request), so

@@ -334,7 +334,13 @@ function tipFor(job) {
 // widget options ("…I cannot help lift it", "My TV is 85 inches or larger").
 // NOTE: "…I CAN help lift it" must NOT match — the negative lookalike is excluded
 // by requiring "cannot" in the lift branch.
-const SECOND_TECH_RE = /(?:second|2nd)\s*tech(?:nician)?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
+// "Extra Tech" is included because the office/techs type that wording by hand
+// on a ticket and it means exactly the same thing as "Second Technician" — it
+// was previously unmatched, so the line paid the tech $0 and was flagged as an
+// unrecognized item instead of adding the $60. (Austin runs one tech, so Zach
+// does the second-tech work himself and earns the whole $60 — the same amount
+// this pays a solo tech on any "Second Technician" job.)
+const SECOND_TECH_RE = /(?:second|2nd|extra)\s*tech(?:nician)?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
 
 // ── Multi-tech detection (when a two-person "lift help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.

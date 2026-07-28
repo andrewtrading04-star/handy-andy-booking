@@ -1382,15 +1382,28 @@ function openChargeFlow(j){
   const base=Number(j.price)||0;
   if(base<=0){ toast('This job has no price to charge.'); return; }
   let tip=0, step=1, sigData=null, signerName=(j.customer&&j.customer.name)||'', customMode=false, charging=false;
+  // 'card' = charge the card on file. 'cash' = the customer hands the tech
+  // money: no sales tax (owner rule), no tip screen (a cash tip is handed over
+  // in person and is 100% the tech's anyway), but the SAME signature.
+  let payMethod='card';
   const custName=(j.customer&&j.customer.name)||'';
   const bizName=j.company_name||(j.business&&j.business.name)||'the company';
   const lines=(j.line_items||[]).filter(li=>Number(li.line_total)>0);
-  const total=()=>Math.round((base+tip)*100)/100;
+  // Cash customers aren't charged sales tax, so the cash total drops the tax
+  // line. Shown BEFORE they sign so they authorize the amount they actually pay.
+  const taxAmt=lines.filter(li=>/\btax\b/i.test(String(li.name||''))).reduce((s,li)=>s+(Number(li.line_total)||0),0);
+  const cashBase=Math.round((base-taxAmt)*100)/100;
+  const payBase=()=>payMethod==='cash'?cashBase:base;
+  const total=()=>Math.round((payBase()+tip)*100)/100;
   // Shown at signing — the tip is chosen AFTER, so the customer authorizes the
   // service amount "plus any gratuity I add".
-  const authLine=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file for the services above (${fmtMoney(base)} service) plus any gratuity I add on the next screen. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
+  const authLine=(name)=>payMethod==='cash'
+    ? `I, ${name||custName||'the customer'}, confirm I have paid ${bizName} ${fmtMoney(cashBase)} in CASH for the services above. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`
+    : `I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file for the services above (${fmtMoney(base)} service) plus any gratuity I add on the next screen. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
   // Stored at charge time — records the actual final total including the tip.
-  const termsFor=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${fmtMoney(total())} for the services above (${fmtMoney(base)} service${tip>0?` + ${fmtMoney(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
+  const termsFor=(name)=>payMethod==='cash'
+    ? `I, ${name||custName||'the customer'}, confirm I have paid ${bizName} ${fmtMoney(cashBase)} in CASH for the services above. I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`
+    : `I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${fmtMoney(total())} for the services above (${fmtMoney(base)} service${tip>0?` + ${fmtMoney(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
 
   // Charge-flow styles, injected once: force-landscape for the signature + tip
   // steps (wide signing strip / big tip buttons) and the POS-style tip grid.
@@ -1433,10 +1446,12 @@ function openChargeFlow(j){
           ${ticketRows()||'<div style="color:var(--mute);">Service</div>'}
           <div style="display:flex;justify-content:space-between;padding-top:12px;margin-top:8px;border-top:1px solid var(--line);font-weight:800;font-size:18px;"><span>Total (incl. tax)</span><span>${fmtMoney(base)}</span></div>
         </div>
+        <div style="color:var(--mute);font-size:13.5px;line-height:1.5;margin-top:14px;">How is the customer paying?</div>
       </div>
-      <div style="padding:16px;display:flex;gap:10px;border-top:1px solid var(--line);">
-        <button class="btn ghost" data-x style="flex:1;">Cancel</button>
-        <button class="btn" data-next style="flex:2;">Continue to signature →</button>
+      <div style="padding:16px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);">
+        <button class="btn" data-pay="card">💳 Card on file — ${fmtMoney(base)}</button>
+        <button class="btn" data-pay="cash" style="background:#16a34a;">💵 Customer is paying CASH — ${fmtMoney(cashBase)}${taxAmt>0?' (no tax)':''}</button>
+        <button class="btn ghost" data-x>Cancel</button>
       </div>`;
     } else if(step===2){
       // Signing screen: fixed, NON-scrolling flex column so nothing scrolls under
@@ -1446,8 +1461,8 @@ function openChargeFlow(j){
       // captured server-side at charge time regardless of what's shown here).
       ov.innerHTML=`
       <div style="padding:16px 20px 0;flex:none;">
-        <h2 style="margin:0 0 2px;font-size:21px;">Authorize payment</h2>
-        <div style="font-size:23px;font-weight:800;margin-bottom:10px;">${fmtMoney(base)} <span style="font-size:13px;color:var(--mute);font-weight:600;">+ tip next</span></div>
+        <h2 style="margin:0 0 2px;font-size:21px;">${payMethod==='cash'?'Confirm cash payment':'Authorize payment'}</h2>
+        <div style="font-size:23px;font-weight:800;margin-bottom:10px;">${fmtMoney(payBase())} <span style="font-size:13px;color:var(--mute);font-weight:600;">${payMethod==='cash'?'received in cash':'+ tip next'}</span></div>
         <div style="background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12px;color:var(--mute);line-height:1.5;">${esc(authLine(signerName))}</div>
         <button id="cfTermsOpen" type="button" class="btn ghost" style="width:100%;margin-top:8px;padding:9px;font-size:13px;">View Terms &amp; Refund Policy</button>
         <input id="cfName" type="text" placeholder="Type full name" value="${esc(signerName)}" style="margin-top:10px;">
@@ -1459,7 +1474,7 @@ function openChargeFlow(j){
       </div>
       <div style="padding:14px 20px;display:flex;gap:10px;border-top:1px solid var(--line);flex:none;">
         <button class="btn ghost" data-back style="flex:1;">← Back</button>
-        <button class="btn" id="cfSignNext" style="flex:2;opacity:.5;" disabled>Continue to tip →</button>
+        <button class="btn" id="cfSignNext" style="flex:2;opacity:.5;" disabled>${payMethod==='cash'?'Complete job ✓':'Continue to tip →'}</button>
       </div>
       <div id="cfTerms" style="position:absolute;inset:0;background:var(--navy);display:none;flex-direction:column;z-index:5;">
         <div style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);flex:none;">
@@ -1512,6 +1527,10 @@ function openChargeFlow(j){
     // Back: step 2 → step 1, or the tip grid's ← → step 2. Always leaves custom mode.
     ov.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>{ step--; customMode=false; render(); });
     const next=ov.querySelector('[data-next]'); if(next) next.onclick=()=>{ step++; render(); };
+    // Card vs cash chosen on the review screen. Both go to the SAME signature
+    // step — the difference is the amount (cash drops sales tax), the wording,
+    // and what happens after signing (cash completes, card goes to the tip grid).
+    ov.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>{ payMethod=b.dataset.pay; step=2; render(); });
     // Preset tip squares — tapping charges immediately (POS-style).
     ov.querySelectorAll('[data-tip]').forEach(b=>b.onclick=()=>{ tip=Number(b.dataset.tip)||0; submit(); });
     const notip=ov.querySelector('[data-notip]'); if(notip) notip.onclick=()=>{ tip=0; submit(); };
@@ -1548,6 +1567,29 @@ function openChargeFlow(j){
   // just saw the button snap back and read it as "stuck". Show a persistent,
   // obvious banner with the reason, and (when there's no card to charge) a
   // one-tap "Take cash — mark paid" so the job can still close in the field.
+  // Cash payment WITH a signature — the deliberate "customer is paying cash"
+  // path chosen up front, not the post-card-failure escape hatch below. Sends
+  // the signature so the job has the same proof-of-completion a card job gets,
+  // and tells the server it's cash so it can drop the sales tax and re-price.
+  async function submitCash(btn){
+    if(charging) return; charging=true;
+    if(btn){ btn.disabled=true; btn.textContent='Recording…'; }
+    try{
+      const r=await api('job_payment',{method:'POST',body:{
+        id:j.id, action:'mark_paid', cash:true,
+        signature:sigData, signer_name:signerName, terms_text:termsFor(signerName),
+      }});
+      done();
+      if(r&&r.warning) alert(r.warning);
+      else toast(`Cash payment recorded ✓ ${fmtMoney((r&&r.price)!=null?r.price:cashBase)}`);
+      setTimeout(()=>showDetail(j.id),400);
+    }catch(e){
+      charging=false;
+      if(btn){ btn.disabled=false; btn.textContent='Complete job ✓'; }
+      chargeError(e.message||'Could not record the cash payment');
+    }
+  }
+
   async function markPaidCash(){
     try{ const r=await api('job_payment',{method:'POST',body:{ id:j.id, action:'mark_paid' }});
       done();
@@ -1593,7 +1635,15 @@ function openChargeFlow(j){
     const stop=()=>{ drawing=false; };
     cv.addEventListener('pointerup',stop); cv.addEventListener('pointercancel',stop); cv.addEventListener('pointerleave',stop);
     if(clr) clr.onclick=()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked=false; sigData=null; if(nextBtn){ nextBtn.disabled=true; nextBtn.style.opacity='.5'; } };
-    if(nextBtn) nextBtn.onclick=()=>{ if(!inked){ toast('Please sign first.'); return; } signerName=(nameEl&&nameEl.value.trim())||custName||''; sigData=cv.toDataURL('image/png'); step=3; render(); };
+    if(nextBtn) nextBtn.onclick=()=>{
+      if(!inked){ toast('Please sign first.'); return; }
+      signerName=(nameEl&&nameEl.value.trim())||custName||'';
+      sigData=cv.toDataURL('image/png');
+      // Cash: no tip screen (a cash tip is handed over in person), so signing IS
+      // the last step — record the payment and close the job right here.
+      if(payMethod==='cash'){ submitCash(nextBtn); return; }
+      step=3; render();
+    };
   }
 
   render();
