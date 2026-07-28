@@ -1783,6 +1783,7 @@ function enterApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('who').textContent = userName || (role==='owner' ? 'Owner' : 'Secretary');
   updateWhoAvatar();
+  businesses = businesses.slice().sort((a,b)=>(a.slug==='handy-andy'?-1:b.slug==='handy-andy'?1:0));
   current = businesses[0] || null;
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
