@@ -2371,10 +2371,18 @@ function notifPill(label,icon,color,text,when,resendAttrs){
 }
 function notificationLog(b){
   const rows=[];
-  if(b.confirmation_email_status){
-    rows.push(b.confirmation_email_status==='sent'
-      ? notifPill('Booking confirmation (email)','✓','#4ade80','Sent',b.confirmation_email_sent_at,{kind:'confirmation_email',id:b.id})
-      : notifPill('Booking confirmation (email)','✕','#f87171','Not sent',b.confirmation_email_sent_at,{kind:'confirmation_email',id:b.id}));
+  // ALWAYS rendered, even with no status recorded. Migration 0075 (the status
+  // columns) went unapplied for a long stretch, so every booking made before it
+  // landed has a null status — and a conditional row meant the office had no
+  // Resend button on exactly the jobs a customer calls about ("I never got my
+  // confirmation"). A null status is reported honestly as "No record" rather
+  // than guessed either way; the button works regardless.
+  {
+    const ca={kind:'confirmation_email',id:b.id};
+    const st=b.confirmation_email_status;
+    if(st==='sent') rows.push(notifPill('Booking confirmation (email)','✓','#4ade80','Sent',b.confirmation_email_sent_at,ca));
+    else if(st) rows.push(notifPill('Booking confirmation (email)','✕','#f87171','Not sent',b.confirmation_email_sent_at,ca));
+    else rows.push(notifPill('Booking confirmation (email)','—','#9ca3af','No record',null,ca));
   }
   // Technician "You got a job!" texts (app.tech_sms_log). One row per attempt,
   // so a re-assignment or a reschedule each get their own line. This is the
@@ -2389,6 +2397,13 @@ function notificationLog(b){
     else if(t.status==='failed'||t.status==='undelivered') rows.push(notifPill(label,'✕','#f87171',t.error?`Not delivered (${t.error})`:'Not delivered',when,resendAttrs));
     else if(t.status==='skipped') rows.push(notifPill(label,'✕','#f87171',t.skip_reason==='no_phone'?'No phone on file':t.skip_reason==='notifications_off'?'Texting is turned off':`Not sent (${t.skip_reason||'skipped'})`,when,resendAttrs));
     else rows.push(notifPill(label,'…','#fbbf24','Sending',when,resendAttrs));
+  }
+  // A tech is assigned but nothing was ever logged for them — the notification
+  // never fired at all (assigned through a path that doesn't notify, or logged
+  // before the tech_sms_log table existed). Surface it as its own row so the
+  // office can actually tell the tech about the job.
+  if(b.technician_id && !(b.tech_sms||[]).some(t=>t.technician_id===b.technician_id)){
+    rows.push(notifPill(`Tech notified: new job${b.technician?.name?' — '+b.technician.name:''}`,'—','#9ca3af','No record',null,{kind:'tech_new_job',id:b.id,technician_id:b.technician_id}));
   }
   if(b.on_the_way_sms_status){
     const st=b.on_the_way_sms_status, when=b.on_the_way_sms_delivered_at||b.on_the_way_sms_sent_at;
