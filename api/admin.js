@@ -1089,6 +1089,17 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
       econ.bracket_cost = Math.round(bracketCost);
       econ.profit = Math.round(cost - payout - bracketCost);
       econ.assigned = techNames.length > 0;
+      // Cash job: the tech kept the customer's money, so what actually gets PAID
+      // on payroll is their earnings minus the cash they're holding (usually
+      // negative — the business's share comes back out of their pay). Profit
+      // above is deliberately unchanged: the job's economics are the same, only
+      // the direction the money moves is different. Surfaced so the schedule
+      // card can't imply the tech is owed money they've already taken.
+      if (b.payment_method === 'cash') {
+        const collected = Math.round(Number(b.amount_paid) || Number(b.price) || 0);
+        econ.cash_collected = collected;
+        econ.net_tech_pay = Math.round(payout + tip) - collected;
+      }
     }
     out[b.id] = econ;
   }
@@ -4750,7 +4761,7 @@ async function fetchBookingRows(makeQuery) {
 // was built by tracing every job.* / b.* read in that call chain — don't trim
 // further without re-checking api/_lib/payroll.js.
 function economicsSelect() {
-  const base = `id, status, payment_status, price, subtotal, tip, notes, customer_notes,
+  const base = `id, status, payment_status, payment_method, amount_paid, price, subtotal, tip, notes, customer_notes,
           zenbooker_job_number, scheduled_at, postal_code,
           service:services ( name ),
           technician:technicians!technician_id ( name ),
