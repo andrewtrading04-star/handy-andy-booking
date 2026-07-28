@@ -1779,11 +1779,10 @@ function enterApp(){
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
   applyIconTheme();
-  // Booking Analytics is owner-only (Andrew); secretaries don't see it.
-  // Booking Analytics: everyone (owner + each secretary sees only their own
-  // business). Website Analytics: owner only.
+  // Booking Analytics: owner only (Heather/Joey no longer get this — per
+  // request; they used to see it for their own business).
   const navAna=document.getElementById('navAnalytics');
-  if(navAna) navAna.style.display = '';
+  if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
   const navWeb=document.getElementById('navWebAnalytics');
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
   // Handyman Analytics: owner only (not techs/secretaries).
@@ -1924,6 +1923,7 @@ document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
 
 function navTo(s){
   if(s==='reviewcalls' && scope==='handy-andy') s='schedule';   // not on Heather's platform
+  if(s==='analytics' && role!=='owner') s='schedule';   // Booking Analytics is owner-only; blocks direct calls too, not just the hidden nav button
   section=s;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
