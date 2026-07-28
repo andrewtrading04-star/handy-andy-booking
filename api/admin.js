@@ -271,6 +271,7 @@ export default async function handler(req, res) {
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
+      case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
@@ -5448,12 +5449,22 @@ async function notificationResend(req, res, db, auth, body) {
 // Cross-business like the review-call queue: the phone system is shared, and a
 // secretary needs to see the voicemails on THEIR extensions regardless of which
 // company the caller was asking about.
-const CALL_OPEN_STATUSES = ['new', 'called_back'];
+const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
+// How long a claim ("I am ringing this person now") stays hot. Long enough to
+// cover dialing, a conversation and writing a note; short enough that a claim
+// someone forgot to close does not hide a customer forever. After this the card
+// goes back to being freely callable, with the stale claim still shown.
+const CALL_CLAIM_MINUTES = 15;
+function claimIsHot(row) {
+  if (!row.claimed_at || !row.claimed_by) return false;
+  return (Date.now() - new Date(row.claimed_at).getTime()) < CALL_CLAIM_MINUTES * 60000;
+}
 async function calls(req, res, db, auth) {
   const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
   const { data: rows, error } = await db.from('calls')
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
+             claimed_by, claimed_at,
              customer_id, booking_id,
              customer:customers ( id, name, phone, business:businesses ( slug ) ),
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
@@ -5480,27 +5491,82 @@ async function calls(req, res, db, auth) {
       if (hit) {
         r.booking_id = hit.id;
         r.booking = { id: hit.id, scheduled_at: hit.scheduled_at, status: hit.status, price: hit.price, technician: hit.technician };
-        patch.push({ id: r.id, booking_id: hit.id });
+        patch.push({ id: r.id, booking_id: hit.id, wasOpen: CALL_OPEN_STATUSES.includes(r.status) });
+        // Booking the customer IS the follow-up. Once a job exists there is
+        // nothing left to return, and leaving it in the queue is exactly how a
+        // second person ends up ringing someone who already booked. Clear it.
+        if (CALL_OPEN_STATUSES.includes(r.status)) {
+          r.status = 'resolved';
+          r.handled_by = 'Booked';
+          r.handled_at = hit.created_at || new Date().toISOString();
+          r.auto_resolved = true;
+        }
       }
     }
     // Persist so the next read does not repeat the work. Best-effort: the list
     // is already correct in memory either way.
     for (const p of patch) {
-      await db.from('calls').update({ booking_id: p.booking_id }).eq('id', p.id).then(null, () => {});
+      const upd = { booking_id: p.booking_id };
+      if (p.wasOpen) { upd.status = 'resolved'; upd.handled_by = 'Booked'; upd.handled_at = new Date().toISOString(); }
+      await db.from('calls').update(upd).eq('id', p.id).then(null, () => {});
     }
   }
 
+  const me = auth.name || auth.role || 'office';
   const mapped = (rows || []).map(r => ({
     ...r,
     caller_display: r.customer?.name || prettyPhone(r.caller_phone),
     caller_pretty: prettyPhone(r.caller_phone),
     is_new_caller: !r.customer_id,
+    // Someone is on this call right now. `claimed_by_me` lets the UI show "you
+    // are on this" rather than warning a person about their own claim.
+    claim_active: claimIsHot(r),
+    claimed_by_me: claimIsHot(r) && r.claimed_by === me,
   }));
+  const open = mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   return res.status(200).json({
-    open: mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status)),
+    open,
     handled: mapped.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
-    open_count: mapped.filter(r => r.status === 'new').length,
+    // The sidebar badge and the banner both count only what is genuinely
+    // waiting on a human: not the ones someone is already ringing, and not the
+    // ones that already turned into a booking.
+    open_count: mapped.filter(r => r.status === 'new' && !claimIsHot(r)).length,
+    // The newest thing worth interrupting someone about, for the banner.
+    banner: open.filter(r => r.status === 'new' && !claimIsHot(r))
+      .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
+    me,
   });
+}
+
+// Claim a voicemail ("I am ringing this person now") so nobody else rings them
+// too. Returns 409 with who holds it when someone else got there first — the UI
+// turns that into a "call anyway?" confirmation rather than a hard block, since
+// there are legitimate reasons to double up and the office should decide.
+async function callClaim(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const me = auth.name || auth.role || 'office';
+
+  const { data: cur, error: e0 } = await db.from('calls')
+    .select('id, status, claimed_by, claimed_at, booking_id').eq('id', id).single();
+  if (e0 || !cur) return res.status(404).json({ error: 'Call not found' });
+
+  // Someone else is mid-call. Report it instead of silently stealing the claim.
+  if (!body.force && claimIsHot(cur) && cur.claimed_by !== me) {
+    const mins = Math.max(1, Math.round((Date.now() - new Date(cur.claimed_at).getTime()) / 60000));
+    return res.status(409).json({
+      error: `${cur.claimed_by} started calling this ${mins} minute${mins === 1 ? '' : 's'} ago.`,
+      claimed_by: cur.claimed_by, minutes_ago: mins, code: 'already_claimed',
+    });
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await db.from('calls')
+    .update({ claimed_by: me, claimed_at: now, status: 'calling', updated_at: now })
+    .eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true, claimed_by: me });
 }
 
 // Mark a call called-back / resolved / ignored, or attach a note.
@@ -5510,10 +5576,13 @@ async function callUpdate(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   const patch = { updated_at: new Date().toISOString() };
   if (body.status) {
-    if (!['new', 'called_back', 'resolved', 'ignored'].includes(body.status)) {
+    if (!['new', 'calling', 'called_back', 'resolved', 'ignored'].includes(body.status)) {
       return res.status(400).json({ error: 'Unknown status' });
     }
     patch.status = body.status;
+    // Closing or reopening a call releases the claim, so a card never sits
+    // showing "Heather is calling" after Heather already finished with it.
+    if (body.status !== 'calling') { patch.claimed_by = null; patch.claimed_at = null; }
     // Stamp WHO handled it and when, so the follow-up list is auditable the
     // same way the review-call queue is.
     if (body.status !== 'new') {
@@ -5617,6 +5686,10 @@ async function callIngest(req, res, body) {
     booking_id,
     warnings: parsed.warnings.length ? parsed.warnings : null,
     email_message_id: parsed.message_id || null,
+    // A voicemail that already produced a booking needs no follow-up: it lands
+    // closed. This matters most on a backfill, which would otherwise drop
+    // months of long-settled voicemails into the callback queue.
+    ...(booking_id ? { status: 'resolved', handled_by: 'Booked', handled_at: new Date().toISOString() } : {}),
   };
 
   const { data: ins, error: insErr } = await db.from('calls').insert(row).select('id').single();
@@ -5632,8 +5705,9 @@ async function callIngest(req, res, body) {
 
   // Alert the person whose extension it came in on. Skipped for a backfill —
   // texting staff about months-old voicemails would be pure noise.
+  // No alert for a caller who has already booked, and none on a backfill.
   let notified = false;
-  if (!body.backfill) {
+  if (!body.backfill && !booking_id) {
     notified = await notifyCallRecipient(db, { ...parsed, id: ins.id, customer, booking_id });
     if (notified) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', ins.id);
   }
@@ -5781,6 +5855,7 @@ async function reviewCalls(req, res, db, auth) {
     out.sort((a, c) => new Date(c.call_at || 0) - new Date(a.call_at || 0));
     const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: RC_TZ, month: 'short', day: 'numeric' }).format(d);
     const weekLastDay = new Date(weekEnd.getTime() - 86400000);
+    await attachInboundVoicemails(db, out);
     return res.status(200).json({
       calls: out,
       warning: warnings.length ? warnings.join(' · ') : null,
@@ -5825,6 +5900,7 @@ async function reviewCalls(req, res, db, auth) {
     if (au !== cu) return au - cu;
     return new Date(c.when || 0) - new Date(a.when || 0);
   });
+  await attachInboundVoicemails(db, out);
   return res.status(200).json({
     calls: out,
     warning: warnings.length ? warnings.join(' · ') : null,
@@ -5834,6 +5910,44 @@ async function reviewCalls(req, res, db, auth) {
       called: out.filter(x => x.call_status).length,
     },
   });
+}
+
+// Attach any voicemail THE CUSTOMER left us to their review-call card, so
+// whoever is about to ring them can read what they said first. Someone chasing
+// a review should not be the last to know the customer already called asking
+// about a problem. One batched query for the whole page, keyed on the phone
+// number (the review-call rows and the call log share no id).
+async function attachInboundVoicemails(db, rows) {
+  try {
+    const byPhone = new Map();
+    for (const r of rows) {
+      const d = digitsOf(r.phone || r.customer_phone || '');
+      if (d.length === 10) {
+        if (!byPhone.has(d)) byPhone.set(d, []);
+        byPhone.get(d).push(r);
+      }
+    }
+    if (!byPhone.size) return;
+    const { data } = await db.from('calls')
+      .select('caller_phone, transcript, occurred_at, market, status')
+      .in('caller_phone', [...byPhone.keys()])
+      .order('occurred_at', { ascending: false });
+    for (const c of (data || [])) {
+      for (const r of (byPhone.get(c.caller_phone) || [])) {
+        // Newest voicemail only — the list is already sorted, so the first one
+        // seen for a number wins.
+        if (!r.inbound_voicemail) {
+          r.inbound_voicemail = {
+            transcript: c.transcript, occurred_at: c.occurred_at, market: c.market, status: c.status,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    // The calls table may not exist on an older deploy — the review-call queue
+    // must keep working regardless.
+    console.warn('[review_calls] voicemail attach skipped:', e.message);
+  }
 }
 
 // Log the outcome of a review call (Joey). Cross-business: resolve by id.

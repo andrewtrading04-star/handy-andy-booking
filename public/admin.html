@@ -5612,6 +5612,11 @@ function callCard(r,handled){
   if(r.market)   badges.push(`<span class="rc-badge gray">${esc(r.market)}</span>`);
   else badges.push('<span class="rc-badge red">Unrouted number</span>');
   if(r.status==='called_back') badges.push('<span class="rc-badge blue">Called back</span>');
+  // Live claim, shown to everyone. This badge is the double-call guard: it is
+  // how Joey learns that Heather is already on it.
+  if(r.claim_active) badges.push(r.claimed_by_me
+    ? '<span class="rc-badge green" style="background:#dcfce7;color:#15803d;">You are calling this</span>'
+    : `<span class="rc-badge red">${esc(r.claimed_by)} is calling this now</span>`);
   for(const w of (r.warnings||[])) badges.push(`<span class="rc-badge red">${esc(w)}</span>`);
 
   // The job this call produced, if any. This is the whole point of matching on
@@ -5627,10 +5632,18 @@ function callCard(r,handled){
     : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
 
   const tel=`tel:+1${esc(r.caller_phone)}`;
+  // The call button CLAIMS before it dials (see callDial). Someone else's live
+  // claim turns it grey and states who is on it, which is the whole point: the
+  // office kept ringing customers twice because a voicemail Heather was already
+  // returning still looked untouched to Joey.
+  const otherHas = r.claim_active && !r.claimed_by_me;
+  const callBtn = otherHas
+    ? `<button class="rc-call disabled" data-calldial="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" style="border:none;">${esc(r.claimed_by)} is calling — dial anyway</button>`
+    : `<button class="rc-call" data-calldial="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" style="border:none;cursor:pointer;">📞 Call ${esc(r.caller_pretty)}</button>`;
   const actions=handled
     ? `<div class="rc-btn-row"><a class="rc-btn" href="${tel}">Call again</a>
        <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button></div>`
-    : `<a class="rc-call" href="${tel}">📞 Call ${esc(r.caller_pretty)}</a>
+    : `${callBtn}
        <div class="rc-btn-row">
          <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
          <button class="rc-btn amber" data-callact="called_back" data-callid="${esc(r.id)}">Called back</button>
@@ -5645,7 +5658,10 @@ function callCard(r,handled){
     : sameBiz ? `<a href="#" data-callcust="${esc(r.customer.id)}" style="color:inherit;text-decoration:underline;">${esc(r.customer.name)}</a>`
     : esc(r.customer.name);
   const handledLine=handled&&r.handled_by
-    ? `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>` : '';
+    ? (r.handled_by==='Booked'
+        ? `<div class="rc-meta">Cleared automatically — they booked.</div>`
+        : `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`)
+    : '';
 
   return `<div class="rc-card" style="align-items:flex-start;">
     <div class="rc-main">
@@ -5679,20 +5695,99 @@ function paintCalls(){
       await renderCalls();
     }catch(e){ toast(e.message||'Could not update'); b.disabled=false; }
   }));
+  view.querySelectorAll('[data-calldial]').forEach(b=>b.addEventListener('click',
+    ()=>callDial(b.dataset.calldial, b.dataset.callphone)));
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
 }
+// Claim the voicemail, THEN dial. Claiming first is what stops two people
+// ringing the same customer: the moment Heather taps Call, Joey's screen shows
+// it as hers. If someone else already holds it the server answers 409 and we
+// ask rather than block — there are good reasons to double up, but it must be a
+// decision, not an accident.
+async function callDial(id, pretty){
+  const dial=()=>{ window.location.href='tel:+1'+String(pretty).replace(/\D/g,''); };
+  try{
+    await api('call_claim',{ method:'POST', body:{ id }});
+  }catch(e){
+    const msg=e.message||'';
+    if(/started calling this/i.test(msg)){
+      if(!confirm(`${msg}\n\nCall them anyway?`)) return;
+      try{ await api('call_claim',{ method:'POST', body:{ id, force:true }}); }catch(_){ /* dial regardless */ }
+    }else{
+      // Claiming failed for some other reason (offline, endpoint down). Never
+      // block the actual phone call over bookkeeping.
+      toast('Could not mark this as claimed, dialing anyway.');
+    }
+  }
+  dial();
+  renderCalls();
+}
+
+// ── "John just left a voicemail" banner ────────────────────────────────────
+// Sits above every tab so Heather and Joey see a new voicemail without being on
+// the Calls tab. The X dismisses it for that person only (remembered locally) —
+// it does NOT resolve the call, which stays in the queue until someone actually
+// deals with it. Dismissing an alert must never quietly drop a customer.
+const CALL_BANNER_KEY='dismissedCallBanners';
+function dismissedBanners(){
+  try{ return JSON.parse(localStorage.getItem(CALL_BANNER_KEY)||'[]'); }catch(_){ return []; }
+}
+function dismissBanner(id){
+  // Keep the last 50 so the list can't grow without bound.
+  const list=[...dismissedBanners().filter(x=>x!==id), id].slice(-50);
+  try{ localStorage.setItem(CALL_BANNER_KEY, JSON.stringify(list)); }catch(_){}
+  const el=document.getElementById('callBanner'); if(el) el.remove();
+}
+function paintCallBanner(call){
+  const existing=document.getElementById('callBanner');
+  if(existing) existing.remove();
+  if(!call || dismissedBanners().includes(call.id)) return;
+  const who=call.customer?call.customer.name:call.caller_pretty;
+  let at='';
+  try{
+    at=new Date(call.occurred_at).toLocaleTimeString('en-US',
+      { timeZone:(CALL_TZ[call.market]||'America/Denver'), hour:'numeric', minute:'2-digit' });
+  }catch(_){}
+  const bar=document.createElement('div');
+  bar.id='callBanner';
+  bar.style.cssText='background:#fff7ed;border-bottom:1px solid #fed7aa;padding:10px 14px;font-size:13.5px;color:#9a3412;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+  bar.innerHTML=`<span>📨</span>
+    <span><b>${esc(who)}</b> left a voicemail${at?' at '+esc(at):''}. Return their call.</span>
+    <button id="callBannerGo" style="background:#9a3412;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:800;cursor:pointer;">Open</button>
+    <button id="callBannerX" title="Dismiss" aria-label="Dismiss this notification" style="margin-left:auto;background:transparent;border:none;color:#9a3412;font-size:19px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>`;
+  const anchor=document.getElementById('viewAsBanner');
+  if(anchor&&anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+  else document.body.insertBefore(bar, document.body.firstChild);
+  document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
+  document.getElementById('callBannerGo').onclick=()=>{
+    dismissBanner(call.id);
+    const b=document.querySelector('[data-nav="calls"]'); if(b) b.click();
+  };
+}
+
 // Unread count on the nav button. Safe to call from anywhere: it silently does
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
   try{
-    const d=_callsData.open_count!=null&&section==='calls' ? _callsData : await api('calls',{ params:{ limit:100 }});
+    const d=(section==='calls'&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
+    paintCallBanner(d.banner||null);
   }catch(_){ /* endpoint not deployed yet — leave the badge hidden */ }
 }
+// Poll while the office has the dashboard open, so a claim taken on one screen
+// shows up on the other within seconds rather than on the next manual refresh —
+// that gap is exactly when the second person picks up the phone. Faster while
+// actually looking at the Calls tab, slower elsewhere; paused when the tab is
+// in the background so it costs nothing.
+setInterval(()=>{
+  if(document.hidden||!current) return;
+  if(section==='calls') renderCalls();
+  else refreshCallsBadge();
+}, 20000);
 
 async function renderReviewCalls(){
   const view=document.getElementById('view');
@@ -5782,6 +5877,7 @@ function rcFolderCard(r){
     <div class="rc-main">
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
       <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}</div>
+      ${rcVoicemailRow(r)}
       <div class="rc-badges">${badges.join('')}</div>
       ${noteBox}
     </div>
@@ -5804,6 +5900,26 @@ function rcRelevantItem(li){
   if(tvSizeIndex(li.name)>=0) return true;               // TV size — always
   if(/handyman|assurion/.test(n)) return true;           // handyman / Assurion — always
   return Number(li.price)>0;                             // priced add-ons; drops $0 config lines
+}
+// Renders the customer's own voicemail (if any) inside a review-call card.
+// Shared shape with the Calls tab: same market-local time, same escaped text.
+function rcVoicemailRow(r){
+  const vm=r.inbound_voicemail; if(!vm) return '';
+  let when='';
+  try{
+    when=new Date(vm.occurred_at).toLocaleString('en-US',
+      { timeZone:(CALL_TZ[vm.market]||'America/Denver'), month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  }catch(_){}
+  const open=vm.status==='new'||vm.status==='calling'||vm.status==='called_back';
+  return `<div style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:9px 11px;">
+    <div style="font-size:12px;font-weight:800;color:#9a3412;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+      📨 They left us a voicemail${when?` · ${esc(when)}`:''}
+      ${open?'<span class="rc-badge red" style="font-size:10.5px;">still needs a callback</span>':''}
+    </div>
+    ${vm.transcript
+      ? `<div style="font-size:12.5px;color:#7c2d12;line-height:1.55;margin-top:5px;">${esc(vm.transcript)}</div>`
+      : '<div style="font-size:12.5px;color:#9a3412;opacity:.75;margin-top:5px;">No transcript for that message.</div>'}
+  </div>`;
 }
 function rcCard(r){
   const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
@@ -5831,6 +5947,9 @@ function rcCard(r){
   const items=(Array.isArray(r.line_items)?r.line_items:[]).filter(rcRelevantItem);
   const itemsRow=items.length
     ? `<div class="rc-items">🛒 ${items.slice(0,8).map(li=>esc(liCleanLabel(li.name))+(li.qty>1?` ×${li.qty}`:'')).join(' · ')}${items.length>8?' …':''}</div>` : '';
+  // A voicemail the CUSTOMER left us, if there is one for this number. Whoever
+  // is about to ring them should know what they already said — chasing someone
+  // for a review while they are waiting on a callback reads badly.
   // Middle of the card is either the outcome buttons or (if selected) the complaint note form.
   const middle = _rcComplaintFor===r.id
     ? `<div class="rc-complaint">
@@ -5852,6 +5971,7 @@ function rcCard(r){
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
       <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
       ${itemsRow}
+      ${rcVoicemailRow(r)}
       <div class="rc-badges">${badges.join('')}</div>
     </div>
     <div class="rc-actions">
