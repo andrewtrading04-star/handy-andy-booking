@@ -27,6 +27,7 @@ import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
+import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
 
 // Search Console domain per business — the free "what did people search to
 // find us" data source (see api/_lib/gsc.js).
@@ -210,6 +211,9 @@ export default async function handler(req, res) {
     if (action === 'review_email_preview') return await reviewEmailPreview(req, res);
     if (action === 'send_test_review_email') return await sendTestReviewEmail(req, res, body);
     if (action === 'session_status') return await sessionStatus(req, res);
+    // Posted by the Gmail forwarder script, which has no dashboard session —
+    // authenticates with GRASSHOPPER_INGEST_SECRET instead of a login token.
+    if (action === 'call_ingest') return await callIngest(req, res, body);
 
     // Everything below requires a valid admin token.
     const auth = verifyToken(getBearer(req));
@@ -265,6 +269,8 @@ export default async function handler(req, res) {
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
+      case 'calls':             return await calls(req, res, db, auth);
+      case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
@@ -5436,6 +5442,247 @@ async function notificationResend(req, res, db, auth, body) {
   }
 
   return res.status(400).json({ error: 'Unknown notification kind.' });
+}
+
+// ── Inbound calls: the office's Calls tab ───────────────────────────────────
+// Cross-business like the review-call queue: the phone system is shared, and a
+// secretary needs to see the voicemails on THEIR extensions regardless of which
+// company the caller was asking about.
+const CALL_OPEN_STATUSES = ['new', 'called_back'];
+async function calls(req, res, db, auth) {
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+  const { data: rows, error } = await db.from('calls')
+    .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
+             occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
+             customer_id, booking_id,
+             customer:customers ( id, name, phone, business:businesses ( slug ) ),
+             booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
+             business:businesses ( slug, name )`)
+    .order('occurred_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+
+  // Self-healing "did this call become a job?": a booking made AFTER ingest
+  // cannot have been linked at ingest time. Rather than coupling booking
+  // creation to the call log, unlinked calls are re-checked on read, in ONE
+  // batched query for the whole page.
+  const needLink = (rows || []).filter(r => r.customer_id && !r.booking_id);
+  if (needLink.length) {
+    const oldest = needLink.reduce((m, r) => (r.occurred_at < m ? r.occurred_at : m), needLink[0].occurred_at);
+    const { data: bks } = await db.from('bookings')
+      .select('id, customer_id, created_at, scheduled_at, status, price, technician:technicians!technician_id ( name )')
+      .in('customer_id', [...new Set(needLink.map(r => r.customer_id))])
+      .gte('created_at', oldest)
+      .order('created_at', { ascending: true });
+    const patch = [];
+    for (const r of needLink) {
+      const until = new Date(new Date(r.occurred_at).getTime() + 14 * 86400000).toISOString();
+      const hit = (bks || []).find(b => b.customer_id === r.customer_id && b.created_at >= r.occurred_at && b.created_at <= until);
+      if (hit) {
+        r.booking_id = hit.id;
+        r.booking = { id: hit.id, scheduled_at: hit.scheduled_at, status: hit.status, price: hit.price, technician: hit.technician };
+        patch.push({ id: r.id, booking_id: hit.id });
+      }
+    }
+    // Persist so the next read does not repeat the work. Best-effort: the list
+    // is already correct in memory either way.
+    for (const p of patch) {
+      await db.from('calls').update({ booking_id: p.booking_id }).eq('id', p.id).then(null, () => {});
+    }
+  }
+
+  const mapped = (rows || []).map(r => ({
+    ...r,
+    caller_display: r.customer?.name || prettyPhone(r.caller_phone),
+    caller_pretty: prettyPhone(r.caller_phone),
+    is_new_caller: !r.customer_id,
+  }));
+  return res.status(200).json({
+    open: mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status)),
+    handled: mapped.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
+    open_count: mapped.filter(r => r.status === 'new').length,
+  });
+}
+
+// Mark a call called-back / resolved / ignored, or attach a note.
+async function callUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const patch = { updated_at: new Date().toISOString() };
+  if (body.status) {
+    if (!['new', 'called_back', 'resolved', 'ignored'].includes(body.status)) {
+      return res.status(400).json({ error: 'Unknown status' });
+    }
+    patch.status = body.status;
+    // Stamp WHO handled it and when, so the follow-up list is auditable the
+    // same way the review-call queue is.
+    if (body.status !== 'new') {
+      patch.handled_by = auth.name || auth.role || 'office';
+      patch.handled_at = new Date().toISOString();
+    } else {
+      patch.handled_by = null; patch.handled_at = null;
+    }
+  }
+  if (body.notes !== undefined) patch.notes = String(body.notes || '').slice(0, 2000) || null;
+  const { error } = await db.from('calls').update(patch).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// ── Inbound calls: ingest a Grasshopper voicemail email ─────────────────────
+// Grasshopper has no API/webhooks/Zapier (verified Jul 2026), so its
+// notification EMAIL is the integration. A Google Apps Script on the owner's
+// own Gmail posts each one here (see docs/grasshopper-gmail-script.md).
+//
+// PRE-AUTH by design: the script runs on Google's servers with no dashboard
+// session, so it authenticates with a shared secret instead of a login token.
+// The secret is compared with safeEqual (constant time) and, with no secret
+// configured, the endpoint stays CLOSED rather than open — an unset env var
+// must never mean "let anyone write call records".
+async function callIngest(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const secret = process.env.GRASSHOPPER_INGEST_SECRET || '';
+  if (!secret) return res.status(503).json({ error: 'Call ingest is not configured' });
+  if (!safeEqual((body.secret || '').toString(), secret)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const parsed = parseGrasshopperEmail({
+    subject: body.subject, body: body.body,
+    receivedAt: body.receivedAt, messageId: body.messageId,
+    hasAttachment: !!body.hasAttachment,
+  });
+  // A parse failure is reported back so the forwarder can log it and the office
+  // can see that something arrived it could not read — silently swallowing it
+  // would mean a customer's voicemail vanished with no trace anywhere.
+  if (!parsed.ok) return res.status(422).json({ error: parsed.error });
+
+  const db = serviceClient();
+
+  // Business + market. The Grasshopper line dialed is what identifies the
+  // market (every email is stamped Central regardless of where it came in).
+  const { data: bizRow } = await db.from('businesses').select('id, slug, name')
+    .eq('slug', parsed.business_slug).maybeSingle();
+  let service_area_id = null;
+  if (bizRow && parsed.market) {
+    const { data: area } = await db.from('service_areas').select('id')
+      .eq('business_id', bizRow.id).ilike('name', parsed.market).maybeSingle();
+    service_area_id = area?.id || null;
+  }
+
+  // Match the caller to an existing customer. 99.9% of stored numbers are bare
+  // 10 digits, so that is the primary lookup; the handful with punctuation get
+  // a second pass on the common written formats. An unmatched caller is a
+  // perfectly normal new lead, not an error.
+  const digits = parsed.caller_phone;
+  let customer = null;
+  {
+    const { data } = await db.from('customers')
+      .select('id, name, phone, business_id').eq('phone', digits).limit(1);
+    customer = (data || [])[0] || null;
+    if (!customer) {
+      const alt = [prettyPhone(digits), `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`, `+1${digits}`, `1${digits}`];
+      const { data: d2 } = await db.from('customers')
+        .select('id, name, phone, business_id')
+        .in('phone', alt).limit(1);
+      customer = (d2 || [])[0] || null;
+    }
+  }
+
+  // Did this call turn into a job? The earliest booking for that customer
+  // created AFTER the call. Bounded to 14 days so a voicemail is never
+  // credited with a booking made weeks later for unrelated reasons.
+  let booking_id = null;
+  if (customer) {
+    const until = new Date(new Date(parsed.occurred_at).getTime() + 14 * 86400000).toISOString();
+    const { data: bk } = await db.from('bookings')
+      .select('id, created_at').eq('customer_id', customer.id)
+      .gte('created_at', parsed.occurred_at).lte('created_at', until)
+      .order('created_at', { ascending: true }).limit(1);
+    booking_id = (bk || [])[0]?.id || null;
+  }
+
+  const row = {
+    business_id: bizRow?.id || null,
+    service_area_id,
+    kind: parsed.kind,
+    caller_phone: digits,
+    grasshopper_number: parsed.grasshopper_number,
+    extension: parsed.extension,
+    extension_no: parsed.extension_no,
+    service: parsed.service,
+    market: parsed.market,
+    occurred_at: parsed.occurred_at,
+    transcript: parsed.transcript,
+    has_recording: parsed.has_recording,
+    customer_id: customer?.id || null,
+    booking_id,
+    warnings: parsed.warnings.length ? parsed.warnings : null,
+    email_message_id: parsed.message_id || null,
+  };
+
+  const { data: ins, error: insErr } = await db.from('calls').insert(row).select('id').single();
+  if (insErr) {
+    // 23505 = the unique index on email_message_id. The forwarder is allowed to
+    // re-post anything (a retry, or a backfill overlapping live traffic) and
+    // must get a success back, or it will keep retrying the same message.
+    if (/duplicate key|23505/i.test(insErr.message || '')) {
+      return res.status(200).json({ ok: true, duplicate: true });
+    }
+    throw insErr;
+  }
+
+  // Alert the person whose extension it came in on. Skipped for a backfill —
+  // texting staff about months-old voicemails would be pure noise.
+  let notified = false;
+  if (!body.backfill) {
+    notified = await notifyCallRecipient(db, { ...parsed, id: ins.id, customer, booking_id });
+    if (notified) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', ins.id);
+  }
+
+  return res.status(200).json({
+    ok: true, id: ins.id,
+    matched_customer: customer?.name || null,
+    linked_booking: !!booking_id,
+    market: parsed.market,
+    notified,
+    warnings: parsed.warnings,
+  });
+}
+
+// Text the staff member whose extension the voicemail landed on. Extensions map
+// to people, not services: the owner confirmed (Jul 2026) that Heather answers
+// 1 and 2 while Joey is 6, even though the menu labels those "TV Mounting" and
+// "Handyman". That mapping lives in staff_users.grasshopper_extensions so it can
+// be corrected without a deploy; the number itself still comes from the existing
+// HANDY_ANDY_SECRETARY_PHONE / DOMS_SECRETARY_PHONE env vars that every other
+// office alert already uses, so there is no second place to keep phones in sync.
+async function notifyCallRecipient(db, call) {
+  try {
+    if (!smsNotificationsOn()) return false;
+    let scope = call.business_slug;
+    if (call.extension_no != null) {
+      const { data: staff } = await db.from('staff_users')
+        .select('name, active, business:businesses ( slug )')
+        .contains('grasshopper_extensions', [call.extension_no]).eq('active', true).limit(1);
+      const who = (staff || [])[0];
+      if (who?.business?.slug) scope = who.business.slug;
+    }
+    const to = secretaryPhoneFor(scope);
+    if (!to) return false;
+
+    const who = call.customer?.name ? call.customer.name : `${prettyPhone(call.caller_phone)} (new caller)`;
+    // One short line of the transcript: enough to triage from a lock screen
+    // without turning the alert into a wall of text.
+    const gist = call.transcript ? `\n"${call.transcript.slice(0, 140)}${call.transcript.length > 140 ? '…' : ''}"` : '';
+    const already = call.booking_id ? '\nAlready booked.' : '';
+    const msg = `New voicemail from ${who}${call.service ? ` (${call.service})` : ''}.${gist}${already}\nOpen the Calls tab to respond.`;
+    const r = await sendSMSResult(to, msg);
+    return !!r.ok;
+  } catch (e) {
+    // An alert failing must never fail the ingest — the voicemail is already
+    // safely recorded and visible in the dashboard by this point.
+    console.error('[calls] notify failed:', e.message);
+    return false;
+  }
 }
 
 // ── Review-call queue (Joey's daily outreach) ────────────────────────────────

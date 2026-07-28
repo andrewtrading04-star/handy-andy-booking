@@ -1125,6 +1125,7 @@
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
+      <button data-nav="calls"><span class="ic" data-ico="voicemail">📨</span> Calls <span class="nav-badge" id="callsBadge" style="display:none;"></span></button>
       <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
@@ -1903,7 +1904,7 @@ async function openAlertJob(slug, id){
     // renderGreeting) AND for 'estimates' (renderEstimates calls it itself) —
     // only call it here for every OTHER section, where neither runs, so the
     // badge/estStale banner still updates without a duplicate fetch.
-    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); loadGoodAlerts();
+    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -1922,7 +1923,7 @@ function renderSwitcher(){
     if(current) nbWarmDataCache(current.slug);
     // See the matching comment in openAlertJob — navTo(section) already covers
     // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
-    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); loadGoodAlerts();
+    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }));
 }
 
@@ -1942,7 +1943,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',calls:'Calls',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -1952,6 +1953,7 @@ function navTo(s){
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
+    else if(s==='calls') renderCalls();
     else if(s==='reviewcalls') renderReviewCalls();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
@@ -1971,6 +1973,7 @@ function refreshCurrent(){
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
   else if(section==='reviews') renderReviews();
+  else if(section==='calls') renderCalls();
   else if(section==='gallery') renderGallery();
   else if(section==='analytics') renderAnalytics();
   else if(section==='handyman') renderHandymanAnalytics();
@@ -5576,6 +5579,121 @@ function rcRel(iso){
   return new Date(iso).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
 }
 function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Not interested',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
+// ── Calls (Grasshopper voicemails) ─────────────────────────────────────────
+// Grasshopper has no API, so these arrive by email: a script on the owner's
+// Gmail forwards each voicemail to api/admin.js?action=call_ingest. Cross-
+// business on purpose — the phone system is shared between both companies.
+let _callsData={open:[],handled:[]};
+async function renderCalls(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading voicemails…</div></div>';
+  try{
+    _callsData=await api('calls');
+    paintCalls();
+    refreshCallsBadge();
+  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+// Times are shown in the market's own zone, NOT the raw value Grasshopper sent:
+// it stamps every notification in Central regardless of where the call came in,
+// so a Denver voicemail would otherwise read an hour late and someone would
+// call back thinking they had more time than they do.
+const CALL_TZ={ Denver:'America/Denver', Houston:'America/Chicago', Austin:'America/Chicago' };
+function callWhen(r){
+  const tz=CALL_TZ[r.market]||'America/Denver';
+  try{
+    return new Date(r.occurred_at).toLocaleString('en-US',
+      { timeZone:tz, weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  }catch(_){ return new Date(r.occurred_at).toLocaleString(); }
+}
+function callCard(r,handled){
+  const badges=[];
+  if(r.is_new_caller) badges.push('<span class="rc-badge amber">New caller</span>');
+  if(r.service)  badges.push(`<span class="rc-badge blue">${esc(r.service)}</span>`);
+  if(r.market)   badges.push(`<span class="rc-badge gray">${esc(r.market)}</span>`);
+  else badges.push('<span class="rc-badge red">Unrouted number</span>');
+  if(r.status==='called_back') badges.push('<span class="rc-badge blue">Called back</span>');
+  for(const w of (r.warnings||[])) badges.push(`<span class="rc-badge red">${esc(w)}</span>`);
+
+  // The job this call produced, if any. This is the whole point of matching on
+  // the phone number: it shows the phone actually earning money.
+  const job=r.booking ? `<div style="margin-top:9px;background:#dcfce7;border-radius:9px;padding:9px 11px;">
+      <div style="font-size:12.5px;font-weight:800;color:#15803d;">Became a job</div>
+      <div style="font-size:12.5px;color:#166534;margin-top:2px;">
+        ${r.booking.price!=null?esc(money(r.booking.price))+' · ':''}${r.booking.technician?esc(r.booking.technician.name)+' · ':''}${esc(fmtDateTime(r.booking.scheduled_at))}
+      </div></div>` : '';
+
+  const tx=r.transcript
+    ? `<div style="margin-top:8px;background:var(--line2);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink-2);line-height:1.55;">${esc(r.transcript)}</div>`
+    : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
+
+  const tel=`tel:+1${esc(r.caller_phone)}`;
+  const actions=handled
+    ? `<div class="rc-btn-row"><a class="rc-btn" href="${tel}">Call again</a>
+       <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button></div>`
+    : `<a class="rc-call" href="${tel}">📞 Call ${esc(r.caller_pretty)}</a>
+       <div class="rc-btn-row">
+         <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
+         <button class="rc-btn amber" data-callact="called_back" data-callid="${esc(r.id)}">Called back</button>
+         <button class="rc-btn red" data-callact="ignored" data-callid="${esc(r.id)}">Ignore</button>
+       </div>`;
+
+  // The list spans BOTH companies but customer_detail is scoped to the business
+  // currently being viewed, so only linkify a customer that lookup can actually
+  // resolve — a link that reliably 404s is worse than plain text.
+  const sameBiz = r.customer && current && r.customer.business && r.customer.business.slug===current.slug;
+  const who = !r.customer ? esc(r.caller_pretty)
+    : sameBiz ? `<a href="#" data-callcust="${esc(r.customer.id)}" style="color:inherit;text-decoration:underline;">${esc(r.customer.name)}</a>`
+    : esc(r.customer.name);
+  const handledLine=handled&&r.handled_by
+    ? `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>` : '';
+
+  return `<div class="rc-card" style="align-items:flex-start;">
+    <div class="rc-main">
+      <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
+      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
+      <div class="rc-badges">${badges.join('')}</div>
+      ${tx}${job}${handledLine}
+    </div>
+    <div class="rc-actions">${actions}</div>
+  </div>`;
+}
+function paintCalls(){
+  const view=document.getElementById('view'); if(!view) return;
+  const open=_callsData.open||[], handled=_callsData.handled||[];
+  const body = (!open.length && !handled.length)
+    ? `<div class="empty" style="padding:34px 12px;">No voicemails yet. They appear here automatically once the Gmail forwarder is switched on.</div>`
+    : `${open.length?`<div class="rc-count">Needs callback (${open.length})</div>${open.map(r=>callCard(r,false)).join('')}`
+        :`<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`}
+       ${handled.length?`<div class="rc-count" style="margin-top:22px;">Handled</div>${handled.map(r=>callCard(r,true)).join('')}`:''}`;
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">📨 Calls</h2>
+      <div class="rc-sub">Voicemails from the office phone, with the transcript so you can read it instead of listening. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
+    </div></div>
+    ${body}</div>`;
+
+  view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
+    b.disabled=true;
+    try{
+      await api('call_update',{ method:'POST', body:{ id:b.dataset.callid, status:b.dataset.callact }});
+      await renderCalls();
+    }catch(e){ toast(e.message||'Could not update'); b.disabled=false; }
+  }));
+  view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
+    ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
+  }));
+}
+// Unread count on the nav button. Safe to call from anywhere: it silently does
+// nothing if the endpoint or the table isn't there yet.
+async function refreshCallsBadge(){
+  try{
+    const d=_callsData.open_count!=null&&section==='calls' ? _callsData : await api('calls',{ params:{ limit:100 }});
+    const n=d.open_count||0;
+    const el=document.getElementById('callsBadge');
+    if(el){ el.textContent=n; el.style.display=n?'':'none'; }
+  }catch(_){ /* endpoint not deployed yet — leave the badge hidden */ }
+}
+
 async function renderReviewCalls(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
