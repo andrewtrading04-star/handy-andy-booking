@@ -79,6 +79,14 @@ const ITEM_RATES = {
   'samsung frame lg gallery in box bracket': { juan: 15, other: 15 },
   'samsung frame lg gallery':                { juan: 15, other: 15 },
   'frame lg gallery in box bracket':         { juan: 15, other: 15 },
+  // TV recycle / haul-away: the tech takes the old set away. $75 to the tech
+  // (owner rate, set Jul 2026 — expected to change; this is the only place to
+  // edit it). Both spellings of the key are listed because the name normalizer
+  // strips the word "tv", so "Tv recycle" can arrive as either.
+  'tv recycle':              { juan: 75, other: 75 },
+  'recycle':                 { juan: 75, other: 75 },
+  'tv recycling':            { juan: 75, other: 75 },
+  'recycling':               { juan: 75, other: 75 },
   'soundbar':                { juan: 35, other: 35 },
   'soundbar installation':   { juan: 35, other: 35 },
   'apple tv':                { juan: 15, other: 15 },
@@ -576,16 +584,30 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
-    // Handyman labor as an ADD-ON line on a mounting job: pay the tech $65/hr.
-    // Hours come from the label ("1 hour of Handyman Labor"); if unstated, infer
-    // from the line's own customer price at $85/hr. (A PURE handyman job never
-    // reaches here — it's handled by the special short-circuit above.)
+    // Handyman labor as an ADD-ON line on a mounting job: $65 per hour, and one
+    // hour per unit of QUANTITY (owner rule, Jul 2026).
+    //
+    // Hours come from the line's quantity, NEVER from the label text. The label
+    // states the price-book unit ("1 hour of Handyman Labor") or a total that was
+    // true when the line was created ("Handyman Labor: Smart Home — 2 hours");
+    // neither is rewritten when the office edits the quantity. Reading it paid a
+    // 2-hour line as 1 hour (Mark Boohaker, Jul 28) and a 4-hour line as 2 hours.
+    // This now mirrors the PURE-handyman path above, which has always used
+    // payQty() — the two paths disagreeing is what let this through: an identical
+    // job paid correctly with no TV on the ticket and short with one.
+    // (No 2-hour minimum here: that floor applies to a standalone handyman visit,
+    // not to an add-on hour bolted onto a mounting job the tech is already at.)
     if (/handyman/i.test(name)) {
-      const m = name.match(/(\d+(?:\.\d+)?)\s*hours?\b/i);
-      const hours = m ? parseFloat(m[1]) : Math.max(1, Math.round((lt || 0) / 85));
+      const hours = payQty(li);
       const amt = Math.round(hours * 65);
       if (amt) breakdown.push({ label: `Handyman ${hours}h @ $65`, amount: amt });
       pay += amt;
+      // The customer is billed $85/hr, so quantity × 85 should equal the charge.
+      // When it doesn't, the line was hand-priced — pay the quantity (the owner
+      // rule) but flag it rather than silently guessing which number is right.
+      if (lt > 0 && Math.abs(hours * 85 - lt) > 0.5) {
+        flags.push(`Handyman line "${name}" — qty ${hours} implies $${hours * 85} but charged $${round0(lt)}; verify hours`);
+      }
       continue;
     }
 
@@ -869,6 +891,42 @@ function runSelfTests() {
     { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
   ] }), 'Juan').pay, 442, 'mixed TV+handyman add-on (Juan) = 442 (430 + $12 travel)');
+
+  // REGRESSION (Mark Boohaker, Jul 28 2026): on a MIXED job the handyman hours
+  // must come from the line's QUANTITY, not from the hours written in the label.
+  // The office bumps the qty to 2 but the label still reads "1 hour of Handyman
+  // Labor", and the old label-parsing paid one hour ($65) for two hours' work.
+  // Kregg: recycle 75 + 33-59 base 60 + 2h handyman 130 = 265.
+  eq(computeJobPay(job({ business_slug: 'handy-andy', price: 376.19, subtotal: 269, line_items: [
+    { name: 'Tv recycle', quantity: 1, unit_price: 75, line_total: 75 },
+    { name: 'TV Size: 33"-59"', quantity: 1, unit_price: 109, line_total: 109 },
+    { name: 'Bracket: I have my own bracket', quantity: 1, unit_price: 0, line_total: 0 },
+    { name: 'Add-ons: 1 hour of Handyman Labor', quantity: 2, unit_price: 85, line_total: 170 },
+    { name: 'Tax (8.25%)', quantity: 1, unit_price: 22.19, line_total: 22.19, kind: 'fee' },
+  ] }), 'Kregg').pay, 265, 'mixed job: handyman hours from qty (2h=130), not the "1 hour" label');
+
+  // Same rule the other way round: a label claiming MORE hours than the quantity
+  // bills must not overpay either. qty 2 ($170) is two hours, never the four the
+  // label's "2 hours" would imply if it were multiplied by the quantity.
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: '33"-59"', quantity: 1, unit_price: 109, line_total: 109 },
+    { name: 'Handyman Labor: Home Repairs — 2 hours', quantity: 2, unit_price: 85, line_total: 170 },
+  ] }), 'Kregg').pay, 190, 'mixed job: "— 2 hours" label with qty 2 pays 2h (130) + base 60, not 4h');
+
+  // A hand-priced handyman line (qty 1 charged $170) still pays the quantity per
+  // the owner rule, but must FLAG rather than silently pay a number nobody checked.
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: '33"-59"', quantity: 1, unit_price: 109, line_total: 109 },
+    { name: 'Handyman Labor', quantity: 1, unit_price: 170, line_total: 170 },
+  ] }), 'Kregg').flags.some(f => /verify hours/.test(f)), true, 'handyman qty/charge mismatch is flagged');
+
+  // TV recycle / haul-away pays the tech $75 (owner rate, Jul 2026).
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: 'Tv recycle', quantity: 1, unit_price: 75, line_total: 75 },
+  ] }), 'Kregg').pay, 75, 'Tv recycle = $75 to the tech');
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: 'Tv recycle', quantity: 2, unit_price: 75, line_total: 150 },
+  ] }), 'Kregg').pay, 150, 'Tv recycle ×2 = $150');
 
   // Dry erase / white board mounting: 1 hour each -> $65 per board (all techs),
   // multiplied by the quantity — NOT inferred from the per-board price. One board.

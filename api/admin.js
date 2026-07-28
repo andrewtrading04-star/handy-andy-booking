@@ -3314,6 +3314,36 @@ function sanitizeBookingLineItems(arr) {
   }).filter(it => it.name || it.unit_price);
 }
 
+// The office bills 8.25% sales tax. One constant so a tax line's AMOUNT and its
+// "Tax (8.25%)" label can never drift apart.
+const BOOKING_TAX_RATE = 0.0825;
+const isTaxLine = (it) => /^\s*tax\b/i.test(String((it && it.name) || ''));
+
+// Recompute a ticket's tax line from the lines it is actually made of.
+//
+// Editing a line's QUANTITY used to leave the tax line frozen at whatever it was
+// when the booking was created, so the customer kept being taxed on the original
+// amount. Mark Boohaker's ticket (Jul 28 2026) still carried tax on a $269 base
+// after its handyman line had grown to $354 — $7.02 undercharged; Samantha
+// Bland's was $14.02 short the same way. The booking's `price` is summed from
+// these lines, so a stale tax line quietly corrupts the ticket total too, and
+// nothing anywhere flagged it.
+//
+// Only an EXISTING tax line is recalculated. A ticket that legitimately has no
+// tax line (tax-exempt work) must never have one invented here.
+function recalcTaxLine(items) {
+  if (!items.some(isTaxLine)) return items;
+  const body = items.filter(it => !isTaxLine(it));
+  const base = body.reduce((t, it) => t + (it.taxable === false ? 0 : it.line_total), 0);
+  const tax = Math.round(base * BOOKING_TAX_RATE * 100) / 100;
+  // Rebuilt as ONE tax line at the end: a hand-edited set can arrive carrying
+  // several, and collapsing them is part of what keeps `price` correct.
+  return [...body, {
+    name: `Tax (${(BOOKING_TAX_RATE * 100).toFixed(2).replace(/\.?0+$/, '')}%)`,
+    quantity: 1, unit_price: tax, line_total: tax, kind: 'fee', taxable: false,
+  }];
+}
+
 // ── Edit a booking's line items (text + price) ───────────────────────────────
 // Owner + secretary. The office sees every line on a job, so the posted set is
 // authoritative: we delete the old rows and insert the new ones, then set the
@@ -3355,7 +3385,9 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
     .select('id, metadata').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
-  const items = sanitizeBookingLineItems(body.items);
+  // Tax is re-derived from the submitted lines on every save, so changing a
+  // quantity can no longer leave the ticket taxed on a stale amount.
+  const items = recalcTaxLine(sanitizeBookingLineItems(body.items));
 
   // Same sanity ceiling as booking_create — an edit can introduce an absurd
   // line item just as easily as the original create (see priceSanityIssue).
@@ -3419,11 +3451,15 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   }
 
   const price = Math.round(items.reduce((t, it) => t + it.line_total, 0) * 100) / 100;
+  // subtotal is the PRE-TAX total (same meaning it carries everywhere else that
+  // writes it, e.g. the estimate->booking path). It used to be left untouched by
+  // an edit, so it drifted away from the lines the moment a quantity changed.
+  const subtotal = Math.round(items.reduce((t, it) => t + (isTaxLine(it) ? 0 : it.line_total), 0) * 100) / 100;
   const { error: upErr } = await db.from('bookings')
-    .update({ price }).eq('id', id).eq('business_id', biz.id);
+    .update({ price, subtotal }).eq('id', id).eq('business_id', biz.id);
   if (upErr) throw upErr;
 
-  return res.status(200).json({ ok: true, price, count: items.length });
+  return res.status(200).json({ ok: true, price, subtotal, count: items.length });
 }
 
 // ── Add / change the card on file (customer wants to pay with a different card) ──
