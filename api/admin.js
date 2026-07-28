@@ -264,6 +264,7 @@ export default async function handler(req, res) {
       case 'reviews':           return await reviews(req, res, db, auth);
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
+      case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
@@ -5307,6 +5308,98 @@ async function reviewResend(req, res, db, auth, body) {
   } catch (e) { /* column absent — metadata already updated above */ }
 
   return res.status(200).json({ ok: true });
+}
+
+// ── Resend a customer notification from the booking detail's notification log ──
+// Covers the notifications review_resend doesn't: the initial booking-confirmation
+// email, a technician's "you got a job" text, and the "on the way" text. Each
+// rebuilds the exact same message the customer originally got, from the booking's
+// current saved state (so an edited address/price/tech is reflected) — never
+// creates a new booking or changes the appointment itself.
+async function notificationResend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = body.id, kind = body.kind;
+  if (!id || !kind) return res.status(400).json({ error: 'id and kind required' });
+
+  const { data: b, error } = await db.from('bookings')
+    .select(`id, scheduled_at, price, tip, needs_lifting, technician_id, sms_consent,
+      address_line1, city, state, postal_code,
+      customer:customers ( name, phone, email ),
+      technician:technicians!technician_id ( id, name, photo_url, bio_years, bio_blurb ),
+      line_items:booking_line_items ( name, quantity, unit_price, line_total )`)
+    .eq('id', id).eq('business_id', biz.id).single();
+  if (error || !b) return res.status(404).json({ error: 'Booking not found' });
+  const tz = biz.timezone || 'America/Denver';
+
+  if (kind === 'confirmation_email') {
+    if (!b.customer?.email) return res.status(400).json({ error: 'No customer email on file for this job.' });
+    if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
+    const firstName = (b.customer.name || '').trim().split(/\s+/)[0] || '';
+    let dateLong = '', timeWindow = '', startEpoch = null, endEpoch = null;
+    if (b.scheduled_at) {
+      try { dateLong = new Date(b.scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }); } catch (e) { /* keep blank */ }
+      const slotDef = SLOTS.find(s => s.key === slotKeyForLocalTime(localHHMM(tz, b.scheduled_at)));
+      timeWindow = slotDef ? slotDef.label : '';
+      startEpoch = Math.floor(new Date(b.scheduled_at).getTime() / 1000);
+      endEpoch = startEpoch + 2 * 3600;
+    }
+    const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+    const lineItems = b.line_items || [];
+    const emailLines = lineItems.map(l => ({ label: l.name, qty: l.quantity, amount: l.line_total }));
+    const { subject, html } = bookingConfirmationEmail({
+      firstName, dateLong, timeWindow,
+      serviceName: biz.slug === 'doms' ? "Dom's TV Mounting" : 'TV Mounting',
+      technicianName: b.technician?.name || null,
+      technicianPhotoUrl: b.technician?.photo_url || null,
+      technicianBioYears: b.technician?.bio_years || null,
+      technicianBioBlurb: b.technician?.bio_blurb || null,
+      address: { line1: b.address_line1, city: b.city, state: b.state, zip: b.postal_code },
+      lines: emailLines.length ? emailLines : null,
+      total: b.price != null ? Number(b.price) : null,
+      tip: Number(b.tip) || 0,
+      twoTechs: !!b.needs_lifting,
+      startEpoch, endEpoch, baseUrl, jobId: b.id,
+      gdsUpsellUrl: gdsUpsellUrlFor({ lines: lineItems, bookingId: b.id, baseUrl }),
+      rescheduleUrl: rescheduleUrlFor({ bookingId: b.id, baseUrl }),
+    }, brandFor(biz.slug));
+    const { from } = emailConfig(biz.slug);
+    const result = await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from });
+    if (!result.sent) return res.status(502).json({ error: 'Email failed to send: ' + (result.skipped || result.error || 'unknown error') });
+    try {
+      await db.from('bookings').update({ confirmation_email_status: 'sent', confirmation_email_sent_at: new Date().toISOString() }).eq('id', id);
+    } catch (e) { /* migration 0075 not applied yet — status just won't show */ }
+    return res.status(200).json({ ok: true });
+  }
+
+  if (kind === 'tech_new_job') {
+    const techId = body.technician_id || b.technician_id;
+    if (!techId) return res.status(400).json({ error: 'No technician assigned to this job.' });
+    if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
+    await notifyTechAssigned(db, biz, techId, b.scheduled_at, tz, { bookingId: id });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (kind === 'on_the_way_sms') {
+    if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
+    if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
+    const techName = b.technician?.name ? String(b.technician.name).split(' ')[0] : 'Your tech';
+    const etaMinutes = Number(body.eta_minutes) || 30;
+    const msg = `Heads up! ${techName} from ${biz.name} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. STOP to opt out.`;
+    const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
+    const statusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;
+    const r = await sendSMSResult(b.customer.phone, msg, { statusCallback });
+    if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
+    try {
+      await db.from('bookings').update({
+        on_the_way_sms_status: 'pending', on_the_way_sms_sent_at: new Date().toISOString(), on_the_way_sms_delivered_at: null,
+      }).eq('id', id);
+    } catch (e) { /* column absent */ }
+    return res.status(200).json({ ok: true });
+  }
+
+  return res.status(400).json({ error: 'Unknown notification kind.' });
 }
 
 // ── Review-call queue (Joey's daily outreach) ────────────────────────────────

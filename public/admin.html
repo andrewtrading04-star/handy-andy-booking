@@ -2360,16 +2360,21 @@ function statusBadge(status){
 // confirmation TEXT in this system today, only the branded email sent right
 // after booking (best-effort; no delivery webhook, so it only ever reads
 // Sent or Not sent, never Delivered).
-function notifPill(label,icon,color,text,when){
+function notifResendBtn(attrs){
+  const a=Object.entries(attrs).map(([k,v])=>`data-nr-${k}="${esc(String(v))}"`).join(' ');
+  return `<button type="button" class="notif-resend-btn" ${a} style="margin-left:8px;padding:2px 9px;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border,#4a3f36);background:transparent;color:#f2c98a;cursor:pointer;">Resend</button>`;
+}
+function notifPill(label,icon,color,text,when,resendAttrs){
   const timeStr=when?fmtDateTime(when):'';
-  return `<div style="font-size:12px;font-weight:600;color:${color};margin-top:2px;">${icon} ${esc(label)}: ${text}${timeStr?' · '+esc(timeStr):''}</div>`;
+  const btn=resendAttrs?notifResendBtn(resendAttrs):'';
+  return `<div style="font-size:12px;font-weight:600;color:${color};margin-top:2px;display:flex;align-items:center;flex-wrap:wrap;">${icon} ${esc(label)}: ${text}${timeStr?' · '+esc(timeStr):''}${btn}</div>`;
 }
 function notificationLog(b){
   const rows=[];
   if(b.confirmation_email_status){
     rows.push(b.confirmation_email_status==='sent'
-      ? notifPill('Booking confirmation (email)','✓','#4ade80','Sent',b.confirmation_email_sent_at)
-      : notifPill('Booking confirmation (email)','✕','#f87171','Not sent',b.confirmation_email_sent_at));
+      ? notifPill('Booking confirmation (email)','✓','#4ade80','Sent',b.confirmation_email_sent_at,{kind:'confirmation_email',id:b.id})
+      : notifPill('Booking confirmation (email)','✕','#f87171','Not sent',b.confirmation_email_sent_at,{kind:'confirmation_email',id:b.id}));
   }
   // Technician "You got a job!" texts (app.tech_sms_log). One row per attempt,
   // so a re-assignment or a reschedule each get their own line. This is the
@@ -2379,30 +2384,58 @@ function notificationLog(b){
     const who=t.tech_name?` — ${t.tech_name}`:'';
     const label=(t.kind==='rescheduled'?'Tech notified: job moved':t.kind==='unassigned'?'Tech notified: job reassigned away':'Tech notified: new job')+who;
     const when=t.delivered_at||t.sent_at;
-    if(t.status==='delivered') rows.push(notifPill(label,'✓','#4ade80','Delivered',when));
-    else if(t.status==='failed'||t.status==='undelivered') rows.push(notifPill(label,'✕','#f87171',t.error?`Not delivered (${t.error})`:'Not delivered',when));
-    else if(t.status==='skipped') rows.push(notifPill(label,'✕','#f87171',t.skip_reason==='no_phone'?'No phone on file':t.skip_reason==='notifications_off'?'Texting is turned off':`Not sent (${t.skip_reason||'skipped'})`,when));
-    else rows.push(notifPill(label,'…','#fbbf24','Sending',when));
+    const resendAttrs=t.technician_id?{kind:'tech_new_job',id:b.id,technician_id:t.technician_id}:null;
+    if(t.status==='delivered') rows.push(notifPill(label,'✓','#4ade80','Delivered',when,resendAttrs));
+    else if(t.status==='failed'||t.status==='undelivered') rows.push(notifPill(label,'✕','#f87171',t.error?`Not delivered (${t.error})`:'Not delivered',when,resendAttrs));
+    else if(t.status==='skipped') rows.push(notifPill(label,'✕','#f87171',t.skip_reason==='no_phone'?'No phone on file':t.skip_reason==='notifications_off'?'Texting is turned off':`Not sent (${t.skip_reason||'skipped'})`,when,resendAttrs));
+    else rows.push(notifPill(label,'…','#fbbf24','Sending',when,resendAttrs));
   }
   if(b.on_the_way_sms_status){
     const st=b.on_the_way_sms_status, when=b.on_the_way_sms_delivered_at||b.on_the_way_sms_sent_at;
-    if(st==='delivered') rows.push(notifPill('On the way (text)','✓','#4ade80','Delivered',when));
-    else if(st==='failed'||st==='undelivered') rows.push(notifPill('On the way (text)','✕','#f87171','Not delivered',when));
-    else rows.push(notifPill('On the way (text)','…','#fbbf24','Sending',when));
+    const resendAttrs={kind:'on_the_way_sms',id:b.id};
+    if(st==='delivered') rows.push(notifPill('On the way (text)','✓','#4ade80','Delivered',when,resendAttrs));
+    else if(st==='failed'||st==='undelivered') rows.push(notifPill('On the way (text)','✕','#f87171','Not delivered',when,resendAttrs));
+    else rows.push(notifPill('On the way (text)','…','#fbbf24','Sending',when,resendAttrs));
   }
   if(b.review_sms_status){
     const st=b.review_sms_status, when=b.review_sms_delivered_at||b.review_sms_sent_at;
-    if(st==='delivered') rows.push(notifPill('Review request (text)','✓','#4ade80','Delivered',when));
-    else if(st==='failed'||st==='undelivered') rows.push(notifPill('Review request (text)','✕','#f87171','Not delivered',when));
-    else rows.push(notifPill('Review request (text)','…','#fbbf24','Sending',when));
+    const resendAttrs={kind:'review_sms',id:b.id};
+    if(st==='delivered') rows.push(notifPill('Review request (text)','✓','#4ade80','Delivered',when,resendAttrs));
+    else if(st==='failed'||st==='undelivered') rows.push(notifPill('Review request (text)','✕','#f87171','Not delivered',when,resendAttrs));
+    else rows.push(notifPill('Review request (text)','…','#fbbf24','Sending',when,resendAttrs));
   }
   if(b.review_email_sent_at){
-    if(b.review_email_clicked_at) rows.push(notifPill('Review request (email)','✓','#4ade80','Clicked',b.review_email_clicked_at));
-    else if(b.review_email_delivered_at) rows.push(notifPill('Review request (email)','✓','#4ade80','Delivered',b.review_email_delivered_at));
-    else rows.push(notifPill('Review request (email)','…','#fbbf24','Sent',b.review_email_sent_at));
+    const resendAttrs={kind:'review_email',id:b.id};
+    if(b.review_email_clicked_at) rows.push(notifPill('Review request (email)','✓','#4ade80','Clicked',b.review_email_clicked_at,resendAttrs));
+    else if(b.review_email_delivered_at) rows.push(notifPill('Review request (email)','✓','#4ade80','Delivered',b.review_email_delivered_at,resendAttrs));
+    else rows.push(notifPill('Review request (email)','…','#fbbf24','Sent',b.review_email_sent_at,resendAttrs));
   }
   return rows.join('');
 }
+// Delegated click handler for every "Resend" button in the notification log —
+// lives once on #bkTitle rather than re-bound per render, since notificationLog()
+// is re-injected via innerHTML on every openBooking() call.
+document.getElementById('bkTitle')?.addEventListener('click', async (e)=>{
+  const btn=e.target.closest('.notif-resend-btn');
+  if(!btn) return;
+  const kind=btn.dataset.nrKind, id=btn.dataset.nrId, technicianId=btn.dataset.nrTechnicianId;
+  const LABELS={confirmation_email:'Confirmation email',tech_new_job:'Tech notification text',on_the_way_sms:'On the way text',review_sms:'Review request text',review_email:'Review request email'};
+  btn.disabled=true; btn.textContent='…';
+  try{
+    if(kind==='review_sms'||kind==='review_email'){
+      await api('review_resend',{ method:'POST', body:{ business:current.slug, id, channel: kind==='review_sms'?'sms':'email' }});
+    } else {
+      const body={ business:current.slug, id, kind };
+      if(technicianId) body.technician_id=technicianId;
+      await api('notification_resend',{ method:'POST', body });
+    }
+    toast(`${LABELS[kind]||'Notification'} re-sent ✓`);
+  }catch(err){
+    toast(err.message||'Resend failed');
+  }finally{
+    btn.disabled=false; btn.textContent='Resend';
+  }
+});
 
 // True when a booking already carries a two-person / lift fee, so we never add a
 // second one. Matches the same wordings the payroll engine treats as a 2nd-tech
