@@ -245,7 +245,11 @@
   .s-available{background:var(--green);} .s-on_job{background:var(--orange);} .s-off{background:#c4ccd6;}
   .search{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:11px 13px;font-size:14px;margin-bottom:12px;}
   .search:focus{outline:none;border-color:var(--accent);}
-  #jobSearchWrap{display:flex !important;justify-content:space-between;align-items:center;flex-wrap:wrap;}
+  /* #jobSearchWrap's own display:none/flex (set in JS -- section==='schedule'
+     ? 'flex' : 'none') is what decides whether this shows at all. It must NOT
+     be !important here: that overrides the inline style and pins the bar
+     visible on every tab (Reviews, Calls, Customers, ...), not just Schedule. */
+  #jobSearchWrap{justify-content:space-between;align-items:center;flex-wrap:wrap;}
   table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
