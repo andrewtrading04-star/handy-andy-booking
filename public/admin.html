@@ -1963,7 +1963,7 @@ async function openAlertJob(slug, id){
     // renderGreeting) AND for 'estimates' (renderEstimates calls it itself) —
     // only call it here for every OTHER section, where neither runs, so the
     // badge/estStale banner still updates without a duplicate fetch.
-    current=biz; availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    current=biz; availData=null; availViewSlug=null; webLastData=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -1982,7 +1982,7 @@ function renderSwitcher(){
     if(current) nbWarmDataCache(current.slug);
     // See the matching comment in openAlertJob — navTo(section) already covers
     // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
-    availData=null; availViewSlug=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    availData=null; availViewSlug=null; webLastData=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }));
 }
 
@@ -4389,7 +4389,8 @@ const WEB_ANA_ORIGIN = {
   'handy-andy': 'https://backend-beryl-seven-95.vercel.app',
   'doms':       'https://doms-backend.vercel.app',
 };
-let webDays='today', webLoading=false, webCharts={};
+let webDays='today', webLoading=false, webCharts={}, webTab='overview', webLastData=null;
+const WEB_TABS=[['overview','Overview'],['pages','Pages'],['sources','Sources'],['seo','SEO']];
 function webBackend(){ return WEB_ANA_ORIGIN[current?current.slug:''] || ''; }
 // from/to range: Denver calendar day for today/yesterday, rolling window otherwise.
 function webRange(mode){
@@ -4417,6 +4418,9 @@ async function renderWebAnalytics(){
           <button data-days="30">30 Days</button>
         </div>
       </div>
+      <div class="ana-tabs" id="webTabs" style="display:flex;gap:6px;margin:12px 0 4px;border-bottom:0.5px solid var(--line);">
+        ${WEB_TABS.map(([k,label])=>`<button data-tab="${k}" style="padding:8px 14px;font-size:13px;border:none;background:none;cursor:pointer;border-bottom:2px solid ${webTab===k?'var(--accent)':'transparent'};color:${webTab===k?'var(--ink)':'var(--mute)'};font-weight:${webTab===k?'700':'400'};">${label}</button>`).join('')}
+      </div>
       <div id="webContent" class="loading">Loading website analytics…</div>
     </div>`;
   const ranges=document.getElementById('webRanges');
@@ -4426,6 +4430,19 @@ async function renderWebAnalytics(){
     webDays=b.dataset.days;
     ranges.querySelectorAll('button[data-days]').forEach(x=>x.classList.toggle('on',x===b));
     loadWebAnalytics();
+  });
+  document.getElementById('webTabs').addEventListener('click', e=>{
+    const b=e.target.closest('button[data-tab]'); if(!b) return;
+    webTab=b.dataset.tab;
+    document.querySelectorAll('#webTabs button').forEach(x=>{
+      const on=x.dataset.tab===webTab;
+      x.style.borderBottomColor=on?'var(--accent)':'transparent';
+      x.style.color=on?'var(--ink)':'var(--mute)';
+      x.style.fontWeight=on?'700':'400';
+    });
+    // Just redraw from the already-fetched data — no refetch, no rebuilding
+    // the whole screen (range picker, tab nav) from scratch.
+    if(webLastData) webRender(webLastData);
   });
   await loadWebAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
@@ -4477,6 +4494,7 @@ async function loadWebAnalytics(){
 
 function webRender(d){
   const content=document.getElementById('webContent'); if(!content) return;
+  webLastData=d;
   const brand=anaBrand();
   const upd=document.getElementById('webUpdated');
   if(upd) upd.textContent='Updated '+new Date(d.lastUpdated).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+' · auto-refreshes every 30s';
@@ -4495,79 +4513,79 @@ function webRender(d){
     ['Form / Booking Starts', webNum(formSessions), `${conv}% of sessions`],
     ['Avg Scroll Depth', (d.scr.average_depth??0)+'%', 'average page scroll'],
   ];
-  let html=`<div class="grid kpis">`+kpis.map(k=>
-    `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
-  ).join('')+`</div>`;
 
-  // DFW location pages — the 6 new pages the owner asked to monitor closely.
-  // Own dedicated section, always visible regardless of the top range picker
-  // (fixed 30-day window — see loadWebAnalytics), Handy Andy only.
-  if(d.dfw) html+=webDfwSection(d.dfw);
+  let html='';
+  if(webTab==='overview'){
+    html+=`<div class="grid kpis">`+kpis.map(k=>
+      `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
+    ).join('')+`</div>`;
 
-  // Funnel — Page View → Click → Form/Booking
-  html+=`<div class="section card"><h2>Visitor Funnel — Page View → Click → Booking</h2>`;
-  const steps=d.fun.funnel||[];
-  if(!steps.length||!sessions){ html+=`<div class="empty">No sessions in this period yet.</div>`; }
-  else{
-    let prev=null;
-    steps.forEach(f=>{
-      const pct=sessions?Math.round(f.sessions/sessions*100):0;
-      const drop=prev!=null?prev-f.sessions:0;
-      html+=`<div class="fstep">
-        <div class="flbl">${esc(f.step)}</div>
-        <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:${brand};">${f.sessions} sessions</div></div>
-        <div class="fdrop">${drop>0?`<b>−${drop} left here</b>`:`<span class="fpct">—</span>`} <span class="fpct">· ${pct}% · ${webNum(f.count)} events</span></div>
-      </div>`;
-      prev=f.sessions;
-    });
+    // DFW location pages — the 6 new pages the owner asked to monitor closely.
+    // Own dedicated section, always visible regardless of the top range picker
+    // (fixed 30-day window — see loadWebAnalytics), Handy Andy only.
+    if(d.dfw) html+=webDfwSection(d.dfw);
+
+    // Funnel — Page View → Click → Form/Booking
+    html+=`<div class="section card"><h2>Visitor Funnel — Page View → Click → Booking</h2>`;
+    const steps=d.fun.funnel||[];
+    if(!steps.length||!sessions){ html+=`<div class="empty">No sessions in this period yet.</div>`; }
+    else{
+      let prev=null;
+      steps.forEach(f=>{
+        const pct=sessions?Math.round(f.sessions/sessions*100):0;
+        const drop=prev!=null?prev-f.sessions:0;
+        html+=`<div class="fstep">
+          <div class="flbl">${esc(f.step)}</div>
+          <div class="ftrack"><div class="fbar" style="width:${Math.max(pct,5)}%;background:${brand};">${f.sessions} sessions</div></div>
+          <div class="fdrop">${drop>0?`<b>−${drop} left here</b>`:`<span class="fpct">—</span>`} <span class="fpct">· ${pct}% · ${webNum(f.count)} events</span></div>
+        </div>`;
+        prev=f.sessions;
+      });
+    }
+    html+=`</div>`;
+
+    // Device split + Scroll depth distribution
+    html+=`<div class="grid two section">
+      <div class="card"><h2>Device Type</h2>${webDeviceCard(d.dev,brand)}</div>
+      <div class="card"><h2>Scroll Depth Distribution</h2><div class="chartbox"><canvas id="web-ch-scroll"></canvas></div></div>
+    </div>`;
   }
-  html+=`</div>`;
 
-  // Device split + Scroll depth distribution
-  html+=`<div class="grid two section">
-    <div class="card"><h2>Device Type</h2>${webDeviceCard(d.dev,brand)}</div>
-    <div class="card"><h2>Scroll Depth Distribution</h2><div class="chartbox"><canvas id="web-ch-scroll"></canvas></div></div>
-  </div>`;
+  else if(webTab==='pages'){
+    // Full-width, not half: real page URLs are long and a half-width card
+    // clipped them (labels ran off the left edge of the chart).
+    html+=`<div class="section">
+      <div class="card"><h2>Top Pages by Views</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-pages"></canvas></div></div>
+    </div>`;
+    html+=`<div class="grid two section">
+      <div class="card"><h2>Top Pages</h2>${webPagesTbl(d.top.pages)}</div>
+      <div class="card"><h2>Pages by Bounce Rate</h2>${webBounceTbl(d.bounce.pages_bounce)}</div>
+    </div>`;
+    html+=`<div class="section card"><h2>Exit Pages</h2>${webExitTbl(d.exit.exit_pages)}</div>`;
+  }
 
-  // Top pages chart + Traffic sources chart — stacked full-width, not side by
-  // side: real page URLs and referrer domains are long, and a half-width card
-  // clipped them (labels ran off the left edge of the chart).
-  html+=`<div class="section">
-    <div class="card"><h2>Top Pages by Views</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-pages"></canvas></div></div>
-  </div>
-  <div class="section">
-    <div class="card"><h2>Traffic Sources</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-ref"></canvas></div></div>
-  </div>`;
+  else if(webTab==='sources'){
+    html+=`<div class="section">
+      <div class="card"><h2>Traffic Sources</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-ref"></canvas></div></div>
+    </div>`;
+    html+=`<div class="grid two section">
+      <div class="card"><h2>Referrers</h2>${webRefTbl(d.ref.referrers)}</div>
+      <div class="card"><h2>Most Clicked Buttons & Links</h2>${webClicksTbl(d.clk.by_button)}</div>
+    </div>`;
+    html+=`<div class="section card"><h2>Recent Sessions</h2>${webSessionsTbl(d.ses.sessions)}</div>`;
+  }
 
-  // Top pages table + Referrers table
-  html+=`<div class="grid two section">
-    <div class="card"><h2>Top Pages</h2>${webPagesTbl(d.top.pages)}</div>
-    <div class="card"><h2>Referrers</h2>${webRefTbl(d.ref.referrers)}</div>
-  </div>`;
-
-  // Most clicked + bounce
-  html+=`<div class="grid two section">
-    <div class="card"><h2>Most Clicked Buttons & Links</h2>${webClicksTbl(d.clk.by_button)}</div>
-    <div class="card"><h2>Pages by Bounce Rate</h2>${webBounceTbl(d.bounce.pages_bounce)}</div>
-  </div>`;
-
-  // Exit pages + recent sessions
-  html+=`<div class="grid two section">
-    <div class="card"><h2>Exit Pages</h2>${webExitTbl(d.exit.exit_pages)}</div>
-    <div class="card"><h2>Recent Sessions</h2>${webSessionsTbl(d.ses.sessions)}</div>
-  </div>`;
-
-  // Real Google search queries — free via Search Console, separate range from
-  // the rest of this screen (always the last 28 days; Google's own data lags
-  // ~2-3 days, so "Today"/"Yesterday" wouldn't have anything to show yet).
-  html+=`<div class="section card"><h2>🔎 Top Google Search Queries <span style="font-weight:400;font-size:12px;color:var(--mute);">— last 28 days</span></h2>${webGscTbl(d.gsc)}</div>`;
-
-  html+=`<div class="section card"><h2>🎯 Striking Distance Keywords <span style="font-weight:400;font-size:12px;color:var(--mute);">— ranking 11–20, worth pushing to page 1</span></h2>${webGscStrikingTbl(d.gsc)}</div>`;
-
-  html+=`<div class="grid two section">
-    <div class="card"><h2>🔗 Top Queries by Landing Page</h2>${webGscQueryPageTbl(d.gsc)}</div>
-    <div class="card"><h2>🏷️ Branded vs. Non-branded Search</h2>${webGscBrandCard(d.gsc)}</div>
-  </div>`;
+  else if(webTab==='seo'){
+    // Real Google search queries — free via Search Console, separate range from
+    // the rest of this screen (always the last 28 days; Google's own data lags
+    // ~2-3 days, so "Today"/"Yesterday" wouldn't have anything to show yet).
+    html+=`<div class="section card"><h2>🔎 Top Google Search Queries <span style="font-weight:400;font-size:12px;color:var(--mute);">— last 28 days</span></h2>${webGscTbl(d.gsc)}</div>`;
+    html+=`<div class="section card"><h2>🎯 Striking Distance Keywords <span style="font-weight:400;font-size:12px;color:var(--mute);">— ranking 11–20, worth pushing to page 1</span></h2>${webGscStrikingTbl(d.gsc)}</div>`;
+    html+=`<div class="grid two section">
+      <div class="card"><h2>🔗 Top Queries by Landing Page</h2>${webGscQueryPageTbl(d.gsc)}</div>
+      <div class="card"><h2>🏷️ Branded vs. Non-branded Search</h2>${webGscBrandCard(d.gsc)}</div>
+    </div>`;
+  }
 
   content.innerHTML=html;
   webDrawCharts(d,brand);
