@@ -355,6 +355,10 @@
   .job.est-card.stale{border-color:#fca5a5;background:#fff6f6;box-shadow:0 0 0 1px #fecaca;animation:estcardpulse 2.4s ease-in-out infinite;}
   @keyframes estcardpulse{0%,100%{box-shadow:0 0 0 1px #fecaca;}50%{box-shadow:0 0 0 4px rgba(239,68,68,.15);}}
   @media(prefers-reduced-motion:reduce){.job.est-card.stale{animation:none;}}
+  /* Deep-linked from the "new estimate" text — flash so it's obvious which one */
+  .job.est-card.est-flash{border-color:var(--accent);box-shadow:0 0 0 4px rgba(255,107,53,.25);animation:estflash 1.3s ease-in-out 2;}
+  @keyframes estflash{0%,100%{box-shadow:0 0 0 4px rgba(255,107,53,.25);}50%{box-shadow:0 0 0 8px rgba(255,107,53,.08);}}
+  @media(prefers-reduced-motion:reduce){.job.est-card.est-flash{animation:none;}}
   /* ── New Booking: recommend add-ons popover ── */
   .nb-ups{position:relative;margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 34px rgba(15,23,42,.16);padding:15px;animation:nbUpsIn .16s ease;}
   .nb-ups.hidden{display:none;}
@@ -1860,7 +1864,12 @@ function enterApp(){
   const navRc=document.querySelector('[data-nav="reviewcalls"]');
   if(navRc) navRc.style.display = scope==='handy-andy' ? 'none' : '';
   renderSwitcher();
-  navTo('schedule');
+  // Arriving from the "new estimate" text (/admin.html?estimate=<id>): open the
+  // Estimates tab straight away instead of the schedule, then focusPendingEstimate()
+  // scrolls to that exact card once the list renders.
+  pendingEstimateId=estimateIdFromUrl();
+  if(pendingEstimateId){ estFilter='all'; navTo('estimates'); }
+  else navTo('schedule');
   // navTo('schedule') already runs renderGreeting(), which itself calls
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
@@ -6642,8 +6651,33 @@ async function renderEstimates(){
     }));
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
+    focusPendingEstimate();
   }catch(err){ const w=document.getElementById('estWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
+
+// Deep link from the "new estimate" text message (api/estimate.js links to
+// /admin.html?estimate=<id>). Scrolls that estimate into view and flashes it,
+// so tapping the text lands on the actual request instead of a generic list.
+let pendingEstimateId=null;
+function estimateIdFromUrl(){
+  try{ return new URLSearchParams(location.search).get('estimate')||null; }catch(_){ return null; }
+}
+function focusPendingEstimate(){
+  if(!pendingEstimateId) return;
+  const el=document.querySelector(`#estWrap [data-est="${CSS.escape(pendingEstimateId)}"]`);
+  if(!el){
+    // Not in this filter's results — retry once under "All" before giving up,
+    // since the text can arrive long after the office already worked the request.
+    if(estFilter!=='all'){ estFilter='all'; pendingEstimateFallback=true; renderEstimates(); return; }
+    if(pendingEstimateFallback) toast('That estimate was not found — it may have been deleted.');
+    pendingEstimateId=null; pendingEstimateFallback=false; return;
+  }
+  pendingEstimateId=null; pendingEstimateFallback=false;
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.classList.add('est-flash');
+  setTimeout(()=>el.classList.remove('est-flash'),2600);
+}
+let pendingEstimateFallback=false;
 
 // The customer's local timezone for an estimate, by ZIP: Colorado (Denver, ZIP
 // 80/81) is Mountain; Texas (Houston + Austin, ZIP 75–79) is Central. Falls back
@@ -6713,7 +6747,7 @@ function estCard(e){
   const agePill = e.status==='new'
     ? `<span class="age-pill ${stale?'stale':'ok'}">${stale?`⚠ ${fmtWaitMinutes(estAgeMinutes(e))} — respond now`:`${fmtWaitMinutes(estAgeMinutes(e))} ago`}</span>`
     : '';
-  return `<div class="job est-card${stale?' stale':''}" data-status="${esc(e.status)}">
+  return `<div class="job est-card${stale?' stale':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
         ${receivedBadge}

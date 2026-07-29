@@ -17,6 +17,11 @@ import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
 
+// Mirrors the estimates.tax_rate column default. Only used to compute the
+// "Value:" figure in the notification text when the caller didn't send its own
+// rate, so that number matches the "Estimated total" on the dashboard card.
+const DEFAULT_ESTIMATE_TAX_RATE = 0.0875;
+
 // Pull a missing-column name out of either error wording Supabase can surface:
 //   PostgREST schema cache: Could not find the 'customer_zip' column of 'estimates' …
 //   Raw Postgres (42703):   column estimates.customer_zip does not exist
@@ -135,6 +140,67 @@ function estimateLineItemsTotal(items) {
   return Math.round(items.reduce((s, li) => s + li.qty * li.unit_price, 0) * 100) / 100;
 }
 
+// Lines that are money adjustments, not work being performed. Excluded from the
+// "Service:" summary in the notification text — the total already reflects them,
+// and listing them reads as if they were things to install.
+const NON_SERVICE_LINE = /^(service minimum|service area surcharge|location|multi-tv|coupon\b|tax\b|after-hours)/i;
+
+// One-line "what is this job" summary for the notification text. Deliberately
+// terse: drops the "TV Size: " style question prefix each line carries for the
+// dashboard, drops $0 answers (the customer saying "no fireplace" is not work),
+// and drops fee/discount rows. "TV Size: 33\"-59\"" + "Wall Surface: Brick"
+// becomes `33"-59", Brick`.
+function estimateServiceSummary(items, maxLen = 90) {
+  const parts = items
+    .filter(li => li.unit_price > 0 && !NON_SERVICE_LINE.test(li.description))
+    .map(li => {
+      let short = li.description.includes(': ')
+        ? li.description.slice(li.description.indexOf(': ') + 2)
+        : li.description;
+      // "Yes, hide the wires OUTSIDE the wall" -> "hide the wires OUTSIDE the
+      // wall". The lead-in is the customer answering a question we no longer
+      // show, so it's pure noise here.
+      short = short.replace(/^(?:yes|no)\s*[,—-]\s*/i, '').trim();
+      return li.qty > 1 ? `${short} x${li.qty}` : short;
+    });
+  if (!parts.length) return '';
+  let out = '';
+  for (const p of parts) {
+    const next = out ? `${out}, ${p}` : p;
+    if (next.length > maxLen) { out = out ? `${out}…` : p.slice(0, maxLen); break; }
+    out = next;
+  }
+  return out;
+}
+
+// Deep link straight to this estimate in the dashboard (admin.html reads
+// ?estimate=<id> and scrolls to that card). Deliberately NOT falling back to
+// VERCEL_URL like tech-notify.js does: that's the per-deployment hostname, so
+// a link texted today would point at a stale build forever. This link sits in
+// someone's message history, so it has to be the stable production alias.
+const DASHBOARD_BASE_URL = (process.env.PUBLIC_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
+function dashboardEstimateUrl(id) {
+  return `${DASHBOARD_BASE_URL}/admin.html?estimate=${encodeURIComponent(id)}`;
+}
+
+// The one notification text for a new estimate, in the exact shape the owner
+// asked for: title, value, terse service list, link — and nothing else. The
+// link carries the customer's name, phone, address and preferred times, so
+// none of that is repeated here.
+function estimateAlertText(id, items, taxRate) {
+  const subtotal = estimateLineItemsTotal(items);
+  // Match the "Estimated total" the dashboard shows for this same estimate.
+  const value = Math.round(subtotal * (1 + (Number(taxRate) || 0)));
+  const service = estimateServiceSummary(items);
+  const url = dashboardEstimateUrl(id);
+  return [
+    'New Estimate Request',
+    `Value: $${value}`,
+    service ? `Service: ${service}` : null,
+    url || null,
+  ].filter(Boolean).join('\n');
+}
+
 async function submit(req, res, db) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const body = req.body || {};
@@ -249,15 +315,13 @@ async function submit(req, res, db) {
     for (const p of [...phones]) if (toE164(p) === ownerE164) phones.delete(p);
   }
 
+  // One text, one format, whoever it goes to: title / value / service / link.
+  // Everything else the office needs (name, phone, address, preferred times) is
+  // one tap away behind the link, so it isn't duplicated into the message.
+  const alertText = estimateAlertText(row.id, line_items, estimateInsert.tax_rate != null ? estimateInsert.tax_rate : DEFAULT_ESTIMATE_TAX_RATE);
+
   if (phones.size) {
-    const when = preferred_slots.length
-      ? ' Preferred: ' + preferred_slots.map(s => `${s.label || s.slot_key}`).slice(0, 2).join(', ') + (preferred_slots.length > 2 ? '…' : '')
-      : '';
-    const svcTxt = service_label ? `${service_label} — ` : '';
-    const snippet = description.length > 90 ? description.slice(0, 90) + '…' : description;
-    const zipTxt = zip ? ` ZIP: ${zip}.` : '';
-    const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
-    for (const p of phones) notifications.push(sendSMS(p, msg).catch(e => console.error('[estimate] staff sms failed:', e.message)));
+    for (const p of phones) notifications.push(sendSMS(p, alertText).catch(e => console.error('[estimate] staff sms failed:', e.message)));
   } else if (!isUnstaffedRequest) {
     console.warn(`[estimate] no staff notify phones configured for ${biz.slug} — nobody was texted`);
   }
@@ -270,11 +334,7 @@ async function submit(req, res, db) {
   // request_type; never set by the original /estimate.html quick-quote form.
   if (isUnstaffedRequest) {
     if (ownerE164) {
-      const total = estimateLineItemsTotal(line_items);
-      const windows = preferred_slots.map(s => s.label || s.slot_key).slice(0, 3).join(', ') || 'none given';
-      const addrTxt = address ? ` ${address},` : '';
-      const msg = `New service request: ${name} (${phone}).${addrTxt} ${zip || 'zip unknown'}. Prefers ${windows}. Est. $${Math.round(total)}. No tech assigned — call to confirm.`;
-      notifications.push(sendSMS(process.env.OWNER_PHONE_NUMBER, msg).catch(e => console.error('[estimate] owner sms failed:', e.message)));
+      notifications.push(sendSMS(process.env.OWNER_PHONE_NUMBER, alertText).catch(e => console.error('[estimate] owner sms failed:', e.message)));
     } else {
       // Loud, because this is the owner's only real-time signal for these.
       console.error('[estimate] OWNER_PHONE_NUMBER is not set — unstaffed-area request went un-texted');
