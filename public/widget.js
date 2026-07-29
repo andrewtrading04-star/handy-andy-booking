@@ -10,7 +10,27 @@
   const API_BASE    = 'https://handy-andy-booking.vercel.app/api';
   const TARGET_ID   = 'ha-widget';
   const DENVER_ID   = '1685582903241x973573877706522600'; // Only Denver requires 2 techs for 98"+ TVs
-  const STRIPE_KEY  = 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
+  // Which business this embed books for. <script src="widget.js" data-business="mile-high">
+  // on the host page selects it; every existing embed has no attribute, so
+  // this defaults to 'handy-andy' and behaves exactly as before. Drives the
+  // zip/slots/booking API calls below and which Stripe publishable key mounts
+  // (see ensureStripe()) -- everything else (question flow, pricing structure,
+  // styling) is shared, per the owner's "function exactly the same"
+  // instruction; only pricing rows and branding differ per business.
+  const BUSINESS = (SELF_SCRIPT && SELF_SCRIPT.dataset && SELF_SCRIPT.dataset.business) || 'handy-andy';
+  // The legal trading name shown in the SMS-consent disclosure below -- must
+  // name the actual company the customer is opting in to hear from, not just
+  // whichever widget copy happens to be running.
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting' }[BUSINESS] || 'Handy Andy TV Mounting';
+  // Hardcoded fallback ONLY for the business this widget shipped with, so a
+  // stripe_config fetch failure can never break the live Handy Andy widget.
+  // Every other business has no fallback -- ensureStripe() must fetch its real
+  // key or that business's checkout simply has no card step, rather than
+  // silently tokenizing into Handy Andy's Stripe account.
+  const STRIPE_KEY_FALLBACK = BUSINESS === 'handy-andy'
+    ? 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA'
+    : null;
+  let STRIPE_KEY = STRIPE_KEY_FALLBACK;
   const THANKYOU_URL= 'https://www.ihandyandy.com/thankyou/';
 
   // ── Native (off-Zenbooker) booking mode ──────────────────────────────────
@@ -568,6 +588,14 @@
   function ensureStripe(){
     return new Promise(resolve=>{
       if(_stripe){resolve();return;}
+      // No publishable key resolved for this business (ensureStripeKey()
+      // failed or this business simply has none configured yet) -- leave
+      // _stripe/_stripeCard null rather than calling window.Stripe(null),
+      // which throws. mountStripeCard() below already no-ops without a card
+      // element to mount into, and doSubmit()'s Stripe branch is gated on
+      // `_stripe&&_stripeCard`, so checkout degrades to "no card step"
+      // instead of crashing the widget.
+      if(!STRIPE_KEY){resolve();return;}
       function init(){
         _stripe=window.Stripe(STRIPE_KEY);
         _stripeElements=_stripe.elements();
@@ -1744,7 +1772,7 @@
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
-        <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from Handy Andy TV Mounting. Reply STOP to unsubscribe.</span>
+        <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from ${BUSINESS_NAME}. Reply STOP to unsubscribe.</span>
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
@@ -1905,10 +1933,30 @@
   // price change there takes effect immediately without a widget deploy.
   // Failure here is silent and total — the hardcoded numbers above are always
   // a safe fallback; a price-fetch hiccup must never block a real booking.
+  // Resolve STRIPE_KEY for this widget's business, once, right after the zip
+  // check succeeds -- well before the customer reaches the card step. Handy
+  // Andy already has a working fallback (see STRIPE_KEY_FALLBACK above), so
+  // this only OVERWRITES it if the fetch succeeds; any other business has no
+  // fallback and stays null on failure, which ensureStripe() below treats as
+  // "no card step" rather than guessing an account.
+  let _stripeKeyFetched=false;
+  async function ensureStripeKey(){
+    if(_stripeKeyFetched) return;
+    _stripeKeyFetched=true;
+    try{
+      const r=await fetch(`${API_BASE}/book?action=stripe_config&business=${encodeURIComponent(BUSINESS)}`);
+      const d=await r.json();
+      if(d&&d.publishable_key) STRIPE_KEY=d.publishable_key;
+      else if(BUSINESS!=='handy-andy') STRIPE_KEY=null;
+    }catch(e){
+      if(BUSINESS!=='handy-andy') STRIPE_KEY=null;   // keep Handy Andy's hardcoded fallback; no other business has one
+    }
+  }
+
   async function applyWidgetPriceOverrides(cityKey){
     if(!serviceConfig) return;
     try{
-      const r=await fetch(`${API_BASE}/book?action=widget_prices&business=handy-andy&city=${encodeURIComponent(cityKey)}`);
+      const r=await fetch(`${API_BASE}/book?action=widget_prices&business=${encodeURIComponent(BUSINESS)}&city=${encodeURIComponent(cityKey)}`);
       const d=await r.json();
       const overrides=(d&&d.prices)||{};
       for(const sec of serviceConfig.sections){
@@ -1927,7 +1975,7 @@
     btn.textContent='Checking…'; btn.disabled=true;
     customer.zip=zip;
     try{
-      const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(NATIVE?{zip,business:'handy-andy'}:{zip})});
+      const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(NATIVE?{zip,business:BUSINESS}:{zip})});
       const d=await r.json();
       if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
       territoryId=d.territory_id; enteredZip=zip;
@@ -1953,6 +2001,7 @@
       }
       serviceConfig=SERVICE_CONFIGS[configKey];
       await applyWidgetPriceOverrides(priceCity);
+      await ensureStripeKey();
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}
@@ -1963,7 +2012,7 @@
     try{
       const provReq=needsTwoTechs()?2:1;
       const slotsUrl=NATIVE
-        ?`${API_BASE}/slots?business=handy-andy&service_area_id=${encodeURIComponent(serviceAreaId)}&days=92`
+        ?`${API_BASE}/slots?business=${encodeURIComponent(BUSINESS)}&service_area_id=${encodeURIComponent(serviceAreaId)}&days=92`
         :`${API_BASE}/slots?territory_id=${territoryId}&duration=120&days=92&min_providers_needed=${provReq}`;
       const r=await fetch(slotsUrl);
       const d=await r.json();
@@ -2035,7 +2084,7 @@
       }));
       const _loc=resolveLocation();
       const reqPayload={
-        business:'handy-andy',
+        business:BUSINESS,
         service_label:serviceConfig.service_label||serviceConfig.name||'TV Mounting',
         customer:{
           name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
@@ -2175,7 +2224,7 @@
       sms_consent:smsConsent,
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
-      ...(NATIVE&&{business:'handy-andy'}),
+      ...(NATIVE&&{business:BUSINESS}),
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
     };
