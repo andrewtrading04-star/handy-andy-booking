@@ -399,8 +399,19 @@ async function websiteLeadSync(req, res) {
   const base = (process.env.PUBLIC_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
   const link = `${base}/admin.html?estimate=${encodeURIComponent(ins.data.id)}`;
   const gist = message.replace(/\s+/g, ' ').trim();
-  const to = process.env.DOMS_SECRETARY_PHONE;
-  if (to) {
+  // Only text for a lead that actually just came in. The mailbox is re-scanned
+  // over a 45-day window on every run, so the first run after this shipped
+  // backfilled 10 historical leads at once — without this guard, turning
+  // DOMS_SECRETARY_PHONE on would have fired 10 texts for messages weeks old.
+  // Anything older is filed silently; it's already visible in the dashboard.
+  const FRESH_MS = 24 * 60 * 60 * 1000;
+  const leadAt = row.created_at ? new Date(row.created_at).getTime() : Date.now();
+  const isFresh = Number.isFinite(leadAt) && (Date.now() - leadAt) < FRESH_MS;
+
+  const to = isFresh ? process.env.DOMS_SECRETARY_PHONE : null;
+  if (!isFresh) {
+    console.log('[website_lead] backfilled (older than 24h) — filed without texting');
+  } else if (to) {
     const msg = [
       'New Website Message',
       `From: ${name}`,
