@@ -4529,10 +4529,14 @@ function webRender(d){
     <div class="card"><h2>Scroll Depth Distribution</h2><div class="chartbox"><canvas id="web-ch-scroll"></canvas></div></div>
   </div>`;
 
-  // Top pages chart + Traffic sources chart
-  html+=`<div class="grid two section">
-    <div class="card"><h2>Top Pages by Views</h2><div class="chartbox"><canvas id="web-ch-pages"></canvas></div></div>
-    <div class="card"><h2>Traffic Sources</h2><div class="chartbox"><canvas id="web-ch-ref"></canvas></div></div>
+  // Top pages chart + Traffic sources chart — stacked full-width, not side by
+  // side: real page URLs and referrer domains are long, and a half-width card
+  // clipped them (labels ran off the left edge of the chart).
+  html+=`<div class="section">
+    <div class="card"><h2>Top Pages by Views</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-pages"></canvas></div></div>
+  </div>
+  <div class="section">
+    <div class="card"><h2>Traffic Sources</h2><div class="chartbox" style="height:280px;"><canvas id="web-ch-ref"></canvas></div></div>
   </div>`;
 
   // Top pages table + Referrers table
@@ -4762,16 +4766,19 @@ function webDrawCharts(d,brand){
   // Top pages by views
   const tp=(d.top.pages||[]).slice(0,8);
   const pg=document.getElementById('web-ch-pages');
+  // Long URLs/domains ran off the edge of the chart at full length — truncate
+  // the axis label but show the full string in the tooltip on hover.
+  const truncLbl=(s,n=32)=>{ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; };
   if(pg) webCharts.pg=new Chart(pg,{ type:'bar',
     data:{ labels:tp.map(p=>webShortPath(p.url)), datasets:[{ label:'Views', data:tp.map(p=>p.views), backgroundColor:bg }] },
-    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } }
+    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{title:(items)=>tp[items[0].dataIndex]?webShortPath(tp[items[0].dataIndex].url):''}}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } }, y:{ ticks:{ callback:(v,i)=>truncLbl(tp[i]?webShortPath(tp[i].url):'') } } } }
   });
   // Traffic sources by sessions
   const tr=(d.ref.referrers||[]).slice(0,8);
   const rf=document.getElementById('web-ch-ref');
   if(rf) webCharts.rf=new Chart(rf,{ type:'bar',
     data:{ labels:tr.map(r=>r.name), datasets:[{ label:'Sessions', data:tr.map(r=>r.unique_sessions), backgroundColor:bg }] },
-    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } }
+    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{title:(items)=>tr[items[0].dataIndex]?tr[items[0].dataIndex].name:''}}}, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } }, y:{ ticks:{ callback:(v,i)=>truncLbl(tr[i]?tr[i].name:'') } } } }
   });
 }
 
