@@ -6398,16 +6398,43 @@ async function renderReviews(){
       </div>`;
     }
 
-    const total=_reviewsList.length;
-    const sum=_reviewsList.reduce((a,r)=>a+(Number(r.rating)||0),0);
-    const avg=total?sum/total:0;
+    let activeTech=null;   // null = all technicians, else a technician_id
     let activeFilter=null, sortMode='newest';
+    // The set the tech picker offers: every roster tech (so someone with zero
+    // reviews still shows up — an admin checking coverage needs to see the
+    // gap, not have it silently omitted) plus "Unassigned" only when a
+    // Google review genuinely has no credited tech yet.
+    const hasUnassigned=_reviewsList.some(r=>!r.technician_id);
+    const techFiltered=()=>activeTech===null?_reviewsList
+      :activeTech==='__none__'?_reviewsList.filter(r=>!r.technician_id)
+      :_reviewsList.filter(r=>r.technician_id===activeTech);
+    // Per-tech review counts for the picker's badge numbers, recomputed on
+    // every paint so a dismiss updates them immediately.
+    const techCounts=()=>{
+      const m=new Map();
+      for(const r of _reviewsList) if(r.technician_id) m.set(r.technician_id,(m.get(r.technician_id)||0)+1);
+      return m;
+    };
 
-    const barsHtml=()=>{
+    // Tech picker — "All technicians" + one pill per roster tech (shown even
+    // at 0 reviews, so a gap in coverage is visible rather than silently
+    // absent), plus "Unassigned" only when a Google review has no credited
+    // tech at all. Selecting a tech scopes the ENTIRE screen below (average,
+    // breakdown, list) to just their reviews — this is deliberately the same
+    // view a tech gets on their own "My Reviews" screen, just reachable from
+    // the office side so Heather/Joey can see it per-tech instead of clumped.
+    const techPickerHtml=()=>{
+      const counts=techCounts();
+      const pill=(id,label,count)=>`<button type="button" class="rc-seg-btn${activeTech===id?' on':''}" data-rstech="${id===null?'':esc(id)}">${esc(label)}${count!=null?` <span style="opacity:.65;">${count}</span>`:''}</button>`;
+      const techPills=revTechs.map(t=>pill(t.id,t.name,counts.get(t.id)||0)).join('');
+      const unassigned=hasUnassigned?pill('__none__','Unassigned',_reviewsList.filter(r=>!r.technician_id).length):'';
+      return `<div class="rc-seg" style="flex-wrap:wrap;">${pill(null,'All technicians',_reviewsList.length)}${techPills}${unassigned}</div>`;
+    };
+    const barsHtml=(scoped)=>{
       // Recomputed on every call (not cached) so a dismissed review — which
       // splices _reviewsList — is instantly reflected in the breakdown too.
       const counts=[0,0,0,0,0,0];
-      _reviewsList.forEach(r=>{ const rt=Math.round(Number(r.rating)||0); if(rt>=1&&rt<=5) counts[rt]++; });
+      scoped.forEach(r=>{ const rt=Math.round(Number(r.rating)||0); if(rt>=1&&rt<=5) counts[rt]++; });
       const maxCount=Math.max(1,...counts.slice(1));
       return [5,4,3,2,1].map(n=>{
         const c=counts[n], pct=Math.round(c/maxCount*100);
@@ -6416,8 +6443,8 @@ async function renderReviews(){
         </button>`;
       }).join('');
     };
-    const sortedFilteredList=()=>{
-      let list=activeFilter?_reviewsList.filter(r=>Math.round(Number(r.rating)||0)===activeFilter):_reviewsList.slice();
+    const sortedFilteredList=(scoped)=>{
+      let list=activeFilter?scoped.filter(r=>Math.round(Number(r.rating)||0)===activeFilter):scoped.slice();
       const whenMs=r=>new Date(r.reviewed_at||0).getTime()||0;
       return list.sort((a,b)=>{
         if(sortMode==='lowest'){ const ra=Number(a.rating)||0, rb=Number(b.rating)||0; if(ra!==rb) return ra-rb; }
@@ -6426,22 +6453,34 @@ async function renderReviews(){
     };
     function paintReviewsWall(){
       const barsEl=document.getElementById('rsBars'); if(!barsEl) return;
-      // Header (average/stars/count) is recomputed here too, not just the
-      // bars+list below — dismissing a Google review should not leave a stale
-      // average sitting above it until the next full tab reload.
-      const t=_reviewsList.length, s=_reviewsList.reduce((a,r)=>a+(Number(r.rating)||0),0), av=t?s/t:0;
+      const scoped=techFiltered();
+      const pickerEl=document.getElementById('rsTechPicker');
+      if(pickerEl){
+        pickerEl.innerHTML=techPickerHtml();
+        pickerEl.querySelectorAll('[data-rstech]').forEach(b=>b.addEventListener('click',()=>{
+          const v=b.dataset.rstech;
+          activeTech=v===''?null:v;
+          activeFilter=null;   // switching techs resets the star filter — "3★ for Steve" carrying over to "All" reads as a bug, not a feature
+          paintReviewsWall();
+        }));
+      }
+      // Header (average/stars/count) is scoped to the current tech selection,
+      // not the whole business — this is the point of the picker: Heather
+      // looking at Kregg's pill sees KREGG's average, same number he'd see on
+      // his own phone, not the office-wide blend.
+      const t=scoped.length, s=scoped.reduce((a,r)=>a+(Number(r.rating)||0),0), av=t?s/t:0;
       const avgEl=document.getElementById('rsAvg');
       if(avgEl){
         avgEl.textContent=t?av.toFixed(1):'—';
         document.getElementById('rsAvgStars').innerHTML=starRow(av,17);
         document.getElementById('rsAvgTotal').textContent=`${t} review${t===1?'':'s'}`;
       }
-      barsEl.innerHTML=barsHtml();
+      barsEl.innerHTML=barsHtml(scoped);
       document.getElementById('rsLabel').textContent=activeFilter?`Showing ${activeFilter} ★ only ✕`:'All reviews';
       document.getElementById('rsLabel').classList.toggle('filtered',!!activeFilter);
       document.getElementById('rsSortPill').textContent=sortMode==='lowest'?'Lowest rating ▾':'Newest ▾';
-      const list=sortedFilteredList();
-      document.getElementById('rsList').innerHTML=!_reviewsList.length
+      const list=sortedFilteredList(scoped);
+      document.getElementById('rsList').innerHTML=!scoped.length
         ? '<div class="empty">No reviews yet.</div>'
         : (list.length?list.map(reviewCard).join(''):`<div class="empty">No ${activeFilter}-star reviews.</div>`);
       barsEl.querySelectorAll('.rs-bar-row').forEach(b=>b.addEventListener('click',()=>{
@@ -6463,12 +6502,13 @@ async function renderReviews(){
     }
 
     document.getElementById('revWrap').innerHTML=`
+      <div id="rsTechPicker" style="margin-bottom:12px;"></div>
       <div class="rs-card">
         <div class="rs-top">
           <div class="rs-avgcol">
-            <div class="rs-avg" id="rsAvg">${total?avg.toFixed(1):'—'}</div>
-            <div class="rs-stars" id="rsAvgStars">${starRow(avg,17)}</div>
-            <div class="rs-total" id="rsAvgTotal">${total} review${total===1?'':'s'}</div>
+            <div class="rs-avg" id="rsAvg">—</div>
+            <div class="rs-stars" id="rsAvgStars"></div>
+            <div class="rs-total" id="rsAvgTotal"></div>
           </div>
           <div class="rs-bars" id="rsBars"></div>
         </div>
