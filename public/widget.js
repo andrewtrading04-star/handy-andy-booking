@@ -22,6 +22,18 @@
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
   const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting' }[BUSINESS] || 'Handy Andy TV Mounting';
+  // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
+  // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
+  // selected-state borders, the calendar, the coupon badge, etc.) reads from
+  // these three instead of a hardcoded orange, so a new business gets its own
+  // look with zero per-screen changes. Handy Andy's values are the exact
+  // orange the widget always used, byte-for-byte, so its live embed is
+  // visually unchanged. Mile High gets the same green used in its email
+  // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
+  // across the booking widget and the confirmation email.
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -749,32 +761,32 @@
   const S={
     host:'display:block!important;visibility:visible!important;position:relative!important;z-index:999999!important;background:#18181c!important;border:1px solid #2d2d34!important;border-radius:12px!important;padding:28px!important;box-shadow:0 10px 30px rgba(0,0,0,0.5)!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;box-sizing:border-box!important;color:#fff!important;',
     bar:'background:#2d2d34!important;height:6px!important;border-radius:3px!important;margin-bottom:16px!important;overflow:hidden!important;display:block!important;',
-    fill:p=>`background:#ff6600!important;height:100%!important;width:${p}%!important;display:block!important;transition:width .3s!important;`,
+    fill:p=>`background:${ACCENT}!important;height:100%!important;width:${p}%!important;display:block!important;transition:width .3s!important;`,
     step:'color:#71717a!important;font-size:12px!important;text-transform:uppercase!important;letter-spacing:1px!important;display:block!important;margin-bottom:18px!important;',
     h1:'margin:0 0 8px 0!important;font-size:22px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.3!important;',
     sub:'color:#a0a0ab!important;font-size:13px!important;display:block!important;margin-bottom:16px!important;line-height:1.5!important;',
     input:'width:100%!important;padding:14px 16px!important;background:#27272a!important;border:1px solid #3f3f46!important;color:#fff!important;border-radius:8px!important;font-size:17px!important;box-sizing:border-box!important;margin-bottom:20px!important;display:block!important;text-align:center!important;',
     inputL:'width:100%!important;padding:11px 14px!important;background:#27272a!important;border:1px solid #3f3f46!important;color:#fff!important;border-radius:6px!important;font-size:15px!important;box-sizing:border-box!important;margin-bottom:12px!important;display:block!important;',
-    btnPri:'background:#ff6600!important;color:#fff!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:pointer!important;display:inline-block!important;',
+    btnPri:`background:${ACCENT}!important;color:#fff!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:pointer!important;display:inline-block!important;`,
     btnSec:'background:transparent!important;color:#a0a0ab!important;border:1px solid #3f3f46!important;padding:10px 20px!important;font-size:14px!important;border-radius:6px!important;cursor:pointer!important;display:inline-block!important;',
     btnDis:'background:#2d2d34!important;color:#52525b!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:not-allowed!important;display:inline-block!important;',
     actions:'display:flex!important;justify-content:space-between!important;align-items:center!important;margin-top:20px!important;',
-    card:on=>`background:${on?'rgba(255,102,0,0.1)':'#27272a'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:8px!important;padding:13px 15px!important;color:#fff!important;display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:8px!important;font-size:14px!important;cursor:pointer!important;`,
-    qRow:on=>`background:${on?'rgba(255,102,0,0.1)':'#27272a'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:8px!important;padding:11px 14px!important;color:#fff!important;display:flex!important;align-items:center!important;margin-bottom:8px!important;font-size:14px!important;`,
+    card:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:'#27272a'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:13px 15px!important;color:#fff!important;display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:8px!important;font-size:14px!important;cursor:pointer!important;`,
+    qRow:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:'#27272a'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:11px 14px!important;color:#fff!important;display:flex!important;align-items:center!important;margin-bottom:8px!important;font-size:14px!important;`,
     qBtn:'background:#3f3f46!important;color:#fff!important;border:none!important;width:30px!important;height:30px!important;border-radius:6px!important;font-size:18px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0!important;',
-    qNum:'color:#ff6600!important;font-weight:700!important;font-size:17px!important;min-width:22px!important;text-align:center!important;display:inline-block!important;',
-    info:'background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#ff9944!important;display:block!important;',
+    qNum:`color:${ACCENT}!important;font-weight:700!important;font-size:17px!important;min-width:22px!important;text-align:center!important;display:inline-block!important;`,
+    info:`background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:${ACCENT_LIGHT}!important;display:block!important;`,
     ok:'background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#4ade80!important;display:block!important;',
     price:p=>p>0?` <span style="color:#a0a0ab!important;font-size:12px!important;">(+$${p})</span>`:'',
     // Bracket-comparison help link, shown above the bracket step's options only.
-    helpLink:'color:#ff9955!important;font-size:12.5px!important;text-decoration:underline!important;cursor:pointer!important;display:inline-block!important;margin-bottom:14px!important;background:none!important;border:none!important;padding:0!important;font-family:inherit!important;',
+    helpLink:`color:${ACCENT_LIGHT}!important;font-size:12.5px!important;text-decoration:underline!important;cursor:pointer!important;display:inline-block!important;margin-bottom:14px!important;background:none!important;border:none!important;padding:0!important;font-family:inherit!important;`,
     // Sticky running-total footer — bleeds to the host's own edges (host padding
     // is 28px, so -28px margins here reach the card's border) and sits as the
     // last thing on every step so the price a customer is building stays visible
     // the whole time, instead of arriving as one number at the very end.
     footerBar:t=>`<div style="margin:18px -28px -28px!important;padding:12px 28px!important;background:#0e0e10!important;border-top:1px solid #2d2d34!important;display:flex!important;justify-content:space-between!important;align-items:center!important;font-size:13px!important;">
       <span style="color:#a0a0ab!important;">Estimated total</span>
-      <span style="font-weight:800!important;font-size:17px!important;color:#ff9944!important;">$${t}</span>
+      <span style="font-weight:800!important;font-size:17px!important;color:${ACCENT_LIGHT}!important;">$${t}</span>
     </div>`,
   };
 
@@ -858,7 +870,7 @@
         <button id="ha-exit-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:12px!important;background:none!important;border:none!important;color:#a0a0ab!important;font-size:18px!important;cursor:pointer!important;padding:4px!important;">✕</button>
         <div style="font-size:17px!important;font-weight:800!important;margin:0 0 6px!important;">Wait, don't lose your spot</div>
         <div style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 16px!important;line-height:1.5!important;">Here's $10 off to lock in today's price.</div>
-        <div style="font-family:ui-monospace,Menlo,Consolas,monospace!important;font-weight:800!important;letter-spacing:0.05em!important;background:rgba(255,102,0,0.14)!important;border:1px solid rgba(255,102,0,0.4)!important;color:#ff9944!important;padding:7px 15px!important;border-radius:8px!important;display:inline-block!important;margin-bottom:16px!important;font-size:13.5px!important;">${EXIT_COUPON}</div>
+        <div style="font-family:ui-monospace,Menlo,Consolas,monospace!important;font-weight:800!important;letter-spacing:0.05em!important;background:rgba(${ACCENT_RGB},0.14)!important;border:1px solid rgba(${ACCENT_RGB},0.4)!important;color:${ACCENT_LIGHT}!important;padding:7px 15px!important;border-radius:8px!important;display:inline-block!important;margin-bottom:16px!important;font-size:13.5px!important;">${EXIT_COUPON}</div>
         <div>
           <button id="ha-exit-apply" style="${S.btnPri};width:100%!important;">Apply $10 off &amp; continue</button>
           <button id="ha-exit-close" style="${S.btnSec};width:100%!important;margin-top:9px!important;">No thanks</button>
@@ -899,11 +911,11 @@
       <p style="${S.sub}">Select all that apply. Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</p>
       <div class="ha-tv-type" data-type="regular" style="${S.card(regOn)}">
         <span>I have a regular TV</span>
-        <span style="color:${regOn?'#ff6600':'#52525b'}!important;font-size:18px!important;">${regOn?'✓':'☐'}</span>
+        <span style="color:${regOn?ACCENT:'#52525b'}!important;font-size:18px!important;">${regOn?'✓':'☐'}</span>
       </div>
       <div class="ha-tv-type" data-type="frame" style="${S.card(frameOn)}">
         <span>I have a Samsung Frame TV or LG Gallery TV</span>
-        <span style="color:${frameOn?'#ff6600':'#52525b'}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
+        <span style="color:${frameOn?ACCENT:'#52525b'}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
       </div>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
@@ -1155,7 +1167,7 @@
         const on=getQty(sec.id,o.id)>0;
         return `<div class="ha-tog" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
           <span>${o.label}</span>
-          <span style="color:${on?'#ff6600':'#52525b'}!important;font-size:18px!important;">${on?'✓':'○'}</span>
+          <span style="color:${on?ACCENT:'#52525b'}!important;font-size:18px!important;">${on?'✓':'○'}</span>
         </div>`;
       }).join('');
     }
@@ -1332,7 +1344,7 @@
       if(autoOpt)selectOnly(sec.id,autoOpt.id);
       return `
         <h1 style="${S.h1}">Two Technicians Required</h1>
-        <div style="background:rgba(255,102,0,0.1)!important;border:1.5px solid rgba(255,102,0,0.4)!important;border-radius:10px!important;padding:20px!important;margin-bottom:20px!important;text-align:center!important;">
+        <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1.5px solid rgba(${ACCENT_RGB},0.4)!important;border-radius:10px!important;padding:20px!important;margin-bottom:20px!important;text-align:center!important;">
           <div style="font-size:36px!important;margin-bottom:10px!important;">💪</div>
           <p style="font-size:15px!important;color:#fff!important;margin:0!important;line-height:1.6!important;">
             Because your TV is <strong>86 inches or larger</strong>, two technicians are required for proper and safe installation.
@@ -1360,7 +1372,7 @@
       const displayLabel=LIFT_LABELS[o.id]||o.label;
       return `<div class="ha-sel" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
         <span>${displayLabel}</span>
-        <span style="color:${on?'#ff6600':'#52525b'}!important;font-size:18px!important;">${on?'●':'○'}</span>
+        <span style="color:${on?ACCENT:'#52525b'}!important;font-size:18px!important;">${on?'●':'○'}</span>
       </div>`;
     }).join('');
     const ok=!!cur;
@@ -1385,16 +1397,16 @@
       <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;text-align:center!important;">Guaranteed Dismount Coverage</h1>
       <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;text-align:center!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
 
-      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid #ff6600!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
+      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid ${ACCENT}!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
         <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
-        <div style="font-size:10.5px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important;color:#ff9944!important;margin-bottom:10px!important;position:relative!important;">🛡️ TV Removal Coverage</div>
+        <div style="font-size:10.5px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important;color:${ACCENT_LIGHT}!important;margin-bottom:10px!important;position:relative!important;">🛡️ TV Removal Coverage</div>
         <div style="background:rgba(34,197,94,0.12)!important;border:1.5px solid rgba(34,197,94,0.5)!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:12px!important;position:relative!important;">
           <div style="font-size:15px!important;font-weight:800!important;color:#fff!important;line-height:1.45!important;">We come back to your home <span style="color:#4ade80!important;">ANYTIME</span>, even years from now, and take your TV down</div>
           <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
         </div>
         <div style="display:grid!important;grid-template-columns:1fr auto 1fr!important;gap:8px!important;align-items:center!important;margin-bottom:12px!important;position:relative!important;">
-          <div style="background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
-            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:#ff9944!important;">Pay today</div>
+          <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
+            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:${ACCENT_LIGHT}!important;">Pay today</div>
             <div style="font-size:22px!important;font-weight:800!important;color:#fff!important;margin-top:2px!important;">$35</div>
             <div style="font-size:10.5px!important;color:#a0a0ab!important;margin-top:2px!important;">one time, that's it</div>
           </div>
@@ -1411,7 +1423,7 @@
 
       <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
 
-      <button id="btn-dis-yes" style="background:${yesOn?'#ff6600':'rgba(255,102,0,0.85)'}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
+      <button id="btn-dis-yes" style="background:${yesOn?ACCENT:`rgba(${ACCENT_RGB},0.85)`}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
         ${yesOn?'✓ ':''}🛡️ Add coverage to my ticket, $35
       </button>
       <div style="text-align:center!important;margin-bottom:8px!important;">
@@ -1446,7 +1458,7 @@
       const labelText=o.requireText?`Briefly describe the task <span style="color:#a0a0ab!important;font-weight:400!important;">(required)</span>`:'';
       const textBox=showText?`<div style="margin:-2px 0 10px 0!important;">
         ${labelText?`<p style="color:#fff!important;font-size:12.5px!important;font-weight:600!important;margin:0 0 6px!important;">${labelText}</p>`:''}
-        <textarea class="ha-comment" data-o="${o.id}" data-required="${o.requireText?1:0}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid ${empty?'#ef4444':'#ff6600'}!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
+        <textarea class="ha-comment" data-o="${o.id}" data-required="${o.requireText?1:0}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid ${empty?'#ef4444':ACCENT}!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
         <p id="${errId}" style="color:#ef4444!important;font-size:12px!important;margin:4px 0 0!important;display:none!important;">Let us know what needs doing so the tech shows up ready.</p>
       </div>`:'';
       return row+textBox;
@@ -1545,8 +1557,8 @@
       const has=availSet.has(ds),isSel=selectedDate===ds,isToday=ds===todayStr;
       const pickedHere=selectedRequestWindows.some(w=>w.date===ds);
       if(has){
-        cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?'rgba(255,102,0,0.12)':'transparent'}!important;">
-          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?'#ff6600':isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?'#ff6600':'#fff'}!important;border:${isToday&&!isSel?'1.5px solid #ff6600':pickedHere?'1.5px solid #4ade80':'none'}!important;">${d}</div>
+        cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?`rgba(${ACCENT_RGB},0.12)`:'transparent'}!important;">
+          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:'#fff'}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:pickedHere?'1.5px solid #4ade80':'none'}!important;">${d}</div>
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
@@ -1563,7 +1575,7 @@
       const winBtns=windows.map(sl=>{
         const on=selectedRequestWindows.some(w=>w.date===selectedDate&&w.slot_key===sl.key);
         const disabled=!on&&atCap;
-        return `<div class="${disabled?'':'ha-reqwin'}" data-date="${selectedDate}" data-key="${sl.key}" data-label="${sl.label}" style="background:${on?'rgba(255,102,0,0.15)':disabled?'#18181c':'#1f1f23'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:6px!important;padding:7px 11px!important;cursor:${disabled?'default':'pointer'}!important;text-align:center!important;font-size:12.5px!important;color:${on?'#fff':disabled?'#52525b':'#a0a0ab'}!important;">${on?'✓ ':''}${sl.label}</div>`;
+        return `<div class="${disabled?'':'ha-reqwin'}" data-date="${selectedDate}" data-key="${sl.key}" data-label="${sl.label}" style="background:${on?`rgba(${ACCENT_RGB},0.15)`:disabled?'#18181c':'#1f1f23'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:6px!important;padding:7px 11px!important;cursor:${disabled?'default':'pointer'}!important;text-align:center!important;font-size:12.5px!important;color:${on?'#fff':disabled?'#52525b':'#a0a0ab'}!important;">${on?'✓ ':''}${sl.label}</div>`;
       }).join('');
       timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
         <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}:</p>
@@ -1626,8 +1638,8 @@
       const has=availSet.has(ds),isSel=selectedDate===ds,isToday=ds===todayStr;
       // disc intentionally removed — no discount display on calendar
       if(has){
-        cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?'rgba(255,102,0,0.12)':'transparent'}!important;">
-          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?'#ff6600':isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?'#ff6600':'#fff'}!important;border:${isToday&&!isSel?'1.5px solid #ff6600':'none'}!important;">${d}</div>
+        cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?`rgba(${ACCENT_RGB},0.12)`:'transparent'}!important;">
+          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:'#fff'}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:'none'}!important;">${d}</div>
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
@@ -1643,8 +1655,8 @@
       const df=fmtDate(selectedDate);
       const slotBtns=slots.map(sl=>{
         const on=selectedSlot===sl.id, sur=slotSurcharge(sl,selectedDate);
-        return `<div class="ha-slot" data-id="${sl.id}" style="background:${on?'rgba(255,102,0,0.12)':'#1f1f23'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:8px!important;padding:14px 10px!important;cursor:pointer!important;text-align:center!important;">
-          <div style="font-size:13px!important;font-weight:600!important;color:#fff!important;">${sl.arrival_window}${sur>0?` <span style="color:#ff9944!important;font-size:11px!important;">+$${sur}</span>`:''}</div>
+        return `<div class="ha-slot" data-id="${sl.id}" style="background:${on?`rgba(${ACCENT_RGB},0.12)`:'#1f1f23'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:14px 10px!important;cursor:pointer!important;text-align:center!important;">
+          <div style="font-size:13px!important;font-weight:600!important;color:#fff!important;">${sl.arrival_window}${sur>0?` <span style="color:${ACCENT_LIGHT}!important;font-size:11px!important;">+$${sur}</span>`:''}</div>
         </div>`;
       }).join('');
       timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
@@ -1694,7 +1706,7 @@
     // up to lock in a time — an explicit, later instruction from the owner
     // that supersedes the earlier "never reveal" rule for this one point only.
     const cardBlock=nativeUnstaffed?`
-      <div style="background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
+      <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
         📋 <strong style="color:#fff!important;">This is an appointment request, not a confirmed appointment.</strong>
         <div>Someone will reach out to you shortly to lock in your preferred time slot.</div>
       </div>`:`
@@ -1711,7 +1723,7 @@
         <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
       </div>`;
     return `
-      <h1 style="${S.h1};color:#ff6600!important;">Almost Done! Last Step…</h1>
+      <h1 style="${S.h1};color:${ACCENT}!important;">Almost Done! Last Step…</h1>
       ${cardBlock}
       <input type="text"  id="c-fn" style="${S.inputL}" placeholder="First Name"     value="${customer.first_name}">
       <input type="text"  id="c-ln" style="${S.inputL}" placeholder="Last Name"      value="${customer.last_name}">
@@ -1771,7 +1783,7 @@
         ${nativeUnstaffed?`<p style="font-size:11px!important;color:#71717a!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
-        <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
+        <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:${ACCENT}!important;cursor:pointer!important;">
         <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from ${BUSINESS_NAME}. Reply STOP to unsubscribe.</span>
       </label>
       <div style="${S.actions}">
@@ -1829,7 +1841,7 @@
     root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{
       optionComments[e.target.dataset.o]=e.target.value;
       if(e.target.value.trim()){
-        e.target.style.setProperty('border-color','#ff6600','important');
+        e.target.style.setProperty('border-color',ACCENT,'important');
         root.querySelector(`#err-${e.target.dataset.o}`)?.style.setProperty('display','none','important');
       }
     }));
