@@ -880,6 +880,46 @@
   .greview.is-new{border-left:3px solid var(--accent);padding-left:9px;}
   .greview.is-past{opacity:.75;}
 
+  /* ── Reviews wall (all sources, one Google-style list — same layout as the tech
+     portal's "My Reviews": average + star breakdown, filter/sort, one card
+     style per review. Admin gets one extra affordance on Google-sourced cards:
+     the tech-credit dropdown and a dismiss ×, which the tech app has no need for. */
+  .rs-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;}
+  .rs-top{display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+  .rs-avgcol{flex:none;text-align:center;}
+  .rs-avg{font-size:40px;font-weight:900;color:var(--ink);line-height:1;}
+  .rs-stars{margin-top:5px;font-size:15px;letter-spacing:-1px;color:var(--amber);}
+  .rs-total{color:var(--mute);font-size:11.5px;margin-top:6px;}
+  .rs-bars{flex:1;min-width:180px;display:flex;flex-direction:column;gap:5px;}
+  .rs-bar-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mute);background:none;border:none;font-family:inherit;padding:3px 0;width:100%;cursor:pointer;}
+  .rs-bar-row .rs-n{width:9px;text-align:right;}
+  .rs-bar-track{flex:1;height:6px;background:var(--line2);border-radius:4px;overflow:hidden;}
+  .rs-bar-fill{height:100%;background:var(--amber);border-radius:4px;}
+  .rs-bar-row.zero{color:var(--line);cursor:default;}
+  .rs-bar-row.zero .rs-bar-fill{background:var(--line);}
+  .rs-bar-row .rs-c{width:16px;color:var(--mute);text-align:right;}
+  .rs-bar-row.active{color:var(--orange);font-weight:700;}
+  .rs-bar-row.active .rs-bar-fill{background:var(--orange);}
+  .rs-sortrow{display:flex;justify-content:space-between;align-items:center;margin:16px 2px 4px;gap:8px;}
+  .rs-label-btn{background:none;border:none;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:700;font-family:inherit;padding:4px 0;cursor:pointer;}
+  .rs-label-btn.filtered{color:var(--orange);}
+  .rs-sortpill{background:#fff;border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:600;padding:6px 10px;border-radius:8px;font-family:inherit;cursor:pointer;}
+  .gcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:10px;position:relative;}
+  .gcard.flagged{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset;}
+  .gtop{display:flex;gap:10px;align-items:flex-start;}
+  .gavatar{width:36px;height:36px;border-radius:50%;background:var(--line2);color:var(--ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none;}
+  .gname{font-weight:700;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;}
+  .gsrc{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#4285F4;color:#fff;font-size:9.5px;font-weight:800;margin-left:6px;vertical-align:middle;}
+  .gmeta{display:flex;align-items:center;gap:7px;margin-top:2px;flex-wrap:wrap;}
+  .gdate{color:var(--mute);font-size:11.5px;}
+  .gtext{font-size:13px;color:var(--ink);line-height:1.5;margin-top:9px;}
+  .gtext.empty{color:var(--mute);font-style:italic;}
+  .gflag{display:inline-block;background:rgba(245,158,11,.13);color:#92400e;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:8px;}
+  .gcard-admin-row{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line2);}
+  .gcard-admin-row select{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:170px;}
+  .gcard-x{position:absolute;top:10px;right:11px;background:none;border:none;color:var(--mute);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px;border-radius:6px;}
+  .gcard-x:hover{background:var(--line2);color:var(--ink);}
+
   /* ── Review-requests scoreboard + per-channel Sent→Delivered→Opened pipeline ── */
   .rev-scoreboard{display:flex;gap:10px;margin-bottom:14px;}
   .rev-score-card{flex:1;background:#fff;border:2px solid var(--line);border-radius:10px;padding:12px 14px;text-align:center;}
@@ -6249,6 +6289,31 @@ let _reviewsRenderSeq=0;
 // background "mark as seen" sync (below) lands and the server starts
 // reporting seen:true on subsequent fetches.
 const _reviewsPinnedNewIds=new Set();
+// A row of 5 stars; the first `n` (rounded) are filled (amber), the rest
+// hollow. Ported from the tech portal's identical helper — same visual as the
+// star breakdown techs see on "My Reviews".
+function starRow(n, size){
+  const filled=Math.round(Number(n)||0);
+  let s='';
+  for(let i=1;i<=5;i++) s+=`<span style="color:${i<=filled?'var(--amber)':'var(--line)'};">★</span>`;
+  return `<span style="font-size:${size||16}px;letter-spacing:2px;line-height:1;">${s}</span>`;
+}
+// Same relative-time convention as the tech portal's review screen ("2 weeks
+// ago" instead of a bare date) — this tab is meant to read as the same feature.
+function revRelativeTime(iso){
+  if(!iso) return '';
+  const then=new Date(iso).getTime(); if(isNaN(then)) return '';
+  const days=Math.floor((Date.now()-then)/86400000);
+  if(days<=0) return 'Today';
+  if(days===1) return '1 day ago';
+  if(days<7) return `${days} days ago`;
+  const weeks=Math.floor(days/7);
+  if(weeks<5) return weeks===1?'1 week ago':`${weeks} weeks ago`;
+  const months=Math.floor(days/30);
+  if(months<12) return months===1?'1 month ago':`${months} months ago`;
+  const years=Math.floor(days/365);
+  return years===1?'1 year ago':`${years} years ago`;
+}
 async function renderReviews(){
   const mySeq=++_reviewsRenderSeq;
   const view=document.getElementById('view');
@@ -6266,7 +6331,7 @@ async function renderReviews(){
     // stale data or fire duplicate "mark as seen" calls for reviews the
     // newer invocation is already handling.
     if(mySeq!==_reviewsRenderSeq) return;
-    const reviews=d.reviews||[];
+    const crmReviews=d.reviews||[];
     const gReviews=gr.reviews||[];
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
     // Include the partner company's roster too — a review can legitimately
@@ -6281,100 +6346,151 @@ async function renderReviews(){
     _revReqState={ page:1, limit:25, total:rq.total||0, rows:rq.requests||[], scoreboard:rq.scoreboard||null };
     _revReqSelected=new Set();
 
-    const revHtml=reviews.map(r=>`
-      <div class="job">
-        <div class="row">
-          <div style="flex:1;">
-            <div class="name">${'⭐'.repeat(r.rating)}</div>
-            <div class="meta">${esc(r.customer_name)} · ${esc(r.technician_name)} · ${esc(r.service_area)}</div>
-            <div class="meta" style="margin-top:8px;font-size:13px;line-height:1.5;">${esc(r.feedback)||'<em style="color:var(--mute);">No feedback provided</em>'}</div>
-          </div>
-          <div style="text-align:right;white-space:nowrap;color:var(--mute);font-size:12px;">${new Date(r.reviewed_at).toLocaleDateString()}</div>
-        </div>
-      </div>`).join('');
+    // ── Merge both sources into ONE list, same shape as the tech portal's
+    // techReviews() merge — this tab is meant to be that screen, not a wall of
+    // three separate lists. A customer might leave a CRM review, a Google
+    // review, or both; neither is a subset of the other, so both count.
+    let _reviewsList=[
+      ...crmReviews.map(r=>({
+        id:'c_'+r.id, source:'crm', rating:r.rating, text:r.feedback||'',
+        customer_name:r.customer_name, technician_name:r.technician_name, technician_id:r.technician_id,
+        service_area:r.service_area, reviewed_at:r.reviewed_at,
+      })),
+      ...gReviews.map(r=>({
+        id:r.id, source:'google', rating:r.rating, text:r.review_text||'',
+        customer_name:r.reviewer_name, technician_name:r.technician_name, technician_id:r.technician_id,
+        reviewed_at:r.review_date||r.created_at, seen:r.seen,
+      })),
+    ];
 
     const techOptsFor=(sel)=>`<option value="">— credit a tech —</option>`+revTechs.map(t=>`<option value="${esc(t.id)}" ${t.id===sel?'selected':''}>${esc(t.name)}</option>`).join('');
-    // Same per-review template as before, just parameterized with an extra
-    // class so the New/Past split below can style the two groups differently
-    // without touching any of the actual review content/markup. The × button
-    // is a permanent dismiss — separate from the New/Past "seen" split, which
-    // only moves a review between groups rather than hiding it.
-    const gReviewHtml=(r, extraClass)=>{
-      const stars='⭐'.repeat(Math.max(1,Math.min(5,r.rating||5)));
-      const when=r.review_date||(r.created_at?new Date(r.created_at).toLocaleDateString():'');
-      const credit=role==='owner'
-        ? `<select data-gtech="${esc(r.id)}">${techOptsFor(r.technician_id)}</select>`
-        : (r.technician_name?`<span class="meta">${esc(r.technician_name)}</span>`:'');
-      // Rating-only reviews carry no real text — keep them to a single tight row.
-      const ratingOnly=!r.review_text||/only left a rating/i.test(r.review_text);
-      const text=ratingOnly?'':`<div class="greview-text">${esc(r.review_text)}</div>`;
-      const who=`${esc(r.reviewer_name)}${r.technician_name?' · '+esc(r.technician_name):''}${when?' · '+esc(when):''}`;
-      return `<div class="greview${extraClass?' '+extraClass:''}">
-        <button class="greview-x" data-gdismiss="${esc(r.id)}" title="Dismiss this review">×</button>
-        <div class="greview-top">
-          <span class="greview-stars">${stars}</span>
-          <span class="greview-who" title="${esc(who)}">${who}</span>
-          <span class="greview-credit">${credit}</span>
-        </div>${text}
+    // One card style for both sources — same visual language as the tech
+    // portal (avatar initial, stars + relative time, comment). Google-sourced
+    // cards get two admin-only affordances the tech app has no use for: a
+    // credit dropdown (attribute an anonymous Google review to a tech) and a
+    // dismiss × (permanently hide a bogus/duplicate one).
+    function reviewCard(r){
+      const initial=(String(r.customer_name||'?').trim().charAt(0)||'?').toUpperCase();
+      const rating=Math.round(Number(r.rating)||0);
+      const flagged=rating>0&&rating<5;
+      const sourceTag=r.source==='google'?'<span class="gsrc" title="Google review">G</span>':'';
+      const meta=[r.technician_name,r.service_area].filter(Boolean).join(' · ');
+      const adminRow=r.source==='google'
+        ? `<div class="gcard-admin-row">
+             <select data-gtech="${esc(r.id)}">${techOptsFor(r.technician_id)}</select>
+           </div>`
+        : '';
+      const dismissBtn=r.source==='google'
+        ? `<button class="gcard-x" data-gdismiss="${esc(r.id)}" title="Dismiss this review">×</button>` : '';
+      return `<div class="gcard${flagged?' flagged':''}">
+        ${dismissBtn}
+        <div class="gtop">
+          <div class="gavatar">${esc(initial)}</div>
+          <div>
+            <div class="gname">${esc(r.customer_name||'Customer')}${sourceTag}</div>
+            <div class="gmeta">${starRow(r.rating,12)}<span class="gdate">${esc(revRelativeTime(r.reviewed_at))}</span></div>
+            ${meta?`<div class="gmeta" style="color:var(--mute);font-size:11.5px;">${esc(meta)}</div>`:''}
+          </div>
+        </div>
+        ${r.text?`<div class="gtext">${esc(r.text)}</div>`:'<div class="gtext empty">No comment left.</div>'}
+        ${flagged?'<span class="gflag">Below 5 stars</span>':''}
+        ${adminRow}
       </div>`;
+    }
+
+    const total=_reviewsList.length;
+    const sum=_reviewsList.reduce((a,r)=>a+(Number(r.rating)||0),0);
+    const avg=total?sum/total:0;
+    let activeFilter=null, sortMode='newest';
+
+    const barsHtml=()=>{
+      // Recomputed on every call (not cached) so a dismissed review — which
+      // splices _reviewsList — is instantly reflected in the breakdown too.
+      const counts=[0,0,0,0,0,0];
+      _reviewsList.forEach(r=>{ const rt=Math.round(Number(r.rating)||0); if(rt>=1&&rt<=5) counts[rt]++; });
+      const maxCount=Math.max(1,...counts.slice(1));
+      return [5,4,3,2,1].map(n=>{
+        const c=counts[n], pct=Math.round(c/maxCount*100);
+        return `<button type="button" class="rs-bar-row${c===0?' zero':''}${activeFilter===n?' active':''}" data-star="${n}" ${c===0?'disabled':''}>
+          <span class="rs-n">${n}</span><div class="rs-bar-track"><div class="rs-bar-fill" style="width:${pct}%;"></div></div><span class="rs-c">${c}</span>
+        </button>`;
+      }).join('');
     };
-    // Mutable working copy — dismissing a review splices it out of this array
-    // and repaints, without a network refetch of the whole tab.
-    let _gReviewsList=gReviews.slice();
-    function paintGReviews(){
-      const wrap=document.getElementById('gRevWrap');
-      if(!wrap) return;
-      // "New" = not yet seen (r.seen is false/undefined) — colored accent bar.
-      // "Past" = already seen — same card, just dimmed. Order within each
-      // group is unchanged (both arrive newest-first from the API).
-      const newGReviews=_gReviewsList.filter(r=>!r.seen||_reviewsPinnedNewIds.has(r.id));
-      const pastGReviews=_gReviewsList.filter(r=>r.seen&&!_reviewsPinnedNewIds.has(r.id));
-      wrap.innerHTML=
-        (_gReviewsList.length ? (
-          (newGReviews.length
-            ? `<div class="greview-group-h">New<span class="chk">${newGReviews.length}</span></div>`+newGReviews.map(r=>gReviewHtml(r,'is-new')).join('')
-            : '')+
-          (pastGReviews.length
-            ? `<div class="greview-group-h">Past<span class="chk">${pastGReviews.length}</span></div>`+pastGReviews.map(r=>gReviewHtml(r,'is-past')).join('')
-            : '')
-        ) : '<div class="empty">No Google reviews yet.</div>');
-      wrap.querySelectorAll('[data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
+    const sortedFilteredList=()=>{
+      let list=activeFilter?_reviewsList.filter(r=>Math.round(Number(r.rating)||0)===activeFilter):_reviewsList.slice();
+      const whenMs=r=>new Date(r.reviewed_at||0).getTime()||0;
+      return list.sort((a,b)=>{
+        if(sortMode==='lowest'){ const ra=Number(a.rating)||0, rb=Number(b.rating)||0; if(ra!==rb) return ra-rb; }
+        return whenMs(b)-whenMs(a);
+      });
+    };
+    function paintReviewsWall(){
+      const barsEl=document.getElementById('rsBars'); if(!barsEl) return;
+      // Header (average/stars/count) is recomputed here too, not just the
+      // bars+list below — dismissing a Google review should not leave a stale
+      // average sitting above it until the next full tab reload.
+      const t=_reviewsList.length, s=_reviewsList.reduce((a,r)=>a+(Number(r.rating)||0),0), av=t?s/t:0;
+      const avgEl=document.getElementById('rsAvg');
+      if(avgEl){
+        avgEl.textContent=t?av.toFixed(1):'—';
+        document.getElementById('rsAvgStars').innerHTML=starRow(av,17);
+        document.getElementById('rsAvgTotal').textContent=`${t} review${t===1?'':'s'}`;
+      }
+      barsEl.innerHTML=barsHtml();
+      document.getElementById('rsLabel').textContent=activeFilter?`Showing ${activeFilter} ★ only ✕`:'All reviews';
+      document.getElementById('rsLabel').classList.toggle('filtered',!!activeFilter);
+      document.getElementById('rsSortPill').textContent=sortMode==='lowest'?'Lowest rating ▾':'Newest ▾';
+      const list=sortedFilteredList();
+      document.getElementById('rsList').innerHTML=!_reviewsList.length
+        ? '<div class="empty">No reviews yet.</div>'
+        : (list.length?list.map(reviewCard).join(''):`<div class="empty">No ${activeFilter}-star reviews.</div>`);
+      barsEl.querySelectorAll('.rs-bar-row').forEach(b=>b.addEventListener('click',()=>{
+        const n=Number(b.dataset.star); activeFilter=(activeFilter===n?null:n); paintReviewsWall();
+      }));
+      document.getElementById('rsList').querySelectorAll('[data-gtech]').forEach(sel=>sel.addEventListener('change',async()=>{
         try{ await api('google_review_update',{ method:'POST', body:{ business:current.slug, id:sel.dataset.gtech, technician_id:sel.value||null }}); toast('Review credited ✓'); }
         catch(e){ toast(e.message); }
       }));
-      wrap.querySelectorAll('[data-gdismiss]').forEach(btn=>btn.addEventListener('click',async()=>{
+      document.getElementById('rsList').querySelectorAll('[data-gdismiss]').forEach(btn=>btn.addEventListener('click',async()=>{
         const id=btn.dataset.gdismiss;
         btn.disabled=true;
         try{
           await api('google_review_update',{ method:'POST', body:{ business:current.slug, id, dismissed:true }});
-          _gReviewsList=_gReviewsList.filter(r=>r.id!==id);
-          paintGReviews();
+          _reviewsList=_reviewsList.filter(r=>r.id!==id);
+          paintReviewsWall();
         }catch(e){ toast(e.message); btn.disabled=false; }
       }));
     }
 
-    document.getElementById('revWrap').innerHTML=
-      `<div class="sec-h" style="margin:0 0 10px;font-weight:800;">⭐ Google reviews</div>`+
-      `<div id="gRevWrap"></div>`+
-      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Review requests</div>`+
-      `<div id="revReqWrap"></div>`+
-      `<div class="sec-h" style="margin:22px 0 10px;font-weight:800;">Reviews received (in-app)</div>`+
-      (revHtml||'<div class="empty">No reviews yet.</div>');
+    document.getElementById('revWrap').innerHTML=`
+      <div class="rs-card">
+        <div class="rs-top">
+          <div class="rs-avgcol">
+            <div class="rs-avg" id="rsAvg">${total?avg.toFixed(1):'—'}</div>
+            <div class="rs-stars" id="rsAvgStars">${starRow(avg,17)}</div>
+            <div class="rs-total" id="rsAvgTotal">${total} review${total===1?'':'s'}</div>
+          </div>
+          <div class="rs-bars" id="rsBars"></div>
+        </div>
+      </div>
+      <div class="rs-sortrow">
+        <button type="button" class="rs-label-btn" id="rsLabel">All reviews</button>
+        <button type="button" class="rs-sortpill" id="rsSortPill">Newest ▾</button>
+      </div>
+      <div id="rsList"></div>
+      <div class="sec-h" style="margin:26px 0 10px;font-weight:800;">Review requests</div>
+      <div id="revReqWrap"></div>`;
 
-    paintGReviews();
+    document.getElementById('rsLabel').addEventListener('click',()=>{ if(activeFilter){ activeFilter=null; paintReviewsWall(); } });
+    document.getElementById('rsSortPill').addEventListener('click',()=>{ sortMode=sortMode==='newest'?'lowest':'newest'; paintReviewsWall(); });
+    paintReviewsWall();
     paintReviewRequests(gByBooking);
 
-    // "Once I see it, it moves to Past": pin these ids as "New" for the rest
-    // of this session (see _reviewsPinnedNewIds above) so the admin keeps
-    // seeing them under New even once the background sync below lands and
-    // the server starts reporting seen:true on later fetches. In the
-    // background, best-effort (and in parallel — never sequential/awaited)
-    // mark each just-viewed review as seen server-side so the NEXT session
-    // it's filed under Past. Every call is independently caught so one
-    // failure never blocks the rest or surfaces an error toast — this sync
-    // is silent by design; only a *successful* write updates the
-    // dashboard-level green banner (_googleReviewsCache), since an unsynced
-    // review is still genuinely unseen server-side and should keep alerting.
+    // "Once I see it, it moves to Past": pin these ids as seen for the rest of
+    // this session (see _reviewsPinnedNewIds above — kept even though the merged
+    // wall no longer visually splits New/Past, since the sidebar's "unseen
+    // reviews" badge still relies on it). Best-effort, parallel, never blocks
+    // the render or surfaces an error toast.
     const newGReviewsForSync=gReviews.filter(r=>!r.seen);
     if(newGReviewsForSync.length){
       newGReviewsForSync.forEach(r=>{
