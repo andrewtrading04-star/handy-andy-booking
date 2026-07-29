@@ -2002,6 +2002,7 @@
         const r=await fetch(`${API_BASE}/estimate?action=submit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(reqPayload)});
         if(r.ok){
           logEvent('booking_confirmed','customer',calcTotal());
+          disarmExitIntent(); // request is already submitted — don't let a later back-button replay the trapped state into the exit-intent popup
           showRequestConfirmation(root);
         }else{
           isSubmitting=false;
@@ -2140,6 +2141,7 @@
           }));
         }catch(e){}
         logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0)-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount());
+        disarmExitIntent(); // job is already booked — a later back-button press must not replay the trapped state into the exit-intent popup
         window.location.href=THANKYOU_URL;
       }else{
         // Server returned an error status — the job was not created, so it's safe
