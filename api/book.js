@@ -106,6 +106,18 @@ function stripePublicConfig(req, res) {
   });
 }
 
+// Public: whether a business's transactional email is wired up. Reports the
+// from-address and a boolean 'configured' -- NEVER the Resend API key itself.
+// Same purpose as stripe_config above: surface a missing key before a real
+// customer's confirmation email silently fails to send.
+const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high']);
+function emailPublicConfig(req, res) {
+  const business = ((req.query || {}).business || 'handy-andy').toString().trim();
+  if (!EMAIL_BUSINESSES.has(business)) return res.status(400).json({ error: `Unknown business "${business}"` });
+  const cfg = emailConfig(business);
+  return res.status(200).json({ business, from: cfg.from, configured: !!cfg.apiKey });
+}
+
 async function widgetPricesPublic(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
   const city = ((req.query || {}).city || 'default').toString().trim();
@@ -961,6 +973,7 @@ export default async function handler(req, res) {
   // Public price overrides for the booking widget — see widgetPricesPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.
