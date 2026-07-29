@@ -103,12 +103,34 @@ async function listServices(req, res, db) {
 }
 
 // POST ?action=submit
+// Sanitize an incoming line-item array the same way admin.js's own line-item
+// editor does: whitelist the shape, clamp quantity, derive a consistent
+// line_total. Used by the online-booking "request" flow (unstaffed service
+// areas — public/widget.js) to carry the customer's real priced TV selections
+// into the estimate, instead of a free-text description. Optional: the
+// original /estimate.html quick-quote form never sends this and is unaffected.
+function sanitizeEstimateLineItems(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, 40).map(it => {
+    const name = String((it && (it.name != null ? it.name : it.label)) || '').trim().slice(0, 200);
+    const qty = Math.min(20, Math.max(1, Math.round(Number(it && it.quantity) || 1)));
+    const unit = Math.round((Number(it && it.unit_price) || 0) * 100) / 100;
+    const line_total = Math.round(unit * qty * 100) / 100;
+    return { name, quantity: qty, unit_price: unit, line_total };
+  }).filter(it => it.name);
+}
+
 async function submit(req, res, db) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const body = req.body || {};
   let biz; try { biz = await resolveBusiness(db, (body.business || '').toString()); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
 
-  const description = (body.description || '').toString().trim();
+  const line_items = sanitizeEstimateLineItems(body.line_items);
+  // description is normally free text the customer typed; the request flow
+  // has no such box (it's all structured TV selections), so build a readable
+  // summary from the line items instead of forcing a redundant text field.
+  const description = (body.description || '').toString().trim()
+    || (line_items.length ? `Online booking request: ${line_items.map(li => li.name).slice(0, 8).join(', ')}` : '');
   if (!description) return res.status(400).json({ error: 'Please tell us what you need help with.' });
   if (description.length > 4000) return res.status(400).json({ error: 'Description is too long.' });
 
@@ -116,6 +138,12 @@ async function submit(req, res, db) {
   const name = (customer.name || '').toString().trim();
   const phone = formatPhoneUS((customer.phone || '').toString().trim());
   const zip = (customer.zip || '').toString().trim() || null;
+  // Full address — optional (the original quick-quote form only ever asked
+  // for a zip). Populated by the request flow, which reuses the same address
+  // step as a normal booking.
+  const address = (customer.address || '').toString().trim().slice(0, 300) || null;
+  const city = (customer.city || '').toString().trim().slice(0, 100) || null;
+  const state = (customer.state || '').toString().trim().slice(0, 2).toUpperCase() || null;
   if (!name)  return res.status(400).json({ error: 'Your name is required.' });
   if (!phone) return res.status(400).json({ error: 'A phone number is required.' });
 
@@ -158,8 +186,10 @@ async function submit(req, res, db) {
     customer_name: name, customer_phone: phone,
     customer_email: (customer.email || '').toString().trim() || null,
     customer_zip: zip,
+    customer_address: address, customer_city: city, customer_state: state,
     description, photo_url, photo_path,
     preferred_slots,
+    line_items,
     source: 'widget',
     sms_consent: body.sms_consent !== false,
   };
@@ -183,6 +213,19 @@ async function submit(req, res, db) {
     const zipTxt = zip ? ` ZIP: ${zip}.` : '';
     const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
     for (const p of phones) sendSMS(p, msg).catch(console.error);
+  }
+
+  // A request from an unstaffed service area (public/widget.js's request
+  // flow, service_areas.unstaffed) ALWAYS texts the owner directly, in
+  // addition to the normal secretary notification above — the owner asked
+  // for personal visibility into these specifically, since there is no tech
+  // there yet to just auto-assign the job to. Marked by the widget via
+  // request_type; never set by the original /estimate.html quick-quote form.
+  if (body.request_type === 'unstaffed_area' && process.env.OWNER_PHONE_NUMBER) {
+    const total = line_items.reduce((s, li) => s + li.line_total, 0);
+    const windows = preferred_slots.map(s => s.label || s.slot_key).slice(0, 3).join(', ') || 'none given';
+    const msg = `New service request: ${name}, ${zip || 'zip unknown'} (unstaffed market). Prefers ${windows}. Est. $${Math.round(total)}. No tech assigned — call to confirm.`;
+    sendSMS(process.env.OWNER_PHONE_NUMBER, msg).catch(console.error);
   }
 
   // Email heads-up to the business's secretary (Heather/Joey) — the ONLY

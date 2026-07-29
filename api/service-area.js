@@ -52,9 +52,9 @@ async function nativeServiceArea(req, res, slug) {
     // zipFlatAdjustment() for how it's folded silently into the total.
     let z, zErr;
     ({ data: z, error: zErr } = await db.from('service_area_zips')
-      .select('surcharge, price_adjustment_amount, service_area:service_areas ( id, name, state, timezone )')
+      .select('surcharge, price_adjustment_amount, service_area:service_areas ( id, name, state, timezone, unstaffed )')
       .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
-    if (zErr && /price_adjustment_amount/.test(zErr.message || '')) {
+    if (zErr && /(price_adjustment_amount|unstaffed)/.test(zErr.message || '')) {
       ({ data: z } = await db.from('service_area_zips')
         .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
         .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
@@ -67,6 +67,11 @@ async function nativeServiceArea(req, res, slug) {
       territory_id:    area.id,
       service_area_id: area.id,
       territory_name:  area.name,
+      // No tech roster in this area yet (owner-set on the service area, e.g.
+      // DFW). The widget NEVER surfaces this fact to the customer -- it only
+      // switches which flow renders (request vs. a confirmed slot + card).
+      // See public/widget.js's `unstaffed`-gated branch below.
+      unstaffed:       !!area.unstaffed,
       surcharge:       Number(z.surcharge) || 0,
       price_adjustment_amount: Number(z.price_adjustment_amount) || 0,
       timezone:        area.timezone || 'America/Denver',

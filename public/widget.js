@@ -24,6 +24,15 @@
   try { const _np = new URLSearchParams(location.search).get('native'); if (_np === '1') NATIVE = true; if (_np === '0') NATIVE = false; } catch (e) {}
   // Set from the native zip check; used by slots, surcharge, and tech scoping.
   let serviceAreaId = null, nativeSurcharge = 0, nativePriceAdjustmentAmount = 0, areaName = '';
+  // No tech roster in this service area yet (owner-set on the service area
+  // itself — e.g. DFW). Changes which final step renders (a "request"
+  // instead of a confirmed slot + card) but is NEVER surfaced to the
+  // customer in any copy anywhere — see bRequestSlots()/bCustomer() below.
+  let nativeUnstaffed = false;
+  // Preferred appointment windows the customer picked in the request flow —
+  // [{date, slot_key, label}], 3 to 4 of them. Unrelated to selectedSlot,
+  // which the request flow never sets (no single slot is ever chosen).
+  let selectedRequestWindows = [];
   const isDenver = () => NATIVE ? /denver/i.test(areaName) : territoryId === DENVER_ID;
 
   // Fallback only — the zip check returns the customer's real city/state, which takes priority.
@@ -203,7 +212,7 @@
     return total;
   }
 
-  const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','customer'];
+  const STEP_KEYS = ['zip','frame_tv','size','bracket','fireplace','surface','wires','lifting','dismount','extras','terms','slots','request_slots','customer'];
 
   // ─── Service configs (sections in DISPLAY order — surface before wires) ───
   const SERVICE_CONFIGS = {
@@ -523,6 +532,10 @@
   function needsTwoTechs(){ return isDenver() && hasXLargeTV(); }
 
   function shouldSkip(k){
+    // Unstaffed area: no confirmed slot + card step, a multi-window request
+    // instead. Exactly one of the two ever renders in a given session.
+    if(k==='slots') return nativeUnstaffed;
+    if(k==='request_slots') return !nativeUnstaffed;
     // Skip bracket only if ALL TVs are Frame/Gallery (no regular TVs mixed in)
     if(k==='bracket'){
       const onlyFrame=isFrameTV&&!(selections['__frame_type']||[]).includes('regular');
@@ -717,7 +730,8 @@
       case 'dismount': body=bDismount(); break;
       case 'extras':   body=bExtras();   break;
       case 'terms':    body=bTerms();    break;
-      case 'slots':    body=bSlots();    break;
+      case 'slots':        body=bSlots();        break;
+      case 'request_slots':body=bRequestSlots();break;
       case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
     }
     // Running total on every step except 'zip' (service area/pricing profile
@@ -728,7 +742,9 @@
     wire(root);
     // Mount Stripe card element after DOM is ready
     if(key==='customer'){
-      ensureStripe().then(mountStripeCard);
+      // Unstaffed-area requests never take a card — nothing is confirmed yet,
+      // so there's nothing to hold. See bCustomer()'s nativeUnstaffed branch.
+      if(!nativeUnstaffed) ensureStripe().then(mountStripeCard);
       armExitIntent();
     }
   }
@@ -1394,6 +1410,119 @@
       </div>`;
   }
 
+  // ── Request flow (unstaffed areas) — synthetic calendar ─────────────────────
+  // There is no tech roster to check real availability against, so this is
+  // purely client-generated: the four standard daily windows (matches
+  // api/_lib/availability.js SLOTS s1-s4; the 8-10:30pm after-hours slot s5
+  // is deliberately excluded here — nothing about this market is confirmed
+  // yet, so it isn't offered), across the next 14 days, with anything inside
+  // the 48-hour minimum silently absent (no explanation shown — the customer
+  // never sees a reason, the same way a normal slot list never explains why
+  // an already-booked time isn't listed).
+  const REQUEST_WINDOW_SLOTS=[
+    {key:'s1',label:'8:00 AM – 10:00 AM',hour:8},
+    {key:'s2',label:'11:00 AM – 1:00 PM',hour:11},
+    {key:'s3',label:'2:00 PM – 4:00 PM', hour:14},
+    {key:'s4',label:'5:00 PM – 8:00 PM', hour:17},
+  ];
+  const REQUEST_DAYS_OUT=14;
+  const REQUEST_MIN_HOURS=48;
+  const REQUEST_MAX_WINDOWS=4;
+  let _reqWindowsCache=null;
+  function requestWindowOptions(){
+    if(_reqWindowsCache)return _reqWindowsCache;
+    const now=new Date();
+    const cutoff=new Date(now.getTime()+REQUEST_MIN_HOURS*3600*1000);
+    const out={};
+    for(let i=0;i<REQUEST_DAYS_OUT;i++){
+      const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()+i);
+      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const windows=REQUEST_WINDOW_SLOTS.filter(sl=>new Date(d.getFullYear(),d.getMonth(),d.getDate(),sl.hour,0,0).getTime()>=cutoff.getTime());
+      if(windows.length)out[ds]=windows;
+    }
+    _reqWindowsCache=out;
+    return out;
+  }
+  function toggleRequestWindow(date,key,label){
+    const idx=selectedRequestWindows.findIndex(w=>w.date===date&&w.slot_key===key);
+    if(idx!==-1){selectedRequestWindows.splice(idx,1);return;}
+    if(selectedRequestWindows.length>=REQUEST_MAX_WINDOWS)return; // silently ignore past the cap — no error needed, the button is already visibly full
+    selectedRequestWindows.push({date,slot_key:key,label});
+  }
+  function bRequestSlots(){
+    const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const windowsByDate=requestWindowOptions();
+    const allDates=Object.keys(windowsByDate).sort();
+    if(!allDates.length)return `<h1 style="${S.h1}">When works for you?</h1><p style="color:#a0a0ab!important;font-size:14px!important;">No dates available right now — please call us.</p>`;
+    if(calYear===null){
+      const f=new Date(allDates[0]+'T12:00:00');
+      calYear=f.getFullYear(); calMonth=f.getMonth();
+    }
+    const availSet=new Set(allDates);
+    const firstDay=new Date(calYear,calMonth,1).getDay();
+    const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+    const todayStr=new Date().toISOString().slice(0,10);
+    const firstAvail=new Date(allDates[0]+'T12:00:00');
+    const lastAvail=new Date(allDates[allDates.length-1]+'T12:00:00');
+    const canPrev=calYear>firstAvail.getFullYear()||(calYear===firstAvail.getFullYear()&&calMonth>firstAvail.getMonth());
+    const canNext=calYear<lastAvail.getFullYear()||(calYear===lastAvail.getFullYear()&&calMonth<lastAvail.getMonth());
+
+    const dayHdr=DAYS.map(d=>`<div style="text-align:center!important;font-size:11px!important;font-weight:600!important;color:#71717a!important;padding:4px 0 8px 0!important;">${d}</div>`).join('');
+    let cells='';
+    for(let i=0;i<firstDay;i++)cells+=`<div></div>`;
+    for(let d=1;d<=daysInMonth;d++){
+      const ds=`${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const has=availSet.has(ds),isSel=selectedDate===ds,isToday=ds===todayStr;
+      const pickedHere=selectedRequestWindows.some(w=>w.date===ds);
+      if(has){
+        cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?'rgba(255,102,0,0.12)':'transparent'}!important;">
+          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?'#ff6600':isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?'#ff6600':'#fff'}!important;border:${isToday&&!isSel?'1.5px solid #ff6600':pickedHere?'1.5px solid #4ade80':'none'}!important;">${d}</div>
+        </div>`;
+      }else{
+        cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
+          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:#3f3f46!important;">${d}</div>
+        </div>`;
+      }
+    }
+
+    let timeHtml='';
+    if(selectedDate&&windowsByDate[selectedDate]){
+      const windows=windowsByDate[selectedDate];
+      const df=fmtDate(selectedDate);
+      const atCap=selectedRequestWindows.length>=REQUEST_MAX_WINDOWS;
+      const winBtns=windows.map(sl=>{
+        const on=selectedRequestWindows.some(w=>w.date===selectedDate&&w.slot_key===sl.key);
+        const disabled=!on&&atCap;
+        return `<div class="${disabled?'':'ha-reqwin'}" data-date="${selectedDate}" data-key="${sl.key}" data-label="${sl.label}" style="background:${on?'rgba(255,102,0,0.15)':disabled?'#18181c':'#1f1f23'}!important;border:1.5px solid ${on?'#ff6600':'#3f3f46'}!important;border-radius:6px!important;padding:7px 11px!important;cursor:${disabled?'default':'pointer'}!important;text-align:center!important;font-size:12.5px!important;color:${on?'#fff':disabled?'#52525b':'#a0a0ab'}!important;">${on?'✓ ':''}${sl.label}</div>`;
+      }).join('');
+      timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
+        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}:</p>
+        <div style="display:flex!important;gap:6px!important;flex-wrap:wrap!important;">${winBtns}</div>
+      </div>`;
+    }
+
+    const count=selectedRequestWindows.length;
+    const canContinue=count>=3;
+    return `<h1 style="${S.h1}">When works for you?</h1>
+      <p style="color:#a0a0ab!important;font-size:13px!important;margin-bottom:16px!important;line-height:1.5!important;">Select 3 to 4 times you'd be available and we'll confirm one that works.</p>
+      <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:10px!important;">
+        <div style="display:flex!important;align-items:center!important;gap:10px!important;">
+          <button id="cal-prev" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canPrev?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;" ${!canPrev?'disabled':''}>‹</button>
+          <span style="font-size:15px!important;font-weight:700!important;color:#fff!important;">${MONTHS[calMonth]} ${calYear}</span>
+          <button id="cal-next" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canNext?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;" ${!canNext?'disabled':''}>›</button>
+        </div>
+        <span style="color:#52525b!important;font-size:12px!important;">${count} of ${REQUEST_MAX_WINDOWS} selected</span>
+      </div>
+      <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${dayHdr}</div>
+      <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${cells}</div>
+      ${timeHtml}
+      <div style="${S.actions}">
+        <button id="btn-prev" style="${S.btnSec}">← Back</button>
+        <button id="btn-next" style="${canContinue?S.btnPri:S.btnDis}" ${!canContinue?'disabled':''}>Continue →</button>
+      </div>`;
+  }
+
   function bSlots(){
     const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
     const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -1490,25 +1619,32 @@
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
             <span style="color:#fff!important;">$${it.amount}</span>
           </div>`).join('');
-    return `
-      <h1 style="${S.h1};color:#ff6600!important;">Almost Done! Last Step…</h1>
+    // Unstaffed-area requests skip Stripe entirely — there is no confirmed
+    // appointment yet to hold a card against, and nothing here should hint at
+    // that (no "held", no "unable to charge yet" wording — just no card step).
+    const cardBlock=nativeUnstaffed?'':`
       <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
         💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
         <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service. Your card only holds the appointment.</div>
         We will only charge you after your services have been completed.
-      </div>
+      </div>`;
+    const cardEl=nativeUnstaffed?'':`
+      <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
+        <div style="font-size:11px!important;color:#a0a0ab!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
+        <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
+        <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
+        <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
+      </div>`;
+    return `
+      <h1 style="${S.h1};color:#ff6600!important;">Almost Done! Last Step…</h1>
+      ${cardBlock}
       <input type="text"  id="c-fn" style="${S.inputL}" placeholder="First Name"     value="${customer.first_name}">
       <input type="text"  id="c-ln" style="${S.inputL}" placeholder="Last Name"      value="${customer.last_name}">
       <input type="email" id="c-em" style="${S.inputL}" placeholder="Email Address"  value="${customer.email}">
       <input type="tel"   id="c-ph" style="${S.inputL}" placeholder="Phone Number"   value="${customer.phone}">
       <input type="text"  id="c-ad" style="${S.inputL}" placeholder="Street Address" value="${customer.address}">
       <input type="text"  id="c-ad2" style="${S.inputL}" placeholder="Apt, suite, or unit number (optional)" value="${customer.address_line2}">
-      <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
-        <div style="font-size:11px!important;color:#a0a0ab!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
-        <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
-        <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
-        <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
-      </div>
+      ${cardEl}
       <div style="margin-bottom:20px!important;">
         <input type="text" id="c-coupon" style="${S.inputL};margin-bottom:0!important;" placeholder="Coupon code (optional)" value="${couponCode}">
       </div>
@@ -1554,9 +1690,10 @@
           </div>`:`<div id="ha-tip-row" style="display:none!important;"></div>`}
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
-          <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">Total</div>
+          <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">${nativeUnstaffed?'Estimated total':'Total'}</div>
           <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount)*100)/100}</div>
         </div>
+        ${nativeUnstaffed?`<p style="font-size:11px!important;color:#71717a!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:#ff6600!important;cursor:pointer!important;">
@@ -1564,7 +1701,7 @@
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
-        <button id="btn-submit" style="${S.btnPri}">Complete My Booking ✓</button>
+        <button id="btn-submit" style="${S.btnPri}">${nativeUnstaffed?'Request Appointment':'Complete My Booking ✓'}</button>
       </div>`;
   }
 
@@ -1613,6 +1750,7 @@
     root.querySelectorAll('.ha-sel').forEach(c=>c.addEventListener('click',()=>{selectOnly(c.dataset.s,c.dataset.o);render();}));
     root.querySelectorAll('.ha-slot').forEach(c=>c.addEventListener('click',()=>{selectedSlot=c.dataset.id;render();}));
     root.querySelectorAll('.ha-date').forEach(c=>c.addEventListener('click',()=>{selectedDate=c.dataset.date;selectedSlot=null;render();}));
+    root.querySelectorAll('.ha-reqwin').forEach(c=>c.addEventListener('click',()=>{toggleRequestWindow(c.dataset.date,c.dataset.key,c.dataset.label);render();}));
     root.querySelectorAll('.ha-comment').forEach(t=>t.addEventListener('input',e=>{
       optionComments[e.target.dataset.o]=e.target.value;
       if(e.target.value.trim()){
@@ -1758,9 +1896,10 @@
       if(NATIVE){
         // Native: the surcharge + metro come from the CRM zip check, and the
         // pricing profile is chosen by metro name (Austin is cheaper).
-        serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; nativePriceAdjustmentAmount=Number(d.price_adjustment_amount)||0; areaName=d.territory_name||'';
+        serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; nativePriceAdjustmentAmount=Number(d.price_adjustment_amount)||0; nativeUnstaffed=!!d.unstaffed; areaName=d.territory_name||'';
         if(/austin/i.test(areaName)){ configKey='austin'; priceCity='austin'; }
         else if(/houston/i.test(areaName)){ configKey='default'; priceCity='houston'; }
+        else if(/dfw/i.test(areaName)){ configKey='default'; priceCity='dfw'; }
       } else {
         configKey=TERRITORY_CONFIG_MAP[territoryId]||'default';
         priceCity=TERRITORY_PRICE_CITY[territoryId]||configKey;
@@ -1795,6 +1934,20 @@
     }catch{slotsByDate={};logEvent('error','slots',null,'slots fetch failed');render();}
   }
 
+  // Inline confirmation panel for the request flow — deliberately NOT the
+  // normal THANKYOU_URL redirect (that page's copy is external/unverified,
+  // and this flow's copy must stay generic — never revealing there's no
+  // tech assigned yet). Exact copy approved against the request_flow_final_step_v2 mockup.
+  function showRequestConfirmation(root){
+    root.innerHTML=`<div style="text-align:center!important;padding:40px 10px!important;">
+      <div style="width:64px!important;height:64px!important;border-radius:50%!important;background:rgba(74,222,128,0.15)!important;display:flex!important;align-items:center!important;justify-content:center!important;margin:0 auto 20px auto!important;">
+        <span style="font-size:32px!important;color:#4ade80!important;">✓</span>
+      </div>
+      <h1 style="${S.h1};margin-bottom:10px!important;">Request received</h1>
+      <p style="color:#a0a0ab!important;font-size:14px!important;line-height:1.6!important;max-width:340px!important;margin:0 auto!important;">We'll text or call you shortly to confirm your appointment time.</p>
+    </div>`;
+  }
+
   // ─── Submit ───────────────────────────────────────────────────────────────
   async function doSubmit(root){
     if(isSubmitting)return; // already booking — ignore extra clicks so we don't double-book
@@ -1814,6 +1967,50 @@
     if(couponCode&&!(couponCode in COUPONS)){logEvent('form_error','customer',null,'invalid coupon: '+couponCode);return alert('That coupon code isn\'t valid. Please check it or clear the coupon field.');}
     if(tipAmount>0)logEvent('answer','tip:$'+tipAmount,tipAmount);
     if(couponCode)logEvent('answer','coupon:'+couponCode);
+
+    // Unstaffed-area request — no Stripe, no /api/book. Same shared fields
+    // above already validated; branch off here into the estimates pipeline
+    // (api/estimate.js) instead of the normal booking flow. Nothing below
+    // this branch or in its request payload/UI ever mentions there's no tech
+    // assigned yet — see bRequestSlots()/bCustomer() for the same rule.
+    if(nativeUnstaffed){
+      if(selectedRequestWindows.length<3){logEvent('form_error','customer',null,'not enough windows selected');return alert('Please select at least 3 preferred times.');}
+      isSubmitting=true;
+      const submitBtn=root.querySelector('#btn-submit');
+      if(submitBtn){submitBtn.textContent='Sending…';submitBtn.disabled=true;}
+      const _lines=buildLineItems().map(li=>({name:li.label,quantity:li.qty||1,unit_price:(li.amount||0)/(li.qty||1)}));
+      const reqPayload={
+        business:'handy-andy',
+        service_label:serviceConfig.service_label||serviceConfig.name||'TV Mounting',
+        customer:{
+          name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
+          phone:customer.phone, email:customer.email,
+          zip:enteredZip, address:customer.address, city:resolveLocation().city, state:resolveLocation().state,
+        },
+        line_items:_lines,
+        preferred_slots:selectedRequestWindows,
+        sms_consent:!!(root.querySelector('#c-sms-consent')||{}).checked,
+        request_type:'unstaffed_area',
+      };
+      try{
+        const r=await fetch(`${API_BASE}/estimate?action=submit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(reqPayload)});
+        if(r.ok){
+          logEvent('booking_confirmed','customer',calcTotal());
+          showRequestConfirmation(root);
+        }else{
+          isSubmitting=false;
+          if(submitBtn){submitBtn.textContent='Request Appointment';submitBtn.disabled=false;}
+          const err=await r.json().catch(()=>({}));
+          logEvent('booking_failed','customer',null,err.error||('HTTP '+r.status));
+          alert(err.error||'Something went wrong submitting your request. Please try again.');
+        }
+      }catch(e){
+        isSubmitting=false;
+        if(submitBtn){submitBtn.textContent='Request Appointment';submitBtn.disabled=false;}
+        alert('Something went wrong submitting your request. Please try again.');
+      }
+      return;
+    }
 
     // Card must be fully entered before we lock in or call Stripe. This is the
     // biggest checkout leak: people tap Complete with a half-filled card and hit
