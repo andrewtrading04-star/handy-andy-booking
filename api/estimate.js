@@ -12,7 +12,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
-import { sendSMS } from './_lib/sms.js';
+import { sendSMS, toE164 } from './_lib/sms.js';
 import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 
 const ALLOWED = new Set(['handy-andy', 'doms']);
@@ -236,6 +236,19 @@ async function submit(req, res, db) {
   const phones = new Set(Array.isArray(biz.settings?.estimate_notify_phones) ? biz.settings.estimate_notify_phones : []);
   if (biz.slug === 'handy-andy' && process.env.HANDY_ANDY_SECRETARY_PHONE) phones.add(process.env.HANDY_ANDY_SECRETARY_PHONE);
   if (biz.slug === 'doms' && process.env.DOMS_SECRETARY_PHONE) phones.add(process.env.DOMS_SECRETARY_PHONE);
+
+  // On an unstaffed-area request the owner gets their own, richer text below
+  // (address + all preferred windows + estimate total). Their number is
+  // usually also in estimate_notify_phones, so drop it from the generic staff
+  // text here — otherwise they'd get the same request twice, and the weaker
+  // message of the two. Compared in E.164 so "(337) 499-7817" and
+  // "+13374997817" are recognized as the same phone.
+  const isUnstaffedRequest = body.request_type === 'unstaffed_area';
+  const ownerE164 = toE164(process.env.OWNER_PHONE_NUMBER || '');
+  if (isUnstaffedRequest && ownerE164) {
+    for (const p of [...phones]) if (toE164(p) === ownerE164) phones.delete(p);
+  }
+
   if (phones.size) {
     const when = preferred_slots.length
       ? ' Preferred: ' + preferred_slots.map(s => `${s.label || s.slot_key}`).slice(0, 2).join(', ') + (preferred_slots.length > 2 ? '…' : '')
@@ -245,7 +258,7 @@ async function submit(req, res, db) {
     const zipTxt = zip ? ` ZIP: ${zip}.` : '';
     const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
     for (const p of phones) notifications.push(sendSMS(p, msg).catch(e => console.error('[estimate] staff sms failed:', e.message)));
-  } else {
+  } else if (!isUnstaffedRequest) {
     console.warn(`[estimate] no staff notify phones configured for ${biz.slug} — nobody was texted`);
   }
 
@@ -255,8 +268,8 @@ async function submit(req, res, db) {
   // for personal visibility into these specifically, since there is no tech
   // there yet to just auto-assign the job to. Marked by the widget via
   // request_type; never set by the original /estimate.html quick-quote form.
-  if (body.request_type === 'unstaffed_area') {
-    if (process.env.OWNER_PHONE_NUMBER) {
+  if (isUnstaffedRequest) {
+    if (ownerE164) {
       const total = estimateLineItemsTotal(line_items);
       const windows = preferred_slots.map(s => s.label || s.slot_key).slice(0, 3).join(', ') || 'none given';
       const addrTxt = address ? ` ${address},` : '';
