@@ -28,7 +28,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseWalmartEmails } from './lib/walmart-parse.mjs';
-import { parseAmazonPlateEmail } from './lib/amazon-parse.mjs';
+import { parseAmazonPlateEmail, PLATE_MATCH } from './lib/amazon-parse.mjs';
 import { parseGoogleReviewEmail } from './lib/google-review-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
@@ -52,15 +52,23 @@ const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 //   GMAIL_USER_7  austinmainbusiness@gmail.com    (HA Austin reviews)
 // Every mailbox is scanned for Walmart, Amazon AND Google-review emails alike,
 // so a review inbox that never sees an order simply yields reviews only.
+// This mailbox exists ONLY to buy the wire concealment plate product — see
+// scripts/lib/amazon-parse.mjs's trustSender doc comment. Amazon's "Ordered:"
+// email doesn't always include the product title (sometimes just the generic
+// category, e.g. "2 Electrical & Heating items"), so PLATE_MATCH can miss a
+// real order. Since nothing else is ever bought through this account, any
+// real Amazon order-flow email seen here is trusted as a plate order.
+const PLATE_DEDICATED_MAILBOX_IDX = 3;
+
 function mailboxes() {
   const list = [];
   if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
-    list.push({ user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
+    list.push({ user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD, idx: 1 });
   // Scan a generous range of numbered slots; unset ones are skipped.
   for (let i = 2; i <= 12; i++) {
     const user = process.env[`GMAIL_USER_${i}`];
     const pass = process.env[`GMAIL_APP_PASSWORD_${i}`];
-    if (user && pass) list.push({ user, pass });
+    if (user && pass) list.push({ user, pass, idx: i });
   }
   return list;
 }
@@ -143,7 +151,10 @@ async function searchUids(client, since) {
   return [...all];
 }
 
-async function scanMailbox({ user, pass }, todayISO) {
+// A real Amazon order-flow email, as opposed to a promo/marketing message.
+const AMAZON_ORDER_SENDER_RE = /^(auto-confirm|ship-confirm|order-update)@amazon\.com$/i;
+
+async function scanMailbox({ user, pass, idx }, todayISO) {
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user, pass }, logger: false,
@@ -182,6 +193,7 @@ async function scanMailbox({ user, pass }, todayISO) {
       try { parsed = await simpleParser(msg.source); }
       catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
       const email = { subject: parsed.subject || '', text: parsed.text || '', html: parsed.html || '', todayISO };
+      const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address || '').toLowerCase();
 
       // Google Business Profile review notification.
       const review = parseGoogleReviewEmail({ ...email, emailDateISO: parsed.date ? new Date(parsed.date).toISOString() : undefined });
@@ -198,12 +210,16 @@ async function scanMailbox({ user, pass }, todayISO) {
         );
         walmart.push(payload);
       }
-      // Amazon: strict — only fires on a real plate order (order # + product match).
-      const plate = parseAmazonPlateEmail(email);
+      // Amazon: strict everywhere — order # + product-phrase match — EXCEPT in
+      // the dedicated plate-ordering mailbox, where a real Amazon order-flow
+      // sender is trusted even if the email only shows the generic category
+      // (Amazon doesn't always print the product title in "Ordered:" emails).
+      const trustSender = idx === PLATE_DEDICATED_MAILBOX_IDX && AMAZON_ORDER_SENDER_RE.test(fromAddr);
+      const plate = parseAmazonPlateEmail({ ...email, trustSender });
       if (plate) {
         console.log(
           `[bracket-sync] ${user}: amazon order=${plate.amazon_order_num} status=${plate.status} ` +
-          `units=${plate.units} plates=${plate.plates}`
+          `units=${plate.units} plates=${plate.plates}${trustSender && !PLATE_MATCH.test(email.subject + '\n' + email.text) ? ' (trusted sender — no product phrase in email)' : ''}`
         );
         amazon.push(plate);
       }
