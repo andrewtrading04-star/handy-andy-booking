@@ -4446,7 +4446,7 @@ async function loadWebAnalytics(){
       try{ const r=await fetch(base+path+(path.includes('?')?'&':'?')+qs); return r.ok?await r.json():fallback; }
       catch{ return fallback; }
     };
-    const [pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc]=await Promise.all([
+    const [pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,dfw]=await Promise.all([
       get('/api/analytics/page-views',{total:0,events:[]}),
       get('/api/analytics/clicks',{total:0,by_button:{}}),
       get('/api/analytics/form-interactions',{total:0,by_field:{}}),
@@ -4461,9 +4461,15 @@ async function loadWebAnalytics(){
       // Real Google search queries (Search Console) — separate source from the
       // rest of this screen, fetched through our own API rather than webBackend().
       api('gsc_queries',{ params:{ business:current.slug, days:28 }}).catch(e=>({rows:[],error:e.message})),
+      // The 6 DFW location pages — our own backend (public.web_events directly),
+      // not webBackend(): they need per-path filtering the site-wide endpoints
+      // above don't offer. Handy Andy only (these are ihandyandy.com URLs).
+      current.slug==='handy-andy'
+        ? api('dfw_pages_analytics',{ params:{ days:30 }}).catch(e=>({pages:[],sessions:[],error:e.message}))
+        : Promise.resolve(null),
     ]);
     await chartReady;
-    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,lastUpdated:new Date().toISOString()});
+    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,dfw,lastUpdated:new Date().toISOString()});
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
   }finally{ webLoading=false; }
@@ -4492,6 +4498,11 @@ function webRender(d){
   let html=`<div class="grid kpis">`+kpis.map(k=>
     `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
   ).join('')+`</div>`;
+
+  // DFW location pages — the 6 new pages the owner asked to monitor closely.
+  // Own dedicated section, always visible regardless of the top range picker
+  // (fixed 30-day window — see loadWebAnalytics), Handy Andy only.
+  if(d.dfw) html+=webDfwSection(d.dfw);
 
   // Funnel — Page View → Click → Form/Booking
   html+=`<div class="section card"><h2>Visitor Funnel — Page View → Click → Booking</h2>`;
@@ -4556,6 +4567,87 @@ function webRender(d){
 
   content.innerHTML=html;
   webDrawCharts(d,brand);
+}
+// The 6 new DFW location pages — see api/admin.js's dfwPagesAnalytics for
+// where this data comes from (public.web_events, filtered to just these paths).
+function webDfwLabel(path){
+  const m=/^\/(frametvmounting|tvmounting)-(dallas|arlington|fortworth)$/.exec(path);
+  if(!m) return path;
+  const city={dallas:'Dallas',arlington:'Arlington',fortworth:'Fort Worth'}[m[2]];
+  return (m[1]==='frametvmounting'?'Frame TV Mounting — ':'TV Mounting — ')+city;
+}
+function webDfwAgo(iso){
+  const mins=(Date.now()-new Date(iso).getTime())/60000;
+  if(mins<1) return 'just now';
+  if(mins<60) return Math.round(mins)+'m ago';
+  const hrs=mins/60;
+  if(hrs<24) return Math.round(hrs)+'h ago';
+  return Math.round(hrs/24)+'d ago';
+}
+function webDfwSection(dfw){
+  if(dfw.error) return `<div class="section card"><h2>📍 DFW Location Pages</h2><div class="empty">Could not load — ${esc(dfw.error)}</div></div>`;
+  const pages=dfw.pages||[], sessions=dfw.sessions||[];
+  const totalViews=pages.reduce((s,p)=>s+p.views,0);
+  const totalSessions=dfw.totalSessions||0, flagged=dfw.flaggedSessions||0;
+  const realSessions=totalSessions-flagged;
+
+  // Honest up front: if every session so far looks non-US, say so plainly
+  // rather than presenting a "views" number that reads as real interest.
+  const warnBanner = (totalSessions>0 && flagged===totalSessions)
+    ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#78350f;">
+        ⚠ <b>Every session on these pages so far looks like automated/non-US traffic</b> (foreign timezone, and in some cases visiting all 6 pages back-to-back with mechanical, evenly-spaced timing). This is not confirmed real visitor interest yet — treat the numbers below as "pages are being crawled/tracked correctly," not "customers are finding these pages."
+      </div>`
+    : (flagged>0 ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#78350f;">⚠ ${flagged} of ${totalSessions} sessions on these pages are flagged as non-US timezone / possible bot traffic — check the Recent Activity list below.</div>` : '');
+
+  const pageRows=pages.map(p=>{
+    const topRef=(p.referrers[0]||{}).label||'—';
+    const devTxt=(p.devices||[]).map(d=>`${esc(d.label)} (${d.count})`).join(', ')||'—';
+    return `<tr>
+      <td><b>${esc(webDfwLabel(p.path))}</b><div style="font-size:11px;color:var(--mute);">${esc(p.path)}</div></td>
+      <td class="num">${webNum(p.views)}</td>
+      <td class="num">${webNum(p.sessions)}</td>
+      <td class="num">${webNum(p.clicks)}</td>
+      <td class="num">${p.avg_dwell_seconds?p.avg_dwell_seconds+'s':'—'}</td>
+      <td class="num">${p.avg_scroll_depth?p.avg_scroll_depth+'%':'—'}</td>
+      <td style="font-size:12px;">${esc(topRef)}</td>
+      <td style="font-size:12px;">${devTxt}</td>
+    </tr>`;
+  }).join('');
+
+  const sessionRows=sessions.slice(0,30).map(s=>{
+    const pagesTxt=s.pages.map(webDfwLabel).join(', ');
+    return `<tr style="${s.flagged?'background:#fffbeb;':''}">
+      <td style="font-size:12px;">${webDfwAgo(s.last_seen)}</td>
+      <td style="font-size:12px;">${esc(pagesTxt)}${s.pages_visited>1?` <span style="color:var(--mute);">(${s.pages_visited} pages)</span>`:''}</td>
+      <td style="font-size:12px;">${esc(s.device||'—')} · ${esc(s.browser||'—')}</td>
+      <td style="font-size:12px;">${esc(s.timezone||'—')}</td>
+      <td style="font-size:12px;">${s.entry_referrer?esc(webHost(s.entry_referrer)):'direct'}</td>
+      <td>${s.flagged?'<span style="background:#fef3c7;color:#78350f;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">⚠ flagged</span>':'<span style="color:#16a34a;font-size:12px;">✓ US</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="section card" style="border:1.5px solid #7c5cff;">
+    <h2>📍 DFW Location Pages <span style="font-weight:400;font-size:12px;color:var(--mute);">— last ${dfw.days||30} days · Dallas / Arlington / Fort Worth</span></h2>
+    ${warnBanner}
+    <div class="grid kpis" style="margin-bottom:14px;">
+      <div class="card kpi"><div class="lbl">Total Page Views</div><div class="val">${webNum(totalViews)}</div><div class="extra">across all 6 pages</div></div>
+      <div class="card kpi"><div class="lbl">Sessions</div><div class="val">${webNum(totalSessions)}</div><div class="extra">${realSessions} look real, ${flagged} flagged</div></div>
+      <div class="card kpi"><div class="lbl">Best Performing</div><div class="val" style="font-size:15px;">${pages.length?esc(webDfwLabel([...pages].sort((a,b)=>b.views-a.views)[0].path)):'—'}</div><div class="extra">by page views</div></div>
+    </div>
+    <div style="overflow-x:auto;margin-bottom:16px;">
+      <table style="width:100%;">
+        <tr><th>Page</th><th class="num">Views</th><th class="num">Sessions</th><th class="num">Clicks</th><th class="num">Avg Dwell</th><th class="num">Avg Scroll</th><th>Top Referrer</th><th>Devices</th></tr>
+        ${pageRows||'<tr><td colspan="8" class="empty">No traffic yet.</td></tr>'}
+      </table>
+    </div>
+    <h3 style="font-size:14px;margin:14px 0 8px;">Recent Activity <span style="font-weight:400;font-size:12px;color:var(--mute);">— every visit, most recent first</span></h3>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;">
+        <tr><th>When</th><th>Page(s)</th><th>Device</th><th>Timezone</th><th>Came from</th><th>Status</th></tr>
+        ${sessionRows||'<tr><td colspan="6" class="empty">No visits recorded yet.</td></tr>'}
+      </table>
+    </div>
+  </div>`;
 }
 function webGscTbl(gsc){
   if(gsc && gsc.error && (!gsc.rows||!gsc.rows.length)) return `<div class="empty">Not connected yet — ${esc(gsc.error)}</div>`;

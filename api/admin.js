@@ -13,7 +13,7 @@
 // Auth scope: owner (ADMIN_PASSWORD) sees all businesses; a secretary password
 // (HANDY_ANDY_PASSWORD / DOMS_PASSWORD) is locked to one business.
 // ============================================================================
-import { serviceClient } from './_lib/supabase.js';
+import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
@@ -292,6 +292,7 @@ export default async function handler(req, res) {
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
       case 'avg_ticket':        return await avgTicketRange(req, res, db, auth);
       case 'gsc_queries':       return await gscQueries(req, res, db, auth);
+      case 'dfw_pages_analytics': return await dfwPagesAnalytics(req, res, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
@@ -6242,6 +6243,131 @@ async function gscQueries(req, res, db, auth) {
   } catch (e) {
     return res.status(200).json({ rows: [], strikingDistance: [], queryPages: [], brandSplit: null, error: e.message });
   }
+}
+
+// ── DFW location-page monitoring ────────────────────────────────────────────
+// The 6 new Dallas/Arlington/Fort Worth landing pages the owner wants watched
+// closely. Reads directly from public.web_events (the same table the external
+// website-analytics backend itself reads — see WEB_ANA_ORIGIN in admin.html)
+// rather than adding a 7th endpoint over there, since these pages need per-path
+// filtering the existing site-wide endpoints don't offer.
+const DFW_LOCATION_PAGES = [
+  '/frametvmounting-dallas', '/frametvmounting-arlington', '/frametvmounting-fortworth',
+  '/tvmounting-dallas', '/tvmounting-arlington', '/tvmounting-fortworth',
+];
+// A visit to a DFW page from outside US timezones is unusual enough to flag —
+// not proof of a bot, but worth a second look. Kept intentionally short (just
+// the zones real US visitors would plausibly show) rather than an exhaustive
+// exclude-list, so anything odd defaults to "flagged", not "trusted".
+const US_TIMEZONES = new Set(['America/Chicago', 'America/New_York', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Anchorage', 'Pacific/Honolulu']);
+
+function dfwPagePath(url) {
+  try { return new URL(url).pathname.replace(/\/$/, '') || '/'; } catch { return (url || '').split('?')[0]; }
+}
+
+async function dfwPagesAnalytics(req, res, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const db = serviceClientPublic();
+  // Pulled unfiltered-by-path and filtered in JS below (small volume — these
+  // pages are brand new) so session-level math (dwell time, bounce, referrer
+  // chains) can be computed once from one dataset instead of N round trips.
+  const { data, error } = await db.from('web_events')
+    .select('event_type, page_url, session_id, referrer, metadata, created_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(8000);
+  if (error) throw error;
+
+  const rows = (data || [])
+    .map(r => ({ ...r, path: dfwPagePath(r.page_url) }))
+    .filter(r => DFW_LOCATION_PAGES.includes(r.path));
+
+  // Per-page rollup.
+  const perPage = {};
+  for (const p of DFW_LOCATION_PAGES) perPage[p] = { path: p, views: 0, sessions: new Set(), clicks: 0, dwellBySession: {}, scrollBySession: {}, devices: {}, referrers: {} };
+  for (const r of rows) {
+    const bucket = perPage[r.path];
+    if (r.event_type === 'page_view') {
+      bucket.views++;
+      bucket.sessions.add(r.session_id);
+      const ref = (r.referrer || '').trim();
+      const refKey = !ref ? '(direct)' : (dfwPagePath(ref).startsWith('/') && ref.includes('ihandyandy.com')) ? `internal: ${dfwPagePath(ref)}` : (() => { try { return new URL(ref).hostname.replace(/^www\./, ''); } catch { return ref.slice(0, 60); } })();
+      bucket.referrers[refKey] = (bucket.referrers[refKey] || 0) + 1;
+      const dev = (r.metadata && r.metadata.device) || 'unknown';
+      bucket.devices[dev] = (bucket.devices[dev] || 0) + 1;
+    } else if (r.event_type === 'click') {
+      bucket.clicks++;
+    } else if (r.event_type === 'time_on_page') {
+      // Fires repeatedly (30s ticks) per session — keep the MAX per session as
+      // that session's real dwell time on this page, not the sum of every tick.
+      const secs = Number(r.metadata && r.metadata.seconds) || 0;
+      bucket.dwellBySession[r.session_id] = Math.max(bucket.dwellBySession[r.session_id] || 0, secs);
+    } else if (r.event_type === 'page_exit') {
+      const depth = Number(r.metadata && r.metadata.max_scroll_depth) || 0;
+      bucket.scrollBySession[r.session_id] = Math.max(bucket.scrollBySession[r.session_id] || 0, depth);
+    }
+  }
+  const avg = (obj) => { const v = Object.values(obj); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0; };
+  const topEntries = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ label: k, count: v }));
+  const pages = DFW_LOCATION_PAGES.map(p => {
+    const b = perPage[p];
+    return {
+      path: p,
+      views: b.views,
+      sessions: b.sessions.size,
+      clicks: b.clicks,
+      avg_dwell_seconds: avg(b.dwellBySession),
+      avg_scroll_depth: avg(b.scrollBySession),
+      devices: topEntries(b.devices, 5),
+      referrers: topEntries(b.referrers, 5),
+    };
+  });
+
+  // Per-session summary across ALL 6 pages, for the "who's actually visiting"
+  // feed and the non-US-timezone flag — grouped independently of the per-page
+  // rollup above since one session can touch multiple pages.
+  const bySession = {};
+  for (const r of rows) {
+    if (!bySession[r.session_id]) {
+      bySession[r.session_id] = {
+        session_id: r.session_id, pages: new Set(), events: 0,
+        first_seen: r.created_at, last_seen: r.created_at,
+        timezone: (r.metadata && r.metadata.timezone) || null,
+        device: (r.metadata && r.metadata.device) || null,
+        browser: (r.metadata && r.metadata.browser) || null,
+        entry_referrer: null,
+      };
+    }
+    const s = bySession[r.session_id];
+    s.events++;
+    if (r.event_type === 'page_view') s.pages.add(r.path);
+    if (r.created_at < s.first_seen) { s.first_seen = r.created_at; s.entry_referrer = r.referrer || null; }
+    if (r.created_at > s.last_seen) s.last_seen = r.created_at;
+  }
+  const sessions = Object.values(bySession)
+    .map(s => ({
+      session_id: s.session_id,
+      pages_visited: s.pages.size,
+      pages: [...s.pages],
+      events: s.events,
+      first_seen: s.first_seen,
+      last_seen: s.last_seen,
+      timezone: s.timezone,
+      device: s.device,
+      browser: s.browser,
+      entry_referrer: s.entry_referrer,
+      flagged: !s.timezone || !US_TIMEZONES.has(s.timezone),
+    }))
+    .sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen))
+    .slice(0, 100);
+
+  const totalSessions = sessions.length;
+  const flaggedSessions = sessions.filter(s => s.flagged).length;
+
+  return res.status(200).json({ days, pages, sessions, totalSessions, flaggedSessions, generatedAt: new Date().toISOString() });
 }
 
 async function estimates(req, res, db, auth) {
