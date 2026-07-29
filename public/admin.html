@@ -8489,6 +8489,14 @@ function nbTechOptionsHtml(excludeNames = []){
     // Own team is narrowed to the zip's metro; the partner pool is already
     // filtered server-side by postal code in nbLoadPartnerTechs.
     const techs = g.pool==='own' ? nbFilterOwn(g.techs) : g.techs;
+    // A business with zero techs of its own (e.g. Mile High, which entirely
+    // cross-hires Handy Andy's Denver roster — see PARTNER_SLUG in
+    // availability.js) has nothing real to put under "<name> Team": showing
+    // an empty group with only a placeholder "Any <name> Technician" pick
+    // that resolves against zero people is confusing, not a real choice.
+    // Skip the group entirely; the cross-company "Any Technician" above (or
+    // the partner's own group below) already covers booking anyone.
+    if(!techs.length) return '';
     return `<optgroup label="${esc(g.name)} Team">`+
       `<option value="any:${g.pool}">Any ${esc(g.name)} Technician</option>`+
       techs.filter(t=> !excludeNames.some(n=> t.name.toLowerCase() === n.toLowerCase()))
@@ -8536,8 +8544,13 @@ function nbPopulateTechs(){
   sel.innerHTML=nbTechOptionsHtml();
   // Denver default is the cross-company "Any Technician" — the office's
   // fastest path for a caller who'll take anyone, ASAP. Elsewhere (no partner
-  // in this metro) it falls back to "Any <own> Technician" as before.
-  const denverDefault = (nbPartner && nbIsDenver()) ? 'any:cross' : 'any:own';
+  // in this metro) it falls back to "Any <own> Technician" as before -- UNLESS
+  // this business has zero techs of its own (Mile High), in which case there
+  // is no "own" group to default to at all (see nbTechOptionsHtml above);
+  // fall through to whichever pool actually has an option in the list.
+  const hasOwn = nbFilterOwn(nbOwnTechs).length > 0;
+  let denverDefault = (nbPartner && nbIsDenver()) ? 'any:cross' : (hasOwn ? 'any:own' : 'any:partner');
+  if(!hasOwn && ![...sel.options].some(o=>o.value===denverDefault)) denverDefault = sel.options[0] ? sel.options[0].value : '';
   sel.value = (prev && [...sel.options].some(o=>o.value===prev)) ? prev : denverDefault;
 }
 // Fill the SECOND technician dropdown (no default pick — it's optional).
