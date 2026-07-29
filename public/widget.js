@@ -1427,7 +1427,7 @@
   ];
   const REQUEST_DAYS_OUT=90;
   const REQUEST_MIN_HOURS=48;
-  const REQUEST_MAX_WINDOWS=4;
+  const REQUEST_MAX_WINDOWS=6;
   let _reqWindowsCache=null;
   function requestWindowOptions(){
     if(_reqWindowsCache)return _reqWindowsCache;
@@ -1620,9 +1620,15 @@
             <span style="color:#fff!important;">$${it.amount}</span>
           </div>`).join('');
     // Unstaffed-area requests skip Stripe entirely — there is no confirmed
-    // appointment yet to hold a card against, and nothing here should hint at
-    // that (no "held", no "unable to charge yet" wording — just no card step).
-    const cardBlock=nativeUnstaffed?'':`
+    // appointment yet to hold a card against. This step explicitly tells the
+    // customer it's a request (not a booking) and that someone will follow
+    // up to lock in a time — an explicit, later instruction from the owner
+    // that supersedes the earlier "never reveal" rule for this one point only.
+    const cardBlock=nativeUnstaffed?`
+      <div style="background:rgba(255,102,0,0.1)!important;border:1px solid rgba(255,102,0,0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
+        📋 <strong style="color:#fff!important;">This is an appointment request, not a confirmed appointment.</strong>
+        <div>Someone will reach out to you shortly to lock in your preferred time slot.</div>
+      </div>`:`
       <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
         💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
         <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service. Your card only holds the appointment.</div>
