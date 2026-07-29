@@ -355,6 +355,12 @@
   .job.est-card.stale{border-color:#fca5a5;background:#fff6f6;box-shadow:0 0 0 1px #fecaca;animation:estcardpulse 2.4s ease-in-out infinite;}
   @keyframes estcardpulse{0%,100%{box-shadow:0 0 0 1px #fecaca;}50%{box-shadow:0 0 0 4px rgba(239,68,68,.15);}}
   @media(prefers-reduced-motion:reduce){.job.est-card.stale{animation:none;}}
+  /* Website contact-form lead: a distinct accent so it reads as a different
+     kind of thing from a priced estimate request sitting next to it. */
+  .job.est-card.est-card-web{border-left:3px solid #7c5cff;}
+  .est-web-badge{display:inline-block;font-size:12px;font-weight:800;color:#3C3489;background:#EEEDFE;border:1px solid #AFA9EC;border-radius:8px;padding:5px 11px;margin:0 7px 9px 0;}
+  .est-card .est-msg{background:#f4f4f2;border-radius:8px;padding:11px 13px;margin-top:9px;}
+  .est-web-src{font-size:11.5px;color:var(--mute);margin-top:8px;}
   /* Deep-linked from the "new estimate" text — flash so it's obvious which one */
   .job.est-card.est-flash{border-color:var(--accent);box-shadow:0 0 0 4px rgba(255,107,53,.25);animation:estflash 1.3s ease-in-out 2;}
   @keyframes estflash{0%,100%{box-shadow:0 0 0 4px rgba(255,107,53,.25);}50%{box-shadow:0 0 0 8px rgba(255,107,53,.08);}}
@@ -6615,7 +6621,9 @@ function estTotals(items, taxRate){
 
 async function renderEstimates(){
   const view=document.getElementById('view');
-  const filters=Object.entries({all:'All',...EST_STATUS,archived:'Archived'}).map(([k,v])=>
+  // "Website messages" is a source filter, not a status (api/admin.js handles it
+  // specially). Sits before Archived so it reads as a working folder.
+  const filters=Object.entries({all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <div class="est-filters" id="estFilters">${filters}</div>
@@ -6691,7 +6699,9 @@ function estTimezone(e){
 function estCard(e){
   const phone=esc(e.customer_phone||'');
   const tel=phone?`<a href="tel:${phone}" style="color:var(--accent);text-decoration:none;">${phone}</a>`:'';
-  const email=e.customer_email?` · ${esc(e.customer_email)}`:'';
+  // Mailto, because a website lead often leaves an email and no usable phone,
+  // and replying by email is then the only way to reach them.
+  const email=e.customer_email?` · <a href="mailto:${encodeURIComponent(e.customer_email)}" style="color:var(--accent);text-decoration:none;">${esc(e.customer_email)}</a>`:'';
   const zip=e.customer_zip?` · ZIP ${esc(e.customer_zip)}`:'';
   // Street address — captured by the online-booking request flow (unstaffed
   // areas), which asks for the full address just like a normal booking. The
@@ -6708,6 +6718,12 @@ function estCard(e){
   const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
   // When the estimate came in, in the CUSTOMER's local time (Denver vs Houston),
   // shown as a prominent badge at the top so the office sees it at a glance.
+  // A website contact-form lead (LandingSite -> Gmail -> api/migrate
+  // website_lead_sync). Raw inbound interest, not a priced request: it has a
+  // free-text message and no line items, so the card leads with the message and
+  // the office builds a quote from there.
+  const isWeb=e.source==='website_form';
+  const webBadge=isWeb?`<span class="est-web-badge">🌐 Website message</span>`:'';
   const _tzi=estTimezone(e);
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const receivedBadge=created?`<div style="display:inline-block;font-size:13px;font-weight:800;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:8px;padding:5px 11px;margin-bottom:9px;">📥 Came in ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
@@ -6747,14 +6763,15 @@ function estCard(e){
   const agePill = e.status==='new'
     ? `<span class="age-pill ${stale?'stale':'ok'}">${stale?`⚠ ${fmtWaitMinutes(estAgeMinutes(e))} — respond now`:`${fmtWaitMinutes(estAgeMinutes(e))} ago`}</span>`
     : '';
-  return `<div class="job est-card${stale?' stale':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
+  return `<div class="job est-card${stale?' stale':''}${isWeb?' est-card-web':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
-        ${receivedBadge}
+        ${webBadge}${receivedBadge}
         <div class="est-toprow"><div class="name">${esc(e.service_label||'Estimate request')}</div>${agePill}</div>
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
         ${addrLine}
-        ${hasQuote ? '' : `<div class="est-desc">${esc(e.description||'')}</div>`}
+        ${hasQuote ? '' : `<div class="est-desc${isWeb?' est-msg':''}">${esc(e.description||'')}</div>`}
+        ${isWeb&&e.notes?`<div class="est-web-src">${esc(e.notes)}</div>`:''}
         ${slotChips}
         ${quote}
         ${approved}

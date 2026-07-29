@@ -6245,12 +6245,17 @@ async function estimates(req, res, db, auth) {
       .lt('created_at', sevenDaysAgo);
   } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
 
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, description, photo_url, preferred_slots, status, sms_consent, notes, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by';
+  // customer_address/city/state: shown on the card and carried into convert-to-job.
+  // source: distinguishes a website contact-form lead from a real estimate request.
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
       .order('created_at', { ascending: false })
       .limit(200);
+    // 'website' is a SOURCE filter, not a status: the Website messages tab shows
+    // every contact-form lead regardless of how far the office has worked it.
+    if (status === 'website') return q.eq('source', 'website_form').neq('status', 'archived');
     // A specific status (incl. 'archived') filters to it; the default/'all' view
     // hides archived so converted + aged-out estimates leave the working list.
     if (status && status !== 'all') q = q.eq('status', status);

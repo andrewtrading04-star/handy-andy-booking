@@ -30,6 +30,7 @@ import { simpleParser } from 'mailparser';
 import { parseWalmartEmails } from './lib/walmart-parse.mjs';
 import { parseAmazonPlateEmail, PLATE_MATCH } from './lib/amazon-parse.mjs';
 import { parseGoogleReviewEmail } from './lib/google-review-parse.mjs';
+import { parseWebsiteLeadEmail } from './lib/website-lead-parse.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
@@ -136,6 +137,8 @@ const SEARCH_TERMS = [
   { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
   // Google Business Profile review notifications.
   { from: 'businessprofile-noreply@google.com' }, { body: 'left a review for' },
+  // Website contact-form leads (LandingSite).
+  { from: 'landingsite.ai' }, { body: 'New customer message from' },
 ];
 
 async function searchUids(client, since) {
@@ -164,7 +167,7 @@ async function scanMailbox({ user, pass, idx }, todayISO) {
   // A dropped/timed-out socket emits an 'error' event; without a listener Node
   // crashes the whole process. Swallow it — per-mailbox failures are handled below.
   client.on('error', (e) => console.warn(`[bracket-sync] ${user} imap error: ${e.message}`));
-  const walmart = [], amazon = [], reviews = [];
+  const walmart = [], amazon = [], reviews = [], leads = [];
   await client.connect();
   console.log(`[bracket-sync] Connected: ${user}`);
   try {
@@ -185,7 +188,7 @@ async function scanMailbox({ user, pass, idx }, todayISO) {
     //     From: isn't amazon.com is still caught. Each parser then requires a
     //     real order number (and, for Amazon, a product match) to qualify.
     let uids = await searchUids(client, since);
-    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon, reviews }; }
+    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon, reviews, leads }; }
     console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
 
     for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
@@ -223,13 +226,24 @@ async function scanMailbox({ user, pass, idx }, todayISO) {
         );
         amazon.push(plate);
       }
+      // Website contact-form lead. Keyed on the email's Message-ID so a re-scan
+      // of the same message never creates a second estimate.
+      const lead = parseWebsiteLeadEmail({
+        from: fromAddr, subject: email.subject, text: email.text, html: email.html,
+        messageId: parsed.messageId || '',
+        receivedISO: parsed.date ? new Date(parsed.date).toISOString() : '',
+      });
+      if (lead) {
+        console.log(`[bracket-sync] ${user}: website lead from ${lead.name} <${lead.email || lead.phone}>`);
+        leads.push(lead);
+      }
     }
   } finally {
     // Close cleanly; if logout hangs/fails (e.g. after a failed command), force
     // the socket shut so it can't linger and fire a fatal timeout later.
     await client.logout().catch(() => { try { client.close(); } catch (_) {} });
   }
-  return { walmart, amazon, reviews };
+  return { walmart, amazon, reviews, leads };
 }
 
 async function main() {
@@ -273,13 +287,14 @@ async function main() {
   const todayISO = new Date().toISOString().slice(0, 10);
 
   // Gather from every configured mailbox.
-  let allWalmart = [], allAmazon = [], allReviews = [];
+  let allWalmart = [], allAmazon = [], allReviews = [], allLeads = [];
   for (const box of boxes) {
     try {
-      const { walmart, amazon, reviews } = await scanMailbox(box, todayISO);
+      const { walmart, amazon, reviews, leads } = await scanMailbox(box, todayISO);
       allWalmart = allWalmart.concat(walmart);
       allAmazon = allAmazon.concat(amazon);
       allReviews = allReviews.concat(reviews || []);
+      allLeads = allLeads.concat(leads || []);
     } catch (e) {
       // Surface Gmail's actual reason so a connect/login failure is diagnosable
       // (auth vs IMAP-disabled vs something else) instead of a bare "Command failed".
@@ -333,6 +348,27 @@ async function main() {
     }
   }
 
+  // ── Website contact-form leads ── dedupe by Message-ID (one email can match
+  // more than one search term, and mailboxes can overlap).
+  const leadByKey = new Map();
+  for (const l of allLeads) {
+    const k = l.external_key || `${l.email || ''}|${l.phone || ''}|${l.message.slice(0, 60)}`;
+    if (!leadByKey.has(k)) leadByKey.set(k, l);
+  }
+  const leadList = [...leadByKey.values()];
+  if (!leadList.length) { console.log('[bracket-sync] No website leads found.'); }
+  else console.log(`[bracket-sync] ${leadList.length} website lead(s) to sync`);
+  let leadsSynced = 0;
+  for (const lead of leadList) {
+    try {
+      const r = await syncTo('website_lead_sync', lead);
+      console.log(`[bracket-sync] website lead ${lead.name}: ${r.action || 'ok'}`);
+      if (r.action === 'created') leadsSynced++;
+    } catch (e) {
+      console.error(`[bracket-sync] website lead sync failed — ${e.message}`);
+    }
+  }
+
   // ── Google reviews ── dedupe by key (the same email can match two search terms).
   const reviewByKey = new Map();
   for (const r of allReviews) if (r && r.google_key && !reviewByKey.has(r.google_key)) reviewByKey.set(r.google_key, r);
@@ -350,7 +386,7 @@ async function main() {
     }
   }
 
-  console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s), ${reviewsSynced}/${reviewList.length} review(s) synced`);
+  console.log(`[bracket-sync] Done — ${synced}/${orders.length} bracket order(s), ${platesSynced}/${plateOrders.length} plate order(s), ${reviewsSynced}/${reviewList.length} review(s), ${leadsSynced}/${leadList.length} website lead(s) synced`);
 }
 
 // Force exit once the work is done. A lingering IMAP socket (e.g. one left open

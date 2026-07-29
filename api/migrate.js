@@ -328,6 +328,96 @@ async function adjustWirePlateInv(db, businessId, technicianId, delta) {
 // to every active business (assignable from either dashboard); once a tech is
 // assigned, that business owns the row and unassigned twins are dropped.
 //
+// Ingest one website contact-form lead (LandingSite -> Gmail -> the
+// bracket-tracker Action -> here) as an estimate. See
+// scripts/lib/website-lead-parse.mjs for the email shape.
+//
+// Filed under DOM'S deliberately, even though the lead comes off the Handy Andy
+// site: estimates are fetched per business, and this is how the owner wants
+// visibility scoped -- Joey (Dom's secretary) works these leads, Heather
+// (Handy Andy) should never see them. Owner sees them by switching to Dom's.
+//
+// Idempotent on external_key (the email's Message-ID, unique index from
+// migration 0085), because the mailbox is fully re-scanned every run.
+// Auth/method checked by the caller.
+async function websiteLeadSync(req, res) {
+  const db = serviceClient();
+  const b = req.body || {};
+  const external_key = (b.external_key || '').toString().trim() || null;
+  const message = (b.message || '').toString().trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+
+  const { data: biz } = await db.from('businesses').select('id, name').eq('slug', 'doms').single();
+  if (!biz) return res.status(500).json({ error: 'doms business not configured' });
+
+  if (external_key) {
+    const { data: dupe } = await db.from('estimates')
+      .select('id').eq('external_key', external_key).maybeSingle();
+    if (dupe) return res.status(200).json({ ok: true, action: 'already_synced', id: dupe.id });
+  }
+
+  const name = (b.name || '').toString().trim().slice(0, 120) || 'Website visitor';
+  const phone = (b.phone || '').toString().trim() || null;
+  const email = (b.email || '').toString().trim() || null;
+  const zip = (b.zip || '').toString().trim() || null;
+  // The analytics id identifies the SITE, not the submission — kept as an
+  // internal note so the office can tell which site produced the lead.
+  const notes = b.analytics_id ? `Website form · ${b.analytics_id}` : 'Website form';
+
+  const row = {
+    business_id: biz.id,
+    service_label: 'Website message',
+    customer_name: name, customer_phone: phone, customer_email: email, customer_zip: zip,
+    description: message.slice(0, 4000),
+    notes,
+    source: 'website_form',
+    external_key,
+    status: 'new',
+    // No card was taken and nothing was quoted: this is raw inbound interest.
+    line_items: [], preferred_slots: [],
+    // Don't text the customer off a form fill they didn't opt in on.
+    sms_consent: false,
+  };
+  if (b.received_at) { const d = new Date(b.received_at); if (!isNaN(d)) row.created_at = d.toISOString(); }
+
+  let ins = await db.from('estimates').insert(row).select('id').single();
+  if (ins.error && /column .*(external_key|source)/i.test(ins.error.message || '')) {
+    // Schema drift (migration 0085 not applied here yet) must not lose the lead.
+    const { external_key: _drop, ...safe } = row;
+    ins = await db.from('estimates').insert(safe).select('id').single();
+  }
+  if (ins.error) {
+    // A racing duplicate is a success, not a failure.
+    if (/duplicate key|unique constraint/i.test(ins.error.message || ''))
+      return res.status(200).json({ ok: true, action: 'already_synced' });
+    throw ins.error;
+  }
+
+  // Text Joey (Dom's secretary) — the owner asked for these to go to him, not
+  // to the Handy Andy line. AWAITED, never fire-and-forget: this handler's
+  // response would otherwise freeze the lambda mid-send (see api/estimate.js).
+  const base = (process.env.PUBLIC_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
+  const link = `${base}/admin.html?estimate=${encodeURIComponent(ins.data.id)}`;
+  const gist = message.replace(/\s+/g, ' ').trim();
+  const to = process.env.DOMS_SECRETARY_PHONE;
+  if (to) {
+    const msg = [
+      'New Website Message',
+      `From: ${name}`,
+      zip ? `ZIP: ${zip}` : null,
+      gist.length > 90 ? gist.slice(0, 90) + '…' : gist,
+      link,
+    ].filter(Boolean).join('\n');
+    const r = await sendSMSResult(to, msg);
+    if (!r.ok) console.error('[website_lead] sms not sent:', r.error || r.skipped);
+  } else {
+    console.error('[website_lead] DOMS_SECRETARY_PHONE not set — lead went un-texted');
+  }
+
+  console.log('[website_lead]', ins.data.id, name, zip || '');
+  return res.status(200).json({ ok: true, action: 'created', id: ins.data.id });
+}
+
 // CREDITING (the key rule): plates are added to a tech's ON-HAND count only when
 // the order is actually DELIVERED — not when it's assigned. An en-route order can
 // be reserved to a tech, but their on-hand count doesn't move until delivery.
@@ -749,6 +839,25 @@ export default async function handler(req, res) {
       return await bracketSync(req, res);
     } catch (e) {
       console.error('[bracket_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Website contact-form lead sync. Called by the bracket-tracker Action after
+  // it parses a LandingSite "New customer message" email. Secured by CRON_SECRET.
+  // POST JSON body:
+  //   { external_key, name, email, phone, zip, message, analytics_id, received_at }
+  if (action === 'website_lead_sync') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      return await websiteLeadSync(req, res);
+    } catch (e) {
+      console.error('[website_lead]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
