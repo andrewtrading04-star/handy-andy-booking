@@ -80,6 +80,32 @@ async function placeDetailsPublic(req, res) {
 // {option_id: price} — the widget overlays this onto its own hardcoded
 // SERVICE_CONFIGS at load, so a fetch failure or an empty/new deploy just
 // falls back to the widget's built-in numbers instead of breaking checkout.
+// Public: the Stripe PUBLISHABLE key for a business, so one widget file can
+// serve several businesses instead of hardcoding one company's key. Publishable
+// keys are designed to ship in client code — this exposes nothing secret.
+//
+// `configured` reports whether the matching SECRET key is present on the server
+// (a boolean, never the key). Without it, a business whose secret key is missing
+// looks fine right up until a real customer's card fails at checkout.
+const STRIPE_PK_ENV = {
+  'handy-andy': 'STRIPE_PUBLISHABLE_KEY',
+  doms:         'DOMS_STRIPE_PUBLISHABLE_KEY',
+  'mile-high':  'MILE_HIGH_STRIPE_PUBLISHABLE_KEY',
+};
+function stripePublicConfig(req, res) {
+  const business = ((req.query || {}).business || 'handy-andy').toString().trim();
+  const envName = STRIPE_PK_ENV[business];
+  if (!envName) return res.status(400).json({ error: `Unknown business "${business}"` });
+  let configured = false;
+  try { configured = stripeConfigured({ account: business }); }
+  catch (e) { configured = false; }   // no Stripe account mapped for this slug
+  return res.status(200).json({
+    business,
+    publishable_key: process.env[envName] || null,
+    configured,
+  });
+}
+
 async function widgetPricesPublic(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
   const city = ((req.query || {}).city || 'default').toString().trim();
@@ -190,6 +216,25 @@ const HA_COUPONS = {
 };
 const DOMS_COUPONS = {
   DONTGO10: 10,   // exit-intent offer
+};
+
+// Businesses served by the generic, zip-driven native path (bookNative). Doms
+// is deliberately NOT here — it predates this and has its own single-metro
+// handler. Adding a business is this entry plus its Stripe/email config; there
+// is no third copy of the booking handler.
+//   name      what a technician sees on the job card and in their assignment text
+//   legalName the full trading name, used in owner alerts
+const NATIVE_BUSINESS = {
+  'handy-andy': { name: 'Handy Andy',            legalName: 'Handy Andy TV Mounting' },
+  'mile-high':  { name: 'Mile High TV Mounting', legalName: 'Mile High TV Mounting' },
+};
+
+// Mile High runs the same Denver playbook as Handy Andy, so it honors the same
+// promo codes. Kept as a per-slug map rather than a shared reference so either
+// business can diverge without touching the other.
+const NATIVE_COUPONS = {
+  'handy-andy': HA_COUPONS,
+  'mile-high':  HA_COUPONS,
 };
 
 // Hard-coded after-hours fee: every job whose arrival window starts at 8 PM or
@@ -549,7 +594,8 @@ async function bookDoms(req, res) {
 // Austin -> Zach, Denver -> Kregg/Steve). Surcharge, after-hours fee, and coupon
 // are enforced server-side. `selectedSlot` is the 'handy-andy_<YYYY-MM-DD>_<slotKey>'
 // id returned by /api/slots?business=handy-andy.
-async function bookHandyAndy(req, res) {
+async function bookNative(req, res, slug) {
+  const DISPLAY = NATIVE_BUSINESS[slug] || { name: slug, legalName: slug };
   const b = req.body || {};
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
@@ -557,7 +603,7 @@ async function bookHandyAndy(req, res) {
   if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
   const parsed = parseSlotId(b.selectedSlot);
-  if (!parsed || parsed.businessSlug !== 'handy-andy') {
+  if (!parsed || parsed.businessSlug !== slug) {
     return res.status(400).json({ error: 'A valid time slot is required' });
   }
   const { dateStr, slotKey } = parsed;
@@ -566,8 +612,8 @@ async function bookHandyAndy(req, res) {
   try { db = serviceClient(); }
   catch (e) { return res.status(500).json({ error: 'Booking storage not configured', message: e.message }); }
 
-  const { data: biz } = await db.from('businesses').select('id').eq('slug', 'handy-andy').single();
-  if (!biz) return res.status(500).json({ error: 'Handy Andy business not configured' });
+  const { data: biz } = await db.from('businesses').select('id, name').eq('slug', slug).single();
+  if (!biz) return res.status(500).json({ error: `${DISPLAY.name} business not configured` });
 
   // ZIP -> service area: timezone, tech roster scope, per-zip surcharge, and
   // the per-zip FLAT price adjustment (0 = no-op; resilient select in case
@@ -610,7 +656,7 @@ async function bookHandyAndy(req, res) {
 
   // Coupon (validated server-side; unknown codes are ignored, never trusted).
   const couponCode = String(b.coupon || '').trim().toUpperCase();
-  const couponAmt = HA_COUPONS[couponCode] || 0;
+  const couponAmt = (NATIVE_COUPONS[slug] || {})[couponCode] || 0;
 
   // ── Line items for storage. Prefer explicit line_items; else the email_summary
   // lines the widget computed for display.
@@ -727,23 +773,23 @@ async function bookHandyAndy(req, res) {
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
   const price = Math.max(subtotal, widgetTotal) || subtotal;
 
-  // ── Save the card on file in Handy Andy's Stripe account (best-effort), using
+  // ── Save the card on file in this business's own Stripe account (best-effort), using
   // HANDY_ANDY_STRIPE_SECRET_KEY. The card is tokenized in the browser with the
   // matching publishable key, so the publishable/secret pair are the same account.
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
-    if (!stripeConfigured({ account: 'handy-andy' })) {
+    if (!stripeConfigured({ account: slug })) {
       cardNote = `Card captured (${b.payment_method_id}) but HANDY_ANDY_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
     } else {
       try {
         const r = await saveCardOnFile({
           email: customer.email,
           name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone, paymentMethodId: b.payment_method_id, account: 'handy-andy',
+          phone: customer.phone, paymentMethodId: b.payment_method_id, account: slug,
         });
         stripeCustomerId = r.customerId;
         paymentStatus = 'card_on_file';
-        cardNote = 'Card is on file (Handy Andy Stripe).';
+        cardNote = `Card is on file (${DISPLAY.name} Stripe).`;
       } catch (e) {
         cardNote = `Card capture failed: ${e.message}`;
       }
@@ -752,7 +798,7 @@ async function bookHandyAndy(req, res) {
 
   // ── Assign a tech from THIS metro's roster so the slot is occupied.
   let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'handy-andy', dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
   catch (e) { console.warn('[book-ha] tech pick failed:', e.message); }
   let technicianName = null, technicianPhoto = null;
   if (technician_id) {
@@ -773,7 +819,7 @@ async function bookHandyAndy(req, res) {
   let result = {};
   try {
     result = (await mirrorBooking({
-      businessSlug: 'handy-andy', source: 'widget',
+      businessSlug: slug, source: 'widget',
       service_area_id: serviceAreaId,
       technician_id,
       status: technician_id ? 'assigned' : 'confirmed',
@@ -782,7 +828,7 @@ async function bookHandyAndy(req, res) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
-      stripe_account: 'handy-andy',
+      stripe_account: slug,
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
         name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -810,7 +856,7 @@ async function bookHandyAndy(req, res) {
   // the METRO's timezone (an Austin job is Central), so the tech is told the
   // job's real local time rather than the company's Mountain clock.
   if (result.technician_id) {
-    await notifyTechAssigned(db, { id: biz.id, name: 'Handy Andy', timezone: tz },
+    await notifyTechAssigned(db, { id: biz.id, name: DISPLAY.name, timezone: tz },
       result.technician_id, startUTC.toISOString(), tz, { bookingId })
       .catch(e => console.error('[book-ha] tech notify failed:', e.message));
   }
@@ -834,15 +880,15 @@ async function bookHandyAndy(req, res) {
 
   if (cardSaveFailed) {
     await sendCardSaveFailedAlert({
-      slug: 'handy-andy', businessName: 'Handy Andy TV Mounting',
+      slug, businessName: DISPLAY.legalName,
       customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
       when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz || 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
       reason: cardNote, bookingId,
     });
   }
 
-  // ── Handy Andy-branded confirmation email (best-effort; never fails booking).
-  const haEmail = emailConfig('handy-andy');
+  // ── Business-branded confirmation email (best-effort; never fails booking).
+  const haEmail = emailConfig(slug);
   const willSend = emailNotificationsOn() && !!haEmail.apiKey && !!customer.email;
   if (willSend) {
     try {
@@ -876,8 +922,8 @@ async function bookHandyAndy(req, res) {
         baseUrl, jobId: bookingId,
         gdsUpsellUrl: gdsUpsellUrlFor({ lines, bookingId, baseUrl }),
         rescheduleUrl: rescheduleUrlFor({ bookingId, baseUrl }),
-      }, brandFor('handy-andy'));
-      const sent = await sendEmail({ slug: 'handy-andy', to: customer.email, subject, html, replyTo: haEmail.from });
+      }, brandFor(slug));
+      const sent = await sendEmail({ slug, to: customer.email, subject, html, replyTo: haEmail.from });
       if (!sent.sent) console.warn('[book-ha] confirmation email not sent:', sent.skipped || sent.error);
       await persistConfirmationEmailStatus(db, bookingId, sent.sent ? 'sent' : 'failed');
     } catch (e) {
@@ -914,11 +960,12 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'place_details') return placeDetailsPublic(req, res);
   // Public price overrides for the booking widget — see widgetPricesPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.
   if (req.body && req.body.business === 'doms') return bookDoms(req, res);
-  if (req.body && req.body.business === 'handy-andy') return bookHandyAndy(req, res);
+  if (req.body && NATIVE_BUSINESS[req.body.business]) return bookNative(req, res, req.body.business);
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
   if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });

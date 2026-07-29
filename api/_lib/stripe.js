@@ -19,6 +19,7 @@ const ACCOUNT_KEY_ENV = {
   global:       'STRIPE_SECRET_KEY',
   'handy-andy': 'HANDY_ANDY_STRIPE_SECRET_KEY',
   doms:         'DOMS_STRIPE_SECRET_KEY',
+  'mile-high':  'MILE_HIGH_STRIPE_SECRET_KEY',
 };
 
 // Legacy slug -> account for bookings made BEFORE per-booking stamping: Handy
@@ -27,6 +28,7 @@ const ACCOUNT_KEY_ENV = {
 const LEGACY_SLUG_ACCOUNT = {
   'handy-andy': 'global',
   doms:         'doms',
+  'mile-high':  'mile-high',
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)
@@ -36,6 +38,12 @@ function selToAccount(sel) {
   const s = typeof sel === 'string' ? { slug: sel } : (sel || {});
   if (s.account && ACCOUNT_KEY_ENV[s.account]) return s.account;
   if (s.slug && LEGACY_SLUG_ACCOUNT[s.slug]) return LEGACY_SLUG_ACCOUNT[s.slug];
+  // A slug we don't recognize must NEVER silently fall through to 'global' —
+  // that is Handy Andy's live Stripe account, so a new business added without a
+  // mapping here would quietly save and charge real cards in the wrong
+  // company's account. Fail loudly instead. (No slug at all still means the
+  // legacy Zenbooker path, which has always used the global account.)
+  if (s.slug) throw new Error(`No Stripe account mapped for business "${s.slug}" — add it to ACCOUNT_KEY_ENV/LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js`);
   return 'global';
 }
 function envNameFor(sel) { return ACCOUNT_KEY_ENV[selToAccount(sel)]; }

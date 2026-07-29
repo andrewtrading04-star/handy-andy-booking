@@ -19,6 +19,16 @@ export function emailConfig(slug) {
       from:   process.env.DOMS_EMAIL_FROM || 'contact@domstvmounting.com',
     };
   }
+  if (slug === 'mile-high') {
+    // Its own Resend account + verified domain. NOTE the deliberate absence of a
+    // fallback to RESEND_API_KEY/ihandyandy.com: sending Mile High's customer
+    // mail from Handy Andy's address would be worse than not sending it, so an
+    // unset key yields no apiKey and sendEmail() skips with a logged reason.
+    return {
+      apiKey: process.env.MILE_HIGH_RESEND_API_KEY,
+      from:   process.env.MILE_HIGH_EMAIL_FROM || 'contact@milehightvmounting.com',
+    };
+  }
   return {
     apiKey: process.env.RESEND_API_KEY,
     from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
@@ -28,10 +38,18 @@ export function emailConfig(slug) {
 // Brand presets for customer-facing emails. Colors match the booking widgets and
 // admin dashboard: Handy Andy = orange, Doms = blue.
 export const EMAIL_BRANDS = {
-  'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',          accent: '#FF6B35', website: 'ihandyandy.com', heightCalc: 'https://www.ihandyandy.com/tv-height-calculator' },
-  'doms':       { slug: 'doms',       name: "Dom's TV Mounting",   accent: '#2563EB', website: 'domstvmounting.com' },
+  'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',            accent: '#FF6B35', website: 'ihandyandy.com', heightCalc: 'https://www.ihandyandy.com/tv-height-calculator' },
+  'doms':       { slug: 'doms',       name: "Dom's TV Mounting",     accent: '#2563EB', website: 'domstvmounting.com' },
+  'mile-high':  { slug: 'mile-high',  name: 'Mile High TV Mounting', accent: '#1D9E75', website: 'milehightvmounting.com' },
 };
-export function brandFor(slug) { return EMAIL_BRANDS[slug] || EMAIL_BRANDS['handy-andy']; }
+// An unknown slug used to fall back to Handy Andy, which meant a new business
+// would send Handy-Andy-branded email to its own customers and look, to the
+// reader, like the wrong company. Warn loudly; the fallback stays so a branding
+// gap can never block a real confirmation email from going out.
+export function brandFor(slug) {
+  if (slug && !EMAIL_BRANDS[slug]) console.error(`[email] no brand for business "${slug}" — falling back to Handy Andy branding; add it to EMAIL_BRANDS`);
+  return EMAIL_BRANDS[slug] || EMAIL_BRANDS['handy-andy'];
+}
 
 // ── Low-level send ──────────────────────────────────────────────────────────
 // Returns { sent, skipped?, id?, error? } and never throws unless throwOnError.
