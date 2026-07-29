@@ -1425,7 +1425,7 @@
     {key:'s3',label:'2:00 PM – 4:00 PM', hour:14},
     {key:'s4',label:'5:00 PM – 8:00 PM', hour:17},
   ];
-  const REQUEST_DAYS_OUT=14;
+  const REQUEST_DAYS_OUT=90;
   const REQUEST_MIN_HOURS=48;
   const REQUEST_MAX_WINDOWS=4;
   let _reqWindowsCache=null;
