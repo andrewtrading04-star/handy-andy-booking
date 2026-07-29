@@ -115,7 +115,15 @@ const SLOT_BY_KEY = Object.fromEntries(SLOTS.map(s => [s.key, s]));
 // the host company's own techs are always tried first (see pickOpenTech). This
 // is Denver-only: Handy Andy's Houston/Austin metros never cross-hire, and it
 // stays off automatically if either business has no Denver service area row.
-const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy' };
+//
+// This map is a per-slug LOOKUP, not a symmetric pairing — each key names the
+// ONE business its overflow falls back to. Handy Andy <-> Doms happens to be
+// mutual (each is the other's key), which is the original two-business case.
+// Mile High is deliberately ONE-DIRECTIONAL: it has no technicians of its own,
+// so it always borrows Handy Andy's Denver roster, but Handy Andy's own
+// overflow must never fall to Mile High's perpetually-empty pool — so there is
+// no 'mile-high' entry on Handy Andy's or Doms's side.
+const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy' };
 
 // Resolve the partner business's Denver tech pool for a cross-hire lookup, or
 // null if not eligible (this request isn't for Denver, or the partner has no

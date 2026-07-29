@@ -48,7 +48,17 @@ const STRIPE_PK_GLOBAL = process.env.STRIPE_PUBLISHABLE_KEY || 'pk_live_51Olvl3I
 // Booking/Change Card would hard-refuse card entry, breaking "click every
 // button" for a prospective buyer touring Doms. Real deployments are
 // unaffected: demoMode() is false there.
-function bookingStripePk(slug) { return (slug === 'doms' && !demoMode()) ? (process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null) : STRIPE_PK_GLOBAL; }
+// Each business's own Stripe publishable key, so New Booking's card entry
+// tokenizes against the RIGHT account. Without a slug's own branch here it
+// silently falls through to STRIPE_PK_GLOBAL (Handy Andy's) — which would
+// tokenize a Mile High job's card into Handy Andy's Stripe account, so it
+// would appear to save fine but be uncharge-able from Mile High's own key.
+function bookingStripePk(slug) {
+  if (demoMode()) return STRIPE_PK_GLOBAL;
+  if (slug === 'doms') return process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null;
+  if (slug === 'mile-high') return process.env.MILE_HIGH_STRIPE_PUBLISHABLE_KEY || null;
+  return STRIPE_PK_GLOBAL;
+}
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 
@@ -78,7 +88,10 @@ const bringsOwnSecondTech = isSecondaryIneligibleName;
 // into); only the assigned technician_id may belong to the partner. A job is
 // "cross-company" whenever the booking's business differs from the assigned
 // tech's home business — derived live, so no schema change is needed.
-const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy' };
+// Per-slug lookup, not a symmetric pairing — see the matching comment in
+// api/_lib/availability.js. Mile High borrows Handy Andy's Denver techs
+// one-directionally; Handy Andy's own overflow still only ever falls to Doms.
+const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy' };
 
 // The partner business row for a host slug, or null when there isn't one.
 async function partnerBusiness(db, hostSlug) {
@@ -409,6 +422,12 @@ async function login(req, res, body) {
 async function viewAs(req, res, db, auth) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  // Deliberately Heather/Joey only, not every business slug: this impersonates
+  // a SECRETARY LOGIN (viewAs's whole purpose is showing the owner exactly what
+  // a real secretary password unlocks — see login() above), and Mile High has
+  // no secretary of its own to view as. The owner sees Mile High via the normal
+  // business switcher instead (unfiltered by slug for scope:'all' — see the
+  // businesses query in login()/sessionStatus()).
   const slug = (req.body?.business || '').toString();
   if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy or doms' });
 
@@ -3903,7 +3922,8 @@ async function bookingAuthorization(req, res, db, auth) {
 // every account we might have charged in for this business.
 function candidateAccounts(slug) {
   if (slug === 'doms') return ['doms'];
-  if (slug === 'handy-andy') return ['global', 'handy-andy'];
+  if (slug === 'handy-andy') return ['global', 'handy-andy'];   // HA transitioned off the global account, so old charges may live in either
+  if (slug === 'mile-high') return ['mile-high'];               // always its own account, never global -- it never existed pre-split
   return ['global'];
 }
 

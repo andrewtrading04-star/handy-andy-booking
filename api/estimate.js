@@ -14,8 +14,9 @@ import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { sendSMS, toE164 } from './_lib/sms.js';
 import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
+import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 
-const ALLOWED = new Set(['handy-andy', 'doms']);
+const ALLOWED = new Set(ALL_BUSINESS_SLUGS);
 
 // Mirrors the estimates.tax_rate column default. Only used to compute the
 // "Value:" figure in the notification text when the caller didn't send its own

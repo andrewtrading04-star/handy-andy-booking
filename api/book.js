@@ -1,4 +1,5 @@
 import { mirrorBooking } from './_lib/mirror.js';
+import { NATIVE_BUSINESS } from './_lib/native-businesses.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { serviceClient } from './_lib/supabase.js';
@@ -228,17 +229,6 @@ const HA_COUPONS = {
 };
 const DOMS_COUPONS = {
   DONTGO10: 10,   // exit-intent offer
-};
-
-// Businesses served by the generic, zip-driven native path (bookNative). Doms
-// is deliberately NOT here — it predates this and has its own single-metro
-// handler. Adding a business is this entry plus its Stripe/email config; there
-// is no third copy of the booking handler.
-//   name      what a technician sees on the job card and in their assignment text
-//   legalName the full trading name, used in owner alerts
-const NATIVE_BUSINESS = {
-  'handy-andy': { name: 'Handy Andy',            legalName: 'Handy Andy TV Mounting' },
-  'mile-high':  { name: 'Mile High TV Mounting', legalName: 'Mile High TV Mounting' },
 };
 
 // Mile High runs the same Denver playbook as Handy Andy, so it honors the same

@@ -1,4 +1,5 @@
 import { serviceClientPublic } from './_lib/supabase.js';
+import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,7 +13,7 @@ export default async function handler(req, res) {
   // Which widget produced this event. The TV-mounting booking widget doesn't send
   // one (legacy) → default 'handy-andy'. The handyman estimate widget sends
   // '<slug>-handyman'. Allowlisted so the column can't be polluted with junk.
-  const WIDGETS = ['handy-andy', 'doms', 'handy-andy-handyman', 'doms-handyman'];
+  const WIDGETS = [...ALL_BUSINESS_SLUGS, 'handy-andy-handyman', 'doms-handyman'];
   const widgetTag = WIDGETS.includes(widget) ? widget : 'handy-andy';
 
   try {

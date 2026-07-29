@@ -1,5 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken } from './_lib/auth.js';
+import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 import crypto from 'crypto';
 
 // Delivery-status webhooks (Twilio + Resend) live in THIS file rather than a
@@ -273,7 +274,7 @@ export default async function handler(req, res) {
     const supabase = serviceClientPublic();
 
     const WIDGET = (req.query.widget || 'handy-andy').toString();
-    if (!['handy-andy', 'doms', 'handy-andy-handyman', 'doms-handyman'].includes(WIDGET)) {
+    if (![...ALL_BUSINESS_SLUGS, 'handy-andy-handyman', 'doms-handyman'].includes(WIDGET)) {
       return res.status(400).json({ error: 'Invalid widget' });
     }
     // Pick the funnel for this widget (booking vs handyman estimate).

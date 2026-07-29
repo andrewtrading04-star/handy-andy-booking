@@ -3,6 +3,7 @@
 // Doms (business=doms) is native: it answers from the CRM's service_area_zips
 // table instead of Zenbooker and returns the per-zip travel surcharge.
 import { serviceClient } from './_lib/supabase.js';
+import { NATIVE_SLUGS } from './_lib/native-businesses.js';
 
 // Native CRM zip check for Doms — no Zenbooker. Returns whether the zip is
 // covered, the per-zip surcharge, and a metro default city/state.
@@ -95,7 +96,7 @@ export default async function handler(req, res) {
 
   // Native CRM businesses — branch before any Zenbooker work.
   if (req.body && req.body.business === 'doms') return domsServiceArea(req, res);
-  if (req.body && req.body.business === 'handy-andy') return nativeServiceArea(req, res, 'handy-andy');
+  if (req.body && NATIVE_SLUGS.includes(req.body.business)) return nativeServiceArea(req, res, req.body.business);
 
   const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
   if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });

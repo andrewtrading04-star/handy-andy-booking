@@ -53,9 +53,13 @@ const REASSIGN_GRACE_MS = 30 * MIN;   // a freshly (re)assigned tech gets this l
 // route is still excluded via on_the_way_at, not just this list).
 const NOT_EN_ROUTE_STATUSES = ['pending', 'confirmed', 'assigned'];
 
-// business slug -> admin escalation phone env var.
+// business slug -> admin escalation phone env var. Mile High jobs are always
+// worked by a cross-hired Handy Andy tech (it has no techs of its own — see
+// PARTNER_SLUG in availability.js), so a late Mile High job escalates to
+// Heather exactly like a late Handy Andy one.
 const STAFF_PHONE_ENV = {
   'handy-andy': 'HEATHER_PHONE_NUMBER',
+  'mile-high': 'HEATHER_PHONE_NUMBER',
   'doms': 'JOEY_PHONE_NUMBER',
 };
 
