@@ -569,12 +569,20 @@ async function bookHandyAndy(req, res) {
   const { data: biz } = await db.from('businesses').select('id').eq('slug', 'handy-andy').single();
   if (!biz) return res.status(500).json({ error: 'Handy Andy business not configured' });
 
-  // ZIP -> service area: timezone, tech roster scope, and per-zip surcharge.
+  // ZIP -> service area: timezone, tech roster scope, per-zip surcharge, and
+  // the per-zip price adjustment (0 = no-op; resilient select in case
+  // migration 0082 hasn't landed on this deploy yet).
   const zip = String(b.postal_code || customer.zip || '').trim();
   if (!zip) return res.status(400).json({ error: 'A ZIP code is required' });
-  const { data: z } = await db.from('service_area_zips')
-    .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
-    .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
+  let z, zErr;
+  ({ data: z, error: zErr } = await db.from('service_area_zips')
+    .select('surcharge, price_adjustment_pct, service_area:service_areas ( id, name, state, timezone )')
+    .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
+  if (zErr && /price_adjustment_pct/.test(zErr.message || '')) {
+    ({ data: z } = await db.from('service_area_zips')
+      .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
+      .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
+  }
   if (!z || !z.service_area) {
     return res.status(400).json({ error: "Sorry — that ZIP code isn't in our service area." });
   }
@@ -582,6 +590,7 @@ async function bookHandyAndy(req, res) {
   const serviceAreaId = area.id;
   const tz = area.timezone || 'America/Denver';
   const surcharge = Number(z.surcharge) || 0;
+  const priceAdjustmentPct = Number(z.price_adjustment_pct) || 0;
 
   const startUTC = slotStartUTC(tz, dateStr, slotKey);
   const endUTC   = slotEndUTC(tz, dateStr, slotKey);
@@ -630,6 +639,21 @@ async function bookHandyAndy(req, res) {
   }
   if (afterHours > 0 && !lines.some(l => /after.?hours/i.test(l.name))) {
     lines.push({ kind: 'fee', name: 'After-hours fee', quantity: 1, unit_price: afterHours, line_total: afterHours });
+  }
+  // Per-zip price adjustment (owner-set, 0 for every zip until configured —
+  // see migration 0082). Same enforcement shape as the surcharge/after-hours
+  // guards above: a normal widget already sent this line (it fetched the
+  // same priceAdjustmentPct at zip-check time), a stale/tampered one didn't,
+  // so a missing line gets added here. Percentage of the REAL priced service
+  // lines only — everything already known to be a fee/discount/tax rather
+  // than an actual mount/bracket/add-on is excluded from that base, so the
+  // adjustment can never compound on top of another fee or on itself.
+  if (priceAdjustmentPct && !lines.some(l => /local pricing adjustment/i.test(l.name))) {
+    const NON_SERVICE_LINE_RE = /surcharge|after.?hours|^tax\b|\btip\b|coupon|multi-tv|local pricing adjustment|^location$/i;
+    const realBase = lines.filter(l => !NON_SERVICE_LINE_RE.test(l.name))
+      .reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+    const adjAmt = Math.round(realBase * priceAdjustmentPct / 100 * 100) / 100;
+    if (adjAmt) lines.push({ kind: 'fee', name: 'Local pricing adjustment', quantity: 1, unit_price: adjAmt, line_total: adjAmt });
   }
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
