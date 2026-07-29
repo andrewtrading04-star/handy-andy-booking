@@ -103,21 +103,36 @@ async function listServices(req, res, db) {
 }
 
 // POST ?action=submit
-// Sanitize an incoming line-item array the same way admin.js's own line-item
-// editor does: whitelist the shape, clamp quantity, derive a consistent
-// line_total. Used by the online-booking "request" flow (unstaffed service
-// areas — public/widget.js) to carry the customer's real priced TV selections
-// into the estimate, instead of a free-text description. Optional: the
-// original /estimate.html quick-quote form never sends this and is unaffected.
+// Sanitize an incoming line-item array into the estimate line-item shape used
+// EVERYWHERE else in the app: { description, qty, unit_price }. This exact
+// shape matters — the dashboard's estimate card, quote builder, totals math
+// and convert-to-job all read `description` and `qty` (see admin.html's
+// estCard()/estLineTotal()). Emitting `name`/`quantity` instead renders every
+// row as a literal "Item" at $0.00 with a $0.00 subtotal, which is precisely
+// what happened to the first real DFW request.
+//
+// Accepts either spelling on input so a caller sending {name, quantity} still
+// stores correctly. Used by the online-booking "request" flow (unstaffed
+// service areas — public/widget.js) to carry the customer's real priced TV
+// selections into the estimate, instead of a free-text description. Optional:
+// the original /estimate.html quick-quote form never sends this.
 function sanitizeEstimateLineItems(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.slice(0, 40).map(it => {
-    const name = String((it && (it.name != null ? it.name : it.label)) || '').trim().slice(0, 200);
-    const qty = Math.min(20, Math.max(1, Math.round(Number(it && it.quantity) || 1)));
-    const unit = Math.round((Number(it && it.unit_price) || 0) * 100) / 100;
-    const line_total = Math.round(unit * qty * 100) / 100;
-    return { name, quantity: qty, unit_price: unit, line_total };
-  }).filter(it => it.name);
+    const raw = it || {};
+    const descRaw = raw.description != null ? raw.description
+                  : (raw.name != null ? raw.name : raw.label);
+    const description = String(descRaw || '').trim().slice(0, 200);
+    const qtyRaw = raw.qty != null ? raw.qty : raw.quantity;
+    const qty = Math.min(20, Math.max(1, Math.round(Number(qtyRaw) || 1)));
+    const unit_price = Math.round((Number(raw.unit_price) || 0) * 100) / 100;
+    return { description, qty, unit_price };
+  }).filter(it => it.description);
+}
+
+// Subtotal of sanitized line items — same math as the dashboard's estLineTotal().
+function estimateLineItemsTotal(items) {
+  return Math.round(items.reduce((s, li) => s + li.qty * li.unit_price, 0) * 100) / 100;
 }
 
 async function submit(req, res, db) {
@@ -130,7 +145,7 @@ async function submit(req, res, db) {
   // has no such box (it's all structured TV selections), so build a readable
   // summary from the line items instead of forcing a redundant text field.
   const description = (body.description || '').toString().trim()
-    || (line_items.length ? `Online booking request: ${line_items.map(li => li.name).slice(0, 8).join(', ')}` : '');
+    || (line_items.length ? `Online booking request: ${line_items.map(li => li.description).slice(0, 8).join(', ')}` : '');
   if (!description) return res.status(400).json({ error: 'Please tell us what you need help with.' });
   if (description.length > 4000) return res.status(400).json({ error: 'Description is too long.' });
 
@@ -194,8 +209,25 @@ async function submit(req, res, db) {
     sms_consent: body.sms_consent !== false,
   };
 
+  // Quote at the rate the customer was actually shown (the widget sends its own
+  // TAX_RATE), instead of letting the column default apply a different one and
+  // make the office's total disagree with the customer's screen. Clamped, and
+  // only honored when sane — an absent/garbage value keeps the DB default.
+  const taxRate = Number(body.tax_rate);
+  if (Number.isFinite(taxRate) && taxRate >= 0 && taxRate <= 0.25) estimateInsert.tax_rate = taxRate;
+
   const { data: row, error } = await insertResilient(db, 'estimates', estimateInsert);
   if (error) throw error;
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  // ALL of these are collected and AWAITED before responding. They used to be
+  // fire-and-forget (`sendSMS(...).catch()` with no await), which silently
+  // loses the send on Vercel: once the handler returns its response the lambda
+  // is frozen, so an in-flight Twilio/Resend fetch never completes and never
+  // even logs why. That's why the first real DFW request produced no owner
+  // text and no [SMS] log line at all. Awaiting costs ~1s on a form submit and
+  // makes delivery (and its logging) deterministic.
+  const notifications = [];
 
   // Notify staff (owner + secretary) per business settings, PLUS the
   // business's secretary (Heather/Joey) directly via env var — guarantees they
@@ -212,7 +244,9 @@ async function submit(req, res, db) {
     const snippet = description.length > 90 ? description.slice(0, 90) + '…' : description;
     const zipTxt = zip ? ` ZIP: ${zip}.` : '';
     const msg = `New ${biz.name} estimate request from ${name} (${phone})${zipTxt}: ${svcTxt}${snippet}.${when} Check the dashboard.`;
-    for (const p of phones) sendSMS(p, msg).catch(console.error);
+    for (const p of phones) notifications.push(sendSMS(p, msg).catch(e => console.error('[estimate] staff sms failed:', e.message)));
+  } else {
+    console.warn(`[estimate] no staff notify phones configured for ${biz.slug} — nobody was texted`);
   }
 
   // A request from an unstaffed service area (public/widget.js's request
@@ -221,22 +255,31 @@ async function submit(req, res, db) {
   // for personal visibility into these specifically, since there is no tech
   // there yet to just auto-assign the job to. Marked by the widget via
   // request_type; never set by the original /estimate.html quick-quote form.
-  if (body.request_type === 'unstaffed_area' && process.env.OWNER_PHONE_NUMBER) {
-    const total = line_items.reduce((s, li) => s + li.line_total, 0);
-    const windows = preferred_slots.map(s => s.label || s.slot_key).slice(0, 3).join(', ') || 'none given';
-    const msg = `New service request: ${name}, ${zip || 'zip unknown'} (unstaffed market). Prefers ${windows}. Est. $${Math.round(total)}. No tech assigned — call to confirm.`;
-    sendSMS(process.env.OWNER_PHONE_NUMBER, msg).catch(console.error);
+  if (body.request_type === 'unstaffed_area') {
+    if (process.env.OWNER_PHONE_NUMBER) {
+      const total = estimateLineItemsTotal(line_items);
+      const windows = preferred_slots.map(s => s.label || s.slot_key).slice(0, 3).join(', ') || 'none given';
+      const addrTxt = address ? ` ${address},` : '';
+      const msg = `New service request: ${name} (${phone}).${addrTxt} ${zip || 'zip unknown'}. Prefers ${windows}. Est. $${Math.round(total)}. No tech assigned — call to confirm.`;
+      notifications.push(sendSMS(process.env.OWNER_PHONE_NUMBER, msg).catch(e => console.error('[estimate] owner sms failed:', e.message)));
+    } else {
+      // Loud, because this is the owner's only real-time signal for these.
+      console.error('[estimate] OWNER_PHONE_NUMBER is not set — unstaffed-area request went un-texted');
+    }
   }
 
   // Email heads-up to the business's secretary (Heather/Joey) — the ONLY
   // per-request email they get for online activity now (real bookings no
-  // longer email them; see mirror.js). Best-effort: never blocks the request.
-  sendOwnerEstimateAlert({
+  // longer email them; see mirror.js).
+  notifications.push(sendOwnerEstimateAlert({
     slug: biz.slug, businessName: biz.name,
     customer: { name, phone, email: customer.email || null },
     zip, serviceLabel: service_label, description,
     preferredSlots: preferred_slots, photoUrl: photo_url,
-  }).catch(e => console.warn('[estimate] owner email failed:', e.message));
+  }).catch(e => console.warn('[estimate] owner email failed:', e.message)));
+
+  // A notification failure must never lose the request — it's already stored.
+  await Promise.allSettled(notifications);
 
   return res.status(200).json({ ok: true, id: row.id });
 }

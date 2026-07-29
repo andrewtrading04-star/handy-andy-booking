@@ -649,6 +649,47 @@
     if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
     return items;
   }
+  // Office-facing spec for an unstaffed-area request (see doSubmit's request
+  // branch). Deliberately NOT buildLineItems(): that one is the customer's
+  // checkout summary, so it hides every $0 selection and drops the question
+  // each answer belongs to. The office reads this cold — with those omitted,
+  // a request arrives as bare fragments ("Brick") with no TV type, fireplace,
+  // or dismount answer at all, which is unreadable. Same prefix convention the
+  // hand-built estimates already use ("Wall Surface: Brick"), plus any free-text
+  // the customer typed on an option.
+  const REQ_SECTION_LABEL={frame_tv:'TV Type',size:'TV Size',bracket:'Bracket',fireplace:'Fireplace',surface:'Wall Surface',wires:'Wire Hiding',dismount:'Dismount',extras:'Add-on'};
+  function buildRequestLineItems(){
+    if(!serviceConfig)return [];
+    const liftSec=getSec('lifting');
+    const items=[];
+    for(const sec of serviceConfig.sections){
+      for(const sel of(selections[sec.id]||[])){
+        const opt=sec.options.find(o=>o.id===sel.option_id);
+        if(!opt)continue;
+        const amount=Math.round((opt.price||0)*sel.quantity*100)/100;
+        const prefix=REQ_SECTION_LABEL[sec.stepKey]||'';
+        let label=(liftSec&&sec.id===liftSec.id)?'Second Technician':(prefix?`${prefix}: ${opt.label}`:opt.label);
+        const note=(optionComments[opt.id]||'').trim();
+        if(note)label+=` — "${note}"`;
+        items.push({label,qty:sel.quantity,amount});
+      }
+    }
+    // Same reconciliation + adjustments the customer actually saw, so the
+    // office's subtotal equals the "Estimated total" on their screen.
+    const sum=items.reduce((s,it)=>s+it.amount,0);
+    const floored=realItemsFloor();
+    if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
+    const adj=territoryAdjustment();
+    if(adj>0)items.push({label:'Service area surcharge',qty:1,amount:adj});
+    if(zipDiscount()>0)items.push({label:'Location',qty:1,amount:-zipDiscount()});
+    const mFee=multiTvFeeAmount(), mPer=multiTvPerTvAmount(), mPrice=steppedMultiTvPriceDiscount();
+    if(mFee>0)items.push({label:'Multi-TV discount',qty:1,amount:-mFee});
+    if(mPer>0)items.push({label:`Multi-TV discount (${totalTVs()} TVs)`,qty:1,amount:-mPer});
+    if(mPrice>0)items.push({label:`Multi-TV price discount (${totalTVs()} TVs)`,qty:1,amount:-mPrice});
+    const cd=COUPONS[couponCode]||0;
+    if(cd>0)items.push({label:`Coupon ${couponCode}`,qty:1,amount:-cd});
+    return items;
+  }
   // Running total shown in the sticky footer bar on every step (except zip,
   // before we know the service area, and customer, which already shows its own
   // full breakdown). Mirrors the exact formula bCustomer() uses for its
@@ -1984,16 +2025,29 @@
       isSubmitting=true;
       const submitBtn=root.querySelector('#btn-submit');
       if(submitBtn){submitBtn.textContent='Sending…';submitBtn.disabled=true;}
-      const _lines=buildLineItems().map(li=>({name:li.label,quantity:li.qty||1,unit_price:(li.amount||0)/(li.qty||1)}));
+      // Canonical estimate line-item shape — { description, qty, unit_price }.
+      // Must match what the dashboard reads (admin.html's estCard/estLineTotal);
+      // sending {name, quantity} instead renders every row as "Item" at $0.00.
+      const _lines=buildRequestLineItems().map(li=>({
+        description:li.label,
+        qty:li.qty||1,
+        unit_price:Math.round(((li.amount||0)/(li.qty||1))*100)/100,
+      }));
+      const _loc=resolveLocation();
       const reqPayload={
         business:'handy-andy',
         service_label:serviceConfig.service_label||serviceConfig.name||'TV Mounting',
         customer:{
           name:`${customer.first_name||''} ${customer.last_name||''}`.trim(),
           phone:customer.phone, email:customer.email,
-          zip:enteredZip, address:customer.address, city:resolveLocation().city, state:resolveLocation().state,
+          zip:enteredZip,
+          address:[customer.address,customer.address_line2].filter(Boolean).join(', '),
+          city:_loc.city, state:_loc.state,
         },
         line_items:_lines,
+        // Quote at the SAME rate the customer was just shown, so the office's
+        // "Estimated total" can't disagree with the number on their screen.
+        tax_rate:TAX_RATE,
         preferred_slots:selectedRequestWindows,
         sms_consent:!!(root.querySelector('#c-sms-consent')||{}).checked,
         request_type:'unstaffed_area',

@@ -6585,7 +6585,16 @@ let estCache = {};   // id -> estimate row, so the quote modal can open without 
 const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
 // Sum of qty × unit price across line items, rounded to cents.
-function estLineTotal(items){ return Math.round((Array.isArray(items)?items:[]).reduce((t,it)=>t+(Number(it.qty)||0)*(Number(it.unit_price)||0),0)*100)/100; }
+// Estimate line items are stored as { description, qty, unit_price }. Read them
+// through these two helpers rather than touching the fields directly: a writer
+// that used the {name, quantity} spelling instead (as the online-booking
+// request flow briefly did) would otherwise render every row as a literal
+// "Item" at $0.00 with a $0.00 subtotal, with nothing to hint the data is fine
+// and only the read is wrong. Tolerating both spellings makes that class of bug
+// impossible to hit silently again.
+function liDesc(it){ return String((it&&(it.description!=null?it.description:(it.name!=null?it.name:it.label)))||''); }
+function liQty(it){ const q=it&&(it.qty!=null?it.qty:it.quantity); const n=Number(q); return Number.isFinite(n)&&n>0?n:(q==null?1:0); }
+function estLineTotal(items){ return Math.round((Array.isArray(items)?items:[]).reduce((t,it)=>t+liQty(it)*(Number(it.unit_price)||0),0)*100)/100; }
 function money2(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
 // { subtotal, tax, total } for a set of line items at a tax rate (fraction).
 function estTotals(items, taxRate){
@@ -6650,6 +6659,14 @@ function estCard(e){
   const tel=phone?`<a href="tel:${phone}" style="color:var(--accent);text-decoration:none;">${phone}</a>`:'';
   const email=e.customer_email?` · ${esc(e.customer_email)}`:'';
   const zip=e.customer_zip?` · ZIP ${esc(e.customer_zip)}`:'';
+  // Street address — captured by the online-booking request flow (unstaffed
+  // areas), which asks for the full address just like a normal booking. The
+  // older quick-quote form only ever collects a ZIP, so this is absent there.
+  // Linked to maps so the office can check the drive before calling back.
+  const addrFull=[e.customer_address,[e.customer_city,e.customer_state].filter(Boolean).join(', '),e.customer_zip].filter(Boolean).join(' · ');
+  const addrLine=e.customer_address
+    ? `<div class="meta">📍 <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([e.customer_address,e.customer_city,e.customer_state,e.customer_zip].filter(Boolean).join(' '))}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;">${esc(addrFull)}</a></div>`
+    : '';
   const slots=Array.isArray(e.preferred_slots)?e.preferred_slots:[];
   const slotChips=slots.length?`<div class="est-slots"><span class="est-slots-lbl">🗓 Customer's preferred times:</span>${slots.map(s=>
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
@@ -6661,15 +6678,15 @@ function estCard(e){
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const receivedBadge=created?`<div style="display:inline-block;font-size:13px;font-weight:800;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:8px;padding:5px 11px;margin-bottom:9px;">📥 Came in ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
   // Priced quote summary (line items). Shown when the office has built a quote.
-  const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(it.description||Number(it.unit_price)!==0)):[];
+  const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(liDesc(it)||Number(it.unit_price)!==0)):[];
   const eTax=(e.tax_rate==null)?0:Number(e.tax_rate);
   const t=estTotals(lines,eTax);
   const taxLines=eTax>0?
     `<div class="est-quote-sub"><span>Subtotal</span><span>${money2(t.subtotal)}</span></div>`+
     `<div class="est-quote-sub"><span>Tax (${(eTax*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span>${money2(t.tax)}</span></div>`:'';
   const quote=lines.length?`<div class="est-quote">${lines.map(it=>{
-    const qty=Number(it.qty)||0; const lt=qty*(Number(it.unit_price)||0);
-    return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(it.description||'Item')}</span><b>${money2(lt)}</b></div>`;
+    const qty=liQty(it); const lt=qty*(Number(it.unit_price)||0);
+    return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
   }).join('')}${taxLines}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(t.total)}</span></div></div>`:'';
   const hasQuote=lines.length>0;
   const buildLabel=hasQuote?'Edit quote':'Build quote';
@@ -6702,6 +6719,7 @@ function estCard(e){
         ${receivedBadge}
         <div class="est-toprow"><div class="name">${esc(e.service_label||'Estimate request')}</div>${agePill}</div>
         <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
+        ${addrLine}
         ${hasQuote ? '' : `<div class="est-desc">${esc(e.description||'')}</div>`}
         ${slotChips}
         ${quote}
@@ -6730,7 +6748,10 @@ function estCard(e){
 let nbSourceEstimateId=null;   // estimate this new-booking was converted from (archived on save)
 function convertEstimateToJob(id){
   const e=estCache[id]; if(!e){ toast('Estimate not found — refresh and try again.'); return; }
-  const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(it.description||Number(it.unit_price)!==0));
+  // Normalize to the canonical { description, qty, unit_price } shape on the way
+  // into the booking modal — see liDesc()/liQty() above.
+  const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(liDesc(it)||Number(it.unit_price)!==0))
+    .map(it=>({ description:liDesc(it), qty:liQty(it)||1, unit_price:Number(it.unit_price)||0 }));
   // Fold the add-ons the customer accepted into the job's line items so they carry
   // through to scheduling, the invoice, and payroll (each keeps its price/qty).
   (Array.isArray(e.accepted_upsells)?e.accepted_upsells:[]).filter(Boolean).forEach(u=>{
@@ -6752,8 +6773,9 @@ function convertEstimateToJob(id){
 // ── Estimate quote builder (line items) ──────────────────────────────────────
 function esLineRow(it){
   it=it||{};
-  const d=esc(it.description||'');
-  const q=(it.qty!=null&&it.qty!=='')?esc(String(it.qty)):'1';
+  const d=esc(liDesc(it));
+  const _q=(it.qty!=null&&it.qty!=='')?it.qty:(it.quantity!=null&&it.quantity!==''?it.quantity:null);
+  const q=_q!=null?esc(String(_q)):'1';
   const p=(it.unit_price!=null&&it.unit_price!=='')?esc(String(it.unit_price)):'';
   return `<div class="es-line" data-line>
     <input class="search es-li-desc" placeholder="Description" value="${d}">
