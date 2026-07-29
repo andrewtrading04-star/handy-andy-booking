@@ -5797,8 +5797,17 @@ function paintCallBanner(call){
     <span><b>${esc(who)}</b> left a voicemail${at?' at '+esc(at):''}. Return their call.</span>
     <button id="callBannerGo" style="background:#9a3412;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:800;cursor:pointer;">Open</button>
     <button id="callBannerX" title="Dismiss" aria-label="Dismiss this notification" style="margin-left:auto;background:transparent;border:none;color:#9a3412;font-size:19px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>`;
-  const anchor=document.getElementById('viewAsBanner');
-  if(anchor&&anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+  // Anchored inside <main>, above the schedule/content area — NOT
+  // #viewAsBanner, which lives in the left sidebar next to "Jobs Assigned To"
+  // and put this notice somewhere Heather/Joey had to go looking for it. Same
+  // slot the existing bad/good-alert banners use, so it reads as one system of
+  // "things above the schedule that need your attention" rather than a
+  // one-off. Falls back to prepending <main> itself if that anchor is ever
+  // missing, so this can never silently stop appearing.
+  const anchor=document.getElementById('badAlerts');
+  const main=document.querySelector('main.main');
+  if(anchor&&anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor);
+  else if(main) main.insertBefore(bar, main.firstChild);
   else document.body.insertBefore(bar, document.body.firstChild);
   document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
   document.getElementById('callBannerGo').onclick=()=>{
