@@ -6303,7 +6303,12 @@ async function dfwPagesAnalytics(req, res, auth) {
     } else if (r.event_type === 'time_on_page') {
       // Fires repeatedly (30s ticks) per session — keep the MAX per session as
       // that session's real dwell time on this page, not the sum of every tick.
-      const secs = Number(r.metadata && r.metadata.seconds) || 0;
+      // Capped at 10 minutes: an idle tab left open in the background keeps
+      // ticking indefinitely with zero real engagement (confirmed against real
+      // data — one session pinged for 5.5 hours straight, which would otherwise
+      // blow the page's average dwell time out to something meaningless).
+      const MAX_DWELL_SECS = 600;
+      const secs = Math.min(MAX_DWELL_SECS, Number(r.metadata && r.metadata.seconds) || 0);
       bucket.dwellBySession[r.session_id] = Math.max(bucket.dwellBySession[r.session_id] || 0, secs);
     } else if (r.event_type === 'page_exit') {
       const depth = Number(r.metadata && r.metadata.max_scroll_depth) || 0;
