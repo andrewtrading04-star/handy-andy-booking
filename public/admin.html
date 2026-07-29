@@ -1282,10 +1282,8 @@
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-        <input class="search" style="margin:0;flex:1;min-width:0" id="nbCustomLabel" placeholder="Custom line item">
-        <input class="search" style="margin:0;width:110px;flex:none" id="nbCustomPrice" placeholder="$ Price" inputmode="decimal" autocomplete="off">
-      </div>
+      <div id="nbCustomLinesWrap" style="margin-top:10px;"></div>
+      <button type="button" id="nbAddCustomLine" class="seg-btn" style="margin:6px 0 0;">+ Add custom line</button>
       <div style="display:flex;align-items:center;background:#16273f;border:1px solid rgba(255,255,255,.18);border-radius:10px;margin:10px 0 12px;overflow:hidden;">
         <span style="padding:11px 13px;font-size:13px;font-weight:700;color:#9fb0c3;white-space:nowrap;border-right:1px solid rgba(255,255,255,.14);">Travel fee</span>
         <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="flex:1;min-width:0;background:transparent;border:none;color:#eef2f7;padding:11px 13px;font-size:14px;outline:none;">
@@ -8300,7 +8298,7 @@ async function openNewBooking(prefill){
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
   document.getElementById('nbTravelFee').value='';
-  document.getElementById('nbCustomLabel').value=''; document.getElementById('nbCustomPrice').value='';
+  nbCustomLines=[{label:'',price:''}]; nbRenderCustomLines();
   document.getElementById('nbTotalDisplay').textContent='';
   nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
   nbSourceEstimateId=(prefill&&prefill._sourceEstimateId)||null;   // archive it on save
@@ -9142,17 +9140,43 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
 });
 document.getElementById('nbTravelFee').addEventListener('change',updateNbTotal);
 // ── Custom line items ───────────────────────────────────────────────────────
-// Custom line item: one optional label + price typed straight in. Whatever's
-// in the price box (with $0 < price) flows live into the Subtotal/Tax/Total —
-// no Add button, no list. Leave it blank to skip.
-function nbCustomItem(){
-  const label=document.getElementById('nbCustomLabel').value.trim();
-  const price=parseFloat(document.getElementById('nbCustomPrice').value);
-  if(!(price>0) || isNaN(price)) return null;
-  return { label: label || 'Custom line item', price: Math.round(price*100)/100 };
+// A repeatable list of label+price rows (was a single fixed pair — the office
+// needed more than one custom line on a quote, e.g. two separate extra parts).
+// Each row flows live into Subtotal/Tax/Total same as before; a row with no
+// price >0 is skipped, so blank rows never block submission.
+let nbCustomLines=[{label:'',price:''}];
+function nbRenderCustomLines(){
+  const wrap=document.getElementById('nbCustomLinesWrap'); if(!wrap) return;
+  wrap.innerHTML=nbCustomLines.map((l,i)=>`
+    <div class="nb-custom-row" data-i="${i}" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <input class="search nb-custom-label" style="margin:0;flex:1;min-width:0" placeholder="Custom line item" value="${esc(l.label)}">
+      <input class="search nb-custom-price" style="margin:0;width:110px;flex:none" placeholder="$ Price" inputmode="decimal" autocomplete="off" value="${esc(l.price)}">
+      ${nbCustomLines.length>1?`<button type="button" class="nb-custom-rm" aria-label="Remove line" style="flex:none;background:none;border:none;color:#8aa0c4;font-size:18px;cursor:pointer;padding:0 4px;">×</button>`:''}
+    </div>`).join('');
+  wrap.querySelectorAll('.nb-custom-label,.nb-custom-price').forEach(inp=>inp.addEventListener('input',e=>{
+    const row=e.target.closest('.nb-custom-row'); const i=Number(row.dataset.i);
+    nbCustomLines[i][e.target.classList.contains('nb-custom-label')?'label':'price']=e.target.value;
+    updateNbTotal();
+  }));
+  wrap.querySelectorAll('.nb-custom-rm').forEach(btn=>btn.addEventListener('click',e=>{
+    const row=e.target.closest('.nb-custom-row'); const i=Number(row.dataset.i);
+    nbCustomLines.splice(i,1);
+    nbRenderCustomLines(); updateNbTotal();
+  }));
 }
-document.getElementById('nbCustomLabel').addEventListener('input',updateNbTotal);
-document.getElementById('nbCustomPrice').addEventListener('input',updateNbTotal);
+document.getElementById('nbAddCustomLine').addEventListener('click',()=>{
+  nbCustomLines.push({label:'',price:''});
+  nbRenderCustomLines();
+});
+// All rows with a real price >0, as { label, price } — blank/zero rows are
+// skipped so an empty extra row never blocks submission.
+function nbCustomItems(){
+  return nbCustomLines.map(l=>{
+    const price=parseFloat(l.price);
+    if(!(price>0) || isNaN(price)) return null;
+    return { label: (l.label||'').trim() || 'Custom line item', price: Math.round(price*100)/100 };
+  }).filter(Boolean);
+}
 document.getElementById('nbSlots').addEventListener('click',e=>{
   const btn=e.target.closest('.nb-slot'); if(!btn) return;
   [...document.getElementById('nbSlots').querySelectorAll('.nb-slot')].forEach(b=>b.classList.remove('on'));
@@ -9739,8 +9763,8 @@ function nbCollectSelections(){
   }
   // Lines carried over from a converted estimate ride on every job type.
   if(nbConvertLines) nbConvertLines.forEach(l=>out.push({option_id:null, label:l.label, price:l.price, quantity:l.quantity}));
-  // Custom line item first, so it shows on every job type (TV or Handyman).
-  const ci=nbCustomItem(); if(ci) out.push({option_id:null, label:ci.label, price:ci.price, quantity:1});
+  // Custom line items first, so they show on every job type (TV or Handyman).
+  nbCustomItems().forEach(ci=>out.push({option_id:null, label:ci.label, price:ci.price, quantity:1}));
   // Handyman labor jobs: a single hourly line at $85/hr, no TV options.
   if(nbHandymanActive){
     if(nbHandymanHours>0) out.push({option_id:null, label:`Handyman Labor: ${nbHandymanLabel} — ${nbHandymanHours} hour${nbHandymanHours===1?'':'s'}${nbHandymanNote.trim()?` (${nbHandymanNote.trim()})`:''}`, price:HANDYMAN_HOURLY, quantity:nbHandymanHours});
