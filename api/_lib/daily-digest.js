@@ -86,6 +86,13 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       const li = (b.booking_line_items || []).find(x => x.kind === 'coupon');
       return li ? li.name.replace(/^Coupon\s+/i, '') : null;
     };
+    // Per-zip flat price adjustment (api/book.js, ZIP_ADJUSTMENT_LINE_NAME —
+    // keep this string in sync with that constant). Deliberately invisible to
+    // the customer everywhere else (no line on their receipt, no mention in
+    // the widget) — this digest is the ONE place it's meant to surface, since
+    // the owner explicitly wants to know whenever a job used it.
+    const ZIP_ADJUSTMENT_LINE_NAME = 'Location-based pricing';
+    const zipAdjustmentLine = (b) => (b.booking_line_items || []).find(x => x.name === ZIP_ADJUSTMENT_LINE_NAME) || null;
 
     // ── Overdue jobs — NOT limited to today's bookings. Any job, from any
     // day, whose scheduled time has passed by 24+ hours but is still sitting
@@ -147,6 +154,26 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     // matching issue (a bare $0 booking would otherwise also trip "low profit"
     // and "no line items" — one clear flag beats three redundant ones).
     const who = (b) => b.customer?.name || 'A customer';
+
+    // Zip pricing adjustment — jobs today whose price was bumped/cut by the
+    // per-zip flat adjustment. Owner-requested visibility: the customer never
+    // sees this line anywhere, so this digest is the only place it's tracked.
+    const zipAdjustedBookings = bookings
+      .map(b => ({ b, li: zipAdjustmentLine(b) }))
+      .filter(x => x.li && Number(x.li.line_total) !== 0);
+    const zipAdjustmentBlock = zipAdjustedBookings.length
+      ? `<div style="margin:0 0 20px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px 18px;">
+          <div style="font-weight:800;color:#1e40af;font-size:15px;margin-bottom:10px;">&#128205; Zip pricing adjustment used today (${zipAdjustedBookings.length})</div>
+          <ul style="margin:0;padding-left:18px;color:#1e40af;font-size:13px;line-height:1.7;">
+            ${zipAdjustedBookings.map(({ b, li }) => {
+              const amt = Number(li.line_total);
+              const sign = amt > 0 ? '+' : '-';
+              return `<li><strong>${escHtml(who(b))}</strong> (${escHtml(b.postal_code || 'zip unknown')}) &mdash; ${sign}${money(Math.abs(amt))}.</li>`;
+            }).join('')}
+          </ul>
+        </div>`
+      : '';
+
     // Customer ids that show up more than once among today's bookings — a
     // second job for the same person on the same day, which is either a
     // legitimate repeat customer or an accidental double-book worth a glance.
@@ -272,6 +299,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${escHtml(dateLabel)} · daily summary</div>
       ${issuesBlock}
       ${overdueBlock}
+      ${zipAdjustmentBlock}
       ${bookingsTable}
       <div style="margin-top:18px;font-size:12px;color:#9ca3af;">You're getting one summary a day instead of an email per booking. Sent at 8 PM Denver.</div>
     </div>`;

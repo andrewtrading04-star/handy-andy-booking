@@ -44,14 +44,17 @@ async function nativeServiceArea(req, res, slug) {
     const db = serviceClient();
     const { data: biz } = await db.from('businesses').select('id').eq('slug', slug).single();
     if (!biz) return res.status(500).json({ error: `${slug} business not configured` });
-    // select('surcharge, price_adjustment_pct, ...'), but fall back to a select
-    // without price_adjustment_pct if that migration hasn't landed on this
-    // deploy yet -- same resilience pattern domsServiceArea uses for surcharge.
+    // select('surcharge, price_adjustment_amount, ...'), but fall back to a
+    // select without price_adjustment_amount if migration 0083 hasn't landed
+    // on this deploy yet -- same resilience pattern domsServiceArea uses for
+    // surcharge. A flat DOLLAR amount, not a percentage (owner-set, per zip,
+    // 0 for every zip until explicitly configured) -- see widget.js
+    // zipFlatAdjustment() for how it's folded silently into the total.
     let z, zErr;
     ({ data: z, error: zErr } = await db.from('service_area_zips')
-      .select('surcharge, price_adjustment_pct, service_area:service_areas ( id, name, state, timezone )')
+      .select('surcharge, price_adjustment_amount, service_area:service_areas ( id, name, state, timezone )')
       .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
-    if (zErr && /price_adjustment_pct/.test(zErr.message || '')) {
+    if (zErr && /price_adjustment_amount/.test(zErr.message || '')) {
       ({ data: z } = await db.from('service_area_zips')
         .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
         .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
@@ -65,9 +68,7 @@ async function nativeServiceArea(req, res, slug) {
       service_area_id: area.id,
       territory_name:  area.name,
       surcharge:       Number(z.surcharge) || 0,
-      // 0 (untouched zips, and every zip until Andrew sets one) means the
-      // widget's own math is unaffected -- see priceAdjustmentPct() there.
-      price_adjustment_pct: Number(z.price_adjustment_pct) || 0,
+      price_adjustment_amount: Number(z.price_adjustment_amount) || 0,
       timezone:        area.timezone || 'America/Denver',
       city:            area.name || null,
       state:           area.state || null,

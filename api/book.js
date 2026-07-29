@@ -570,15 +570,15 @@ async function bookHandyAndy(req, res) {
   if (!biz) return res.status(500).json({ error: 'Handy Andy business not configured' });
 
   // ZIP -> service area: timezone, tech roster scope, per-zip surcharge, and
-  // the per-zip price adjustment (0 = no-op; resilient select in case
-  // migration 0082 hasn't landed on this deploy yet).
+  // the per-zip FLAT price adjustment (0 = no-op; resilient select in case
+  // migration 0083 hasn't landed on this deploy yet).
   const zip = String(b.postal_code || customer.zip || '').trim();
   if (!zip) return res.status(400).json({ error: 'A ZIP code is required' });
   let z, zErr;
   ({ data: z, error: zErr } = await db.from('service_area_zips')
-    .select('surcharge, price_adjustment_pct, service_area:service_areas ( id, name, state, timezone )')
+    .select('surcharge, price_adjustment_amount, service_area:service_areas ( id, name, state, timezone )')
     .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
-  if (zErr && /price_adjustment_pct/.test(zErr.message || '')) {
+  if (zErr && /price_adjustment_amount/.test(zErr.message || '')) {
     ({ data: z } = await db.from('service_area_zips')
       .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
       .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
@@ -590,7 +590,7 @@ async function bookHandyAndy(req, res) {
   const serviceAreaId = area.id;
   const tz = area.timezone || 'America/Denver';
   const surcharge = Number(z.surcharge) || 0;
-  const priceAdjustmentPct = Number(z.price_adjustment_pct) || 0;
+  const priceAdjustmentAmount = Number(z.price_adjustment_amount) || 0;
 
   const startUTC = slotStartUTC(tz, dateStr, slotKey);
   const endUTC   = slotEndUTC(tz, dateStr, slotKey);
@@ -640,20 +640,21 @@ async function bookHandyAndy(req, res) {
   if (afterHours > 0 && !lines.some(l => /after.?hours/i.test(l.name))) {
     lines.push({ kind: 'fee', name: 'After-hours fee', quantity: 1, unit_price: afterHours, line_total: afterHours });
   }
-  // Per-zip price adjustment (owner-set, 0 for every zip until configured —
-  // see migration 0082). Same enforcement shape as the surcharge/after-hours
-  // guards above: a normal widget already sent this line (it fetched the
-  // same priceAdjustmentPct at zip-check time), a stale/tampered one didn't,
-  // so a missing line gets added here. Percentage of the REAL priced service
-  // lines only — everything already known to be a fee/discount/tax rather
-  // than an actual mount/bracket/add-on is excluded from that base, so the
-  // adjustment can never compound on top of another fee or on itself.
-  if (priceAdjustmentPct && !lines.some(l => /local pricing adjustment/i.test(l.name))) {
-    const NON_SERVICE_LINE_RE = /surcharge|after.?hours|^tax\b|\btip\b|coupon|multi-tv|local pricing adjustment|^location$/i;
-    const realBase = lines.filter(l => !NON_SERVICE_LINE_RE.test(l.name))
-      .reduce((s, l) => s + (Number(l.line_total) || 0), 0);
-    const adjAmt = Math.round(realBase * priceAdjustmentPct / 100 * 100) / 100;
-    if (adjAmt) lines.push({ kind: 'fee', name: 'Local pricing adjustment', quantity: 1, unit_price: adjAmt, line_total: adjAmt });
+  // Per-zip FLAT price adjustment (owner-set, 0 for every zip until
+  // configured — see migration 0083). ALWAYS enforced here — unlike the
+  // surcharge/after-hours guards above, the widget never sends this as a
+  // named line at all (see widget.js zipFlatAdjustment()/calcTotal() — it's
+  // folded silently into the totals the customer sees, with no line to
+  // check for). This IS the one and only place the charge gets applied.
+  // kind:'fee' so payroll skips it outright — it changes what the customer
+  // pays, never what the tech is paid. Named plainly (not "zip"/"pricing
+  // adjustment") and EXCLUDED from the customer's emailed receipt below
+  // (see the `emailLines` filter) — the office can see it on the ticket in
+  // the dashboard and in the daily digest; the customer never sees why (or
+  // that) their price differs from another address.
+  const ZIP_ADJUSTMENT_LINE_NAME = 'Location-based pricing';
+  if (priceAdjustmentAmount) {
+    lines.push({ kind: 'fee', name: ZIP_ADJUSTMENT_LINE_NAME, quantity: 1, unit_price: priceAdjustmentAmount, line_total: priceAdjustmentAmount });
   }
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
@@ -850,7 +851,13 @@ async function bookHandyAndy(req, res) {
         { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
       const slot = SLOTS.find(s => s.key === slotKey);
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
-      const emailLines = lines.map(l => ({ label: l.name, qty: l.quantity, amount: l.line_total }));
+      // The zip price adjustment is real money the customer pays (it's inside
+      // `price`/`subtotal` below), but is NEVER itemized to them — filtered
+      // out of the receipt they actually see. It still lives in `lines`
+      // (stored on the booking) for the office/admin and the daily digest.
+      const emailLines = lines
+        .filter(l => l.name !== ZIP_ADJUSTMENT_LINE_NAME)
+        .map(l => ({ label: l.name, qty: l.quantity, amount: l.line_total }));
       const { subject, html } = bookingConfirmationEmail({
         firstName:   customer.first_name || sum.firstName || '',
         dateLong,

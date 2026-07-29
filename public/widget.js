@@ -23,7 +23,7 @@
   let NATIVE = NATIVE_DEFAULT;
   try { const _np = new URLSearchParams(location.search).get('native'); if (_np === '1') NATIVE = true; if (_np === '0') NATIVE = false; } catch (e) {}
   // Set from the native zip check; used by slots, surcharge, and tech scoping.
-  let serviceAreaId = null, nativeSurcharge = 0, nativePriceAdjustmentPct = 0, areaName = '';
+  let serviceAreaId = null, nativeSurcharge = 0, nativePriceAdjustmentAmount = 0, areaName = '';
   const isDenver = () => NATIVE ? /denver/i.test(areaName) : territoryId === DENVER_ID;
 
   // Fallback only — the zip check returns the customer's real city/state, which takes priority.
@@ -157,16 +157,16 @@
     '1723559782141x609094402068185100': 100, // Denver #4 Boulder/Colorado Springs
   };
   function territoryAdjustment(){ return NATIVE ? nativeSurcharge : (TERRITORY_ADJUSTMENTS[territoryId] || 0); }
-  // Per-zip percentage price adjustment (owner-set per zip, admin.js/DB —
-  // 0 for every zip until explicitly configured, so this is a no-op almost
-  // everywhere). Applies ONLY to the priced service lines (calcTotal()) —
-  // never to the travel surcharge, after-hours fee, tax, or tip, and is kept
-  // deliberately separate from multiTvDiscount() above, which keys off the
+  // Per-zip FLAT price adjustment (owner-set per zip, DB — 0 for every zip
+  // until explicitly configured). Deliberately NEVER shown to the customer as
+  // its own line anywhere (checkout summary, thank-you page, or the emailed
+  // receipt) — see realItemsFloor()/calcTotal() below for how it's folded
+  // silently into the number the customer sees and pays, with no explanatory
+  // row. It is still charged for real (server-enforced in api/book.js) and
+  // stored as its own line item there so the office/admin can see it, and it
+  // is kept separate from multiTvDiscount() above, which keys off the
   // travel-fee zone specifically and must not be affected by this.
-  function zipPriceAdjustmentAmount(){
-    if(!NATIVE || !nativePriceAdjustmentPct) return 0;
-    return Math.round(calcTotal()*nativePriceAdjustmentPct/100*100)/100;
-  }
+  function zipFlatAdjustment(){ return NATIVE ? nativePriceAdjustmentAmount : 0; }
   const ZIP_DISCOUNTS = { '77011': 10 };
   function zipDiscount(){ return ZIP_DISCOUNTS[customer.zip] || 0; }
 
@@ -588,7 +588,12 @@
     // Stripe auto-unmounts from old node and re-mounts here
     _stripeCard.mount(el);
   }
-  function calcTotal(){
+  // The floor of the real, itemized service price (TV size/brackets/add-ons),
+  // BEFORE the invisible zip adjustment — this is what buildLineItems() below
+  // reconciles its "Service minimum" line against, so an active zip
+  // adjustment can never masquerade as (or trigger a bogus) minimum-price
+  // top-up.
+  function realItemsFloor(){
     if(!serviceConfig)return 0;
     let sum=0;
     for(const sec of serviceConfig.sections){
@@ -601,6 +606,12 @@
     // — already included above since extras section is iterated
     return Math.max(sum, serviceConfig.minPrice||139);
   }
+  // The customer-facing "service subtotal" — every downstream total
+  // (footerTotal, bCustomer's checkout summary, the emailed receipt) reads
+  // from THIS, so the invisible zip adjustment (folded in here, with no
+  // separate line anywhere) is baked into every number the customer sees
+  // without ever being itemized or explained.
+  function calcTotal(){ return realItemsFloor()+zipFlatAdjustment(); }
   // Customer-facing itemized line items for the checkout summary AND the thank-you page.
   // Only options that actually cost money are listed — a $0 selection (e.g. "I can help
   // lift it / no second technician needed") is omitted so it never looks like a free add-on.
@@ -621,7 +632,7 @@
     }
     // Reconcile with the service minimum so the lines always sum to the subtotal.
     const sum=items.reduce((s,it)=>s+it.amount,0);
-    const floored=calcTotal();
+    const floored=realItemsFloor();
     if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
     return items;
   }
@@ -631,7 +642,7 @@
   // subtotal, so the number the customer watches grow never disagrees with the
   // one they see at checkout.
   function footerTotal(){
-    return calcTotal()+territoryAdjustment()+zipPriceAdjustmentAmount()-zipDiscount()+selectedSlotSurcharge()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount();
+    return calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount();
   }
   function slotSurcharge(sl,ds){
     const m=sl.arrival_window.match(/^(\d+)(?::\d+)?\s*(AM|PM)/i);
@@ -707,7 +718,7 @@
       case 'extras':   body=bExtras();   break;
       case 'terms':    body=bTerms();    break;
       case 'slots':    body=bSlots();    break;
-      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()+zipPriceAdjustmentAmount()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
+      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
     }
     // Running total on every step except 'zip' (service area/pricing profile
     // isn't known yet) and 'customer' (bCustomer() already shows its own full
@@ -1464,13 +1475,16 @@
 
   function bCustomer(){
     const adj=territoryAdjustment();
-    const zipAdj=zipPriceAdjustmentAmount();
     const zipDisc=zipDiscount();
     const ah=selectedSlotSurcharge();
     const mtvPerTv=multiTvPerTvAmount();
     const mtvFee=multiTvFeeAmount();
     const mtvPriceDisc=steppedMultiTvPriceDiscount();
-    const base=calcTotal()+adj+zipAdj-zipDisc+ah-mtvPerTv-mtvFee-mtvPriceDisc;
+    // calcTotal() already carries the invisible zip flat adjustment (see
+    // realItemsFloor()/calcTotal() above) — this is the whole point: it's
+    // baked into "base" with no separate term here and no line item below,
+    // so nothing in this checkout summary ever names or explains it.
+    const base=calcTotal()+adj-zipDisc+ah-mtvPerTv-mtvFee-mtvPriceDisc;
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
@@ -1509,10 +1523,6 @@
           ${adj>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Service area surcharge</span>
             <span style="color:#fff!important;">+$${adj}</span>
-          </div>`:''}
-          ${zipAdj!==0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
-            <span>Local pricing adjustment</span>
-            <span style="color:${zipAdj>0?'#fff':'#4ade80'}!important;">${zipAdj>0?'+':'-'}$${Math.abs(zipAdj)}</span>
           </div>`:''}
           ${ah>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>After-hours fee (8 PM)</span>
@@ -1748,7 +1758,7 @@
       if(NATIVE){
         // Native: the surcharge + metro come from the CRM zip check, and the
         // pricing profile is chosen by metro name (Austin is cheaper).
-        serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; nativePriceAdjustmentPct=Number(d.price_adjustment_pct)||0; areaName=d.territory_name||'';
+        serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; nativePriceAdjustmentAmount=Number(d.price_adjustment_amount)||0; areaName=d.territory_name||'';
         if(/austin/i.test(areaName)){ configKey='austin'; priceCity='austin'; }
         else if(/houston/i.test(areaName)){ configKey='default'; priceCity='houston'; }
       } else {
@@ -1870,8 +1880,10 @@
     const _df=selectedDate?fmtDate(selectedDate):null;
     const _lines=buildLineItems();
     if(territoryAdjustment()>0)_lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
-    const _zipAdj=zipPriceAdjustmentAmount();
-    if(_zipAdj!==0)_lines.push({label:'Local pricing adjustment',qty:1,amount:_zipAdj});
+    // The zip flat adjustment is DELIBERATELY never pushed as its own line
+    // here — calcTotal() already carries it invisibly (see realItemsFloor()
+    // above), so _taxBase below picks it up for free with no explanatory row
+    // in the email/thank-you page.
     const _ahFee=selectedSlotSurcharge();
     if(_ahFee>0)_lines.push({label:'After-hours fee (8 PM)',qty:1,amount:_ahFee});
     if(zipDiscount()>0)_lines.push({label:'Location',qty:1,amount:-zipDiscount()});
@@ -1882,7 +1894,7 @@
     if(_mtvPerTv>0)_lines.push({label:`Multi-TV discount (${totalTVs()} TVs)`,qty:1,amount:-_mtvPerTv});
     if(_mtvPriceDisc>0)_lines.push({label:`Multi-TV price discount (${totalTVs()} TVs)`,qty:1,amount:-_mtvPriceDisc});
     // Sales tax on the taxable subtotal (matches the checkout screen's base).
-    const _taxBase=calcTotal()+territoryAdjustment()+_zipAdj+_ahFee-zipDiscount()-_mtvFee-_mtvPerTv-_mtvPriceDisc;
+    const _taxBase=calcTotal()+territoryAdjustment()+_ahFee-zipDiscount()-_mtvFee-_mtvPerTv-_mtvPriceDisc;
     const _tax=Math.round(_taxBase*TAX_RATE*100)/100;
     if(_tax>0)_lines.push({label:'Tax (8.25%)',qty:1,amount:_tax});
     const _couponDisc=COUPONS[couponCode]||0;
@@ -1924,7 +1936,7 @@
             ts:Date.now()
           }));
         }catch(e){}
-        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+zipPriceAdjustmentAmount()+selectedSlotSurcharge()-(COUPONS[couponCode]||0)-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount());
+        logEvent('booking_confirmed', 'customer', calcTotal()+territoryAdjustment()+selectedSlotSurcharge()-(COUPONS[couponCode]||0)-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount());
         window.location.href=THANKYOU_URL;
       }else{
         // Server returned an error status — the job was not created, so it's safe
