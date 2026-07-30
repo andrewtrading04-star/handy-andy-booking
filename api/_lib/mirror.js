@@ -81,7 +81,24 @@ export async function mirrorBooking(ctx = {}) {
     } else if (custRow.email) {
       const { data: found } = await db.from('customers').select('id')
         .eq('business_id', biz.id).eq('email', custRow.email).maybeSingle();
-      customer_id = found?.id || (await db.from('customers').insert(custRow).select('id').single()).data?.id || null;
+      if (found) {
+        // Refresh the matched row with what was JUST typed at checkout — the
+        // most current truth about this customer. Previously this branch kept
+        // whatever name/phone/address the row already had and silently
+        // discarded the new booking's values, so any customer whose email
+        // already existed (a repeat booking, OR simply an email that
+        // coincidentally matched an imported historical record) had their
+        // freshly-typed name overwritten by whatever was on file — including,
+        // concretely, a leftover test customer's placeholder name ("ZZ
+        // MileHighTest") sticking on a real booking (2026-07-30 incident).
+        // The zenbooker_customer_id branch above already does a full
+        // overwrite on match; this makes the email-match branch consistent
+        // with it instead of being the one path that silently goes stale.
+        const { data } = await db.from('customers').update(custRow).eq('id', found.id).select('id').single();
+        customer_id = data?.id || found.id;
+      } else {
+        customer_id = (await db.from('customers').insert(custRow).select('id').single()).data?.id || null;
+      }
     } else {
       customer_id = (await db.from('customers').insert(custRow).select('id').single()).data?.id || null;
     }

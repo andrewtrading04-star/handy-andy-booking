@@ -43,7 +43,14 @@
     ? 'pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA'
     : null;
   let STRIPE_KEY = STRIPE_KEY_FALLBACK;
-  const THANKYOU_URL= 'https://www.ihandyandy.com/thankyou/';
+  // Every business needs its OWN thank-you page — this was hardcoded to Handy
+  // Andy's URL regardless of BUSINESS, so a real Mile High customer who just
+  // booked and paid was redirected to ihandyandy.com instead of Mile High's
+  // own site (real incident, 2026-07-30).
+  const THANKYOU_URL = {
+    'handy-andy': 'https://www.ihandyandy.com/thankyou/',
+    'mile-high':  'https://www.milehightvmounting.com/thankyou/',
+  }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
 
   // ── Native (off-Zenbooker) booking mode ──────────────────────────────────
   // When on, the widget books through the CRM's own service-area / slots / book
