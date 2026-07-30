@@ -237,16 +237,6 @@ export default async function handler(req, res) {
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
       case 'send_gds_rate_update': return await sendGdsRateUpdate(req, res, db);
-      case '_debug_pick_tech': {
-        const { business, date, slot_key, service_area_id } = req.query;
-        const picked = await pickOpenTech(db, {
-          businessSlug: business, dateStr: date, slotKey: slot_key,
-          serviceAreaId: service_area_id || null, crossHire: true,
-        });
-        let name = null;
-        if (picked) { const { data: t } = await db.from('technicians').select('name').eq('id', picked).maybeSingle(); name = t?.name || null; }
-        return res.status(200).json({ picked, name });
-      }
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
