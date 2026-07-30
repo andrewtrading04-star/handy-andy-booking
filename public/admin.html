@@ -151,25 +151,28 @@
   .ghost-n{font-size:12.5px;font-weight:600;color:#9aa4b2;margin-top:3px;display:flex;align-items:center;gap:5px;}
   .ghost-tag{font-size:9.5px;font-weight:800;color:#7a8694;background:#e7e9ee;border-radius:5px;padding:1px 6px;}
   .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
-  /* New single-row card: avatar | name+time+lights | price stack. */
-  .evt{display:flex;align-items:center;gap:10px;}
-  .evt-mid{flex:1;min-width:0;}
-  .evt-n{font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .evt-t{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mute);font-weight:600;}
+  /* Two-row card: top = avatar + name + price. Bottom = time + lights + tech
+     pay/profit, indented under the name so it reads as a detail line, not
+     crammed onto the same row as the price (that's what made v1 unreadable —
+     the lights collided with the price number in a narrow week column). */
+  .evt{display:flex;flex-direction:column;gap:7px;padding:11px 12px;min-height:60px;}
+  .evt-top{display:flex;align-items:center;gap:9px;}
+  .evt-n{flex:1;min-width:0;font-size:14px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .evt-bottom{display:flex;align-items:center;gap:7px;padding-left:33px;}
+  .evt-t{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mute);font-weight:600;}
   .evt-time{white-space:nowrap;}
   .evt-dur{font-weight:600;color:var(--mute);}
-  .evt-lights{display:flex;align-items:center;gap:4px;flex-shrink:0;}
-  .evt-light-pay{font-size:9px;display:flex;line-height:1;}
-  .evt-light-done{width:6px;height:6px;border-radius:50%;display:block;flex-shrink:0;}
+  .evt-lights{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+  .evt-light-pay{font-size:10px;display:flex;line-height:1;}
+  .evt-light-done{width:7px;height:7px;border-radius:50%;display:block;flex-shrink:0;}
   .evt-light-blue{color:#378ADD;} .evt-light-done.evt-light-blue{background:#378ADD;}
   .evt-light-yellow{color:#EF9F27;} .evt-light-done.evt-light-yellow{background:#EF9F27;}
   .evt-light-green{color:#639922;} .evt-light-done.evt-light-green{background:#639922;}
   .evt-light-red{color:#E24B4A;} .evt-light-done.evt-light-red{background:#E24B4A;}
   .evt-light-gray{color:var(--mute);} .evt-light-done.evt-light-gray{background:var(--mute);}
-  .evt-side{text-align:right;flex-shrink:0;}
-  /* Total ticket price (black) + total tech pay/profit (smaller, muted, admin-only). */
-  .evt-price{font-weight:500;color:var(--ink);font-size:14px;display:block;}
-  .evt-sub{font-size:10px;color:var(--mute);white-space:nowrap;}
+  /* Total ticket price (top row, next to name) + tech pay/profit (bottom row, next to lights). */
+  .evt-price{font-weight:600;color:var(--ink);font-size:15px;flex-shrink:0;}
+  .evt-sub{font-size:11px;color:var(--mute);white-space:nowrap;margin-left:auto;}
   .evt-techpay.neg,.evt-profit.neg{color:#dc2626;}
   .evt.s-completed .evt-n{color:var(--mute);}
   .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
@@ -2270,12 +2273,15 @@ function evtCard(b){
   if(b.econ&&b.econ.assigned&&b.econ.profit!=null) subParts.push(`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`);
   const subHtml = subParts.length ? `<span class="evt-sub">${subParts.join(' · ')}</span>` : '';
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
-    ${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}
-    <div class="evt-mid">
+    <div class="evt-top">
+      ${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}
       <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
-      <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1}</span>`:''}${lightsHtml}</div>
+      ${priceHtml}
     </div>
-    <div class="evt-side">${priceHtml}${subHtml}</div>
+    <div class="evt-bottom">
+      <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1}</span>`:''}${lightsHtml}</div>
+      ${subHtml}
+    </div>
   </div>`;
 }
 function dollarSignSvg(){ return '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
