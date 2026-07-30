@@ -236,6 +236,7 @@ export default async function handler(req, res) {
 
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
+      case 'send_gds_rate_update': return await sendGdsRateUpdate(req, res, db);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
@@ -7448,6 +7449,38 @@ async function zbImport(req, res, db, body) {
     bookings_written: Object.keys(savedIds).length, gds_line_items: gdsWritten,
     techs_created: createdTechs,
   });
+}
+
+// One-off internal notice to every active tech about the GDS-redemption pay
+// rate change ($60 -> $50, effective Mon Aug 3 2026 -- see api/_lib/payroll.js's
+// GDS_REDEEMED_RATE_CHANGE, which the payroll engine itself gates on the job's
+// scheduled date, not on when this code deployed). Recipients are read
+// straight from the technicians table (active + has an email on file), never
+// from the request. Sent from each tech's OWN business identity (Doms techs
+// get a Doms-branded email, Handy Andy techs a Handy Andy one) so it reads as
+// coming from the company they actually work for.
+async function sendGdsRateUpdate(req, res, db) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const { data: rows } = await db.from('technicians')
+    .select('name, email, business:businesses ( slug )')
+    .eq('active', true).not('email', 'is', null);
+  const subject = 'Pay rate update: GDS redemption jobs';
+  const results = [];
+  for (const t of rows || []) {
+    const slug = t.business?.slug || 'handy-andy';
+    const firstName = String(t.name || '').trim().split(/\s+/)[0] || 'there';
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;">
+      <p>Hi ${firstName},</p>
+      <p>Quick rate sheet update. Starting Monday, August 3, Guaranteed Dismount Service
+         redemption jobs (the free TV removal visits, $0 to the customer) now pay $50 per job,
+         previously $60.</p>
+      <p>Everything else on the rate sheet stays the same.</p>
+      <p>Thanks,<br>Andrew</p>
+    </div>`;
+    const r = await sendEmail({ slug, to: t.email, subject, html });
+    results.push({ to: t.email, name: t.name, business: slug, sent: !!r.sent, error: r.error || r.skipped || null });
+  }
+  return res.status(200).json({ results });
 }
 
 // One-off internal notice asking the office to un-spam the brand-new Mile High
