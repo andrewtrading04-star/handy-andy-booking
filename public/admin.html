@@ -151,19 +151,26 @@
   .ghost-n{font-size:12.5px;font-weight:600;color:#9aa4b2;margin-top:3px;display:flex;align-items:center;gap:5px;}
   .ghost-tag{font-size:9.5px;font-weight:800;color:#7a8694;background:#e7e9ee;border-radius:5px;padding:1px 6px;}
   .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
-  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);line-height:1.3;}
+  /* New single-row card: avatar | name+time+lights | price stack. */
+  .evt{display:flex;align-items:center;gap:10px;}
+  .evt-mid{flex:1;min-width:0;}
+  .evt-n{font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .evt-t{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mute);font-weight:600;}
   .evt-time{white-space:nowrap;}
-  .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
-  /* Total ticket price (black) + total tech pay (smaller, blue, admin-only). */
-  .evt-price{font-weight:800;color:var(--ink);margin-left:4px;}
-  .evt-techpay{font-weight:700;font-size:11px;color:#2563eb;margin-left:3px;}
-  /* Cash job: the tech is PAID a negative amount (they kept the customer's
-     money), so it reads red like a negative profit rather than blue like pay. */
-  .evt-techpay.neg{color:#dc2626;}
-  .evt-profit{font-weight:700;font-size:11px;color:#16a34a;margin-left:3px;}
-  .evt-profit.neg{color:#dc2626;}
-  .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
+  .evt-dur{font-weight:600;color:var(--mute);}
+  .evt-lights{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+  .evt-light-pay{font-size:9px;display:flex;line-height:1;}
+  .evt-light-done{width:6px;height:6px;border-radius:50%;display:block;flex-shrink:0;}
+  .evt-light-blue{color:#378ADD;} .evt-light-done.evt-light-blue{background:#378ADD;}
+  .evt-light-yellow{color:#EF9F27;} .evt-light-done.evt-light-yellow{background:#EF9F27;}
+  .evt-light-green{color:#639922;} .evt-light-done.evt-light-green{background:#639922;}
+  .evt-light-red{color:#E24B4A;} .evt-light-done.evt-light-red{background:#E24B4A;}
+  .evt-light-gray{color:var(--mute);} .evt-light-done.evt-light-gray{background:var(--mute);}
+  .evt-side{text-align:right;flex-shrink:0;}
+  /* Total ticket price (black) + total tech pay/profit (smaller, muted, admin-only). */
+  .evt-price{font-weight:500;color:var(--ink);font-size:14px;display:block;}
+  .evt-sub{font-size:10px;color:var(--mute);white-space:nowrap;}
+  .evt-techpay.neg,.evt-profit.neg{color:#dc2626;}
   .evt.s-completed .evt-n{color:var(--mute);}
   .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
   .evt.s-cancelled .evt-n{text-decoration:line-through;}
@@ -174,7 +181,6 @@
   .evt.overdue{border:1.5px solid var(--red);border-left:3px solid var(--red);background:#fef2f2;animation:evtPulse 1.8s ease-in-out infinite;}
   @keyframes evtPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0);}50%{box-shadow:0 0 0 4px rgba(239,68,68,.22);}}
   @media (prefers-reduced-motion:reduce){ .evt.overdue{animation:none;box-shadow:0 0 0 3px rgba(239,68,68,.18);} }
-  .evt-overdue{font-size:9.5px;font-weight:800;color:#fff;background:#ef4444;border-radius:999px;padding:1px 7px;white-space:nowrap;}
   .xco-secondary-tag{display:inline-block;font-size:10px;font-weight:800;background:#ffb366;color:#7a4620;padding:2px 6px;border-radius:4px;margin-left:4px;}
   body.doms .xco-secondary-tag{background:#4d8dff;color:#fff;}
   .job.xco-secondary .xco-secondary-tag{background:#ffb366;color:#7a4620;}
@@ -246,8 +252,14 @@
   /* #jobSearchWrap's own display:none/flex (set in JS -- section==='schedule'
      ? 'flex' : 'none') is what decides whether this shows at all. It must NOT
      be !important here: that overrides the inline style and pins the bar
-     visible on every tab (Reviews, Calls, Customers, ...), not just Schedule. */
-  #jobSearchWrap{justify-content:space-between;align-items:center;flex-wrap:wrap;}
+     visible on every tab (Reviews, Calls, Customers, ...), not just Schedule.
+     Now lives inline in the cal-head next to Today, not its own full-width bar. */
+  #jobSearchWrap{align-items:center;gap:6px;}
+  #jobSearchWrap input[type=text]{width:170px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px 7px 28px;font-size:13px;}
+  #jobSearchWrap input[type=text]:focus{outline:none;border-color:var(--accent);width:220px;}
+  .job-search-icon{position:relative;display:flex;align-items:center;}
+  .job-search-icon svg{position:absolute;left:9px;pointer-events:none;color:var(--mute);}
+  #jobSearchWrap label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);margin:0;cursor:pointer;white-space:nowrap;}
   table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
@@ -433,8 +445,7 @@
   .pay-paid{background:#dcfce7;color:#15803d;} .pay-unpaid{background:#f1f3f6;color:var(--mute);}
   .pay-card_on_file{background:#dbeafe;color:#1d4ed8;} .pay-deposit_paid{background:#fef3c7;color:#b45309;}
   .pay-refunded{background:#fee2e2;color:#b91c1c;} .pay-void{background:#f1f3f6;color:var(--mute);}
-  .evt-paid,.evt-complete{font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:1px 7px;white-space:nowrap;}
-  .evt-pills{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;}
+  .evt-paid{font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:1px 7px;white-space:nowrap;}
   /* Bracket Inventory */
   .bracket-table{width:100%;border-collapse:collapse;margin-bottom:20px;}
   .bracket-table th{background:var(--line2);padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.02em;}
@@ -1232,22 +1243,22 @@
 
     <div id="greeting" class="greeting hidden"></div>
 
-    <div id="jobSearchWrap" style="display:none;background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;gap:8px;">
-      <input type="text" id="jobSearch" placeholder="Search jobs by customer name…" style="flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;">
-      <div style="display:flex;gap:6px;align-items:center;">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);margin:0;cursor:pointer;">
-          <input type="checkbox" id="jobSearchShowCanceled" style="cursor:pointer;">
-          <span>Include canceled</span>
-        </label>
-      </div>
-    </div>
-
     <div class="cal-head" id="calHead">
       <div class="cal-nav">
         <button class="arrow" id="prevWk">‹</button>
         <div class="range-pill" id="rangeLabel">…</div>
         <button class="arrow" id="nextWk">›</button>
         <button class="btn ghost sm" id="todayBtn">Today</button>
+        <div id="jobSearchWrap" style="display:none;">
+          <div class="job-search-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="jobSearch" placeholder="Search customer…">
+          </div>
+          <label>
+            <input type="checkbox" id="jobSearchShowCanceled" style="cursor:pointer;">
+            <span>Canceled</span>
+          </label>
+        </div>
       </div>
       <div class="view-toggle" id="viewToggle">
         <button data-view="list">List</button>
@@ -2215,23 +2226,59 @@ function isOverdueUnpaid(b){
   const t=new Date(b.scheduled_at).getTime();
   return !!t && (Date.now()-t) > 48*3600*1000;
 }
+// Two status lights: left is payment ($ icon), right is completion (dot).
+//   gray   — cancelled / no-show, nothing to track
+//   yellow — tech en route / arrived / actively working the job right now
+//   blue   — job hasn't happened yet, nothing due
+//   green  — resolved correctly (paid / marked complete)
+//   red    — job's scheduled time has passed and it's NOT resolved
+// A $0 job (GDS, No Charge, a comped comeback) is never "unpaid" -- there's
+// nothing to collect, so the payment light reads it as green/blue same as a
+// paid job. Without this every $0 job would sit red forever, exactly the
+// same false-alarm shape as the low-profit SMS bug fixed for GDS jobs.
+function evtLights(b){
+  if(b.status==='cancelled'||b.status==='no_show') return {pay:'gray',done:'gray'};
+  if(['on_the_way','arrived','in_progress'].includes(b.status)) return {pay:'yellow',done:'yellow'};
+  const due = !!b.scheduled_at && new Date(b.scheduled_at).getTime()<=Date.now();
+  if(!due) return {pay:'blue',done:'blue'};
+  const paid = !(Number(b.price)>0) || b.payment_status==='paid' || b.payment_status==='refunded';
+  const done = b.status==='completed';
+  return {pay:paid?'green':'red', done:done?'green':'red'};
+}
+const EVT_LIGHT_TITLE={
+  pay:{gray:'Cancelled',yellow:'In progress',blue:'Not due yet',green:'Paid',red:'Not paid'},
+  done:{gray:'Cancelled',yellow:'In progress',blue:'Not due yet',green:'Complete',red:'Not complete'},
+};
 function evtCard(b){
   const xcoSecondary = b.secondary_technician?.cross_company;
   const overdue = isOverdueUnpaid(b);
   const odDays = overdue ? Math.floor((Date.now()-new Date(b.scheduled_at).getTime())/86400000) : 0;
-  const pills=[];
-  if(b.payment_status==='paid') pills.push('<span class="evt-paid">✓ PAID</span>');
-  if(b.status==='completed') pills.push('<span class="evt-complete">✓ COMPLETE</span>');
-  if(overdue) pills.push(`<span class="evt-overdue" title="Unpaid ${odDays} day${odDays===1?'':'s'} — payment overdue">⚠ UNPAID · ${odDays}d</span>`);
-  const pillsHtml = pills.length ? `<span class="evt-pills">${pills.join('')}</span>` : '';
+  const L = evtLights(b);
+  const lightsHtml = `<span class="evt-lights">
+    <span class="evt-light-pay evt-light-${L.pay}" title="${esc(EVT_LIGHT_TITLE.pay[L.pay])}${overdue?` — ${odDays}d overdue`:''}">${dollarSignSvg()}</span>
+    <span class="evt-light-done evt-light-${L.done}" title="${esc(EVT_LIGHT_TITLE.done[L.done])}"></span>
+  </span>`;
+  const priceHtml = b.price ? `<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>` : '';
+  const subParts=[];
+  if(b.econ&&b.econ.tech_payout!=null){
+    const payAmt = b.econ.net_tech_pay!=null ? b.econ.net_tech_pay : b.econ.tech_payout;
+    const payTitle = b.econ.net_tech_pay!=null
+      ? `CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}`
+      : 'Total tech pay incl. tip (admin only)';
+    subParts.push(`<span class="evt-techpay${payAmt<0?' neg':''}" title="${esc(payTitle)}">${money(payAmt)}</span>`);
+  }
+  if(b.econ&&b.econ.assigned&&b.econ.profit!=null) subParts.push(`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`);
+  const subHtml = subParts.length ? `<span class="evt-sub">${subParts.join(' · ')}</span>` : '';
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
-    <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}</div>
-    <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
-    <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?(b.econ.net_tech_pay!=null
-      ? `<span class="evt-techpay${b.econ.net_tech_pay<0?' neg':''}" title="CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}">${money(b.econ.net_tech_pay)}</span>`
-      : `<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`):''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${pillsHtml}</div>
+    ${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}
+    <div class="evt-mid">
+      <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
+      <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1}</span>`:''}${lightsHtml}</div>
+    </div>
+    <div class="evt-side">${priceHtml}${subHtml}</div>
   </div>`;
 }
+function dollarSignSvg(){ return '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
 function ghostEvtCard(g){
   const t=techCache.find(x=>x.id===g.technician_id);
   const start=fmtClock(g.scheduled_at);
