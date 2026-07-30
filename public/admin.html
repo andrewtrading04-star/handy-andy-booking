@@ -164,11 +164,17 @@
   .evt-profit.neg{color:#dc2626;}
   .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
-  .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
-  .evt.s-pending{border-left-color:var(--amber);}
-  .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
-  .evt.s-cancelled,.evt.s-no_show{border-left-color:#c4ccd6;opacity:.6;}
+  .evt.s-completed .evt-n{color:var(--mute);}
+  .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
   .evt.s-cancelled .evt-n{text-decoration:line-through;}
+  /* Left bar = which company's WEBSITE the job was booked through (not status,
+     not the assigned tech — a Dom's job stays blue even worked by a Handy Andy
+     cross-hire tech). Handy Andy's orange matches the live widget's own accent
+     (#ff6600, see ACCENT in widget.js); Dom's blue matches its existing accent
+     (--accent, #2563eb) used everywhere else in this dashboard for Dom's. */
+  .evt.src-handy-andy{border-left-color:#ff6600;}
+  .evt.src-doms{border-left-color:#2563eb;}
+  .evt.src-mile-high{border-left-color:#000;}
   /* Cross-company secondary technician booking (partner tech helping with large lift) */
   .evt.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;box-shadow:0 0 0 1px rgba(255,179,102,.3) inset;}
   body.doms .evt.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;box-shadow:0 0 0 1px rgba(77,141,255,.3) inset;}
@@ -2226,7 +2232,12 @@ function evtCard(b){
   if(b.status==='completed') pills.push('<span class="evt-complete">✓ COMPLETE</span>');
   if(overdue) pills.push(`<span class="evt-overdue" title="Unpaid ${odDays} day${odDays===1?'':'s'} — payment overdue">⚠ UNPAID · ${odDays}d</span>`);
   const pillsHtml = pills.length ? `<span class="evt-pills">${pills.join('')}</span>` : '';
-  return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
+  // Left bar color = which company's website the job came through (current.slug
+  // — the calendar is always scoped to one business, so every row in view shares
+  // it), NOT the assigned tech: a Dom's booking worked by a cross-hired Handy
+  // Andy tech still shows Dom's blue.
+  const srcClass = current&&current.slug ? ` src-${current.slug}` : '';
+  return `<div class="evt s-${b.status}${srcClass}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}</div>
     <div class="evt-n">${esc(b.customer?.name||'Customer')}${b.cross_company?`<span class="evt-xco" title="Assigned to a ${esc(b.partner_company||'partner')} technician">${esc(b.partner_company||'PARTNER')}</span>`:''}${xcoSecondary?` <span class="xco-secondary-tag" title="2nd tech from partner company">${esc(b.secondary_technician?.company||'PARTNER')}</span>`:''}</div>
     <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?(b.econ.net_tech_pay!=null
