@@ -119,6 +119,12 @@ export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customer
       sendSMS(phone, msg).catch(e => console.warn('[zero-profit] alert SMS failed:', e.message));
       return; // one heads-up per job — don't also fire the low-profit text below
     }
+    // A real GDS job is SUPPOSED to run negative every time -- $0 to the
+    // customer, $60 out to the tech, by design (a free-redo goodwill service).
+    // Without this it tripped the low-profit alert on literally every GDS job,
+    // paging the owner for something that was never a problem (Dalton Chapa's
+    // job, Jul 2026 -- "nothing is wrong, this is a normal thing").
+    if (isGds) return;
     const profit = estimateJobProfit({ price, lines, techName, scheduled_at });
     if (profit != null && profit < 20) {
       const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) has an estimated profit of $${profit.toFixed(2)} — under $20.`;
