@@ -1392,6 +1392,8 @@
     <input type="date" id="rsDate" class="search" style="margin:0 0 16px;">
     <label class="rs-lbl">New time</label>
     <div id="rsSlots" class="rs-slots"></div>
+    <label class="rs-lbl" for="rsTech" style="margin-top:14px;display:block;">Technician</label>
+    <select id="rsTech" class="search" style="margin:0;"></select>
     <div style="display:flex;gap:8px;margin-top:18px;">
       <button class="btn" type="button" id="rsSave">Save new time</button>
       <button class="btn ghost" type="button" id="rsCancel">Cancel</button>
@@ -2581,6 +2583,33 @@ async function setBkSlots(b, slots){
   }catch(err){ toast(err.message||'Could not update slots'); if(el) el.style.opacity=''; }
 }
 
+// Primary-technician <option> list for a booking: this job's own metro roster,
+// plus the currently assigned tech even if cross-company or outside that metro
+// (never silently hide an assignment that already exists). Shared by the
+// booking detail modal's Assign dropdown and the Reschedule modal's tech
+// picker, so "who can this job go to" is answered identically in both places.
+function bkPrimaryTechOptionsHtml(b){
+  // A cross-company job is assigned to a partner-company tech who isn't in our
+  // own roster (techCache) — add them so the dropdown shows the right person.
+  const xcoOpt=(b.cross_company && b.technician && !techCache.some(t=>t.id===b.technician_id))
+    ? `<option value="${b.technician_id}" selected>${esc(b.technician.name)} (${esc(b.partner_company||'partner')})</option>` : '';
+  // Must NEVER offer a partner-company tech (that's what the 2nd-tech "partner
+  // pool" picker is for), and should default to just this job's own metro so an
+  // out-of-market tech can't be accidentally handed a job they don't cover.
+  // techCache is already same-business from the server, but re-filter here too
+  // as a second guard against any staleness in that shared global. If the tech
+  // CURRENTLY assigned falls outside the metro filter, keep them in the list
+  // anyway (still shown/selected) rather than silently hiding an assignment
+  // that's already been made.
+  const ownBizTechs = techCache.filter(t=>t.business_id===b.business_id);
+  const ownRoster = ownBizTechs.length ? ownBizTechs : techCache; // fallback if business_id is ever missing on old data
+  let assignableTechs = b.service_area_id ? ownRoster.filter(t=>t.service_area_id===b.service_area_id) : ownRoster;
+  if(!assignableTechs.length) assignableTechs=ownRoster; // no tech tagged to this metro yet — don't leave the dropdown empty
+  const currentTech = ownRoster.find(t=>t.id===b.technician_id);
+  if(currentTech && !assignableTechs.some(t=>t.id===currentTech.id)) assignableTechs=[...assignableTechs, currentTech];
+  return ['<option value="">— Unassigned —</option>', xcoOpt,
+    ...assignableTechs.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+}
 function openBooking(b){
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
@@ -2588,26 +2617,7 @@ function openBooking(b){
   // Who booked it: widget bookings are "Booking widget"; office bookings carry the
   // booker's name (Admin / Heather / Joey). Older office bookings default to Admin.
   const bookedBy = b.source==='widget' ? 'Booking widget' : (b.booked_by || 'Admin');
-  // A cross-company job is assigned to a partner-company tech who isn't in our
-  // own roster (techCache) — add them so the dropdown shows the right person.
-  const xcoOpt=(b.cross_company && b.technician && !techCache.some(t=>t.id===b.technician_id))
-    ? `<option value="${b.technician_id}" selected>${esc(b.technician.name)} (${esc(b.partner_company||'partner')})</option>` : '';
-  // The primary Assign dropdown must NEVER offer a partner-company tech (that's
-  // what the 2nd-tech "partner pool" picker below is for), and should default to
-  // just this job's own metro so an out-of-market tech can't be accidentally
-  // handed a job they don't cover. techCache is already same-business from the
-  // server, but re-filter here too as a second guard against any staleness in
-  // that shared global. If the tech CURRENTLY assigned falls outside the metro
-  // filter, keep them in the list anyway (still shown/selected) rather than
-  // silently hiding an assignment that's already been made.
-  const ownBizTechs = techCache.filter(t=>t.business_id===b.business_id);
-  const ownRoster = ownBizTechs.length ? ownBizTechs : techCache; // fallback if business_id is ever missing on old data
-  let assignableTechs = b.service_area_id ? ownRoster.filter(t=>t.service_area_id===b.service_area_id) : ownRoster;
-  if(!assignableTechs.length) assignableTechs=ownRoster; // no tech tagged to this metro yet — don't leave the dropdown empty
-  const currentTech = ownRoster.find(t=>t.id===b.technician_id);
-  if(currentTech && !assignableTechs.some(t=>t.id===currentTech.id)) assignableTechs=[...assignableTechs, currentTech];
-  const techOpts=['<option value="">— Unassigned —</option>', xcoOpt,
-    ...assignableTechs.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+  const techOpts=bkPrimaryTechOptionsHtml(b);
   // A cross-company second tech (e.g. a Doms helper on a Handy Andy job) isn't in
   // our own roster, so add them explicitly — same as the primary's xcoOpt — so the
   // dropdown shows the right person instead of falsely reading "None".
@@ -3138,6 +3148,10 @@ function openReschedule(b, onDone){
   const di=document.getElementById('rsDate'); di.value=curDate; di.min=todayStr();
   document.getElementById('rsErr').textContent='';
   renderRsSlots();
+  // Same tech picker the booking detail modal's Assign dropdown uses, so the
+  // office can move the time AND swap the tech (e.g. the customer asked for
+  // someone else) in one step instead of two separate screens.
+  document.getElementById('rsTech').innerHTML=bkPrimaryTechOptionsHtml(b);
   document.getElementById('rsModal').classList.remove('hidden');
 }
 function renderRsSlots(){
@@ -3160,7 +3174,8 @@ document.getElementById('rsSave').onclick=async()=>{
   const btn=document.getElementById('rsSave'); btn.disabled=true;
   const onDone=rsState.onDone;
   try{
-    await apiConfirmUnavailable('booking_update',{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot });
+    const techVal=document.getElementById('rsTech').value;
+    await apiConfirmUnavailable('booking_update',{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot, technician_id:techVal||null });
     toast('Rescheduled ✓');
     closeRsModal();
     if(onDone) onDone();        // close the booking detail modal too

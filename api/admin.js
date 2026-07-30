@@ -3006,8 +3006,15 @@ async function bookingUpdate(req, res, db, auth, body) {
       } else {
         return res.status(400).json({ error: 'scheduled_at (or scheduled_date + scheduled_slot) required' });
       }
+      // Optional technician change riding along with the reschedule — the office
+      // asked to do both in one step (e.g. the customer requested a different
+      // tech at the new time). Same undefined-check as 'assign' so omitting it
+      // leaves the existing tech untouched.
+      if (body.technician_id !== undefined) patch.technician_id = body.technician_id || null;
       // A big job's extra slots were reserved for the OLD time — drop them on a
       // reschedule so they can't silently land on another job at the new time.
+      // (Also correct when only the tech changed: the extra slots belong to the
+      // OLD tech's schedule and must be re-validated for the new one.)
       if (extraSlotsCol) patch.extra_slots = [];
       // A lateness alert already sent for the OLD time doesn't mean anything
       // about the NEW time — clear it so a tech who's late for the rescheduled
@@ -3303,11 +3310,32 @@ async function bookingUpdate(req, res, db, auth, body) {
   // tech kept the old time in their head and showed up wrong (or not at all).
   // patch.scheduled_at is the new time; existing.technician_id is unchanged by
   // this action, which is exactly why it needs telling.
-  if (body.action === 'reschedule' && patch.scheduled_at && patch.scheduled_at !== existing.scheduled_at) {
-    for (const techId of [existing.technician_id, existing.secondary_technician_id]) {
-      if (!techId) continue;
-      await notifyTechAssigned(db, biz, techId, patch.scheduled_at, notifyTz, { bookingId: id, kind: 'rescheduled' })
-        .catch(e => console.error('[tech-notify]', e.message));
+  if (body.action === 'reschedule') {
+    // The primary tech changed alongside the reschedule (office does both in
+    // one step) — text the OLD tech that the job left them, and the NEW tech
+    // that they've got it, both at the (possibly also new) time. Distinct from
+    // the plain time-move notify below, which fires for whoever is STILL on
+    // the job.
+    const primaryChanged = 'technician_id' in patch && (patch.technician_id || null) !== (existing.technician_id || null);
+    if (primaryChanged) {
+      if (existing.technician_id) {
+        await notifyTechAssigned(db, biz, existing.technician_id, existing.scheduled_at, notifyTz, { bookingId: id, kind: 'unassigned' })
+          .catch(e => console.error('[tech-notify]', e.message));
+      }
+      if (patch.technician_id) {
+        await notifyTechAssigned(db, biz, patch.technician_id, patch.scheduled_at || existing.scheduled_at, notifyTz, { bookingId: id })
+          .catch(e => console.error('[tech-notify]', e.message));
+      }
+    }
+    // Plain time move: notify whoever is (still) on the job — the primary,
+    // unless they were JUST reassigned away above, plus the secondary.
+    if (patch.scheduled_at && patch.scheduled_at !== existing.scheduled_at) {
+      const stillPrimary = primaryChanged ? null : existing.technician_id;
+      for (const techId of [stillPrimary, existing.secondary_technician_id]) {
+        if (!techId) continue;
+        await notifyTechAssigned(db, biz, techId, patch.scheduled_at, notifyTz, { bookingId: id, kind: 'rescheduled' })
+          .catch(e => console.error('[tech-notify]', e.message));
+      }
     }
   }
   return res.status(200).json({ ok: true });
