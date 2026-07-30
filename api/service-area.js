@@ -60,7 +60,38 @@ async function nativeServiceArea(req, res, slug) {
         .select('surcharge, service_area:service_areas ( id, name, state, timezone )')
         .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle());
     }
-    if (!z || !z.service_area) return res.status(200).json({ in_service_area: false, territory_id: null });
+    if (!z || !z.service_area) {
+      // ANY California zip (90000-96199, the full CA range) routes to the
+      // unstaffed Los Angeles REQUEST flow -- the LA pages are live but there
+      // are no techs there, so this only gauges demand through the booking
+      // funnel, exactly like DFW: no travel fee, no tech assignment, never the
+      // real booking flow. Deliberately a range fallback instead of seeding
+      // thousands of service_area_zips rows; a real LA launch later just seeds
+      // real zips + techs and flips unstaffed off, and per-zip rows would then
+      // take precedence over this fallback anyway.
+      if (slug === 'handy-andy' && /^9(?:[0-5]\d{3}|6[01]\d{2})$/.test(zip)) {
+        const { data: la } = await db.from('service_areas')
+          .select('id, name, state, timezone, unstaffed')
+          .eq('business_id', biz.id).eq('state', 'CA').eq('active', true).maybeSingle();
+        if (la && la.unstaffed) {
+          return res.status(200).json({
+            in_service_area: true,
+            territory_id:    la.id,
+            service_area_id: la.id,
+            territory_name:  la.name,
+            unstaffed:       true,
+            surcharge:       0,
+            price_adjustment_amount: 0,
+            timezone:        la.timezone || 'America/Los_Angeles',
+            city:            la.name,
+            state:           'CA',
+            lat:             null,
+            lng:             null,
+          });
+        }
+      }
+      return res.status(200).json({ in_service_area: false, territory_id: null });
+    }
     const area = z.service_area;
     return res.status(200).json({
       in_service_area: true,
