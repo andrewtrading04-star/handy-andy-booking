@@ -1005,6 +1005,12 @@ async function calendar(req, res, db, auth) {
     s.slot_time = slotTimeLabel(areaTzById[b.service_area_id] || biz.timezone || 'America/Denver', b.scheduled_at);
     return s;
   });
+  // Attach tech-notification status. The detail panel shows a "Tech notified"
+  // row for every job, and without tech_sms it falls back to "No record" — so
+  // every job opened from the SCHEDULE (which is how the office opens nearly
+  // all of them) claimed the tech was never texted even when the text was
+  // delivered. Only the bookings-list endpoint attached this before.
+  await withTechSms(db, bookings);
 
   return res.status(200).json({
     business: { id: biz.id, slug: biz.slug, name: biz.name, timezone: biz.timezone || 'America/Denver' },
