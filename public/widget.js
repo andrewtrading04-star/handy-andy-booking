@@ -889,8 +889,37 @@
     ov.querySelector('#ha-exit-apply').addEventListener('click',()=>{
       couponCode=EXIT_COUPON;
       const f=document.getElementById('c-coupon'); if(f)f.value=EXIT_COUPON;
+      // Show the discount immediately -- without this the breakdown and total
+      // don't change and "Apply" looks like it did nothing (real complaint).
+      refreshCouponUI();
       close('applied');
     });
+  }
+
+  // Live coupon feedback on the checkout screen: validate the field, toggle the
+  // discount row, and rewrite the total IN PLACE. Deliberately not a re-render:
+  // render('customer') would wipe whatever the customer already typed into the
+  // name/email/address fields and remount the Stripe card element mid-entry.
+  // Math mirrors the server: the coupon is a flat, non-taxable dollar amount
+  // taken off AFTER tax (api/book.js adds it as taxable:false), so the total is
+  // base*(1+tax)+tip-coupon -- the tax line itself does not change.
+  function refreshCouponUI(){
+    const f=document.getElementById('c-coupon');
+    const row=document.getElementById('ha-coupon-row');
+    const tot=document.getElementById('ha-total');
+    if(!f||!row||!tot)return;
+    const code=f.value.trim().toUpperCase();
+    couponCode=(code in COUPONS)?code:'';
+    const disc=COUPONS[couponCode]||0;
+    if(disc>0){
+      row.style.cssText='display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;font-size:13px!important;color:#a0a0ab!important;';
+      row.innerHTML=`<span>Coupon ${couponCode}</span><span style="color:#4ade80!important;">-$${disc}</span>`;
+    }else{
+      row.style.cssText='display:none!important;';
+      row.innerHTML='';
+    }
+    const base=calcTotal()+territoryAdjustment()-zipDiscount()+selectedSlotSurcharge()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount();
+    tot.textContent='$'+(Math.round((base*(1+TAX_RATE)+tipAmount-disc)*100)/100);
   }
 
   // ─── Step builders ────────────────────────────────────────────────────────
@@ -1781,10 +1810,14 @@
             <span>Tip</span>
             <span id="ha-tip-amt" style="color:#fff!important;">$${tipAmount}</span>
           </div>`:`<div id="ha-tip-row" style="display:none!important;"></div>`}
+          ${(COUPONS[couponCode]||0)>0?`<div id="ha-coupon-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
+            <span>Coupon ${couponCode}</span>
+            <span style="color:#4ade80!important;">-$${COUPONS[couponCode]}</span>
+          </div>`:`<div id="ha-coupon-row" style="display:none!important;"></div>`}
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
           <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">${nativeUnstaffed?'Estimated total':'Total'}</div>
-          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount)*100)/100}</div>
+          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount-(COUPONS[couponCode]||0))*100)/100}</div>
         </div>
         ${nativeUnstaffed?`<p style="font-size:11px!important;color:#71717a!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
       </div>
@@ -1808,6 +1841,8 @@
     { const wh=root.querySelector('#ha-wire-help'); if(wh) wh.addEventListener('click',()=>showWireHelp(wh.dataset.sec,{behind:wh.dataset.behind,outside:wh.dataset.outside,plug:wh.dataset.plug,hang:wh.dataset.hang})); }
     root.querySelector('#btn-next')?.addEventListener('click',()=>goNext());
     root.querySelector('#btn-submit')?.addEventListener('click',()=>doSubmit(root));
+    // Typed coupon codes get the same live discount feedback as the exit popup
+    root.querySelector('#c-coupon')?.addEventListener('input',refreshCouponUI);
     root.querySelector('#btn-date-back')?.addEventListener('click',()=>{selectedDate=null;selectedSlot=null;render();});
     root.querySelector('#cal-prev')?.addEventListener('click',()=>{calMonth--;if(calMonth<0){calMonth=11;calYear--;}render();});
     root.querySelector('#cal-next')?.addEventListener('click',()=>{calMonth++;if(calMonth>11){calMonth=0;calYear++;}render();});
