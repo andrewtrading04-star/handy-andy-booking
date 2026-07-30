@@ -452,7 +452,7 @@ async function bookedSlotsOneTech(db, techId, dateStr, tz) {
 // several techs who are all free for the same slot, instead of always handing
 // it to whichever tech happens to sort first (previously: insertion order —
 // the earliest-added tech on the roster silently got every tie forever).
-export async function weekJobCounts(db, techIds, dateStr, tz) {
+async function weekJobCounts(db, techIds, dateStr, tz) {
   const counts = new Map(techIds.map(id => [id, 0]));
   if (!techIds.length) return counts;
   const dow = dayOfWeekFor(dateStr);
@@ -493,7 +493,13 @@ async function pickFairest(db, eligible, dateStr, tz) {
   let best = eligible[0], bestCount = counts.get(eligible[0].id) || 0;
   for (const t of eligible.slice(1)) {
     const c = counts.get(t.id) || 0;
-    if (c < bestCount) { best = t; bestCount = c; }
+    // Strictly fewer wins; an exact tie falls back to the lower id purely so the
+    // result is STABLE. The pool is ordered by created_at, but techs onboarded
+    // in the same batch share an identical created_at (Steve and Kregg both
+    // '2026-06-17 07:22:16.363923+00'), so Postgres returns those in arbitrary
+    // order -- without this, two equally-loaded techs could swap picks between
+    // otherwise-identical calls.
+    if (c < bestCount || (c === bestCount && t.id < best.id)) { best = t; bestCount = c; }
   }
   return best.id;
 }
