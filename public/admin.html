@@ -9220,11 +9220,21 @@ document.getElementById('nbAddCustomLine').addEventListener('click',()=>{
 });
 // All rows with a real price >0, as { label, price } — blank/zero rows are
 // skipped so an empty extra row never blocks submission.
+// A row counts if the office actually filled something in: any nonzero price,
+// OR a label (with the price defaulting to $0). Only fully blank rows are
+// dropped — so an untouched extra row never blocks submission. Previously this
+// required price>0, which silently discarded $0 lines ("Comeback: remount left
+// TV" on a no-charge redo) and negative ones (an itemized discount) — the
+// office then hit "choose a category and at least one option" on a
+// custom-lines-only booking with no clue why (Heather, Jul 2026).
 function nbCustomItems(){
   return nbCustomLines.map(l=>{
-    const price=parseFloat(l.price);
-    if(!(price>0) || isNaN(price)) return null;
-    return { label: (l.label||'').trim() || 'Custom line item', price: Math.round(price*100)/100 };
+    const label=(l.label||'').trim();
+    const raw=String(l.price??'').trim();
+    const price=parseFloat(raw);
+    const hasPrice=raw!=='' && !isNaN(price) && price!==0;
+    if(!hasPrice && !label) return null;
+    return { label: label || 'Custom line item', price: hasPrice ? Math.round(price*100)/100 : 0 };
   }).filter(Boolean);
 }
 document.getElementById('nbSlots').addEventListener('click',e=>{
