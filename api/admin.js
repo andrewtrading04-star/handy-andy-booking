@@ -22,7 +22,7 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, weekJobCounts } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -237,6 +237,15 @@ export default async function handler(req, res) {
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
       case 'send_gds_rate_update': return await sendGdsRateUpdate(req, res, db);
+      case '_debug_week_counts': {
+        const ids = String(req.query.ids || '').split(',').filter(Boolean);
+        try {
+          const counts = await weekJobCounts(db, ids, req.query.date, req.query.tz || 'America/Denver');
+          return res.status(200).json({ ok: true, counts: Object.fromEntries(counts) });
+        } catch (e) {
+          return res.status(200).json({ ok: false, threw: e.message, code: e.code || null });
+        }
+      }
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);

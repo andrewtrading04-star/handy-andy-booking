@@ -452,7 +452,7 @@ async function bookedSlotsOneTech(db, techId, dateStr, tz) {
 // several techs who are all free for the same slot, instead of always handing
 // it to whichever tech happens to sort first (previously: insertion order —
 // the earliest-added tech on the roster silently got every tie forever).
-async function weekJobCounts(db, techIds, dateStr, tz) {
+export async function weekJobCounts(db, techIds, dateStr, tz) {
   const counts = new Map(techIds.map(id => [id, 0]));
   if (!techIds.length) return counts;
   const dow = dayOfWeekFor(dateStr);
