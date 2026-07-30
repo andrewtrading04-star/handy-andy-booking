@@ -235,6 +235,7 @@ export default async function handler(req, res) {
     const db = serviceClient();
 
     switch (action) {
+      case 'send_spam_notice':  return await sendSpamNotice(req, res);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
@@ -7275,6 +7276,35 @@ async function sendTestReviewEmail(req, res, body) {
   const result = await sendEmail({ slug: bizSlug, to: TEST_EMAIL_RECIPIENT, subject: `[TEST] ${subject}`, html, replyTo: from });
   if (!result.sent) return res.status(500).json({ error: result.error || result.skipped || 'Email did not send.' });
   return res.status(200).json({ ok: true, to: TEST_EMAIL_RECIPIENT });
+}
+
+// One-off internal notice asking the office to un-spam the brand-new Mile High
+// sending address. Recipients are read from the same env vars owner-notify uses
+// (never from the request), so this can't be used to relay mail anywhere else.
+async function sendSpamNotice(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const to = [
+    process.env.MILE_HIGH_SECRETARY_EMAIL || process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com',
+    process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com',
+  ];
+  const subject = 'Quick favor: mark this email as "not spam"';
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;">
+    <p>Hi Joey and Heather,</p>
+    <p>We just set up the email address for Mile High TV Mounting. Because the address is brand new,
+       Gmail does not trust it yet and is filing our messages into spam.</p>
+    <p><b>If this email landed in your spam folder, please open it and click "Not spam."</b>
+       If it came straight to your inbox, no action needed.</p>
+    <p>It also helps to add <b>contact@milehightvmounting.com</b> to your contacts.</p>
+    <p>That small step teaches Gmail we are legitimate, so booking confirmations reach our customers
+       instead of their spam folders.</p>
+    <p>Thanks,<br>Andrew</p>
+  </div>`;
+  const results = [];
+  for (const addr of to) {
+    const r = await sendEmail({ slug: 'mile-high', to: addr, subject, html });
+    results.push({ to: addr, sent: !!r.sent, error: r.error || r.skipped || null });
+  }
+  return res.status(200).json({ results });
 }
 
 async function estimateApproveInfo(req, res, body) {
