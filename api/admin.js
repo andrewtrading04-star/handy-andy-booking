@@ -1095,6 +1095,7 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
         service_name: b.service?.name || '',
         business_slug: biz.slug,
         line_items: b.line_items || [],
+        scheduled_at: b.scheduled_at,
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
         // Two assigned techs split the job 50/50 even without a "lift help" line.
         second_tech: techNames.length > 1,
@@ -2800,6 +2801,7 @@ async function bookingCreate(req, res, db, auth, body) {
     lines: selections,
     techName: primaryTechInfo?.name || '',
     customerName: c.name || '',
+    scheduled_at,
     whenStr: (() => {
       try { return scheduled_at ? new Date(scheduled_at).toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }) : null; }
       catch { return body.scheduled_date || null; }
@@ -7977,6 +7979,7 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
         service_name: b.services?.name || '',
         business_slug: biz.slug,
         line_items: b.line_items || [],
+        scheduled_at: b.scheduled_at,
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
         // A 2nd tech is on the job — but it only SPLITS 50/50 when the customer
         // booked a two-person job. On a one-person job the lead keeps full pay and

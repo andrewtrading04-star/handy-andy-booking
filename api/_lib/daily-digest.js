@@ -200,11 +200,11 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
         label: 'Low or negative estimated profit',
         test: (b) => {
           if ((Number(b.price) || 0) === 0) return false; // already covered by zero_not_gds
-          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name });
+          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name, scheduled_at: b.scheduled_at });
           return p != null && p < 20;
         },
         detail: (b) => {
-          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name });
+          const p = estimateJobProfit({ price: b.price, lines: b.booking_line_items, techName: b.technician?.name, scheduled_at: b.scheduled_at });
           return `${who(b)}'s job has an estimated profit of ${money(p)} — under $20.`;
         },
       },

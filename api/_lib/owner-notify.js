@@ -96,18 +96,19 @@ export function rescheduleUrlFor({ bookingId, baseUrl }) {
   const token = signToken({ kind: 'reschedule', booking_id: bookingId }, 7776000);
   return `${String(baseUrl).replace(/\/$/, '')}/reschedule.html?token=${token}`;
 }
-export function estimateJobProfit({ price, lines, techName }) {
+export function estimateJobProfit({ price, lines, techName, scheduled_at }) {
   try {
     const synthetic = {
       status: 'completed', payment_status: 'paid',
       price, subtotal: price, amount_paid: price,
       line_items: Array.isArray(lines) ? lines : [],
+      scheduled_at,
     };
     const result = computeJobPay(synthetic, techName || '');
     return (Number(price) || 0) - (Number(result.pay) || 0);
   } catch (e) { console.warn('[low-profit] estimate error:', e.message); return null; }
 }
-export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customerName, whenStr }) {
+export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customerName, whenStr, scheduled_at }) {
   try {
     const phone = process.env.OWNER_PHONE_NUMBER;
     if (!phone) return;
@@ -118,7 +119,7 @@ export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customer
       sendSMS(phone, msg).catch(e => console.warn('[zero-profit] alert SMS failed:', e.message));
       return; // one heads-up per job — don't also fire the low-profit text below
     }
-    const profit = estimateJobProfit({ price, lines, techName });
+    const profit = estimateJobProfit({ price, lines, techName, scheduled_at });
     if (profit != null && profit < 20) {
       const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) has an estimated profit of $${profit.toFixed(2)} — under $20.`;
       sendSMS(phone, msg).catch(e => console.warn('[low-profit] alert SMS failed:', e.message));

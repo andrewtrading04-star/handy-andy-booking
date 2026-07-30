@@ -527,6 +527,7 @@ async function bookDoms(req, res) {
   maybeSendZeroOrLowProfitAlert({
     price, lines, techName: technicianName || '',
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    scheduled_at: startUTC.toISOString(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   });
 
@@ -877,6 +878,7 @@ async function bookNative(req, res, slug) {
   maybeSendZeroOrLowProfitAlert({
     price, lines, techName: technicianName || '',
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    scheduled_at: startUTC.toISOString(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   });
 

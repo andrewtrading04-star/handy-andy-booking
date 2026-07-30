@@ -487,6 +487,7 @@ async function job(req, res, db, auth) {
       service_name: data.service?.name || '',
       business_slug: data.business?.slug || '',
       line_items: data.line_items || [],
+      scheduled_at: data.scheduled_at,
       travel_payout: travelMap.get(String(data.postal_code || '')) || 0,
       // A second real tech on the job splits the base pay 50/50 (owner rule);
       // a solo tech keeps it all. Juan/TK bring their own helper and never split.
@@ -1862,6 +1863,7 @@ async function techPayroll(req, res, db, auth) {
       service_name: b.services?.name || '',
       business_slug: businessSlug,
       line_items: b.line_items || [],
+      scheduled_at: b.scheduled_at,
       travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
       second_tech: !!b.secondary_technician_id,
       is_secondary: techId === b.secondary_technician_id && techId !== b.technician_id,

@@ -350,6 +350,20 @@ function tipFor(job) {
 // this pays a solo tech on any "Second Technician" job.)
 const SECOND_TECH_RE = /(?:second|2nd|extra)\s*tech(?:nician)?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
 
+// Guaranteed Dismount REDEEMED payout drops $60 -> $50, effective the job's
+// scheduled date (owner-announced to the crew, communicated as "effective
+// Monday"). Gated on job.scheduled_at rather than applying the moment the code
+// deploys, so a job already on the books for before the effective date still
+// pays the rate the tech was quoted when it was scheduled -- the code must
+// never contradict what the crew was actually told. A missing scheduled_at
+// (synthetic/estimate jobs built without one -- see estimateJobProfit) is
+// treated as "now," i.e. the new rate, since there's no earlier date to honor.
+const GDS_REDEEMED_RATE_CHANGE = { at: new Date('2026-08-03T00:00:00Z'), before: 60, after: 50 };
+function gdsRedeemedRate(scheduledAt) {
+  const t = scheduledAt ? new Date(scheduledAt) : null;
+  return (t && !isNaN(t) && t < GDS_REDEEMED_RATE_CHANGE.at) ? GDS_REDEEMED_RATE_CHANGE.before : GDS_REDEEMED_RATE_CHANGE.after;
+}
+
 // ── Multi-tech detection (when a two-person "lift help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.
 // Bonus is $30 per tech if the customer paid for it (line_total >= 70), else $0.
@@ -565,8 +579,9 @@ export function computeJobPay(job, techName) {
 
     // Dismount pay (rate sheet §5):
     //  • Guaranteed Dismount SOLD (a charged line, per-unit lt > 0)     -> $0 (counts as sold)
-    //  • Guaranteed Dismount REDEEMED ($0 standalone, per-unit lt <= 0) -> $50
-    //    (was $60 through Jul 2026; owner rate change effective Aug 2026)
+    //  • Guaranteed Dismount REDEEMED ($0 standalone, per-unit lt <= 0) -> see
+    //    gdsRedeemedRate() -- $60 for jobs scheduled before Mon Aug 3 2026,
+    //    $50 on/after (owner rate change).
     //  • Plain dismount CHARGED: per-unit customer charge > $60 -> $60, else $50
     //  • Plain dismount NOT charged ($0): the customer DECLINED it (a widget
     //    answer like "Dismount: No, I will handle it myself") -> $0. Never pay
@@ -577,7 +592,7 @@ export function computeJobPay(job, techName) {
       const qty = dismountQty(name, li);
       const perUnit = lt / qty;
       const unit = isGuaranteed
-        ? (perUnit > 0 ? 0 : 50)
+        ? (perUnit > 0 ? 0 : gdsRedeemedRate(job.scheduled_at))
         : (perUnit <= 0 ? 0 : (perUnit > 60 ? 60 : 50));
       const amt = unit * qty;
       if (amt) breakdown.push({ label: `${isGuaranteed ? 'Guaranteed Dismount' : 'Dismount'}${qty > 1 ? ` ×${qty}` : ''}`, amount: amt });
@@ -1123,7 +1138,11 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 119 }] }), 'Zach').pay, 60, 'dismount >$60 -> 60');
   eq(computeJobPay(job({ line_items: [{ name: 'Dismount', line_total: 45 }] }), 'Zach').pay, 50, 'dismount <=$60 -> 50');
   eq(computeJobPay(job({ line_items: [{ name: 'Guaranteed Dismount Service', line_total: 35 }] }), 'Zach').pay, 0, 'GD sold -> 0');
-  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 50, 'GD redeemed -> 50 (rate change Aug 2026)');
+  eq(computeJobPay(job({ price: 0, line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 50, 'GD redeemed, no scheduled_at -> defaults to new $50 rate');
+  // Rate change is gated on the JOB's scheduled date (what the tech was quoted
+  // when it went on the calendar), not on when this code deployed.
+  eq(computeJobPay(job({ price: 0, scheduled_at: '2026-07-15T18:00:00Z', line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 60, 'GD redeemed, scheduled BEFORE Aug 3 2026 -> old $60 rate');
+  eq(computeJobPay(job({ price: 0, scheduled_at: '2026-08-10T18:00:00Z', line_items: [{ name: 'Guaranteed Dismount Service', line_total: 0 }] }), 'Zach').pay, 50, 'GD redeemed, scheduled ON/AFTER Aug 3 2026 -> new $50 rate');
   eq(computeJobPay(job({ line_items: [{ name: 'Dismount x3', line_total: 170 }] }), 'Zach').pay, 150, 'dismount x3 $170 -> 3x$50=150');
   // Declined dismount: a $0 "Dismount: No, I will handle" widget answer pays $0
   // (the customer didn't buy a dismount — must not score a phantom $50).
