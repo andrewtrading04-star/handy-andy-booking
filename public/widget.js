@@ -1772,8 +1772,34 @@
         <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
         <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
       </div>`;
+    // A staffed booking (never the unstaffed-area REQUEST flow, which has no
+    // single confirmed slot — see selectedRequestWindows instead) had NO
+    // reminder anywhere on this last step of what date/time was picked.
+    // Customers were abandoning checkout because they'd forgotten it and had
+    // no way back to check without losing everything already typed below —
+    // real, reported lost bookings. "Edit" jumps straight back to the
+    // slot-picker step; STEP_KEYS always has 'slots' (or 'request_slots')
+    // immediately before 'customer', so the same goBack() the visible
+    // "← Back" button already uses lands in exactly the right place.
+    const dtSummary=(!nativeUnstaffed&&selectedDate&&selectedSlot)?(()=>{
+      const df=fmtDate(selectedDate);
+      const sl=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot);
+      if(!sl)return '';
+      return `
+      <div style="background:#27272a!important;border:1.5px solid ${ACCENT}!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:16px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;">
+        <div style="display:flex!important;align-items:center!important;gap:10px!important;">
+          <span style="font-size:20px!important;color:${ACCENT_LIGHT}!important;">📅</span>
+          <div>
+            <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">${df.long}, ${df.date}</div>
+            <div style="font-size:12px!important;color:#a0a0ab!important;">${sl.arrival_window}</div>
+          </div>
+        </div>
+        <div id="ha-edit-dt" style="font-size:12px!important;font-weight:700!important;color:${ACCENT_LIGHT}!important;cursor:pointer!important;white-space:nowrap!important;">Edit ›</div>
+      </div>`;
+    })():'';
     return `
       <h1 style="${S.h1};color:${ACCENT}!important;">Almost Done! Last Step…</h1>
+      ${dtSummary}
       ${cardBlock}
       <input type="text"  id="c-fn" style="${S.inputL}" placeholder="First Name"     value="${customer.first_name}">
       <input type="text"  id="c-ln" style="${S.inputL}" placeholder="Last Name"      value="${customer.last_name}">
@@ -1851,6 +1877,7 @@
     root.querySelector('#btn-zip')?.addEventListener('click',()=>doZip(root));
     root.querySelector('#ha-zip')?.addEventListener('keypress',e=>{if(e.key==='Enter')doZip(root);});
     root.querySelector('#btn-prev')?.addEventListener('click',()=>goBack());
+    root.querySelector('#ha-edit-dt')?.addEventListener('click',()=>goBack());
     { const helpBtn=root.querySelector('#ha-bracket-help'); if(helpBtn) helpBtn.addEventListener('click',()=>showBracketHelp(helpBtn.dataset.sec,helpBtn.dataset.flat,helpBtn.dataset.tilt,helpBtn.dataset.full)); }
     { const sh=root.querySelector('#ha-surface-help'); if(sh) sh.addEventListener('click',()=>showSurfaceHelp(sh.dataset.sec,{drywall:sh.dataset.drywall,brick:sh.dataset.brick,stone:sh.dataset.stone,stucco:sh.dataset.stucco})); }
     { const wh=root.querySelector('#ha-wire-help'); if(wh) wh.addEventListener('click',()=>showWireHelp(wh.dataset.sec,{behind:wh.dataset.behind,outside:wh.dataset.outside,plug:wh.dataset.plug,hang:wh.dataset.hang})); }
