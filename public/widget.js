@@ -654,16 +654,24 @@
   // top-up.
   function realItemsFloor(){
     if(!serviceConfig)return 0;
-    let sum=0;
+    let sum=0, gds=0;
     for(const sec of serviceConfig.sections){
       for(const sel of(selections[sec.id]||[])){
         const opt=sec.options.find(o=>o.id===sel.option_id);
-        if(opt)sum+=(opt.price||0)*sel.quantity;
+        if(!opt)continue;
+        const amt=(opt.price||0)*sel.quantity;
+        // Guaranteed Dismount is a coverage PRODUCT, not part of the job — it
+        // rides ON TOP of the service minimum. Inside the floor it got
+        // silently absorbed: a $109 mount floored to $139 meant adding $35
+        // GDS only moved the total to $144, selling the coverage for $5
+        // (or $0 on even smaller jobs) — and the customer read the barely-
+        // moving total as "Add to my ticket didn't work".
+        if(sec.stepKey==='dismount')gds+=amt; else sum+=amt;
       }
     }
     // Also count OneConnect if selected on wires card (stored in extras section)
     // — already included above since extras section is iterated
-    return Math.max(sum, serviceConfig.minPrice||139);
+    return Math.max(sum, serviceConfig.minPrice||139)+gds;
   }
   // The customer-facing "service subtotal" — every downstream total
   // (footerTotal, bCustomer's checkout summary, the emailed receipt) reads
