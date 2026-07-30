@@ -8367,6 +8367,12 @@ async function openNewBooking(prefill){
     // tech $60 (redeemed GDS). Bottom of the list for BOTH businesses. Links to the
     // TV-mounting service row (a dismount is a TV job); the price is $0. Hidden in demo.
     if(!appConfig.demo) cats.push('Guaranteed Dismount Service');
+    // No Charge / Callback — a $0 visit for something that needs fixing from a
+    // previous job (warranty redo). Skips TV Mounting's required-question flow
+    // entirely and never applies the branch minimum or after-hours fee, so the
+    // office isn't forced through the full service picker just to zero out a
+    // callback. Bottom of the list for both businesses.
+    cats.push('No Charge / Callback');
     nbGdsServiceId = (nbServices.find(s=>s.category==='TV Mounting')||{}).id || null;
     document.getElementById('nbCategory').innerHTML='<option value="">— Category —</option>'+
       cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -8505,6 +8511,7 @@ const NB_STEPS=[
   { label:'Options', done:()=>{
       try{
         if(nbGdsActive) return true;   // GDS has no options to pick
+        if(nbNoChargeActive) return true;   // No Charge / Callback has no options to pick
         if(nbAssurionActive) return nbAssurionSel.size>0;
         if(nbHandymanActive) return nbHandymanHours>0;
         if(nbOptionGroups.length) return !nbValidateTvMountingRequired();
@@ -8679,7 +8686,7 @@ function nbPopulateSecondTechs(){
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
   // TV Mounting auto-picks its service; Assurion uses its own multi-select UI.
-  if(!category || category==='TV Mounting' || category==='Assurion' || category==='Guaranteed Dismount Service'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  if(!category || category==='TV Mounting' || category==='Assurion' || category==='Guaranteed Dismount Service' || category==='No Charge / Callback'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
   svcDiv.innerHTML='<option value="">— Task —</option>'+
@@ -8723,6 +8730,13 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
     return;
   }
 
+  if(cat==='No Charge / Callback'){
+    nbNoChargeActive=true;
+    nbServiceId=nbGdsServiceId;   // link to the TV-mounting service row (just needs SOME real service_id)
+    renderNoChargeStep();
+    return;
+  }
+
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
     if(tvMountService){
@@ -8755,6 +8769,22 @@ function renderGdsStep(){
     `<div style="margin-top:12px;">`+
       `<label style="display:block;font-size:12px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">What phone number did the customer use?</label>`+
       `<input class="search" style="margin:0;" id="nbGdsPhone" inputmode="tel" autocomplete="off" placeholder="Phone the customer used">`+
+    `</div>`;
+  updateNbTotal();
+}
+
+// No Charge / Callback step: a $0 visit to fix something from a previous
+// appointment (warranty redo). The only field is a note on what's being
+// fixed, so it's on the job for the tech and stays on the record.
+function renderNoChargeStep(){
+  const steps=document.getElementById('nbSteps');
+  if(!steps) return;
+  steps.innerHTML=
+    `<div class="nb-step-t">No Charge / Callback</div>`+
+    `<div class="nb-hint">$0 to the customer — for fixing something from a previous appointment.</div>`+
+    `<div style="margin-top:12px;">`+
+      `<label style="display:block;font-size:12px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">What needs to be fixed?</label>`+
+      `<textarea class="search" style="margin:0;min-height:60px;resize:vertical;" id="nbNoChargeNote" placeholder="e.g. bracket came loose, re-level the TV"></textarea>`+
     `</div>`;
   updateNbTotal();
 }
@@ -9124,7 +9154,7 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Option prices can CHANGE with the metro (Austin overrides) — re-render the
   // option rows so the price labels match what nbCollectSelections now books;
   // renderNbSteps ends in updateNbTotal(), covering the plain case too.
-  if(nbOptionGroups.length && !nbHandymanActive && !nbAssurionActive && !nbGdsActive) renderNbSteps();
+  if(nbOptionGroups.length && !nbHandymanActive && !nbAssurionActive && !nbGdsActive && !nbNoChargeActive) renderNbSteps();
   else updateNbTotal();
   // AWAIT the roster reload before the calendar: it repopulates both tech
   // dropdowns (now preserving any chosen tech), and loading the calendar in
@@ -9252,9 +9282,9 @@ const ASSURION_GROUPS = [
 ];
 const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
-let nbGdsActive=false, nbGdsServiceId=null;
+let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -9741,7 +9771,7 @@ function nbCurrentMinimum(){
 // selections. GDS / Assurion are $0 flows and handyman has its own 2-hr min, so
 // they're exempt; a waiver or an empty cart also yields no top-up.
 function nbMinimumTopUp(rawSelections){
-  if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbMinWaived) return 0;
+  if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbNoChargeActive || nbMinWaived) return 0;
   const min=nbCurrentMinimum(); if(!(min>0)) return 0;
   const sum=(rawSelections||[]).reduce((s,x)=>s+x.price*x.quantity,0);
   if(!(sum>0) || sum>=min) return 0;
@@ -9753,6 +9783,12 @@ function nbCollectSelections(){
   // Guaranteed Dismount: a single $0 line — the payroll engine reads this as a
   // redeemed GDS and pays the tech $60.
   if(nbGdsActive){ return [{option_id:null, label:'Guaranteed Dismount Service', price:0, quantity:1}]; }
+  // No Charge / Callback: a single $0 line, the office's note folded into the label
+  // so it's on the job for the tech and stays on the record.
+  if(nbNoChargeActive){
+    const note=(document.getElementById('nbNoChargeNote')?.value||'').trim();
+    return [{option_id:null, label:'No Charge / Callback'+(note?`: ${note}`:''), price:0, quantity:1}];
+  }
   // Assurion: one line per selected service, priced at Steve's payout. The
   // customer is charged $0 (handled at submit); these amounts feed his pay.
   if(nbAssurionActive){
@@ -9803,7 +9839,7 @@ const TAX_RATE = 0.0825;
 // undercharged while still costing the extra tech pay. Read by BOTH the total
 // display and the submit path so the screen always matches the booking.
 function nbAfterHoursFee(){
-  if(nbAssurionActive || nbGdsActive || nbHandymanActive) return 0;
+  if(nbAssurionActive || nbGdsActive || nbHandymanActive || nbNoChargeActive) return 0;
   if(!nbSelectedSlot || nbSelectedSlot.key!=='s5') return 0;
   const ds=document.getElementById('nbDate').value;
   const isSunday=ds ? new Date(ds+'T12:00:00').getDay()===0 : false;
@@ -9840,7 +9876,7 @@ function renderNbMinWarn(selections){
   const warn=document.getElementById('nbMinWarn'); if(!warn) return;
   const min=nbCurrentMinimum();
   const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum'&&!/^multi-tv discount$|^multi-tv price discount/i.test(s.label||'')).reduce((s,x)=>s+x.price*x.quantity,0);
-  const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && rawSum>0 && min>0;
+  const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && !nbNoChargeActive && rawSum>0 && min>0;
   if(!applies || rawSum>=min){ warn.style.display='none'; warn.innerHTML=''; return; }
   const metro=nbAreaName?esc(nbAreaName)+' ':'';
   const topup=Math.round((min-rawSum)*100)/100;
@@ -10229,7 +10265,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(!assurion && !gds && selections.length===0){ err.textContent='Choose a service category and at least one option before creating this booking.'; return; }
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
-  const travelFee=(assurion||gds)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
+  const noCharge=nbNoChargeActive;
+  const travelFee=(assurion||gds||noCharge)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   // A NEGATIVE travel fee (an office-entered discount) must ride onto the
   // booking too — it was shown in the displayed total but silently excluded
   // here (only >0 was pushed), so the booking saved HIGHER than the screen.
@@ -10237,7 +10274,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // After-hours fee (8 PM slot): same helper the displayed total uses, so the
   // booked price always equals what the secretary saw. Skip if a matching fee
   // line already rode in via a converted estimate's carried lines.
-  const _ah=(assurion||gds)?0:nbAfterHoursFee();
+  const _ah=(assurion||gds||noCharge)?0:nbAfterHoursFee();
   if(_ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
     selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:_ah,quantity:1});
   }
@@ -10248,11 +10285,11 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const prim = assurion
     ? { id:(nbSteveTechId||'any'), pool:'own' }
     : (nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' });
-  const paymentMethod=(assurion||gds)?'':document.getElementById('nbPaymentMethod').value;
+  const paymentMethod=(assurion||gds||noCharge)?'':document.getElementById('nbPaymentMethod').value;
   const email=document.getElementById('nbEmail').value.trim();
   const submitBtn=e.target.querySelector('button[type="submit"]');
 
-  if(!email && !gds){ openCust(); err.textContent='Email is required for booking confirmation'; return; }
+  if(!email && !gds && !noCharge){ openCust(); err.textContent='Email is required for booking confirmation'; return; }
 
   // TV mounting (the main paid service) requires a credit card on file — cash and
   // quote are not allowed for these jobs. Card details are validated below.
@@ -10267,11 +10304,11 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // it optional. The second tech may be "any" (auto-picked server-side) or come
   // from the other company. Validate BEFORE tokenizing a card so we never charge
   // then fail.
-  const secondMode=(assurion||gds)?'none':nbSecondTechMode();
+  const secondMode=(assurion||gds||noCharge)?'none':nbSecondTechMode();
   // Juan/Zach bring their own second person (off-schedule), so no roster second
   // tech is chosen or required — but the two-person fee still rides on the line
   // items, so the customer is charged the same.
-  const ownSecond=!assurion && !gds && nbPrimaryBringsOwnSecond();
+  const ownSecond=!assurion && !gds && !noCharge && nbPrimaryBringsOwnSecond();
   const sec=(secondMode!=='none' && !ownSecond) ? nbParseTech(document.getElementById('nbSecondTech').value) : null;
   // Either tech may be "any" — the server resolves "any + any" to two distinct
   // people. Only reject a missing second tech, or the same concrete person twice.
