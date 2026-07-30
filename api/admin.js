@@ -4228,7 +4228,10 @@ async function customers(req, res, db, auth) {
     const like = `%${term}%`;
     q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like},address_line1.ilike.${like}`);
   }
-  const { data, error } = await q.order('created_at', { ascending: false }).limit(200);
+  // Alphabetical by name. Newest-first stopped being useful once the Zenbooker
+  // history landed: 7,000+ customers all created in the same import batch have
+  // no meaningful recency order, so the office could never find anyone.
+  const { data, error } = await q.order('name', { ascending: true }).limit(200);
   if (error) throw error;
   const customerRows = data || [];
 
