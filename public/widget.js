@@ -145,6 +145,12 @@
           // the booking analytics can show who the session belongs to.
           customer_name: `${customer.first_name||''} ${customer.last_name||''}`.trim() || null,
           error_message,
+          // Which business this session belongs to — log-event.js allowlists this
+          // against ALL_BUSINESS_SLUGS and defaults to 'handy-andy' when absent.
+          // This field was never sent at all, so every non-Handy-Andy business
+          // (Mile High included) had 100% of its traffic silently filed under
+          // Handy Andy's analytics instead of its own.
+          widget: BUSINESS,
         }),
       });
     } catch (e) { console.error('[analytics] log failed', e); }
