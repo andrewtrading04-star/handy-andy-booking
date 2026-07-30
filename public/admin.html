@@ -1284,9 +1284,9 @@
       <div id="nbSteps"></div>
       <div id="nbCustomLinesWrap" style="margin-top:10px;"></div>
       <button type="button" id="nbAddCustomLine" class="seg-btn" style="margin:6px 0 0;">+ Add custom line</button>
-      <div style="display:flex;align-items:center;background:#16273f;border:1px solid rgba(255,255,255,.18);border-radius:10px;margin:10px 0 12px;overflow:hidden;">
-        <span style="padding:11px 13px;font-size:13px;font-weight:700;color:#9fb0c3;white-space:nowrap;border-right:1px solid rgba(255,255,255,.14);">Travel fee</span>
-        <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="flex:1;min-width:0;background:transparent;border:none;color:#eef2f7;padding:11px 13px;font-size:14px;outline:none;">
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border-radius:10px;margin:10px 0 12px;padding:11px 13px;">
+        <span style="font-size:14px;font-weight:500;color:#0f1b33;white-space:nowrap;">+ Travel fee</span>
+        <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="width:90px;background:transparent;border:none;color:#0f1b33;font-size:14px;outline:none;text-align:center;">
       </div>
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
       <div id="nbTotalDisplay" style="font-size:13px;padding:12px 14px;border-radius:10px;"></div>
@@ -8313,7 +8313,7 @@ async function openNewBooking(prefill){
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
   document.getElementById('nbTravelFee').value='';
-  nbCustomLines=[{label:'',price:''}]; nbRenderCustomLines();
+  nbCustomLines=[]; nbRenderCustomLines();
   document.getElementById('nbTotalDisplay').textContent='';
   nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
   nbSourceEstimateId=(prefill&&prefill._sourceEstimateId)||null;   // archive it on save
@@ -8688,7 +8688,12 @@ function nbPopulateTechs(){
   const hasOwn = nbFilterOwn(nbOwnTechs).length > 0;
   let denverDefault = (nbPartner && nbIsDenver()) ? 'any:cross' : (hasOwn ? 'any:own' : 'any:partner');
   if(!hasOwn && ![...sel.options].some(o=>o.value===denverDefault)) denverDefault = sel.options[0] ? sel.options[0].value : '';
-  sel.value = (prev && [...sel.options].some(o=>o.value===prev)) ? prev : denverDefault;
+  // Only preserve a REAL pick (a concrete tech id) across repopulation — an
+  // "any:*" value is always an auto-default, never a deliberate choice, so it
+  // must stay free to upgrade from "any:own" to "any:cross" once the partner
+  // roster finishes loading (the office's initial pick otherwise got stuck on
+  // "Any Handy Andy Technician" instead of "Any Technician" in Denver).
+  sel.value = (prev && prev.indexOf('any:')!==0 && [...sel.options].some(o=>o.value===prev)) ? prev : denverDefault;
 }
 // Fill the SECOND technician dropdown (no default pick — it's optional).
 // Juan and Zach are excluded from secondary selection but available as primary.
