@@ -7256,7 +7256,7 @@ function reviewTesterSample(bizSlug) {
 
 async function reviewEmailPreview(req, res) {
   const slug = (req.query.business || 'handy-andy').toString();
-  const bizSlug = slug === 'doms' ? 'doms' : 'handy-andy';
+  const bizSlug = ['doms', 'mile-high'].includes(slug) ? slug : 'handy-andy';
   const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brandFor(bizSlug));
   return res.status(200).json({ subject, html });
 }
@@ -7268,7 +7268,7 @@ const TEST_EMAIL_RECIPIENT = 'andrewtrading04@gmail.com';
 async function sendTestReviewEmail(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const slug = ((body && body.business) || 'handy-andy').toString();
-  const bizSlug = slug === 'doms' ? 'doms' : 'handy-andy';
+  const bizSlug = ['doms', 'mile-high'].includes(slug) ? slug : 'handy-andy';
   const brand = brandFor(bizSlug);
   const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brand);
   const { from } = emailConfig(bizSlug);
