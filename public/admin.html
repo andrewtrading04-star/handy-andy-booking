@@ -145,7 +145,7 @@
   .todot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;}
   .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
   .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
-  .evt{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);overflow:hidden;}
+  .evt{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);overflow:hidden;}
   .evt-ghost{background:repeating-linear-gradient(135deg,#f1f2f5,#f1f2f5 6px,#f7f8fa 6px,#f7f8fa 12px);border:1px dashed #cbd2dc;border-left:3px dashed #b6bfcc;border-radius:9px;padding:9px 10px;box-shadow:none;cursor:default;}
   .ghost-t{font-size:12.5px;font-weight:700;color:#9aa4b2;}
   .ghost-n{font-size:12.5px;font-weight:600;color:#9aa4b2;margin-top:3px;display:flex;align-items:center;gap:5px;}
@@ -164,10 +164,8 @@
   .evt-profit.neg{color:#dc2626;}
   .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
-  .evt.s-completed{border-left-color:var(--green);} .evt.s-completed .evt-n{color:var(--mute);}
-  .evt.s-pending{border-left-color:var(--amber);}
-  .evt.s-on_the_way,.evt.s-arrived,.evt.s-in_progress{border-left-color:var(--orange);}
-  .evt.s-cancelled,.evt.s-no_show{border-left-color:#c4ccd6;opacity:.6;}
+  .evt.s-completed .evt-n{color:var(--mute);}
+  .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
   .evt.s-cancelled .evt-n{text-decoration:line-through;}
   /* Cross-company secondary technician booking (partner tech helping with large lift) */
   .evt.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;box-shadow:0 0 0 1px rgba(255,179,102,.3) inset;}
