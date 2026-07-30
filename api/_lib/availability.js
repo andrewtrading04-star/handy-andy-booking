@@ -447,8 +447,59 @@ async function bookedSlotsOneTech(db, techId, dateStr, tz) {
   return { taken, jobCount };
 }
 
-// Pick the first active tech who is available (recurring/exception) AND free for
-// an exact date+slot, so a public booking actually OCCUPIES the slot (prevents
+// Count each tech's ACTIVE jobs (primary or secondary) in the Sun-Sat payroll
+// week containing dateStr. Used by pickOpenTech to round-robin fairly among
+// several techs who are all free for the same slot, instead of always handing
+// it to whichever tech happens to sort first (previously: insertion order —
+// the earliest-added tech on the roster silently got every tie forever).
+async function weekJobCounts(db, techIds, dateStr, tz) {
+  const counts = new Map(techIds.map(id => [id, 0]));
+  if (!techIds.length) return counts;
+  const dow = dayOfWeekFor(dateStr);
+  const sunStr = addDaysStr(dateStr, -dow);
+  const weekStart = localDateStartUTC(tz, sunStr).toISOString();
+  const weekEnd = localDateStartUTC(tz, addDaysStr(sunStr, 7)).toISOString();
+  const idList = techIds.join(',');
+  const run = (withSecond) => {
+    let q = db.from('bookings').select('technician_id' + (withSecond ? ', secondary_technician_id' : ''))
+      .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+      .gte('scheduled_at', weekStart).lt('scheduled_at', weekEnd);
+    return withSecond
+      ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
+      : q.in('technician_id', techIds);
+  };
+  let { data, error } = await run(_liftOne);
+  if (error && error.code === '42703' && /secondary_technician_id/.test(error.message || '')) {
+    _liftOne = false;
+    ({ data, error } = await run(_liftOne));
+  }
+  if (error) throw error;
+  for (const b of (data || [])) {
+    if (counts.has(b.technician_id)) counts.set(b.technician_id, counts.get(b.technician_id) + 1);
+    if (b.secondary_technician_id && counts.has(b.secondary_technician_id)) counts.set(b.secondary_technician_id, counts.get(b.secondary_technician_id) + 1);
+  }
+  return counts;
+}
+
+// Among a pool of already-eligible techs (available + free + under cap for
+// this slot), pick whichever has the FEWEST jobs this payroll week — the
+// round-robin. A tie keeps the pool's existing (created_at) order, so the
+// result stays deterministic instead of flapping between equally-loaded techs
+// on repeated calls.
+async function pickFairest(db, eligible, dateStr, tz) {
+  if (!eligible.length) return null;
+  if (eligible.length === 1) return eligible[0].id;
+  const counts = await weekJobCounts(db, eligible.map(t => t.id), dateStr, tz);
+  let best = eligible[0], bestCount = counts.get(eligible[0].id) || 0;
+  for (const t of eligible.slice(1)) {
+    const c = counts.get(t.id) || 0;
+    if (c < bestCount) { best = t; bestCount = c; }
+  }
+  return best.id;
+}
+
+// Pick an active tech who is available (recurring/exception) AND free for an
+// exact date+slot, so a public booking actually OCCUPIES the slot (prevents
 // two customers grabbing the same window). Falls back to any tech free that slot,
 // else null (the office will assign). Returns a CRM technician id.
 export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false }) {
@@ -479,18 +530,24 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   // (e.g. never works Mondays) must never be auto-booked into it just because
   // they happen to have no conflicting job. Any slot nobody has opted into
   // falls through to null so the office assigns it manually.
-  const tryList = async (pool) => {
+  // Collect every tech in the pool who is actually available + free + under
+  // cap for this exact slot (was: return the FIRST one found, which meant one
+  // tech absorbed every tie between equally-available techs forever).
+  const eligibleFrom = async (pool) => {
+    const eligible = [];
     for (const t of pool) {
       const keys = await recurringPlusExceptions(db, t.id, dateStr, dow);
       if (!keys.has(slotKey)) continue;
       const { taken, jobCount } = await bookedSlotsOneTech(db, t.id, dateStr, tz);
       if (atCap(t, jobCount)) continue;
-      if (!taken.has(slotKey)) return t.id;
+      if (taken.has(slotKey)) continue;
+      eligible.push(t);
     }
-    return null;
+    return eligible;
   };
   // Host company's own techs always go first.
-  const hostPick = await tryList(list);
+  const hostEligible = await eligibleFrom(list);
+  const hostPick = await pickFairest(db, hostEligible, dateStr, tz);
   if (hostPick) return hostPick;
   // Cross-hire fallback (Denver only): only reached once every host tech is
   // unavailable for this slot/date.
@@ -502,7 +559,8 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
         .order('created_at', { ascending: true });
       let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day');
       if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
-      const partnerPick = await tryList(pTechs || []);
+      const partnerEligible = await eligibleFrom(pTechs || []);
+      const partnerPick = await pickFairest(db, partnerEligible, dateStr, tz);
       if (partnerPick) return partnerPick;
     }
   }
