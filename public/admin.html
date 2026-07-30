@@ -145,25 +145,33 @@
   .todot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;}
   .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
   .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
-  .evt{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);}
+  .evt{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);overflow:hidden;}
   .evt-ghost{background:repeating-linear-gradient(135deg,#f1f2f5,#f1f2f5 6px,#f7f8fa 6px,#f7f8fa 12px);border:1px dashed #cbd2dc;border-left:3px dashed #b6bfcc;border-radius:9px;padding:9px 10px;box-shadow:none;cursor:default;}
   .ghost-t{font-size:12.5px;font-weight:700;color:#9aa4b2;}
   .ghost-n{font-size:12.5px;font-weight:600;color:#9aa4b2;margin-top:3px;display:flex;align-items:center;gap:5px;}
   .ghost-tag{font-size:9.5px;font-weight:800;color:#7a8694;background:#e7e9ee;border-radius:5px;padding:1px 6px;}
   .evt:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
-  /* Two-row card: top = avatar + name ONLY (full remaining card width, so a
-     long single-word surname like Sladkovskyi has room to fit on one line
-     instead of fighting the price for space). Bottom = time + lights on the
-     left, price stacked above tech pay/profit on the right. */
-  .evt{display:flex;flex-direction:column;gap:7px;padding:11px 12px;min-height:60px;}
-  .evt-top{display:flex;align-items:flex-start;gap:9px;}
-  .evt-top .av{margin-top:1px;}
-  .evt-n{flex:1;min-width:0;font-size:14px;font-weight:500;color:var(--ink);white-space:normal;overflow-wrap:break-word;hyphens:auto;line-height:1.3;}
-  .evt-bottom{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding-left:33px;}
-  .evt-t{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mute);font-weight:600;flex-wrap:wrap;row-gap:4px;}
+  .evt-t{font-size:12.5px;font-weight:800;color:var(--ink);line-height:1.3;}
   .evt-time{white-space:nowrap;}
-  .evt-dur{font-weight:600;color:var(--mute);}
-  .evt-lights{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+  .evt-dur{font-weight:600;color:var(--mute);margin-left:4px;}
+  /* Total ticket price (black) + total tech pay (smaller, blue, admin-only). */
+  .evt-price{font-weight:800;color:var(--ink);margin-left:4px;}
+  .evt-techpay{font-weight:700;font-size:11px;color:#2563eb;margin-left:3px;}
+  /* Cash job: the tech is PAID a negative amount (they kept the customer's
+     money), so it reads red like a negative profit rather than blue like pay. */
+  .evt-techpay.neg{color:#dc2626;}
+  .evt-profit{font-weight:700;font-size:11px;color:#16a34a;margin-left:3px;}
+  .evt-profit.neg{color:#dc2626;}
+  .evt-n{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .evt-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:5px;}
+  .evt.s-completed .evt-n{color:var(--mute);}
+  .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
+  .evt.s-cancelled .evt-n{text-decoration:line-through;}
+  /* Two status lights (replace the old PAID/COMPLETE text pills): $ icon for
+     payment, dot for completion. gray=cancelled, yellow=in progress,
+     blue=not due yet, green=resolved correctly, red=should be resolved and
+     isn't. See evtLights()/EVT_LIGHT_TITLE below. */
+  .evt-lights{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-left:auto;}
   .evt-light-pay{font-size:10px;display:flex;line-height:1;}
   .evt-light-done{width:7px;height:7px;border-radius:50%;display:block;flex-shrink:0;}
   .evt-light-blue{color:#378ADD;} .evt-light-done.evt-light-blue{background:#378ADD;}
@@ -171,14 +179,6 @@
   .evt-light-green{color:#639922;} .evt-light-done.evt-light-green{background:#639922;}
   .evt-light-red{color:#E24B4A;} .evt-light-done.evt-light-red{background:#E24B4A;}
   .evt-light-gray{color:var(--mute);} .evt-light-done.evt-light-gray{background:var(--mute);}
-  /* Right side of the bottom row: price on top, tech pay/profit underneath. */
-  .evt-money{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0;}
-  .evt-price{font-weight:600;color:var(--ink);font-size:15px;white-space:nowrap;}
-  .evt-sub{font-size:11px;color:var(--mute);white-space:nowrap;}
-  .evt-techpay.neg,.evt-profit.neg{color:#dc2626;}
-  .evt.s-completed .evt-n{color:var(--mute);}
-  .evt.s-cancelled,.evt.s-no_show{opacity:.6;}
-  .evt.s-cancelled .evt-n{text-decoration:line-through;}
   /* Cross-company secondary technician booking (partner tech helping with large lift) */
   .evt.xco-secondary{background:#fffbf0;border:1.5px solid #ffb366;box-shadow:0 0 0 1px rgba(255,179,102,.3) inset;}
   body.doms .evt.xco-secondary{background:#f0f6ff;border:1.5px solid #4d8dff;box-shadow:0 0 0 1px rgba(77,141,255,.3) inset;}
@@ -2263,26 +2263,12 @@ function evtCard(b){
     <span class="evt-light-pay evt-light-${L.pay}" title="${esc(EVT_LIGHT_TITLE.pay[L.pay])}${overdue?` — ${odDays}d overdue`:''}">${dollarSignSvg()}</span>
     <span class="evt-light-done evt-light-${L.done}" title="${esc(EVT_LIGHT_TITLE.done[L.done])}"></span>
   </span>`;
-  const priceHtml = b.price ? `<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>` : '';
-  const subParts=[];
-  if(b.econ&&b.econ.tech_payout!=null){
-    const payAmt = b.econ.net_tech_pay!=null ? b.econ.net_tech_pay : b.econ.tech_payout;
-    const payTitle = b.econ.net_tech_pay!=null
-      ? `CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}`
-      : 'Total tech pay incl. tip (admin only)';
-    subParts.push(`<span class="evt-techpay${payAmt<0?' neg':''}" title="${esc(payTitle)}">${money(payAmt)}</span>`);
-  }
-  if(b.econ&&b.econ.assigned&&b.econ.profit!=null) subParts.push(`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`);
-  const subHtml = subParts.length ? `<span class="evt-sub">${subParts.join(' · ')}</span>` : '';
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
-    <div class="evt-top">
-      ${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}
-      <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
-    </div>
-    <div class="evt-bottom">
-      <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1}</span>`:''}${lightsHtml}</div>
-      <div class="evt-money">${priceHtml}${subHtml}</div>
-    </div>
+    <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}</div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
+    <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?(b.econ.net_tech_pay!=null
+      ? `<span class="evt-techpay${b.econ.net_tech_pay<0?' neg':''}" title="CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}">${money(b.econ.net_tech_pay)}</span>`
+      : `<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`):''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}${lightsHtml}</div>
   </div>`;
 }
 function dollarSignSvg(){ return '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
