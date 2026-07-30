@@ -236,6 +236,7 @@ export default async function handler(req, res) {
 
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
+      case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
       case 'service_options':   return await serviceOptions(req, res, db, auth);
@@ -7276,6 +7277,172 @@ async function sendTestReviewEmail(req, res, body) {
   const result = await sendEmail({ slug: bizSlug, to: TEST_EMAIL_RECIPIENT, subject: `[TEST] ${subject}`, html, replyTo: from });
   if (!result.sent) return res.status(500).json({ error: result.error || result.skipped || 'Email did not send.' });
   return res.status(200).json({ ok: true, to: TEST_EMAIL_RECIPIENT });
+}
+
+// ── Zenbooker historical job import ─────────────────────────────────────────
+// Batch loader for the "All Jobs" export. Idempotent: bookings are keyed on
+// zenbooker_job_id, so re-running a batch updates rather than duplicates.
+// Customers are MATCHED against the existing roster (phone first, then email)
+// because the customer export was already imported; only genuinely new people
+// are created. Pass dry_run to get the counts without writing anything.
+const ZB_PLACEHOLDER_CREW = {};   // crewId -> label, filled from the request
+
+async function zbImport(req, res, db, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No rows supplied.' });
+  const dry = !!body.dry_run;
+  const slug = body.business || 'handy-andy';
+
+  const { data: biz } = await db.from('businesses').select('id, slug').eq('slug', slug).single();
+  if (!biz) return res.status(400).json({ error: 'Unknown business ' + slug });
+
+  const { data: areas } = await db.from('service_areas').select('id, name').eq('business_id', biz.id);
+  const areaByName = {};
+  for (const a of areas || []) areaByName[(a.name || '').toLowerCase()] = a.id;
+
+  // ── technicians: map Zenbooker crew id -> technician row, creating a clearly
+  // provisional placeholder when the crew is one we could not name. Renaming
+  // the placeholder later re-labels every job automatically (jobs point at the
+  // technician row, not at a name string).
+  const { data: techs } = await db.from('technicians').select('id, name, zenbooker_provider_id').eq('business_id', biz.id);
+  const techByCrew = {};
+  for (const t of techs || []) if (t.zenbooker_provider_id) techByCrew[t.zenbooker_provider_id] = t.id;
+  const techByName = {};
+  for (const t of techs || []) techByName[(t.name || '').toLowerCase()] = t.id;
+
+  const crewNames = body.crew_names || {};
+  const neededCrews = [...new Set(rows.map(r => r.crew).filter(Boolean))];
+  const createdTechs = [];
+  for (const crew of neededCrews) {
+    if (techByCrew[crew]) continue;
+    const wanted = crewNames[crew];
+    // A known name (Juan / Zach) attaches the crew id to the EXISTING tech row
+    // rather than creating a duplicate person.
+    if (wanted && techByName[wanted.toLowerCase()]) {
+      const id = techByName[wanted.toLowerCase()];
+      if (!dry) await db.from('technicians').update({ zenbooker_provider_id: crew }).eq('id', id);
+      techByCrew[crew] = id;
+      continue;
+    }
+    if (!wanted) continue;   // unnamed crews are handled by the caller
+    if (dry) { createdTechs.push(wanted); techByCrew[crew] = '00000000-0000-0000-0000-000000000000'; continue; }
+    const { data: nt, error } = await db.from('technicians').insert({
+      business_id: biz.id, name: wanted, active: false, status: 'off',
+      zenbooker_provider_id: crew,
+    }).select('id').single();
+    if (error) return res.status(500).json({ error: 'tech insert: ' + error.message });
+    techByCrew[crew] = nt.id; createdTechs.push(wanted);
+  }
+
+  // ── customer matching, in bulk ────────────────────────────────────────────
+  const phones = [...new Set(rows.map(r => r.phone).filter(Boolean))];
+  const emails = [...new Set(rows.map(r => r.email).filter(Boolean))];
+  const byPhone = {}, byEmail = {};
+  for (let i = 0; i < phones.length; i += 200) {
+    const { data } = await db.from('customers').select('id, phone').eq('business_id', biz.id).in('phone', phones.slice(i, i + 200));
+    for (const c of data || []) if (c.phone) byPhone[c.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '')] = c.id;
+  }
+  for (let i = 0; i < emails.length; i += 200) {
+    const { data } = await db.from('customers').select('id, email').eq('business_id', biz.id).in('email', emails.slice(i, i + 200));
+    for (const c of data || []) if (c.email) byEmail[c.email.toLowerCase()] = c.id;
+  }
+
+  const matched = new Set(), toCreate = new Map();
+  for (const r of rows) {
+    const hit = (r.phone && byPhone[r.phone]) || (r.email && byEmail[r.email]) || null;
+    if (hit) { matched.add(hit); continue; }
+    const key = r.phone || r.email;
+    if (!toCreate.has(key)) toCreate.set(key, r);
+  }
+
+  let created = 0;
+  if (!dry && toCreate.size) {
+    const payload = [...toCreate.values()].map(r => ({
+      business_id: biz.id, name: r.name, phone: r.phone || null, email: r.email || null,
+      address_line1: r.line1 || null, address_line2: r.line2 || null,
+      city: r.city || null, state: r.state || null, postal_code: r.zip || null,
+      stripe_customer_id: r.stripe_cust || null,
+      metadata: { imported_from: 'zenbooker_all_jobs' },
+    }));
+    for (let i = 0; i < payload.length; i += 200) {
+      const { data, error } = await db.from('customers').insert(payload.slice(i, i + 200)).select('id, phone, email');
+      if (error) return res.status(500).json({ error: 'customer insert: ' + error.message });
+      for (const c of data || []) {
+        created++;
+        if (c.phone) byPhone[c.phone.replace(/\D/g, '')] = c.id;
+        if (c.email) byEmail[c.email.toLowerCase()] = c.id;
+      }
+    }
+  }
+
+  if (dry) {
+    return res.status(200).json({
+      dry_run: true, rows: rows.length,
+      customers_matched: matched.size, customers_would_create: toCreate.size,
+      techs_would_create: createdTechs, crews_unnamed: neededCrews.filter(c => !techByCrew[c]),
+      gds_rows: rows.filter(r => r.gds).length,
+    });
+  }
+
+  // ── bookings ──────────────────────────────────────────────────────────────
+  const bookingRows = [];
+  for (const r of rows) {
+    const cid = (r.phone && byPhone[r.phone]) || (r.email && byEmail[r.email]) || null;
+    if (!cid) continue;
+    bookingRows.push({
+      business_id: biz.id, customer_id: cid,
+      technician_id: techByCrew[r.crew] || null,
+      service_area_id: areaByName[(r.market || '').toLowerCase()] || null,
+      status: r.status, source: 'import',
+      scheduled_at: r.start, duration_minutes: r.duration || 60,
+      subtotal: r.subtotal || 0, price: r.price || 0, tip: r.tip || 0,
+      payment_status: r.paid ? 'paid' : 'unpaid',
+      amount_paid: r.paid ? (r.price || 0) : 0,
+      paid_at: r.paid ? (r.completed || r.start) : null,
+      stripe_customer_id: r.stripe_cust || null,
+      address_line1: r.line1 || null, address_line2: r.line2 || null,
+      city: r.city || null, state: r.state || null, postal_code: r.zip || null,
+      on_the_way_at: r.enroute, arrived_at: r.arrived, completed_at: r.completed,
+      review_rating: r.rating || null,
+      zenbooker_job_id: r.zb_id, zenbooker_job_number: r.job_no || null,
+      notes: r.svc || null, payment_required: false,
+    });
+  }
+  const savedIds = {};
+  for (let i = 0; i < bookingRows.length; i += 200) {
+    const { data, error } = await db.from('bookings')
+      .upsert(bookingRows.slice(i, i + 200), { onConflict: 'business_id,zenbooker_job_id' })
+      .select('id, zenbooker_job_id');
+    if (error) return res.status(500).json({ error: 'booking upsert: ' + error.message });
+    for (const b of data || []) savedIds[b.zenbooker_job_id] = b.id;
+  }
+
+  // ── GDS line items (this is what lights up the ✓ in the customer modal) ────
+  const gdsRows = rows.filter(r => r.gds && savedIds[r.zb_id]);
+  let gdsWritten = 0;
+  if (gdsRows.length) {
+    const ids = gdsRows.map(r => savedIds[r.zb_id]);
+    const { data: existing } = await db.from('booking_line_items')
+      .select('booking_id, name').in('booking_id', ids);
+    const have = new Set((existing || []).filter(l => /guaranteed dismount/i.test(l.name || '')).map(l => l.booking_id));
+    const payload = gdsRows.filter(r => !have.has(savedIds[r.zb_id])).map(r => ({
+      booking_id: savedIds[r.zb_id], business_id: biz.id, kind: 'addon',
+      name: 'Guaranteed Dismount Service', quantity: 1, unit_price: 35, line_total: 35,
+      taxable: true, zenbooker_ref: r.zb_id, sort_order: 99,
+    }));
+    if (payload.length) {
+      const { error } = await db.from('booking_line_items').insert(payload);
+      if (error) return res.status(500).json({ error: 'line item insert: ' + error.message });
+      gdsWritten = payload.length;
+    }
+  }
+
+  return res.status(200).json({
+    ok: true, rows: rows.length, customers_matched: matched.size, customers_created: created,
+    bookings_written: Object.keys(savedIds).length, gds_line_items: gdsWritten,
+    techs_created: createdTechs,
+  });
 }
 
 // One-off internal notice asking the office to un-spam the brand-new Mile High
