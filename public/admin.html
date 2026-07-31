@@ -172,8 +172,8 @@
      blue=not due yet, green=resolved correctly, red=should be resolved and
      isn't. See evtLights()/EVT_LIGHT_TITLE below. */
   .evt-lights{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-left:auto;}
-  .evt-light-pay{font-size:10px;display:flex;line-height:1;}
-  .evt-light-done{width:7px;height:7px;border-radius:50%;display:block;flex-shrink:0;}
+  .evt-light-pay{font-size:11px;display:flex;line-height:1;}
+  .evt-light-done{width:9px;height:9px;border-radius:50%;display:block;flex-shrink:0;}
   .evt-light-blue{color:#378ADD;} .evt-light-done.evt-light-blue{background:#378ADD;}
   .evt-light-yellow{color:#EF9F27;} .evt-light-done.evt-light-yellow{background:#EF9F27;}
   .evt-light-green{color:#639922;} .evt-light-done.evt-light-green{background:#639922;}
@@ -2271,7 +2271,7 @@ function evtCard(b){
       : `<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`):''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}</div>
   </div>`;
 }
-function dollarSignSvg(){ return '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
+function dollarSignSvg(){ return '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
 function ghostEvtCard(g){
   const t=techCache.find(x=>x.id===g.technician_id);
   const start=fmtClock(g.scheduled_at);
