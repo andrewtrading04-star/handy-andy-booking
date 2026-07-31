@@ -316,11 +316,16 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       <div style="margin-top:18px;font-size:12px;color:#9ca3af;">You're getting one summary a day instead of an email per booking. Sent at 8 PM Denver.</div>
     </div>`;
 
+    // Cron sends keep the per-day idempotency key (exactly one delivery per
+    // Denver day even if the cron fires twice). A FORCED send gets a unique
+    // key: force exists precisely to resend a day's digest (e.g. after the
+    // Jul 30 2026 import-polluted email), and reusing the day key would make
+    // the provider silently swallow the resend as a duplicate of the bad one.
     await sendEmail({
       slug: 'handy-andy', to,
       subject: `Daily booking summary — ${bookings.length} new appointment${bookings.length === 1 ? '' : 's'}${overdue.length ? `, ${overdue.length} overdue` : ''}`,
       html, replyTo: cfg.from,
-      idempotencyKey: `daily-digest-${dayKey}`,   // exactly one delivery per Denver day
+      idempotencyKey: force ? `daily-digest-${dayKey}-resend-${Date.now()}` : `daily-digest-${dayKey}`,
     });
     return { sent: true, count: bookings.length, overdue: overdue.length, to, dayKey };
   } catch (e) {

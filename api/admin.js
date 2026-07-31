@@ -21,6 +21,7 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
+import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -237,6 +238,18 @@ export default async function handler(req, res) {
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
       case 'send_gds_rate_update': return await sendGdsRateUpdate(req, res, db);
+      // Owner-triggered digest (re)send for a specific day — exists because the
+      // cron path (api/migrate.js) is gated on CRON_SECRET, which is a
+      // sensitive Vercel env var nobody can read back, so the owner had no way
+      // to resend a digest after the Jul 30 2026 import-pollution incident.
+      // offset: 0=today, -1=yesterday. dry=1 counts without sending.
+      case 'daily_digest_resend': {
+        if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+        const offset = (req.query.offset != null && req.query.offset !== '') ? parseInt(req.query.offset, 10) : 0;
+        const dryRun = req.query.dry === '1';
+        const out = await sendDailyBookingDigest({ force: true, dryRun, offset });
+        return res.status(200).json({ ok: true, ...out });
+      }
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
