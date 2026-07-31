@@ -199,6 +199,13 @@
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;}
   .lightbox img{max-width:100%;max-height:100%;border-radius:8px;}
   .lightbox .lb-close{position:fixed;top:16px;right:18px;background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;}
+  /* "Get the logo on the TV" sheet — segmented tabs so only ONE path is on
+     screen at a time (three stacked paths read as a wall of text), plus the
+     numbered step rows shared by all three panels. */
+  .lh-tab{flex:1;background:transparent;border:none;color:#7a8694;font-size:12.5px;font-weight:700;padding:8px 4px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .lh-tab.on{background:#fff;color:#222a35;box-shadow:0 1px 3px rgba(20,30,50,.13);}
+  .lh-step{display:flex;gap:11px;align-items:flex-start;margin-bottom:11px;font-size:14.5px;color:#222a35;line-height:1.45;}
+  .lh-num{flex:0 0 24px;height:24px;border-radius:50%;background:#FF6B35;color:#fff;font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-top:1px;}
   .streetview{width:100%;height:auto;border-radius:10px;display:block;margin:12px 0;background:var(--navy);aspect-ratio:4/3;}
 
   /* Availability */
@@ -383,54 +390,68 @@
      wifi, which is the single most common reason this fails in the field.
      The mechanic is identical for both companies; only the video differs. -->
 <div id="logoHelpModal" class="lightbox hidden">
-  <div style="background:#fff;border-radius:16px;padding:20px;max-width:350px;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:left;">
-    <div style="font-size:19px;font-weight:800;color:#222a35;">Get the logo on the TV</div>
+  <div style="background:#fff;border-radius:18px;padding:0;max-width:352px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:left;overflow:hidden;">
 
-    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:11px 13px;margin:11px 0 13px;">
-      <div style="font-size:14px;font-weight:800;color:#9a3412;">Turn the TV on first</div>
-      <div style="font-size:13px;color:#9a4a1f;line-height:1.5;margin-top:2px;">A sleeping TV photographs black and won't show up on your phone either.</div>
-    </div>
-
-    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:11px;">
-      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">FASTEST — JUST ASK THEM</div>
-      <div style="font-size:14px;color:#222a35;line-height:1.6;">&ldquo;Can you pull up YouTube on it for a second?&rdquo;<br><span style="color:#7a8694;font-size:13px;">They know their own remote better than you do. Then search <b>Handy Andy TV Mounting</b> and play the <b>LOGO</b> video.</span></div>
-    </div>
-
-    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:11px;">
-      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">OR USE THEIR REMOTE YOURSELF</div>
-      <div style="font-size:14px;color:#222a35;line-height:1.85;">
-        1. Open the <b>YouTube app</b> on the TV<br>
-        2. Search <b>Handy Andy TV Mounting</b><br>
-        3. Play the <b>LOGO</b> video<br>
-        4. Let it play — wait for the play bar to disappear
+    <div style="padding:18px 20px 0;">
+      <div style="font-size:20px;font-weight:800;color:#222a35;letter-spacing:-.2px;">Get the logo on the TV</div>
+      <div style="display:flex;align-items:center;gap:7px;margin-top:9px;background:#fff7ed;border-radius:9px;padding:9px 11px;">
+        <span style="font-size:15px;line-height:1;">&#9888;&#65039;</span>
+        <span style="font-size:12.5px;color:#9a3412;line-height:1.4;font-weight:600;">Turn the TV on first &mdash; a sleeping TV photographs black.</span>
       </div>
     </div>
 
-    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:13px;">
-      <div style="font-size:12px;font-weight:800;color:#1d4ed8;letter-spacing:.3px;margin-bottom:5px;">OR SEND IT FROM YOUR PHONE</div>
-      <div style="font-size:12.5px;color:#7a8694;line-height:1.5;margin-bottom:8px;">Your phone and the TV both have to be on the same wifi. <b style="color:#9a3412;">Guest wifi won't work</b> — the TV just won't show up in the list.</div>
-      <div style="font-size:14px;color:#222a35;line-height:1.85;">
-        1. Tap <b>Open the logo video</b> below<br>
-        2. Tap the little TV icon at the top right:
-      </div>
-      <div style="background:#0f0f0f;border-radius:8px;padding:9px 11px;margin:9px 0 7px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
-        <span style="position:relative;display:inline-flex;align-items:center;">
-          <span style="position:absolute;top:-7px;left:-7px;right:-7px;bottom:-7px;border:2px solid #FF6B35;border-radius:50%;"></span>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3v2h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
-        </span>
-        <span style="color:#8a8a8a;font-size:13px;font-weight:700;border:1px solid #8a8a8a;border-radius:3px;padding:0 3px;">CC</span>
-        <span style="color:#8a8a8a;font-size:16px;">&#9881;</span>
-      </div>
-      <div style="font-size:14px;color:#222a35;line-height:1.85;">3. Pick the customer's TV from the list</div>
+    <div style="display:flex;gap:4px;background:#eef1f5;border-radius:11px;padding:4px;margin:14px 20px 0;">
+      <button class="lh-tab" data-lh="ask">Ask them</button>
+      <button class="lh-tab" data-lh="remote">Their remote</button>
+      <button class="lh-tab" data-lh="cast">My phone</button>
     </div>
 
-    <div style="font-size:13px;color:#7a8694;line-height:1.65;margin-bottom:15px;">
-      <b style="color:#222a35;">Before you shoot:</b> flash off, and tap the TV on your phone screen so it focuses on the logo.<br>
-      <b style="color:#222a35;">When you're done:</b> put the input back where you found it and hand them the remote.
+    <div data-lh-body style="flex:1;overflow-y:auto;padding:16px 20px 4px;">
+
+      <div class="lh-panel" data-lh-panel="ask">
+        <div style="display:inline-block;background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 9px;border-radius:99px;margin-bottom:11px;">FASTEST</div>
+        <div style="background:#f4f6f9;border-left:3px solid #FF6B35;border-radius:0 10px 10px 0;padding:13px 14px;margin-bottom:12px;">
+          <div style="font-size:16px;color:#222a35;line-height:1.45;font-weight:600;">&ldquo;Can you pull up YouTube on it for a second?&rdquo;</div>
+        </div>
+        <div style="font-size:13px;color:#7a8694;line-height:1.55;margin-bottom:13px;">They know their own remote better than you do.</div>
+        <div class="lh-step"><span class="lh-num">1</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
+        <div class="lh-step"><span class="lh-num">2</span><div>Play the <b>LOGO</b> video</div></div>
+      </div>
+
+      <div class="lh-panel" data-lh-panel="remote" style="display:none;">
+        <div class="lh-step"><span class="lh-num">1</span><div>Open the <b>YouTube app</b> on the TV</div></div>
+        <div class="lh-step"><span class="lh-num">2</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
+        <div class="lh-step"><span class="lh-num">3</span><div>Play the <b>LOGO</b> video</div></div>
+        <div class="lh-step"><span class="lh-num">4</span><div>Let it play &mdash; wait for the play bar to disappear</div></div>
+      </div>
+
+      <div class="lh-panel" data-lh-panel="cast" style="display:none;">
+        <div style="background:#fef2f2;border-radius:9px;padding:9px 11px;margin-bottom:13px;font-size:12.5px;color:#9a3412;line-height:1.45;">
+          <b>Guest wifi won't work.</b> Your phone and the TV must be on the same network or the TV won't appear.
+        </div>
+        <div class="lh-step"><span class="lh-num">1</span><div>Tap <b>Open the logo video</b> below</div></div>
+        <div class="lh-step"><span class="lh-num">2</span><div>Tap the little TV icon, top right</div></div>
+        <div style="background:#0f0f0f;border-radius:9px;padding:10px 12px;margin:2px 0 12px 35px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
+          <span style="position:relative;display:inline-flex;align-items:center;">
+            <span style="position:absolute;top:-7px;left:-7px;right:-7px;bottom:-7px;border:2px solid #FF6B35;border-radius:50%;"></span>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3v2h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+          </span>
+          <span style="color:#8a8a8a;font-size:12px;font-weight:700;border:1px solid #8a8a8a;border-radius:3px;padding:0 3px;">CC</span>
+          <span style="color:#8a8a8a;font-size:15px;">&#9881;</span>
+        </div>
+        <div class="lh-step"><span class="lh-num">3</span><div>Pick the customer's TV from the list</div></div>
+      </div>
+
+      <div style="border-top:1px solid #eef1f5;margin-top:14px;padding-top:12px;display:flex;gap:16px;">
+        <div style="flex:1;font-size:11.5px;color:#7a8694;line-height:1.45;"><b style="color:#222a35;display:block;">Before you shoot</b>Flash off. Tap the TV on your screen to focus.</div>
+        <div style="flex:1;font-size:11.5px;color:#7a8694;line-height:1.45;"><b style="color:#222a35;display:block;">When you're done</b>Put the input back, hand them the remote.</div>
+      </div>
     </div>
 
-    <button class="btn" id="logoHelpOpen" style="width:100%;background:#FF6B35;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:9px;">&#9654; Open the logo video</button>
-    <button class="btn ghost" id="logoHelpClose" style="width:100%;background:transparent;color:#7a8694;border:1px solid #e7e9ee;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
+    <div style="padding:12px 20px 16px;border-top:1px solid #eef1f5;background:#fff;">
+      <button class="btn" id="logoHelpOpen" style="width:100%;background:#FF6B35;color:#fff;border:none;border-radius:11px;padding:15px;font-size:16px;font-weight:800;cursor:pointer;margin-bottom:8px;">&#9654;&nbsp; Open the logo video</button>
+      <button class="btn ghost" id="logoHelpClose" style="width:100%;background:transparent;color:#7a8694;border:none;border-radius:10px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
+    </div>
   </div>
 </div>
 
@@ -2420,8 +2441,21 @@ document.getElementById('completeModal').addEventListener('click',e=>{
 // the Help tab), so binding a single element by id would only ever wire up
 // whichever copy rendered first.
 function closeLogoHelp(){ document.getElementById('logoHelpModal').classList.add('hidden'); }
+// Show one path, hide the other two. Also used to reset to the recommended
+// "Ask them" tab every time the sheet opens, so a tech who poked at the cast
+// tab last time doesn't reopen straight into the hardest path.
+function logoHelpTab(key){
+  document.querySelectorAll('#logoHelpModal .lh-tab').forEach(b=>b.classList.toggle('on', b.dataset.lh===key));
+  document.querySelectorAll('#logoHelpModal .lh-panel').forEach(p=>{ p.style.display = (p.dataset.lhPanel===key ? '' : 'none'); });
+  const body=document.querySelector('#logoHelpModal [data-lh-body]');
+  if(body) body.scrollTop=0;
+}
+document.querySelectorAll('#logoHelpModal .lh-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>logoHelpTab(btn.dataset.lh));
+});
 document.addEventListener('click',e=>{
   if(!e.target.closest('.js-logo-help')) return;
+  logoHelpTab('ask');
   document.getElementById('logoHelpModal').classList.remove('hidden');
 });
 document.getElementById('logoHelpOpen').addEventListener('click',()=>{
