@@ -52,15 +52,13 @@
     'mile-high':  'https://www.milehightvmounting.com/thankyou/',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
 
-  // ── Native (off-Zenbooker) booking mode ──────────────────────────────────
-  // When on, the widget books through the CRM's own service-area / slots / book
-  // engine (business=handy-andy) instead of Zenbooker. During rollout it's
-  // OPT-IN via ?native=1 on the host page (so real traffic is unaffected); flip
-  // NATIVE_DEFAULT to true to make it the default for everyone, or use ?native=0
-  // to force the old Zenbooker path as a fallback.
-  const NATIVE_DEFAULT = true;   // Handy Andy booking now runs on the CRM, not Zenbooker. Use ?native=0 to force the old path.
-  let NATIVE = NATIVE_DEFAULT;
-  try { const _np = new URLSearchParams(location.search).get('native'); if (_np === '1') NATIVE = true; if (_np === '0') NATIVE = false; } catch (e) {}
+  // ── Native booking mode ───────────────────────────────────────────────────
+  // The widget always books through the CRM's own service-area / slots / book
+  // engine now. Zenbooker was canceled 2026-07-31 -- the old Zenbooker-backed
+  // path (and its ?native=0 escape hatch to force it) is gone; the backend
+  // endpoints hard-fail anything non-native anyway, so there is no fallback
+  // left to opt into.
+  const NATIVE = true;
   // Set from the native zip check; used by slots, surcharge, and tech scoping.
   let serviceAreaId = null, nativeSurcharge = 0, nativePriceAdjustmentAmount = 0, areaName = '';
   // No tech roster in this service area yet (owner-set on the service area
