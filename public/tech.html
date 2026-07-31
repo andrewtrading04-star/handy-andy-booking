@@ -404,7 +404,7 @@
       <div class="lh-step"><span class="lh-num">2</span><div style="flex:1;min-width:0;">
         Search for this:
         <button id="lhCopy" style="display:flex;align-items:center;gap:9px;width:100%;margin-top:6px;background:#f4f6f9;border:1px solid #e2e6ec;border-radius:9px;padding:10px 12px;cursor:pointer;font-family:inherit;text-align:left;">
-          <span id="lhTerm" style="flex:1;min-width:0;font-size:14.5px;font-weight:700;color:#222a35;">Handy Andy TV Mounting logo</span>
+          <span id="lhTerm" style="flex:1;min-width:0;font-size:14.5px;font-weight:700;color:#222a35;-webkit-user-select:text;user-select:text;">Handy Andy TV Mounting logo</span>
           <span id="lhCopyLabel" style="flex:0 0 auto;font-size:12px;font-weight:800;color:#FF6B35;white-space:nowrap;">COPY</span>
         </button>
       </div></div>
@@ -2459,7 +2459,9 @@ document.getElementById('lhCopy').addEventListener('click',async()=>{
     }catch(__){ ok=false; }
   }
   const lbl=document.getElementById('lhCopyLabel');
-  lbl.textContent = ok ? 'COPIED ✓' : 'PRESS & HOLD';
+  // If both copy paths are blocked (locked-down webview), don't leave the tech
+  // stuck — the term itself is selectable text, so long-pressing it still works.
+  lbl.textContent = ok ? 'COPIED ✓' : 'HOLD TO SELECT';
   lbl.style.color = ok ? '#15803d' : '#9a3412';
   setTimeout(()=>{ lbl.textContent='COPY'; lbl.style.color='#FF6B35'; },1600);
 });
