@@ -1,7 +1,8 @@
 // /api/slots.js
-// Returns bookable appointment times. Handy Andy proxies Zenbooker's timeslots;
-// Doms (business=doms) is native — it computes open slots from the CRM's own
-// technician availability minus existing bookings, no Zenbooker involved.
+// Returns bookable appointment times. Every real business (Handy Andy, Mile
+// High, Doms) is native — open slots come from the CRM's own technician
+// availability minus existing bookings. Zenbooker was canceled 2026-07-31;
+// the branch below this point is a dead-end, not a live fallback.
 import { serviceClient } from './_lib/supabase.js';
 import { publicOpenSlots } from './_lib/availability.js';
 import { NATIVE_SLUGS } from './_lib/native-businesses.js';
@@ -45,34 +46,8 @@ export default async function handler(req, res) {
     }
   }
 
-  const ZBK_KEY = process.env.ZENBOOKER_API_KEY;
-  if (!ZBK_KEY) return res.status(500).json({ error: 'ZENBOOKER_API_KEY missing' });
-
-  const { territory_id, duration, date, days, lat, lng, min_providers_needed } = src;
-
-  if (!territory_id) return res.status(400).json({ error: 'territory_id is required' });
-  if (!duration)     return res.status(400).json({ error: 'duration (minutes) is required' });
-
-  try {
-    const url = new URL('https://api.zenbooker.com/v1/scheduling/timeslots');
-    url.searchParams.set('territory', territory_id);
-    url.searchParams.set('date',      date || new Date().toISOString().slice(0, 10));
-    url.searchParams.set('duration',  String(duration));
-    url.searchParams.set('days',      String(days || 14));
-    if (min_providers_needed) url.searchParams.set('min_providers_needed', String(min_providers_needed));
-    if (lat) url.searchParams.set('lat', String(lat));
-    if (lng) url.searchParams.set('lng', String(lng));
-
-    const r = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${ZBK_KEY}` },
-    });
-    const data = await r.json().catch(() => ({}));
-
-    if (!r.ok) {
-      return res.status(r.status).json({ error: data?.message || 'Zenbooker error', details: data });
-    }
-    return res.status(200).json(data);
-  } catch (err) {
-    return res.status(500).json({ error: 'Timeslot lookup failed', message: err.message });
-  }
+  // Zenbooker was canceled 2026-07-31 — see the matching comment in
+  // api/service-area.js. Every real business is handled by the branches
+  // above; nothing legitimate should ever reach here.
+  return res.status(410).json({ error: 'Unknown or missing business. Zenbooker is no longer used — pass business=handy-andy, mile-high, or doms.' });
 }
