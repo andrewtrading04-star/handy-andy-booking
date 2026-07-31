@@ -6998,7 +6998,7 @@ function esLineRow(it){
   const p=(it.unit_price!=null&&it.unit_price!=='')?esc(String(it.unit_price)):'';
   return `<div class="es-line" data-line>
     <input class="search es-li-desc" placeholder="Description" value="${d}">
-    <input class="search es-li-qty" type="number" inputmode="decimal" min="0" step="0.5" value="${q}">
+    <input class="search es-li-qty" type="number" inputmode="numeric" min="0" step="1" value="${q}">
     <input class="search es-li-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" value="${p}">
     <button class="es-li-rm" type="button" title="Remove">✕</button>
   </div>`;
@@ -7006,14 +7006,14 @@ function esLineRow(it){
 function esReadLines(){
   return [...document.querySelectorAll('#esLines [data-line]')].map(row=>({
     description: row.querySelector('.es-li-desc').value.trim(),
-    qty: parseFloat(row.querySelector('.es-li-qty').value)||0,
+    qty: Math.round(parseFloat(row.querySelector('.es-li-qty').value)||0),
     unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
   })).filter(it=>it.description||it.unit_price>0);
 }
 function esCurrentTaxRate(){ return document.getElementById('esTaxOn').checked ? EST_TAX_RATE : 0; }
 function esRecalcTotal(){
   const rows=[...document.querySelectorAll('#esLines [data-line]')].map(row=>({
-    qty: parseFloat(row.querySelector('.es-li-qty').value)||0,
+    qty: Math.round(parseFloat(row.querySelector('.es-li-qty').value)||0),
     unit_price: parseFloat(row.querySelector('.es-li-price').value)||0,
   }));
   const t=estTotals(rows,esCurrentTaxRate());
