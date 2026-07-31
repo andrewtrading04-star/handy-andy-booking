@@ -238,6 +238,15 @@ export default async function handler(req, res) {
     switch (action) {
       case 'send_spam_notice':  return await sendSpamNotice(req, res);
       case 'send_gds_rate_update': return await sendGdsRateUpdate(req, res, db);
+      // TEMP: mint an approve token so the estimate flow can be tested without
+      // emailing a real customer. Removed immediately after verification.
+      case '_debug_approve_link': {
+        if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+        const eid = (req.query.id || '').toString();
+        if (!eid) return res.status(400).json({ error: 'id required' });
+        const tok = signToken({ kind: 'estimate_approve', estimate_id: eid }, 3600);
+        return res.status(200).json({ token: tok });
+      }
       // Owner-triggered digest (re)send for a specific day — exists because the
       // cron path (api/migrate.js) is gated on CRON_SECRET, which is a
       // sensitive Vercel env var nobody can read back, so the owner had no way
