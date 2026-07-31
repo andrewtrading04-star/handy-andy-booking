@@ -363,6 +363,19 @@
   </div>
 </div>
 
+<!-- Mark-complete nudge (shown right after a payment that clears the LAST
+     blocker to completing the job — the moment techs kept forgetting to tap
+     "Mark Complete" themselves) -->
+<div id="completeModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:32px;max-width:340px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
+    <div style="width:48px;height:48px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:22px;">✅</div>
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;color:#222a35;">Payment collected</h2>
+    <p style="color:#7a8694;font-size:14.5px;line-height:1.5;margin-bottom:24px;">Mark this job complete now so it's off your list?</p>
+    <button class="btn" id="completeYes" style="width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;">Mark Complete ✓</button>
+    <button class="btn ghost" id="completeNo" style="width:100%;background:transparent;color:#7a8694;border:1px solid #e7e9ee;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;">Not yet</button>
+  </div>
+</div>
+
 <!-- ETA Modal (shown when tech marks job as "on the way") -->
 <div id="etaModal" class="lightbox hidden">
   <div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
@@ -917,6 +930,25 @@ const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
 const MIN_PHOTOS=2;
 let curJob=null, curPhotos=[], curNotes=[];
 let detailPoll=null;   // refreshes the open job so a 2nd tech's payment shows up
+let completePending=null;   // {id} while the mark-complete nudge modal is open
+
+// Fires right after a payment succeeds. If payment was the LAST thing blocking
+// "Mark Complete" (photos + bracket already handled), show an immediate,
+// impossible-to-miss prompt instead of quietly returning to the job detail
+// screen and hoping the tech notices the now-enabled button and remembers to
+// tap it themselves — which is exactly the failure mode this exists to close.
+function maybePromptComplete(id){
+  if(!curJob || curJob.id!==id) return;
+  const next=NEXT[curJob.status];
+  if(!next || next.to!=='completed') return;
+  const photoOK=curPhotos.length>=MIN_PHOTOS;
+  const paidOK=!(Number(curJob.price)>0) || curJob.payment_status==='paid';
+  const bracketOK=!(curJob.bracket && curJob.bracket.needed) || !!(curJob.bracket && curJob.bracket.supplied_by);
+  if(photoOK && paidOK && bracketOK){
+    completePending={id};
+    document.getElementById('completeModal').classList.remove('hidden');
+  }
+}
 
 async function showDetail(id){
   show('detailView');
@@ -1555,7 +1587,7 @@ function openChargeFlow(j){
       done();
       if(r&&r.warning) alert(r.warning);   // e.g. "already charged on an earlier attempt — no new charge was made"
       else toast('Charged '+fmtMoney(total())+' — receipt sent ✓');
-      setTimeout(()=>showDetail(j.id),400);
+      setTimeout(()=>showDetail(j.id).then(()=>maybePromptComplete(j.id)),400);
     }catch(e){
       charging=false; ov.style.pointerEvents='';
       chargeError(e.message||'Charge failed');
@@ -1582,7 +1614,7 @@ function openChargeFlow(j){
       done();
       if(r&&r.warning) alert(r.warning);
       else toast(`Cash payment recorded ✓ ${fmtMoney((r&&r.price)!=null?r.price:cashBase)}`);
-      setTimeout(()=>showDetail(j.id),400);
+      setTimeout(()=>showDetail(j.id).then(()=>maybePromptComplete(j.id)),400);
     }catch(e){
       charging=false;
       if(btn){ btn.disabled=false; btn.textContent='Complete job ✓'; }
@@ -1595,7 +1627,7 @@ function openChargeFlow(j){
       done();
       if(r&&r.warning) alert(r.warning);   // e.g. "the card charge actually went through — do NOT take cash"
       else toast('Marked paid (cash) ✓');
-      setTimeout(()=>showDetail(j.id),400);
+      setTimeout(()=>showDetail(j.id).then(()=>maybePromptComplete(j.id)),400);
     }catch(e){ toast(e.message||'Could not mark paid'); }
   }
   function chargeError(msg){
@@ -2282,6 +2314,25 @@ document.getElementById('etaModal').addEventListener('click',e=>{
   closeEtaModal();
   if(etaPending && etaPending.advBtn) etaPending.advBtn.disabled=false;
   etaPending=null;
+});
+
+// Mark-complete nudge modal (#completeModal) — bound ONCE, same pattern as
+// #etaModal/#bracketModal above. Reads `completePending` at click time.
+function closeCompleteModal(){ document.getElementById('completeModal').classList.add('hidden'); }
+document.getElementById('completeYes').addEventListener('click',async()=>{
+  const pending=completePending; if(!pending) return;
+  closeCompleteModal(); completePending=null;
+  try{
+    await api('status',{method:'POST',body:{id:pending.id,status:'completed'}});
+    toast('Mark Complete ✓'); syncJobStatus(pending.id,'completed'); showDetail(pending.id);
+  }catch(e){ toast(e.message||'Could not mark complete'); }
+});
+document.getElementById('completeNo').addEventListener('click',()=>{
+  closeCompleteModal(); completePending=null;
+});
+document.getElementById('completeModal').addEventListener('click',e=>{
+  if(e.target.id!=='completeModal') return;
+  closeCompleteModal(); completePending=null;
 });
 
 // Boot
