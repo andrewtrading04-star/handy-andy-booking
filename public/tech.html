@@ -202,8 +202,6 @@
   /* "Get the logo on the TV" sheet — segmented tabs so only ONE path is on
      screen at a time (three stacked paths read as a wall of text), plus the
      numbered step rows shared by all three panels. */
-  .lh-tab{flex:1;background:transparent;border:none;color:#7a8694;font-size:12.5px;font-weight:700;padding:8px 4px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap;}
-  .lh-tab.on{background:#fff;color:#222a35;box-shadow:0 1px 3px rgba(20,30,50,.13);}
   .lh-step{display:flex;gap:11px;align-items:flex-start;margin-bottom:11px;font-size:14.5px;color:#222a35;line-height:1.45;}
   .lh-num{flex:0 0 24px;height:24px;border-radius:50%;background:#FF6B35;color:#fff;font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-top:1px;}
   .streetview{width:100%;height:auto;border-radius:10px;display:block;margin:12px 0;background:var(--navy);aspect-ratio:4/3;}
@@ -400,51 +398,33 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:4px;background:#eef1f5;border-radius:11px;padding:4px;margin:14px 20px 0;">
-      <button class="lh-tab" data-lh="ask">Ask them</button>
-      <button class="lh-tab" data-lh="remote">Their remote</button>
-      <button class="lh-tab" data-lh="cast">My phone</button>
-    </div>
-
     <div data-lh-body style="flex:1;overflow-y:auto;padding:16px 20px 4px;">
 
-      <div class="lh-panel" data-lh-panel="ask">
-        <div style="display:inline-block;background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 9px;border-radius:99px;margin-bottom:11px;">FASTEST</div>
-        <div style="background:#f4f6f9;border-left:3px solid #FF6B35;border-radius:0 10px 10px 0;padding:13px 14px;margin-bottom:12px;">
-          <div style="font-size:16px;color:#222a35;line-height:1.45;font-weight:600;">&ldquo;Can you pull up YouTube on it for a second?&rdquo;</div>
+      <div class="lh-step"><span class="lh-num">1</span><div>Open <b>YouTube on the TV</b> &mdash; or just ask: <span style="color:#7a8694;">&ldquo;Can you pull up YouTube for a second?&rdquo;</span></div></div>
+      <div class="lh-step"><span class="lh-num">2</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
+      <div class="lh-step"><span class="lh-num">3</span><div>Play the <b>LOGO</b> video, snap your photo</div></div>
+
+      <!-- Casting kept as a tucked-away alternative, not a competing path: it
+           needs the tech's phone on the customer's wifi, which usually fails. -->
+      <div style="margin:4px 0 2px;">
+        <button id="lhCastToggle" style="background:none;border:none;padding:6px 0;color:#7a8694;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">Cast from your phone instead &#9662;</button>
+        <div id="lhCastBody" style="display:none;padding:2px 0 6px;">
+          <div style="background:#fef2f2;border-radius:9px;padding:8px 11px;margin-bottom:11px;font-size:12px;color:#9a3412;line-height:1.45;"><b>Needs the customer's wifi</b> on your phone &mdash; guest wifi won't work.</div>
+          <div class="lh-step"><span class="lh-num">1</span><div>Tap <b>Open the logo video</b> below</div></div>
+          <div class="lh-step"><span class="lh-num">2</span><div>Tap the little TV icon, top right, and pick their TV</div></div>
+          <div style="background:#0f0f0f;border-radius:9px;padding:10px 12px;margin:2px 0 4px 35px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
+            <span style="position:relative;display:inline-flex;align-items:center;">
+              <span style="position:absolute;top:-7px;left:-7px;right:-7px;bottom:-7px;border:2px solid #FF6B35;border-radius:50%;"></span>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3v2h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+            </span>
+            <span style="color:#8a8a8a;font-size:12px;font-weight:700;border:1px solid #8a8a8a;border-radius:3px;padding:0 3px;">CC</span>
+            <span style="color:#8a8a8a;font-size:15px;">&#9881;</span>
+          </div>
         </div>
-        <div style="font-size:13px;color:#7a8694;line-height:1.55;margin-bottom:13px;">They know their own remote better than you do.</div>
-        <div class="lh-step"><span class="lh-num">1</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
-        <div class="lh-step"><span class="lh-num">2</span><div>Play the <b>LOGO</b> video</div></div>
       </div>
 
-      <div class="lh-panel" data-lh-panel="remote" style="display:none;">
-        <div class="lh-step"><span class="lh-num">1</span><div>Open the <b>YouTube app</b> on the TV</div></div>
-        <div class="lh-step"><span class="lh-num">2</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
-        <div class="lh-step"><span class="lh-num">3</span><div>Play the <b>LOGO</b> video</div></div>
-        <div class="lh-step"><span class="lh-num">4</span><div>Let it play &mdash; wait for the play bar to disappear</div></div>
-      </div>
-
-      <div class="lh-panel" data-lh-panel="cast" style="display:none;">
-        <div style="background:#fef2f2;border-radius:9px;padding:9px 11px;margin-bottom:13px;font-size:12.5px;color:#9a3412;line-height:1.45;">
-          <b>Guest wifi won't work.</b> Your phone and the TV must be on the same network or the TV won't appear.
-        </div>
-        <div class="lh-step"><span class="lh-num">1</span><div>Tap <b>Open the logo video</b> below</div></div>
-        <div class="lh-step"><span class="lh-num">2</span><div>Tap the little TV icon, top right</div></div>
-        <div style="background:#0f0f0f;border-radius:9px;padding:10px 12px;margin:2px 0 12px 35px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
-          <span style="position:relative;display:inline-flex;align-items:center;">
-            <span style="position:absolute;top:-7px;left:-7px;right:-7px;bottom:-7px;border:2px solid #FF6B35;border-radius:50%;"></span>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3v2h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
-          </span>
-          <span style="color:#8a8a8a;font-size:12px;font-weight:700;border:1px solid #8a8a8a;border-radius:3px;padding:0 3px;">CC</span>
-          <span style="color:#8a8a8a;font-size:15px;">&#9881;</span>
-        </div>
-        <div class="lh-step"><span class="lh-num">3</span><div>Pick the customer's TV from the list</div></div>
-      </div>
-
-      <div style="border-top:1px solid #eef1f5;margin-top:14px;padding-top:12px;display:flex;gap:16px;">
-        <div style="flex:1;font-size:11.5px;color:#7a8694;line-height:1.45;"><b style="color:#222a35;display:block;">Before you shoot</b>Flash off. Tap the TV on your screen to focus.</div>
-        <div style="flex:1;font-size:11.5px;color:#7a8694;line-height:1.45;"><b style="color:#222a35;display:block;">When you're done</b>Put the input back, hand them the remote.</div>
+      <div style="border-top:1px solid #eef1f5;margin-top:10px;padding-top:11px;font-size:12px;color:#7a8694;line-height:1.5;">
+        Flash off. When you're done, put the input back and hand them the remote.
       </div>
     </div>
 
@@ -2441,21 +2421,18 @@ document.getElementById('completeModal').addEventListener('click',e=>{
 // the Help tab), so binding a single element by id would only ever wire up
 // whichever copy rendered first.
 function closeLogoHelp(){ document.getElementById('logoHelpModal').classList.add('hidden'); }
-// Show one path, hide the other two. Also used to reset to the recommended
-// "Ask them" tab every time the sheet opens, so a tech who poked at the cast
-// tab last time doesn't reopen straight into the hardest path.
-function logoHelpTab(key){
-  document.querySelectorAll('#logoHelpModal .lh-tab').forEach(b=>b.classList.toggle('on', b.dataset.lh===key));
-  document.querySelectorAll('#logoHelpModal .lh-panel').forEach(p=>{ p.style.display = (p.dataset.lhPanel===key ? '' : 'none'); });
-  const body=document.querySelector('#logoHelpModal [data-lh-body]');
-  if(body) body.scrollTop=0;
-}
-document.querySelectorAll('#logoHelpModal .lh-tab').forEach(btn=>{
-  btn.addEventListener('click',()=>logoHelpTab(btn.dataset.lh));
+// Casting lives behind a small disclosure, collapsed by default — it's the
+// alternative, not a competing path. Re-collapse it every time the sheet
+// opens so it always starts on the simple 1-2-3.
+document.getElementById('lhCastToggle').addEventListener('click',()=>{
+  const b=document.getElementById('lhCastBody');
+  b.style.display = (b.style.display==='none') ? '' : 'none';
 });
 document.addEventListener('click',e=>{
   if(!e.target.closest('.js-logo-help')) return;
-  logoHelpTab('ask');
+  document.getElementById('lhCastBody').style.display='none';
+  const body=document.querySelector('#logoHelpModal [data-lh-body]');
+  if(body) body.scrollTop=0;
   document.getElementById('logoHelpModal').classList.remove('hidden');
 });
 document.getElementById('logoHelpOpen').addEventListener('click',()=>{
