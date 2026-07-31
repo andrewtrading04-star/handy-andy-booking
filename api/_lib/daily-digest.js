@@ -62,7 +62,12 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: DIGEST_TZ }).format(start); // YYYY-MM-DD of target day
 
     // Everything BOOKED (created) during today's Denver day, any business, minus
-    // cancellations.
+    // cancellations. Imported rows are EXCLUDED: a bulk history import stamps
+    // thousands of old jobs with the import day's created_at, which read as
+    // "booked today" -- the Jul 30 2026 Zenbooker import (7,097 jobs) produced
+    // a "1000 new appointments, 50 overdue, 277 issues" digest (the 1000 was
+    // itself a lie: Supabase's silent 1,000-row default cap; the real day had
+    // 9 bookings).
     const { data: rows } = await db.from('bookings')
       .select(`id, created_at, scheduled_at, price, status, service_area_id, source, metadata, customer_id,
                business:businesses ( name, timezone ),
@@ -73,6 +78,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
       .neq('status', 'cancelled')
+      .neq('source', 'import')
       .order('created_at', { ascending: true });
     const bookings = rows || [];
 
@@ -103,6 +109,11 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
     let overdue = [];
     try {
       const overdueThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      // source<>'import' for the same reason as the main query above: the
+      // Zenbooker history import carried 365 old jobs frozen mid-status
+      // ('on_the_way'/'in_progress' from the export), every one of which
+      // read as "overdue for completion" here. A real job can only become
+      // overdue through this system's own booking flows.
       const { data: overdueRows } = await db.from('bookings')
         .select(`id, scheduled_at, status,
                  business:businesses ( name ),
@@ -110,6 +121,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
                  technician:technicians!technician_id ( name )`)
         .lt('scheduled_at', overdueThreshold)
         .not('status', 'in', '(completed,cancelled)')
+        .neq('source', 'import')
         .order('scheduled_at', { ascending: true })
         .limit(50);
       overdue = overdueRows || [];
