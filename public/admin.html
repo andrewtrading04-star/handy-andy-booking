@@ -2683,7 +2683,7 @@ function openBooking(b){
     <div class="bk-row" id="bkAddrRow"><span>${ic('location')}</span><div style="flex:1;">
       ${b.address?esc(b.address):'<span style="color:var(--mute);">No address on file</span>'}
     </div></div>
-    ${b.customer?.phone?`<div class="bk-row" id="bkPhoneRow"><span>${ic('phone')}</span><div><a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a></div></div>`:''}
+    <div class="bk-row" id="bkPhoneRow"><span>${ic('phone')}</span><div>${b.customer?.phone?`<a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>`:'<strong style="color:var(--red);">NO PHONE NUMBER</strong>'}</div></div>
     ${b.customer?.email?`<div class="bk-row" id="bkEmailRow"><span>${ic('email')}</span><div><a href="mailto:${esc(b.customer.email)}">${esc(b.customer.email)}</a></div></div>`:''}
     ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
     ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
