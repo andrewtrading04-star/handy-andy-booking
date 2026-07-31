@@ -376,6 +376,54 @@
   </div>
 </div>
 
+<!-- How to get the logo onto the customer's TV. Opened ON DEMAND from the photo
+     card (and the Help tab) — never auto-opens, never blocks completing a job,
+     so a tech who already knows the drill never sees it. The remote path is
+     listed FIRST on purpose: casting needs the tech's phone on the customer's
+     wifi, which is the single most common reason this fails in the field.
+     The mechanic is identical for both companies; only the video differs. -->
+<div id="logoHelpModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:20px;max-width:350px;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:left;">
+    <div style="font-size:19px;font-weight:800;color:#222a35;">Get the logo on the TV</div>
+    <div style="font-size:13px;color:#7a8694;margin:4px 0 15px;">Two ways. The remote is usually faster.</div>
+
+    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:11px;">
+      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">EASIEST — USE THE TV REMOTE</div>
+      <div style="font-size:14px;color:#222a35;line-height:1.85;">
+        1. Open the <b>YouTube app</b> on the TV<br>
+        2. Search <b>Handy Andy TV Mounting</b><br>
+        3. Play the <b>LOGO</b> video<br>
+        4. Let it play — wait for the play bar to disappear
+      </div>
+    </div>
+
+    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:13px;">
+      <div style="font-size:12px;font-weight:800;color:#1d4ed8;letter-spacing:.3px;margin-bottom:5px;">OR CAST FROM YOUR PHONE</div>
+      <div style="font-size:12.5px;color:#7a8694;line-height:1.5;margin-bottom:8px;">Your phone and the TV both have to be on the customer's wifi. If you can't get on it, use the remote instead.</div>
+      <div style="font-size:14px;color:#222a35;line-height:1.85;">
+        1. Tap <b>Open the logo video</b> below<br>
+        2. Tap the cast icon at the top right:
+      </div>
+      <div style="background:#0f0f0f;border-radius:8px;padding:9px 11px;margin:9px 0 7px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
+        <span style="position:relative;display:inline-flex;align-items:center;">
+          <span style="position:absolute;top:-7px;left:-7px;right:-7px;bottom:-7px;border:2px solid #FF6B35;border-radius:50%;"></span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3v2h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+        </span>
+        <span style="color:#8a8a8a;font-size:13px;font-weight:700;border:1px solid #8a8a8a;border-radius:3px;padding:0 3px;">CC</span>
+        <span style="color:#8a8a8a;font-size:16px;">&#9881;</span>
+      </div>
+      <div style="font-size:14px;color:#222a35;line-height:1.85;">3. Pick the customer's TV from the list</div>
+    </div>
+
+    <div style="font-size:13px;color:#7a8694;line-height:1.65;margin-bottom:15px;">
+      <b style="color:#222a35;">Before you shoot:</b> flash off, and tap the TV on your phone screen so it focuses on the logo. When you're done, put the input back and hand them the remote.
+    </div>
+
+    <button class="btn" id="logoHelpOpen" style="width:100%;background:#FF6B35;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:9px;">&#9654; Open the logo video</button>
+    <button class="btn ghost" id="logoHelpClose" style="width:100%;background:transparent;color:#7a8694;border:1px solid #e7e9ee;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
+  </div>
+</div>
+
 <!-- ETA Modal (shown when tech marks job as "on the way") -->
 <div id="etaModal" class="lightbox hidden">
   <div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
@@ -1296,10 +1344,15 @@ function mountTechLineItems(j, id){
 // Handy Andy only: every example shows the Handy Andy logo on the TV screen,
 // so showing these to Dom's techs would be showing them the wrong brand.
 const GOOD_PHOTO_EXAMPLES = ['good-1.jpg','good-2.jpg','good-3.jpg','good-4.jpg','good-5.jpg'];
-function photoGuideHtml(){
-  const url = isDoms()
+// The logo video, per company. Shared by the photo card's button and the
+// "Get the logo on the TV" how-to modal so they can never drift apart.
+function logoVideoUrl(){
+  return isDoms()
     ? 'https://youtu.be/FPZ_sz59Vkg?si=qqtxMzUlWuzPKzU7'
     : 'https://youtu.be/GvTppkdlEr8?si=bq6x8xzJB-q79hsv';
+}
+function photoGuideHtml(){
+  const url = logoVideoUrl();
   // Tap a thumbnail to open it full-size — reuses the same #lightbox already
   // wired up for the tech's own uploaded job photos (see openLightbox() /
   // photoThumbs() below), so there's nothing new to bind here.
@@ -1312,7 +1365,7 @@ function photoGuideHtml(){
     <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📸 Take a photo of your work</div>
     <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">${isDoms() ? 'Sometimes these photos go on our social media. Before you shoot please:' : "Sometimes these go on our social media — here's what a great one looks like:"}</div>
     ${examplesHtml}
-    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ Project the logo on the screen ↓</div>
+    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ Project the logo on the screen &mdash; <span class="js-logo-help" style="color:var(--orange);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;">how?</span></div>
     ${(tech&&tech.demo)
       ? `<span class="btn" style="display:block;text-align:center;cursor:default;" aria-disabled="true">▶ Open logo on YouTube</span>`
       : `<a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Open logo on YouTube</a>`}
@@ -2349,6 +2402,30 @@ document.getElementById('completeNo').addEventListener('click',()=>{
 document.getElementById('completeModal').addEventListener('click',e=>{
   if(e.target.id!=='completeModal') return;
   closeCompleteModal(); completePending=null;
+});
+
+// "Get the logo on the TV" how-to (#logoHelpModal). Bound ONCE here, same
+// pattern as the other modals. The trigger is DELEGATED off document because
+// photoGuideHtml() renders in two places at once (the job's Photos card and
+// the Help tab), so binding a single element by id would only ever wire up
+// whichever copy rendered first.
+function closeLogoHelp(){ document.getElementById('logoHelpModal').classList.add('hidden'); }
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.js-logo-help')) return;
+  document.getElementById('logoHelpModal').classList.remove('hidden');
+});
+document.getElementById('logoHelpOpen').addEventListener('click',()=>{
+  // Open the video AND get out of the way: the tech's next move is taking the
+  // photo, so close the how-to and put the Add Photo button back in front of
+  // them rather than leaving them to dismiss a sheet when they come back.
+  window.open(logoVideoUrl(),'_blank','noopener');
+  closeLogoHelp();
+  const add=document.getElementById('addPhoto');
+  if(add) add.scrollIntoView({behavior:'smooth',block:'center'});
+});
+document.getElementById('logoHelpClose').addEventListener('click',closeLogoHelp);
+document.getElementById('logoHelpModal').addEventListener('click',e=>{
+  if(e.target.id==='logoHelpModal') closeLogoHelp();
 });
 
 // Boot
