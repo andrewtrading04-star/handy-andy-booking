@@ -1310,7 +1310,7 @@ function photoGuideHtml(){
     <div style="font-size:10px;color:var(--mute);text-align:center;margin-bottom:11px;">← tap to enlarge, swipe for more →</div>` : '';
   return `<div style="margin:2px 0 12px;padding:12px 14px;border:1px solid var(--orange);border-radius:12px;background:rgba(255,255,255,.04);">
     <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📸 Take a photo of your work</div>
-    <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">Sometimes these go on our social media — here's what a great one looks like:</div>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">${isDoms() ? 'Sometimes these photos go on our social media. Before you shoot please:' : "Sometimes these go on our social media — here's what a great one looks like:"}</div>
     ${examplesHtml}
     <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ Project the logo on the screen ↓</div>
     ${(tech&&tech.demo)
