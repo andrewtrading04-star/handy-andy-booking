@@ -128,6 +128,10 @@
   <div class="state" id="approveSection">
     <h1>Your <span class="hl">estimate</span></h1>
     <p class="sub" id="approveSub">Here's your quote. Add any upgrades you'd like, then approve.</p>
+    <!-- Shown only when a booking attempt bounced the customer back here (e.g.
+         their picked time was taken between page load and confirming). Without
+         it the return trip looked like a random reset of the whole form. -->
+    <div id="approveErr" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#9a1c1c;border-radius:10px;padding:11px 13px;font-size:14px;font-weight:600;line-height:1.45;margin-bottom:14px;"></div>
     <div id="quoteBox"></div>
     <div id="addonsBox"></div>
     <div id="availBox"></div>
@@ -440,6 +444,9 @@ function initCard(){
 // "Approve" no longer submits — it advances to the details step (card + address),
 // which are required before we record the approval and can book the job.
 $('approveBtn').addEventListener('click', ()=>{
+  // Clear any "that time was taken" banner from a previous bounce, so it can't
+  // linger over a fresh attempt.
+  const ab=$('approveErr'); if (ab){ ab.textContent=''; ab.style.display='none'; }
   // Prefill from what we already know about the customer.
   $('fName').value  = (INFO && INFO.customer_name)  || '';
   $('fPhone').value = (INFO && INFO.customer_phone) || '';
@@ -484,10 +491,19 @@ $('confirmBtn').addEventListener('click', async ()=>{
         // Someone else took that exact time between page-load and this click —
         // reload live availability so the customer can pick a different slot
         // instead of hitting a dead end.
-        errEl.textContent = data.error || 'That time was just booked. Please pick another time below.';
+        // The message MUST land on the section we're about to show: writing it
+        // to detailsErr and then jumping to approveSection hid it completely,
+        // so the customer just got thrown back to the start with no
+        // explanation and no idea their card was never charged.
+        const msg = data.error || 'That time was just booked. Please pick another time below.';
+        errEl.textContent = '';
         pickedSlots = [];
         show('approveSection');
+        const banner = $('approveErr');
+        if (banner){ banner.textContent = msg; banner.style.display = 'block'; }
+        else { alert(msg); }
         await loadAvail();
+        try{ $('availBox').scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){}
         return;
       }
       errEl.textContent = data.error || 'We could not record your approval. Please try again.';

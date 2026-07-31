@@ -6973,6 +6973,17 @@ async function estimateSlots(req, res) {
 
   const slug = est.business?.slug || 'handy-andy';
   const serviceAreaId = await serviceAreaIdFromPostal(db, est.business_id, est.customer_zip);
+  // No resolvable metro => offer NOTHING. publicOpenSlots applies no
+  // service_area filter when serviceAreaId is null, so it would happily offer
+  // every tech in the company (a Denver customer shown Austin's openings), and
+  // the booking's strict per-metro check then refuses all of them — the
+  // customer picks a time, hands over a card, and gets silently bounced. An
+  // empty list makes the page show its "please call us to book" message, which
+  // is the honest outcome when we can't tell which metro serves this address.
+  if (!serviceAreaId) {
+    console.warn('[estimate_slots] no service area for estimate', id, 'zip', est.customer_zip || '(blank)', '— offering no slots');
+    return res.status(200).json({ days: [], timezone: est.business?.timezone || 'America/Denver' });
+  }
   try {
     const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId });
     return res.status(200).json({ days: result.days || [], timezone: result.timezone || 'America/Denver' });
@@ -7588,7 +7599,18 @@ function upsellsAsLineItems(accepted) {
 // so the customer can pick a different time instead of hitting a dead end.
 async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot, cust, card) {
   const tz = await areaTimezone(db, null, biz.timezone || 'America/Denver').catch(() => biz.timezone || 'America/Denver');
-  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, cust.zip);
+  // Resolve the metro the SAME way estimateSlots did when it offered these
+  // times, or "offered" and "bookable" disagree and every approval 409s.
+  // estimateSlots keys off the ESTIMATE's zip; this used to key only off the
+  // zip the customer types on the details form. When that typed zip isn't in
+  // service_area_zips (a typo, or a genuinely-served zip nobody has mapped
+  // yet) this came back null, and scopedRosterTechs deliberately contributes
+  // NOTHING for a null area — so the strict tech pick found nobody, threw
+  // .conflict, and the customer was bounced back to the start after their
+  // card had already been tokenized. Falling back to the estimate's own zip
+  // keeps both sides on the same roster.
+  const bookingAreaId = (await serviceAreaIdFromPostal(db, biz.id, cust.zip))
+    || (await serviceAreaIdFromPostal(db, biz.id, est.customer_zip));
   const areaTz = bookingAreaId ? await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver') : tz;
 
   const slotDef = SLOTS.find(s => s.key === slot.slot_key);
