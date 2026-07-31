@@ -385,10 +385,19 @@
 <div id="logoHelpModal" class="lightbox hidden">
   <div style="background:#fff;border-radius:16px;padding:20px;max-width:350px;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:left;">
     <div style="font-size:19px;font-weight:800;color:#222a35;">Get the logo on the TV</div>
-    <div style="font-size:13px;color:#7a8694;margin:4px 0 15px;">Two ways. The remote is usually faster.</div>
+
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:11px 13px;margin:11px 0 13px;">
+      <div style="font-size:14px;font-weight:800;color:#9a3412;">Turn the TV on first</div>
+      <div style="font-size:13px;color:#9a4a1f;line-height:1.5;margin-top:2px;">A sleeping TV photographs black and won't show up on your phone either.</div>
+    </div>
 
     <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:11px;">
-      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">EASIEST — USE THE TV REMOTE</div>
+      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">FASTEST — JUST ASK THEM</div>
+      <div style="font-size:14px;color:#222a35;line-height:1.6;">&ldquo;Can you pull up YouTube on it for a second?&rdquo;<br><span style="color:#7a8694;font-size:13px;">They know their own remote better than you do. Then search <b>Handy Andy TV Mounting</b> and play the <b>LOGO</b> video.</span></div>
+    </div>
+
+    <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:11px;">
+      <div style="font-size:12px;font-weight:800;color:#15803d;letter-spacing:.3px;margin-bottom:7px;">OR USE THEIR REMOTE YOURSELF</div>
       <div style="font-size:14px;color:#222a35;line-height:1.85;">
         1. Open the <b>YouTube app</b> on the TV<br>
         2. Search <b>Handy Andy TV Mounting</b><br>
@@ -398,11 +407,11 @@
     </div>
 
     <div style="background:#f4f6f9;border-radius:12px;padding:13px 14px;margin-bottom:13px;">
-      <div style="font-size:12px;font-weight:800;color:#1d4ed8;letter-spacing:.3px;margin-bottom:5px;">OR CAST FROM YOUR PHONE</div>
-      <div style="font-size:12.5px;color:#7a8694;line-height:1.5;margin-bottom:8px;">Your phone and the TV both have to be on the customer's wifi. If you can't get on it, use the remote instead.</div>
+      <div style="font-size:12px;font-weight:800;color:#1d4ed8;letter-spacing:.3px;margin-bottom:5px;">OR SEND IT FROM YOUR PHONE</div>
+      <div style="font-size:12.5px;color:#7a8694;line-height:1.5;margin-bottom:8px;">Your phone and the TV both have to be on the same wifi. <b style="color:#9a3412;">Guest wifi won't work</b> — the TV just won't show up in the list.</div>
       <div style="font-size:14px;color:#222a35;line-height:1.85;">
         1. Tap <b>Open the logo video</b> below<br>
-        2. Tap the cast icon at the top right:
+        2. Tap the little TV icon at the top right:
       </div>
       <div style="background:#0f0f0f;border-radius:8px;padding:9px 11px;margin:9px 0 7px;display:flex;align-items:center;justify-content:flex-end;gap:15px;">
         <span style="position:relative;display:inline-flex;align-items:center;">
@@ -416,7 +425,8 @@
     </div>
 
     <div style="font-size:13px;color:#7a8694;line-height:1.65;margin-bottom:15px;">
-      <b style="color:#222a35;">Before you shoot:</b> flash off, and tap the TV on your phone screen so it focuses on the logo. When you're done, put the input back and hand them the remote.
+      <b style="color:#222a35;">Before you shoot:</b> flash off, and tap the TV on your phone screen so it focuses on the logo.<br>
+      <b style="color:#222a35;">When you're done:</b> put the input back where you found it and hand them the remote.
     </div>
 
     <button class="btn" id="logoHelpOpen" style="width:100%;background:#FF6B35;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:9px;">&#9654; Open the logo video</button>
@@ -1365,7 +1375,7 @@ function photoGuideHtml(){
     <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📸 Take a photo of your work</div>
     <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">${isDoms() ? 'Sometimes these photos go on our social media. Before you shoot please:' : "Sometimes these go on our social media — here's what a great one looks like:"}</div>
     ${examplesHtml}
-    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ Project the logo on the screen &mdash; <span class="js-logo-help" style="color:var(--orange);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;">how?</span></div>
+    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ TV <b>on</b>, with our logo up &mdash; <span class="js-logo-help" style="color:var(--orange);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;">how?</span></div>
     ${(tech&&tech.demo)
       ? `<span class="btn" style="display:block;text-align:center;cursor:default;" aria-disabled="true">▶ Open logo on YouTube</span>`
       : `<a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Open logo on YouTube</a>`}
