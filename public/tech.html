@@ -401,7 +401,13 @@
     <div data-lh-body style="flex:1;overflow-y:auto;padding:16px 20px 4px;">
 
       <div class="lh-step"><span class="lh-num">1</span><div>Open <b>YouTube on the TV</b> &mdash; or just ask: <span style="color:#7a8694;">&ldquo;Can you pull up YouTube for a second?&rdquo;</span></div></div>
-      <div class="lh-step"><span class="lh-num">2</span><div>Search <b>Handy Andy TV Mounting</b></div></div>
+      <div class="lh-step"><span class="lh-num">2</span><div style="flex:1;min-width:0;">
+        Search for this:
+        <button id="lhCopy" style="display:flex;align-items:center;gap:9px;width:100%;margin-top:6px;background:#f4f6f9;border:1px solid #e2e6ec;border-radius:9px;padding:10px 12px;cursor:pointer;font-family:inherit;text-align:left;">
+          <span id="lhTerm" style="flex:1;min-width:0;font-size:14.5px;font-weight:700;color:#222a35;">Handy Andy TV Mounting logo</span>
+          <span id="lhCopyLabel" style="flex:0 0 auto;font-size:12px;font-weight:800;color:#FF6B35;white-space:nowrap;">COPY</span>
+        </button>
+      </div></div>
       <div class="lh-step"><span class="lh-num">3</span><div>Play the <b>LOGO</b> video, snap your photo</div></div>
 
       <!-- Casting kept as a tucked-away alternative, not a competing path: it
@@ -1361,6 +1367,15 @@ function logoVideoUrl(){
   return isDoms()
     ? 'https://youtu.be/FPZ_sz59Vkg?si=qqtxMzUlWuzPKzU7'
     : 'https://youtu.be/GvTppkdlEr8?si=bq6x8xzJB-q79hsv';
+}
+// What the tech types into YouTube's search on the TV. Verified against a real
+// YouTube search: each of these returns the company's own channel first and the
+// right video as the top video hit. NOT symmetrical on purpose — Handy Andy's
+// video is titled "...TV Mounting LOGO" so "logo" narrows it, but Dom's video
+// is titled just "Dom's TV Mounting", so adding "logo" would search for a word
+// that isn't in the title.
+function logoSearchTerm(){
+  return isDoms() ? "Dom's TV Mounting" : 'Handy Andy TV Mounting logo';
 }
 function photoGuideHtml(){
   const url = logoVideoUrl();
@@ -2428,9 +2443,31 @@ document.getElementById('lhCastToggle').addEventListener('click',()=>{
   const b=document.getElementById('lhCastBody');
   b.style.display = (b.style.display==='none') ? '' : 'none';
 });
+// Copy the search term. navigator.clipboard needs HTTPS + a user gesture (a tap
+// is one); the execCommand path is the fallback for older in-app webviews,
+// which some techs' phones still open links in.
+document.getElementById('lhCopy').addEventListener('click',async()=>{
+  const term=logoSearchTerm();
+  let ok=false;
+  try{ await navigator.clipboard.writeText(term); ok=true; }
+  catch(_){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=term; ta.style.cssText='position:fixed;top:-999px;opacity:0;';
+      document.body.appendChild(ta); ta.select();
+      ok=document.execCommand('copy'); ta.remove();
+    }catch(__){ ok=false; }
+  }
+  const lbl=document.getElementById('lhCopyLabel');
+  lbl.textContent = ok ? 'COPIED ✓' : 'PRESS & HOLD';
+  lbl.style.color = ok ? '#15803d' : '#9a3412';
+  setTimeout(()=>{ lbl.textContent='COPY'; lbl.style.color='#FF6B35'; },1600);
+});
 document.addEventListener('click',e=>{
   if(!e.target.closest('.js-logo-help')) return;
   document.getElementById('lhCastBody').style.display='none';
+  // Per-company search term — Dom's techs must not be told to search "Handy Andy".
+  document.getElementById('lhTerm').textContent=logoSearchTerm();
   const body=document.querySelector('#logoHelpModal [data-lh-body]');
   if(body) body.scrollTop=0;
   document.getElementById('logoHelpModal').classList.remove('hidden');
