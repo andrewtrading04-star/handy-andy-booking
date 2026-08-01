@@ -2085,9 +2085,19 @@
         // Native: the surcharge + metro come from the CRM zip check, and the
         // pricing profile is chosen by metro name (Austin is cheaper).
         serviceAreaId=d.service_area_id||d.territory_id; nativeSurcharge=Number(d.surcharge)||0; nativePriceAdjustmentAmount=Number(d.price_adjustment_amount)||0; nativeUnstaffed=!!d.unstaffed; areaName=d.territory_name||'';
-        if(/austin/i.test(areaName)){ configKey='austin'; priceCity='austin'; }
-        else if(/houston/i.test(areaName)){ configKey='default'; priceCity='houston'; }
-        else if(/dfw/i.test(areaName)){ configKey='default'; priceCity='dfw'; }
+        // Every metro gets its OWN price set. This used to be a short if/else
+        // chain that only knew austin/houston/dfw, so any newer market (Los
+        // Angeles, Phoenix, San Antonio) silently fell through to Denver's
+        // prices — the admin could edit "Phoenix" all day and no customer
+        // would ever see it. Derived from the area name so a metro added in
+        // the CRM tomorrow just works: lowercase, spaces -> underscores, which
+        // is exactly how the city_key rows are seeded. Denver stays 'default'
+        // because it is the canonical/base set every other city was copied
+        // from. Austin is the only metro with a different QUESTION structure,
+        // so it is the only one that also overrides configKey.
+        const areaSlug=areaName.trim().toLowerCase().replace(/\s+/g,'_');
+        priceCity = (areaSlug==='denver' || !areaSlug) ? 'default' : areaSlug;
+        if(areaSlug==='austin') configKey='austin';
       } else {
         configKey=TERRITORY_CONFIG_MAP[territoryId]||'default';
         priceCity=TERRITORY_PRICE_CITY[territoryId]||configKey;

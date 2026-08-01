@@ -266,6 +266,10 @@
   .job-search-icon svg{position:absolute;left:9px;pointer-events:none;color:var(--mute);}
   #jobSearchWrap label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);margin:0;cursor:pointer;white-space:nowrap;}
   table{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  /* Widget Pricing: the option-name column stays pinned while the location
+     columns scroll sideways, so you never lose track of which row you're
+     editing once there are nine markets on screen. */
+  .wp-stick{position:sticky;left:0;z-index:2;background:var(--panel);}
   th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px;border-bottom:1px solid var(--line);background:#fafbfc;}
   td{padding:11px 10px;border-bottom:1px solid var(--line2);vertical-align:top;}
   .empty{color:var(--mute);text-align:center;padding:48px 0;}
@@ -5562,15 +5566,38 @@ const WP_SECTION_LABELS={ size:'TV Size', bracket:'Mounting Bracket', fireplace:
 // Column order is fixed and explicit so the metros never reshuffle between
 // loads. Any city in the data that isn't listed here still gets a column,
 // appended after these.
-const WP_CITY_ORDER=['default','austin','houston'];
-const WP_CITY_LABELS={ default:'Denver', austin:'Austin', houston:'Houston' };
+// Every location, across every business, in one matrix — columns are keyed
+// "<business slug>:<city_key>" so Dom's Denver and Handy Andy's Denver can sit
+// side by side without colliding. widget_prices_list is per-business, so the
+// owner view fetches each business and merges; a secretary (scoped to one
+// business) simply gets fewer columns.
+const WP_COLS=[
+  { key:'handy-andy:default',     slug:'handy-andy', city:'default',     label:'Denver',      group:'Handy Andy' },
+  { key:'handy-andy:houston',     slug:'handy-andy', city:'houston',     label:'Houston',     group:'Handy Andy' },
+  { key:'handy-andy:austin',      slug:'handy-andy', city:'austin',      label:'Austin',      group:'Handy Andy' },
+  { key:'handy-andy:dfw',         slug:'handy-andy', city:'dfw',         label:'DFW',         group:'Handy Andy' },
+  { key:'handy-andy:los_angeles', slug:'handy-andy', city:'los_angeles', label:'Los Angeles', group:'Handy Andy' },
+  { key:'handy-andy:phoenix',     slug:'handy-andy', city:'phoenix',     label:'Phoenix',     group:'Handy Andy' },
+  { key:'handy-andy:san_antonio', slug:'handy-andy', city:'san_antonio', label:'San Antonio', group:'Handy Andy' },
+  { key:'doms:default',           slug:'doms',       city:'default',     label:"Dom's",       group:"Dom's" },
+  { key:'mile-high:default',      slug:'mile-high',  city:'default',     label:'Mile High',   group:'Mile High' },
+];
 let wpRows=[], wpDirty=new Map(), wpSaveMsg='';  // wpDirty: id -> new price, only for edited rows
+let wpCols=[];                                   // columns that actually returned data
 async function renderWidgetPricing(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   try{
-    const d=await api('widget_prices_list',{ params:{ business:current.slug }});
-    wpRows=d.prices||[];
+    // One fetch per business, in parallel. A business the signed-in user isn't
+    // allowed to read just yields no rows (its columns drop out) instead of
+    // failing the whole screen.
+    const slugs=[...new Set(WP_COLS.map(c=>c.slug))];
+    const results=await Promise.all(slugs.map(s=>
+      api('widget_prices_list',{ params:{ business:s }}).then(d=>({s,prices:d.prices||[]})).catch(()=>({s,prices:[]}))
+    ));
+    wpRows=[];
+    for(const {s,prices} of results) for(const p of prices) wpRows.push({...p, _slug:s, _col:`${s}:${p.city_key}`});
+    wpCols=WP_COLS.filter(c=>wpRows.some(r=>r._col===c.key));
     wpDirty=new Map();
     renderWidgetPricingBody();
   }catch(e){
@@ -5605,16 +5632,16 @@ function renderWidgetPricingBody(){
   // TV installation; Denver's 70"-85" tier is Austin's 70"-84"), so rows are
   // matched on row_key — see the widget_prices migration. A city with no row
   // for a key gets an em-dash, never a misaligned price.
-  const cities=[...WP_CITY_ORDER.filter(c=>wpRows.some(r=>r.city_key===c)),
-                ...[...new Set(wpRows.map(r=>r.city_key))].filter(c=>!WP_CITY_ORDER.includes(c))];
+  const cities=wpCols.map(c=>c.key);
+  const colLabel=Object.fromEntries(wpCols.map(c=>[c.key,c.label]));
   const byKey=new Map();
   for(const r of wpRows){
     const k=r.row_key||`${r.section_key}_${r.option_id}`;
     if(!byKey.has(k)) byKey.set(k,{ key:k, section:r.section_key, label:r.label, sort:r.sort_order, byCity:{} });
     const e=byKey.get(k);
-    e.byCity[r.city_key]=r;
-    // Prefer Denver's wording for the row label; it's the canonical config.
-    if(r.city_key==='default') e.label=r.label;
+    e.byCity[r._col]=r;
+    // Prefer Handy Andy Denver's wording for the row label; it's the canonical config.
+    if(r._col==='handy-andy:default') e.label=r.label;
   }
   const bySection={};
   for(const e of byKey.values()) (bySection[e.section]=bySection[e.section]||[]).push(e);
@@ -5622,10 +5649,10 @@ function renderWidgetPricingBody(){
   const sectionOrder=Object.keys(WP_SECTION_LABELS).filter(k=>bySection[k]);
 
   const cell=(r)=>{
-    if(!r) return `<td style="text-align:center;color:var(--mute);">—</td>`;
+    if(!r) return `<td style="text-align:center;color:var(--mute);border-top:1px solid var(--line);">—</td>`;
     const val=wpDirty.has(r.id)?wpDirty.get(r.id):Number(r.price);
     const changed=wpDirty.has(r.id);
-    return `<td style="text-align:right;padding:6px 4px;">
+    return `<td style="text-align:right;padding:6px 4px;border-top:1px solid var(--line);">
       <div style="display:inline-flex;align-items:center;background:var(--bg2,#f3f4f6);border:1px solid ${changed?'var(--accent,#2563eb)':'var(--line)'};border-radius:9px;overflow:hidden;">
         <span style="padding:7px 2px 7px 9px;color:var(--mute);font-weight:700;font-size:13px;">$</span>
         <input type="number" min="0" step="1" data-wp-id="${r.id}" value="${val}"
@@ -5641,23 +5668,23 @@ function renderWidgetPricingBody(){
     <div class="sub" style="color:var(--mute);margin-bottom:16px;">Every price the public booking widget charges, all metros side by side. Changes go live for real customers within a minute.</div>
 
     ${sectionOrder.map(sec=>`
-      <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px;max-width:720px;overflow-x:auto;">
+      <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px;max-width:1180px;overflow-x:auto;">
         <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:6px;">${esc(WP_SECTION_LABELS[sec])}</div>
-        <table style="width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;">
+        <table style="width:100%;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;">
           <thead><tr>
-            <th style="text-align:left;font-size:11.5px;font-weight:700;color:var(--mute);padding:4px 0;"></th>
-            ${cities.map(c=>`<th style="text-align:right;font-size:11.5px;font-weight:800;color:var(--mute);padding:4px 8px 4px 4px;">${esc(WP_CITY_LABELS[c]||c)}</th>`).join('')}
+            <th class="wp-stick" style="text-align:left;font-size:11.5px;font-weight:700;color:var(--mute);padding:4px 12px 6px 0;">Option</th>
+            ${cities.map(c=>`<th style="text-align:right;font-size:11.5px;font-weight:800;color:var(--mute);padding:4px 8px 6px 4px;white-space:nowrap;">${esc(colLabel[c]||c)}</th>`).join('')}
           </tr></thead>
           <tbody>
-            ${bySection[sec].map(e=>`<tr style="border-top:1px solid var(--line);">
-              <td style="font-size:14px;padding:6px 12px 6px 0;">${esc(e.label)}</td>
+            ${bySection[sec].map(e=>`<tr>
+              <td class="wp-stick" style="font-size:14px;padding:6px 12px 6px 0;border-top:1px solid var(--line);white-space:nowrap;">${esc(e.label)}</td>
               ${cities.map(c=>cell(e.byCity[c])).join('')}
             </tr>`).join('')}
           </tbody>
         </table>
       </div>`).join('')}
 
-    <div style="max-width:720px;display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;">
+    <div style="max-width:1180px;display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;">
       <span id="wpSaveMsg" style="color:var(--mute);font-size:13px;">${esc(wpSaveMsg)}</span>
       <button class="btn" id="wpSaveBtn" style="width:auto;" ${wpDirty.size?'':'disabled'}>Save changes${wpDirty.size?` (${wpDirty.size})`:''}</button>
     </div>
@@ -5701,7 +5728,18 @@ function renderWidgetPricingBody(){
     if(!updates.length) return;
     saveBtn.disabled=true; saveBtn.textContent='Saving…';
     try{
-      await api('widget_prices_save',{ method:'POST', body:{ business:current.slug, updates }});
+      // Edits can span businesses now (a Dom's price and a Phoenix price in the
+      // same batch), and widget_prices_save scopes every id to one business —
+      // sending them all under current.slug would reject the foreign ones. So
+      // group by the row's own business and save each group.
+      const bySlug=new Map();
+      for(const u of updates){
+        const row=wpRows.find(r=>r.id===u.id);
+        const slug=(row&&row._slug)||current.slug;
+        if(!bySlug.has(slug)) bySlug.set(slug,[]);
+        bySlug.get(slug).push(u);
+      }
+      for(const [slug,ups] of bySlug) await api('widget_prices_save',{ method:'POST', body:{ business:slug, updates:ups }});
       for(const u of updates){ const row=wpRows.find(r=>r.id===u.id); if(row) row.price=u.price; }
       wpDirty=new Map();
       wpSaveMsg='Saved ✓';

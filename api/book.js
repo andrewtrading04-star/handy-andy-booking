@@ -126,13 +126,26 @@ async function widgetPricesPublic(req, res) {
     const db = serviceClient();
     const { data: biz } = await db.from('businesses').select('id').eq('slug', business).maybeSingle();
     if (!biz) return res.status(200).json({ prices: {} });
-    const { data, error } = await db.from('widget_prices')
-      .select('option_id, price')
-      .eq('business_id', biz.id)
-      .eq('city_key', city);
-    if (error) throw error;
+    const fetchCity = async (key) => {
+      const { data, error } = await db.from('widget_prices')
+        .select('option_id, price')
+        .eq('business_id', biz.id)
+        .eq('city_key', key);
+      if (error) throw error;
+      return data || [];
+    };
+    let data = await fetchCity(city);
+    // A metro with no price rows of its own falls back to 'default' (Denver,
+    // the canonical set every other city was copied from) rather than to
+    // widget.js's baked-in constants. Those constants drift the moment anyone
+    // edits a price in the dashboard, so without this a brand-new market would
+    // quietly quote whatever was hardcoded at the last deploy.
+    if (!data.length && city !== 'default') {
+      console.warn(`[book] no widget_prices for ${business}/${city} — falling back to default`);
+      data = await fetchCity('default');
+    }
     const prices = {};
-    for (const r of (data || [])) prices[r.option_id] = Number(r.price) || 0;
+    for (const r of data) prices[r.option_id] = Number(r.price) || 0;
     return res.status(200).json({ prices });
   } catch (e) {
     console.warn('[book] widget_prices lookup failed:', e.message);
