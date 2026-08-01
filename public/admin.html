@@ -6571,7 +6571,7 @@ async function renderReviews(){
     // Include the partner company's roster too — a review can legitimately
     // credit a cross-hire tech (e.g. a Dom's tech who helped on a Handy Andy
     // job), and without this they simply don't appear in the dropdown at all.
-    const revTechs=(tl.technicians||[]).map(t=>({id:t.id,name:t.name}));
+    const revTechs=(tl.technicians||[]).filter(t=>t.active).map(t=>({id:t.id,name:t.name}));
     if(pt && pt.partner && (pt.technicians||[]).length){
       const haveIds=new Set(revTechs.map(t=>t.id));
       pt.technicians.forEach(t=>{ if(!haveIds.has(t.id)) revTechs.push({id:t.id,name:`${t.name} (${pt.partner.name})`}); });
