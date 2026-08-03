@@ -15,6 +15,7 @@ import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
+import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
@@ -838,40 +839,22 @@ async function status(req, res, db, auth, body) {
   await db.from('technicians').update({ status: map.tech }).eq('id', auth.tech_id);
 
   // Send SMS to customer on certain status changes (if customer opted in).
-  if (next === 'on_the_way' && existing.customer?.phone && existing.sms_consent) {
-    const etaMinutes = body.eta_minutes || 30;
-    let techName = 'Your tech', bizName = 'us';
-    try {
-      const { data: _t } = await db.from('technicians')
-        .select('name, business:businesses ( name )').eq('id', auth.tech_id).maybeSingle();
-      if (_t?.name) techName = String(_t.name).split(' ')[0];
-      if (_t?.business?.name) bizName = _t.business.name;
-    } catch { /* best-effort — fall back to generic */ }
-    const msg = `Heads up! ${techName} from ${bizName} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. STOP to opt out.`;
-    // Real delivery tracking (admin/secretary dashboard only — never surfaced to
-    // techs): a signed token carries the booking id through Twilio's status
-    // callback (api/analytics.js action=sms_status), same pattern the review SMS
-    // already uses. 'pending' is set immediately on a successful send attempt;
-    // the callback later flips it to 'delivered' or 'failed'/'undelivered'.
-    const otwBase = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-    const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
-    const otwStatusCallback = `${otwBase}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;
-    // Awaited, not fire-and-forget: Vercel can freeze the lambda the instant
-    // the HTTP response goes out, so a .then()-only send (as this was) could
-    // simply never run — the text, and its delivery-tracking write, silently
-    // never happened. The status change itself is already saved above by this
-    // point, so awaiting here only adds a beat to the tech's "On My Way ✓"
-    // response, never risks losing the status update. Any failure is caught
-    // and logged, same as before — never surfaced to the tech.
-    try {
-      const r = await sendSMSResult(existing.customer.phone, msg, { statusCallback: otwStatusCallback });
-      const patch = r.ok
-        ? { on_the_way_sms_status: 'pending', on_the_way_sms_sent_at: new Date().toISOString() }
-        : { on_the_way_sms_status: 'failed', on_the_way_sms_sent_at: new Date().toISOString() };
-      await db.from('bookings').update(patch).eq('id', id);
-    } catch (e) {
-      console.error('[on_the_way sms]', e.message);
-    }
+  //
+  // The message text, delivery tracking and column writes now live in
+  // _lib/en-route.js so this path and the one-tap nudge link (api/book.js
+  // action=otw_send) can never drift into telling the customer two different
+  // things. Awaited, not fire-and-forget: Vercel can freeze the lambda the
+  // instant the HTTP response goes out, so a .then()-only send could simply
+  // never run. The status change is already committed above, so awaiting only
+  // adds a beat to the tech's "On My Way ✓" response.
+  if (next === 'on_the_way') {
+    await sendEnRouteSms(db, {
+      bookingId: id,
+      technicianId: auth.tech_id,
+      customerPhone: existing.customer?.phone,
+      smsConsent: existing.sms_consent,
+      etaMinutes: body.eta_minutes || DEFAULT_ETA_MINUTES,
+    });
   }
 
   // On completion: send the branded review-request email immediately, and an SMS

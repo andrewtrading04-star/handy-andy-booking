@@ -21,6 +21,7 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
+import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
@@ -5502,9 +5503,10 @@ async function notificationResend(req, res, db, auth, body) {
   if (kind === 'on_the_way_sms') {
     if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
-    const techName = b.technician?.name ? String(b.technician.name).split(' ')[0] : 'Your tech';
-    const etaMinutes = Number(body.eta_minutes) || 30;
-    const msg = `Heads up! ${techName} from ${biz.name} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. STOP to opt out.`;
+    // Wording comes from _lib/en-route.js so this manual resend, the tech app's
+    // "On My Way" button and the one-tap nudge link all say the same thing.
+    const etaMinutes = Number(body.eta_minutes) || DEFAULT_ETA_MINUTES;
+    const msg = enRouteMessage(b.technician?.name, biz.name, etaMinutes);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
     const statusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;

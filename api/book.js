@@ -9,6 +9,7 @@ import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
+import { sendEnRouteSms } from './_lib/en-route.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -902,6 +903,103 @@ async function bookNative(req, res, slug) {
   });
 }
 
+// ── One-tap "on my way" from the pre-job nudge text ─────────────────────────
+// The nudge (_lib/tech-late.js stage 1) texts the tech a link to /otw.html
+// carrying a signed { kind:'otw_quick', booking_id, tech_id } token. That page
+// reads the job with action=otw_info and only acts when the tech taps the
+// button, which POSTs action=otw_send.
+//
+// GET is deliberately read-only. SMS clients, carriers and link scanners
+// routinely prefetch URLs in a message — if tapping were a plain GET, a link
+// preview would mark the job en route and text the customer before the tech
+// had even seen the message.
+const OTW_OPEN_STATUSES = ['pending', 'confirmed', 'assigned'];
+
+function otwToken(req) {
+  const raw = ((req.query || {}).token || (req.body || {}).token || '').toString();
+  const t = verifyToken(raw);
+  return (t && t.kind === 'otw_quick' && t.booking_id) ? t : null;
+}
+
+async function otwInfo(req, res) {
+  const t = otwToken(req);
+  if (!t) return res.status(200).json({ ok: false, reason: 'invalid' });
+  const db = serviceClient();
+  const { data: b } = await db.from('bookings')
+    .select('id, status, on_the_way_at, scheduled_at, service_area_id, business:businesses(name, timezone), customer:customers(name)')
+    .eq('id', t.booking_id).maybeSingle();
+  if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
+
+  let tz = b.business?.timezone || 'America/Denver';
+  if (b.service_area_id) {
+    try {
+      const { data: sa } = await db.from('service_areas').select('timezone').eq('id', b.service_area_id).maybeSingle();
+      if (sa?.timezone) tz = sa.timezone;
+    } catch { /* fall back to business tz */ }
+  }
+  let whenTxt = null;
+  try {
+    whenTxt = new Date(b.scheduled_at).toLocaleString('en-US', {
+      timeZone: tz, weekday: 'short', hour: 'numeric', minute: '2-digit',
+    });
+  } catch { /* leave null */ }
+
+  return res.status(200).json({
+    ok: true,
+    already: !!b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status),
+    customer: b.customer?.name || 'your customer',
+    when: whenTxt,
+    business: b.business?.name || null,
+  });
+}
+
+async function otwSend(req, res) {
+  const t = otwToken(req);
+  if (!t) return res.status(200).json({ ok: false, reason: 'invalid' });
+  const db = serviceClient();
+
+  const { data: b } = await db.from('bookings')
+    .select('id, status, on_the_way_at, sms_consent, technician_id, secondary_technician_id, customer:customers(name, phone)')
+    .eq('id', t.booking_id).maybeSingle();
+  if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
+
+  // Idempotent, and safe against a stale link: a job already en route (or
+  // further along) is never dragged backwards, it just reports success.
+  if (b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status)) {
+    return res.status(200).json({ ok: true, already: true, customer: b.customer?.name || 'your customer' });
+  }
+
+  // Only a tech actually on this job may act on it, even with a valid token.
+  const tokenTech = String(t.tech_id || '');
+  const onThisJob = tokenTech && (tokenTech === String(b.technician_id) || tokenTech === String(b.secondary_technician_id));
+  if (!onThisJob) return res.status(200).json({ ok: false, reason: 'not_assigned' });
+
+  const nowISO = new Date().toISOString();
+  const { error: upErr } = await db.from('bookings')
+    .update({ status: 'on_the_way', on_the_way_at: nowISO })
+    .eq('id', b.id)
+    .is('on_the_way_at', null);          // lost race with the app = no double send
+  if (upErr) {
+    console.error('[otw_send] status update failed:', upErr.message);
+    return res.status(200).json({ ok: false, reason: 'error' });
+  }
+
+  // Mirror the tech app: show them as on a job in the dashboard.
+  try { await db.from('technicians').update({ status: 'on_job' }).eq('id', tokenTech); } catch { /* cosmetic */ }
+
+  // Awaited on purpose — an un-awaited send is silently killed when Vercel
+  // freezes the lambda on response.
+  await sendEnRouteSms(db, {
+    bookingId: b.id,
+    technicianId: tokenTech,
+    customerPhone: b.customer?.phone,
+    smsConsent: b.sms_consent,
+  });
+
+  console.log(`[otw_send] booking=${b.id} tech=${tokenTech} marked en route from nudge link`);
+  return res.status(200).json({ ok: true, already: false, customer: b.customer?.name || 'your customer' });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -921,6 +1019,9 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
+  // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.
+  if (req.method === 'GET' && (req.query || {}).action === 'otw_info') return otwInfo(req, res);
+  if (req.method === 'POST' && ((req.query || {}).action === 'otw_send' || (req.body || {}).action === 'otw_send')) return otwSend(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.
