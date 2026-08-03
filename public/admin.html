@@ -681,6 +681,74 @@
   #bkModal .bk-row a{color:#8fc0ff;}
   #bkModal .bk-sec-h{color:#fff;}
   #bkModal .bk-xco{background:rgba(251,146,60,.12);border-color:rgba(251,146,60,.35);color:#fdba74;}
+
+  /* ── Job detail header: status rail, map, key figures, detail rows ───────
+     Replaces the old flat .bk-row list, which read as one long paragraph with
+     the email receipts on top and the money buried in the middle. Scoped to
+     #bkModal because this sheet is the navy surface, not the light chrome. */
+  #bkModal #bkTitle{font-size:19px;margin-bottom:0;}
+  #bkModal .bk-svc{font-size:19px;font-weight:800;letter-spacing:-.02em;line-height:1.3;color:#fff;}
+  #bkModal .bk-svc .for{color:#93a6bd;font-weight:500;}
+  #bkModal .bk-jobno{font:600 11px/1 ui-monospace,Consolas,monospace;color:#7d90a8;letter-spacing:.03em;margin-top:6px;}
+  #bkModal .bk-badges{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:9px;}
+
+  /* Status rail. Chevrons rather than a progress bar: a job moves through
+     named gates, and each one is something the office actually asks about. */
+  #bkModal .bk-rail{display:flex;gap:3px;margin:14px 0 0;}
+  #bkModal .bk-rstep{flex:1;min-width:0;padding:8px 3px 8px 11px;font-size:9px;font-weight:800;
+    letter-spacing:.045em;text-transform:uppercase;text-align:center;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;background:rgba(255,255,255,.07);color:#8ba0b8;
+    clip-path:polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%,8px 50%);}
+  #bkModal .bk-rstep:first-child{clip-path:polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%);}
+  #bkModal .bk-rstep:last-child{clip-path:polygon(0 0,100% 0,100% 100%,0 100%,8px 50%);}
+  #bkModal .bk-rstep.done{background:#15803d;color:#e8f8ef;}
+  #bkModal .bk-rstep.now{background:#22c55e;color:#06240f;box-shadow:inset 0 0 0 2px rgba(255,255,255,.34);}
+  #bkModal .bk-rail.dead .bk-rstep{background:rgba(248,113,113,.14);color:#e8a1a1;}
+  #bkModal .bk-rail.dead .bk-rstep.dead{background:#b91c1c;color:#fff;}
+
+  /* Static map of the service address. Removed entirely if the image fails, so
+     a missing or unbilled Maps key degrades to no map rather than a broken tile. */
+  #bkModal .bk-map{display:block;width:100%;height:118px;object-fit:cover;border-radius:10px;
+    border:1px solid rgba(255,255,255,.10);margin:14px 0 0;background:rgba(255,255,255,.04);}
+
+  /* The three things looked up most, pinned above everything else. */
+  #bkModal .bk-figs{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid rgba(255,255,255,.10);
+    border-radius:10px;overflow:hidden;margin:14px 0 2px;}
+  #bkModal .bk-fig{padding:10px 12px;border-right:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);}
+  #bkModal .bk-fig:last-child{border-right:0;}
+  #bkModal .bk-fig-l{font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:#8ba0b8;}
+  #bkModal .bk-fig-v{font-size:16px;font-weight:800;letter-spacing:-.02em;margin-top:5px;
+    font-variant-numeric:tabular-nums;color:#eef2f7;}
+  #bkModal .bk-fig-v.money{color:#4ade80;}
+  #bkModal .bk-fig-v.sm{font-size:12px;font-weight:700;line-height:1.3;}
+
+  /* Detail rows: icon tile, label, value. Replaces the emoji plus run-on line. */
+  #bkModal .bk-d{display:grid;grid-template-columns:32px 1fr;gap:11px;padding:12px 0;
+    border-bottom:1px solid rgba(255,255,255,.07);}
+  #bkModal .bk-d:last-of-type{border-bottom:0;}
+  #bkModal .bk-dtile{width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;color:#93a6bd;}
+  #bkModal .bk-dtile svg{width:15px;height:15px;}
+  #bkModal .bk-dl{font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;
+    color:#8ba0b8;display:block;margin-bottom:5px;}
+  #bkModal .bk-dv{font-size:14px;line-height:1.5;color:#eef2f7;}
+  #bkModal .bk-dv .lead{font-size:15px;font-weight:700;}
+  #bkModal .bk-dv .dim{color:#93a6bd;font-size:12.5px;}
+  #bkModal .bk-dv a{color:#8fc0ff;}
+  #bkModal .bk-dact{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;}
+  #bkModal .bk-dact a{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);
+    border-radius:7px;padding:6px 11px;font-size:12px;font-weight:700;color:#eef2f7;text-decoration:none;}
+  #bkModal .bk-dact a:hover{background:rgba(255,255,255,.12);}
+
+  /* Delivery receipts, demoted from the top of the sheet to a collapsed line. */
+  #bkModal .bk-receipts{border-top:1px solid rgba(255,255,255,.07);margin-top:2px;}
+  #bkModal .bk-receipts summary{list-style:none;cursor:pointer;padding:11px 0 10px;font-size:12px;
+    color:#93a6bd;display:flex;align-items:center;gap:7px;}
+  #bkModal .bk-receipts summary::-webkit-details-marker{display:none;}
+  #bkModal .bk-receipts summary .caret{margin-left:auto;font-size:10px;opacity:.7;transition:transform .15s;}
+  #bkModal .bk-receipts[open] summary .caret{transform:rotate(90deg);}
+  #bkModal .bk-receipts .bk-rlist{padding:0 0 10px;}
+  @media (prefers-reduced-motion: reduce){ #bkModal .bk-receipts summary .caret{transition:none;} }
   /* No divider lines anywhere in this card — every border-top (some set
      inline, hence !important) is fully transparent. */
   #bkModal .bk-slots,
@@ -2693,6 +2761,64 @@ function bkPrimaryTechOptionsHtml(b){
   return ['<option value="">— Unassigned —</option>', xcoOpt,
     ...assignableTechs.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
 }
+// ── Job detail header pieces ────────────────────────────────────────────────
+// The rail is five gates, and deliberately NOT the nine values in the status
+// enum. The tech app only ever sets two of them: tech.html renders exactly one
+// advance button, "On My Way" then "Mark Complete". 'arrived' and 'in_progress'
+// have never been written by this app — booking_status_events contains zero of
+// either, and every arrived_at/in_progress row in the database is Zenbooker
+// import backfill from one batch on 2026-07-30. Showing them would park every
+// live job at step 3 of 5 forever. 'Paid' takes a slot instead because it is a
+// real server-enforced gate: api/tech.js refuses to complete a priced job until
+// payment_status is 'paid', and it is the step the office actually chases.
+const BK_RANK={ pending:0, confirmed:0, assigned:1, on_the_way:2, arrived:2, in_progress:2, completed:4 };
+const BK_STEPS=['Scheduled','Assigned','On the way','Paid','Complete'];
+function bkStatusRail(b){
+  const s=b.status||'';
+  if(s==='cancelled'||s==='no_show'){
+    const dead=s==='no_show'?'No show':'Cancelled';
+    return `<div class="bk-rail dead">${BK_STEPS.map((t,i)=>
+      `<div class="bk-rstep${i===3?' dead':''}">${esc(i===3?dead:t)}</div>`).join('')}</div>`;
+  }
+  const rank=BK_RANK[s]!==undefined?BK_RANK[s]:0;
+  const done=[
+    true,                              // Scheduled — the job exists at all
+    rank>=1 || !!b.technician_id,      // Assigned
+    rank>=2,                           // On the way (the tech tapped it)
+    b.payment_status==='paid',         // Paid
+    s==='completed',                   // Complete
+  ];
+  const nowIdx=done.indexOf(false);    // first unmet gate = what happens next
+  return `<div class="bk-rail">${BK_STEPS.map((t,i)=>
+    `<div class="bk-rstep${done[i]?' done':(i===nowIdx?' now':'')}">${esc(t)}</div>`).join('')}</div>`;
+}
+// House inline-SVG convention (see .pw-eye, .job-search-icon): 24-box, no fill,
+// stroke:currentColor, so it inherits the sheet's colour with no extra rule.
+const BK_ICONS={
+  clock:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+  pin:'<path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
+  phone:'<path d="M20 16.9v2.6a1.7 1.7 0 0 1-1.9 1.7 16.8 16.8 0 0 1-7.3-2.6 16.5 16.5 0 0 1-5.1-5.1A16.8 16.8 0 0 1 3.1 6.2 1.7 1.7 0 0 1 4.8 4.3h2.6a1.7 1.7 0 0 1 1.7 1.5c.1.9.3 1.7.6 2.5a1.7 1.7 0 0 1-.4 1.8l-1.1 1.1a13.6 13.6 0 0 0 5.1 5.1l1.1-1.1a1.7 1.7 0 0 1 1.8-.4c.8.3 1.6.5 2.5.6a1.7 1.7 0 0 1 1.5 1.7z"/>',
+  user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  note:'<path d="M4 4h16v13l-4 4H4z"/><path d="M16 21v-4h4M8 9h8M8 13h6"/>',
+  star:'<path d="M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 16.8 6.7 19.7l1.1-6.1L3.4 9.4l6-.8z"/>',
+};
+function bkIcon(name){
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BK_ICONS[name]||''}</svg>`;
+}
+// Static map of the service address. Geocodes off the address string, so it
+// works even though bookings.lat/lng is null on effectively every row. The key
+// is the same one the address autocomplete already uses (appConfig.maps_key).
+// onerror removes the element, so an unbilled or Static-Maps-disabled key
+// degrades to no map rather than a broken tile.
+function bkMapHtml(b){
+  const key=(typeof appConfig==='object'&&appConfig&&appConfig.maps_key)||'';
+  if(!key||!b.address) return '';
+  const q=encodeURIComponent(b.address);
+  const url=`https://maps.googleapis.com/maps/api/staticmap?center=${q}&zoom=15&size=560x118&scale=2`
+    +`&markers=${encodeURIComponent('color:0x22c55e|')}${q}&key=${encodeURIComponent(key)}`;
+  return `<img class="bk-map" alt="" loading="lazy" src="${url}" onerror="this.remove()">`;
+}
+
 function openBooking(b){
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
@@ -2718,23 +2844,65 @@ function openBooking(b){
   // only on jobs that originally requested a two-person lift.
   const showSecond=canAssign;
   const _bktz=bookingTz(b);
-  document.getElementById('bkTitle').innerHTML=`${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}${notificationLog(b)}`;
+  const _svcName=b.service?.category||b.service?.name||'Service';
+  const _fmtTz=(opts,fallback)=>{ try{ return new Date(b.scheduled_at).toLocaleString('en-US',{ timeZone:_bktz.tz, ...opts }); }catch(_){ return fallback; } };
+  const _startTime=_fmtTz({hour:'numeric',minute:'2-digit'},'');
+  const _startDate=_fmtTz({weekday:'long',month:'long',day:'numeric',year:'numeric'},fmtDateTimeTz(b.scheduled_at,_bktz.tz));
+  const _payTxt=(b.payment_status||'unpaid').replace(/_/g,' ');
+  const _dirUrl=b.address?`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(b.address)}`:'';
+  // Service first, customer second: this is a work order, not a contact card.
+  document.getElementById('bkTitle').innerHTML=`
+    <div class="bk-svc">${esc(_svcName)} <span class="for">for ${esc(b.customer?.name||'Customer')}</span></div>
+    ${b.zenbooker_job_number?`<div class="bk-jobno">JOB #${esc(b.zenbooker_job_number)}</div>`:''}
+    ${bkStatusRail(b)}`;
   document.getElementById('bkBody').innerHTML=`
-    <div class="bk-row"><span>${ic('customers')}</span><div>Booked by <strong>${esc(bookedBy)}</strong></div></div>
-    ${b.cross_company?`<div class="bk-xco">⚠ Cross-company job — assigned to <strong>${esc(b.technician?.name||'a')} </strong> from <strong>${esc(b.partner_company||'the partner company')}</strong>.</div>`:''}
-    <div class="bk-row"><span>${ic('clock')}</span><div>${esc(fmtDateTimeTz(b.scheduled_at,_bktz.tz))}${_bktz.label?` <span style="color:var(--mute);font-size:12px;">· ${esc(_bktz.label)}</span>`:''}</div></div>
-    <div class="bk-row"><span>${ic('wrench')}</span><div>${esc(b.service?.category||b.service?.name||'Service')}${b.price?' · '+money(b.price):''}</div></div>
-    <div class="bk-row"><span>${ic('card')}</span><div><span class="pay pay-${b.payment_status||'unpaid'}">${esc((b.payment_status||'unpaid').replace(/_/g,' '))}</span>${b.paid_at?' · '+esc(fmtDateTime(b.paid_at)):''}</div></div>
-    <div class="bk-row" id="bkAddrRow"><span>${ic('location')}</span><div style="flex:1;">
-      ${b.address?esc(b.address):'<span style="color:var(--mute);">No address on file</span>'}
+    ${bkMapHtml(b)}
+    <div class="bk-figs">
+      <div class="bk-fig"><div class="bk-fig-l">Total</div><div class="bk-fig-v money">${b.price?money(b.price):'—'}</div></div>
+      <div class="bk-fig"><div class="bk-fig-l">Starts</div><div class="bk-fig-v">${esc(_startTime||'—')}</div></div>
+      <div class="bk-fig"><div class="bk-fig-l">Payment</div><div class="bk-fig-v sm">${esc(_payTxt)}</div></div>
+    </div>
+    <div class="bk-d"><div class="bk-dtile">${bkIcon('clock')}</div><div>
+      <span class="bk-dl">Date &amp; time</span>
+      <div class="bk-dv"><span class="lead">${esc(_startDate)}</span><br>
+        <span class="dim">${esc(_startTime||'')}${_bktz.label?' · '+esc(_bktz.label):''}${b.paid_at?' · paid '+esc(fmtDateTime(b.paid_at)):''}</span></div>
     </div></div>
-    <div class="bk-row" id="bkPhoneRow"><span>${ic('phone')}</span><div>${b.customer?.phone?`<a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>`:'<strong style="color:var(--red);">NO PHONE NUMBER</strong>'}</div></div>
-    ${b.customer?.email?`<div class="bk-row" id="bkEmailRow"><span>${ic('email')}</span><div><a href="mailto:${esc(b.customer.email)}">${esc(b.customer.email)}</a></div></div>`:''}
-    ${b.customer_notes?`<div class="bk-row"><span>${ic('note')}</span><div>${esc(b.customer_notes)}</div></div>`:''}
-    ${b.review_rating?`<div class="bk-row"><span>${ic('star')}</span><div>${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div>`:''}
-    ${b.review_token&&!b.review_rating?`<div class="bk-row"><span>${ic('link')}</span><div><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a> · <button type="button" class="btn ghost sm" id="bkCopyReview" style="padding:2px 8px;">Copy</button></div></div>`:''}
-    ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-row"><span>🔧</span><div><strong>Two-person lift</strong>${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</div></div>`:''}
-    ${b.secondary_technician?`<div class="bk-row"><span>${ic('customers')}</span><div>2nd tech: <strong>${esc(b.secondary_technician.name)}</strong>${b.secondary_technician.cross_company?` <span class="evt-xco" title="From the partner company — the customer never sees this">${esc(b.secondary_technician.company||'PARTNER')}</span>`:''}</div></div>`:''}
+    <div class="bk-d" id="bkAddrRow"><div class="bk-dtile">${bkIcon('pin')}</div><div>
+      <span class="bk-dl">Service address</span>
+      <div class="bk-dv">${b.address?`<span class="lead">${esc(b.address)}</span>`:'<span class="dim">No address on file</span>'}</div>
+      ${_dirUrl?`<div class="bk-dact"><a href="${_dirUrl}" target="_blank" rel="noopener">Directions</a></div>`:''}
+    </div></div>
+    <div class="bk-d" id="bkPhoneRow"><div class="bk-dtile">${bkIcon('phone')}</div><div>
+      <span class="bk-dl">Customer</span>
+      <div class="bk-dv">${b.customer?.phone
+        ? `<span class="lead">${esc(b.customer.phone)}</span>`
+        : '<strong style="color:#f87171;">NO PHONE NUMBER</strong>'}
+        ${b.customer?.email?`<br><span class="dim">${esc(b.customer.email)}</span>`:''}</div>
+      ${(b.customer?.phone||b.customer?.email)?`<div class="bk-dact">
+        ${b.customer?.phone?`<a href="tel:${esc(b.customer.phone)}">Call</a><a href="sms:${esc(b.customer.phone)}">Text</a>`:''}
+        ${b.customer?.email?`<a href="mailto:${esc(b.customer.email)}">Email</a>`:''}
+      </div>`:''}
+    </div></div>
+    <div class="bk-d"><div class="bk-dtile">${bkIcon('user')}</div><div>
+      <span class="bk-dl">Assigned to</span>
+      <div class="bk-dv"><span class="lead">${esc(b.technician?.name||'Unassigned')}</span>
+        ${b.secondary_technician?`<br><span class="dim">2nd tech: ${esc(b.secondary_technician.name)}${b.secondary_technician.cross_company?' ('+esc(b.secondary_technician.company||'partner')+')':''}</span>`:''}
+        <br><span class="dim">Booked by ${esc(bookedBy)}</span></div>
+      ${b.cross_company?`<div class="bk-xco" style="margin:9px 0 0;">⚠ Cross-company job — ${esc(b.technician?.name||'this tech')} is from ${esc(b.partner_company||'the partner company')}.</div>`:''}
+      ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-dv" style="margin-top:7px;"><span class="dim">Two-person lift${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</span></div>`:''}
+    </div></div>
+    ${b.customer_notes?`<div class="bk-d"><div class="bk-dtile">${bkIcon('note')}</div><div>
+      <span class="bk-dl">Customer notes</span><div class="bk-dv">${esc(b.customer_notes)}</div></div></div>`:''}
+    ${b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>
+      <span class="bk-dl">Review</span><div class="bk-dv">${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div></div>`:''}
+    ${b.review_token&&!b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>
+      <span class="bk-dl">Review link</span>
+      <div class="bk-dv"><a href="/review.html?token=${encodeURIComponent(b.review_token)}" target="_blank">Open review link</a></div>
+      <div class="bk-dact"><button type="button" class="btn ghost sm" id="bkCopyReview">Copy link</button></div></div></div>`:''}
+    <details class="bk-receipts">
+      <summary>Delivery receipts &amp; resend<span class="caret">▶</span></summary>
+      <div class="bk-rlist">${notificationLog(b)}</div>
+    </details>
     <div class="bk-slots" id="bkSlots"></div>
     ${canAssign?`<div class="bk-minicard">
       <div class="bk-minicard-head"><span class="bk-badge bk-badge-assign">👤</span><span class="bk-minicard-label">Assignment</span></div>
