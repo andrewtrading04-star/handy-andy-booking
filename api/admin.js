@@ -8249,9 +8249,20 @@ function sortForPayroll(data) {
 async function secretaryWorkDaysInWeek(db, bizSlug, weekStart) {
   const { data: biz } = await db.from('businesses').select('id').eq('slug', bizSlug).maybeSingle();
   if (!biz) return 0;
-  const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
-  const patternByDow = new Map(pattern.map(p => [p.day_of_week, p.is_available]));
-  const excByDate = new Map(exceptions.map(e => [e.exception_date, e.is_available]));
+  const { data: pattern } = await db.from('secretary_availability')
+    .select('day_of_week, is_available').eq('business_id', biz.id);
+  // Exceptions for THIS pay week specifically, not fetchSecretaryAvailability's
+  // rolling "last 7 days onward" window. That window is for the dashboard's
+  // "upcoming days off" list; using it here silently overpaid, because payroll
+  // for a week is run the SECOND Monday after it closes (see _lib/payroll.js),
+  // by which point that week's days off had already fallen outside it — so a
+  // day the secretary took off was counted and paid as a normal work day.
+  const weekEnd = addDaysStr(weekStart, 6);
+  const { data: exceptions } = await db.from('secretary_availability_exceptions')
+    .select('exception_date, is_available').eq('business_id', biz.id)
+    .gte('exception_date', weekStart).lte('exception_date', weekEnd);
+  const patternByDow = new Map((pattern || []).map(p => [p.day_of_week, p.is_available]));
+  const excByDate = new Map((exceptions || []).map(e => [e.exception_date, e.is_available]));
   let workDays = 0;
   for (let i = 0; i < 7; i++) {
     const d = addDaysStr(weekStart, i);
@@ -8572,6 +8583,36 @@ async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, d
       : (kind === 'weekly' ? `is now OFF ${when}` : `took ${when} OFF`);
     await sendSMS(ownerPhone, `Schedule change: ${who} ${what}.`);
   } catch (e) { console.warn('[secretary-change] owner SMS failed:', e.message); }
+
+  // Tell the crew when the office is closed on a specific day. Scoped tightly
+  // on purpose:
+  //   * one-off dates only, never a weekly-pattern edit. "Heather is now off
+  //     every Sunday" is a standing arrangement the techs already live with;
+  //     texting all of them every time it's re-saved is pure noise.
+  //   * only when going OFF. Putting a day BACK to working is a correction the
+  //     office cares about, not something the techs need woken up for.
+  // The techs of the affected business only, because that is whose office
+  // phone goes unanswered that day.
+  if (kind === 'exception' && !isAvailable) {
+    try {
+      const { data: techs } = await db.from('technicians')
+        .select('name, phone').eq('business_id', biz.id).eq('active', true);
+      const reachable = (techs || []).filter(t => t.phone);
+      if (reachable.length) {
+        const dayTxt = (() => { try { return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' }); }
+                                catch { return dateStr; } })();
+        const msg = `Heads up: ${subject} is OFF ${dayTxt}, so the office phone won't be covered that day. Reach the owner directly if you need something.`;
+        for (const t of reachable) {
+          const r = await sendSMSResult(t.phone, msg);
+          if (!r.ok) console.warn(`[secretary-change] tech SMS failed for ${t.name}:`, r.error || r.skipped);
+        }
+      }
+    } catch (e) {
+      // Never let a crew alert fail the schedule change itself — the day off is
+      // already saved and visible by this point.
+      console.warn('[secretary-change] tech alert failed:', e.message);
+    }
+  }
 }
 
 // POST — a one-off exception for a specific date (e.g. a day off this week
