@@ -64,7 +64,9 @@
   .sidebar{width:248px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;position:sticky;top:0;overflow-y:auto;}
   .side-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;}
   .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;flex:1;min-width:0;}
-  .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+  /* --logo is the ONLY place the brand colour survives in the chrome. Every
+     other accented control is neutral (see BIZ_THEME). */
+  .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--logo,var(--orange));display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
   .logo .ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .plus{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:18px;line-height:1;flex-shrink:0;}
   .switcher{display:flex;gap:5px;padding:0 14px 8px;flex-wrap:wrap;}
@@ -102,12 +104,13 @@
   body.doms .logo .dot i{color:#fff;font-size:13px;}
   /* Doms theme: blue + black only. Remap the brand orange to blue and darken
      body text to black. Handy Andy (no .doms class) keeps its orange. */
-  body.doms{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
-  body.doms .logo .dot{ background:var(--accent); }
-  /* Mile High theme: black. Same treatment as Doms — remap the brand orange to
-     the accent so no Handy Andy orange leaks through on a Mile High session. */
-  body.mile-high{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
-  body.mile-high .logo .dot{ background:var(--accent); }
+  /* Doms/Mile High darken body text. The old `--orange: var(--accent)` remap
+     here is gone: applyIconTheme() now sets --orange for EVERY business, and
+     the logo reads --logo instead, so the brand colour survives in exactly one
+     place. Leaving the old .logo .dot overrides in would have repainted the
+     logo with the neutral chrome colour. */
+  body.doms{ --ink:#0f1115; --ink-2:#1b2027; }
+  body.mile-high{ --ink:#0f1115; --ink-2:#1b2027; }
   /* New Booking's option rows are unified flat dark rows for both businesses now
      (see the #modal-scoped block near the other #modal overrides) — the old
      per-business card-tint override is superseded (the #modal id always wins
@@ -1642,10 +1645,17 @@ function isMileHigh(){ return !!(current && current.slug==='mile-high'); }
 // for the rest of its life — switching to Mile High or Dom's in the sidebar
 // changed the data but not a single colour. Applied by applyIconTheme(), which
 // already runs on every business switch.
+// accent/soft — the chrome (nav, badges, buttons, pills) on LIGHT surfaces.
+//                Neutral black for Handy Andy and Mile High so the dashboard
+//                reads as a tool; only the logo carries the brand.
+// logo         — the one place the brand colour survives in the chrome.
+// onDark       — the greeting card and chart series sit on dark navy, where
+//                black would simply disappear, so those keep a legible
+//                brand-tinted colour instead of the neutral accent.
 const BIZ_THEME={
-  'handy-andy':{ accent:'#FF6B35', soft:'#fff0e9' },
-  'doms':      { accent:'#2563EB', soft:'#eaf1ff' },
-  'mile-high': { accent:'#111418', soft:'#ecedf0' },
+  'handy-andy':{ accent:'#111418', soft:'#eceef1', logo:'#FF6B35', onDark:'#FF8A5C' },
+  'doms':      { accent:'#2563EB', soft:'#eaf1ff', logo:'#2563EB', onDark:'#60a5fa' },
+  'mile-high': { accent:'#111418', soft:'#eceef1', logo:'#111418', onDark:'#93a1ae' },
 };
 function bizTheme(slug){ return BIZ_THEME[slug||''] || BIZ_THEME['handy-andy']; }
 // Font Awesome is only ever needed by a Doms session (Handy Andy always uses
@@ -1672,8 +1682,14 @@ function applyIconTheme(){
   // <html> because brandLogin() also writes there pre-auth — same property, so
   // this simply overwrites the stale login-URL colour instead of losing to it.
   const th=bizTheme(current&&current.slug);
-  document.documentElement.style.setProperty('--accent', th.accent);
-  document.documentElement.style.setProperty('--accent-soft', th.soft);
+  const rs=document.documentElement.style;
+  rs.setProperty('--accent', th.accent);
+  rs.setProperty('--accent-soft', th.soft);
+  rs.setProperty('--logo', th.logo);
+  // Neutralise the legacy brand-orange token too (rating badges, the on-a-job
+  // status dot, review-bar highlights). Without this those stayed orange on a
+  // Handy Andy session even though everything around them had gone black.
+  rs.setProperty('--orange', th.accent);
   document.querySelectorAll('[data-ico]').forEach(el=>{
     const m=ICONS[el.dataset.ico]; if(!m) return;
     el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
@@ -4398,7 +4414,9 @@ function anaSessionsTbl(rows){
 // Each business's brand color for analytics charts: blue for Doms, orange for
 // Handy Andy. Hardcoded (not from the DB brand_orange column, which holds a
 // non-orange value for Handy Andy) so the chart colors are always correct.
-function anaBrand(){ return bizTheme(current&&current.slug).accent; }
+// Chart series colours sit on dark cards and act as a Handy Andy vs Doms
+// legend, so they use the on-dark brand tint, never the neutral chrome accent.
+function anaBrand(){ return bizTheme(current&&current.slug).onDark; }
 function anaHexRgb(hex){
   const h=(hex||'').replace('#','').trim();
   if(h.length===6){ const n=parseInt(h,16); return (n>>16&255)+','+(n>>8&255)+','+(n&255); }
@@ -7943,7 +7961,7 @@ function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
   el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
-  el.style.setProperty('--gaccent', bizTheme(current&&current.slug).accent);
+  el.style.setProperty('--gaccent', bizTheme(current&&current.slug).onDark);
   const z=greetingData.tz||tz(), now=new Date();
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
