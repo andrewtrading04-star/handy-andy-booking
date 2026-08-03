@@ -292,6 +292,7 @@ export default async function handler(req, res) {
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'customer_detail':   return await customerDetail(req, res, db, auth);
+      case 'profit_range':      return await profitRange(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
@@ -1096,6 +1097,63 @@ function bracketHardwareCost(lineItems, hasJuan) {
     if (hit) total += hit.cost * (Number(li.quantity) || 1);
   }
   return total;
+}
+
+// Realized profit over an arbitrary window, both companies combined, with the
+// per-business split the Profit box shows underneath.
+//
+// Lives in its OWN action rather than being folded into the greeting payload on
+// purpose: "this year" can span several thousand jobs and every one of them
+// needs a computeJobEconomics pass, so precomputing it would put seconds onto
+// EVERY dashboard load to serve a tab most opens never touch. The dashboard
+// fetches it the first time the tab is clicked and caches the answer.
+//
+// Same definition of profit as the week figure it sits next to: completed AND
+// paid only, so the numbers are comparable rather than three different ideas of
+// "profit" in one card.
+async function profitRange(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const range = (req.query.range || '').toString();
+  if (!['30d', 'year'].includes(range)) return res.status(400).json({ error: 'range must be 30d or year' });
+
+  const { data: allBiz } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+  const tz = biz.timezone || 'America/Denver';
+
+  // Anchored on the VIEWED business's local day so "this year" means the year
+  // the office is actually living in, not UTC's.
+  const end = localDayStartUTC(tz, 1);            // include everything up to end of today
+  let start;
+  if (range === '30d') {
+    start = localDayStartUTC(tz, -29);            // 30 calendar days including today
+  } else {
+    // Jan 1 of the year the office is currently living in, converted to the
+    // right UTC instant by the shared helper rather than by hand.
+    const localYear = new Date().toLocaleString('en-US', { timeZone: tz, year: 'numeric' });
+    start = localDateStartUTC(tz, `${localYear}-01-01`);
+  }
+
+  const travelCache = new Map();
+  const travelMapFor = async (bb) => {
+    if (travelCache.has(bb.id)) return travelCache.get(bb.id);
+    const m = await travelPayoutMap(db, bb.id);
+    travelCache.set(bb.id, m);
+    return m;
+  };
+
+  const parts = await Promise.all((allBiz || []).map(async (bb) => {
+    const { data: rows } = await fetchEconomicsRows(sel => db.from('bookings').select(sel)
+      .eq('business_id', bb.id)
+      .gte('scheduled_at', start.toISOString())
+      .lt('scheduled_at', end.toISOString()));
+    const paid = (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    if (!paid.length) return [bb.slug, 0];
+    const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
+    return [bb.slug, Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
+  }));
+
+  const by_slug = Object.fromEntries(parts);
+  const total = Math.round(parts.reduce((a, [, v]) => a + v, 0));
+  return res.status(200).json({ range, total, by_slug, from: start.toISOString(), to: end.toISOString() });
 }
 
 async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) {

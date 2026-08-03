@@ -2090,7 +2090,7 @@ async function openAlertJob(slug, id){
     // renderGreeting) AND for 'estimates' (renderEstimates calls it itself) —
     // only call it here for every OTHER section, where neither runs, so the
     // badge/estStale banner still updates without a duplicate fetch.
-    current=biz; availData=null; availViewSlug=null; webLastData=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    current=biz; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -2109,7 +2109,7 @@ function renderSwitcher(){
     if(current) nbWarmDataCache(current.slug);
     // See the matching comment in openAlertJob — navTo(section) already covers
     // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
-    availData=null; availViewSlug=null; webLastData=null; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }));
 }
 
@@ -8124,7 +8124,13 @@ function getTimeGreeting(name, tz) {
   return `Good ${timeOfDay}.`;
 }
 let netDailyView='today';   // 'today' | 'yesterday' for the Net Daily Profit card
-let profitView='week';      // 'week' | 'today' | 'yesterday' for the tabbed Profit card
+let profitView='week';      // 'week' | '30d' | 'year' for the tabbed Profit card
+// Answers to the two expensive Profit ranges, kept so tabbing back and forth
+// doesn't refetch. Cleared on a business switch. Deliberately NOT cleared on
+// every greeting refresh: these are 30-day and year-to-date windows, where one
+// more job landing barely moves the number, and refetching a full year on every
+// navigation would be a lot of work for no visible difference.
+let profitRangeCache={};
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
@@ -8212,22 +8218,46 @@ function paintGreeting(){
     const vEl=document.getElementById('ndpVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-ndp]').forEach(b=>b.classList.toggle('on', b.dataset.ndp===netDailyView));
   }));
-  // Profit card tab toggle: This week / Today / Yesterday (this business).
-  el.querySelectorAll('[data-pv]').forEach(btn=>btn.addEventListener('click',()=>{
-    profitView=btn.dataset.pv;
-    const pf=(greetingData&&greetingData.profit)||{};
-    const wbs=pf.week_by_slug||{};
-    const weekTotal=Number(wbs.doms||0)+Number(wbs['handy-andy']||0);
-    const v = profitView==='week' ? weekTotal : profitView==='yesterday' ? (pf.yesterday||0) : (pf.today||0);
-    const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(v);
-    const bySlug = profitView==='week' ? wbs : profitView==='yesterday' ? pf.yesterday_by_slug : pf.today_by_slug;
+  // Profit card tab toggle: This week / Last 30 days / This year.
+  //
+  // Only "this week" ships with the greeting payload. The two longer windows can
+  // span thousands of jobs and each one needs a full economics pass, so they are
+  // fetched the first time they're opened (action=profit_range) and cached in
+  // profitRangeCache for the rest of the session. Clicking back and forth after
+  // that is instant and costs nothing.
+  const paintProfit=(total,bySlug)=>{
+    const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(total);
     const splitEl=document.getElementById('pfSplit');
     if(splitEl){
       const dEl=splitEl.querySelector('[data-split="doms"]'), hEl=splitEl.querySelector('[data-split="handy-andy"]');
       if(dEl) dEl.textContent=money(Number((bySlug&&bySlug.doms)||0));
       if(hEl) hEl.textContent=money(Number((bySlug&&bySlug['handy-andy'])||0));
     }
+  };
+  el.querySelectorAll('[data-pv]').forEach(btn=>btn.addEventListener('click',async()=>{
+    profitView=btn.dataset.pv;
     el.querySelectorAll('[data-pv]').forEach(b=>b.classList.toggle('on', b.dataset.pv===profitView));
+    const pf=(greetingData&&greetingData.profit)||{};
+    if(profitView==='week'){
+      const wbs=pf.week_by_slug||{};
+      return paintProfit(Number(wbs.doms||0)+Number(wbs['handy-andy']||0), wbs);
+    }
+    const cached=profitRangeCache[profitView];
+    if(cached) return paintProfit(cached.total, cached.by_slug);
+    // Honest loading state: a year can take a moment, and leaving the previous
+    // tab's figure on screen while it loads would be read as the real answer.
+    const vEl=document.getElementById('pfVal');
+    const splitEl=document.getElementById('pfSplit');
+    if(vEl) vEl.textContent='…';
+    if(splitEl) splitEl.querySelectorAll('[data-split]').forEach(s=>s.textContent='…');
+    const want=profitView;
+    try{
+      const d=await api('profit_range',{ params:{ business:current.slug, range:want } });
+      profitRangeCache[want]={ total:d.total||0, by_slug:d.by_slug||{} };
+      if(profitView===want) paintProfit(d.total||0, d.by_slug||{});   // ignore a slow answer the user already tabbed away from
+    }catch(e){
+      if(profitView===want){ if(vEl) vEl.textContent='—'; toast('Could not load that range'); }
+    }
   }));
   const callsLink=el.querySelector('[data-gocalls]');
   if(callsLink) callsLink.addEventListener('click',()=>navTo('reviewcalls'));
@@ -8402,7 +8432,7 @@ function greetStatsHtml(){
     // stacked "week total, then a divider, then today/yesterday" layout.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;gap:6px;">`+
       `<span class="gstat-l">Profit</span>`+
-      `<div class="ndp-seg"><button data-pv="week" class="${profitView==='week'?'on':''}">This week</button><button data-pv="today" class="${profitView==='today'?'on':''}">Today</button><button data-pv="yesterday" class="${profitView==='yesterday'?'on':''}">Yesterday</button></div>`+
+      `<div class="ndp-seg"><button data-pv="week" class="${profitView==='week'?'on':''}">This week</button><button data-pv="30d" class="${profitView==='30d'?'on':''}">Last 30 days</button><button data-pv="year" class="${profitView==='year'?'on':''}">This year</button></div>`+
       `<span class="gstat-v" id="pfVal" style="color:#4ade80;">${money(profitVal)}</span>`+
       bizSplitHtml(profitSplitBySlug(pf), 'pfSplit')+
     `</div>`+
