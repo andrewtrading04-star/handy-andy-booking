@@ -5800,7 +5800,7 @@ async function callIngest(req, res, body) {
   // No alert for a caller who has already booked, and none on a backfill.
   let notified = false;
   if (!body.backfill && !booking_id) {
-    notified = await notifyCallRecipient(db, { ...parsed, id: ins.id, customer, booking_id });
+    notified = await notifyCallRecipient(db, { ...parsed, id: ins.id, customer, booking_id, business_name: bizRow?.name || null });
     if (notified) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', ins.id);
   }
 
@@ -5821,16 +5821,25 @@ async function callIngest(req, res, body) {
 // be corrected without a deploy; the number itself still comes from the existing
 // HANDY_ANDY_SECRETARY_PHONE / DOMS_SECRETARY_PHONE env vars that every other
 // office alert already uses, so there is no second place to keep phones in sync.
+// Extensions whose alert gets the named, urgent wording plus a one-tap link to
+// the transcript (public/voicemail.html). Scoped to Dom's for now at the
+// owner's request; adding 'handy-andy' here is all Heather needs to get the
+// same treatment on extensions 1 and 2.
+const VM_LINK_SCOPES = ['doms'];
+const VM_LINK_TTL_S = 14 * 24 * 60 * 60;   // a voicemail text can sit unread a while
+
 async function notifyCallRecipient(db, call) {
   try {
     if (!smsNotificationsOn()) return false;
     let scope = call.business_slug;
+    let staffName = null;
     if (call.extension_no != null) {
       const { data: staff } = await db.from('staff_users')
         .select('name, active, business:businesses ( slug )')
         .contains('grasshopper_extensions', [call.extension_no]).eq('active', true).limit(1);
-      const who = (staff || [])[0];
-      if (who?.business?.slug) scope = who.business.slug;
+      const found = (staff || [])[0];
+      if (found?.business?.slug) scope = found.business.slug;
+      if (found?.name) staffName = found.name;
     }
     const to = secretaryPhoneFor(scope);
     if (!to) return false;
@@ -5840,7 +5849,22 @@ async function notifyCallRecipient(db, call) {
     // without turning the alert into a wall of text.
     const gist = call.transcript ? `\n"${call.transcript.slice(0, 140)}${call.transcript.length > 140 ? '…' : ''}"` : '';
     const already = call.booking_id ? '\nAlready booked.' : '';
-    const msg = `New voicemail from ${who}${call.service ? ` (${call.service})` : ''}.${gist}${already}\nOpen the Calls tab to respond.`;
+
+    let msg;
+    if (VM_LINK_SCOPES.includes(scope)) {
+      // Named, urgent, and actionable: the link opens the full transcript with
+      // a Call back button, so they never have to log into the dashboard on a
+      // phone just to find out what the caller wanted.
+      const base = process.env.PUBLIC_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+      const token = signToken({ kind: 'voicemail', call_id: call.id }, VM_LINK_TTL_S);
+      const link = `${base}/voicemail.html?token=${encodeURIComponent(token)}`;
+      const hi = staffName ? `${staffName}, you` : 'You';
+      const bizName = call.business_name || (scope === 'doms' ? "Dom's" : 'the business line');
+      msg = `${hi} just received a voicemail for ${bizName} from ${who}. Reply back immediately.${gist}${already}\n${link}`;
+    } else {
+      msg = `New voicemail from ${who}${call.service ? ` (${call.service})` : ''}.${gist}${already}\nOpen the Calls tab to respond.`;
+    }
     const r = await sendSMSResult(to, msg);
     return !!r.ok;
   } catch (e) {

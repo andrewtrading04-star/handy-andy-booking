@@ -54,10 +54,17 @@ edited without the password being in it.
    - Function: `syncNow`
    - Event source: Time-driven
    - Type: Minutes timer
-   - Interval: Every 5 minutes
+   - Interval: **Every minute**
    - Save
 
-That's it. New voicemails appear in the Calls tab within about five minutes.
+That's it. New voicemails appear in the Calls tab, and the alert text goes out,
+within about a minute.
+
+> **Already set this up on 5 minutes?** Open Triggers, click the three dots on
+> the `syncNow` row, choose Edit, change the interval to Every minute and save.
+> You do not need to re-authorise anything. A once-a-minute trigger is still far
+> inside Google's free quota (the cap is ~20,000 trigger-runs a day; this uses
+> 1,440), and a run with no new mail exits in well under a second.
 
 ---
 

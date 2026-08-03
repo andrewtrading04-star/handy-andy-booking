@@ -1000,6 +1000,32 @@ async function otwSend(req, res) {
   return res.status(200).json({ ok: true, already: false, customer: b.customer?.name || 'your customer' });
 }
 
+// ── Voicemail deep link ─────────────────────────────────────────────────────
+// The alert text sent to the secretary (notifyCallRecipient in api/admin.js)
+// carries a signed link to /voicemail.html so they can read what the caller
+// actually said and tap to ring them back, without logging into the dashboard
+// on a phone first. Read-only: this exposes nothing but the one voicemail the
+// token names, and the token is unguessable (HMAC, see _lib/auth.js).
+async function voicemailInfo(req, res) {
+  const t = verifyToken(((req.query || {}).token || '').toString());
+  if (!t || t.kind !== 'voicemail' || !t.call_id) return res.status(200).json({ ok: false, reason: 'invalid' });
+  const db = serviceClient();
+  const { data: c } = await db.from('calls')
+    .select('id, caller_phone, transcript, occurred_at, service, market, status, claimed_by, claimed_at, business:businesses(name)')
+    .eq('id', t.call_id).maybeSingle();
+  if (!c) return res.status(200).json({ ok: false, reason: 'invalid' });
+  return res.status(200).json({
+    ok: true,
+    phone: c.caller_phone || null,
+    transcript: c.transcript || null,
+    occurred_at: c.occurred_at || null,
+    service: c.service || null,
+    market: c.market || null,
+    business: c.business?.name || null,
+    claimed_by: c.claimed_by || null,
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -1021,6 +1047,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.
   if (req.method === 'GET' && (req.query || {}).action === 'otw_info') return otwInfo(req, res);
+  // Signed voicemail link from the secretary's alert text.
+  if (req.method === 'GET' && (req.query || {}).action === 'vm_info') return voicemailInfo(req, res);
   if (req.method === 'POST' && ((req.query || {}).action === 'otw_send' || (req.body || {}).action === 'otw_send')) return otwSend(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
