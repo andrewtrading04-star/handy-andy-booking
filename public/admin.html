@@ -8438,15 +8438,11 @@ function incomeChartSvg(history){
     const ly=Math.max(9, y-far);
     return `<text x="${x.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
   }).join('');
-  const shortDate=ds=>{ const d=new Date(ds+'T00:00:00Z'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}); };
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;margin-top:4px;">`+
       `<line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
       `<polyline points="${pts}" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`+
       dots+labels+
-    `</svg>`+
-    `<div style="display:flex;justify-content:space-between;font-size:10px;opacity:.7;margin-top:2px;">`+
-      `<span>${esc(shortDate(history[0].pay_date))}</span><span>${esc(shortDate(history[history.length-1].pay_date))}</span>`+
-    `</div>`;
+    `</svg>`;
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
