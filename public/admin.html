@@ -6568,10 +6568,19 @@ async function renderReviews(){
     const crmReviews=d.reviews||[];
     const gReviews=gr.reviews||[];
     const gByBooking=new Set(gReviews.filter(x=>x.booking_id).map(x=>x.booking_id));
-    // Include the partner company's roster too — a review can legitimately
-    // credit a cross-hire tech (e.g. a Dom's tech who helped on a Handy Andy
-    // job), and without this they simply don't appear in the dropdown at all.
-    const revTechs=(tl.technicians||[]).filter(t=>t.active).map(t=>({id:t.id,name:t.name}));
+    // TWO different lists, deliberately:
+    //
+    //   ownTechs  — this company's own active roster. Drives the filter pills.
+    //               Dom's shows Dom's people, Handy Andy shows Handy Andy's.
+    //               Cross-hire names used to be merged in here too, which meant
+    //               the Dom's tab listed four Handy Andy techs (three of them
+    //               with zero Dom's reviews) purely as clutter.
+    //   revTechs  — own roster PLUS the partner company's, used only by the
+    //               "credit a tech" dropdown on Google review cards. A Google
+    //               review for a Dom's job genuinely can belong to a Handy Andy
+    //               tech who covered it, so that dropdown must still offer them.
+    const ownTechs=(tl.technicians||[]).filter(t=>t.active).map(t=>({id:t.id,name:t.name}));
+    const revTechs=ownTechs.slice();
     if(pt && pt.partner && (pt.technicians||[]).length){
       const haveIds=new Set(revTechs.map(t=>t.id));
       pt.technicians.forEach(t=>{ if(!haveIds.has(t.id)) revTechs.push({id:t.id,name:`${t.name} (${pt.partner.name})`}); });
@@ -6660,7 +6669,10 @@ async function renderReviews(){
     const techPickerHtml=()=>{
       const counts=techCounts();
       const pill=(id,label,count)=>`<button type="button" class="rc-seg-btn${activeTech===id?' on':''}" data-rstech="${id===null?'':esc(id)}">${esc(label)}${count!=null?` <span style="opacity:.65;">${count}</span>`:''}</button>`;
-      const techPills=revTechs.map(t=>pill(t.id,t.name,counts.get(t.id)||0)).join('');
+      // ownTechs, NOT revTechs: the pills are "my crew", so the partner
+      // company's people don't belong here even though they can still be
+      // credited on an individual review via the dropdown.
+      const techPills=ownTechs.map(t=>pill(t.id,t.name,counts.get(t.id)||0)).join('');
       const unassigned=hasUnassigned?pill('__none__','Unassigned',_reviewsList.filter(r=>!r.technician_id).length):'';
       return `<div class="rc-seg" style="flex-wrap:wrap;">${pill(null,'All technicians',_reviewsList.length)}${techPills}${unassigned}</div>`;
     };
