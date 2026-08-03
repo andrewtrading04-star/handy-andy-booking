@@ -5575,17 +5575,32 @@ async function renderSecretaries(){
         </div>`;
       }).join('');
       const upcoming=(s.exceptions||[]).filter(e=>e.exception_date>=today).sort((a,b)=>a.exception_date.localeCompare(b.exception_date));
+      const niceDate=(ds)=>{ try{ return new Date(ds+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch(_){ return ds; } };
       const excHtml=upcoming.length
-        ? `<div class="side-section" style="margin-top:14px;">Upcoming exceptions</div>` +
-          upcoming.map(e=>`<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
-            <div class="name">${esc(e.exception_date)}</div>
-            <div class="meta">${e.is_available?'Working (override)':'Off (override)'}</div>
+        ? upcoming.map(e=>`<div class="job" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <div class="name">${esc(niceDate(e.exception_date))}</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="meta" style="font-weight:700;color:${e.is_available?'var(--accent)':'#b91c1c'};">${e.is_available?'Working':'Off'}</span>
+              <button type="button" class="btn ghost sm" data-sec-exc-del="${esc(e.exception_date)}" data-sec-biz="${esc(s.business_slug)}"
+                title="Remove this override so the date goes back to the normal weekly schedule" style="width:auto;padding:3px 8px;">✕</button>
+            </div>
           </div>`).join('')
-        : '';
+        : `<div class="meta" style="padding:8px 2px;">No one-off days set.</div>`;
+      // Owner-only: book a specific date off (or on) without logging in as them.
+      const addHtml=`
+        <div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+          <input type="date" class="search" style="margin:0;width:auto;flex:1;min-width:150px;" data-sec-date="${esc(s.business_slug)}" min="${esc(today)}">
+          <button type="button" class="btn sm" style="width:auto;background:#b91c1c;border-color:#b91c1c;"
+            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="0">Mark off</button>
+          <button type="button" class="btn ghost sm" style="width:auto;"
+            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="1">Mark working</button>
+        </div>`;
       return `<div style="flex:1;min-width:260px;">
         <h2 style="margin:0 0 10px;">${esc(s.name)} <span class="meta" style="font-weight:400;">(${s.business_slug==='handy-andy'?'Handy Andy':"Dom's"} · ${payFmtMoney(s.daily_rate,s.currency)}/day)</span></h2>
         ${rows}
+        <div class="side-section" style="margin-top:14px;">One-off days</div>
         ${excHtml}
+        ${addHtml}
       </div>`;
     };
     // Recent schedule changes (app.secretary_schedule_changes). Best-effort:
@@ -5623,7 +5638,7 @@ async function renderSecretaries(){
     view.innerHTML=`<div class="wrap">
       <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
       ${feedHtml}
-      <div style="margin-bottom:14px;"><div class="meta">Each secretary's own work/off days — set from their own "My Availability" tab.</div></div>
+      <div style="margin-bottom:14px;"><div class="meta">The weekly pattern is set by each secretary from their own "My Availability" tab. You can add one-off days here, and they will see it on their side.</div></div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;">${(d.secretaries||[]).map(cardFor).join('')}</div>
     </div>`;
     const seenBtn=document.getElementById('secSeenAll');
@@ -5632,6 +5647,33 @@ async function renderSecretaries(){
       try{ await api('secretary_changes_seen',{ method:'POST', body:{ all:true }}); renderSecretaries(); }
       catch(e){ seenBtn.disabled=false; toast(e.message); }
     });
+    // Add a one-off day for a secretary. The date input is per-card, so the
+    // button reads the one belonging to the same business it was rendered for.
+    view.querySelectorAll('[data-sec-exc-add]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const slug=btn.dataset.secExcAdd;
+      const input=view.querySelector(`[data-sec-date="${slug}"]`);
+      const date=input&&input.value;
+      if(!date){ toast('Pick a date first'); if(input) input.focus(); return; }
+      const wantAvailable=btn.dataset.secAvail==='1';
+      btn.disabled=true;
+      try{
+        await api('secretary_availability_exception_set',{ method:'POST',
+          body:{ business:slug, date, is_available:wantAvailable }});
+        toast(wantAvailable?'Marked working':'Marked off');
+        renderSecretaries();
+      }catch(e){ btn.disabled=false; toast(e.message||'Could not save that day'); }
+    }));
+    // Remove an override so the date reverts to the normal weekly schedule.
+    view.querySelectorAll('[data-sec-exc-del]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const date=btn.dataset.secExcDel, slug=btn.dataset.secBiz;
+      btn.disabled=true;
+      try{
+        await api('secretary_availability_exception_set',{ method:'POST',
+          body:{ business:slug, date, remove:true }});
+        toast('Back to the normal schedule');
+        renderSecretaries();
+      }catch(e){ btn.disabled=false; toast(e.message||'Could not remove that day'); }
+    }));
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
 

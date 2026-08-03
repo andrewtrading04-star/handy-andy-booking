@@ -8543,10 +8543,14 @@ async function secretaryAvailabilitySet(req, res, db, auth) {
 // the owner. Best-effort throughout: the schedule change itself is already
 // committed by the time this runs, so a logging or SMS failure must never turn
 // a successful save into an error for Heather/Joey.
-async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, dateStr = null, isAvailable, previous }) {
+async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, dateStr = null, isAvailable, previous, actor = 'secretary' }) {
   // Nothing actually changed (re-saving the same value) — don't cry wolf.
   if (previous !== null && previous === isAvailable) return;
-  const who = displayNameFor(scope);
+  // Name who actually did it. An owner booking a day off on someone's behalf
+  // must not show up in the feed as the secretary having done it themselves —
+  // the whole point of this log is knowing who changed what.
+  const subject = displayNameFor(scope);
+  const who = actor === 'owner' ? `Owner (for ${subject})` : subject;
   try {
     await db.from('secretary_schedule_changes').insert({
       business_id: biz.id, changed_by: who, kind,
@@ -8572,30 +8576,65 @@ async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, d
 
 // POST — a one-off exception for a specific date (e.g. a day off this week
 // only). Same secretary-only, own-business-only scoping as the weekly set.
+// POST — a one-off day for a specific date, overriding the weekly pattern.
+//
+// Two callers with different rules:
+//   secretary — their OWN business only, taken from auth.scope. A body
+//               `business` field is never trusted, so Heather can never edit
+//               Joey's calendar.
+//   owner     — either secretary, and must name which via body.business. This
+//               is how the office books a day off on someone's behalf ("Joey
+//               told me he's out on the 12th") without logging in as them.
+//
+// `remove: true` deletes the override so the date falls back to the weekly
+// pattern, rather than leaving a redundant row that says the same thing.
 async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'secretary') return res.status(403).json({ error: 'Secretary only' });
-  const date = (req.body?.date || '').toString();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
-  const isAvailable = !!(req.body || {}).is_available;
+  const body = req.body || {};
+  let scope;
+  if (auth.role === 'secretary') scope = auth.scope;
+  else if (auth.role === 'owner') scope = (body.business || '').toString();
+  else return res.status(403).json({ error: 'Not authorized' });
+  if (!scope || !['handy-andy', 'doms'].includes(scope)) return res.status(400).json({ error: 'business required' });
 
-  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', auth.scope).maybeSingle();
+  const date = (body.date || '').toString();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
+  const remove = !!body.remove;
+  const isAvailable = !!body.is_available;
+
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', scope).maybeSingle();
   if (bizErr) throw bizErr;
   if (!biz) return res.status(404).json({ error: 'Business not found' });
 
-  // Prior state for this exact date: an existing exception if there is one,
-  // otherwise what their recurring weekly pattern says for that weekday — so
-  // "took Friday off" is only reported when Friday was actually a work day.
+  // What the weekly pattern says for this weekday — needed both as the "prior
+  // state" fallback and as the value the date reverts to when an override is
+  // removed.
+  let patternSays = null;
+  try {
+    const dow = dayOfWeekFor(date);
+    const { data: pat } = await db.from('secretary_availability')
+      .select('is_available').eq('business_id', biz.id).eq('day_of_week', dow).maybeSingle();
+    if (pat) patternSays = pat.is_available;
+  } catch { /* fall back to "no prior state" */ }
+
+  // Prior state for this exact date: an existing override if there is one,
+  // otherwise the weekly pattern — so "took Friday off" is only reported when
+  // Friday was actually a work day.
   const { data: prevEx } = await db.from('secretary_availability_exceptions')
     .select('is_available').eq('business_id', biz.id).eq('exception_date', date).maybeSingle();
-  let previous = prevEx ? prevEx.is_available : null;
-  if (previous === null) {
-    try {
-      const dow = dayOfWeekFor(date);
-      const { data: pat } = await db.from('secretary_availability')
-        .select('is_available').eq('business_id', biz.id).eq('day_of_week', dow).maybeSingle();
-      if (pat) previous = pat.is_available;
-    } catch { /* fall back to "no prior state" */ }
+  const previous = prevEx ? prevEx.is_available : patternSays;
+
+  if (remove) {
+    const { error: delErr } = await db.from('secretary_availability_exceptions')
+      .delete().eq('business_id', biz.id).eq('exception_date', date);
+    if (delErr) throw delErr;
+    // The date now means whatever the weekly pattern means. Only worth logging
+    // if that is actually different from the override we just deleted.
+    await recordSecretaryChange(db, {
+      biz, scope, actor: auth.role === 'owner' ? 'owner' : 'secretary', kind: 'exception',
+      dateStr: date, isAvailable: patternSays === null ? true : patternSays, previous,
+    });
+    return res.status(200).json({ ok: true, date, removed: true, reverts_to: patternSays });
   }
 
   const { error } = await db.from('secretary_availability_exceptions')
@@ -8604,7 +8643,7 @@ async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
   if (error) throw error;
 
   await recordSecretaryChange(db, {
-    biz, scope: auth.scope, kind: 'exception',
+    biz, scope, actor: auth.role === 'owner' ? 'owner' : 'secretary', kind: 'exception',
     dateStr: date, isAvailable, previous,
   });
   return res.status(200).json({ ok: true, date, is_available: isAvailable });
