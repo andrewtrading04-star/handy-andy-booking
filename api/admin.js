@@ -65,6 +65,11 @@ import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
+// What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
+// lists arrived/in_progress because imported Zenbooker rows sit on them and
+// must keep showing up in queries; this list is narrower on purpose so nothing
+// new can be created there. See TECH_STATUS in api/tech.js for the tech side.
+const SETTABLE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'completed', 'cancelled', 'no_show'];
 
 // Technicians who can NEVER be the second tech on a two-person job. They cover
 // out-of-town territories (Zach → Austin, Juan → Houston) and only ever work as
@@ -3113,6 +3118,15 @@ async function bookingUpdate(req, res, db, auth, body) {
       break;
     case 'status':
       if (!body.status) return res.status(400).json({ error: 'status required' });
+      // Validated, and deliberately WITHOUT 'arrived'/'in_progress'. We don't
+      // track on-site arrival, the tech app has no button for either, and a job
+      // parked on one of them used to render the tech no advance button at all.
+      // The DB enum still allows them so imported Zenbooker rows stay valid;
+      // this just stops anything new landing there. Previously this accepted any
+      // string, so a typo became a 500 from the enum column instead of a 400.
+      if (!SETTABLE_STATUSES.includes(body.status)) {
+        return res.status(400).json({ error: `Unknown status "${body.status}". Allowed: ${SETTABLE_STATUSES.join(', ')}` });
+      }
       patch.status = newStatus = body.status; break;
     default:
       return res.status(400).json({ error: `Unknown booking action "${body.action}"` });

@@ -78,10 +78,22 @@ async function fetchMine(build) {
 
 // Status a technician is allowed to set, and how it maps to availability + the
 // matching lifecycle timestamp on the booking.
+//
+// Deliberately TWO, matching the two buttons the tech app actually renders
+// ("On My Way" then "Mark Complete" — see NEXT in public/tech.html). 'arrived'
+// and 'in_progress' used to be accepted here and were a trap: nothing in the
+// app ever set them (zero rows in app.booking_status_events, and every such
+// row in the database is Zenbooker import backfill), but the API accepted
+// them, and tech.html had no advance button for 'arrived' — so a job that
+// somehow reached it showed the tech NO button at all and could only be
+// unstuck by the office. We don't track on-site arrival as a separate step,
+// so the states are gone rather than plumbed through.
+//
+// Legacy/imported rows already sitting on those statuses are handled, not
+// orphaned: STATUS_RANK below still knows them so the forward-only guard keeps
+// working, and tech.html still offers "Mark Complete" from either one.
 const TECH_STATUS = {
   on_the_way:  { tech: 'on_job',    stamp: 'on_the_way_at' },
-  arrived:     { tech: 'on_job',    stamp: 'arrived_at' },
-  in_progress: { tech: 'on_job',    stamp: null },
   completed:   { tech: 'available', stamp: 'completed_at' },
 };
 // Forward-only progression, enforced server-side. Without this, a stale phone

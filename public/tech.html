@@ -619,7 +619,7 @@ const HELP_CONTENT = [
       body:`Tap any day in the strip to jump to it. Use the ‹ › arrows to move a whole week at a time, and tap <b>Today</b> to snap straight back to now.` },
     { id:'jobs-badges', q:'What do the colored badges on a job mean?',
       tags:['badge','color','status','assigned','confirmed','completed'],
-      body:`<b>Blue</b> = assigned to you. <b>Amber</b> = confirmed / pending. <b>Orange</b> = on the way, arrived, or in progress. <b>Green</b> = completed. The badge always matches the button you'd tap next on that job.` },
+      body:`<b>Blue</b> = assigned to you. <b>Amber</b> = confirmed / pending. <b>Orange</b> = on the way. <b>Green</b> = completed. The badge always matches the button you'd tap next on that job.` },
     { id:'jobs-xco', q:'A job has a gold border and says it’s from the other company. What is that?',
       tags:['cross company','xco','doms','handy andy','partner'],
       body:`That's a cross-company job. Handy Andy and Dom's occasionally borrow each other's technicians when the home company is fully booked. It works exactly like any other job, just booked by the other business.` },
@@ -628,15 +628,15 @@ const HELP_CONTENT = [
       body:`Something important is missing on a job, most often an address. Don't head out until it's fixed. Tap the alert to call the office right away.` },
     { id:'jobs-overdue', q:'What’s the bar stuck to the bottom of my screen?',
       tags:['overdue','stuck','nag bar'],
-      body:`A job is still marked "On the Way" or "In Progress" past its scheduled end time. Tap the bar to jump straight to that job and update its real status.` },
+      body:`A job is still marked "On the Way" past its scheduled end time. Tap the bar to jump straight to that job and mark it complete.` },
     { id:'jobs-notice', q:'Why do I sometimes see an amber notice banner on my job list?',
       tags:['notice','banner','coverage'],
       body:`That's a one-off heads-up from the office for something specific to you that week, for example a coverage note. It clears on its own once it no longer applies.` },
   ]},
   { id:'detail', label:'Job Detail & Status Updates', icon:'🧰', entries:[
     { id:'detail-flow', q:'What order do I update a job’s status in?',
-      tags:['status','on my way','arrived','in progress','completed','flow'],
-      body:`<b>On My Way</b> &rarr; <b>Arrived</b> &rarr; <b>In Progress</b> &rarr; <b>Completed</b>. Tap whichever button matches what's actually happening right now. The customer gets updates as you go, so keep it current rather than batching it all at the end.` },
+      tags:['status','on my way','complete','flow','arrived','in progress'],
+      body:`Two taps, that is the whole flow. <b>On My Way</b> when you set off, then <b>Mark Complete</b> when you are done. There is no arrival or start button, so do not go looking for one. The customer gets a text the moment you tap On My Way, so tap it when you actually leave rather than saving it for later.` },
     { id:'detail-eta', q:'Why does it ask me for an ETA when I tap On My Way?',
       tags:['eta','30 minutes','45 minutes','60 minutes','on the way'],
       body:`Whatever you pick (30 / 45 / 60 minutes) gets texted to the customer automatically. Give your honest best guess. If you're going to run later than that, a quick call to the customer goes a long way.` },
@@ -987,9 +987,16 @@ function renderDay(){
   list.querySelectorAll('.jobc').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
 }
 
+// Two real steps: On My Way, then Mark Complete. We do not track on-site
+// arrival, and the API no longer accepts 'arrived'/'in_progress' at all (see
+// TECH_STATUS in api/tech.js). They survive here ONLY as source keys so an
+// imported Zenbooker job already sitting on one still shows a way out: without
+// the 'arrived' line a job on that status rendered no button whatsoever and
+// the tech could not finish it.
 const NEXT={ assigned:{to:'on_the_way',label:'On My Way',cls:'blue'},
   confirmed:{to:'on_the_way',label:'On My Way',cls:'blue'},
   on_the_way:{to:'completed',label:'Mark Complete',cls:'green'},
+  arrived:{to:'completed',label:'Mark Complete',cls:'green'},
   in_progress:{to:'completed',label:'Mark Complete',cls:'green'} };
 
 const MIN_PHOTOS=2;
