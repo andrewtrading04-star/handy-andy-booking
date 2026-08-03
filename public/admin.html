@@ -104,6 +104,10 @@
      body text to black. Handy Andy (no .doms class) keeps its orange. */
   body.doms{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
   body.doms .logo .dot{ background:var(--accent); }
+  /* Mile High theme: black. Same treatment as Doms — remap the brand orange to
+     the accent so no Handy Andy orange leaks through on a Mile High session. */
+  body.mile-high{ --orange: var(--accent); --ink:#0f1115; --ink-2:#1b2027; }
+  body.mile-high .logo .dot{ background:var(--accent); }
   /* New Booking's option rows are unified flat dark rows for both businesses now
      (see the #modal-scoped block near the other #modal overrides) — the old
      per-business card-tint override is superseded (the #modal id always wins
@@ -1630,6 +1634,20 @@ const ICONS = {
   webanalytics:{e:'🌐', f:'fa-solid fa-globe'},
 };
 function isDoms(){ return !!(current && current.slug==='doms'); }
+function isMileHigh(){ return !!(current && current.slug==='mile-high'); }
+// Per-business accent, keyed by the ACTIVE business.
+//
+// This used to be set ONCE by brandLogin() from the login URL and never touched
+// again, so a session that signed in at /handy-andy kept Handy Andy's orange
+// for the rest of its life — switching to Mile High or Dom's in the sidebar
+// changed the data but not a single colour. Applied by applyIconTheme(), which
+// already runs on every business switch.
+const BIZ_THEME={
+  'handy-andy':{ accent:'#FF6B35', soft:'#fff0e9' },
+  'doms':      { accent:'#2563EB', soft:'#eaf1ff' },
+  'mile-high': { accent:'#111418', soft:'#ecedf0' },
+};
+function bizTheme(slug){ return BIZ_THEME[slug||''] || BIZ_THEME['handy-andy']; }
 // Font Awesome is only ever needed by a Doms session (Handy Andy always uses
 // the emoji glyph — see ICONS above) — inject it on first actual need instead
 // of loading it render-blocking in <head> for every session. Idempotent: safe
@@ -1649,6 +1667,13 @@ function applyIconTheme(){
   const doms=isDoms();
   if(doms) ensureFontAwesome();
   document.body.classList.toggle('doms', doms);
+  document.body.classList.toggle('mile-high', isMileHigh());
+  // Repaint the accent for whichever business is now active. Set inline on
+  // <html> because brandLogin() also writes there pre-auth — same property, so
+  // this simply overwrites the stale login-URL colour instead of losing to it.
+  const th=bizTheme(current&&current.slug);
+  document.documentElement.style.setProperty('--accent', th.accent);
+  document.documentElement.style.setProperty('--accent-soft', th.soft);
   document.querySelectorAll('[data-ico]').forEach(el=>{
     const m=ICONS[el.dataset.ico]; if(!m) return;
     el.innerHTML = doms ? `<i class="${m.f}"></i>` : m.e;
@@ -4373,7 +4398,7 @@ function anaSessionsTbl(rows){
 // Each business's brand color for analytics charts: blue for Doms, orange for
 // Handy Andy. Hardcoded (not from the DB brand_orange column, which holds a
 // non-orange value for Handy Andy) so the chart colors are always correct.
-function anaBrand(){ return isDoms() ? '#2563EB' : '#FF6B35'; }
+function anaBrand(){ return bizTheme(current&&current.slug).accent; }
 function anaHexRgb(hex){
   const h=(hex||'').replace('#','').trim();
   if(h.length===6){ const n=parseInt(h,16); return (n>>16&255)+','+(n>>8&255)+','+(n&255); }
@@ -7918,7 +7943,7 @@ function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
   el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
-  el.style.setProperty('--gaccent', isDoms() ? '#2563EB' : ((current&&current.brand_orange)||'#FF6B35'));
+  el.style.setProperty('--gaccent', bizTheme(current&&current.slug).accent);
   const z=greetingData.tz||tz(), now=new Date();
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
@@ -10558,7 +10583,7 @@ async function tryAutoLogin(){
 // scope server-side, so isolation never depends on which link is used.
 const TEAM_BRAND={
   'handy-andy':{ label:'Handy Andy', accent:'#FF6B35', navy:'#0A1628' },
-  'doms':{ label:'Doms', accent:'#C8102E', navy:'#111827' },
+  'doms':{ label:'Doms', accent:'#2563EB', navy:'#111827' },
 };
 function teamFromUrl(){
   const q=new URLSearchParams(location.search).get('team');
