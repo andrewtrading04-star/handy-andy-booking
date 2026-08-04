@@ -222,6 +222,7 @@ const HA_COUPONS = {
   ISREAL15: 15, STEVE15: 15, BATCITY10: 10, FBD15: 15, FB15: 15,
   ANNIVERSARY15: 15, BING10: 10, OLIVE10: 10, STV10: 10, G10TV: 10,
   TV2026: 10, HG20: 20, LA10: 10, AB20: 20, FBA20: 20, FB10: 10,
+  FB20: 20,   // Facebook ad code, Houston, Aug 2026
   LASTCHANCE10: 10,   // exit-intent offer
 };
 const DOMS_COUPONS = {
