@@ -9746,8 +9746,10 @@ async function renderCallWiz(){
           ${subtotal>0?row('Total before tax', money(subtotal), {strong:true,top:true})+row('Total after tax', money(afterTax), {strong:true}):''}
         </div>
       </details>
-      <div style="text-align:center;font-size:12.5px;color:var(--mute);font-style:italic;margin-bottom:14px;">
-        Stay quiet — let them respond.
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:14px 16px;text-align:center;margin:14px 0;">
+        <div style="font-size:20px;margin-bottom:4px;">🤫</div>
+        <div style="font-size:14.5px;font-weight:700;color:#9a3412;">Stay quiet</div>
+        <div style="font-size:12.5px;color:#c2410c;margin-top:2px;">Let them respond first.</div>
       </div>
       <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts — book it</button>
       <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>`;
