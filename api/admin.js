@@ -266,6 +266,8 @@ export default async function handler(req, res) {
       case 'service_options':   return await serviceOptions(req, res, db, auth);
       case 'widget_prices_list': return await widgetPricesList(req, res, db, auth);
       case 'widget_prices_save': return await widgetPricesSave(req, res, db, auth, body);
+      case 'travel_fees_list':  return await travelFeesList(req, res, db, auth);
+      case 'travel_fees_save':  return await travelFeesSave(req, res, db, auth, body);
       case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
       case 'relabel_tv_size':   return await relabelTvSize(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
@@ -1521,6 +1523,63 @@ async function widgetPricesSave(req, res, db, auth, body) {
     if (error) throw error;
   }
   return res.status(200).json({ ok: true, updated: updates.length });
+}
+
+// ── Travel fees (Other -> Travel Fees) ───────────────────────────────────────
+// Per-zip travel pricing, grouped into the tiers the office actually thinks in
+// ("Houston 1/2/3/4"). A tier is just every zip in an area sharing the same
+// (surcharge, tech_payout) pair — there is no tier table, which is why editing
+// a tier writes to all of its zips at once.
+//
+// Only two columns here are live: `surcharge` is what the CUSTOMER is charged
+// (api/book.js and api/service-area.js read it) and `tech_payout` is what the
+// TECH is paid for the drive (payroll's travelPayoutMap reads it). The older
+// travel_fee/travel_payout columns are vestigial — nothing reads them — so this
+// tool deliberately ignores them rather than writing numbers that do nothing.
+const TRAVEL_FEE_CEILING = 500;    // dollars — a fat-fingered fee never silently saves
+async function travelFeesList(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data: areas, error: aErr } = await db.from('service_areas')
+    .select('id, name, unstaffed, active').eq('business_id', biz.id).order('name');
+  if (aErr) throw aErr;
+  const { data: zips, error: zErr } = await db.from('service_area_zips')
+    .select('id, postal_code, service_area_id, surcharge, tech_payout')
+    .eq('business_id', biz.id).order('postal_code');
+  if (zErr) throw zErr;
+  return res.status(200).json({ areas: areas || [], zips: zips || [] });
+}
+async function travelFeesSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // Travel pricing moves both customer revenue and tech pay, so it stays with
+  // the owner rather than whoever is covering the phones.
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change travel fees' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const ids = Array.isArray(body.zip_ids) ? body.zip_ids.filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'zip_ids required' });
+  const surcharge = Number(body.surcharge);
+  const payout = Number(body.tech_payout);
+  if (!Number.isFinite(surcharge) || surcharge < 0) return res.status(400).json({ error: 'Customer fee must be a number of $0 or more' });
+  if (!Number.isFinite(payout) || payout < 0) return res.status(400).json({ error: 'Tech payout must be a number of $0 or more' });
+  if (surcharge > TRAVEL_FEE_CEILING || payout > TRAVEL_FEE_CEILING) {
+    return res.status(400).json({ error: `$${Math.max(surcharge, payout)} is above the $${TRAVEL_FEE_CEILING} sanity ceiling for a travel fee — double-check this isn't a typo.` });
+  }
+  // Paying the tech more for the drive than the customer is charged for it is
+  // nearly always a slip, and it silently loses money on every job in the tier.
+  // Allowed only when explicitly confirmed, so a deliberate loss-leader is still
+  // possible.
+  if (payout > surcharge && body.confirm_negative !== true) {
+    return res.status(409).json({
+      code: 'travel_fee_negative',
+      error: `That pays the tech $${(payout - surcharge).toFixed(2)} more per job than the customer is charged. Save it anyway?`,
+    });
+  }
+  // business_id in the WHERE clause scopes the write even given a stale id.
+  const { data, error } = await db.from('service_area_zips')
+    .update({ surcharge, tech_payout: payout })
+    .in('id', ids).eq('business_id', biz.id).select('id');
+  if (error) throw error;
+  return res.status(200).json({ ok: true, updated: (data || []).length });
 }
 
 // ── Seed / repair the Handy Andy "TV Installation" option groups ─────────────

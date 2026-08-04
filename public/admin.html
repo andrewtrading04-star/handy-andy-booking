@@ -5818,6 +5818,10 @@ async function renderOther(){
         <div><div style="font-weight:700;">📨 Calls</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Voicemails from the office phone, with transcripts, plus calls logged through "Take a Call".</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherCallsCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
+      <div id="otherTravelFees" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">🚗 Travel Fees</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">What each zip adds to a booking for the drive, and what the tech is paid for it — by tier, e.g. Houston 1 through 4.</div></div>
+        <span style="color:var(--mute);font-size:20px;">›</span>
+      </div>
       <div id="otherWidgetPricing" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">💲 Widget Pricing</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every price the public booking widget charges customers — edit directly, no code or deploy needed.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
@@ -5828,6 +5832,7 @@ async function renderOther(){
   document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
   document.getElementById('otherCalls').onclick=()=>navTo('calls');
+  document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
@@ -5881,6 +5886,145 @@ const WP_COLS=[
 ];
 let wpRows=[], wpDirty=new Map(), wpSaveMsg='';  // wpDirty: id -> new price, only for edited rows
 let wpCols=[];                                   // columns that actually returned data
+// ── Travel Fees ──────────────────────────────────────────────────────────────
+// Per-zip travel pricing, shown the way the office actually talks about it:
+// tiers within a metro ("Houston 1/2/3/4"). A tier isn't a real table — it's
+// every zip in an area sharing the same customer fee + tech payout — so saving
+// a tier writes to all of its zips at once, and changing a tier's numbers to
+// match another tier simply merges them.
+//
+// Two numbers per tier, and both matter: the customer fee is charged on the
+// booking, and the tech payout is what payroll pays for the drive. Editing one
+// without seeing the other is how a zip ends up charging $65 while paying the
+// tech nothing, which is exactly what this screen surfaces.
+let tfAreas=[], tfZips=[], tfOpen=null, tfShowZips=null;
+async function renderTravelFees(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('travel_fees_list',{ params:{ business:current.slug }});
+    tfAreas=d.areas||[]; tfZips=d.zips||[];
+    renderTravelFeesBody();
+  }catch(e){
+    view.innerHTML=`<div class="wrap"><button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;">← Other</button><div class="empty">${esc(e.message)}</div></div>`;
+  }
+}
+// Group an area's zips into tiers, cheapest first, so the tier numbering the
+// office uses ("Houston 3") stays stable as long as the fee ladder does.
+function tfTiersFor(areaId){
+  const mine=tfZips.filter(z=>z.service_area_id===areaId);
+  const by=new Map();
+  for(const z of mine){
+    const sur=Number(z.surcharge)||0, pay=Number(z.tech_payout)||0;
+    const k=`${sur}|${pay}`;
+    if(!by.has(k)) by.set(k,{ surcharge:sur, tech_payout:pay, zips:[] });
+    by.get(k).zips.push(z);
+  }
+  return [...by.values()].sort((a,b)=>a.surcharge-b.surcharge || a.tech_payout-b.tech_payout);
+}
+function renderTravelFeesBody(){
+  const view=document.getElementById('view');
+  const areas=tfAreas.filter(a=>tfZips.some(z=>z.service_area_id===a.id));
+  const cards=areas.map(a=>{
+    const tiers=tfTiersFor(a.id);
+    const total=tiers.reduce((s,t)=>s+t.zips.length,0);
+    const open=tfOpen===a.id;
+    const rows=tiers.map((t,i)=>{
+      const key=`${a.id}|${t.surcharge}|${t.tech_payout}`;
+      const free=t.surcharge===0 && t.tech_payout===0;
+      // The tech is paid less than nothing extra for a drive the customer IS
+      // paying for — call it out rather than leaving it buried in the numbers.
+      const unpaid=t.surcharge>0 && t.tech_payout===0;
+      const showing=tfShowZips===key;
+      return `<div style="border-top:1px solid var(--line);padding:12px 0;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="min-width:104px;">
+            <div style="font-weight:700;font-size:13.5px;">${esc(a.name)} ${i+1}</div>
+            <div style="color:var(--mute);font-size:12px;">${t.zips.length} zip${t.zips.length===1?'':'s'}</div>
+          </div>
+          <label style="font-size:12px;color:var(--ink-2);">Customer pays
+            <input class="search" type="number" min="0" step="5" value="${t.surcharge}" data-tfsur="${esc(key)}" style="margin:2px 0 0;width:92px;">
+          </label>
+          <label style="font-size:12px;color:var(--ink-2);">Tech gets
+            <input class="search" type="number" min="0" step="5" value="${t.tech_payout}" data-tfpay="${esc(key)}" style="margin:2px 0 0;width:92px;">
+          </label>
+          <div style="font-size:12px;color:var(--mute);min-width:78px;">${free?'no travel fee':'keeps '+money(t.surcharge-t.tech_payout)}</div>
+          <button type="button" class="btn sm" style="width:auto;" data-tfsave="${esc(key)}">Save</button>
+          <button type="button" class="btn ghost sm" style="width:auto;" data-tfzips="${esc(key)}">${showing?'Hide':'Zips'}</button>
+        </div>
+        ${unpaid?`<div style="font-size:12px;color:#b45309;margin-top:6px;">⚠ The customer is charged ${money(t.surcharge)} for this drive but the tech is paid nothing for it.</div>`:''}
+        ${showing?`<div style="margin-top:9px;display:flex;flex-wrap:wrap;gap:4px;max-height:190px;overflow:auto;">
+            ${t.zips.map(z=>`<span style="font-size:11.5px;font-family:ui-monospace,monospace;background:var(--line2);border-radius:5px;padding:3px 6px;">${esc(z.postal_code)}</span>`).join('')}
+          </div>`:''}
+      </div>`;
+    }).join('');
+    return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;" data-tfarea="${esc(a.id)}">
+        <div>
+          <div style="font-weight:700;">${esc(a.name)}${a.unstaffed?' <span style="font-weight:400;color:var(--mute);font-size:12px;">(unstaffed)</span>':''}</div>
+          <div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${tiers.length} tier${tiers.length===1?'':'s'} · ${total} zips</div>
+        </div>
+        <span style="color:var(--mute);font-size:20px;">${open?'⌄':'›'}</span>
+      </div>
+      ${open?rows:''}
+    </div>`;
+  }).join('');
+
+  view.innerHTML=`<div class="wrap">
+    <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
+    <h2 style="margin:0 0 4px;">🚗 Travel Fees</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:16px;max-width:640px;line-height:1.6;">
+      What each zip adds to a booking for the drive, and what the tech is paid for it.
+      Editing a tier changes every zip in it. Changes take effect on the next booking — nothing already booked is repriced.
+    </div>
+    <div id="tfErr" style="color:#b91c1c;font-size:13px;margin-bottom:10px;"></div>
+    ${cards||'<div class="empty">No service-area zips set up for this business.</div>'}
+    <div style="height:40px;"></div>
+  </div>`;
+
+  view.querySelectorAll('[data-tfarea]').forEach(el=>el.addEventListener('click',()=>{
+    tfOpen = tfOpen===el.dataset.tfarea ? null : el.dataset.tfarea;
+    tfShowZips=null; renderTravelFeesBody();
+  }));
+  view.querySelectorAll('[data-tfzips]').forEach(b=>b.addEventListener('click',()=>{
+    tfShowZips = tfShowZips===b.dataset.tfzips ? null : b.dataset.tfzips;
+    renderTravelFeesBody();
+  }));
+  view.querySelectorAll('[data-tfsave]').forEach(b=>b.addEventListener('click',()=>tfSave(b)));
+}
+async function tfSave(btn){
+  const key=btn.dataset.tfsave;
+  const errEl=document.getElementById('tfErr'); errEl.textContent='';
+  const [areaId,sur,pay]=key.split('|');
+  const tier=tfTiersFor(areaId).find(t=>String(t.surcharge)===sur && String(t.tech_payout)===pay);
+  if(!tier){ errEl.textContent='That tier changed underneath you — reloading.'; renderTravelFees(); return; }
+  const newSur=Number(document.querySelector(`[data-tfsur="${CSS.escape(key)}"]`).value);
+  const newPay=Number(document.querySelector(`[data-tfpay="${CSS.escape(key)}"]`).value);
+  if(!Number.isFinite(newSur)||!Number.isFinite(newPay)||newSur<0||newPay<0){
+    errEl.textContent='Both amounts have to be $0 or more.'; return;
+  }
+  const zipIds=tier.zips.map(z=>z.id);
+  btn.disabled=true; btn.textContent='Saving…';
+  const send=async confirmNegative=>api('travel_fees_save',{ method:'POST', body:{
+    business:current.slug, zip_ids:zipIds, surcharge:newSur, tech_payout:newPay,
+    ...(confirmNegative?{confirm_negative:true}:{}),
+  }});
+  try{
+    try{ await send(false); }
+    catch(e){
+      // Paying the tech more than the customer pays is allowed, but only once
+      // it's been said out loud — it loses money on every job in the tier.
+      if(e.code!=='travel_fee_negative') throw e;
+      if(!confirm(e.message)){ btn.disabled=false; btn.textContent='Save'; return; }
+      await send(true);
+    }
+    toast(`${tier.zips.length} zip${tier.zips.length===1?'':'s'} updated ✓`);
+    await renderTravelFees();
+  }catch(e){
+    errEl.textContent=e.message||'Could not save that change.';
+    btn.disabled=false; btn.textContent='Save';
+  }
+}
 async function renderWidgetPricing(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
