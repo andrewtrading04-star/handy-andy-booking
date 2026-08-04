@@ -8711,7 +8711,7 @@ let callWiz=null;
 function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
-    zip:'', areaName:null, otherBiz:null,
+    zip:'', areaName:null, otherBiz:null, surcharge:0,
     optStep:0, optsLoaded:false,
     handymanDesc:'',
     prefDate:'', selectedSlot:null,
@@ -8806,17 +8806,19 @@ const CW_REQUIRED_GROUPS=new Set(['size','fireplace','surface']);
 // shared engine; only this wording is call-specific.
 const CW_SCRIPTS={
   size:      'What size is your TV?',
-  fireplace: 'Is it going over a fireplace?',
+  bracket:   'Do you have a bracket for this TV?',
+  fireplace: 'Is your TV over a fireplace?',
   surface:   'What kind of wall is it going on?',
-  wires:     'Would you like the wires hidden?',
-  bracket:   "Do you have a bracket yet for these TV's?",
+  wires:     'Would you like to hide the wires?',
   lifting:   'Since it is a larger TV, will you be able to help lift it?',
-  dismount:  'Do you need an old TV taken down?',
   extras:    'Is there anything else you would like added?',
   frame:     'Is any of them a Samsung Frame or LG Gallery TV?',
 };
 function callWizGroupScript(card){
   if(card.kind==='frame') return CW_SCRIPTS.frame;
+  // Read out loud, so a two-TV job should not say "this TV".
+  if(card.g.key==='bracket' && nbTotalTvs()>1) return 'Do you have brackets for these TVs?';
+  if(card.g.key==='fireplace' && nbTotalTvs()>1) return 'Are any of the TVs over a fireplace?';
   return CW_SCRIPTS[card.g.key] || nbGroupLabel(card.g);
 }
 // On a call the TV COUNT comes from the size question — the secretary asks
@@ -8838,9 +8840,14 @@ function cwSyncTvCounts(){
 function callWizCards(){
   const cards=[];
   const showLifting=nbShowLifting(), onlyFrame=nbOnlyFrame();
-  const order={size:1,fireplace:2,surface:3,wires:4,bracket:5,lifting:6,dismount:7,extras:8};
+  // Owner-specified call order: size, bracket, fireplace, wall, wires. This is
+  // the order the questions actually come up in conversation, which is NOT the
+  // form's order (the form leads with the required ones for validation).
+  const order={size:1,bracket:2,fireplace:3,surface:4,wires:5,lifting:6,extras:7};
   let hasExtras=false;
   [...nbOptionGroups].sort((a,b)=>(order[a.key]||99)-(order[b.key]||99)).forEach(g=>{
+    // Dismount is not asked on a call — the office handles it separately.
+    if(g.key==='dismount') return;
     if(g.key==='lifting' && !showLifting) return;
     if(g.key==='bracket' && onlyFrame) return;
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0) return;
@@ -8853,6 +8860,82 @@ function callWizCards(){
   // add-ons group, it gets its own card at the end rather than going unasked.
   if(!hasExtras && nbTotalTvs()>0) cards.push({kind:'frame'});
   return cards;
+}
+// ── Saying the price out loud ───────────────────────────────────────────────
+// Prices are read to the customer the way people actually say them on the
+// phone: $456 is "four fifty six", not "four hundred and fifty six dollars".
+// The words hundred / thousand / dollars / cents are deliberately never
+// produced — they make a quote sound bigger and slower than it is.
+const CW_ONES=['zero','one','two','three','four','five','six','seven','eight','nine','ten',
+  'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+const CW_TENS=['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+function cwTwoDigit(n){
+  if(n<20) return CW_ONES[n];
+  return CW_TENS[Math.floor(n/10)]+(n%10?' '+CW_ONES[n%10]:'');
+}
+// Splits into "leading group" + "last two digits": 456 -> four | fifty six,
+// 1234 -> twelve | thirty four. A flat hundred reads "even" (four even), and
+// 1..9 in the tail reads "oh five" — both standard on a service call, and both
+// avoid the banned words.
+function cwSpokenAmount(amount){
+  const n=Math.round(Number(amount)||0);
+  if(n<0) return cwSpokenAmount(-n);
+  if(n<100) return cwTwoDigit(n);
+  const lead=Math.floor(n/100), tail=n%100;
+  // Above 9,999 the leading group stops being sayable as two digits; fall back
+  // to reading the leading digits one at a time rather than emitting garbage.
+  const leadWords = lead<100 ? cwTwoDigit(lead)
+    : String(lead).split('').map(d=>CW_ONES[Number(d)]).join(' ');
+  if(tail===0) return `${leadWords} even`;
+  if(tail<10)  return `${leadWords} oh ${CW_ONES[tail]}`;
+  return `${leadWords} ${cwTwoDigit(tail)}`;
+}
+// A plain-English readback of what was ordered, for the secretary to say:
+// "2 TVs, 1 tilting bracket, 1 over a fireplace, and a soundbar installation".
+// Built from the same selections that produce the price, so the sentence can
+// never describe a different job than the one being quoted.
+function cwJobSummary(){
+  const parts=[];
+  const tvs=nbTotalTvs();
+  if(tvs>0) parts.push(`${tvs} TV${tvs===1?'':'s'}`);
+  if(nbFrameTvQty.frame>0) parts.push(`${nbFrameTvQty.frame} Frame TV${nbFrameTvQty.frame===1?'':'s'}`);
+  const each=(key, fn)=>{
+    const g=nbOptionGroups.find(x=>x.key===key); if(!g||!nbQty[g.id]) return;
+    Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{
+      if(ct<=0) return;
+      const o=g.options.find(x=>x.id===oid); if(!o) return;
+      const phrase=fn(o,ct); if(phrase) parts.push(phrase);
+    });
+  };
+  each('bracket',(o,ct)=>{
+    if(/own/i.test(o.label)) return `${ct} customer-supplied bracket${ct===1?'':'s'}`;
+    // "Tilting (recommended)" / "85"-100" TV Tilting Bracket" -> "tilting"
+    const kind=o.label.replace(/\(.*?\)/g,'').replace(/bracket/ig,'')
+      .replace(/\d+["”]?\s*-\s*\d+["”]?/g,'').replace(/\bTV\b/ig,'').trim().toLowerCase();
+    return `${ct} ${kind} bracket${ct===1?'':'s'}`.replace(/\s+/g,' ');
+  });
+  each('fireplace',(o,ct)=> nbIsAboveFireplace(o.label) ? `${ct} over a fireplace` : null);
+  each('surface',(o,ct)=> /drywall/i.test(o.label) ? null : `${ct} on ${o.label.toLowerCase()}`);
+  each('wires',(o,ct)=>{
+    if(/behind the wall/i.test(o.label)) return `${ct} with the wires hidden behind the wall`;
+    if(/outside the wall/i.test(o.label)) return `${ct} with the wires hidden outside the wall`;
+    return null;
+  });
+  each('extras',(o,ct)=>{
+    const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
+    const label=(note||o.label).toLowerCase();
+    return ct===1 ? `a ${label}` : `${ct} ${label}`;
+  });
+  if(!parts.length) return '';
+  if(parts.length===1) return parts[0];
+  return parts.slice(0,-1).join(', ')+', and '+parts[parts.length-1];
+}
+// After-hours fee for a slot — same rule as the booking form and the public
+// widget: an 8 PM start bills $75, or $100 on a Sunday.
+function cwAfterHoursFeeFor(slotKey, dateStr){
+  if(slotKey!=='s5') return 0;
+  const isSunday = dateStr ? new Date(dateStr+'T12:00:00').getDay()===0 : false;
+  return isSunday?100:75;
 }
 // The Frame/Gallery stepper, shown inside the add-ons card. Capped at the
 // number of TVs on the job — a frame TV is one of those TVs, not an extra one.
@@ -8913,7 +8996,7 @@ async function renderCallWiz(){
       result.textContent='Checking…';
       try{
         const d=await api('zip_area',{ params:{ business:current.slug, postal_code:z }});
-        callWiz.areaName=d.name; callWiz.otherBiz=d.other_business;
+        callWiz.areaName=d.name; callWiz.otherBiz=d.other_business; callWiz.surcharge=Number(d.surcharge)||0;
         // Drives the same Austin price overrides New Booking applies — without
         // this an Austin caller would be quoted Denver rates on the phone while
         // the same job booked online priced lower.
@@ -9013,7 +9096,7 @@ async function renderCallWiz(){
   if(s==='schedule'){
     if(!callWiz.calMonth){ const d=new Date(); d.setDate(1); callWiz.calMonth=d; }
     if(!callWiz.availDates) callWiz.availDates=new Set();
-    body.innerHTML=`${callWizScript('When would you like to schedule your appointment?')}
+    body.innerHTML=`${callWizScript('What day would you prefer to schedule for?')}
       <div id="cwCalWrap" style="width:100%;min-width:0;background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
         <div class="nb-cal-head">
           <button type="button" class="nb-cal-nav" id="cwCalPrev">‹</button>
@@ -9024,7 +9107,9 @@ async function renderCallWiz(){
         <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
       </div>
       <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
+        <div id="cwSlotAsk" style="margin-bottom:8px;">${callWizScript('Would you prefer morning or afternoon?').replace('margin-bottom:12px','margin-bottom:0')}</div>
         <div id="cwSlots" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div id="cwSlotSay" style="margin-top:10px;"></div>
       </div>
       <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -9070,13 +9155,34 @@ async function renderCallWiz(){
       try{
         const r=await api('available_slots',{ params });
         if(!r.slots.length){ list.innerHTML='<div style="color:var(--mute);font-size:13px;">No available times for this date.</div>'; }
-        else list.innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
+        // The 8 PM slot carries an after-hours fee. It is flagged right on the
+        // button so the secretary quotes it on the call instead of discovering
+        // it on the booking screen after the customer already agreed.
+        else list.innerHTML=r.slots.map(s=>{
+          const fee=cwAfterHoursFeeFor(s.slot_key, date);
+          const on=callWiz.selectedSlot&&callWiz.selectedSlot.key===s.slot_key;
+          return `<button type="button" class="nb-slot${on?' on':''}" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">`+
+            `<span class="nb-slot-label">${esc(s.label)}</span>`+
+            (fee?`<span class="nb-price" style="color:#b45309;font-weight:700;">+$${fee} after hours</span>`:'')+
+          `</button>`;
+        }).join('');
         wrap.style.display='';
+        const sayWhat=()=>{
+          const say=document.getElementById('cwSlotSay'); if(!say) return;
+          if(!callWiz.selectedSlot){ say.innerHTML=''; return; }
+          let day=date;
+          try{ day=new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
+          const fee=cwAfterHoursFeeFor(callWiz.selectedSlot.key, date);
+          say.innerHTML=callWizScript(`We have ${day} at ${callWiz.selectedSlot.label} available.`+
+            (fee?` That is an after-hours slot, so there is an extra ${cwSpokenAmount(fee)} on it.`:''));
+        };
         list.querySelectorAll('.nb-slot').forEach(b=>b.addEventListener('click', ()=>{
           callWiz.selectedSlot={ key:b.dataset.key, label:b.dataset.label };
           list.querySelectorAll('.nb-slot').forEach(x=>x.classList.remove('on'));
           b.classList.add('on');
+          sayWhat();
         }));
+        sayWhat();
       }catch(e){ list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
     }
     document.getElementById('cwCalPrev').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()-1); loadCwCalendar(); });
@@ -9102,17 +9208,38 @@ async function renderCallWiz(){
     } else if(callWiz.handymanDesc){
       lines.push(`Job: ${callWiz.handymanDesc}`);
     }
-    if(callWiz.prefDate) lines.push(`Preferred: ${callWiz.prefDate}${callWiz.selectedSlot?' ('+callWiz.selectedSlot.label+')':''}`);
-    const subtotal=priced.reduce((s,x)=>s+x.price*x.quantity,0);
-    body.innerHTML=`${callWizScript("Here's what I've got for you — let me get you on the schedule.")}
+    // Travel fee and the 8 PM after-hours fee are part of what the customer
+    // pays before tax, so they belong in the number read out on the call —
+    // quoting the options-only figure would under-quote every out-of-area job.
+    const travelFee=Number(callWiz.surcharge)||0;
+    if(travelFee>0) lines.push(`Travel fee — ${money(travelFee)}`);
+    const ahFee=callWiz.selectedSlot?cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate):0;
+    if(ahFee>0) lines.push(`After-hours (8 PM start) — ${money(ahFee)}`);
+    let whenTxt='';
+    if(callWiz.prefDate){
+      let day=callWiz.prefDate;
+      try{ day=new Date(callWiz.prefDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
+      whenTxt = callWiz.selectedSlot ? `${day} at ${callWiz.selectedSlot.label}` : day;
+      lines.push(`Scheduled: ${whenTxt}`);
+    }
+    const subtotal=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
+    // The line the secretary reads. The amount is spoken the way it is said out
+    // loud ("four fifty six"), with the digits shown underneath for their eyes.
+    const summary=cwJobSummary();
+    const spoken=cwSpokenAmount(subtotal).toUpperCase();
+    const sentence = callWiz.service==='TV Mounting' && summary
+      ? `Ok, I have ${summary}${whenTxt?` for ${whenTxt}`:''}. The total before tax for this installation is ${spoken}.`
+      : `${callWiz.handymanDesc?`Ok, I have ${callWiz.handymanDesc}`:'Ok'}${whenTxt?` for ${whenTxt}`:''}.${subtotal>0?` The total before tax is ${spoken}.`:''}`;
+    body.innerHTML=`${callWizScript(sentence)}
+      ${subtotal>0?`<div style="text-align:center;margin:-4px 0 12px;font-size:12px;color:var(--mute);">${esc(money(subtotal))} before tax</div>`:''}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
         ${lines.map(l=>esc(l)).join('<br>')}
-        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Subtotal: ${esc(money(subtotal))}<div style="font-weight:400;font-size:11.5px;color:var(--mute);">Travel fee and tax are added on the booking screen.</div></div>`:''}
+        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Total before tax: ${esc(money(subtotal))}</div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button type="button" class="btn" id="cwGoBooking">Continue to booking →</button>
         <button type="button" class="btn ghost" id="cwGoEstimate">Send an estimate instead</button>
-        <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer didn't want to continue</button>
+        <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
       </div>`;
     document.getElementById('cwGoBooking').addEventListener('click', async()=>{
       const notes=lines.join(' · ');
