@@ -268,6 +268,15 @@ function matchItem(name, lt) {
   // to the customer, so the generic $85/hr custom-hourly inference over-counts
   // (5 boards @ $170 would read as 10 hrs). Pin it to 1 hr each.
   if (/dry\s*erase\s*board/i.test(name)) return { key: 'dry erase board', juan: 65, other: 65 };
+  // Ring camera / doorbell installation: flat $65 per unit (all techs), pinned
+  // for the same reason as the dry erase board above — this is always a
+  // free-hand New Booking line (never a widget catalog item, so it's never
+  // priced consistently), and the generic $85/hr custom-hourly inference
+  // guesses hours off whatever the office happened to charge ($129 -> "2h" ->
+  // $130 instead of the flat $65 owner rate; Tiffany Weld job, Aug 2026).
+  if (/\bring\b.*\b(camera|doorbell)\b|\b(camera|doorbell)\b.*\bring\b/i.test(name)) {
+    return { key: 'ring device installation', juan: 65, other: 65 };
+  }
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
   if (isFrameInBoxBracket(name, lt)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   // Wire/cord concealment worded outside the standard keys ("Hide Cords in Wall",
