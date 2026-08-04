@@ -9706,7 +9706,8 @@ async function renderCallWiz(){
         <div id="cwSlots" style="display:flex;flex-direction:column;gap:6px;"></div>
         <div id="cwSlotSay" style="margin-top:10px;"></div>
       </div>
-      <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>`;
+      <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>
+      <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">They're not ready to pick a time</button>`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     let cwCalSeq=0;
     async function loadCwCalendar(){
@@ -9806,6 +9807,13 @@ async function renderCallWiz(){
       err.textContent='';
       callWiz.step='recap'; renderCallWiz();
     });
+    // Not everyone is ready to commit to a date on the call. They should still
+    // hear the price and get it in writing, so this goes to the recap without a
+    // slot rather than making the secretary invent one or hang up.
+    document.getElementById('cwSchedSkip').addEventListener('click', ()=>{
+      err.textContent='';
+      callWiz.step='recap'; renderCallWiz();
+    });
     return;
   }
 
@@ -9901,10 +9909,22 @@ async function renderCallWiz(){
         <div style="font-size:14.5px;font-weight:700;color:#9a3412;">Stay quiet</div>
         <div style="font-size:12.5px;color:#c2410c;margin-top:2px;">Let them respond first.</div>
       </div>
-      <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts — book it</button>
+      ${callWiz.selectedSlot
+        ? `<button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts — book it</button>`
+        : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet — send it over, or go back and pick one to book it now.</div>`}
+      <button type="button" class="btn${callWiz.selectedSlot?' ghost':''}" id="cwRecapEstimate" style="margin-bottom:7px;">Send them the estimate instead</button>
       <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>
-      <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← Pick a different day or time</button>`;
-    document.getElementById('cwAccepts').addEventListener('click', e=>{ e.currentTarget.disabled=true; cwTrack('accepted'); cwGoToBooking(); });
+      <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← ${callWiz.selectedSlot?'Pick a different day or time':'Pick a day and time'}</button>`;
+    // Only rendered once a slot is chosen — there is nothing to book without one.
+    { const acc=document.getElementById('cwAccepts');
+      if(acc) acc.addEventListener('click', e=>{ e.currentTarget.disabled=true; cwTrack('accepted'); cwGoToBooking(); }); }
+    // Straight to the estimate. Wanting it in writing is not a price objection,
+    // so this no longer has to be reached by claiming the customer pushed back
+    // and walking them through a discount offer they never asked for.
+    document.getElementById('cwRecapEstimate').addEventListener('click', ()=>{
+      cwTrack('estimate_chosen',{ had_slot:!!callWiz.selectedSlot });
+      callWiz.step='estimate'; renderCallWiz();
+    });
     document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
     // Customers routinely accept the price and then want a different day. Before
     // this the schedule step was forward-only, so the only way to change it was
@@ -10115,6 +10135,13 @@ async function renderCallWiz(){
         ? `TV mounting — ${tvCount} TV${tvCount===1?'':'s'}`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
       if(!sels.length) sels=[{ label, quantity:1, price:0 }];
+      // A travel fee and any discount already offered out loud have to be on the
+      // estimate too, or the written number contradicts the one the customer
+      // was just read on the phone.
+      const estTravel=Number(callWiz.surcharge)||0;
+      if(estTravel!==0) sels.push({ label:estTravel>0?'Travel Fee':'Travel discount', price:estTravel, quantity:1 });
+      const estDisc=cwDiscountApplied();
+      if(estDisc>0) sels.push({ label:callWiz.discountLabel||'Discount', price:-estDisc, quantity:1 });
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
           business:current.slug, customer_name:name, customer_phone:phone, customer_email:email,
