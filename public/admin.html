@@ -9793,20 +9793,26 @@ async function renderCallWiz(){
     const capped=raw>max;
     const loading=!callWiz.econ;
     const newTotal=Math.max(0,(Number(callWiz.preDiscountTotal)||0)-applied);
+    // Dark, bold, left-ruled — matches heading weight elsewhere in the app
+    // instead of the muted all-caps label these three used to share with
+    // ordinary field captions, which is why they read as blending in.
+    const secTitle=(label,sub)=>`<div style="border-left:3px solid var(--ink);padding-left:9px;margin:0 0 8px;">
+        <span style="font-size:13.5px;font-weight:700;color:var(--ink);">${esc(label)}</span>${sub?` <span style="font-size:12px;font-weight:400;color:var(--mute);">${esc(sub)}</span>`:''}
+      </div>`;
     body.innerHTML=`${callWizScript('I hear you. Let me see what I can do — how did you hear about us?')}
-      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Where they heard about us · -${money(CW_SOURCE_DISCOUNT)}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+      ${secTitle('Where they heard about us', '-'+money(CW_SOURCE_DISCOUNT))}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
         ${CW_SOURCES.map(src=>`<button type="button" class="btn ${callWiz.discSource===src?'':'ghost'} sm" style="width:auto;" data-cwsrc="${esc(src)}">${esc(src)}</button>`).join('')}
       </div>
 
-      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Coupon code they read out</div>
+      ${secTitle('Coupon code they read out')}
       <div style="display:flex;gap:6px;margin-bottom:6px;">
         <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(callWiz.discCoupon?callWiz.discCoupon.code:'')}">
         <button type="button" class="btn ghost" id="cwCouponApply" style="width:auto;">Apply</button>
       </div>
-      <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:14px;color:var(--mute);">${callWiz.discCoupon?`✓ ${esc(callWiz.discCoupon.code)} — -${money(callWiz.discCoupon.amount)}`:'Same codes that work on the website.'}</div>
+      <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:16px;color:var(--mute);">${callWiz.discCoupon?`✓ ${esc(callWiz.discCoupon.code)} — -${money(callWiz.discCoupon.amount)}`:'Same codes that work on the website.'}</div>
 
-      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Take something off manually</div>
+      ${secTitle('Take something off manually')}
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
         <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${callWiz.discManual||''}">
         <button type="button" class="btn ghost" id="cwManualApply" style="width:auto;">Apply</button>
