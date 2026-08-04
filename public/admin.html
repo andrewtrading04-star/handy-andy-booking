@@ -8742,7 +8742,22 @@ document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.targ
 // identically on both screens.
 document.getElementById('callWizBody').addEventListener('click', e=>{
   if(!callWiz || callWiz.step!=='tvopts') return;
-  if(nbHandleOptClick(e)) renderCallWiz();
+  // Adding a TV size is what CREATES a TV here, so the per-TV cap the shared
+  // handler enforces has to be lifted first or it would refuse the very click
+  // that raises the count. Everything downstream is then re-synced and
+  // re-clamped against the new total.
+  const qBtn=e.target.closest('.nb-q-btn');
+  if(qBtn && !qBtn.disabled && Number(qBtn.dataset.d)>0){
+    const grp=nbOptionGroups.find(g=>g.id===qBtn.dataset.g);
+    if(grp && grp.key==='size') nbFrameTvQty.regular++;
+  }
+  if(nbHandleOptClick(e)){
+    cwSyncTvCounts();
+    nbClampTvBound();
+    nbPruneInvisibleOptions();
+    nbPruneBehindWall();
+    renderCallWiz();
+  }
 });
 document.getElementById('callWizBody').addEventListener('input', e=>{
   const note=e.target.closest('.nb-other-note');
@@ -8773,7 +8788,6 @@ const CW_REQUIRED_GROUPS=new Set(['size','fireplace','surface']);
 // which options exist, what they cost, how many are allowed — comes from the
 // shared engine; only this wording is call-specific.
 const CW_SCRIPTS={
-  tvtype:    'What type of TV are we mounting for you?',
   size:      'What size is your TV?',
   fireplace: 'Is it going over a fireplace?',
   surface:   'What kind of wall is it going on?',
@@ -8782,27 +8796,64 @@ const CW_SCRIPTS={
   lifting:   'Since it is a larger TV, will you be able to help lift it?',
   dismount:  'Do you need an old TV taken down?',
   extras:    'Is there anything else you would like added?',
+  frame:     'Is any of them a Samsung Frame or LG Gallery TV?',
 };
 function callWizGroupScript(card){
-  if(card.kind==='tvtype') return CW_SCRIPTS.tvtype;
+  if(card.kind==='frame') return CW_SCRIPTS.frame;
   return CW_SCRIPTS[card.g.key] || nbGroupLabel(card.g);
+}
+// On a call the TV COUNT comes from the size question — the secretary asks
+// "what size?" and taps + for each TV, which is how the conversation actually
+// goes. (The New Booking form asks TV type first and derives the count from
+// that; here the count flows the other way and this keeps the engine's
+// regular/frame split in step with it.) Frame TVs are asked about later, as an
+// add-on, so they are a SUBSET of the TVs already counted — never extra ones.
+function cwSyncTvCounts(){
+  const sg=nbOptionGroups.find(g=>g.key==='size');
+  const sizeCount=sg?nbGroupCount(sg.id):0;
+  nbFrameTvQty.frame=Math.min(nbFrameTvQty.frame, sizeCount);
+  nbFrameTvQty.regular=Math.max(0, sizeCount-nbFrameTvQty.frame);
 }
 // The ordered list of question cards, recomputed on every render so the SAME
 // conditional rules the New Booking form applies (lifting only for 70"+ TVs,
 // no bracket question on a frame-only job, bracket needs a size first) decide
 // what the secretary is asked — no separate branching logic to drift.
 function callWizCards(){
-  const cards=[{kind:'tvtype'}];
+  const cards=[];
   const showLifting=nbShowLifting(), onlyFrame=nbOnlyFrame();
   const order={size:1,fireplace:2,surface:3,wires:4,bracket:5,lifting:6,dismount:7,extras:8};
+  let hasExtras=false;
   [...nbOptionGroups].sort((a,b)=>(order[a.key]||99)-(order[b.key]||99)).forEach(g=>{
     if(g.key==='lifting' && !showLifting) return;
     if(g.key==='bracket' && onlyFrame) return;
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0) return;
-    if(NB_TV_BOUND.has(g.key) && nbTotalTvs()===0) return;
+    // Size drives the count, so it is never gated on the count existing yet.
+    if(g.key!=='size' && NB_TV_BOUND.has(g.key) && nbTotalTvs()===0) return;
+    if(g.key==='extras') hasExtras=true;
     cards.push({kind:'group', g});
   });
+  // Frame/Gallery rides along on the add-ons question. If this catalog has no
+  // add-ons group, it gets its own card at the end rather than going unasked.
+  if(!hasExtras && nbTotalTvs()>0) cards.push({kind:'frame'});
   return cards;
+}
+// The Frame/Gallery stepper, shown inside the add-ons card. Capped at the
+// number of TVs on the job — a frame TV is one of those TVs, not an extra one.
+function cwFrameRowHtml(){
+  const ct=nbFrameTvQty.frame||0, cap=nbTotalTvs();
+  const plusDis=ct>=cap?' disabled':'';
+  return `<div class="nb-optq${ct>0?' on':''}">`+
+    `<span class="nb-optlabel">Samsung Frame TV or LG Gallery TV</span>`+
+    `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
+    (ct>0
+      ? `<span class="nb-stepper">`+
+          `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
+          `<span class="nb-qty">${ct}</span>`+
+          `<button type="button" class="nb-tv-q-btn"${plusDis} data-t="frame" data-d="1">+</button>`+
+        `</span>`
+      : `<button type="button" class="nb-tv-q-btn"${plusDis} data-t="frame" data-d="1">+</button>`
+    )+
+  `</div>`;
 }
 async function renderCallWiz(){
   const body=document.getElementById('callWizBody');
@@ -8890,9 +8941,14 @@ async function renderCallWiz(){
     const tvCount=nbTotalTvs();
 
     let optsHtml, blocked=null;
-    if(card.kind==='tvtype'){
-      optsHtml=nbTvTypeOptsHtml();
-      if(tvCount===0) blocked='Add at least one TV to continue.';
+    if(card.kind==='frame'){
+      optsHtml=`<div class="nb-opts">${cwFrameRowHtml()}</div>`;
+    } else if(card.g.key==='size'){
+      // Size is the count: uncapped, one + per TV on the job.
+      const gCount=nbGroupCount(card.g.id);
+      optsHtml=nbGroupOptsHtml(card.g, false)+
+        `<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${gCount} TV${gCount===1?'':'s'} on this job</div>`;
+      if(gCount===0) blocked='Add at least one TV to continue.';
     } else {
       const g=card.g;
       const tvBound=NB_TV_BOUND.has(g.key);
@@ -8900,6 +8956,9 @@ async function renderCallWiz(){
       const gCount=nbGroupCount(g.id);
       const atCap=tvBound && capN>0 && gCount>=capN;
       optsHtml=nbGroupOptsHtml(g, atCap);
+      // Frame/Gallery is asked here rather than as its own opening question —
+      // on a call it belongs with the other add-ons, not before the TV itself.
+      if(g.key==='extras') optsHtml=optsHtml.replace(/<\/div>$/, cwFrameRowHtml()+'</div>');
       if(tvBound && capN>0){
         optsHtml+=`<div style="margin-top:8px;font-size:12.5px;color:${gCount>=capN?'var(--ok,#15803d)':'var(--mute)'};">${gCount>=capN?'✓ ':''}${gCount} of ${capN} selected</div>`;
       }
