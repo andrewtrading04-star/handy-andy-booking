@@ -1278,6 +1278,7 @@
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="calls"><span class="ic" data-ico="voicemail">📨</span> Calls <span class="nav-badge" id="callsBadge" style="display:none;"></span></button>
       <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
+      <button data-nav="callanalytics" id="navCallAnalytics"><span class="ic" data-ico="analytics">📈</span> Call Performance</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
@@ -1991,6 +1992,11 @@ function enterApp(){
   if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
   const navWeb=document.getElementById('navWebAnalytics');
   if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
+  // Call Performance ranks the secretaries against each other by booking rate.
+  // That is a management view, not something the people being measured should
+  // be looking at during a shift — owner only, same as the other analytics.
+  const navCallAna=document.getElementById('navCallAnalytics');
+  if(navCallAna) navCallAna.style.display = role==='owner' ? '' : 'none';
   // Handyman Analytics: owner only (not techs/secretaries).
   const navHandy=document.getElementById('navHandyman');
   if(navHandy) navHandy.style.display = role==='owner' ? '' : 'none';
@@ -2135,6 +2141,7 @@ document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
 function navTo(s){
   if(s==='reviewcalls' && scope==='handy-andy') s='schedule';   // not on Heather's platform
   if(s==='analytics' && role!=='owner') s='schedule';   // Booking Analytics is owner-only; blocks direct calls too, not just the hidden nav button
+  if(s==='callanalytics' && role!=='owner') s='schedule';   // same: hiding the button is not the gate
   section=s;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -2155,6 +2162,7 @@ function navTo(s){
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
     else if(s==='calls') renderCalls();
+    else if(s==='callanalytics') renderCallAnalytics();
     else if(s==='reviewcalls') renderReviewCalls();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
@@ -2175,6 +2183,7 @@ function refreshCurrent(){
   else if(section==='technicians') renderTechnicians();
   else if(section==='reviews') renderReviews();
   else if(section==='calls') renderCalls();
+  else if(section==='callanalytics') renderCallAnalytics();
   else if(section==='gallery') renderGallery();
   else if(section==='analytics') renderAnalytics();
   else if(section==='handyman') renderHandymanAnalytics();
@@ -6112,6 +6121,134 @@ function rcRel(iso){
   return new Date(iso).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
 }
 function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Not interested',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
+// ── Call Performance ───────────────────────────────────────────────────────
+// Everything the phone script records, rolled up. The headline is calls taken
+// vs calls booked; the per-person table answers who is converting and who is
+// not, and the funnel shows WHERE the ones that didn't book fell out.
+let _caDays=7;
+async function renderCallAnalytics(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await api('call_analytics',{ params:{ business:current.slug, days:_caDays }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  const t=d.totals||{};
+  const pct=n=>`${Number(n||0).toFixed(1)}%`;
+  const rangeBtns=[[1,'Today'],[7,'7 days'],[30,'30 days'],[90,'90 days']].map(([n,l])=>
+    `<button type="button" class="seg-btn ${_caDays===n?'on':''}" data-cad="${n}">${l}</button>`).join('');
+
+  const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
+      <span class="gstat-l">${esc(label)}</span>
+      <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
+      ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
+
+  // Conversion is the number the owner asked for, so it leads and is colored
+  // by how it's doing rather than being one grey figure among many.
+  const convColor = t.conversion>=50 ? '#4ade80' : t.conversion>=30 ? '#fbbf24' : '#f87171';
+
+  const peopleRows=(d.people||[]).length
+    ? d.people.map(p=>{
+        const c=p.conversion>=50?'#15803d':p.conversion>=30?'#b45309':'#b91c1c';
+        return `<tr>
+          <td style="padding:9px 8px;font-weight:700;">${esc(p.person)}</td>
+          <td style="padding:9px 8px;text-align:right;">${p.calls}</td>
+          <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${p.booked}</td>
+          <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${pct(p.conversion)}</td>
+          <td style="padding:9px 8px;text-align:right;">${p.estimates}</td>
+          <td style="padding:9px 8px;text-align:right;">${p.declined}</td>
+          <td style="padding:9px 8px;text-align:right;color:var(--mute);">${p.unfinished}</td>
+          <td style="padding:9px 8px;text-align:right;">${esc(money(p.avg_quote))}</td>
+          <td style="padding:9px 8px;text-align:right;font-weight:700;">${esc(money(p.booked_value))}</td>
+          <td style="padding:9px 8px;text-align:right;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${esc(money(p.discount_given))}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="10" style="padding:18px;text-align:center;color:var(--mute);">No calls taken in this period.</td></tr>`;
+
+  const maxDay=Math.max(1,...(d.daily||[]).map(x=>x.calls));
+  const dailyRows=(d.daily||[]).slice().reverse().map(x=>{
+    const w=Math.round((x.calls/maxDay)*100);
+    const bw=x.calls?Math.round((x.booked/x.calls)*100):0;
+    let lbl=x.date; try{ lbl=new Date(x.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }catch(_){}
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;">
+      <div style="width:120px;flex-shrink:0;color:var(--ink-2);">${esc(lbl)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:6px;height:20px;position:relative;overflow:hidden;">
+        <div style="position:absolute;inset:0 auto 0 0;width:${w}%;background:#cbd5e1;"></div>
+        <div style="position:absolute;inset:0 auto 0 0;width:${Math.round(w*bw/100)}%;background:#15803d;"></div>
+      </div>
+      <div style="width:118px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        <b>${x.booked}</b>/${x.calls} · ${pct(x.conversion)}</div>
+    </div>`;
+  }).join('') || `<div class="empty">Nothing yet.</div>`;
+
+  const FUNNEL_LABEL={greet:'Answered',zip:'Gave a zip',tvopts:'Answered questions',schedule:'Picked a time',recap:'Heard the price',wait:'Reacted to price',discount:'Asked for a discount',booked:'Booked'};
+  const fTop=Math.max(1,...(d.funnel||[]).map(f=>f.reached));
+  const funnelRows=(d.funnel||[]).map(f=>{
+    const w=Math.round((f.reached/fTop)*100);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+      <div style="width:150px;flex-shrink:0;color:var(--ink-2);">${esc(FUNNEL_LABEL[f.step]||f.step)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:6px;height:18px;overflow:hidden;">
+        <div style="height:100%;width:${w}%;background:${f.step==='booked'?'#15803d':'#60a5fa'};"></div></div>
+      <div style="width:52px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${f.reached}</div>
+    </div>`;
+  }).join('');
+
+  const chips=arr=>arr.length?arr.map(x=>`<span class="rc-badge gray">${esc(x.source||x.code||x.event)} · ${x.count}</span>`).join(''):'<span style="color:var(--mute);font-size:13px;">None yet.</span>';
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">📈 Call Performance</h2>
+      <div class="rc-sub">Every call taken through the phone script. Booked means a real booking was created from that call, not just that the script reached the end.</div>
+    </div></div>
+    <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
+
+    <div class="greet-stats" style="margin-bottom:18px;">
+      ${stat('Calls taken', String(t.calls||0), `${t.unfinished||0} never finished`)}
+      ${stat('Booked', String(t.booked||0), `${t.estimates||0} estimates · ${t.declined||0} declined`,'#4ade80')}
+      ${stat('Conversion', pct(t.conversion), 'calls that became jobs', convColor)}
+      ${stat('Booked value', money(t.booked_value||0), `${esc(money(t.discount_given||0))} discounted`)}
+    </div>
+
+    <div class="rc-count">Who is booking</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px;">
+        <thead><tr style="background:var(--line2);text-align:right;">
+          <th style="padding:9px 8px;text-align:left;">Person</th>
+          <th style="padding:9px 8px;">Calls</th><th style="padding:9px 8px;">Booked</th><th style="padding:9px 8px;">Rate</th>
+          <th style="padding:9px 8px;">Est.</th><th style="padding:9px 8px;">Declined</th><th style="padding:9px 8px;">Unfinished</th>
+          <th style="padding:9px 8px;">Avg quote</th><th style="padding:9px 8px;">Booked $</th><th style="padding:9px 8px;">Discounts</th>
+        </tr></thead>
+        <tbody>${peopleRows}</tbody>
+      </table>
+    </div>
+
+    <div class="rc-count">Day by day</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${dailyRows}</div>
+
+    <div class="rc-count">Where calls drop off</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${funnelRows}</div>
+
+    <div class="rc-count">Discounts &amp; sources</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:22px;">
+      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">How they heard about us</div>
+      <div class="rc-badges" style="margin-bottom:14px;">${chips(d.sources||[])}</div>
+      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">Coupon codes used</div>
+      <div class="rc-badges" style="margin-bottom:14px;">${chips(d.coupons||[])}</div>
+      <div style="font-size:13px;color:var(--ink-2);">
+        <b>${t.discounted_calls||0}</b> of ${t.calls||0} calls got a discount, totalling <b>${esc(money(t.discount_given||0))}</b>.
+      </div>
+    </div>
+
+    <details style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:13.5px;">Every action recorded</summary>
+      <div class="rc-badges" style="margin-top:10px;">${chips(d.event_counts||[])}</div>
+    </details>
+  </div>`;
+
+  view.querySelectorAll('[data-cad]').forEach(b=>b.addEventListener('click',()=>{
+    _caDays=Number(b.dataset.cad); renderCallAnalytics();
+  }));
+}
+
 // ── Calls (Grasshopper voicemails) ─────────────────────────────────────────
 // Grasshopper has no API, so these arrive by email: a script on the owner's
 // Gmail forwards each voicemail to api/admin.js?action=call_ingest. Cross-
@@ -8733,6 +8870,11 @@ document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==
 // by sending a quick estimate, or by logging a decline. Every path finishes
 // at the resolution step so nothing falls through without a recorded outcome.
 let callWiz=null;
+// Set when a call hands off to New Booking, cleared when that booking actually
+// gets created (or when a different booking flow starts). This is what makes
+// "calls vs booked" a measured number rather than an assumption — reaching the
+// booking form is not the same as booking.
+let cwPendingBookingCallId=null;
 function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
@@ -8761,7 +8903,16 @@ function openTakeCall(){
   document.getElementById('callWizModal').classList.remove('hidden');
   renderCallWiz();
 }
-function closeCallWiz(){ document.getElementById('callWizModal').classList.add('hidden'); }
+// `abandoned` marks a call that was closed with no outcome recorded — the
+// secretary backed out or clicked away mid-script. These are the calls worth
+// asking about, so they are logged rather than silently vanishing.
+function closeCallWiz(opts){
+  if(callWiz && callWiz.id && !(opts&&opts.resolved) && !callWiz._closed){
+    callWiz._closed=true;
+    cwTrack('abandoned',{ at_step:callWiz.step });
+  }
+  document.getElementById('callWizModal').classList.add('hidden');
+}
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
 document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
 // Option-step clicks are delegated from the container ONCE — the card's HTML is
@@ -8825,6 +8976,16 @@ function callWizChoiceRow(options){
 }
 function callWizScript(line){
   return `<div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:14.5px;line-height:1.5;margin-bottom:12px;">🗣️ ${esc(line)}</div>`;
+}
+// Log one action from the script. Fire-and-forget on purpose: analytics must
+// never add latency to, or fail, a call the secretary is actually on. Every
+// call site is non-awaited for the same reason.
+function cwTrack(event, meta){
+  if(!callWiz || !callWiz.id) return;
+  api('call_event',{ method:'POST', body:{
+    business:current.slug, call_id:callWiz.id, event,
+    step:callWiz.step, meta:meta||{},
+  }}).catch(()=>{});
 }
 // Which option groups the secretary must answer before moving on — the same
 // set New Booking validates at submit (nbValidateTvMountingRequired), asked up
@@ -9025,11 +9186,19 @@ async function cwGoToBooking(){
   if(callWiz.discSource) bits.push(`heard via ${callWiz.discSource}`);
   if(callWiz.discCoupon) bits.push(`code ${callWiz.discCoupon.code}`);
   if(callWiz.discManual>0) bits.push(`manual $${callWiz.discManual}`);
+  cwTrack('discount_final',{ amount:applied, detail:bits.join(', ')||null,
+    source:callWiz.discSource||null, coupon:callWiz.discCoupon?callWiz.discCoupon.code:null,
+    manual:callWiz.discManual||0, max_allowed:cwDiscountMax() });
+  cwTrack('booking_started',{ discount:applied });
+  // Hand the call id to the booking form. Conversion is only trustworthy if the
+  // booking that ACTUALLY gets created reports back — a call that reached this
+  // screen and was then abandoned must not count as booked.
+  cwPendingBookingCallId=callWiz.id;
   if(applied>0){
     await api('call_update',{ method:'POST', body:{ id:callWiz.id,
       notes:`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).` }}).catch(()=>{});
   }
-  closeCallWiz();
+  closeCallWiz({resolved:true});
   toast(applied>0 ? `Carried over with ${money(applied)} off — add the customer's details.` : 'Answers carried over — just add the customer\'s details and confirm the time.');
   openNewBooking({
     postal_code: callWiz.zip,
@@ -9083,6 +9252,8 @@ async function renderCallWiz(){
         const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
         callWiz.id=r.id; callWiz.service=service;
         api('call_update',{ method:'POST', body:{ id:callWiz.id, service }}).catch(()=>{});
+        cwTrack('started');
+        cwTrack('service_picked',{ service });
         callWiz.step='zip'; renderCallWiz();
       }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); }
     }));
@@ -9119,6 +9290,7 @@ async function renderCallWiz(){
     document.getElementById('cwZipNext').addEventListener('click', ()=>{
       callWiz.zip=zipInput.value.trim();
       api('call_update',{ method:'POST', body:{ id:callWiz.id, market:callWiz.areaName||null }}).catch(()=>{});
+      cwTrack('zip_checked',{ zip:callWiz.zip, area:callWiz.areaName||null, in_area:!!callWiz.areaName, surcharge:callWiz.surcharge||0 });
       callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
       renderCallWiz();
     });
@@ -9187,7 +9359,16 @@ async function renderCallWiz(){
       <div style="margin-top:8px;font-size:11.5px;color:var(--mute);text-align:center;">Question ${stepNo} of ${cards.length}</div>`;
     const backBtn=document.getElementById('cwOptBack');
     if(backBtn) backBtn.addEventListener('click', ()=>{ callWiz.optStep--; renderCallWiz(); });
-    document.getElementById('cwOptNext').addEventListener('click', ()=>{ callWiz.optStep++; renderCallWiz(); });
+    document.getElementById('cwOptNext').addEventListener('click', ()=>{
+      cwTrack('question_answered',{
+        question: card.kind==='frame' ? 'frame' : card.g.key,
+        tv_count: nbTotalTvs(),
+        n: card.kind==='frame' ? nbFrameTvQty.frame : nbGroupCount(card.g.id),
+      });
+      callWiz.optStep++;
+      if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
+      renderCallWiz();
+    });
     return;
   }
   if(s==='handydesc'){
@@ -9252,6 +9433,7 @@ async function renderCallWiz(){
       grid.innerHTML=html;
       grid.querySelectorAll('.nb-cal-day.avail').forEach(cell=>cell.addEventListener('click', async()=>{
         callWiz.prefDate=cell.dataset.date; callWiz.selectedSlot=null;
+        cwTrack('date_picked',{ date:callWiz.prefDate });
         renderCwCalendarGrid();
         await loadCwSlots(cell.dataset.date);
       }));
@@ -9286,6 +9468,7 @@ async function renderCallWiz(){
         };
         list.querySelectorAll('.nb-slot').forEach(b=>b.addEventListener('click', ()=>{
           callWiz.selectedSlot={ key:b.dataset.key, label:b.dataset.label };
+          cwTrack('slot_picked',{ date:callWiz.prefDate, slot:b.dataset.label, after_hours_fee:cwAfterHoursFeeFor(b.dataset.key, date) });
           list.querySelectorAll('.nb-slot').forEach(x=>x.classList.remove('on'));
           b.classList.add('on');
           sayWhat();
@@ -9346,6 +9529,13 @@ async function renderCallWiz(){
     // card (one tap away) already knows its ceiling instead of making the
     // secretary wait mid-conversation.
     if(!callWiz.econ) cwLoadEconomics(priced, travelFee, ahFee);
+    // The quote itself — the number every later outcome is judged against.
+    // Logged once per call, not on every repaint of this card.
+    if(!callWiz._quoteLogged){
+      callWiz._quoteLogged=true;
+      cwTrack('price_quoted',{ total:subtotal, after_tax:afterTax, tv_count:nbTotalTvs(),
+        travel_fee:travelFee, after_hours_fee:ahFee, service:callWiz.service });
+    }
     body.innerHTML=`${callWizScript(sentence)}
       ${subtotal>0?`<div style="text-align:center;margin:-4px 0 12px;font-size:12px;color:var(--mute);">${esc(money(subtotal))} before tax</div>`:''}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
@@ -9356,6 +9546,7 @@ async function renderCallWiz(){
       <button type="button" class="btn" id="cwReadIt">I've read this to them →</button>`;
     document.getElementById('cwReadIt').addEventListener('click', async()=>{
       await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:lines.join(' · ') }}).catch(()=>{});
+      cwTrack('read_to_customer',{ total:subtotal });
       callWiz.step='wait'; renderCallWiz();
     });
     return;
@@ -9376,8 +9567,8 @@ async function renderCallWiz(){
         <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;">✓ Customer accepts — book it</button>
         <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>
       </div>`;
-    document.getElementById('cwAccepts').addEventListener('click', ()=>cwGoToBooking());
-    document.getElementById('cwPushback').addEventListener('click', ()=>{ callWiz.step='discount'; renderCallWiz(); });
+    document.getElementById('cwAccepts').addEventListener('click', ()=>{ cwTrack('accepted'); cwGoToBooking(); });
+    document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
     return;
   }
 
@@ -9429,6 +9620,7 @@ async function renderCallWiz(){
     body.querySelectorAll('[data-cwsrc]').forEach(b=>b.addEventListener('click', ()=>{
       const v=b.dataset.cwsrc;
       callWiz.discSource = callWiz.discSource===v ? null : v;   // tap again to clear
+      if(callWiz.discSource) cwTrack('source_picked',{ source:callWiz.discSource });
       renderCallWiz();
     }));
     document.getElementById('cwCouponApply').addEventListener('click', async()=>{
@@ -9438,21 +9630,26 @@ async function renderCallWiz(){
       msg.textContent='Checking…';
       try{
         const r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }});
-        if(r.ok){ callWiz.discCoupon={code:r.code, amount:r.amount}; }
+        cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
+        if(r.ok){ callWiz.discCoupon={code:r.code, amount:r.amount}; cwTrack('coupon_applied',{ code:r.code, amount:r.amount }); }
         else { callWiz.discCoupon=null; msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`; return; }
         renderCallWiz();
       }catch(e){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(e.message||'Could not check that code')}</span>`; }
     });
     document.getElementById('cwManualApply').addEventListener('click', ()=>{
       callWiz.discManual=Math.max(0, Number(document.getElementById('cwManualInput').value)||0);
+      // Log what was ASKED for as well as what the caps allowed, so a secretary
+      // repeatedly trying to give away more than the rules permit is visible.
+      cwTrack('manual_discount',{ requested:callWiz.discManual, allowed:cwDiscountMax(), applied:cwDiscountApplied() });
       renderCallWiz();
     });
     document.getElementById('cwGoBooking').addEventListener('click', ()=>cwGoToBooking());
     document.getElementById('cwGoEstimate').addEventListener('click', ()=>{ callWiz.step='estimate'; renderCallWiz(); });
     document.getElementById('cwGoDeclined').addEventListener('click', async()=>{
       try{
+        cwTrack('declined',{ after_discount_offer:cwDiscountApplied() });
         await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
-        closeCallWiz(); toast('Call logged.');
+        closeCallWiz({resolved:true}); toast('Call logged.');
         if(document.querySelector('[data-nav="calls"].on')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     });
@@ -9490,11 +9687,12 @@ async function renderCallWiz(){
           customer_zip:callWiz.zip, service_label:label,
           selections:sels,
         }});
+        cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:cwDiscountApplied() });
         await api('call_update',{ method:'POST', body:{
           id:callWiz.id, resolution:'estimate_sent',
           notes:`Estimate sent (${label})${callWiz.prefDate?' · preferred '+callWiz.prefDate:''}`,
         }}).catch(()=>{});
-        closeCallWiz();
+        closeCallWiz({resolved:true});
         toast(est.warnings ? 'Estimate saved — price still needs to be set before it goes out.' : 'Estimate sent ✓');
       }catch(e){ err.textContent=e.message||'Could not create the estimate'; btn.disabled=false; btn.textContent='Send estimate'; }
     });
@@ -9511,8 +9709,10 @@ async function renderCallWiz(){
       </div>`;
     body.querySelectorAll('[data-cwres]').forEach(b=>b.addEventListener('click', async()=>{
       try{
-        await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:b.dataset.cwres }});
-        closeCallWiz(); toast('Call logged.');
+        const res=b.dataset.cwres;
+        cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
+        await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:res }});
+        closeCallWiz({resolved:true}); toast('Call logged.');
         if(document.querySelector('[data-nav="calls"].on')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
@@ -11698,6 +11898,16 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     try{
       const resp=await apiConfirmUnavailable('booking_create', nbBody);
       nbKeyCache.delete(fp);
+      // Close the loop on a call that came through the phone script: link the
+      // real booking to it and mark it booked. Only fires when the booking
+      // genuinely succeeded, so an abandoned handoff stays uncounted.
+      if(cwPendingBookingCallId){
+        const _cid=cwPendingBookingCallId; cwPendingBookingCallId=null;
+        api('call_update',{ method:'POST', body:{ id:_cid, booking_id:resp&&resp.id?resp.id:undefined, resolution:'booked' }}).catch(()=>{});
+        api('call_event',{ method:'POST', body:{ business:current.slug, call_id:_cid,
+          event:'booking_created', step:'booked',
+          meta:{ booking_id:resp&&resp.id?resp.id:null, total:totalPrice } }}).catch(()=>{});
+      }
       // Converted from an estimate? Archive it now that the job exists, so it leaves
       // the estimates list. Best-effort — the booking is already created either way.
       if(nbSourceEstimateId){

@@ -329,6 +329,8 @@ export default async function handler(req, res) {
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'quote_economics':   return await quoteEconomics(req, res, db, auth, body);
       case 'quote_coupon':      return await quoteCoupon(req, res, db, auth, body);
+      case 'call_event':        return await callEvent(req, res, db, auth, body);
+      case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -7161,6 +7163,165 @@ async function quoteEconomics(req, res, db, auth, body) {
     // Which limit actually bound this quote, so the office can see WHY a job
     // has little room rather than just being told "no".
     capped_by: maxDiscount <= 0 ? 'nothing to give' : (pctRoom < floorRoom ? '10% of the ticket' : 'profit floor'),
+  });
+}
+
+// ── Take a Call: event log + rollups ────────────────────────────────────────
+// Every step of the phone script writes one row here. The point is the funnel:
+// a call that dies on the zip question and a call that dies after the price was
+// quoted are very different failures, and only the event history tells them
+// apart. Also stamps the denormalized outcome columns on the call itself so the
+// day/week rollup is one scan instead of re-aggregating events every load.
+const CALL_EVENTS = new Set([
+  'started', 'service_picked', 'zip_checked', 'question_answered', 'options_done',
+  'date_picked', 'slot_picked', 'price_quoted', 'read_to_customer',
+  'accepted', 'pushback', 'source_picked', 'coupon_tried', 'coupon_applied',
+  'manual_discount', 'discount_final', 'booking_started', 'booking_created',
+  'estimate_sent', 'declined', 'abandoned',
+]);
+async function callEvent(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const event = String(body.event || '').trim();
+  if (!CALL_EVENTS.has(event)) return res.status(400).json({ error: `Unknown event "${event}"` });
+  if (!body.call_id) return res.status(400).json({ error: 'call_id required' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const meta = (body.meta && typeof body.meta === 'object') ? body.meta : {};
+  const actor = auth.name || adminAuthorName(auth) || auth.role || 'office';
+
+  // Best-effort: analytics must never break the call the secretary is on.
+  try {
+    await db.from('call_events').insert({
+      call_id: body.call_id, business_id: biz.id, actor,
+      event, step: body.step ? String(body.step).slice(0, 40) : null, meta,
+    });
+  } catch (e) { console.warn('[call_event] insert failed:', e.message); }
+
+  // Roll the interesting values onto the call row so reports don't have to dig
+  // through jsonb for the numbers they show on every line.
+  const patch = { reached_step: body.step ? String(body.step).slice(0, 40) : undefined };
+  if (event === 'price_quoted') {
+    if (meta.total != null) patch.quoted_total = Number(meta.total) || 0;
+    if (meta.tv_count != null) patch.tv_count = Number(meta.tv_count) || 0;
+  }
+  if (event === 'discount_final') {
+    patch.discount_amount = Number(meta.amount) || 0;
+    patch.discount_detail = meta.detail ? String(meta.detail).slice(0, 200) : null;
+  }
+  if (['booking_created', 'estimate_sent', 'declined', 'abandoned'].includes(event)) {
+    patch.ended_at = new Date().toISOString();
+  }
+  Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
+  if (Object.keys(patch).length) {
+    try { await db.from('calls').update(patch).eq('id', body.call_id); }
+    catch (e) { console.warn('[call_event] call patch failed:', e.message); }
+  }
+  return res.status(200).json({ ok: true });
+}
+
+// Daily + weekly rollups for the phone script. The headline number the owner
+// asked for is calls-taken vs calls-booked, broken down by who took the call —
+// everything else on this payload exists to explain that ratio.
+async function callAnalytics(req, res, db, auth) {
+  // Ranks staff against each other on booking rate — the hidden nav button is a
+  // convenience, this is the actual gate.
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const days = Math.min(180, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const tz = biz.timezone || 'America/Denver';
+  const since = localDayStartUTC(tz, -(days - 1));
+
+  // Live (script-taken) calls only. Grasshopper voicemails are a different
+  // thing entirely and would wreck the conversion rate if mixed in.
+  const { data: calls, error } = await db.from('calls')
+    .select('id, handled_by, service, market, status, resolution, booking_id, quoted_total, discount_amount, discount_detail, tv_count, reached_step, occurred_at, ended_at')
+    .eq('business_id', biz.id).eq('kind', 'live')
+    .gte('occurred_at', since.toISOString())
+    .order('occurred_at', { ascending: false });
+  if (error) throw error;
+  const rows = calls || [];
+
+  const { data: events } = await db.from('call_events')
+    .select('call_id, actor, event, step, meta, created_at')
+    .eq('business_id', biz.id)
+    .gte('created_at', since.toISOString());
+  const evs = events || [];
+
+  const isBooked = r => !!r.booking_id || r.resolution === 'booked';
+  const dayKeyOf = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });   // YYYY-MM-DD
+
+  // ── Per-person scoreboard: the "who is booking and who is not" table.
+  const byPerson = {};
+  for (const r of rows) {
+    const who = r.handled_by || 'Unknown';
+    const p = byPerson[who] || (byPerson[who] = {
+      person: who, calls: 0, booked: 0, estimates: 0, declined: 0, unfinished: 0,
+      quoted_total: 0, quoted_count: 0, discount_given: 0, booked_value: 0,
+    });
+    p.calls++;
+    if (isBooked(r)) { p.booked++; p.booked_value += Number(r.quoted_total) || 0; }
+    else if (r.resolution === 'estimate_sent') p.estimates++;
+    else if (r.resolution === 'refused') p.declined++;
+    else if (!r.resolution) p.unfinished++;
+    if (r.quoted_total != null) { p.quoted_total += Number(r.quoted_total) || 0; p.quoted_count++; }
+    p.discount_given += Number(r.discount_amount) || 0;
+  }
+  const people = Object.values(byPerson).map(p => ({
+    ...p,
+    conversion: p.calls ? Math.round((p.booked / p.calls) * 1000) / 10 : 0,
+    avg_quote: p.quoted_count ? Math.round(p.quoted_total / p.quoted_count) : 0,
+  })).sort((a, b) => b.calls - a.calls);
+
+  // ── Day-by-day series, for the daily number and the weekly chart.
+  const byDay = {};
+  for (const r of rows) {
+    const k = dayKeyOf(r.occurred_at);
+    const d = byDay[k] || (byDay[k] = { date: k, calls: 0, booked: 0, quoted_total: 0, discount_given: 0 });
+    d.calls++;
+    if (isBooked(r)) { d.booked++; d.quoted_total += Number(r.quoted_total) || 0; }
+    d.discount_given += Number(r.discount_amount) || 0;
+  }
+  const daily = Object.values(byDay).sort((a, b) => (a.date < b.date ? -1 : 1))
+    .map(d => ({ ...d, conversion: d.calls ? Math.round((d.booked / d.calls) * 1000) / 10 : 0 }));
+
+  // ── Where calls die. Counted from the furthest step each call reached, so a
+  // call that quit on the zip question is distinguishable from one that heard
+  // the price and walked.
+  const FUNNEL = ['greet', 'zip', 'tvopts', 'schedule', 'recap', 'wait', 'discount', 'booked'];
+  const funnel = FUNNEL.map(step => ({ step, reached: 0 }));
+  for (const r of rows) {
+    const reached = isBooked(r) ? 'booked' : (r.reached_step || 'greet');
+    const idx = FUNNEL.indexOf(reached);
+    // Reaching a step means having reached everything before it.
+    for (let i = 0; i <= (idx < 0 ? 0 : idx); i++) funnel[i].reached++;
+  }
+
+  // ── Discounts: what is actually being given away, and why.
+  const discounted = rows.filter(r => Number(r.discount_amount) > 0);
+  const sourceCounts = {}, couponCounts = {};
+  for (const e of evs) {
+    if (e.event === 'source_picked' && e.meta?.source) sourceCounts[e.meta.source] = (sourceCounts[e.meta.source] || 0) + 1;
+    if (e.event === 'coupon_applied' && e.meta?.code) couponCounts[e.meta.code] = (couponCounts[e.meta.code] || 0) + 1;
+  }
+
+  const totals = {
+    calls: rows.length,
+    booked: rows.filter(isBooked).length,
+    estimates: rows.filter(r => r.resolution === 'estimate_sent').length,
+    declined: rows.filter(r => r.resolution === 'refused').length,
+    unfinished: rows.filter(r => !r.resolution && !r.booking_id).length,
+    booked_value: Math.round(rows.filter(isBooked).reduce((t, r) => t + (Number(r.quoted_total) || 0), 0)),
+    discount_given: Math.round(rows.reduce((t, r) => t + (Number(r.discount_amount) || 0), 0)),
+    discounted_calls: discounted.length,
+  };
+  totals.conversion = totals.calls ? Math.round((totals.booked / totals.calls) * 1000) / 10 : 0;
+
+  return res.status(200).json({
+    days, since: since.toISOString(), totals, people, daily, funnel,
+    sources: Object.entries(sourceCounts).map(([k, v]) => ({ source: k, count: v })).sort((a, b) => b.count - a.count),
+    coupons: Object.entries(couponCounts).map(([k, v]) => ({ code: k, count: v })).sort((a, b) => b.count - a.count),
+    event_counts: Object.entries(evs.reduce((m, e) => { m[e.event] = (m[e.event] || 0) + 1; return m; }, {}))
+      .map(([k, v]) => ({ event: k, count: v })).sort((a, b) => b.count - a.count),
   });
 }
 
