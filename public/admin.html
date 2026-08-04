@@ -8712,7 +8712,7 @@ function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null,
-    tvs:[], tvIndex:0,
+    optStep:0, optsLoaded:false,
     handymanDesc:'',
     prefDate:'', selectedSlot:null,
     calMonth:null, availDates:null,
@@ -8723,6 +8723,11 @@ function openTakeCall(){
   if(!current) return;
   closeSidebar();
   callWizReset();
+  // The script shares New Booking's option state, so a previous call's (or a
+  // previous form's) selections must be cleared or they'd silently ride along
+  // into this call's quote.
+  resetNbSteps();
+  nbAreaName=''; nbZipAreaId=null;
   document.getElementById('callWizErr').textContent='';
   document.getElementById('callWizModal').classList.remove('hidden');
   renderCallWiz();
@@ -8730,6 +8735,19 @@ function openTakeCall(){
 function closeCallWiz(){ document.getElementById('callWizModal').classList.add('hidden'); }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
 document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
+// Option-step clicks are delegated from the container ONCE — the card's HTML is
+// replaced on every render, so attaching inside the render would stack a fresh
+// listener per repaint and fire one click N times. Routed through the SAME
+// handler the New Booking form uses, so caps, pruning and clamping behave
+// identically on both screens.
+document.getElementById('callWizBody').addEventListener('click', e=>{
+  if(!callWiz || callWiz.step!=='tvopts') return;
+  if(nbHandleOptClick(e)) renderCallWiz();
+});
+document.getElementById('callWizBody').addEventListener('input', e=>{
+  const note=e.target.closest('.nb-other-note');
+  if(note) nbOptionNotes[note.dataset.o]=note.value;
+});
 // "End call" jumps straight to the resolution step from wherever the
 // secretary currently is — the one guaranteed way out that always logs an
 // outcome, so a call that goes sideways mid-script still gets recorded.
@@ -8746,6 +8764,45 @@ function callWizChoiceRow(options){
 }
 function callWizScript(line){
   return `<div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:14.5px;line-height:1.5;margin-bottom:12px;">🗣️ ${esc(line)}</div>`;
+}
+// Which option groups the secretary must answer before moving on — the same
+// set New Booking validates at submit (nbValidateTvMountingRequired), asked up
+// front here because on a phone call there is no going back later.
+const CW_REQUIRED_GROUPS=new Set(['size','fireplace','surface']);
+// The out-loud version of each question. Everything else about these steps —
+// which options exist, what they cost, how many are allowed — comes from the
+// shared engine; only this wording is call-specific.
+const CW_SCRIPTS={
+  tvtype:    'What type of TV are we mounting for you?',
+  size:      'What size is your TV?',
+  fireplace: 'Is it going over a fireplace?',
+  surface:   'What kind of wall is it going on?',
+  wires:     'Would you like the wires hidden?',
+  bracket:   "Do you have a bracket yet for these TV's?",
+  lifting:   'Since it is a larger TV, will you be able to help lift it?',
+  dismount:  'Do you need an old TV taken down?',
+  extras:    'Is there anything else you would like added?',
+};
+function callWizGroupScript(card){
+  if(card.kind==='tvtype') return CW_SCRIPTS.tvtype;
+  return CW_SCRIPTS[card.g.key] || nbGroupLabel(card.g);
+}
+// The ordered list of question cards, recomputed on every render so the SAME
+// conditional rules the New Booking form applies (lifting only for 70"+ TVs,
+// no bracket question on a frame-only job, bracket needs a size first) decide
+// what the secretary is asked — no separate branching logic to drift.
+function callWizCards(){
+  const cards=[{kind:'tvtype'}];
+  const showLifting=nbShowLifting(), onlyFrame=nbOnlyFrame();
+  const order={size:1,fireplace:2,surface:3,wires:4,bracket:5,lifting:6,dismount:7,extras:8};
+  [...nbOptionGroups].sort((a,b)=>(order[a.key]||99)-(order[b.key]||99)).forEach(g=>{
+    if(g.key==='lifting' && !showLifting) return;
+    if(g.key==='bracket' && onlyFrame) return;
+    if(g.key==='bracket' && nbSelectedSizeTiers().size===0) return;
+    if(NB_TV_BOUND.has(g.key) && nbTotalTvs()===0) return;
+    cards.push({kind:'group', g});
+  });
+  return cards;
 }
 async function renderCallWiz(){
   const body=document.getElementById('callWizBody');
@@ -8789,6 +8846,10 @@ async function renderCallWiz(){
       try{
         const d=await api('zip_area',{ params:{ business:current.slug, postal_code:z }});
         callWiz.areaName=d.name; callWiz.otherBiz=d.other_business;
+        // Drives the same Austin price overrides New Booking applies — without
+        // this an Austin caller would be quoted Denver rates on the phone while
+        // the same job booked online priced lower.
+        nbAreaName=d.name||''; nbZipAreaId=d.service_area_id||null;
         if(d.name) result.innerHTML=`<span style="color:var(--ok,#15803d);">✓ In our ${esc(d.name)} service area.</span>`;
         else if(d.other_business) result.innerHTML=`That zip is actually served by <b>${esc(d.other_business.name)}</b>, not ${esc(bizName)}.`;
         else result.innerHTML=`We don't have this zip on file yet — double-check it, or continue and note it for the office.`;
@@ -8799,95 +8860,67 @@ async function renderCallWiz(){
     document.getElementById('cwZipNext').addEventListener('click', ()=>{
       callWiz.zip=zipInput.value.trim();
       api('call_update',{ method:'POST', body:{ id:callWiz.id, market:callWiz.areaName||null }}).catch(()=>{});
-      callWiz.step = callWiz.service==='TV Mounting' ? 'size' : 'handydesc';
+      callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
       renderCallWiz();
     });
     return;
   }
 
-  if(s==='size'){
-    // Same qty-stepper pattern as New Booking's "tap + to add each TV": each
-    // tap of + adds one TV of that size to the job, not a single pick — this
-    // is what makes "2 TVs" a real count the later per-TV questions loop over.
-    const opts=['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'];
-    const countOf=v=>callWiz.tvs.filter(t=>t.size===v).length;
-    body.innerHTML=`${callWizScript('What size is your TV?')}
-      <div class="nb-opts">
-        ${opts.map(v=>{ const ct=countOf(v);
-          return `<div class="nb-optq${ct>0?' on':''}"><span class="nb-optlabel">${esc(v)}</span>`+
-            (ct>0
-              ? `<span class="nb-stepper"><button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="-1">−</button><span class="nb-qty">${ct}</span><button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="1">+</button></span>`
-              : `<button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="1">+</button>`)+
-            `</div>`;
-        }).join('')}
+  // TV Mounting questions — driven by the SAME option catalog, quantity rules
+  // and caps as New Booking (nbOptionGroups / nbQty / nbFrameTvQty), just shown
+  // one question per card with a line for the secretary to read. Nothing about
+  // pricing or the per-TV limits is re-implemented here; this is the New
+  // Booking step engine with a script wrapped around it.
+  if(s==='tvopts'){
+    if(!callWiz.optsLoaded){
+      body.innerHTML='<div class="empty">Loading…</div>';
+      try{
+        const { svc } = await nbEnsureDataCached(current.slug);
+        nbServices = svc.services || [];
+        const tvSvc=nbServices.find(x=>x.category==='TV Mounting');
+        if(!tvSvc) throw new Error('TV Mounting service is not set up for this business.');
+        nbServiceId=tvSvc.id;
+        nbOptionGroups=await nbLoadTvOptions(tvSvc.id);
+        callWiz.optsLoaded=true;
+      }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger,#b91c1c);">${esc(e.message||'Could not load the questions')}</div>`; return; }
+    }
+    const cards=callWizCards();
+    if(callWiz.optStep>=cards.length){ callWiz.step='schedule'; renderCallWiz(); return; }
+    const card=cards[callWiz.optStep];
+    const tvCount=nbTotalTvs();
+
+    let optsHtml, blocked=null;
+    if(card.kind==='tvtype'){
+      optsHtml=nbTvTypeOptsHtml();
+      if(tvCount===0) blocked='Add at least one TV to continue.';
+    } else {
+      const g=card.g;
+      const tvBound=NB_TV_BOUND.has(g.key);
+      const capN = g.key==='bracket' ? nbFrameTvQty.regular : tvCount;
+      const gCount=nbGroupCount(g.id);
+      const atCap=tvBound && capN>0 && gCount>=capN;
+      optsHtml=nbGroupOptsHtml(g, atCap);
+      if(tvBound && capN>0){
+        optsHtml+=`<div style="margin-top:8px;font-size:12.5px;color:${gCount>=capN?'var(--ok,#15803d)':'var(--mute)'};">${gCount>=capN?'✓ ':''}${gCount} of ${capN} selected</div>`;
+      }
+      // Same required-answer rule the New Booking form enforces at submit —
+      // asked here up front so the secretary can't skip past it on the call.
+      if(CW_REQUIRED_GROUPS.has(g.key) && capN>0 && gCount<capN){
+        blocked=`Pick one for each TV (${gCount} of ${capN}).`;
+      }
+    }
+    const stepNo=callWiz.optStep+1;
+    body.innerHTML=`${callWizScript(callWizGroupScript(card))}
+      ${optsHtml}
+      ${blocked?`<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${esc(blocked)}</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        ${callWiz.optStep>0?'<button type="button" class="btn ghost" id="cwOptBack" style="width:auto;">Back</button>':''}
+        <button type="button" class="btn" id="cwOptNext" style="flex:1;" ${blocked?'disabled':''}>Continue</button>
       </div>
-      <div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${callWiz.tvs.length} TV${callWiz.tvs.length===1?'':'s'} total</div>
-      <button type="button" class="btn" id="cwSizeNext" style="margin-top:10px;" ${callWiz.tvs.length?'':'disabled'}>Continue</button>`;
-    body.querySelectorAll('[data-cwsizeadj]').forEach(b=>b.addEventListener('click', ()=>{
-      const v=b.dataset.cwsizeadj, d=Number(b.dataset.d);
-      if(d>0) callWiz.tvs.push({size:v});
-      else { const i=callWiz.tvs.map(t=>t.size).lastIndexOf(v); if(i>=0) callWiz.tvs.splice(i,1); }
-      renderCallWiz();
-    }));
-    document.getElementById('cwSizeNext').addEventListener('click', ()=>{ callWiz.tvIndex=0; callWiz.step='bracket'; renderCallWiz(); });
-    return;
-  }
-  // Bracket/fireplace/wires loop once PER TV — same requirement New Booking
-  // enforces (bracket count capped to, and required to match, the TV count).
-  // callWiz.tvIndex walks the tvs array; each TV must answer all three before
-  // the next one starts, and only once every TV is done does it move on.
-  if(s==='bracket'){
-    const tv=callWiz.tvs[callWiz.tvIndex], total=callWiz.tvs.length;
-    body.innerHTML=`${callWizScript(`Do you have a bracket yet for ${total>1?"these TV's":'this TV'}?`)}
-      ${callWizChoiceRow([{value:'Yes',label:'Yes, has one'},{value:'No',label:'No, needs one'}])}`;
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      tv.bracket=b.dataset.cwchoice;
-      // "No" means we're supplying it — ask which kind now instead of just
-      // moving on, same as the New Booking form does once "needs one" is picked.
-      callWiz.step = tv.bracket==='No' ? 'bracket_type' : 'fireplace';
-      renderCallWiz();
-    }));
-    return;
-  }
-  if(s==='bracket_type'){
-    const tv=callWiz.tvs[callWiz.tvIndex];
-    body.innerHTML=`${callWizScript('Which bracket would you like?')}
-      ${callWizChoiceRow([
-        {value:'Flat',label:'Flat'},
-        {value:'Tilting',label:'Tilting (recommended)'},
-        {value:'Full Motion',label:'Full Motion'},
-      ])}`;
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      tv.bracketType=b.dataset.cwchoice; callWiz.step='fireplace'; renderCallWiz();
-    }));
-    return;
-  }
-  if(s==='fireplace'){
-    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
-    body.innerHTML=`${callWizScript(`Is ${total>1?`TV ${n} of ${total}`:'it'} going over a fireplace?`)}
-      ${callWizChoiceRow([{value:'Yes',label:'Yes'},{value:'No',label:'No'}])}`;
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      tv.fireplace=b.dataset.cwchoice; callWiz.step='wires'; renderCallWiz();
-    }));
-    return;
-  }
-  if(s==='wires'){
-    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
-    body.innerHTML=`${callWizScript(`Would you like the wires hidden${total>1?` for TV ${n} of ${total}`:''}?`)}
-      ${callWizChoiceRow([
-        {value:'Hide behind wall',label:'Hide behind the wall'},
-        {value:'Hide outside wall',label:'Hide outside the wall'},
-        {value:'Plug already behind TV',label:'Already has a plug behind the TV'},
-        {value:'Hang under TV',label:'Let them hang under the TV'},
-      ])}`;
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      tv.wires=b.dataset.cwchoice;
-      callWiz.tvIndex++;
-      // Next TV starts back at bracket; only once every TV is answered does
-      // the loop actually move on to scheduling.
-      callWiz.step = callWiz.tvIndex < callWiz.tvs.length ? 'bracket' : 'schedule';
-      renderCallWiz();
-    }));
+      <div style="margin-top:8px;font-size:11.5px;color:var(--mute);text-align:center;">Question ${stepNo} of ${cards.length}</div>`;
+    const backBtn=document.getElementById('cwOptBack');
+    if(backBtn) backBtn.addEventListener('click', ()=>{ callWiz.optStep--; renderCallWiz(); });
+    document.getElementById('cwOptNext').addEventListener('click', ()=>{ callWiz.optStep++; renderCallWiz(); });
     return;
   }
   if(s==='handydesc'){
@@ -8983,21 +9016,22 @@ async function renderCallWiz(){
     lines.push(`Service: ${callWiz.service}`);
     if(callWiz.areaName) lines.push(`Area: ${callWiz.areaName} (zip ${callWiz.zip})`);
     else if(callWiz.zip) lines.push(`Zip: ${callWiz.zip}`);
+    // The priced lines come straight from New Booking's own collector, so the
+    // figure read out on the phone is the figure the booking will carry —
+    // including the branch minimum and any multi-TV discount.
+    let priced=[];
     if(callWiz.service==='TV Mounting'){
-      callWiz.tvs.forEach((tv,i)=>{
-        const n=i+1, bits=[];
-        if(tv.bracket) bits.push(tv.bracket==='Yes'?'has bracket':'needs bracket — '+(tv.bracketType||'unspecified'));
-        if(tv.fireplace==='Yes') bits.push('over fireplace');
-        if(tv.wires) bits.push(tv.wires);
-        lines.push(`TV ${n}: ${tv.size}${bits.length?' — '+bits.join(', '):''}`);
-      });
+      try{ priced=nbCollectSelections(); }catch(e){ priced=[]; }
+      priced.forEach(l=>lines.push(`${l.label}${l.quantity>1?` ×${l.quantity}`:''} — ${money(l.price*l.quantity)}`));
     } else if(callWiz.handymanDesc){
       lines.push(`Job: ${callWiz.handymanDesc}`);
     }
     if(callWiz.prefDate) lines.push(`Preferred: ${callWiz.prefDate}${callWiz.selectedSlot?' ('+callWiz.selectedSlot.label+')':''}`);
-    body.innerHTML=`${callWizScript("Here's what I've got — let's get you on the schedule with exact pricing.")}
+    const subtotal=priced.reduce((s,x)=>s+x.price*x.quantity,0);
+    body.innerHTML=`${callWizScript("Here's what I've got for you — let me get you on the schedule.")}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
         ${lines.map(l=>esc(l)).join('<br>')}
+        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Subtotal: ${esc(money(subtotal))}<div style="font-weight:400;font-size:11.5px;color:var(--mute);">Travel fee and tax are added on the booking screen.</div></div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button type="button" class="btn" id="cwGoBooking">Continue to booking →</button>
@@ -9008,9 +9042,10 @@ async function renderCallWiz(){
       const notes=lines.join(' · ');
       await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes }}).catch(()=>{});
       closeCallWiz();
-      toast('Answers noted — pick up with the customer\'s zip/address below, then remember to log this call\'s outcome from the Calls tab.');
+      toast('Answers carried over — just add the customer\'s details and confirm the time.');
       openNewBooking({
         postal_code: callWiz.zip,
+        _keepOptions: callWiz.service==='TV Mounting',
         preferred_slots: callWiz.prefDate ? [{ date:callWiz.prefDate, label:callWiz.selectedSlot?callWiz.selectedSlot.label:null, slot_key:callWiz.selectedSlot?callWiz.selectedSlot.key:null }] : undefined,
       });
     });
@@ -9042,14 +9077,20 @@ async function renderCallWiz(){
       const email=document.getElementById('cwEmail').value.trim();
       if(!name || !email){ err.textContent='Name and email are required to send an estimate.'; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
+      // Same priced lines the booking would carry, so the estimate the customer
+      // receives matches what they were quoted on the call.
+      let sels=[];
+      if(callWiz.service==='TV Mounting'){ try{ sels=nbCollectSelections(); }catch(e){ sels=[]; } }
+      const tvCount=nbTotalTvs();
       const label = callWiz.service==='TV Mounting'
-        ? `TV mounting — ${callWiz.tvs.length} TV${callWiz.tvs.length===1?'':'s'} (${callWiz.tvs.map(t=>t.size).join('/')})`
+        ? `TV mounting — ${tvCount} TV${tvCount===1?'':'s'}`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
+      if(!sels.length) sels=[{ label, quantity:1, price:0 }];
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
           business:current.slug, customer_name:name, customer_phone:phone, customer_email:email,
           customer_zip:callWiz.zip, service_label:label,
-          selections:[{ label, quantity:1, price:0 }],
+          selections:sels,
         }});
         await api('call_update',{ method:'POST', body:{
           id:callWiz.id, resolution:'estimate_sent',
@@ -9086,6 +9127,18 @@ document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpse
 async function openNewBooking(prefill){
   if(!current) return;
   closeSidebar();
+  // Handed over from the Take a Call script: the secretary already answered
+  // every option question on the phone, against this same engine. Snapshot the
+  // selections before resetNbSteps() wipes them, and put them back once the
+  // form is built, so the call's answers ARE the booking's answers — nothing
+  // is re-keyed and nothing can drift between the two screens.
+  const carry = (prefill && prefill._keepOptions) ? {
+    groups: nbOptionGroups,
+    qty: JSON.parse(JSON.stringify(nbQty)),
+    frame: { ...nbFrameTvQty },
+    notes: { ...nbOptionNotes },
+    serviceId: nbServiceId,
+  } : null;
   const modal=document.getElementById('modal');
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
@@ -9215,6 +9268,21 @@ async function openNewBooking(prefill){
     // We already have the customer — expand the details so they're visible/editable.
     if(prefill.name||prefill.phone||prefill.email){ const cd=document.getElementById('nbCustDetails'); if(cd) cd.open=true; }
     updateNbTotal();
+  }
+  // Put the phone call's answers back. The category is set directly rather than
+  // dispatched: the change handler resets the steps and re-fetches the option
+  // catalog, which would throw away the very selections being restored.
+  if(carry){
+    nbOptionGroups=carry.groups;
+    Object.keys(nbQty).forEach(k=>delete nbQty[k]);
+    Object.entries(carry.qty).forEach(([k,v])=>{ nbQty[k]=v; });
+    nbFrameTvQty={ ...carry.frame };
+    Object.entries(carry.notes).forEach(([k,v])=>{ nbOptionNotes[k]=v; });
+    nbServiceId=carry.serviceId;
+    const catSel=document.getElementById('nbCategory');
+    if(catSel) catSel.value='TV Mounting';
+    renderNbServices('TV Mounting');
+    renderNbSteps();
   }
 }
 // Lines carried over when converting an approved estimate into a booking. Null
@@ -10372,6 +10440,122 @@ function nbPruneInvisibleOptions(){
     Object.keys(nbQty[g.id]).forEach(oid=>{ if(!visible.has(oid)) delete nbQty[g.id][oid]; });
   });
 }
+// The option rows for ONE group — quantity steppers (with caps/disabled state)
+// or single-pick buttons, whichever this group uses. Shared verbatim by the New
+// Booking form and the Take a Call script so a phone-in job is priced and
+// constrained EXACTLY like one entered on the form; there is deliberately no
+// second copy of this logic to drift out of sync.
+function nbGroupOptsHtml(g, atCap){
+  const qtyMode=NB_QTY_KEYS.has(g.key);
+  let html='<div class="nb-opts">';
+  nbVisibleOptions(g).forEach(o=>{
+    const price=nbOptPrice(o); const priceLbl=price?'+$'+price:'$0';
+    if(qtyMode){
+      const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
+      // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
+      const bw=(g.key==='wires' && nbIsBehindWall(o));
+      const bwMax=bw?nbBehindWallMax():Infinity;
+      const plusDis=(atCap || ct>=bwMax)?' disabled':'';
+      html+=`<div class="nb-optq${ct>0?' on':''}">`+
+            `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
+            `<span class="nb-price">${priceLbl}</span>`+
+            (ct>0
+              ? `<span class="nb-stepper">`+
+                  `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
+                  `<span class="nb-qty">${ct}</span>`+
+                  `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
+                `</span>`
+              : `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`
+            )+
+            `</div>`;
+      // "Other" add-on: when selected, let the admin describe it.
+      if(nbIsOtherOption(o) && ct>0){
+        html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
+              `data-o="${o.id}" placeholder="Describe this" `+
+              `value="${esc(nbOptionNotes[o.id]||'')}">`;
+      }
+    } else {
+      const on=nbPickGet(g.id)===o.id;
+      html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
+            `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
+    }
+  });
+  return html+'</div>';
+}
+// The TV Type question (regular vs Frame/Gallery counts) — also shared, since
+// it is the single source of truth for how many TVs every per-TV group is
+// capped to.
+function nbTvTypeOptsHtml(){
+  const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
+  const row=(t,label,priceLbl,ct)=>
+    `<div class="nb-optq${ct>0?' on':''}">`+
+      `<span class="nb-optlabel">${esc(label)}</span>`+
+      `<span class="nb-price">${priceLbl}</span>`+
+      (ct>0
+        ? `<span class="nb-stepper">`+
+            `<button type="button" class="nb-tv-q-btn" data-t="${t}" data-d="-1">−</button>`+
+            `<span class="nb-qty">${ct}</span>`+
+            `<button type="button" class="nb-tv-q-btn" data-t="${t}" data-d="1">+</button>`+
+          `</span>`
+        : `<button type="button" class="nb-tv-q-btn" data-t="${t}" data-d="1">+</button>`
+      )+
+    `</div>`;
+  return `<div class="nb-opts">`+
+    row('regular','Regular TV','$0',regCt)+
+    row('frame','Samsung Frame TV or LG Gallery TV',`+$${FRAME_TV_PRICE}`,frameCt)+
+  `</div>`;
+}
+// One shared handler for a click anywhere in an option step, used by BOTH the
+// New Booking form and the Take a Call script. Returns true if it consumed the
+// click, so each caller can re-render its own surface afterwards.
+function nbHandleOptClick(e){
+  const tvQBtn=e.target.closest('.nb-tv-q-btn');
+  const qBtn=e.target.closest('.nb-q-btn');
+  const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
+  if(tvQBtn){
+    const t=tvQBtn.dataset.t, d=Number(tvQBtn.dataset.d);
+    nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
+    // Prune newly-INVISIBLE picks first, THEN clamp to the new caps: clamping
+    // first trimmed an arbitrary (insertion-order) selection, which could drop
+    // a still-valid paid pick while keeping one the visibility prune was about
+    // to delete anyway — quietly shrinking the total by the wrong line.
+    nbPruneInvisibleOptions();
+    nbClampTvBound();
+    nbPruneBehindWall();
+    return true;
+  }
+  if(qBtn){
+    if(qBtn.disabled) return true;
+    const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
+    const grp=nbOptionGroups.find(g=>g.id===gid);
+    // Cap TV-bound groups at the number of TVs selected — brackets at the
+    // REGULAR TV count (Frame/Gallery TVs use their in-box bracket).
+    if(d>0 && grp && NB_TV_BOUND.has(grp.key)){
+      const cap = grp.key==='bracket' ? nbFrameTvQty.regular : nbTotalTvs();
+      if(nbGroupCount(gid)>=cap) return true;
+    }
+    // Behind-the-wall wires are capped at the number of TVs not over a fireplace.
+    if(d>0 && grp && grp.key==='wires'){
+      const o=grp.options.find(x=>x.id===oid);
+      if(o && nbIsBehindWall(o) && ((nbQty[gid]&&nbQty[gid][oid])||0)>=nbBehindWallMax()) return true;
+    }
+    if(!nbQty[gid]) nbQty[gid]={};
+    nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
+    if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
+    // Prune invisible before clamping — same reasoning as the TV-type handler.
+    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbPruneInvisibleOptions(); nbClampTvBound(); }
+    // Marking a TV over a fireplace or on a hard surface can invalidate existing
+    // behind-wall picks (both block behind-the-wall routing).
+    if(grp&&(grp.key==='fireplace'||grp.key==='surface'||grp.key==='size')) nbPruneBehindWall();
+    return true;
+  }
+  if(pickBtn){
+    const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
+    nbQty[gid] = (nbPickGet(gid)===oid) ? {} : {[oid]:1};
+    return true;
+  }
+  return false;
+}
 function renderNbSteps(){
   const wrap=document.getElementById('nbSteps');
   // Handyman labor — a single hours stepper at $85/hour.
@@ -10402,34 +10586,8 @@ function renderNbSteps(){
   // size/bracket group). Frame/Gallery use the in-box bracket.
   const isTvService=nbOptionGroups.some(g=>g.key==='bracket'||g.key==='size');
   if(isTvService){
-    const regCt=nbFrameTvQty.regular||0, frameCt=nbFrameTvQty.frame||0;
     html+=`<div class="nb-step"><div class="nb-step-t">What type of TV is the customer mounting?</div>`+
-      `<div class="nb-opts">`+
-        `<div class="nb-optq${regCt>0?' on':''}">`+
-          `<span class="nb-optlabel">Regular TV</span>`+
-          `<span class="nb-price">$0</span>`+
-          (regCt>0
-            ? `<span class="nb-stepper">`+
-                `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="-1">−</button>`+
-                `<span class="nb-qty">${regCt}</span>`+
-                `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`+
-              `</span>`
-            : `<button type="button" class="nb-tv-q-btn" data-t="regular" data-d="1">+</button>`
-          )+
-        `</div>`+
-        `<div class="nb-optq${frameCt>0?' on':''}">`+
-          `<span class="nb-optlabel">Samsung Frame TV or LG Gallery TV</span>`+
-          `<span class="nb-price">+$${FRAME_TV_PRICE}</span>`+
-          (frameCt>0
-            ? `<span class="nb-stepper">`+
-                `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="-1">−</button>`+
-                `<span class="nb-qty">${frameCt}</span>`+
-                `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`+
-              `</span>`
-            : `<button type="button" class="nb-tv-q-btn" data-t="frame" data-d="1">+</button>`
-          )+
-        `</div>`+
-      `</div></div>`;
+      nbTvTypeOptsHtml()+`</div>`;
   }
   const tvCount=nbTotalTvs();
   const showLifting=nbShowLifting();
@@ -10476,40 +10634,7 @@ function renderNbSteps(){
     // priced into the total (and into sent estimates) behind a "Select a TV
     // size first" hint.
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0){ if(nbQty[g.id]) delete nbQty[g.id]; html+=`<div class="nb-hint">Select a TV size first</div></div>`; return; }
-    html+='<div class="nb-opts">';
-    nbVisibleOptions(g).forEach(o=>{
-      const price=nbOptPrice(o); const priceLbl=price?'+$'+price:'$0';
-      if(qtyMode){
-        const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
-        // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
-        const bw=(g.key==='wires' && nbIsBehindWall(o));
-        const bwMax=bw?nbBehindWallMax():Infinity;
-        const plusDis=(atCap || ct>=bwMax)?' disabled':'';
-        html+=`<div class="nb-optq${ct>0?' on':''}">`+
-              `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
-              `<span class="nb-price">${priceLbl}</span>`+
-              (ct>0
-                ? `<span class="nb-stepper">`+
-                    `<button type="button" class="nb-q-btn" data-g="${g.id}" data-o="${o.id}" data-d="-1">−</button>`+
-                    `<span class="nb-qty">${ct}</span>`+
-                    `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`+
-                  `</span>`
-                : `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`
-              )+
-              `</div>`;
-        // "Other" add-on: when selected, let the admin describe it.
-        if(nbIsOtherOption(o) && ct>0){
-          html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
-                `data-o="${o.id}" placeholder="Describe this" `+
-                `value="${esc(nbOptionNotes[o.id]||'')}">`;
-        }
-      } else {
-        const on=nbPickGet(g.id)===o.id;
-        html+=`<button type="button" class="nb-opt${on?' on':''}" data-pick="1" data-g="${g.id}" data-o="${o.id}">`+
-              `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span><span class="nb-price">${priceLbl}</span></button>`;
-      }
-    });
-    html+='</div></div>';
+    html+=nbGroupOptsHtml(g, atCap)+'</div>';
   });
   wrap.innerHTML=html;
   updateNbTotal();
@@ -10525,51 +10650,7 @@ document.getElementById('nbSteps').addEventListener('input',e=>{
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
   if(hmBtn){ nbHandymanHours=Math.max(2,nbHandymanHours+Number(hmBtn.dataset.d)); renderNbSteps(); return; }
-  const tvQBtn=e.target.closest('.nb-tv-q-btn');
-  const qBtn=e.target.closest('.nb-q-btn');
-  const pickBtn=e.target.closest('.nb-opt[data-pick="1"]');
-  if(tvQBtn){
-    const t=tvQBtn.dataset.t, d=Number(tvQBtn.dataset.d);
-    nbFrameTvQty[t]=Math.max(0,nbFrameTvQty[t]+d);
-    // Prune newly-INVISIBLE picks first, THEN clamp to the new caps: clamping
-    // first trimmed an arbitrary (insertion-order) selection, which could drop
-    // a still-valid paid pick while keeping one the visibility prune was about
-    // to delete anyway — quietly shrinking the total by the wrong line.
-    nbPruneInvisibleOptions();
-    nbClampTvBound();
-    nbPruneBehindWall();
-    renderNbSteps();
-    return;
-  }
-  if(qBtn){
-    if(qBtn.disabled) return;
-    const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
-    const grp=nbOptionGroups.find(g=>g.id===gid);
-    // Cap TV-bound groups at the number of TVs selected — brackets at the
-    // REGULAR TV count (Frame/Gallery TVs use their in-box bracket).
-    if(d>0 && grp && NB_TV_BOUND.has(grp.key)){
-      const cap = grp.key==='bracket' ? nbFrameTvQty.regular : nbTotalTvs();
-      if(nbGroupCount(gid)>=cap) return;
-    }
-    // Behind-the-wall wires are capped at the number of TVs not over a fireplace.
-    if(d>0 && grp && grp.key==='wires'){
-      const o=grp.options.find(x=>x.id===oid);
-      if(o && nbIsBehindWall(o) && ((nbQty[gid]&&nbQty[gid][oid])||0)>=nbBehindWallMax()) return;
-    }
-    if(!nbQty[gid]) nbQty[gid]={};
-    nbQty[gid][oid]=Math.max(0,(nbQty[gid][oid]||0)+d);
-    if(nbQty[gid][oid]===0) delete nbQty[gid][oid];
-    // Prune invisible before clamping — same reasoning as the TV-type handler.
-    if(grp&&grp.key==='size'){ nbPruneBrackets(); nbPruneInvisibleOptions(); nbClampTvBound(); }
-    // Marking a TV over a fireplace or on a hard surface can invalidate existing
-    // behind-wall picks (both block behind-the-wall routing).
-    if(grp&&(grp.key==='fireplace'||grp.key==='surface'||grp.key==='size')) nbPruneBehindWall();
-    renderNbSteps();
-  } else if(pickBtn){
-    const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
-    nbQty[gid] = (nbPickGet(gid)===oid) ? {} : {[oid]:1};
-    renderNbSteps();
-  }
+  if(nbHandleOptClick(e)) renderNbSteps();
 });
 // ── Branch service minimum ───────────────────────────────────────────────────
 // Minimum job price by business + metro, mirroring the online booking widget
