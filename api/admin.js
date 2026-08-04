@@ -308,6 +308,7 @@ export default async function handler(req, res) {
       case 'calls':             return await calls(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
+      case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
@@ -5719,7 +5720,11 @@ async function callClaim(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, claimed_by: me });
 }
 
-// Mark a call called-back / resolved / ignored, or attach a note.
+// Mark a call called-back / resolved / ignored, or attach a note. Also used by
+// the "Take a Call" wizard (kind='live') to fill in what a voicemail row gets
+// for free at ingest — service/market/caller_phone as the secretary learns
+// them, then a resolution once the call is over.
+const CALL_RESOLUTIONS = ['booked', 'estimate_sent', 'refused', 'other'];
 async function callUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id;
@@ -5743,9 +5748,45 @@ async function callUpdate(req, res, db, auth, body) {
     }
   }
   if (body.notes !== undefined) patch.notes = String(body.notes || '').slice(0, 2000) || null;
+  if (body.service !== undefined) patch.service = String(body.service || '').slice(0, 60) || null;
+  if (body.market !== undefined) patch.market = String(body.market || '').slice(0, 60) || null;
+  if (body.caller_phone !== undefined) patch.caller_phone = String(body.caller_phone || '').replace(/\D/g, '').slice(0, 10) || null;
+  if (body.customer_id !== undefined) patch.customer_id = body.customer_id || null;
+  if (body.booking_id !== undefined) patch.booking_id = body.booking_id || null;
+  // Resolution ends the call: "how did it end" IS the terminal status, so
+  // resolving always also closes it out, same stamping as any other close.
+  if (body.resolution !== undefined) {
+    const r = String(body.resolution || '').trim();
+    if (r && !CALL_RESOLUTIONS.includes(r)) return res.status(400).json({ error: 'Unknown resolution' });
+    patch.resolution = r || null;
+    if (r) {
+      patch.status = 'resolved';
+      patch.claimed_by = null; patch.claimed_at = null;
+      patch.handled_by = auth.name || auth.role || 'office';
+      patch.handled_at = new Date().toISOString();
+    }
+  }
   const { error } = await db.from('calls').update(patch).eq('id', id);
   if (error) throw error;
   return res.status(200).json({ ok: true });
+}
+
+// Start a "Take a Call" live intake: logs the call the moment the secretary
+// picks up, before anything about the customer is known, so an abandoned or
+// interrupted call still shows up in the Calls tab instead of vanishing.
+async function callLiveStart(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const now = new Date().toISOString();
+  const { data, error } = await db.from('calls').insert({
+    business_id: biz.id,
+    kind: 'live',
+    occurred_at: now,
+    status: 'new',
+    handled_by: auth.name || auth.role || 'office',
+  }).select('id').single();
+  if (error) throw error;
+  return res.status(200).json({ ok: true, id: data.id });
 }
 
 // ── Inbound calls: ingest a Grasshopper voicemail email ─────────────────────
