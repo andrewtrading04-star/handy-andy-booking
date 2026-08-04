@@ -610,9 +610,9 @@
      of a plain show/hide word on the right. */
   #callWizBody details>summary{list-style:none;}
   #callWizBody details>summary::-webkit-details-marker{display:none;}
-  #callWizBody details>summary:hover{background:var(--line2);}
-  #callWizBody details:not([open])>summary .cw-toggle::after{content:'show';}
-  #callWizBody details[open]>summary .cw-toggle::after{content:'hide';}
+  #callWizBody details>summary:hover{color:var(--ink-2);}
+  #callWizBody details:not([open])>summary .cw-toggle::after{content:' · show';}
+  #callWizBody details[open]>summary .cw-toggle::after{content:' · hide';}
   #modal .search{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #modal .search::placeholder{color:#6b7f9c;}
   #modal #nbTravelFee::placeholder{color:#6b7f9c;}
@@ -9734,19 +9734,19 @@ async function renderCallWiz(){
     // On a call the secretary is reading a script, not auditing a quote — the
     // wall of line items was competing with the sentence they need to say.
     body.innerHTML=`${callWizScript(sentence)}
-      <details style="border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden;">
-        <summary style="cursor:pointer;padding:11px 14px;font-size:13.5px;color:var(--ink-2);list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;">
-          <span>Customer requests a breakdown of pricing</span>
-          <span class="cw-toggle" style="color:var(--mute);font-size:11px;"></span>
+      <details>
+        <summary style="cursor:pointer;padding:4px 2px;font-size:11.5px;color:var(--mute);list-style:none;text-align:center;">
+          <span style="border-bottom:1px dotted var(--line);">Breakdown of pricing</span>
+          <span class="cw-toggle"></span>
         </summary>
-        <div style="padding:2px 14px 12px;font-size:13px;line-height:1.6;border-top:1px solid var(--line);">
+        <div style="background:var(--line2);border-radius:10px;padding:10px 14px;margin-top:7px;font-size:13px;line-height:1.6;">
           ${context.map(([k,v])=>row(k,v)).join('')}
           ${items.length?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line);"></div>`:''}
           ${items.map(([k,v])=>row(k, (v<0?'-':'')+money(Math.abs(v)), {neg:v<0})).join('')}
           ${subtotal>0?row('Total before tax', money(subtotal), {strong:true,top:true})+row('Total after tax', money(afterTax), {strong:true}):''}
         </div>
       </details>
-      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:14px 16px;text-align:center;margin:14px 0;">
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:14px 16px;text-align:center;margin:24px 0;">
         <div style="font-size:20px;margin-bottom:4px;">🤫</div>
         <div style="font-size:14.5px;font-weight:700;color:#9a3412;">Stay quiet</div>
         <div style="font-size:12.5px;color:#c2410c;margin-top:2px;">Let them respond first.</div>
