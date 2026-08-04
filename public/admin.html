@@ -1284,7 +1284,6 @@
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
-      <button data-nav="calls"><span class="ic" data-ico="voicemail">📨</span> Calls <span class="nav-badge" id="callsBadge" style="display:none;"></span></button>
       <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="callanalytics" id="navCallAnalytics"><span class="ic" data-ico="analytics">📈</span> Call Performance</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
@@ -1695,7 +1694,10 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
     logout(); throw new Error('Session expired — please sign in again');
   }
   const data = await res.json().catch(()=>({}));
-  if (!res.ok) { const e=new Error(data.error || 'Request failed'); if(data.code) e.code=data.code; throw e; }
+  // tech_id has to ride along too: apiConfirmUnavailable's "book them anyway?"
+  // override is gated on it, so without this every tech_unavailable conflict
+  // was a dead end even though both sides were built to offer the override.
+  if (!res.ok) { const e=new Error(data.error || 'Request failed'); if(data.code) e.code=data.code; if(data.tech_id) e.tech_id=data.tech_id; throw e; }
   return data;
 }
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
@@ -5812,6 +5814,10 @@ async function renderOther(){
         <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Heather's and Joey's weekly work/off schedule, plus every schedule change they make.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherSecCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
+      <div id="otherCalls" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">📨 Calls</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Voicemails from the office phone, with transcripts, plus calls logged through "Take a Call".</div></div>
+        <div style="display:flex;align-items:center;gap:8px;"><span id="otherCallsCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
+      </div>
       <div id="otherWidgetPricing" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">💲 Widget Pricing</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every price the public booking widget charges customers — edit directly, no code or deploy needed.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
@@ -5821,10 +5827,16 @@ async function renderOther(){
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
   document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
+  document.getElementById('otherCalls').onclick=()=>navTo('calls');
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
-  let dispN=0, secN=0;
+  let dispN=0, secN=0, callN=0;
+  try{
+    const c=await api('calls',{ params:{ limit:1 }});
+    callN=Number(c.open_count)||0;
+    const el=document.getElementById('otherCallsCount'); if(el) el.textContent=callN?`${callN} to call back`:'';
+  }catch(_){}
   try{
     const d=await api('disputes',{ params:{ business:current.slug }});
     dispN=(d.disputes||[]).length;
@@ -5836,7 +5848,7 @@ async function renderOther(){
     const c=document.getElementById('otherSecCount'); if(c) c.textContent=secN?`${secN} new`:'';
   }catch(_){}
   const badge=document.getElementById('dispBadge');
-  if(badge){ const total=dispN+secN; if(total){ badge.textContent=total; badge.style.display=''; } else badge.style.display='none'; }
+  if(badge){ const total=dispN+secN+callN; if(total){ badge.textContent=total; badge.style.display=''; } else badge.style.display='none'; }
 }
 
 // ── Widget Pricing ───────────────────────────────────────────────────────────
@@ -6190,7 +6202,7 @@ async function renderCallAnalytics(){
     </div>`;
   }).join('') || `<div class="empty">Nothing yet.</div>`;
 
-  const FUNNEL_LABEL={greet:'Answered',zip:'Gave a zip',tvopts:'Answered questions',schedule:'Picked a time',recap:'Heard the price',wait:'Reacted to price',discount:'Asked for a discount',booked:'Booked'};
+  const FUNNEL_LABEL={greet:'Answered',zip:'Gave a zip',tvopts:'Answered questions',schedule:'Picked a time',recap:'Heard the price',discount:'Asked for a discount',customer:'Gave their details',booked:'Booked'};
   const fTop=Math.max(1,...(d.funnel||[]).map(f=>f.reached));
   const funnelRows=(d.funnel||[]).map(f=>{
     const w=Math.round((f.reached/fTop)*100);
@@ -6435,6 +6447,7 @@ function paintCalls(){
         :`<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`}
        ${handled.length?`<div class="rc-count" style="margin-top:22px;">Handled</div>${handled.map(r=>callCard(r,true)).join('')}`:''}`;
   view.innerHTML=`<div class="wrap">
+    <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
       <h2 class="rc-title">📨 Calls</h2>
       <div class="rc-sub">Voicemails from the office phone, with the transcript so you can read it instead of listening. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
@@ -6532,7 +6545,7 @@ function paintCallBanner(call){
   document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
   document.getElementById('callBannerGo').onclick=()=>{
     dismissBanner(call.id);
-    const b=document.querySelector('[data-nav="calls"]'); if(b) b.click();
+    navTo('calls');
   };
 }
 
@@ -8954,24 +8967,45 @@ function callWizReset(){
 function openTakeCall(){
   if(!current) return;
   closeSidebar();
+  // A call already in progress that was only clicked away from is RESUMED, not
+  // restarted: re-running the reset would throw away the zip, options, quote and
+  // discount already collected and open a SECOND app.calls row for the same
+  // conversation, leaving the first one unresolved forever.
+  if(callWiz && callWiz.id && !callWiz.resolution){
+    document.getElementById('callWizModal').classList.remove('hidden');
+    renderCallWiz();
+    return;
+  }
   callWizReset();
   // The script shares New Booking's option state, so a previous call's (or a
   // previous form's) selections must be cleared or they'd silently ride along
   // into this call's quote.
   resetNbSteps();
   nbAreaName=''; nbZipAreaId=null;
+  // resetNbSteps() does NOT cover these — they're cleared only inside
+  // openNewBooking, so a New Booking dismissed by clicking the backdrop leaves
+  // real money behind: a converted estimate's line items, custom/discount
+  // lines, a waived branch minimum, and the previous job's service id all ride
+  // into this caller's quote and onto the booking that gets created from it.
+  nbConvertLines=null; renderNbConvertSummary();
+  nbCustomLines=[]; nbRenderCustomLines();
+  nbSourceEstimateId=null;
+  nbMinWaived=false;
+  nbServiceId=null;
+  { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=''; }
   document.getElementById('callWizErr').textContent='';
   document.getElementById('callWizModal').classList.remove('hidden');
   renderCallWiz();
 }
 // Closing the panel is NOT the same as ending the call. Clicking off it just
 // gets the script out of the way (to look something up, take another call);
-// the call stays open and is resumed from the Calls tab. Only "Hang up" ends
-// a call, which is what makes every call carry a real outcome instead of a
-// pile of half-finished ones nobody can explain later.
+// the call stays open and clicking "Take a Call" again picks it back up exactly
+// where it left off. Only "Hang up" ends a call, which is what makes every call
+// carry a real outcome instead of a pile of half-finished ones nobody can
+// explain later.
 function closeCallWiz(opts){
   document.getElementById('callWizModal').classList.add('hidden');
-  if(callWiz && callWiz.id && !(opts&&opts.resolved)) toast('Call still open — hang up when you\'re done to record it.');
+  if(callWiz && callWiz.id && !(opts&&opts.resolved)) toast('Call still open — hit "Take a Call" to pick it back up.');
 }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
 document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
@@ -9253,6 +9287,15 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
 // New Booking form. The discount rides along as a negative custom line so it
 // lands in the booking's own line items and the office can see (and edit) it.
 async function cwGoToBooking(){
+  // Neither button that lands here is disabled on click, and this awaits a
+  // round-trip when a discount applies — a double-click used to log the
+  // discount twice, which doubles it in the discount report.
+  if(callWiz.goBusy) return;
+  callWiz.goBusy=true;
+  try{ await cwGoToBookingInner(); } finally{ callWiz.goBusy=false; }
+}
+async function cwGoToBookingInner(){
+  const fromStep=callWiz.step;
   const applied=cwDiscountApplied();
   const bits=[];
   if(callWiz.discSource) bits.push(`heard via ${callWiz.discSource}`);
@@ -9264,12 +9307,19 @@ async function cwGoToBooking(){
   cwTrack('booking_started',{ discount:applied });
   if(applied>0){
     callWiz.discountLabel=`Discount${bits.length?` (${bits.join(', ')})`:''}`;
+    // The server replaces notes wholesale, so this has to carry the quote
+    // breakdown the recap already saved or the call record loses what was
+    // actually quoted and keeps only the discount line.
+    const _note=`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).`;
     await api('call_update',{ method:'POST', body:{ id:callWiz.id,
-      notes:`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).` }}).catch(()=>{});
+      notes: callWiz.quoteNote ? `${callWiz.quoteNote} · ${_note}` : _note }}).catch(()=>{});
   }
   // Stay in the script and take the details here. Bouncing to the New Booking
   // form mid-call meant re-orienting to a different screen while the customer
-  // waits on the line.
+  // waits on the line. If the secretary moved on during the await (e.g. tapped
+  // "Send an estimate instead"), respect that rather than repainting over the
+  // screen they're now filling in.
+  if(callWiz.step!==fromStep) return;
   callWiz.step='customer';
   renderCallWiz();
 }
@@ -9328,6 +9378,12 @@ async function cwSubmitBooking(){
       paymentMethodId=r.paymentMethod.id;
     }
     const selections=nbCollectSelections();
+    // A handyman call collects the job in plain words and nothing else — no
+    // option catalog, so nbCollectSelections() is empty. Without this the tech
+    // arrives at the door with a booking that says only who took the call.
+    if(!isTv && callWiz.handymanDesc){
+      selections.push({ option_id:null, label:'Handyman — '+callWiz.handymanDesc, price:0, quantity:1 });
+    }
     const travelFee=Number(callWiz.surcharge)||0;
     if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
     const ah=cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate);
@@ -9340,25 +9396,41 @@ async function cwSubmitBooking(){
     const tax=Math.round(subtotal*TAX_RATE*100)/100;
     const totalPrice=subtotal+tax;
 
+    // A key built purely from business+date+slot+phone repeats across calls, so
+    // re-booking the same slot after a CANCELLATION matched the cancelled row
+    // and the server handed it straight back as "already exists" — nobody
+    // scheduled, customer told they were booked. Mint a fresh random key per
+    // attempt (cached only so a retry of THIS submit still de-dupes), same as
+    // the New Booking form does.
+    const _fp=[current.slug,callWiz.prefDate,callWiz.selectedSlot.key,phone||email||name].join('|');
+    const _key=nbKeyCache.get(_fp)||nbNewKey();
+    nbKeyCache.set(_fp,_key);
+    // 98"+ TVs are a two-person lift. The wizard already CHARGES for it via the
+    // shared lifting option, but sent needs_lifting:false, so the server never
+    // ran the pair assignment and the job went out one-tech.
+    const _mode=(typeof nbSecondTechMode==='function') ? nbSecondTechMode() : 'none';
+    const _mandatoryPair = isTv && _mode==='mandatory';
     const resp=await apiConfirmUnavailable('booking_create',{
       business: current.slug,
-      idempotency_key: [current.slug,callWiz.prefDate,callWiz.selectedSlot.key,phone||email||name].join('|'),
+      idempotency_key: _key,
       customer:{ name, phone, email,
         address_line1: val('cwCustAddr'), city: val('cwCustCity'),
         state: val('cwCustState'), postal_code: callWiz.zip },
-      service_id: nbServiceId || null,
+      service_id: isTv ? (nbServiceId || null) : null,
       technician_id: 'any', pool:'own',
-      secondary_technician_id: null, pool2:'own',
-      needs_lifting: false,
+      secondary_technician_id: _mandatoryPair ? 'any' : null, pool2:'own',
+      needs_lifting: _mandatoryPair,
       tv_size_category: (typeof nbSelectedLiftingKind==='function' ? nbSelectedLiftingKind() : null) || null,
       scheduled_date: callWiz.prefDate,
       scheduled_slot: callWiz.selectedSlot.key,
       selections, subtotal, tax, price: totalPrice,
-      notes: `Booked on a phone call by ${userName||'the office'}.`,
+      notes: `Booked on a phone call by ${userName||'the office'}.`+
+        ((!isTv && callWiz.handymanDesc) ? ` Job as described on the call: ${callWiz.handymanDesc}` : ''),
       payment_method: payMethod || null,
       payment_method_id: paymentMethodId,
       sms_consent: !!(document.getElementById('cwSmsConsent') && document.getElementById('cwSmsConsent').checked),
     });
+    nbKeyCache.delete(_fp);
     // Conversion is only counted once a booking genuinely exists.
     api('call_update',{ method:'POST', body:{ id:callWiz.id,
       booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' }}).catch(()=>{});
@@ -9373,8 +9445,11 @@ async function cwSubmitBooking(){
   }
 }
 // After-hours fee for a slot — same rule as the booking form and the public
-// widget: an 8 PM start bills $75, or $100 on a Sunday.
+// widget: an 8 PM start bills $75, or $100 on a Sunday. Handyman work is exempt,
+// exactly as nbAfterHoursFee() exempts it on the form — otherwise the same 8 PM
+// handyman job cost $75 more booked over the phone than typed into New Booking.
 function cwAfterHoursFeeFor(slotKey, dateStr){
+  if(callWiz && callWiz.service!=='TV Mounting') return 0;
   if(slotKey!=='s5') return 0;
   const isSunday = dateStr ? new Date(dateStr+'T12:00:00').getDay()===0 : false;
   return isSunday?100:75;
@@ -9432,14 +9507,22 @@ async function renderCallWiz(){
       <button type="button" class="btn" id="cwZipNext" style="margin-top:10px;">Continue</button>`;
     const zipInput=document.getElementById('cwZip');
     const result=document.getElementById('cwZipResult');
-    let lastChecked=null;
-    async function checkZip(){
+    // cwZipDone is set only when a lookup actually COMPLETES, so a lookup merely
+    // in flight can never be mistaken for a finished one. cwZipSeq discards
+    // out-of-order responses: typing 78701, correcting to 78702, and having
+    // 78701's slower reply land last used to overwrite the area, surcharge and
+    // travel fee with the wrong zip's values while callWiz.zip held the new one.
+    let cwZipSeq=0, cwZipDone=null, cwZipPending=null, cwZipFailed=null;
+    function checkZip(){
       const z=zipInput.value.trim();
-      if(z.length!==5 || z===lastChecked) return;
-      lastChecked=z;
+      if(z.length!==5 || z===cwZipDone) return Promise.resolve();
+      const seq=++cwZipSeq;
       result.textContent='Checking…';
+      cwZipPending=(async()=>{
       try{
         const d=await api('zip_area',{ params:{ business:current.slug, postal_code:z }});
+        if(seq!==cwZipSeq) return;   // superseded by a newer zip — drop this reply
+        cwZipDone=z; cwZipFailed=null;
         callWiz.areaName=d.name; callWiz.otherBiz=d.other_business; callWiz.surcharge=Number(d.surcharge)||0;
         // Drives the same Austin price overrides New Booking applies — without
         // this an Austin caller would be quoted Denver rates on the phone while
@@ -9454,13 +9537,21 @@ async function renderCallWiz(){
         else if(d.other_business) result.innerHTML=`That zip is actually served by <b>${esc(d.other_business.name)}</b>, not ${esc(bizName)}.`;
         else result.innerHTML=`We don't have this zip on file yet — double-check it, or continue and note it for the office.`;
       }catch(e){
+        if(seq!==cwZipSeq) return;
         // Reset so the next attempt (blur or Continue) re-runs the lookup
         // instead of silently proceeding on a failed one — the area/surcharge
-        // from a PREVIOUS zip must never ride along under a new zip.
-        lastChecked=null;
+        // from a PREVIOUS zip must never ride along under a new zip. The travel
+        // fee lives in a DOM field the multi-TV discount reads directly, so it
+        // has to be cleared here too or a leftover $65 quietly knocks ~$39 off
+        // a 3-TV quote that has no travel fee at all.
+        cwZipDone=null; cwZipFailed=z;
         callWiz.areaName=null; callWiz.otherBiz=null; callWiz.surcharge=0;
-        result.innerHTML='<span style="color:#b91c1c;">Could not check that zip — try again.</span>';
+        nbAreaName=''; nbZipAreaId=null;
+        { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=''; }
+        result.innerHTML='<span style="color:#b91c1c;">Could not check that zip — press Continue again to go on without it.</span>';
       }
+      })();
+      return cwZipPending;
     }
     zipInput.addEventListener('change', checkZip);
     zipInput.addEventListener('blur', checkZip);
@@ -9477,11 +9568,17 @@ async function renderCallWiz(){
       }
       const nextBtn=document.getElementById('cwZipNext');
       nextBtn.disabled=true;
-      // Continue clicked straight after typing (no blur/change fired yet), or
-      // the earlier lookup failed silently — make sure the area/surcharge
-      // lookup has actually run for THIS zip before moving on.
-      if(z!==lastChecked){ await checkZip(); }
+      // Clicking Continue right after typing fires blur first, which STARTS the
+      // lookup — so "a lookup exists" is not the same as "the lookup finished".
+      // Always wait for the in-flight one (or start one) before moving on, or
+      // the whole call is quoted with no area, no travel fee and no Austin
+      // price overrides.
+      if(z!==cwZipDone) checkZip();
+      if(cwZipPending) await cwZipPending;
       nextBtn.disabled=false;
+      // Lookup genuinely failed: let them retry once, then go on knowingly
+      // rather than trapping them mid-call on a network blip.
+      if(z!==cwZipDone && cwZipFailed!==z) return;
       callWiz.zip=z;
       api('call_update',{ method:'POST', body:{ id:callWiz.id, market:callWiz.areaName||null }}).catch(()=>{});
       cwTrack('zip_checked',{ zip:callWiz.zip, area:callWiz.areaName||null, in_area:!!callWiz.areaName, surcharge:callWiz.surcharge||0 });
@@ -9499,15 +9596,25 @@ async function renderCallWiz(){
   if(s==='tvopts'){
     if(!callWiz.optsLoaded){
       body.innerHTML='<div class="empty">Loading…</div>';
+      // Hang up (and the whole modal) stays clickable while the catalog loads,
+      // so by the time this resolves the wizard may have moved on — or been
+      // reset and restarted as a different call. Painting the question card
+      // over whatever is showing then leaves dead buttons, or worse, walks a
+      // whole call with callWiz.id still null and nothing logged.
+      const my=callWiz;
+      const stale=()=>callWiz!==my || callWiz.step!=='tvopts';
       try{
         const { svc } = await nbEnsureDataCached(current.slug);
+        if(stale()) return;
         nbServices = svc.services || [];
         const tvSvc=nbServices.find(x=>x.category==='TV Mounting');
         if(!tvSvc) throw new Error('TV Mounting service is not set up for this business.');
+        const groups=await nbLoadTvOptions(tvSvc.id);
+        if(stale()) return;
         nbServiceId=tvSvc.id;
-        nbOptionGroups=await nbLoadTvOptions(tvSvc.id);
+        nbOptionGroups=groups;
         callWiz.optsLoaded=true;
-      }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger,#b91c1c);">${esc(e.message||'Could not load the questions')}</div>`; return; }
+      }catch(e){ if(stale()) return; body.innerHTML=`<div class="empty" style="color:var(--danger,#b91c1c);">${esc(e.message||'Could not load the questions')}</div>`; return; }
     }
     const cards=callWizCards();
     if(callWiz.optStep>=cards.length){ callWiz.step='schedule'; renderCallWiz(); return; }
@@ -9637,12 +9744,19 @@ async function renderCallWiz(){
         await loadCwSlots(cell.dataset.date);
       }));
     }
+    let cwSlotSeq=0;
     async function loadCwSlots(date){
+      // Same guard the calendar above already has: click date A then date B and
+      // A's slower reply used to repaint B's list with A's times, so the
+      // secretary read out the wrong day and could pick a slot that isn't even
+      // open on the date the booking is then submitted with.
+      const mySeq=++cwSlotSeq;
       const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
       const params={ business:current.slug, date, technician_id:'any' };
       if(callWiz.zip) params.postal_code=callWiz.zip;
       try{
         const r=await api('available_slots',{ params });
+        if(mySeq!==cwSlotSeq || date!==callWiz.prefDate) return;
         if(!r.slots.length){ list.innerHTML='<div style="color:var(--mute);font-size:13px;">No available times for this date.</div>'; }
         // The 8 PM slot carries an after-hours fee. It is flagged right on the
         // button so the secretary quotes it on the call instead of discovering
@@ -9674,13 +9788,24 @@ async function renderCallWiz(){
           sayWhat();
         }));
         sayWhat();
-      }catch(e){ list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
+      }catch(e){ if(mySeq!==cwSlotSeq) return; list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
     }
     document.getElementById('cwCalPrev').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()-1); loadCwCalendar(); });
     document.getElementById('cwCalNext').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()+1); loadCwCalendar(); });
     loadCwCalendar();
     if(callWiz.prefDate) loadCwSlots(callWiz.prefDate);
-    document.getElementById('cwSchedNext').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
+    // Nothing past this step can get back to the calendar, and the booking is
+    // hard-blocked without a date and slot — so letting Continue through
+    // unpicked used to strand the whole call at "go back and pick a time" with
+    // no way back. Stop it here instead.
+    document.getElementById('cwSchedNext').addEventListener('click', ()=>{
+      if(!callWiz.prefDate || !callWiz.selectedSlot){
+        err.textContent='Pick a date and a time first.';
+        return;
+      }
+      err.textContent='';
+      callWiz.step='recap'; renderCallWiz();
+    });
     return;
   }
 
@@ -9744,7 +9869,8 @@ async function renderCallWiz(){
       cwTrack('price_quoted',{ total:subtotal, after_tax:afterTax, tv_count:nbTotalTvs(),
         travel_fee:travelFee, after_hours_fee:ahFee, service:callWiz.service });
       cwTrack('read_to_customer',{ total:subtotal });
-      api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:lines.join(' · ') }}).catch(()=>{});
+      callWiz.quoteNote=lines.join(' · ');
+      api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:callWiz.quoteNote }}).catch(()=>{});
     }
     // The pause is a strip inside this same card, not its own screen — the
     // price, the quiet reminder, and the two outcomes are all here at once so
@@ -9776,9 +9902,19 @@ async function renderCallWiz(){
         <div style="font-size:12.5px;color:#c2410c;margin-top:2px;">Let them respond first.</div>
       </div>
       <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts — book it</button>
-      <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>`;
-    document.getElementById('cwAccepts').addEventListener('click', ()=>{ cwTrack('accepted'); cwGoToBooking(); });
+      <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>
+      <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← Pick a different day or time</button>`;
+    document.getElementById('cwAccepts').addEventListener('click', e=>{ e.currentTarget.disabled=true; cwTrack('accepted'); cwGoToBooking(); });
     document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
+    // Customers routinely accept the price and then want a different day. Before
+    // this the schedule step was forward-only, so the only way to change it was
+    // to abandon the call and start a second one.
+    document.getElementById('cwRecapBack').addEventListener('click', ()=>{
+      // The new slot can carry a different after-hours fee, so the quote has to
+      // be re-read and re-logged rather than kept from the first pass.
+      callWiz._quoteLogged=false; callWiz.econ=null;
+      callWiz.step='schedule'; renderCallWiz();
+    });
     return;
   }
 
@@ -9799,6 +9935,13 @@ async function renderCallWiz(){
     const secTitle=(label,sub)=>`<div style="border-left:3px solid var(--ink);padding-left:9px;margin:0 0 8px;">
         <span style="font-size:13.5px;font-weight:700;color:var(--ink);">${esc(label)}</span>${sub?` <span style="font-size:12px;font-weight:400;color:var(--mute);">${esc(sub)}</span>`:''}
       </div>`;
+    // This card re-renders on every source tap and again when the profit
+    // projection lands, and both used to wipe whatever the secretary was
+    // half-way through typing. Carry the uncommitted text across the repaint.
+    { const ci=document.getElementById('cwCouponInput'); if(ci) callWiz._couponDraft=ci.value;
+      const mi=document.getElementById('cwManualInput'); if(mi) callWiz._manualDraft=mi.value; }
+    const couponVal = callWiz._couponDraft!=null ? callWiz._couponDraft : (callWiz.discCoupon?callWiz.discCoupon.code:'');
+    const manualVal = callWiz._manualDraft!=null ? callWiz._manualDraft : (callWiz.discManual||'');
     body.innerHTML=`${callWizScript('I hear you. Let me see what I can do — how did you hear about us?')}
       ${secTitle('Where they heard about us', '-'+money(CW_SOURCE_DISCOUNT))}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
@@ -9807,14 +9950,14 @@ async function renderCallWiz(){
 
       ${secTitle('Coupon code they read out')}
       <div style="display:flex;gap:6px;margin-bottom:6px;">
-        <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(callWiz.discCoupon?callWiz.discCoupon.code:'')}">
+        <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(couponVal)}">
         <button type="button" class="btn ghost" id="cwCouponApply" style="width:auto;">Apply</button>
       </div>
       <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:16px;color:var(--mute);">${callWiz.discCoupon?`✓ ${esc(callWiz.discCoupon.code)} — -${money(callWiz.discCoupon.amount)}`:'Same codes that work on the website.'}</div>
 
       ${secTitle('Take something off manually')}
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-        <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${callWiz.discManual||''}">
+        <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${esc(String(manualVal))}">
         <button type="button" class="btn ghost" id="cwManualApply" style="width:auto;">Apply</button>
       </div>
 
@@ -9870,14 +10013,14 @@ async function renderCallWiz(){
       cwTrack('manual_discount',{ requested:callWiz.discManual, allowed:cwDiscountMax(), applied:cwDiscountApplied() });
       renderCallWiz();
     });
-    document.getElementById('cwGoBooking').addEventListener('click', ()=>cwGoToBooking());
+    document.getElementById('cwGoBooking').addEventListener('click', e=>{ e.currentTarget.disabled=true; cwGoToBooking(); });
     document.getElementById('cwGoEstimate').addEventListener('click', ()=>{ callWiz.step='estimate'; renderCallWiz(); });
     document.getElementById('cwGoDeclined').addEventListener('click', async()=>{
       try{
         cwTrack('declined',{ after_discount_offer:cwDiscountApplied() });
         await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
         closeCallWiz({resolved:true}); toast('Call logged.');
-        if(document.querySelector('[data-nav="calls"].on')) renderCalls();
+        if(section==='calls') renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     });
     return;
@@ -9999,7 +10142,7 @@ async function renderCallWiz(){
         cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
         await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:res }});
         closeCallWiz({resolved:true}); toast('Call logged.');
-        if(document.querySelector('[data-nav="calls"].on')) renderCalls();
+        if(section==='calls') renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
     return;

@@ -2426,8 +2426,13 @@ async function bookingCreate(req, res, db, auth, body) {
   // query errors — we ignore that and fall through to a normal create.
   const idempotencyKey = (body.idempotency_key || '').toString().trim() || null;
   if (idempotencyKey) {
+    // A CANCELLED booking must never satisfy this check. Every slot-occupancy
+    // query already excludes cancelled rows, so one matching here would hand the
+    // caller back a dead booking as if it were live: nobody scheduled, customer
+    // told they're confirmed. Re-booking is a real new booking.
     const { data: dupe } = await db.from('bookings')
-      .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+      .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey)
+      .neq('status', 'cancelled').maybeSingle();
     if (dupe?.id) return res.status(200).json({ id: dupe.id, duplicate: true });
   }
 
@@ -2756,7 +2761,8 @@ async function bookingCreate(req, res, db, auth, body) {
     // double-submit is a no-op rather than a phantom job.
     if (idempotencyKey && (bErr.code === '23505' || /idempotency/i.test(bErr.message || '') || /duplicate key/i.test(bErr.message || ''))) {
       const { data: winner } = await db.from('bookings')
-        .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+        .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey)
+        .neq('status', 'cancelled').maybeSingle();   // a cancelled row is not a winner
       if (winner?.id) return res.status(200).json({ id: winner.id, duplicate: true });
     }
     // Tech/slot race lost at the DB (bookings_tech_slot_unique, migration 0073):
@@ -7208,6 +7214,12 @@ async function callEvent(req, res, db, auth, body) {
     patch.discount_amount = Number(meta.amount) || 0;
     patch.discount_detail = meta.detail ? String(meta.detail).slice(0, 200) : null;
   }
+  if (event === 'booking_created' && meta.total != null) {
+    // quoted_total was frozen at the FIRST recap, before any discount, so booked
+    // revenue read higher than what was actually charged and never reconciled
+    // with the discount column sitting next to it. The booked price wins.
+    patch.quoted_total = Number(meta.total) || 0;
+  }
   if (['booking_created', 'estimate_sent', 'declined', 'abandoned'].includes(event)) {
     patch.ended_at = new Date().toISOString();
   }
@@ -7290,10 +7302,19 @@ async function callAnalytics(req, res, db, auth) {
   // ── Where calls die. Counted from the furthest step each call reached, so a
   // call that quit on the zip question is distinguishable from one that heard
   // the price and walked.
-  const FUNNEL = ['greet', 'zip', 'tvopts', 'schedule', 'recap', 'wait', 'discount', 'booked'];
+  // These must be the steps the wizard actually stamps. 'wait' was a screen that
+  // got merged into the recap and is never emitted, while 'customer',
+  // 'handydesc', 'estimate' and 'resolution' ARE emitted and were missing — so
+  // indexOf returned -1 and every deep call that didn't book was reported as
+  // dying at hello, which is precisely the group this chart exists to explain.
+  const FUNNEL = ['greet', 'zip', 'tvopts', 'schedule', 'recap', 'discount', 'customer', 'booked'];
+  // Branch steps that aren't stages of their own: a handyman description is the
+  // handyman equivalent of the options step, and estimate/resolution are exits
+  // taken from the discount screen.
+  const STEP_ALIAS = { handydesc: 'tvopts', estimate: 'discount', resolution: 'discount' };
   const funnel = FUNNEL.map(step => ({ step, reached: 0 }));
   for (const r of rows) {
-    const reached = isBooked(r) ? 'booked' : (r.reached_step || 'greet');
+    const reached = isBooked(r) ? 'booked' : (STEP_ALIAS[r.reached_step] || r.reached_step || 'greet');
     const idx = FUNNEL.indexOf(reached);
     // Reaching a step means having reached everything before it.
     for (let i = 0; i <= (idx < 0 ? 0 : idx); i++) funnel[i].reached++;
