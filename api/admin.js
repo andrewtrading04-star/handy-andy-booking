@@ -1604,25 +1604,37 @@ async function couponsList(req, res, db, auth) {
     if (/coupons/.test(error.message || '')) return res.status(200).json({ coupons: [], usage: {} });
     throw error;
   }
-  // Redemption counts + what each code has actually given away, from the
-  // booking line items. One read, tallied in memory — the alternative is a
-  // per-code query and the list is small.
+  // Redemption counts + what each code has actually given away. Line items live
+  // in their OWN table (app.booking_line_items) — bookings has no line_items
+  // column at all, so reading it there silently returned nothing and every code
+  // reported "never used" while 16 real redemptions sat in the database.
   const usage = {};
   try {
-    const { data: bks } = await db.from('bookings')
-      .select('line_items, scheduled_at, status')
-      .eq('business_id', biz.id).neq('status', 'cancelled').not('line_items', 'is', null)
-      .limit(5000);
-    for (const b of bks || []) {
-      for (const li of (Array.isArray(b.line_items) ? b.line_items : [])) {
-        const m = String(li.name || '').match(/^coupon\s+([A-Z0-9_-]+)/i);
-        if (!m) continue;
-        const k = m[1].toUpperCase();
-        const u = usage[k] || (usage[k] = { count: 0, total: 0, last: null });
-        u.count++;
-        u.total += Math.abs(Number(li.line_total) || 0);
-        if (!u.last || (b.scheduled_at && b.scheduled_at > u.last)) u.last = b.scheduled_at || u.last;
-      }
+    const { data: lis } = await db.from('booking_line_items')
+      .select('name, line_total, booking_id, created_at')
+      .eq('business_id', biz.id).ilike('name', 'coupon%')
+      .limit(20000);
+    // Exclude cancelled bookings: a cancelled job's coupon was never really
+    // given away, and counting it overstates what the code has cost.
+    const ids = [...new Set((lis || []).map(l => l.booking_id).filter(Boolean))];
+    const cancelled = new Set();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: bk } = await db.from('bookings')
+        .select('id, status').in('id', ids.slice(i, i + 200)).eq('status', 'cancelled');
+      for (const b of bk || []) cancelled.add(b.id);
+    }
+    for (const li of lis || []) {
+      if (li.booking_id && cancelled.has(li.booking_id)) continue;
+      // "Coupon TV2026" -> TV2026. A bare "Coupon" line (one exists, from an
+      // early booking) has no code to attribute, so it's counted nowhere
+      // rather than being guessed onto some code that didn't earn it.
+      const m = String(li.name || '').match(/^coupon\s+([A-Z0-9_-]+)/i);
+      if (!m) continue;
+      const k = m[1].toUpperCase();
+      const u = usage[k] || (usage[k] = { count: 0, total: 0, last: null });
+      u.count++;
+      u.total += Math.abs(Number(li.line_total) || 0);
+      if (li.created_at && (!u.last || li.created_at > u.last)) u.last = li.created_at;
     }
   } catch { /* usage is a nice-to-have; never fail the list over it */ }
   return res.status(200).json({ coupons: data || [], usage });
