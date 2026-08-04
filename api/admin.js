@@ -63,6 +63,7 @@ function bookingStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
+import { couponAmountFor } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 // What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
@@ -326,6 +327,8 @@ export default async function handler(req, res) {
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
+      case 'quote_economics':   return await quoteEconomics(req, res, db, auth, body);
+      case 'quote_coupon':      return await quoteCoupon(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -7088,6 +7091,79 @@ async function estimateDecline(req, res, db, auth, body) {
     sms_sent: !!(smsResult && smsResult.ok),
     email_sent: !!(emailResult && emailResult.sent),
   });
+}
+
+// ── How much can we discount this quote without losing money? ────────────────
+// The owner's rule: never take a job below $50 of profit. Profit here is NOT a
+// percentage guess — the quote's line items are run through the SAME payroll
+// engine that pays the techs (computeJobPay), so the TV base rates, bracket
+// rates, wire/fireplace add-ons, travel tiers and the after-hours bonus are all
+// priced exactly as they will be on payday. Bracket hardware the business buys
+// is subtracted too, same as the Profit card does.
+//
+// No tech is assigned yet at quote time, so this prices the job for a standard
+// (non-Juan) tech: Juan supplies his own brackets and is reimbursed through his
+// payout, which makes his jobs look CHEAPER to the business. Quoting against
+// the standard rate is the conservative choice — the real job can only come in
+// at or above this projection, never below it.
+const QUOTE_PROFIT_FLOOR = 50;
+async function quoteEconomics(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const lines = (Array.isArray(body.line_items) ? body.line_items : []).map(li => ({
+    name: String(li.name || li.label || ''),
+    quantity: Number(li.quantity) || 1,
+    line_total: Number(li.line_total != null ? li.line_total : (Number(li.price) || 0) * (Number(li.quantity) || 1)) || 0,
+    kind: li.kind || null,
+  }));
+  const price = Math.round(lines.reduce((t, li) => t + li.line_total, 0) * 100) / 100;
+
+  // Same projection shape computeJobEconomics builds for an upcoming job: force
+  // completed + paid so the payment gate doesn't zero out a job that hasn't
+  // happened yet.
+  const projJob = {
+    status: 'completed',
+    payment_status: 'paid',
+    price,
+    subtotal: price,
+    notes: '',
+    customer_notes: '',
+    service_name: '',
+    business_slug: biz.slug,
+    line_items: lines,
+    scheduled_at: body.scheduled_at || new Date().toISOString(),
+    travel_payout: 0,   // derived from the ticket's own surcharge line by the engine
+    second_tech: false,
+  };
+  const { pay, flags } = computeJobPay(projJob, 'Office Quote');
+  const payout = Number(pay) || 0;
+  const bracketCost = bracketHardwareCost(lines, false);
+  const profit = Math.round(price - payout - bracketCost);
+  const maxDiscount = Math.max(0, profit - QUOTE_PROFIT_FLOOR);
+
+  return res.status(200).json({
+    price,
+    // Only the owner sees the raw economics; a secretary gets the ceiling they
+    // are allowed to work within, which is all they need to close the call.
+    ...(auth.role === 'owner' ? { payout: Math.round(payout), bracket_cost: bracketCost, profit, flags } : {}),
+    profit,
+    max_discount: maxDiscount,
+    floor: QUOTE_PROFIT_FLOOR,
+  });
+}
+
+// Validate a promo code the customer read out over the phone. Resolves against
+// the SAME table the public booking widget uses, so the office can never tell a
+// caller a live code is invalid (or honor one that has been retired).
+async function quoteCoupon(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const code = String(body.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'code required' });
+  const amount = couponAmountFor(biz.slug, code);
+  if (!amount) return res.status(200).json({ ok: false, code, amount: 0 });
+  return res.status(200).json({ ok: true, code, amount });
 }
 
 // ── Public "what we do" services list (no admin auth) ────────────────────────

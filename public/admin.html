@@ -8739,6 +8739,10 @@ function callWizReset(){
     zip:'', areaName:null, otherBiz:null, surcharge:0,
     optStep:0, optsLoaded:false,
     handymanDesc:'',
+    // Discount state, only ever populated on the "customer pushed back" branch.
+    // econ holds the server's profit projection for THIS quote, which is what
+    // caps how much can be given away.
+    econ:null, discSource:null, discCoupon:null, discManual:0,
     prefDate:'', selectedSlot:null,
     calMonth:null, availDates:null,
     resolution:null,
@@ -8971,6 +8975,68 @@ function cwJobSummary(){
   if(!parts.length) return '';
   if(parts.length===1) return parts[0];
   return parts.slice(0,-1).join(', ')+', and '+parts[parts.length-1];
+}
+// Where the caller heard about us. Each is worth the same $10 — it is a
+// thank-you for the referral channel, not a per-channel bidding war, and a
+// flat number is one less thing to get wrong out loud on a call.
+const CW_SOURCE_DISCOUNT = 10;
+const CW_SOURCES = ['Facebook', 'Yelp', 'Google', 'Nextdoor', 'Friend or referral', 'Other'];
+// Total coming off this quote. The three tools stack, but the SUM is clamped to
+// what the profit floor allows — the clamp is the only thing standing between
+// a persuasive customer and a job that costs more to do than it earns.
+function cwDiscountRaw(){
+  return (callWiz.discSource ? CW_SOURCE_DISCOUNT : 0)
+       + (callWiz.discCoupon ? Number(callWiz.discCoupon.amount) || 0 : 0)
+       + (Number(callWiz.discManual) || 0);
+}
+function cwDiscountMax(){
+  return callWiz.econ ? Math.max(0, Number(callWiz.econ.max_discount) || 0) : 0;
+}
+function cwDiscountApplied(){
+  return Math.min(cwDiscountRaw(), cwDiscountMax());
+}
+// Ask the server what this job is actually worth to the business. The
+// projection runs through the real payroll engine (see quoteEconomics), so the
+// ceiling reflects the tech pay this specific job will incur — a 1-TV ticket
+// and a 4-TV ticket get very different answers rather than one flat rule.
+async function cwLoadEconomics(priced, travelFee, ahFee){
+  const lines=(priced||[]).map(l=>({ name:l.label, quantity:l.quantity, line_total:l.price*l.quantity }));
+  if(travelFee>0) lines.push({ name:'Travel Fee', quantity:1, line_total:travelFee, kind:'fee' });
+  if(ahFee>0) lines.push({ name:'After-hours fee', quantity:1, line_total:ahFee, kind:'fee' });
+  callWiz.preDiscountTotal=lines.reduce((t,l)=>t+l.line_total,0);
+  try{
+    callWiz.econ=await api('quote_economics',{ method:'POST', body:{
+      business:current.slug, line_items:lines,
+      scheduled_at: callWiz.prefDate ? new Date(callWiz.prefDate+'T12:00:00').toISOString() : undefined,
+    }});
+  }catch(e){
+    // Never let a failed projection quietly authorize an unlimited discount —
+    // no answer means no room to discount.
+    callWiz.econ={ max_discount:0, profit:null, error:e.message||'could not price this job' };
+  }
+  if(callWiz.step==='discount') renderCallWiz();
+}
+// Hand the whole call — answers, chosen slot, and any discount — into the real
+// New Booking form. The discount rides along as a negative custom line so it
+// lands in the booking's own line items and the office can see (and edit) it.
+async function cwGoToBooking(){
+  const applied=cwDiscountApplied();
+  const bits=[];
+  if(callWiz.discSource) bits.push(`heard via ${callWiz.discSource}`);
+  if(callWiz.discCoupon) bits.push(`code ${callWiz.discCoupon.code}`);
+  if(callWiz.discManual>0) bits.push(`manual $${callWiz.discManual}`);
+  if(applied>0){
+    await api('call_update',{ method:'POST', body:{ id:callWiz.id,
+      notes:`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).` }}).catch(()=>{});
+  }
+  closeCallWiz();
+  toast(applied>0 ? `Carried over with ${money(applied)} off — add the customer's details.` : 'Answers carried over — just add the customer\'s details and confirm the time.');
+  openNewBooking({
+    postal_code: callWiz.zip,
+    _keepOptions: callWiz.service==='TV Mounting',
+    _discount: applied>0 ? { amount:applied, label:`Discount${bits.length?` (${bits.join(', ')})`:''}` } : null,
+    preferred_slots: callWiz.prefDate ? [{ date:callWiz.prefDate, label:callWiz.selectedSlot?callWiz.selectedSlot.label:null, slot_key:callWiz.selectedSlot?callWiz.selectedSlot.key:null }] : undefined,
+  });
 }
 // After-hours fee for a slot — same rule as the booking form and the public
 // widget: an 8 PM start bills $75, or $100 on a Sunday.
@@ -9264,7 +9330,11 @@ async function renderCallWiz(){
       whenTxt = callWiz.selectedSlot ? `${day} at ${callWiz.selectedSlot.label}` : day;
       lines.push(`Scheduled: ${whenTxt}`);
     }
-    const subtotal=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
+    const preDiscount=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
+    const discount=cwDiscountApplied();
+    const subtotal=Math.max(0, preDiscount-discount);
+    if(discount>0) lines.push(`Discount — -${money(discount)}`);
+    const afterTax=Math.round(subtotal*(1+TAX_RATE)*100)/100;
     // The line the secretary reads. The amount is spoken the way it is said out
     // loud ("four fifty six"), with the digits shown underneath for their eyes.
     const summary=cwJobSummary();
@@ -9272,33 +9342,116 @@ async function renderCallWiz(){
     const sentence = callWiz.service==='TV Mounting' && summary
       ? `Ok, I have ${summary}${whenTxt?` for ${whenTxt}`:''}. The total before tax for this installation is ${spoken}.`
       : `${callWiz.handymanDesc?`Ok, I have ${callWiz.handymanDesc}`:'Ok'}${whenTxt?` for ${whenTxt}`:''}.${subtotal>0?` The total before tax is ${spoken}.`:''}`;
+    // Kick off the profit projection now, in the background, so the discount
+    // card (one tap away) already knows its ceiling instead of making the
+    // secretary wait mid-conversation.
+    if(!callWiz.econ) cwLoadEconomics(priced, travelFee, ahFee);
     body.innerHTML=`${callWizScript(sentence)}
       ${subtotal>0?`<div style="text-align:center;margin:-4px 0 12px;font-size:12px;color:var(--mute);">${esc(money(subtotal))} before tax</div>`:''}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
         ${lines.map(l=>esc(l)).join('<br>')}
-        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Total before tax: ${esc(money(subtotal))}</div>`:''}
+        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Total before tax: ${esc(money(subtotal))}
+          <div style="font-weight:700;margin-top:3px;">Total after tax: ${esc(money(afterTax))}</div></div>`:''}
       </div>
+      <button type="button" class="btn" id="cwReadIt">I've read this to them →</button>`;
+    document.getElementById('cwReadIt').addEventListener('click', async()=>{
+      await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:lines.join(' · ') }}).catch(()=>{});
+      callWiz.step='wait'; renderCallWiz();
+    });
+    return;
+  }
+
+  // The pause. Deliberately its own screen with nothing else on it: the whole
+  // point is that the secretary stops talking after the price and lets the
+  // customer react first. Putting this on the price card would have them read
+  // straight through it.
+  if(s==='wait'){
+    body.innerHTML=`
+      <div style="background:var(--line2);border-radius:10px;padding:22px 16px;text-align:center;margin-bottom:14px;">
+        <div style="font-size:34px;line-height:1;margin-bottom:10px;">🤫</div>
+        <div style="font-size:17px;font-weight:800;margin-bottom:6px;">Wait for the customer to respond.</div>
+        <div style="font-size:14px;color:var(--mute);line-height:1.5;">Stay quiet. Let them speak first.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;">✓ Customer accepts — book it</button>
+        <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>
+      </div>`;
+    document.getElementById('cwAccepts').addEventListener('click', ()=>cwGoToBooking());
+    document.getElementById('cwPushback').addEventListener('click', ()=>{ callWiz.step='discount'; renderCallWiz(); });
+    return;
+  }
+
+  // Discount tools, only reachable when the customer actually pushed back. The
+  // ceiling comes from the server's profit projection for THIS job, so a thin
+  // ticket simply has nothing to give and the screen says so rather than
+  // letting the secretary talk their way into an unprofitable booking.
+  if(s==='discount'){
+    const max=cwDiscountMax();
+    const raw=cwDiscountRaw();
+    const applied=cwDiscountApplied();
+    const capped=raw>max;
+    const loading=!callWiz.econ;
+    const newTotal=Math.max(0,(Number(callWiz.preDiscountTotal)||0)-applied);
+    body.innerHTML=`${callWizScript('I hear you. Let me see what I can do — how did you hear about us?')}
+      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Where they heard about us · -${money(CW_SOURCE_DISCOUNT)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+        ${CW_SOURCES.map(src=>`<button type="button" class="btn ${callWiz.discSource===src?'':'ghost'} sm" style="width:auto;" data-cwsrc="${esc(src)}">${esc(src)}</button>`).join('')}
+      </div>
+
+      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Coupon code they read out</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(callWiz.discCoupon?callWiz.discCoupon.code:'')}">
+        <button type="button" class="btn ghost" id="cwCouponApply" style="width:auto;">Apply</button>
+      </div>
+      <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:14px;color:var(--mute);">${callWiz.discCoupon?`✓ ${esc(callWiz.discCoupon.code)} — -${money(callWiz.discCoupon.amount)}`:'Same codes that work on the website.'}</div>
+
+      <div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;">Take something off manually</div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${callWiz.discManual||''}">
+        <button type="button" class="btn ghost" id="cwManualApply" style="width:auto;">Apply</button>
+      </div>
+
+      <div style="background:var(--line2);border-radius:10px;padding:12px 14px;margin:14px 0;font-size:13.5px;line-height:1.8;">
+        ${loading
+          ? '<div style="color:var(--mute);">Working out how much we can give…</div>'
+          : `<div>Most we can give on this job: <b>${esc(money(max))}</b></div>
+             <div>Discount applied: <b>${esc(money(applied))}</b>${capped?` <span style="color:#b45309;">(asked for ${esc(money(raw))} — capped)</span>`:''}</div>
+             <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line);font-weight:800;">New total before tax: ${esc(money(newTotal))}</div>
+             <div style="font-weight:800;">New total after tax: ${esc(money(Math.round(newTotal*(1+TAX_RATE)*100)/100))}</div>
+             ${max<=0?'<div style="color:#b91c1c;margin-top:6px;font-size:12.5px;">This job is too thin to discount — there is nothing to give without losing money on it.</div>':''}`}
+      </div>
+      ${applied>0?callWizScript(`Best I can do is ${cwSpokenAmount(newTotal).toUpperCase()} before tax.`):''}
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button type="button" class="btn" id="cwGoBooking">Continue to booking →</button>
         <button type="button" class="btn ghost" id="cwGoEstimate">Send an estimate instead</button>
         <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
       </div>`;
-    document.getElementById('cwGoBooking').addEventListener('click', async()=>{
-      const notes=lines.join(' · ');
-      await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes }}).catch(()=>{});
-      closeCallWiz();
-      toast('Answers carried over — just add the customer\'s details and confirm the time.');
-      openNewBooking({
-        postal_code: callWiz.zip,
-        _keepOptions: callWiz.service==='TV Mounting',
-        preferred_slots: callWiz.prefDate ? [{ date:callWiz.prefDate, label:callWiz.selectedSlot?callWiz.selectedSlot.label:null, slot_key:callWiz.selectedSlot?callWiz.selectedSlot.key:null }] : undefined,
-      });
+    body.querySelectorAll('[data-cwsrc]').forEach(b=>b.addEventListener('click', ()=>{
+      const v=b.dataset.cwsrc;
+      callWiz.discSource = callWiz.discSource===v ? null : v;   // tap again to clear
+      renderCallWiz();
+    }));
+    document.getElementById('cwCouponApply').addEventListener('click', async()=>{
+      const code=document.getElementById('cwCouponInput').value.trim().toUpperCase();
+      const msg=document.getElementById('cwCouponMsg');
+      if(!code){ callWiz.discCoupon=null; renderCallWiz(); return; }
+      msg.textContent='Checking…';
+      try{
+        const r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }});
+        if(r.ok){ callWiz.discCoupon={code:r.code, amount:r.amount}; }
+        else { callWiz.discCoupon=null; msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`; return; }
+        renderCallWiz();
+      }catch(e){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(e.message||'Could not check that code')}</span>`; }
     });
+    document.getElementById('cwManualApply').addEventListener('click', ()=>{
+      callWiz.discManual=Math.max(0, Number(document.getElementById('cwManualInput').value)||0);
+      renderCallWiz();
+    });
+    document.getElementById('cwGoBooking').addEventListener('click', ()=>cwGoToBooking());
     document.getElementById('cwGoEstimate').addEventListener('click', ()=>{ callWiz.step='estimate'; renderCallWiz(); });
     document.getElementById('cwGoDeclined').addEventListener('click', async()=>{
-      const notes=lines.join(' · ');
       try{
-        await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes, resolution:'refused' }});
+        await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
         closeCallWiz(); toast('Call logged.');
         if(document.querySelector('[data-nav="calls"].on')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
@@ -9528,6 +9681,15 @@ async function openNewBooking(prefill){
     if(catSel) catSel.value='TV Mounting';
     renderNbServices('TV Mounting');
     renderNbSteps();
+  }
+  // A discount agreed on the phone rides in as a negative custom line, so it
+  // lands in the booking's real line items — visible, editable, and counted by
+  // the same total the customer will be charged.
+  if(prefill && prefill._discount && prefill._discount.amount>0){
+    const d=prefill._discount;
+    nbCustomLines=[{ label:d.label||'Discount', price:String(-Math.abs(d.amount)) }];
+    nbRenderCustomLines();
+    updateNbTotal();
   }
 }
 // Lines carried over when converting an approved estimate into a booking. Null

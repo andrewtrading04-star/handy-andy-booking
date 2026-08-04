@@ -237,6 +237,18 @@ const NATIVE_COUPONS = {
   'mile-high':  HA_COUPONS,
 };
 
+// The one place any surface resolves a promo code to a dollar amount. Exported
+// so the office's phone-quote flow (api/admin.js quote_coupon) honors EXACTLY
+// the codes a customer can use online — a second hand-maintained list would
+// drift the moment a code is added here, and the office would be telling
+// callers a code is invalid while the website accepts it.
+export function couponAmountFor(businessSlug, rawCode) {
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (!code) return 0;
+  const map = businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
+  return Number(map[code]) || 0;
+}
+
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
 // RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
 function icsEscape(s) {
