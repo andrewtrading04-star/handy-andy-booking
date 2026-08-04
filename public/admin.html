@@ -8936,11 +8936,6 @@ document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==
 // by sending a quick estimate, or by logging a decline. Every path finishes
 // at the resolution step so nothing falls through without a recorded outcome.
 let callWiz=null;
-// Set when a call hands off to New Booking, cleared when that booking actually
-// gets created (or when a different booking flow starts). This is what makes
-// "calls vs booked" a measured number rather than an assumption — reaching the
-// booking form is not the same as booking.
-let cwPendingBookingCallId=null;
 function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
@@ -9267,22 +9262,115 @@ async function cwGoToBooking(){
     source:callWiz.discSource||null, coupon:callWiz.discCoupon?callWiz.discCoupon.code:null,
     manual:callWiz.discManual||0, max_allowed:cwDiscountMax() });
   cwTrack('booking_started',{ discount:applied });
-  // Hand the call id to the booking form. Conversion is only trustworthy if the
-  // booking that ACTUALLY gets created reports back — a call that reached this
-  // screen and was then abandoned must not count as booked.
-  cwPendingBookingCallId=callWiz.id;
   if(applied>0){
+    callWiz.discountLabel=`Discount${bits.length?` (${bits.join(', ')})`:''}`;
     await api('call_update',{ method:'POST', body:{ id:callWiz.id,
       notes:`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).` }}).catch(()=>{});
   }
-  closeCallWiz({resolved:true});
-  toast(applied>0 ? `Carried over with ${money(applied)} off — add the customer's details.` : 'Answers carried over — just add the customer\'s details and confirm the time.');
-  openNewBooking({
-    postal_code: callWiz.zip,
-    _keepOptions: callWiz.service==='TV Mounting',
-    _discount: applied>0 ? { amount:applied, label:`Discount${bits.length?` (${bits.join(', ')})`:''}` } : null,
-    preferred_slots: callWiz.prefDate ? [{ date:callWiz.prefDate, label:callWiz.selectedSlot?callWiz.selectedSlot.label:null, slot_key:callWiz.selectedSlot?callWiz.selectedSlot.key:null }] : undefined,
-  });
+  // Stay in the script and take the details here. Bouncing to the New Booking
+  // form mid-call meant re-orienting to a different screen while the customer
+  // waits on the line.
+  callWiz.step='customer';
+  renderCallWiz();
+}
+// Card entry for the call script. Deliberately its own Stripe instance rather
+// than sharing New Booking's: that one caches a card Element mounted inside the
+// booking modal, and re-mounting the same Element in a second place detaches it
+// from the first. Uses the same per-business publishable key resolution, so a
+// Dom's card still tokenizes into Dom's Stripe account.
+let cwStripe=null, cwStripeCard=null, cwStripePk=null;
+function cwEnsureStripe(){
+  const pk=currentNbStripePk();
+  if(!pk) return Promise.reject(new Error('Card entry needs a refresh — press Ctrl+Shift+R, then try again.'));
+  return nbWithTimeout(new Promise((resolve,reject)=>{
+    const init=()=>{
+      try{
+        if(cwStripeCard){ try{ cwStripeCard.unmount(); }catch(_){} cwStripeCard=null; }
+        cwStripe=window.Stripe(pk);
+        cwStripeCard=cwStripe.elements().create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
+        cwStripeCard.mount('#cwStripeCard');
+        cwStripePk=pk;
+        resolve();
+      }catch(err){ reject(err); }
+    };
+    if(window.Stripe){ init(); return; }
+    const s=document.createElement('script'); s.src='https://js.stripe.com/v3/';
+    s.onload=init; s.onerror=()=>reject(new Error('Could not load Stripe.')); document.head.appendChild(s);
+  }),20000,'Could not load the card processor — check your connection and try again.');
+}
+// Create the booking straight from the call. Prices are assembled the same way
+// the New Booking form assembles them (same collector, same travel/after-hours
+// lines, same tax) so a job booked on the phone is priced identically to one
+// keyed into the form.
+async function cwSubmitBooking(){
+  const err=document.getElementById('callWizErr'); err.textContent='';
+  const val=id=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
+  const name=val('cwCustName'), phone=val('cwCustPhone'), email=val('cwCustEmail');
+  if(!name){ err.textContent='Customer name is required.'; return; }
+  if(!phone){ err.textContent='Phone number is required.'; return; }
+  if(!email){ err.textContent='Email is required — the confirmation goes there.'; return; }
+  if(!callWiz.prefDate || !callWiz.selectedSlot){ err.textContent='Go back and pick a date and time first.'; return; }
+
+  const payMethod=val('cwPayMethod');
+  const skipCard=document.getElementById('cwSkipCard') && document.getElementById('cwSkipCard').checked;
+  const isTv=callWiz.service==='TV Mounting';
+  if(isTv && payMethod!=='card'){ err.textContent='TV mounting jobs need a card on file.'; return; }
+  if(!payMethod){ err.textContent='Pick a payment method.'; return; }
+
+  const btn=document.getElementById('cwBookNow');
+  btn.disabled=true; btn.textContent='Booking…';
+  try{
+    let paymentMethodId=null;
+    if(payMethod==='card' && !skipCard){
+      if(!cwStripeCard) throw new Error('Card form is not ready — reopen this step.');
+      const r=await nbWithTimeout(cwStripe.createPaymentMethod({type:'card',card:cwStripeCard}),25000,'Card processor timed out.');
+      if(r.error) throw new Error(r.error.message||'That card could not be accepted.');
+      paymentMethodId=r.paymentMethod.id;
+    }
+    const selections=nbCollectSelections();
+    const travelFee=Number(callWiz.surcharge)||0;
+    if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
+    const ah=cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate);
+    if(ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
+      selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:ah,quantity:1});
+    }
+    const disc=cwDiscountApplied();
+    if(disc>0) selections.push({option_id:null,label:callWiz.discountLabel||'Discount',price:-disc,quantity:1});
+    const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
+    const tax=Math.round(subtotal*TAX_RATE*100)/100;
+    const totalPrice=subtotal+tax;
+
+    const resp=await apiConfirmUnavailable('booking_create',{
+      business: current.slug,
+      idempotency_key: [current.slug,callWiz.prefDate,callWiz.selectedSlot.key,phone||email||name].join('|'),
+      customer:{ name, phone, email,
+        address_line1: val('cwCustAddr'), city: val('cwCustCity'),
+        state: val('cwCustState'), postal_code: callWiz.zip },
+      service_id: nbServiceId || null,
+      technician_id: 'any', pool:'own',
+      secondary_technician_id: null, pool2:'own',
+      needs_lifting: false,
+      tv_size_category: (typeof nbSelectedLiftingKind==='function' ? nbSelectedLiftingKind() : null) || null,
+      scheduled_date: callWiz.prefDate,
+      scheduled_slot: callWiz.selectedSlot.key,
+      selections, subtotal, tax, price: totalPrice,
+      notes: `Booked on a phone call by ${userName||'the office'}.`,
+      payment_method: payMethod || null,
+      payment_method_id: paymentMethodId,
+      sms_consent: !!(document.getElementById('cwSmsConsent') && document.getElementById('cwSmsConsent').checked),
+    });
+    // Conversion is only counted once a booking genuinely exists.
+    api('call_update',{ method:'POST', body:{ id:callWiz.id,
+      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' }}).catch(()=>{});
+    cwTrack('booking_created',{ booking_id: resp&&resp.id?resp.id:null, total: totalPrice });
+    if(resp&&resp.warning) alert('⚠ '+resp.warning);
+    closeCallWiz({resolved:true});
+    toast(resp&&resp.duplicate ? 'That booking already existed — no duplicate created' : 'Booked ✓');
+    refreshCurrent();
+  }catch(e){
+    err.textContent=e.message||'Could not create the booking.';
+    btn.disabled=false; btn.textContent='Book it';
+  }
 }
 // After-hours fee for a slot — same rule as the booking form and the public
 // widget: an 8 PM start bills $75, or $100 on a Sunday.
@@ -9357,6 +9445,11 @@ async function renderCallWiz(){
         // this an Austin caller would be quoted Denver rates on the phone while
         // the same job booked online priced lower.
         nbAreaName=d.name||''; nbZipAreaId=d.service_area_id||null;
+        // nbCollectSelections' multi-TV FEE discount is computed from the travel
+        // fee, which it reads off the booking form's field. Left empty it reads
+        // as $0 and a 3+ TV call would get a different discount than the same
+        // job keyed into the form.
+        { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=callWiz.surcharge||''; }
         if(d.name) result.innerHTML=`<span style="color:var(--ok,#15803d);">✓ In our ${esc(d.name)} service area.</span>`;
         else if(d.other_business) result.innerHTML=`That zip is actually served by <b>${esc(d.other_business.name)}</b>, not ${esc(bizName)}.`;
         else result.innerHTML=`We don't have this zip on file yet — double-check it, or continue and note it for the office.`;
@@ -9743,6 +9836,65 @@ async function renderCallWiz(){
         if(document.querySelector('[data-nav="calls"].on')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     });
+    return;
+  }
+
+  // Take the details and book, without leaving the call. Rendered once and
+  // never re-rendered while it's open — the Stripe card Element lives inside
+  // this markup, and a repaint would detach it.
+  if(s==='customer'){
+    const disc=cwDiscountApplied();
+    const isTv=callWiz.service==='TV Mounting';
+    let whenTxt='';
+    if(callWiz.prefDate){
+      let day=callWiz.prefDate;
+      try{ day=new Date(callWiz.prefDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }catch(_){}
+      whenTxt=callWiz.selectedSlot?`${day}, ${callWiz.selectedSlot.label}`:day;
+    }
+    body.innerHTML=`${callWizScript('Perfect — let me get you booked in. Can I get your name, phone, and email?')}
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">${esc(whenTxt)}${disc>0?` · ${esc(money(disc))} off applied`:''}</div>
+      <input class="search" id="cwCustName" style="margin:0 0 8px;" placeholder="Full name *">
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input class="search" id="cwCustPhone" style="margin:0;" placeholder="Phone *" inputmode="tel">
+        <input class="search" id="cwCustEmail" style="margin:0;" placeholder="Email *" inputmode="email">
+      </div>
+      ${callWizScript('And the address it\'s going to?')}
+      <input class="search" id="cwCustAddr" style="margin:0 0 8px;" placeholder="Street address">
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <input class="search" id="cwCustCity" style="margin:0;" placeholder="City">
+        <input class="search" id="cwCustState" style="margin:0;max-width:80px;" placeholder="ST">
+        <input class="search" style="margin:0;max-width:90px;background:var(--line2);" value="${esc(callWiz.zip||'')}" disabled>
+      </div>
+      ${callWizScript(isTv?'I just need a card to hold the appointment. It is not charged until the job is done.':'How will you be paying?')}
+      <select class="search" id="cwPayMethod" style="margin:0 0 8px;width:100%;">
+        <option value="">Select payment method</option>
+        <option value="card"${isTv?' selected':''}>Credit Card</option>
+        ${isTv?'':'<option value="cash">Cash</option><option value="quote">Quote (no charge)</option>'}
+      </select>
+      <div id="cwCardWrap" style="display:none;margin-bottom:10px;">
+        <div id="cwStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
+        <div style="font-size:11px;color:var(--mute);margin-top:6px;">Card is saved and charged at time of service.</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;">
+          <input type="checkbox" id="cwSkipCard" style="cursor:pointer;width:16px;height:16px;">
+          <span>Skip for now — add the card later from the job</span>
+        </label>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12.5px;cursor:pointer;">
+        <input type="checkbox" id="cwSmsConsent" checked style="cursor:pointer;width:16px;height:16px;">
+        <span>Okay to text them about this job</span>
+      </label>
+      <button type="button" class="btn" id="cwBookNow" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Book it</button>
+      <button type="button" class="btn ghost" id="cwCustBack">Back</button>`;
+    const pmSel=document.getElementById('cwPayMethod');
+    const syncCard=async()=>{
+      const isCard=pmSel.value==='card';
+      document.getElementById('cwCardWrap').style.display=isCard?'':'none';
+      if(isCard){ try{ await cwEnsureStripe(); }catch(e){ err.textContent=e.message; } }
+    };
+    pmSel.addEventListener('change', syncCard);
+    syncCard();
+    document.getElementById('cwBookNow').addEventListener('click', cwSubmitBooking);
+    document.getElementById('cwCustBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
     return;
   }
 
@@ -12000,16 +12152,6 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     try{
       const resp=await apiConfirmUnavailable('booking_create', nbBody);
       nbKeyCache.delete(fp);
-      // Close the loop on a call that came through the phone script: link the
-      // real booking to it and mark it booked. Only fires when the booking
-      // genuinely succeeded, so an abandoned handoff stays uncounted.
-      if(cwPendingBookingCallId){
-        const _cid=cwPendingBookingCallId; cwPendingBookingCallId=null;
-        api('call_update',{ method:'POST', body:{ id:_cid, booking_id:resp&&resp.id?resp.id:undefined, resolution:'booked' }}).catch(()=>{});
-        api('call_event',{ method:'POST', body:{ business:current.slug, call_id:_cid,
-          event:'booking_created', step:'booked',
-          meta:{ booking_id:resp&&resp.id?resp.id:null, total:totalPrice } }}).catch(()=>{});
-      }
       // Converted from an estimate? Archive it now that the job exists, so it leaves
       // the estimates list. Best-effort — the booking is already created either way.
       if(nbSourceEstimateId){
