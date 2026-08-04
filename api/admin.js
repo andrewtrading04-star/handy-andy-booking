@@ -6163,7 +6163,7 @@ async function reviews(req, res, db, auth) {
     `)
     .eq('business_id', biz.id)
     .not('review_rating', 'is', null)
-    .order('reviewed_at', { ascending: false })
+    .order('reviewed_at', { ascending: false, nullsFirst: false })
     .limit(100);
 
   if (error) throw error;
