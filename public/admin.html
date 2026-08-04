@@ -8713,9 +8713,10 @@ function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null,
-    size:null, bracket:null, bracketType:null, fireplace:null, wires:null,
+    sizes:[], bracket:null, bracketType:null, fireplace:null, wires:null,
     handymanDesc:'',
-    prefDate:'', prefTime:'',
+    prefDate:'', selectedSlot:null,
+    calMonth:null, availDates:null,
     resolution:null,
   };
 }
@@ -8811,11 +8812,20 @@ async function renderCallWiz(){
   }
 
   if(s==='size'){
-    body.innerHTML=`${callWizScript('What size is your TV?')}
-      ${callWizChoiceRow(['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'].map(v=>({value:v,label:v})))}`;
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.size=b.dataset.cwchoice; callWiz.step='bracket'; renderCallWiz();
+    // Multi-select — a call can be for more than one TV, same as New
+    // Booking's "tap + to add each TV" size step.
+    const opts=['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'];
+    body.innerHTML=`${callWizScript('What size is your TV? Select all that apply.')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+        ${opts.map(v=>`<button type="button" class="btn ${callWiz.sizes.includes(v)?'':'ghost'}" style="width:auto;flex:1;min-width:110px;" data-cwsize="${esc(v)}">${esc(v)}</button>`).join('')}
+      </div>
+      <button type="button" class="btn" id="cwSizeNext" style="margin-top:10px;" ${callWiz.sizes.length?'':'disabled'}>Continue</button>`;
+    body.querySelectorAll('[data-cwsize]').forEach(b=>b.addEventListener('click', ()=>{
+      const v=b.dataset.cwsize, i=callWiz.sizes.indexOf(v);
+      if(i>=0) callWiz.sizes.splice(i,1); else callWiz.sizes.push(v);
+      renderCallWiz();
     }));
+    document.getElementById('cwSizeNext').addEventListener('click', ()=>{ callWiz.step='bracket'; renderCallWiz(); });
     return;
   }
   if(s==='bracket'){
@@ -8875,22 +8885,79 @@ async function renderCallWiz(){
   }
 
   if(s==='schedule'){
+    if(!callWiz.calMonth){ const d=new Date(); d.setDate(1); callWiz.calMonth=d; }
+    if(!callWiz.availDates) callWiz.availDates=new Set();
     body.innerHTML=`${callWizScript('When would you like to schedule your appointment?')}
-      <div style="display:flex;gap:8px;">
-        <input class="search" type="date" id="cwDate" style="margin:0;" value="${esc(callWiz.prefDate)}">
-        <select class="search" id="cwTime" style="margin:0;">
-          <option value="">Any time</option>
-          <option value="Morning"${callWiz.prefTime==='Morning'?' selected':''}>Morning</option>
-          <option value="Afternoon"${callWiz.prefTime==='Afternoon'?' selected':''}>Afternoon</option>
-          <option value="Evening"${callWiz.prefTime==='Evening'?' selected':''}>Evening</option>
-        </select>
+      <div id="cwCalWrap" style="width:100%;min-width:0;background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
+        <div class="nb-cal-head">
+          <button type="button" class="nb-cal-nav" id="cwCalPrev">‹</button>
+          <div class="nb-cal-title" id="cwCalTitle"></div>
+          <button type="button" class="nb-cal-nav" id="cwCalNext">›</button>
+        </div>
+        <div class="nb-cal-dow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
+        <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
+      </div>
+      <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
+        <div id="cwSlots" style="display:flex;flex-direction:column;gap:6px;"></div>
       </div>
       <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>`;
-    document.getElementById('cwSchedNext').addEventListener('click', ()=>{
-      callWiz.prefDate=document.getElementById('cwDate').value;
-      callWiz.prefTime=document.getElementById('cwTime').value;
-      callWiz.step='recap'; renderCallWiz();
-    });
+    const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    let cwCalSeq=0;
+    async function loadCwCalendar(){
+      const mySeq=++cwCalSeq;
+      document.getElementById('cwCalTitle').textContent=callWiz.calMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+      const cur=new Date(); cur.setDate(1);
+      document.getElementById('cwCalPrev').disabled=(callWiz.calMonth.getFullYear()===cur.getFullYear()&&callWiz.calMonth.getMonth()===cur.getMonth());
+      const params={ business:current.slug, month:cwMonthKey(callWiz.calMonth), technician_id:'any' };
+      if(callWiz.zip) params.postal_code=callWiz.zip;
+      try{
+        const r=await api('available_dates',{ params });
+        if(mySeq!==cwCalSeq) return;
+        callWiz.availDates=new Set(r.dates||[]);
+      }catch(e){ if(mySeq!==cwCalSeq) return; callWiz.availDates=new Set(); }
+      renderCwCalendarGrid();
+    }
+    function renderCwCalendarGrid(){
+      const grid=document.getElementById('cwCalGrid');
+      const y=callWiz.calMonth.getFullYear(), m=callWiz.calMonth.getMonth();
+      const firstDow=new Date(y,m,1).getDay();
+      const days=new Date(y,m+1,0).getDate();
+      let html='';
+      for(let i=0;i<firstDow;i++) html+='<div class="nb-cal-day empty"></div>';
+      for(let d=1;d<=days;d++){
+        const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const avail=callWiz.availDates.has(ds);
+        const cls=avail?(ds===callWiz.prefDate?'avail sel':'avail'):'off';
+        html+=`<div class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:''}>${d}</div>`;
+      }
+      grid.innerHTML=html;
+      grid.querySelectorAll('.nb-cal-day.avail').forEach(cell=>cell.addEventListener('click', async()=>{
+        callWiz.prefDate=cell.dataset.date; callWiz.selectedSlot=null;
+        renderCwCalendarGrid();
+        await loadCwSlots(cell.dataset.date);
+      }));
+    }
+    async function loadCwSlots(date){
+      const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
+      const params={ business:current.slug, date, technician_id:'any' };
+      if(callWiz.zip) params.postal_code=callWiz.zip;
+      try{
+        const r=await api('available_slots',{ params });
+        if(!r.slots.length){ list.innerHTML='<div style="color:var(--mute);font-size:13px;">No available times for this date.</div>'; }
+        else list.innerHTML=r.slots.map(s=>`<button type="button" class="nb-slot" data-key="${esc(s.slot_key)}" data-label="${esc(s.label)}">${esc(s.label)}</button>`).join('');
+        wrap.style.display='';
+        list.querySelectorAll('.nb-slot').forEach(b=>b.addEventListener('click', ()=>{
+          callWiz.selectedSlot={ key:b.dataset.key, label:b.dataset.label };
+          list.querySelectorAll('.nb-slot').forEach(x=>x.classList.remove('on'));
+          b.classList.add('on');
+        }));
+      }catch(e){ list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
+    }
+    document.getElementById('cwCalPrev').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()-1); loadCwCalendar(); });
+    document.getElementById('cwCalNext').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()+1); loadCwCalendar(); });
+    loadCwCalendar();
+    if(callWiz.prefDate) loadCwSlots(callWiz.prefDate);
+    document.getElementById('cwSchedNext').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
     return;
   }
 
@@ -8900,14 +8967,14 @@ async function renderCallWiz(){
     if(callWiz.areaName) lines.push(`Area: ${callWiz.areaName} (zip ${callWiz.zip})`);
     else if(callWiz.zip) lines.push(`Zip: ${callWiz.zip}`);
     if(callWiz.service==='TV Mounting'){
-      if(callWiz.size) lines.push(`TV size: ${callWiz.size}`);
+      if(callWiz.sizes.length) lines.push(`TV size: ${callWiz.sizes.join(', ')}`);
       if(callWiz.bracket) lines.push(`Bracket: ${callWiz.bracket==='Yes'?'customer has one':'needs one — '+(callWiz.bracketType||'unspecified')}`);
       if(callWiz.fireplace) lines.push(`Over a fireplace: ${callWiz.fireplace}`);
       if(callWiz.wires) lines.push(`Hide wires: ${callWiz.wires}`);
     } else if(callWiz.handymanDesc){
       lines.push(`Job: ${callWiz.handymanDesc}`);
     }
-    if(callWiz.prefDate) lines.push(`Preferred: ${callWiz.prefDate}${callWiz.prefTime?' ('+callWiz.prefTime+')':''}`);
+    if(callWiz.prefDate) lines.push(`Preferred: ${callWiz.prefDate}${callWiz.selectedSlot?' ('+callWiz.selectedSlot.label+')':''}`);
     body.innerHTML=`${callWizScript("Here's what I've got — let's get you on the schedule with exact pricing.")}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
         ${lines.map(l=>esc(l)).join('<br>')}
@@ -8922,7 +8989,10 @@ async function renderCallWiz(){
       await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes }}).catch(()=>{});
       closeCallWiz();
       toast('Answers noted — pick up with the customer\'s zip/address below, then remember to log this call\'s outcome from the Calls tab.');
-      openNewBooking({ postal_code: callWiz.zip });
+      openNewBooking({
+        postal_code: callWiz.zip,
+        preferred_slots: callWiz.prefDate ? [{ date:callWiz.prefDate, label:callWiz.selectedSlot?callWiz.selectedSlot.label:null, slot_key:callWiz.selectedSlot?callWiz.selectedSlot.key:null }] : undefined,
+      });
     });
     document.getElementById('cwGoEstimate').addEventListener('click', ()=>{ callWiz.step='estimate'; renderCallWiz(); });
     document.getElementById('cwGoDeclined').addEventListener('click', async()=>{
@@ -8953,7 +9023,7 @@ async function renderCallWiz(){
       if(!name || !email){ err.textContent='Name and email are required to send an estimate.'; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
       const label = callWiz.service==='TV Mounting'
-        ? `TV mounting — ${[callWiz.size,callWiz.fireplace==='Yes'?'over fireplace':null,callWiz.wires||null].filter(Boolean).join(', ')}`
+        ? `TV mounting — ${[callWiz.sizes.join('/'),callWiz.fireplace==='Yes'?'over fireplace':null,callWiz.wires||null].filter(Boolean).join(', ')}`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
