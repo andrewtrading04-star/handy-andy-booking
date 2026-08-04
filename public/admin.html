@@ -605,6 +605,14 @@
   /* Take a Call is short and one-question-at-a-time, unlike the tall scrolling
      forms the shared .modal top-alignment was built for — center it instead. */
   #callWizModal{align-items:center;}
+  /* The pricing breakdown folds away behind a row the secretary only opens if
+     the customer asks. Default disclosure triangles are suppressed in favour
+     of a plain show/hide word on the right. */
+  #callWizBody details>summary{list-style:none;}
+  #callWizBody details>summary::-webkit-details-marker{display:none;}
+  #callWizBody details>summary:hover{background:var(--line2);}
+  #callWizBody details:not([open])>summary .cw-toggle::after{content:'show';}
+  #callWizBody details[open]>summary .cw-toggle::after{content:'hide';}
   #modal .search{background:#16273f;border:1px solid rgba(255,255,255,.18);color:#eef2f7;}
   #modal .search::placeholder{color:#6b7f9c;}
   #modal #nbTravelFee::placeholder{color:#6b7f9c;}
@@ -9559,39 +9567,45 @@ async function renderCallWiz(){
   }
 
   if(s==='recap'){
-    const lines=[];
-    lines.push(`Service: ${callWiz.service}`);
-    if(callWiz.areaName) lines.push(`Area: ${callWiz.areaName} (zip ${callWiz.zip})`);
-    else if(callWiz.zip) lines.push(`Zip: ${callWiz.zip}`);
+    // Two separate things, deliberately: `items` is the money (what the
+    // customer would be read if they ask for a breakdown), `context` is the
+    // job facts around it. Mixing them into one list is what made the old
+    // block read as a wall of text.
+    const items=[], context=[];
+    context.push(['Service', callWiz.service]);
+    if(callWiz.areaName) context.push(['Area', `${callWiz.areaName} (zip ${callWiz.zip})`]);
+    else if(callWiz.zip) context.push(['Zip', callWiz.zip]);
     // The priced lines come straight from New Booking's own collector, so the
     // figure read out on the phone is the figure the booking will carry —
     // including the branch minimum and any multi-TV discount.
     let priced=[];
     if(callWiz.service==='TV Mounting'){
       try{ priced=nbCollectSelections(); }catch(e){ priced=[]; }
-      priced.forEach(l=>lines.push(`${l.label}${l.quantity>1?` ×${l.quantity}`:''} — ${money(l.price*l.quantity)}`));
+      priced.forEach(l=>items.push([`${l.label}${l.quantity>1?` ×${l.quantity}`:''}`, l.price*l.quantity]));
     } else if(callWiz.handymanDesc){
-      lines.push(`Job: ${callWiz.handymanDesc}`);
+      context.push(['Job', callWiz.handymanDesc]);
     }
     // Travel fee and the 8 PM after-hours fee are part of what the customer
     // pays before tax, so they belong in the number read out on the call —
     // quoting the options-only figure would under-quote every out-of-area job.
     const travelFee=Number(callWiz.surcharge)||0;
-    if(travelFee>0) lines.push(`Travel fee — ${money(travelFee)}`);
+    if(travelFee>0) items.push(['Travel fee', travelFee]);
     const ahFee=callWiz.selectedSlot?cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate):0;
-    if(ahFee>0) lines.push(`After-hours (8 PM start) — ${money(ahFee)}`);
+    if(ahFee>0) items.push(['After-hours (8 PM start)', ahFee]);
     let whenTxt='';
     if(callWiz.prefDate){
       let day=callWiz.prefDate;
       try{ day=new Date(callWiz.prefDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
       whenTxt = callWiz.selectedSlot ? `${day} at ${callWiz.selectedSlot.label}` : day;
-      lines.push(`Scheduled: ${whenTxt}`);
+      context.push(['Scheduled', whenTxt]);
     }
     const preDiscount=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
     const discount=cwDiscountApplied();
     const subtotal=Math.max(0, preDiscount-discount);
-    if(discount>0) lines.push(`Discount — -${money(discount)}`);
+    if(discount>0) items.push(['Discount', -discount]);
     const afterTax=Math.round(subtotal*(1+TAX_RATE)*100)/100;
+    // Flat text version, kept only for the note saved against the call.
+    const lines=[...context.map(([k,v])=>`${k}: ${v}`), ...items.map(([k,v])=>`${k} — ${money(v)}`)];
     // The line the secretary reads. The amount is spoken the way it is said out
     // loud ("four fifty six"), with the digits shown underneath for their eyes.
     const summary=cwJobSummary();
@@ -9618,18 +9632,30 @@ async function renderCallWiz(){
     // price, the quiet reminder, and the two outcomes are all here at once so
     // there's nothing to click through between hearing the number and
     // reacting to what the customer says.
+    const row=(label,val,opts={})=>`<div style="display:flex;justify-content:space-between;gap:14px;padding:5px 0;${opts.top?'border-top:1px solid var(--line);margin-top:6px;padding-top:9px;':''}">
+        <span style="${opts.strong?'font-weight:700;':'color:var(--ink-2);'}">${esc(label)}</span>
+        <span style="${opts.strong?'font-weight:700;':''}white-space:nowrap;${opts.neg?'color:#b45309;':''}">${esc(val)}</span>
+      </div>`;
+    // The breakdown stays folded away until the customer actually asks for it.
+    // On a call the secretary is reading a script, not auditing a quote — the
+    // wall of line items was competing with the sentence they need to say.
     body.innerHTML=`${callWizScript(sentence)}
-      ${subtotal>0?`<div style="text-align:center;margin:-4px 0 12px;font-size:12px;color:var(--mute);">${esc(money(subtotal))} before tax</div>`:''}
-      <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
-        ${lines.map(l=>esc(l)).join('<br>')}
-        ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Total before tax: ${esc(money(subtotal))}
-          <div style="font-weight:700;margin-top:3px;">Total after tax: ${esc(money(afterTax))}</div></div>`:''}
+      <details style="border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden;">
+        <summary style="cursor:pointer;padding:11px 14px;font-size:13.5px;color:var(--ink-2);list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span>Customer requests a breakdown of pricing</span>
+          <span class="cw-toggle" style="color:var(--mute);font-size:11px;"></span>
+        </summary>
+        <div style="padding:2px 14px 12px;font-size:13px;line-height:1.6;border-top:1px solid var(--line);">
+          ${context.map(([k,v])=>row(k,v)).join('')}
+          ${items.length?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line);"></div>`:''}
+          ${items.map(([k,v])=>row(k, (v<0?'-':'')+money(Math.abs(v)), {neg:v<0})).join('')}
+          ${subtotal>0?row('Total before tax', money(subtotal), {strong:true,top:true})+row('Total after tax', money(afterTax), {strong:true}):''}
+        </div>
+      </details>
+      <div style="text-align:center;font-size:12.5px;color:var(--mute);font-style:italic;margin-bottom:14px;">
+        Stay quiet — let them respond.
       </div>
-      <div style="display:flex;align-items:center;gap:8px;background:var(--page,#1c2530);border:1px dashed var(--line);border-radius:9px;padding:9px 11px;margin-bottom:12px;">
-        <span style="font-size:16px;">🤫</span>
-        <span style="font-size:12px;color:var(--mute);">Stay quiet — let them respond.</span>
-      </div>
-      <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">✓ Customer accepts — book it</button>
+      <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts — book it</button>
       <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>`;
     document.getElementById('cwAccepts').addEventListener('click', ()=>{ cwTrack('accepted'); cwGoToBooking(); });
     document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
