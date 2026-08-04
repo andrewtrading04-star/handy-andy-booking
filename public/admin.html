@@ -8812,7 +8812,7 @@ async function renderCallWiz(){
 
   if(s==='size'){
     body.innerHTML=`${callWizScript('What size is your TV?')}
-      ${callWizChoiceRow(['Under 43"','43"–55"','56"–65"','66"–85"','86"+'].map(v=>({value:v,label:v})))}`;
+      ${callWizChoiceRow(['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'].map(v=>({value:v,label:v})))}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
       callWiz.size=b.dataset.cwchoice; callWiz.step='bracket'; renderCallWiz();
     }));
