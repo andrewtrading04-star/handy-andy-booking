@@ -9788,14 +9788,25 @@ async function renderCallWiz(){
         <button type="button" class="btn ghost" id="cwManualApply" style="width:auto;">Apply</button>
       </div>
 
-      <div style="background:var(--line2);border-radius:10px;padding:12px 14px;margin:14px 0;font-size:13.5px;line-height:1.8;">
+      <div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;">
         ${loading
-          ? '<div style="color:var(--mute);">Working out how much we can give…</div>'
-          : `<div>Most we can give on this job: <b>${esc(money(max))}</b>${callWiz.econ.capped_by?` <span style="color:var(--mute);font-size:12px;">(${esc(callWiz.econ.capped_by)})</span>`:''}</div>
-             <div>Discount applied: <b>${esc(money(applied))}</b>${capped?` <span style="color:#b45309;">(asked for ${esc(money(raw))} — capped)</span>`:''}</div>
-             <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line);font-weight:800;">New total before tax: ${esc(money(newTotal))}</div>
-             <div style="font-weight:800;">New total after tax: ${esc(money(Math.round(newTotal*(1+TAX_RATE)*100)/100))}</div>
-             ${max<=0?'<div style="color:#b91c1c;margin-top:6px;font-size:12.5px;">This job is too thin to discount — there is nothing to give without losing money on it.</div>':''}`}
+          ? '<div style="color:var(--mute);font-size:13.5px;">Working out how much we can give…</div>'
+          : `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;">
+               <span style="font-size:12.5px;color:var(--ink-2);">New total</span>
+               <span style="font-size:24px;font-weight:800;color:#14532d;">${esc(money(newTotal))}</span>
+             </div>
+             <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute);padding-bottom:11px;border-bottom:1px solid var(--line2);">
+               <span>before tax</span><span>${esc(money(Math.round(newTotal*(1+TAX_RATE)*100)/100))} after tax</span>
+             </div>
+             <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin:10px 0 5px;">
+               <span>Discount used${capped?` <span style="color:#b45309;">(asked ${esc(money(raw))})</span>`:''}</span>
+               <span><b style="color:#b45309;">${esc(money(applied))}</b> of ${esc(money(max))}</span>
+             </div>
+             <div style="height:6px;background:var(--line2);border-radius:99px;overflow:hidden;">
+               <div style="width:${max>0?Math.min(100,Math.round(applied/max*100)):0}%;height:100%;background:#f59e0b;"></div>
+             </div>
+             ${callWiz.econ.capped_by&&max>0?`<div style="font-size:11px;color:var(--mute);margin-top:6px;text-align:right;">limit: ${esc(callWiz.econ.capped_by)}</div>`:''}
+             ${max<=0?'<div style="color:#b91c1c;margin-top:8px;font-size:12.5px;">This job is too thin to discount — there is nothing to give without losing money on it.</div>':''}`}
       </div>
       ${applied>0?callWizScript(`Best I can do is ${cwSpokenAmount(newTotal).toUpperCase()} before tax.`):''}
       <div style="display:flex;flex-direction:column;gap:8px;">
