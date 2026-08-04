@@ -9032,7 +9032,13 @@ function callWizChoiceRow(options){
   `</div>`;
 }
 function callWizScript(line){
-  return `<div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:14.5px;line-height:1.5;margin-bottom:12px;">🗣️ ${esc(line)}</div>`;
+  // Editorial styling, not a UI label: an oversized quote mark stands in for
+  // an icon, and the line itself reads bigger and looser than surrounding
+  // controls so a secretary can catch it at a glance mid-conversation.
+  return `<div style="background:var(--line2);border-radius:10px;padding:12px 16px 14px;margin-bottom:12px;position:relative;">
+    <div style="font-family:Georgia,serif;font-size:40px;line-height:1;color:var(--mute);opacity:.35;position:absolute;top:2px;left:10px;" aria-hidden="true">&ldquo;</div>
+    <div style="font-size:18px;line-height:1.4;font-weight:400;padding-left:24px;">${esc(line)}</div>
+  </div>`;
 }
 // Log one action from the script. Fire-and-forget on purpose: analytics must
 // never add latency to, or fail, a call the secretary is actually on. Every
