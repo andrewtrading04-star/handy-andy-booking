@@ -8873,22 +8873,36 @@ function cwTwoDigit(n){
   if(n<20) return CW_ONES[n];
   return CW_TENS[Math.floor(n/10)]+(n%10?' '+CW_ONES[n%10]:'');
 }
-// Splits into "leading group" + "last two digits": 456 -> four | fifty six,
-// 1234 -> twelve | thirty four. A flat hundred reads "even" (four even), and
-// 1..9 in the tail reads "oh five" — both standard on a service call, and both
-// avoid the banned words.
+// Splits into "leading group" + "last two digits": 456 -> four | fifty six.
+// A flat hundred reads "even" (four even), and 1..9 in the tail reads "oh
+// five" — both standard on a service call, and both avoid the banned words.
+//
+// This pattern ONLY holds for amounts under $1,000. At $1,000+ the "leading
+// group" would itself become a two-digit number run through the SAME
+// cwTwoDigit() used for the tail — $1,050 would read "ten fifty", phonetically
+// identical to $10.50, and this exact function also speaks the small
+// after-hours fee earlier in the same call ("an extra twenty"), so the
+// collision is a real in-conversation risk, not just a theoretical one.
+// Amounts that large go through cwSpokenAmountThousands instead, which reads
+// each digit on its own so it can never fold into a small-number phrase.
 function cwSpokenAmount(amount){
   const n=Math.round(Number(amount)||0);
   if(n<0) return cwSpokenAmount(-n);
+  if(n>=1000) return cwSpokenAmountThousands(n);
   if(n<100) return cwTwoDigit(n);
   const lead=Math.floor(n/100), tail=n%100;
-  // Above 9,999 the leading group stops being sayable as two digits; fall back
-  // to reading the leading digits one at a time rather than emitting garbage.
-  const leadWords = lead<100 ? cwTwoDigit(lead)
-    : String(lead).split('').map(d=>CW_ONES[Number(d)]).join(' ');
-  if(tail===0) return `${leadWords} even`;
-  if(tail<10)  return `${leadWords} oh ${CW_ONES[tail]}`;
-  return `${leadWords} ${cwTwoDigit(tail)}`;
+  if(tail===0) return `${lead<20?CW_ONES[lead]:cwTwoDigit(lead)} even`;
+  if(tail<10)  return `${lead<20?CW_ONES[lead]:cwTwoDigit(lead)} oh ${CW_ONES[tail]}`;
+  return `${lead<20?CW_ONES[lead]:cwTwoDigit(lead)} ${cwTwoDigit(tail)}`;
+}
+// $1,000+: read one digit at a time using "zero" for a bare 0 — never "oh",
+// which the sub-$1,000 path uses as a hundreds-gap filler ("one oh five" =
+// $105). Keeping the filler words disjoint means a thousands-range amount can
+// never be misheard as a hundreds-range one, at the cost of sounding more like
+// a reference number than a price — an acceptable trade for a range these
+// jobs rarely reach, versus a quote a customer could mishear as 100x smaller.
+function cwSpokenAmountThousands(n){
+  return String(n).split('').map(d=>CW_ONES[Number(d)]).join(' ');
 }
 // A plain-English readback of what was ordered, for the secretary to say:
 // "2 TVs, 1 tilting bracket, 1 over a fireplace, and a soundbar installation".
