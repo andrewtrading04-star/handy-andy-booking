@@ -6873,7 +6873,17 @@ async function estimateCreate(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
 
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
-  if (!customer_name || !customer_email) return res.status(400).json({ error: 'Customer name and email required' });
+  // One way to reach them is all that's required. A customer who has already
+  // said no to booking often will not hand over a name and both contact
+  // details just to hear a number, and refusing to send anything without all
+  // three loses the estimate entirely. Whichever channel they gave is the one
+  // it goes out on.
+  const estEmail = (customer_email || '').trim();
+  const estPhone = (customer_phone || '').trim();
+  const estName  = (customer_name || '').trim();
+  if (!estEmail && !estPhone) {
+    return res.status(400).json({ error: 'A phone number or an email address is required to send an estimate' });
+  }
   // Keep the zip so the approve page can show real availability for the right metro.
   const customer_zip = (body.postal_code || body.customer_zip || '').toString().replace(/\D/g, '').slice(0, 5) || null;
 
@@ -6907,9 +6917,11 @@ async function estimateCreate(req, res, db, auth, body) {
   // and retrying, so an estimate is never lost to schema drift.
   const { data: est, error: createErr } = await insertEstimateResilient(db, {
     business_id: biz.id,
-    customer_name: customer_name.trim(),
-    customer_phone: customer_phone ? customer_phone.trim() : null,
-    customer_email: customer_email.trim(),
+    // No name given: label the row by whichever contact detail they did give,
+    // so the estimates list still has something recognisable to show.
+    customer_name: estName || estPhone || estEmail,
+    customer_phone: estPhone || null,
+    customer_email: estEmail || null,
     customer_zip,
     service_label: service_label || 'Custom Estimate',
     description,
@@ -6927,57 +6939,68 @@ async function estimateCreate(req, res, db, auth, body) {
   if (createErr) throw createErr;
   if (!est) return res.status(500).json({ error: 'Failed to create estimate' });
 
-  // Now send the email immediately
-  if (!emailNotificationsOn()) {
-    // Still created, but email won't send
-    return res.status(201).json({ id: est.id, ok: true, warning: 'Email notifications are turned off' });
-  }
+  // Email is no longer mandatory, so its unavailability can't short-circuit the
+  // whole send — a phone-only customer still gets their estimate by text below.
+  const emailOff = !emailNotificationsOn() ? 'Email notifications are turned off'
+    : !emailConfig(biz.slug).apiKey ? 'Email service not configured'
+    : null;
 
-  const { apiKey } = emailConfig(biz.slug);
-  if (!apiKey) {
-    return res.status(201).json({ id: est.id, ok: true, warning: 'Email service not configured' });
-  }
-
-  const firstName = (customer_name || '').trim().split(/\s+/)[0];
+  // Only greet by name when a real one was given — with no name the stored
+  // customer_name is their phone number, and "Hi 5125550134," is worse than
+  // no greeting at all.
+  const firstName = estName ? estName.split(/\s+/)[0] : '';
   // 90-day signed approve link (same as the Estimates-tab "send" flow), so the
   // New Booking estimate email also gets an "I approve this estimate" button.
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: est.id }, 7776000);
   const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
-  const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl, upsells: publicUpsells(upsells) },
-    brandFor(biz.slug)
-  );
-
-  try {
-    await sendEmail({ slug: biz.slug, to: customer_email.trim(), subject, html, throwOnError: true });
-    await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
-  } catch (e) {
-    console.warn('[estimate_create] email send failed, but estimate created:', e.message);
-    return res.status(201).json({ id: est.id, ok: true, warning: `Estimate created but email failed: ${e.message}` });
+  let emailed = false, emailWarning = emailOff;
+  if (estEmail && !emailOff) {
+    const { subject, html } = estimateEmail(
+      { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl, upsells: publicUpsells(upsells) },
+      brandFor(biz.slug)
+    );
+    try {
+      await sendEmail({ slug: biz.slug, to: estEmail, subject, html, throwOnError: true });
+      emailed = true;
+      await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
+    } catch (e) {
+      console.warn('[estimate_create] email send failed, but estimate created:', e.message);
+      emailWarning = `email failed: ${e.message}`;
+    }
   }
 
-  // Also text the customer the estimate + a link to view/approve it, so a
-  // phone-first customer can act on the same tap-through the email offers.
-  // Best-effort: a texting hiccup must never turn a sent estimate into an
-  // error (the email already went out above), so failures are logged only.
+  // Text the customer the estimate + a link to view/approve it. For a customer
+  // who only gave a phone number this IS the delivery, not a bonus copy.
   let texted = false;
-  if (customer_phone && body.sms_consent !== false && approveUrl) {
+  if (estPhone && body.sms_consent !== false && approveUrl) {
     try {
       const { total } = quoteTotals(line_items, DEFAULT_EST_TAX_RATE);
       const greeting = firstName ? `Hi ${firstName}, ` : '';
       const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
       const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
       const msg = `${greeting}here's your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
-      const r = await sendSMSResult(customer_phone, msg);
+      const r = await sendSMSResult(estPhone, msg);
       texted = !!r.ok;
+      if (texted && !emailed) await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
       if (!r.ok) console.warn(`[estimate_create] estimate SMS not sent:`, r.skipped || r.error);
     } catch (e) {
       console.warn('[estimate_create] estimate SMS threw:', e.message);
     }
   }
 
-  return res.status(201).json({ id: est.id, ok: true, texted });
+  // The estimate exists either way, but the office needs to know when nothing
+  // actually left the building — otherwise "Estimate sent ✓" is a lie and the
+  // customer is waiting on something that never arrived.
+  let warning = null;
+  if (!emailed && !texted) {
+    warning = estEmail
+      ? `Estimate saved but nothing could be sent (${emailWarning || 'no delivery channel available'}) — reach out manually.`
+      : 'Estimate saved but the text could not be sent — reach out manually.';
+  } else if (estEmail && !emailed && emailWarning) {
+    warning = `Sent by text. Email did not go out (${emailWarning}).`;
+  }
+  return res.status(201).json({ id: est.id, ok: true, texted, emailed, warning });
 }
 
 // Send quote SMS to customer

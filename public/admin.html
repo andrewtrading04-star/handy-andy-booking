@@ -10086,12 +10086,17 @@ async function renderCallWiz(){
   }
 
   if(s==='estimate'){
-    body.innerHTML=`${callWizScript("Great, I'll get an estimate over to you — what's the best name, phone, and email?")}
-      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Customer name *">
+    // This screen is reached AFTER the customer has already said no. Asking a
+    // reluctant caller for a name and two contact details to hear a number is
+    // how the estimate gets lost entirely — so one way to reach them is all
+    // that's required, and it goes out on whichever they gave.
+    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. Would a text or an email be easier?")}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone">
-        <input class="search" id="cwEmail" style="margin:0;" placeholder="Email *">
+        <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel">
+        <input class="search" id="cwEmail" style="margin:0;" placeholder="Email">
       </div>
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">Either one is enough — whichever they'd rather give.</div>
+      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)">
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
@@ -10099,7 +10104,7 @@ async function renderCallWiz(){
       const name=document.getElementById('cwName').value.trim();
       const phone=document.getElementById('cwPhone').value.trim();
       const email=document.getElementById('cwEmail').value.trim();
-      if(!name || !email){ err.textContent='Name and email are required to send an estimate.'; return; }
+      if(!phone && !email){ err.textContent='A phone number or an email is needed to send it — whichever they prefer.'; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
       // Same priced lines the booking would carry, so the estimate the customer
       // receives matches what they were quoted on the call.
@@ -10122,7 +10127,13 @@ async function renderCallWiz(){
           notes:`Estimate sent (${label})${callWiz.prefDate?' · preferred '+callWiz.prefDate:''}`,
         }}).catch(()=>{});
         closeCallWiz({resolved:true});
-        toast(est.warnings ? 'Estimate saved — price still needs to be set before it goes out.' : 'Estimate sent ✓');
+        // Say which channel it actually went out on, and never claim "sent"
+        // when nothing left — the customer would be waiting on nothing.
+        toast(est.warning ? '⚠ '+est.warning
+          : est.warnings ? 'Estimate saved — price still needs to be set before it goes out.'
+          : est.emailed && est.texted ? 'Estimate sent by email and text ✓'
+          : est.texted ? 'Estimate texted ✓'
+          : 'Estimate emailed ✓');
       }catch(e){ err.textContent=e.message||'Could not create the estimate'; btn.disabled=false; btn.textContent='Send estimate'; }
     });
     return;
