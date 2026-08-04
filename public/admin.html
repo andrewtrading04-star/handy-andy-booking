@@ -6154,14 +6154,14 @@ async function renderCallAnalytics(){
         const c=p.conversion>=50?'#15803d':p.conversion>=30?'#b45309':'#b91c1c';
         return `<tr>
           <td style="padding:9px 8px;font-weight:700;">${esc(p.person)}</td>
-          <td style="padding:9px 8px;text-align:right;">${p.calls}</td>
-          <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${p.booked}</td>
-          <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${pct(p.conversion)}</td>
-          <td style="padding:9px 8px;text-align:right;color:var(--mute);">${p.not_booked}</td>
-          <td style="padding:9px 8px;text-align:right;" title="Estimates sent instead of booking on the call">${p.estimates}</td>
-          <td style="padding:9px 8px;text-align:right;">${esc(money(p.avg_quote))}</td>
-          <td style="padding:9px 8px;text-align:right;font-weight:700;">${esc(money(p.booked_value))}</td>
-          <td style="padding:9px 8px;text-align:right;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${p.discounted_calls?`${esc(money(p.discount_given))} <span style="font-size:11px;opacity:.7;">(${p.discounted_calls}×, avg ${esc(money(p.avg_discount))})</span>`:'—'}</td>
+          <td style="padding:9px 8px;text-align:center;">${p.calls}</td>
+          <td style="padding:9px 8px;text-align:center;font-weight:800;color:${c};">${p.booked}</td>
+          <td style="padding:9px 8px;text-align:center;font-weight:800;color:${c};">${pct(p.conversion)}</td>
+          <td style="padding:9px 8px;text-align:center;color:var(--mute);">${p.not_booked}</td>
+          <td style="padding:9px 8px;text-align:center;" title="Estimates sent instead of booking on the call">${p.estimates}</td>
+          <td style="padding:9px 8px;text-align:center;">${esc(money(p.avg_quote))}</td>
+          <td style="padding:9px 8px;text-align:center;font-weight:700;">${esc(money(p.booked_value))}</td>
+          <td style="padding:9px 8px;text-align:center;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${p.discounted_calls?`${esc(money(p.discount_given))} <span style="font-size:11px;opacity:.7;">(${p.discounted_calls}×, avg ${esc(money(p.avg_discount))})</span>`:'—'}</td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="9" style="padding:18px;text-align:center;color:var(--mute);">No calls taken in this period.</td></tr>`;
@@ -6213,7 +6213,7 @@ async function renderCallAnalytics(){
     <div class="rc-count">Who is booking</div>
     <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px;">
-        <thead><tr style="background:var(--line2);text-align:right;">
+        <thead><tr style="background:var(--line2);text-align:center;">
           <th style="padding:9px 8px;text-align:left;">Person</th>
           <th style="padding:9px 8px;">Calls</th><th style="padding:9px 8px;">Booked</th><th style="padding:9px 8px;">Rate</th>
           <th style="padding:9px 8px;">Not booked</th>
