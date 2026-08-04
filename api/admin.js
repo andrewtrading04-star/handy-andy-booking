@@ -7107,6 +7107,12 @@ async function estimateDecline(req, res, db, auth, body) {
 // the standard rate is the conservative choice — the real job can only come in
 // at or above this projection, never below it.
 const QUOTE_PROFIT_FLOOR = 50;
+// A second, independent ceiling: never give away more than a tenth of the
+// ticket. The profit floor alone scales with the job, so a fat multi-TV ticket
+// would have permitted several hundred off and still cleared $50 — technically
+// profitable, but not a discount anyone meant to authorize. Whichever limit is
+// TIGHTER wins, so a thin job is protected by the floor and a big one by this.
+const QUOTE_MAX_DISCOUNT_PCT = 0.10;
 async function quoteEconomics(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -7140,7 +7146,9 @@ async function quoteEconomics(req, res, db, auth, body) {
   const payout = Number(pay) || 0;
   const bracketCost = bracketHardwareCost(lines, false);
   const profit = Math.round(price - payout - bracketCost);
-  const maxDiscount = Math.max(0, profit - QUOTE_PROFIT_FLOOR);
+  const floorRoom = Math.max(0, profit - QUOTE_PROFIT_FLOOR);
+  const pctRoom = Math.floor(price * QUOTE_MAX_DISCOUNT_PCT);
+  const maxDiscount = Math.min(floorRoom, pctRoom);
 
   return res.status(200).json({
     price,
@@ -7150,6 +7158,9 @@ async function quoteEconomics(req, res, db, auth, body) {
     profit,
     max_discount: maxDiscount,
     floor: QUOTE_PROFIT_FLOOR,
+    // Which limit actually bound this quote, so the office can see WHY a job
+    // has little room rather than just being told "no".
+    capped_by: maxDiscount <= 0 ? 'nothing to give' : (pctRoom < floorRoom ? '10% of the ticket' : 'profit floor'),
   });
 }
 
