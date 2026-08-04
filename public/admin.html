@@ -1472,8 +1472,7 @@
 <!-- Take a Call: step-by-step phone-intake script -->
 <div id="callWizModal" class="modal hidden">
   <div class="sheet" style="max-width:480px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="margin:0;">📞 Take a Call</h2>
+    <div style="display:flex;align-items:center;justify-content:flex-end;">
       <button class="btn ghost sm" type="button" id="callWizEndBtn" style="width:auto;">End call</button>
     </div>
     <div id="callWizBody" style="margin-top:14px;"></div>
@@ -8812,7 +8811,7 @@ async function renderCallWiz(){
     // is what makes "2 TVs" a real count the later per-TV questions loop over.
     const opts=['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'];
     const countOf=v=>callWiz.tvs.filter(t=>t.size===v).length;
-    body.innerHTML=`${callWizScript('What size is your TV? Tap + for each one.')}
+    body.innerHTML=`${callWizScript('What size is your TV?')}
       <div class="nb-opts">
         ${opts.map(v=>{ const ct=countOf(v);
           return `<div class="nb-optq${ct>0?' on':''}"><span class="nb-optlabel">${esc(v)}</span>`+
