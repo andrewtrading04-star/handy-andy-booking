@@ -1474,7 +1474,7 @@
 <div id="callWizModal" class="modal hidden">
   <div class="sheet" style="max-width:480px;">
     <div style="display:flex;align-items:center;justify-content:flex-end;">
-      <button class="btn ghost sm" type="button" id="callWizEndBtn" style="width:auto;">End call</button>
+      <button class="btn ghost sm" type="button" id="callWizEndBtn" style="width:auto;">📞 Hang up</button>
     </div>
     <div id="callWizBody" style="margin-top:14px;"></div>
     <div class="err" id="callWizErr"></div>
@@ -6133,6 +6133,9 @@ async function renderCallAnalytics(){
   try{ d=await api('call_analytics',{ params:{ business:current.slug, days:_caDays }}); }
   catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
   const t=d.totals||{};
+  const disc=d.discounts||{};
+  const dl=disc.lever||{};
+  const eff=disc.effect||{};
   const pct=n=>`${Number(n||0).toFixed(1)}%`;
   const rangeBtns=[[1,'Today'],[7,'7 days'],[30,'30 days'],[90,'90 days']].map(([n,l])=>
     `<button type="button" class="seg-btn ${_caDays===n?'on':''}" data-cad="${n}">${l}</button>`).join('');
@@ -6154,15 +6157,14 @@ async function renderCallAnalytics(){
           <td style="padding:9px 8px;text-align:right;">${p.calls}</td>
           <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${p.booked}</td>
           <td style="padding:9px 8px;text-align:right;font-weight:800;color:${c};">${pct(p.conversion)}</td>
-          <td style="padding:9px 8px;text-align:right;">${p.estimates}</td>
-          <td style="padding:9px 8px;text-align:right;">${p.declined}</td>
-          <td style="padding:9px 8px;text-align:right;color:var(--mute);">${p.unfinished}</td>
+          <td style="padding:9px 8px;text-align:right;color:var(--mute);">${p.not_booked}</td>
+          <td style="padding:9px 8px;text-align:right;" title="Estimates sent instead of booking on the call">${p.estimates}</td>
           <td style="padding:9px 8px;text-align:right;">${esc(money(p.avg_quote))}</td>
           <td style="padding:9px 8px;text-align:right;font-weight:700;">${esc(money(p.booked_value))}</td>
-          <td style="padding:9px 8px;text-align:right;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${esc(money(p.discount_given))}</td>
+          <td style="padding:9px 8px;text-align:right;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${p.discounted_calls?`${esc(money(p.discount_given))} <span style="font-size:11px;opacity:.7;">(${p.discounted_calls}×, avg ${esc(money(p.avg_discount))})</span>`:'—'}</td>
         </tr>`;
       }).join('')
-    : `<tr><td colspan="10" style="padding:18px;text-align:center;color:var(--mute);">No calls taken in this period.</td></tr>`;
+    : `<tr><td colspan="9" style="padding:18px;text-align:center;color:var(--mute);">No calls taken in this period.</td></tr>`;
 
   const maxDay=Math.max(1,...(d.daily||[]).map(x=>x.calls));
   const dailyRows=(d.daily||[]).slice().reverse().map(x=>{
@@ -6202,8 +6204,8 @@ async function renderCallAnalytics(){
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
 
     <div class="greet-stats" style="margin-bottom:18px;">
-      ${stat('Calls taken', String(t.calls||0), `${t.unfinished||0} never finished`)}
-      ${stat('Booked', String(t.booked||0), `${t.estimates||0} estimates · ${t.declined||0} declined`,'#4ade80')}
+      ${stat('Calls taken', String(t.calls||0), `${t.not_booked||0} did not book`)}
+      ${stat('Booked', String(t.booked||0), `${t.estimates||0} estimate${(t.estimates||0)===1?'':'s'} sent`,'#4ade80')}
       ${stat('Conversion', pct(t.conversion), 'calls that became jobs', convColor)}
       ${stat('Booked value', money(t.booked_value||0), `${esc(money(t.discount_given||0))} discounted`)}
     </div>
@@ -6214,8 +6216,9 @@ async function renderCallAnalytics(){
         <thead><tr style="background:var(--line2);text-align:right;">
           <th style="padding:9px 8px;text-align:left;">Person</th>
           <th style="padding:9px 8px;">Calls</th><th style="padding:9px 8px;">Booked</th><th style="padding:9px 8px;">Rate</th>
-          <th style="padding:9px 8px;">Est.</th><th style="padding:9px 8px;">Declined</th><th style="padding:9px 8px;">Unfinished</th>
-          <th style="padding:9px 8px;">Avg quote</th><th style="padding:9px 8px;">Booked $</th><th style="padding:9px 8px;">Discounts</th>
+          <th style="padding:9px 8px;">Not booked</th>
+          <th style="padding:9px 8px;" title="Estimates sent instead of booking on the call">Est.</th>
+          <th style="padding:9px 8px;">Avg quote</th><th style="padding:9px 8px;">Booked $</th><th style="padding:9px 8px;">Discounts given</th>
         </tr></thead>
         <tbody>${peopleRows}</tbody>
       </table>
@@ -6227,15 +6230,70 @@ async function renderCallAnalytics(){
     <div class="rc-count">Where calls drop off</div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${funnelRows}</div>
 
-    <div class="rc-count">Discounts &amp; sources</div>
+    <div class="rc-count">Discounts</div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:22px;">
-      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">How they heard about us</div>
-      <div class="rc-badges" style="margin-bottom:14px;">${chips(d.sources||[])}</div>
-      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">Coupon codes used</div>
-      <div class="rc-badges" style="margin-bottom:14px;">${chips(d.coupons||[])}</div>
-      <div style="font-size:13px;color:var(--ink-2);">
-        <b>${t.discounted_calls||0}</b> of ${t.calls||0} calls got a discount, totalling <b>${esc(money(t.discount_given||0))}</b>.
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+        ${[['Referral source',dl.source],['Coupon code',dl.coupon],['Manual',dl.manual]].map(([lbl,v])=>`
+          <div style="flex:1;min-width:150px;background:var(--line2);border-radius:9px;padding:11px 13px;">
+            <div style="font-size:11.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;">${esc(lbl)}</div>
+            <div style="font-size:19px;font-weight:800;margin-top:3px;">${esc(money((v&&v.amount)||0))}</div>
+            <div style="font-size:12px;color:var(--mute);">used on ${(v&&v.count)||0} call${((v&&v.count)||0)===1?'':'s'}</div>
+          </div>`).join('')}
       </div>
+
+      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">How they heard about us</div>
+      ${(disc.by_source||[]).length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;">
+        <thead><tr style="text-align:right;color:var(--mute);font-size:11.5px;text-transform:uppercase;">
+          <th style="text-align:left;padding:4px 6px;">Source</th><th style="padding:4px 6px;">Times</th><th style="padding:4px 6px;">Booked</th><th style="padding:4px 6px;">$ involved</th></tr></thead>
+        <tbody>${disc.by_source.map(s=>`<tr style="border-top:1px solid var(--line2);">
+          <td style="padding:6px;font-weight:600;">${esc(s.source)}</td>
+          <td style="padding:6px;text-align:right;">${s.count}</td>
+          <td style="padding:6px;text-align:right;color:#15803d;font-weight:700;">${s.booked}</td>
+          <td style="padding:6px;text-align:right;">${esc(money(s.amount))}</td></tr>`).join('')}</tbody></table>`
+        : '<div style="font-size:13px;color:var(--mute);margin-bottom:16px;">Nobody has claimed a referral source yet.</div>'}
+
+      <div style="font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:7px;">Coupon codes</div>
+      ${(disc.by_coupon||[]).length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px;">
+        <thead><tr style="text-align:right;color:var(--mute);font-size:11.5px;text-transform:uppercase;">
+          <th style="text-align:left;padding:4px 6px;">Code</th><th style="padding:4px 6px;">Times</th><th style="padding:4px 6px;">Booked</th><th style="padding:4px 6px;">$ involved</th></tr></thead>
+        <tbody>${disc.by_coupon.map(c=>`<tr style="border-top:1px solid var(--line2);">
+          <td style="padding:6px;font-weight:700;font-family:ui-monospace,monospace;">${esc(c.code)}</td>
+          <td style="padding:6px;text-align:right;">${c.count}</td>
+          <td style="padding:6px;text-align:right;color:#15803d;font-weight:700;">${c.booked}</td>
+          <td style="padding:6px;text-align:right;">${esc(money(c.amount))}</td></tr>`).join('')}</tbody></table>`
+        : '<div style="font-size:13px;color:var(--mute);margin-bottom:10px;">No coupon codes used yet.</div>'}
+      ${(disc.rejected_coupons||[]).length?`<div style="font-size:12.5px;color:#b45309;margin-bottom:14px;">
+        ⚠ Customers read out codes that don't exist: ${disc.rejected_coupons.map(c=>`<b>${esc(c.code)}</b> (${c.count}×)`).join(', ')} — worth checking whether an old ad is still running.</div>`:''}
+
+      <div style="border-top:1px solid var(--line);padding-top:12px;font-size:13px;color:var(--ink-2);line-height:1.8;">
+        <div><b>${t.discounted_calls||0}</b> of ${t.calls||0} calls got a discount, totalling <b>${esc(money(t.discount_given||0))}</b> (avg ${esc(money(t.avg_discount||0))}).</div>
+        <div>Booking rate <b>with</b> a discount: <b style="color:#15803d;">${pct(eff.discounted_conversion)}</b> (${eff.discounted_booked}/${eff.discounted_calls}) ·
+             <b>without</b>: <b>${pct(eff.plain_conversion)}</b> (${eff.plain_booked}/${eff.plain_calls})</div>
+        ${disc.capped_attempts>0?`<div style="color:#b45309;">${disc.capped_attempts} time${disc.capped_attempts===1?'':'s'} someone tried to give away more than the rules allow.</div>`:''}
+      </div>
+    </div>
+
+    <div class="rc-count">Every discount given</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px;">
+        <thead><tr style="background:var(--line2);text-align:right;">
+          <th style="padding:9px 8px;text-align:left;">When</th><th style="padding:9px 8px;text-align:left;">Who</th>
+          <th style="padding:9px 8px;text-align:left;">What was used</th>
+          <th style="padding:9px 8px;">Quote</th><th style="padding:9px 8px;">Discount</th><th style="padding:9px 8px;">Max</th><th style="padding:9px 8px;">Booked?</th>
+        </tr></thead>
+        <tbody>${(disc.log||[]).length ? disc.log.map(l=>{
+          let when=l.at; try{ when=new Date(l.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(_){}
+          return `<tr style="border-top:1px solid var(--line2);">
+            <td style="padding:8px;color:var(--mute);">${esc(when)}</td>
+            <td style="padding:8px;font-weight:600;">${esc(l.person)}</td>
+            <td style="padding:8px;">${l.levers.length?l.levers.map(x=>`<span class="rc-badge gray">${esc(x)}</span>`).join(' '):'<span style="color:var(--mute);">—</span>'}</td>
+            <td style="padding:8px;text-align:right;">${l.quoted!=null?esc(money(l.quoted)):'—'}</td>
+            <td style="padding:8px;text-align:right;font-weight:800;color:#b45309;">-${esc(money(l.amount))}</td>
+            <td style="padding:8px;text-align:right;color:var(--mute);">${l.max_allowed!=null?esc(money(l.max_allowed)):'—'}</td>
+            <td style="padding:8px;text-align:right;">${l.booked?'<b style="color:#15803d;">Yes</b>':'<span style="color:var(--mute);">No</span>'}</td>
+          </tr>`;
+        }).join('') : '<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--mute);">No discounts given in this period.</td></tr>'}</tbody>
+      </table>
     </div>
 
     <details style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;">
@@ -8903,15 +8961,14 @@ function openTakeCall(){
   document.getElementById('callWizModal').classList.remove('hidden');
   renderCallWiz();
 }
-// `abandoned` marks a call that was closed with no outcome recorded — the
-// secretary backed out or clicked away mid-script. These are the calls worth
-// asking about, so they are logged rather than silently vanishing.
+// Closing the panel is NOT the same as ending the call. Clicking off it just
+// gets the script out of the way (to look something up, take another call);
+// the call stays open and is resumed from the Calls tab. Only "Hang up" ends
+// a call, which is what makes every call carry a real outcome instead of a
+// pile of half-finished ones nobody can explain later.
 function closeCallWiz(opts){
-  if(callWiz && callWiz.id && !(opts&&opts.resolved) && !callWiz._closed){
-    callWiz._closed=true;
-    cwTrack('abandoned',{ at_step:callWiz.step });
-  }
   document.getElementById('callWizModal').classList.add('hidden');
+  if(callWiz && callWiz.id && !(opts&&opts.resolved)) toast('Call still open — hang up when you\'re done to record it.');
 }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
 document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
@@ -8960,12 +9017,12 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
   const note=e.target.closest('.nb-other-note');
   if(note) nbOptionNotes[note.dataset.o]=note.value;
 });
-// "End call" jumps straight to the resolution step from wherever the
-// secretary currently is — the one guaranteed way out that always logs an
-// outcome, so a call that goes sideways mid-script still gets recorded.
+// "Hang up" is the ONLY way a call gets an outcome. It jumps to the resolution
+// step from wherever the secretary is, so however the conversation went, the
+// call ends recorded rather than trailing off into an untracked state.
 document.getElementById('callWizEndBtn').addEventListener('click', ()=>{
   if(callWiz && callWiz.id && !callWiz.resolution){ callWiz.step='resolution'; renderCallWiz(); }
-  else closeCallWiz();
+  else closeCallWiz({resolved:true});
 });
 // A row of tappable choice buttons — the workhorse of this whole wizard,
 // since almost every step is "pick one of a few answers", not free text.

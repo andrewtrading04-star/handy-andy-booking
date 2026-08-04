@@ -7251,25 +7251,28 @@ async function callAnalytics(req, res, db, auth) {
   const dayKeyOf = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });   // YYYY-MM-DD
 
   // ── Per-person scoreboard: the "who is booking and who is not" table.
+  // Everything that isn't a booking is one bucket ("not booked"). Splitting it
+  // into declined-vs-unfinished implied we knew WHY a call didn't convert, and
+  // we don't — the phone system isn't wired into this, so those were guesses
+  // dressed up as data.
   const byPerson = {};
   for (const r of rows) {
     const who = r.handled_by || 'Unknown';
     const p = byPerson[who] || (byPerson[who] = {
-      person: who, calls: 0, booked: 0, estimates: 0, declined: 0, unfinished: 0,
-      quoted_total: 0, quoted_count: 0, discount_given: 0, booked_value: 0,
+      person: who, calls: 0, booked: 0, estimates: 0, not_booked: 0,
+      quoted_total: 0, quoted_count: 0, discount_given: 0, discounted_calls: 0, booked_value: 0,
     });
     p.calls++;
     if (isBooked(r)) { p.booked++; p.booked_value += Number(r.quoted_total) || 0; }
-    else if (r.resolution === 'estimate_sent') p.estimates++;
-    else if (r.resolution === 'refused') p.declined++;
-    else if (!r.resolution) p.unfinished++;
+    else { p.not_booked++; if (r.resolution === 'estimate_sent') p.estimates++; }
     if (r.quoted_total != null) { p.quoted_total += Number(r.quoted_total) || 0; p.quoted_count++; }
-    p.discount_given += Number(r.discount_amount) || 0;
+    if (Number(r.discount_amount) > 0) { p.discount_given += Number(r.discount_amount); p.discounted_calls++; }
   }
   const people = Object.values(byPerson).map(p => ({
     ...p,
     conversion: p.calls ? Math.round((p.booked / p.calls) * 1000) / 10 : 0,
     avg_quote: p.quoted_count ? Math.round(p.quoted_total / p.quoted_count) : 0,
+    avg_discount: p.discounted_calls ? Math.round(p.discount_given / p.discounted_calls) : 0,
   })).sort((a, b) => b.calls - a.calls);
 
   // ── Day-by-day series, for the daily number and the weekly chart.
@@ -7296,30 +7299,107 @@ async function callAnalytics(req, res, db, auth) {
     for (let i = 0; i <= (idx < 0 ? 0 : idx); i++) funnel[i].reached++;
   }
 
-  // ── Discounts: what is actually being given away, and why.
+  // ── Discounts: what is actually being given away, on which lever, by whom,
+  // and whether it bought a booking. The `discount_final` event carries the
+  // full picture for one call (which levers were pulled, what was asked for,
+  // what the caps allowed), so it is the spine of this whole section.
   const discounted = rows.filter(r => Number(r.discount_amount) > 0);
-  const sourceCounts = {}, couponCounts = {};
-  for (const e of evs) {
-    if (e.event === 'source_picked' && e.meta?.source) sourceCounts[e.meta.source] = (sourceCounts[e.meta.source] || 0) + 1;
-    if (e.event === 'coupon_applied' && e.meta?.code) couponCounts[e.meta.code] = (couponCounts[e.meta.code] || 0) + 1;
+  const callById = Object.fromEntries(rows.map(r => [r.id, r]));
+  const finals = evs.filter(e => e.event === 'discount_final' && Number(e.meta?.amount) > 0);
+
+  // Per-lever totals. A call can pull more than one lever, so `amount` is the
+  // call's TOTAL and is attributed to each lever used — the counts are exact,
+  // the money is "discounts involving this lever".
+  const lever = { source: { count: 0, amount: 0 }, coupon: { count: 0, amount: 0 }, manual: { count: 0, amount: 0 } };
+  const bySource = {}, byCoupon = {};
+  for (const e of finals) {
+    const m = e.meta || {};
+    const amt = Number(m.amount) || 0;
+    if (m.source) {
+      lever.source.count++; lever.source.amount += amt;
+      const s = bySource[m.source] || (bySource[m.source] = { source: m.source, count: 0, amount: 0, booked: 0 });
+      s.count++; s.amount += amt;
+      if (callById[e.call_id] && isBooked(callById[e.call_id])) s.booked++;
+    }
+    if (m.coupon) {
+      lever.coupon.count++; lever.coupon.amount += amt;
+      const c = byCoupon[m.coupon] || (byCoupon[m.coupon] = { code: m.coupon, count: 0, amount: 0, booked: 0 });
+      c.count++; c.amount += amt;
+      if (callById[e.call_id] && isBooked(callById[e.call_id])) c.booked++;
+    }
+    if (Number(m.manual) > 0) { lever.manual.count++; lever.manual.amount += amt; }
   }
+  // How often the caps actually bit — a secretary asking for more than the
+  // rules allow, repeatedly, is a conversation worth having.
+  const cappedCount = evs.filter(e =>
+    e.event === 'manual_discount' && Number(e.meta?.requested) > Number(e.meta?.allowed || 0)).length;
+  // Coupon codes that were READ OUT but rejected — a customer quoting a dead
+  // code is worth knowing about (an ad still running with an expired offer).
+  const badCoupons = {};
+  for (const e of evs) {
+    if (e.event === 'coupon_tried' && e.meta && e.meta.valid === false && e.meta.code) {
+      badCoupons[e.meta.code] = (badCoupons[e.meta.code] || 0) + 1;
+    }
+  }
+  // Call-by-call discount log, newest first — the "show me exactly what was
+  // given away" list.
+  const discountLog = finals
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    .slice(0, 100)
+    .map(e => {
+      const c = callById[e.call_id] || {};
+      const m = e.meta || {};
+      const levers = [];
+      if (m.source) levers.push(m.source);
+      if (m.coupon) levers.push(m.coupon);
+      if (Number(m.manual) > 0) levers.push(`manual $${Math.round(Number(m.manual))}`);
+      return {
+        at: e.created_at, person: e.actor || c.handled_by || 'Unknown',
+        amount: Number(m.amount) || 0, levers,
+        max_allowed: m.max_allowed != null ? Number(m.max_allowed) : null,
+        quoted: c.quoted_total != null ? Number(c.quoted_total) : null,
+        booked: isBooked(c),
+      };
+    });
+  // Did discounting actually work? Conversion with vs without.
+  const discBooked = discounted.filter(isBooked).length;
+  const plain = rows.filter(r => !(Number(r.discount_amount) > 0));
+  const plainBooked = plain.filter(isBooked).length;
 
   const totals = {
     calls: rows.length,
     booked: rows.filter(isBooked).length,
     estimates: rows.filter(r => r.resolution === 'estimate_sent').length,
-    declined: rows.filter(r => r.resolution === 'refused').length,
-    unfinished: rows.filter(r => !r.resolution && !r.booking_id).length,
+    not_booked: rows.filter(r => !isBooked(r)).length,
     booked_value: Math.round(rows.filter(isBooked).reduce((t, r) => t + (Number(r.quoted_total) || 0), 0)),
     discount_given: Math.round(rows.reduce((t, r) => t + (Number(r.discount_amount) || 0), 0)),
     discounted_calls: discounted.length,
   };
   totals.conversion = totals.calls ? Math.round((totals.booked / totals.calls) * 1000) / 10 : 0;
+  totals.avg_discount = discounted.length ? Math.round(totals.discount_given / discounted.length) : 0;
 
   return res.status(200).json({
     days, since: since.toISOString(), totals, people, daily, funnel,
-    sources: Object.entries(sourceCounts).map(([k, v]) => ({ source: k, count: v })).sort((a, b) => b.count - a.count),
-    coupons: Object.entries(couponCounts).map(([k, v]) => ({ code: k, count: v })).sort((a, b) => b.count - a.count),
+    discounts: {
+      lever: {
+        source: { ...lever.source, amount: Math.round(lever.source.amount) },
+        coupon: { ...lever.coupon, amount: Math.round(lever.coupon.amount) },
+        manual: { ...lever.manual, amount: Math.round(lever.manual.amount) },
+      },
+      by_source: Object.values(bySource).map(s => ({ ...s, amount: Math.round(s.amount) })).sort((a, b) => b.count - a.count),
+      by_coupon: Object.values(byCoupon).map(c => ({ ...c, amount: Math.round(c.amount) })).sort((a, b) => b.count - a.count),
+      rejected_coupons: Object.entries(badCoupons).map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count),
+      capped_attempts: cappedCount,
+      log: discountLog,
+      // Whether discounting is buying anything: booking rate on discounted
+      // calls vs everything else.
+      effect: {
+        discounted_calls: discounted.length, discounted_booked: discBooked,
+        discounted_conversion: discounted.length ? Math.round((discBooked / discounted.length) * 1000) / 10 : 0,
+        plain_calls: plain.length, plain_booked: plainBooked,
+        plain_conversion: plain.length ? Math.round((plainBooked / plain.length) * 1000) / 10 : 0,
+      },
+    },
     event_counts: Object.entries(evs.reduce((m, e) => { m[e.event] = (m[e.event] || 0) + 1; return m; }, {}))
       .map(([k, v]) => ({ event: k, count: v })).sort((a, b) => b.count - a.count),
   });
