@@ -687,6 +687,21 @@ async function googleReviewSync(req, res) {
     return res.status(500).json({ error: error.message });
   }
   console.log('[google_review_sync]', slug, reviewer_name, `${rating}★`, technician_id ? 'matched-tech' : 'no-match');
+
+  // A real Google review is separate from the in-app 1–5★ flow (which already
+  // texts the tech, but only on a poor rating — see admin.js's review handler).
+  // A review posted straight to Google skips that flow entirely, so without
+  // this a tech could get reviewed on Google and never hear about it at all —
+  // good or bad. Best-effort: a text failure must never fail the ingest.
+  if (technician_id) {
+    const { data: tech } = await db.from('technicians').select('name, phone').eq('id', technician_id).maybeSingle();
+    if (tech?.phone) {
+      const msg = rating >= 4
+        ? `${tech.name || 'Hey'}, you just got a ${rating}★ Google review${reviewer_name ? ` from ${reviewer_name}` : ''}! Nice work.`
+        : `${tech.name || 'Hey'}, a ${rating}★ Google review came in${reviewer_name ? ` from ${reviewer_name}` : ''}. Check your profile to view it.`;
+      sendSMSResult(tech.phone, msg).catch(err => console.warn('[google_review_sync] tech SMS failed:', err.message));
+    }
+  }
   return res.status(200).json({ ok: true, action: 'created', id: ins?.id, matched: !!technician_id });
 }
 
