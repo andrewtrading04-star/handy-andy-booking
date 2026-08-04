@@ -10601,6 +10601,12 @@ async function openNewBooking(prefill){
   document.getElementById('nbSlotsWrap').style.display='none';
   document.getElementById('nbService').style.display='none';
   document.getElementById('nbTravelFee').value='';
+  // Reset the auto-fill marker WITH the field. Left stale from a prior modal
+  // session, it can equal a fee the office deliberately TYPES this session
+  // (surcharges come from a tiny fixed set), and the zip handler's clearing
+  // branches would then silently wipe the typed value as if it were their own
+  // auto-fill.
+  nbAutoTravel='';
   nbCustomLines=[]; nbRenderCustomLines();
   document.getElementById('nbTotalDisplay').textContent='';
   nbConvertLines=null; renderNbConvertSummary();   // clear any prior estimate conversion
@@ -10745,6 +10751,17 @@ async function openNewBooking(prefill){
 // for a normal manual booking. Included in nbCollectSelections so they flow into
 // the total + the created job's line items.
 let nbConvertLines=null;
+// True when those carried lines already include a travel fee (or a travel
+// discount) — the zip handler must then never auto-fill the Travel Fee field,
+// or the fee gets charged twice. Estimate lines are free text, so this covers
+// the machine-written labels ('Travel Fee' / 'Travel discount') AND the
+// office's hand-typed synonyms — the same vocabulary payroll's matcher treats
+// as one thing ('Service Area Fee', 'Service area surcharge', trip fee, …).
+// Every alternative is anchored to a travel-specific two-word phrase, so an
+// ordinary service description can't match by accident.
+function nbCarriedTravelLine(){
+  return (nbConvertLines||[]).some(l=>/travel\s*(fee|discount|surcharge|charge)|service\s*area\s*(fee|surcharge)|trip\s*(fee|charge)/i.test(l.label||''));
+}
 // Show the customer's requested dates/times (from the approve page) above the
 // availability calendar when converting an estimate. Hidden for a normal booking.
 function renderNbRequestedTimes(slots){
@@ -11455,12 +11472,20 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
         // A transient lookup failure used to fall through to the generic "new
         // area" copy — silently dropping the travel fee and applying the wrong
         // (default) minimum with zero visual cue. Say what actually happened.
-        zr.innerHTML=`⚠ Couldn't check this ZIP right now (connection hiccup) — the travel fee and service minimum may be wrong. Re-enter the ZIP to retry, or fill the travel fee manually.`;
+        // On a converted estimate that already carries a travel line, DON'T
+        // tell the office to fill the fee manually — following that advice
+        // charges travel twice.
+        zr.innerHTML=nbCarriedTravelLine()
+          ? `⚠ Couldn't check this ZIP right now (connection hiccup) — the service minimum may be wrong. The estimate's lines already include a travel fee, so don't add another one below.`
+          : `⚠ Couldn't check this ZIP right now (connection hiccup) — the travel fee and service minimum may be wrong. Re-enter the ZIP to retry, or fill the travel fee manually.`;
         zr.className='nb-zip-area bad';
       }
       else if(nbZipAreaId){
+        const _carried=nbCarriedTravelLine();
         zr.innerHTML = surcharge>0
-          ? `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and the travel fee is <b>$${surcharge}</b>. I'll fill it in below.`
+          ? (_carried
+              ? `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>. The estimate's lines already include a travel fee, so I won't add this area's $${surcharge} fee again.`
+              : `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and the travel fee is <b>$${surcharge}</b>. I'll fill it in below.`)
           : `Good news — that's <b>${esc(nbAreaName||'the service area')}</b>, and there's no travel fee for this area.`;
         zr.className='nb-zip-area ok';
       }
@@ -11476,8 +11501,17 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Auto-fill the Travel Fee from this zip's service-area surcharge, the same way
   // the public widget does — but only when the field is empty or still holds the
   // value we last auto-filled, so a manual override is never overwritten.
+  // NEVER auto-fill when the booking was converted from an estimate whose lines
+  // already carry a travel fee: the customer approved that priced quote, and
+  // stacking the surcharge on top of the carried line double-charged the fee in
+  // both the on-screen total and the booked price (Cady Valentine, Aug 2026:
+  // quoted $873.58, booked $943.94 with two $65 Travel Fee lines). A travel fee
+  // the office TYPES into the field on a converted booking still counts — this
+  // only stops the silent automatic top-up.
   const tf=document.getElementById('nbTravelFee');
-  if(surcharge>0 && (tf.value.trim()===''||tf.value.trim()===nbAutoTravel)){
+  if(nbCarriedTravelLine()){
+    if(nbAutoTravel!=='' && tf.value.trim()===nbAutoTravel){ tf.value=''; nbAutoTravel=''; }
+  } else if(surcharge>0 && (tf.value.trim()===''||tf.value.trim()===nbAutoTravel)){
     tf.value=String(surcharge); nbAutoTravel=String(surcharge);
     tf.title='Auto-filled from this zip’s service-area surcharge — you can change or clear it.';
   } else if(surcharge===0 && tf.value.trim()===nbAutoTravel){
@@ -12223,7 +12257,10 @@ function updateNbTotal(){
       <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:#eef2f7;border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:8px;"><span>Steve's payout</span><span style="color:#4ade80;">$${optionsTotal.toFixed(2)}</span></div>`;
     return;
   }
-  const travelFee=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  // GDS and No Charge/Callback mirror the submit path, which forces the travel
+  // fee to $0 for both — the display read the field unconditionally, so a
+  // leftover auto-filled surcharge showed a paid total for a free job.
+  const travelFee=(nbGdsActive||nbNoChargeActive)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   // Same skip rule as the submit path: a converted estimate may already carry
   // an after-hours line among its selections — never count the fee twice.
   const afterHours=selections.some(s=>/after.?hours/i.test(s.label||''))?0:nbAfterHoursFee();
