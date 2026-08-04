@@ -8756,25 +8756,20 @@ async function renderCallWiz(){
   const s=callWiz.step;
 
   if(s==='greet'){
+    // One card: greeting + the service question together — the secretary
+    // reads both lines in one breath, and picking an answer both starts the
+    // call log and records the service in a single tap.
     body.innerHTML=`${callWizScript(`Hello, thank you for calling ${bizName}, how may I help you?`)}
-      <button type="button" class="btn" id="cwStart">Start call</button>`;
-    document.getElementById('cwStart').addEventListener('click', async()=>{
-      const btn=document.getElementById('cwStart'); btn.disabled=true; btn.textContent='Starting…';
-      try{
-        const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
-        callWiz.id=r.id; callWiz.step='service'; renderCallWiz();
-      }catch(e){ err.textContent=e.message||'Could not start the call log'; btn.disabled=false; btn.textContent='Start call'; }
-    });
-    return;
-  }
-
-  if(s==='service'){
-    body.innerHTML=`${callWizScript('What can I help you with today?')}
       ${callWizChoiceRow([{value:'TV Mounting',label:'TV mounting'},{value:'Handyman',label:'Handyman'}])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', async()=>{
-      callWiz.service=b.dataset.cwchoice;
-      api('call_update',{ method:'POST', body:{ id:callWiz.id, service:callWiz.service }}).catch(()=>{});
-      callWiz.step='zip'; renderCallWiz();
+      body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
+      const service=b.dataset.cwchoice;
+      try{
+        const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
+        callWiz.id=r.id; callWiz.service=service;
+        api('call_update',{ method:'POST', body:{ id:callWiz.id, service }}).catch(()=>{});
+        callWiz.step='zip'; renderCallWiz();
+      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); }
     }));
     return;
   }
