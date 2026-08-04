@@ -9416,12 +9416,17 @@ async function renderCallWiz(){
       ${optsHtml}
       ${blocked?`<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${esc(blocked)}</div>`:''}
       <div style="display:flex;gap:8px;margin-top:12px;">
-        ${callWiz.optStep>0?'<button type="button" class="btn ghost" id="cwOptBack" style="width:auto;">Back</button>':''}
+        <button type="button" class="btn ghost" id="cwOptBack" style="width:auto;">Back</button>
         <button type="button" class="btn" id="cwOptNext" style="flex:1;" ${blocked?'disabled':''}>Continue</button>
       </div>
       <div style="margin-top:8px;font-size:11.5px;color:var(--mute);text-align:center;">Question ${stepNo} of ${cards.length}</div>`;
-    const backBtn=document.getElementById('cwOptBack');
-    if(backBtn) backBtn.addEventListener('click', ()=>{ callWiz.optStep--; renderCallWiz(); });
+    document.getElementById('cwOptBack').addEventListener('click', ()=>{
+      // First question backs out of the option walk entirely, to the zip step
+      // that led into it — there's nothing earlier IN this walk to go to.
+      if(callWiz.optStep>0) callWiz.optStep--;
+      else callWiz.step='zip';
+      renderCallWiz();
+    });
     document.getElementById('cwOptNext').addEventListener('click', ()=>{
       cwTrack('question_answered',{
         question: card.kind==='frame' ? 'frame' : card.g.key,
