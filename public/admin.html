@@ -1702,6 +1702,13 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
 }
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// (xxx) xxx-xxxx for display only — never touches what's stored or dialed. A
+// non-US or partial number (not exactly 10 digits) is returned unchanged
+// rather than mangled into a fake-looking format.
+function fmtPhone(p){
+  const d=String(p||'').replace(/\D/g,'');
+  return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (p||'');
+}
 // A slot's label plus a green "+$N bonus" badge when the slot pays a bonus
 // (e.g. the late 8 PM slot). Driven by slot.bonus from availability.js.
 function slotLabelHtml(s){ const base=esc(s.label); return s&&s.bonus ? `${base}<span class="slotbonus">+$${esc(s.bonus)} bonus</span>` : base; }
@@ -2909,7 +2916,7 @@ function openBooking(b){
     <div class="bk-d" id="bkPhoneRow"><div class="bk-dtile">${bkIcon('phone')}</div><div>
       <span class="bk-dl">Customer</span>
       <div class="bk-dv">${b.customer?.phone
-        ? `<span class="lead">${esc(b.customer.phone)}</span>`
+        ? `<span class="lead">${esc(fmtPhone(b.customer.phone))}</span>`
         : '<strong style="color:#f87171;">NO PHONE NUMBER</strong>'}
         ${b.customer?.email?`<br><span class="dim">${esc(b.customer.email)}</span>`:''}</div>
       ${(b.customer?.phone||b.customer?.email)?`<div class="bk-dact">
