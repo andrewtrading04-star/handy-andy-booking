@@ -154,6 +154,23 @@ async function widgetPricesPublic(req, res) {
   }
 }
 
+// GET /api/book?action=coupons&business=<slug>
+// The live promo codes, so the widget stops shipping its own copy. That copy
+// had already drifted from the enforcing list (FB20 worked server-side but the
+// widget called it invalid), which reads to a customer as a broken code.
+// Amounts are public by nature — a customer types the code and sees the
+// discount — so this needs no auth, same as widget_prices above.
+async function couponsPublic(req, res) {
+  const business = ((req.query || {}).business || 'handy-andy').toString().trim();
+  try {
+    const map = await couponMapFor(serviceClient(), business);
+    return res.status(200).json({ coupons: map });
+  } catch (e) {
+    console.warn('[book] coupons lookup failed:', e.message);
+    return res.status(200).json({ coupons: {} });
+  }
+}
+
 // GET/POST /api/book?action=review_click&token=<review_token>&ch=email|sms
 // Records the first time a customer clicks the review link from either channel,
 // then redirects to review.html. Replaces the old email open-pixel with a
@@ -237,24 +254,65 @@ const NATIVE_COUPONS = {
   'mile-high':  HA_COUPONS,
 };
 
-// The one place any surface resolves a promo code to a dollar amount. Exported
-// so the office's phone-quote flow (api/admin.js quote_coupon) honors EXACTLY
-// the codes a customer can use online — a second hand-maintained list would
-// drift the moment a code is added here, and the office would be telling
-// callers a code is invalid while the website accepts it.
-export function couponAmountFor(businessSlug, rawCode) {
+// The hardcoded maps above are now only a FALLBACK. app.coupons is the live
+// list (Other -> Coupons), so a code can be added, repriced or retired without
+// a deploy. If that table is missing or unreadable we fall back to the maps
+// rather than silently rejecting every code a customer types.
+const COUPON_TTL_MS = 60000;
+const _couponCache = new Map();   // slug -> { at, map }
+function couponFallbackMap(businessSlug) {
+  return businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
+}
+// { CODE: amount } for every ACTIVE, unexpired coupon this business honors.
+// Cached for a minute — this sits in the booking hot path and the list changes
+// a few times a month at most.
+export async function couponMapFor(db, businessSlug) {
+  const slug = String(businessSlug || '');
+  const hit = _couponCache.get(slug);
+  if (hit && Date.now() - hit.at < COUPON_TTL_MS) return hit.map;
+  let map = null;
+  try {
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', slug).maybeSingle();
+    if (biz?.id) {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await db.from('coupons')
+        .select('code, amount, active, expires_on').eq('business_id', biz.id).eq('active', true);
+      if (!error && Array.isArray(data)) {
+        map = {};
+        for (const c of data) {
+          if (c.expires_on && String(c.expires_on) < today) continue;   // lapsed
+          map[String(c.code || '').trim().toUpperCase()] = Number(c.amount) || 0;
+        }
+      }
+    }
+  } catch { /* table not applied yet — fall through to the hardcoded map */ }
+  if (!map) map = couponFallbackMap(slug);
+  _couponCache.set(slug, { at: Date.now(), map });
+  return map;
+}
+// Drop the cache so an edit in the dashboard takes effect immediately rather
+// than up to a minute later (the office repricing a code then testing it must
+// not see the old amount).
+export function couponCacheClear(businessSlug) {
+  if (businessSlug) _couponCache.delete(String(businessSlug));
+  else _couponCache.clear();
+}
+// The one place any surface resolves a promo code to a dollar amount, so the
+// office's phone-quote flow (api/admin.js quote_coupon) honors EXACTLY the
+// codes a customer can use online — a second hand-maintained list would drift
+// the moment a code changes, and the office would be telling callers a code is
+// invalid while the website accepts it.
+export async function couponAmountFor(db, businessSlug, rawCode) {
   const code = String(rawCode || '').trim().toUpperCase();
   if (!code) return 0;
-  const map = businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
+  const map = await couponMapFor(db, businessSlug);
   return Number(map[code]) || 0;
 }
-// Every code this business honors. Exported for the office's phone flow, which
-// offers a "did they mean…" on a near miss — a customer reading a code down the
-// phone is one dropped letter away from being told, wrongly, that their code is
-// no good (BOOKONLNE for BOOKONLINE, Aug 2026).
-export function couponCodesFor(businessSlug) {
-  const map = businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
-  return Object.keys(map);
+// Every code this business honors. Used by the phone flow to offer a "did they
+// mean…" on a near miss — a customer reading a code down the phone is one
+// dropped letter away from being told, wrongly, that their code is no good.
+export async function couponCodesFor(db, businessSlug) {
+  return Object.keys(await couponMapFor(db, businessSlug));
 }
 
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
@@ -356,7 +414,7 @@ async function bookDoms(req, res) {
 
   // Coupon (validated server-side; unknown codes are ignored, never trusted).
   const couponCode = String(b.coupon || '').trim().toUpperCase();
-  const couponAmt = DOMS_COUPONS[couponCode] || 0;
+  const couponAmt = await couponAmountFor(db, 'doms', couponCode);
 
   // ── Line items for storage. Prefer explicit line_items; else map the
   // email_summary lines the widget already computed for display.
@@ -636,7 +694,7 @@ async function bookNative(req, res, slug) {
 
   // Coupon (validated server-side; unknown codes are ignored, never trusted).
   const couponCode = String(b.coupon || '').trim().toUpperCase();
-  const couponAmt = (NATIVE_COUPONS[slug] || {})[couponCode] || 0;
+  const couponAmt = await couponAmountFor(db, slug, couponCode);
 
   // ── Line items for storage. Prefer explicit line_items; else the email_summary
   // lines the widget computed for display.
@@ -1064,6 +1122,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'place_details') return placeDetailsPublic(req, res);
   // Public price overrides for the booking widget — see widgetPricesPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
+  // Live promo codes for the widget — see couponsPublic() above.
+  if (req.method === 'GET' && (req.query || {}).action === 'coupons') return couponsPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.

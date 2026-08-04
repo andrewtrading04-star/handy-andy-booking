@@ -5825,6 +5825,10 @@ async function renderOther(){
         <div><div style="font-weight:700;">📨 Calls</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Voicemails from the office phone, with transcripts, plus calls logged through "Take a Call".</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherCallsCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
+      <div id="otherCoupons" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">🎟️ Coupons</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every promo code the website and the phone script honor — add, reprice, retire, and see which ones are actually used.</div></div>
+        <span style="color:var(--mute);font-size:20px;">›</span>
+      </div>
       <div id="otherTravelFees" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🚗 Travel Fees</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">What each zip adds to a booking for the drive, and what the tech is paid for it — by tier, e.g. Houston 1 through 4.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
@@ -5840,6 +5844,7 @@ async function renderOther(){
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
   document.getElementById('otherCalls').onclick=()=>navTo('calls');
   document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();
+  document.getElementById('otherCoupons').onclick=()=>renderCoupons();
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
@@ -5893,6 +5898,144 @@ const WP_COLS=[
 ];
 let wpRows=[], wpDirty=new Map(), wpSaveMsg='';  // wpDirty: id -> new price, only for edited rows
 let wpCols=[];                                   // columns that actually returned data
+// ── Coupons ──────────────────────────────────────────────────────────────────
+// The live promo-code list (app.coupons). Both the public widget and the phone
+// script read the same rows, so a code added here works everywhere immediately
+// — no deploy, and no second hand-kept list to drift out of sync.
+//
+// "Used" counts real redemptions off booking line items ("Coupon <CODE>"), not
+// clicks, so a code nobody has ever used is visibly dead weight.
+let cpRows=[], cpUsage={}, cpEditing=null;
+async function renderCoupons(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('coupons_list',{ params:{ business:current.slug }});
+    cpRows=d.coupons||[]; cpUsage=d.usage||{}; cpEditing=null;
+    renderCouponsBody();
+  }catch(e){
+    view.innerHTML=`<div class="wrap"><button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;">← Other</button><div class="empty">${esc(e.message)}</div></div>`;
+  }
+}
+function renderCouponsBody(){
+  const view=document.getElementById('view');
+  const today=new Date().toISOString().slice(0,10);
+  const rows=cpRows.map(c=>{
+    const u=cpUsage[String(c.code).toUpperCase()]||{count:0,total:0,last:null};
+    const lapsed=c.expires_on && String(c.expires_on)<today;
+    const live=c.active && !lapsed;
+    const editing=cpEditing===c.id;
+    if(editing) return cpFormHtml(c);
+    return `<tr style="${live?'':'opacity:.55;'}">
+      <td style="font-family:ui-monospace,monospace;font-weight:700;">${esc(c.code)}</td>
+      <td style="text-align:right;font-weight:700;">${esc(money(c.amount))}</td>
+      <td>${live?'<span style="color:#15803d;font-weight:600;">Live</span>'
+             :lapsed?`<span style="color:#b45309;">Expired ${esc(c.expires_on)}</span>`
+             :'<span style="color:var(--mute);">Off</span>'}</td>
+      <td style="text-align:right;">${u.count||'<span style="color:var(--mute);">never</span>'}</td>
+      <td style="text-align:right;">${u.total?esc(money(u.total)):'—'}</td>
+      <td style="color:var(--mute);font-size:12.5px;">${esc(c.note||'')}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn ghost sm" data-cpedit="${esc(c.id)}">Edit</button>
+        <button class="btn ghost sm" data-cpdel="${esc(c.id)}" style="color:#b91c1c;">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const totalGiven=Object.values(cpUsage).reduce((s,u)=>s+(u.total||0),0);
+  const everUsed=cpRows.filter(c=>(cpUsage[String(c.code).toUpperCase()]||{}).count).length;
+  view.innerHTML=`<div class="wrap">
+    <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
+    <h2 style="margin:0 0 4px;">🎟️ Coupons</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:14px;max-width:660px;line-height:1.6;">
+      Every promo code ${esc(current&&current.name||'this business')} honors, on the website and over the phone.
+      A change here applies to the next booking — nothing already booked is repriced.
+    </div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;">
+      <div><b>${cpRows.length}</b> <span style="color:var(--mute);">codes</span></div>
+      <div><b>${everUsed}</b> <span style="color:var(--mute);">ever used</span></div>
+      <div><b>${esc(money(totalGiven))}</b> <span style="color:var(--mute);">given away all time</span></div>
+    </div>
+    <div id="cpErr" style="color:#b91c1c;font-size:13px;margin-bottom:10px;"></div>
+    ${cpEditing==='new'?cpFormHtml(null):'<button class="btn sm" id="cpAdd" style="width:auto;margin-bottom:12px;">+ Add a coupon</button>'}
+    ${cpRows.length?`<table><thead><tr>
+        <th>Code</th><th style="text-align:right;">Amount</th><th>Status</th>
+        <th style="text-align:right;">Used</th><th style="text-align:right;">Given away</th><th>Note</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table>`
+      :'<div class="empty">No coupons yet.</div>'}
+    <div style="height:40px;"></div>
+  </div>`;
+  const add=document.getElementById('cpAdd');
+  if(add) add.addEventListener('click',()=>{ cpEditing='new'; renderCouponsBody(); });
+  view.querySelectorAll('[data-cpedit]').forEach(b=>b.addEventListener('click',()=>{ cpEditing=b.dataset.cpedit; renderCouponsBody(); }));
+  view.querySelectorAll('[data-cpdel]').forEach(b=>b.addEventListener('click',()=>cpDelete(b.dataset.cpdel)));
+  const save=document.getElementById('cpSave');
+  if(save) save.addEventListener('click',()=>cpSave());
+  const cancel=document.getElementById('cpCancel');
+  if(cancel) cancel.addEventListener('click',()=>{ cpEditing=null; renderCouponsBody(); });
+}
+function cpFormHtml(c){
+  const f=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <label style="font-size:12px;color:var(--ink-2);">Code
+        <input class="search" id="cpCode" style="margin:2px 0 0;width:150px;text-transform:uppercase;font-family:ui-monospace,monospace;" value="${esc(c?c.code:'')}" placeholder="SUMMER20">
+      </label>
+      <label style="font-size:12px;color:var(--ink-2);">$ off
+        <input class="search" id="cpAmount" type="number" min="0" step="5" style="margin:2px 0 0;width:90px;" value="${c?c.amount:''}" placeholder="10">
+      </label>
+      <label style="font-size:12px;color:var(--ink-2);">Expires <span style="color:var(--mute);">(optional)</span>
+        <input class="search" id="cpExpires" type="date" style="margin:2px 0 0;width:160px;" value="${esc(c&&c.expires_on?c.expires_on:'')}">
+      </label>
+      <label style="font-size:12px;color:var(--ink-2);flex:1;min-width:180px;">Note <span style="color:var(--mute);">(where it's used)</span>
+        <input class="search" id="cpNote" style="margin:2px 0 0;" value="${esc(c&&c.note?c.note:'')}" placeholder="Facebook ad, Houston">
+      </label>
+      <label style="font-size:13px;display:flex;align-items:center;gap:6px;padding-bottom:7px;">
+        <input type="checkbox" id="cpActive" ${!c||c.active?'checked':''}> Live
+      </label>
+      <button class="btn sm" id="cpSave" style="width:auto;">Save</button>
+      <button class="btn ghost sm" id="cpCancel" style="width:auto;">Cancel</button>
+    </div>
+    <div style="font-size:12px;color:var(--mute);margin-top:8px;">Turning a code off keeps its history but stops it working. Delete removes it entirely.</div>
+  </div>`;
+  return c ? `<tr><td colspan="7" style="padding:0;">${f}</td></tr>` : f;
+}
+async function cpSave(){
+  const errEl=document.getElementById('cpErr'); errEl.textContent='';
+  const body={
+    business:current.slug,
+    code:document.getElementById('cpCode').value.trim().toUpperCase(),
+    amount:Number(document.getElementById('cpAmount').value),
+    note:document.getElementById('cpNote').value.trim(),
+    expires_on:document.getElementById('cpExpires').value||null,
+    active:document.getElementById('cpActive').checked,
+  };
+  if(cpEditing && cpEditing!=='new') body.id=cpEditing;
+  const btn=document.getElementById('cpSave'); btn.disabled=true; btn.textContent='Saving…';
+  try{
+    await api('coupons_save',{ method:'POST', body });
+    toast(`${body.code} saved ✓`);
+    await renderCoupons();
+  }catch(e){
+    errEl.textContent=e.message||'Could not save that coupon.';
+    btn.disabled=false; btn.textContent='Save';
+  }
+}
+async function cpDelete(id){
+  const c=cpRows.find(x=>x.id===id); if(!c) return;
+  const u=cpUsage[String(c.code).toUpperCase()];
+  // Deleting a code that has real redemptions behind it loses the only record
+  // of what it was worth, so say so rather than asking a generic "are you sure".
+  const warn=u&&u.count
+    ? `${c.code} has been used ${u.count} time${u.count===1?'':'s'} for ${money(u.total)}. Deleting it removes the code — past bookings keep their discount, but you lose this row. Turning it off instead keeps the history.\n\nDelete anyway?`
+    : `Delete ${c.code}?`;
+  if(!confirm(warn)) return;
+  const errEl=document.getElementById('cpErr'); errEl.textContent='';
+  try{
+    await api('coupons_delete',{ method:'POST', body:{ business:current.slug, id }});
+    toast(`${c.code} deleted`);
+    await renderCoupons();
+  }catch(e){ errEl.textContent=e.message||'Could not delete that coupon.'; }
+}
+
 // ── Travel Fees ──────────────────────────────────────────────────────────────
 // Per-zip travel pricing, shown the way the office actually talks about it:
 // tiers within a metro ("Houston 1/2/3/4"). A tier isn't a real table — it's

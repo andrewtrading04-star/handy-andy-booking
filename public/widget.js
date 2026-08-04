@@ -98,10 +98,13 @@
     '1707514546803x280800015001583600': 'houston',   // Houston #1
   };
 
-  // Valid coupon codes → discount in dollars. Must match HA_COUPONS in
-  // api/book.js, which is the enforcing copy — this one only gives instant
-  // feedback pre-Stripe and shows the discount on the thank-you summary.
-  const COUPONS = {
+  // Valid coupon codes → discount in dollars. These are only a FALLBACK for a
+  // failed fetch: loadCoupons() below replaces them with the live list from
+  // app.coupons (Other -> Coupons in the dashboard), which is also what
+  // api/book.js enforces at booking time. Keeping a hand-maintained copy here
+  // is what let this drift — FB20 was live server-side while this list called
+  // it invalid, which reads to the customer as a broken code.
+  let COUPONS = {
     MCDENVER20: 20, MP10: 10, AUS10: 10, HOU10: 10, DEN10: 10,
     ISREAL15: 15, STEVE15: 15, BATCITY10: 10, FBD15: 15, FB15: 15,
     ANNIVERSARY15: 15, BING10: 10, OLIVE10: 10, STV10: 10, G10TV: 10,
@@ -2046,6 +2049,17 @@
     }
   }
 
+  // Pull the live promo codes so the widget accepts exactly what the server
+  // will honor. On any failure the hardcoded list above stands in, so a code
+  // never stops working because this one request did.
+  async function loadCoupons(){
+    try{
+      const r=await fetch(`${API_BASE}/book?action=coupons&business=${encodeURIComponent(BUSINESS)}`);
+      const d=await r.json();
+      if(d&&d.coupons&&Object.keys(d.coupons).length) COUPONS=d.coupons;
+    }catch(e){ /* keep the built-in fallback list */ }
+  }
+
   async function applyWidgetPriceOverrides(cityKey){
     if(!serviceConfig) return;
     try{
@@ -2104,6 +2118,7 @@
       }
       serviceConfig=SERVICE_CONFIGS[configKey];
       await applyWidgetPriceOverrides(priceCity);
+      await loadCoupons();
       await ensureStripeKey();
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();

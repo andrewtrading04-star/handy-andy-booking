@@ -63,7 +63,7 @@ function bookingStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
-import { couponAmountFor, couponCodesFor } from './book.js';
+import { couponAmountFor, couponCodesFor, couponCacheClear } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 // What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
@@ -268,6 +268,9 @@ export default async function handler(req, res) {
       case 'widget_prices_save': return await widgetPricesSave(req, res, db, auth, body);
       case 'travel_fees_list':  return await travelFeesList(req, res, db, auth);
       case 'travel_fees_save':  return await travelFeesSave(req, res, db, auth, body);
+      case 'coupons_list':      return await couponsList(req, res, db, auth);
+      case 'coupons_save':      return await couponsSave(req, res, db, auth, body);
+      case 'coupons_delete':    return await couponsDelete(req, res, db, auth, body);
       case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
       case 'relabel_tv_size':   return await relabelTvSize(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
@@ -1580,6 +1583,101 @@ async function travelFeesSave(req, res, db, auth, body) {
     .in('id', ids).eq('business_id', biz.id).select('id');
   if (error) throw error;
   return res.status(200).json({ ok: true, updated: (data || []).length });
+}
+
+// ── Coupons (Other -> Coupons) ───────────────────────────────────────────────
+// The live promo-code list. Previously three hardcoded copies (api/book.js's
+// HA_COUPONS/DOMS_COUPONS plus public/widget.js's own COUPONS) that had already
+// drifted apart, so the website could call a code invalid that the server would
+// have honored. This is now the single source; book.js reads it and the widget
+// fetches it, with the old maps left only as a fallback.
+//
+// Usage is counted off the bookings themselves: a redeemed code is stored as a
+// "Coupon <CODE>" line item, so the count is real redemptions, not clicks.
+const COUPON_MAX = 500;   // dollars — a fat-fingered code never silently saves
+async function couponsList(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data, error } = await db.from('coupons')
+    .select('id, code, amount, active, note, expires_on, created_at')
+    .eq('business_id', biz.id).order('code');
+  if (error) {
+    if (/coupons/.test(error.message || '')) return res.status(200).json({ coupons: [], usage: {} });
+    throw error;
+  }
+  // Redemption counts + what each code has actually given away, from the
+  // booking line items. One read, tallied in memory — the alternative is a
+  // per-code query and the list is small.
+  const usage = {};
+  try {
+    const { data: bks } = await db.from('bookings')
+      .select('line_items, scheduled_at, status')
+      .eq('business_id', biz.id).neq('status', 'cancelled').not('line_items', 'is', null)
+      .limit(5000);
+    for (const b of bks || []) {
+      for (const li of (Array.isArray(b.line_items) ? b.line_items : [])) {
+        const m = String(li.name || '').match(/^coupon\s+([A-Z0-9_-]+)/i);
+        if (!m) continue;
+        const k = m[1].toUpperCase();
+        const u = usage[k] || (usage[k] = { count: 0, total: 0, last: null });
+        u.count++;
+        u.total += Math.abs(Number(li.line_total) || 0);
+        if (!u.last || (b.scheduled_at && b.scheduled_at > u.last)) u.last = b.scheduled_at || u.last;
+      }
+    }
+  } catch { /* usage is a nice-to-have; never fail the list over it */ }
+  return res.status(200).json({ coupons: data || [], usage });
+}
+async function couponsSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // A promo code is money off every job that uses it — owner only.
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change coupons' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const code = String(body.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'A code is required' });
+  if (!/^[A-Z0-9_-]{2,32}$/.test(code)) {
+    return res.status(400).json({ error: 'Codes can only use letters, numbers, dashes and underscores (2-32 characters) — a code with a space or symbol cannot be typed reliably by a customer.' });
+  }
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: 'Amount must be $0 or more' });
+  if (amount > COUPON_MAX) return res.status(400).json({ error: `$${amount} is above the $${COUPON_MAX} sanity ceiling for a coupon — double-check this isn't a typo.` });
+
+  const patch = {
+    business_id: biz.id, code, amount,
+    active: body.active !== false,
+    note: body.note ? String(body.note).slice(0, 200) : null,
+    expires_on: body.expires_on || null,
+    updated_at: new Date().toISOString(),
+  };
+  let out;
+  if (body.id) {
+    const { data, error } = await db.from('coupons').update(patch)
+      .eq('id', body.id).eq('business_id', biz.id).select('id').maybeSingle();
+    if (error) {
+      if (/duplicate key|unique/i.test(error.message || '')) return res.status(409).json({ error: `${code} already exists for this business.` });
+      throw error;
+    }
+    out = data;
+  } else {
+    const { data, error } = await db.from('coupons').insert(patch).select('id').maybeSingle();
+    if (error) {
+      if (/duplicate key|unique/i.test(error.message || '')) return res.status(409).json({ error: `${code} already exists for this business.` });
+      throw error;
+    }
+    out = data;
+  }
+  couponCacheClear(biz.slug);   // so a repriced code takes effect on the very next booking
+  return res.status(200).json({ ok: true, id: out?.id || null });
+}
+async function couponsDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change coupons' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('coupons').delete().eq('id', body.id).eq('business_id', biz.id);
+  if (error) throw error;
+  couponCacheClear(biz.slug);
+  return res.status(200).json({ ok: true });
 }
 
 // ── Seed / repair the Handy Andy "TV Installation" option groups ─────────────
@@ -7555,13 +7653,13 @@ async function quoteCoupon(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const code = String(body.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'code required' });
-  const amount = couponAmountFor(biz.slug, code);
+  const amount = await couponAmountFor(db, biz.slug, code);
   if (!amount) {
     // Offer the closest real code when it's within one or two characters — a
     // code read aloud over the phone is easy to mistype, and a bare "not valid"
     // strands the secretary mid-call against a customer who is actually right.
     let suggest = null, best = 3;
-    for (const c of couponCodesFor(biz.slug)) {
+    for (const c of await couponCodesFor(db, biz.slug)) {
       const d = editDistance(code, c);
       if (d > 0 && d < best) { best = d; suggest = c; }
     }
