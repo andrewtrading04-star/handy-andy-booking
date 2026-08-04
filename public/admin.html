@@ -9453,12 +9453,36 @@ async function renderCallWiz(){
         if(d.name) result.innerHTML=`<span style="color:var(--ok,#15803d);">✓ In our ${esc(d.name)} service area.</span>`;
         else if(d.other_business) result.innerHTML=`That zip is actually served by <b>${esc(d.other_business.name)}</b>, not ${esc(bizName)}.`;
         else result.innerHTML=`We don't have this zip on file yet — double-check it, or continue and note it for the office.`;
-      }catch(e){ result.textContent=''; }
+      }catch(e){
+        // Reset so the next attempt (blur or Continue) re-runs the lookup
+        // instead of silently proceeding on a failed one — the area/surcharge
+        // from a PREVIOUS zip must never ride along under a new zip.
+        lastChecked=null;
+        callWiz.areaName=null; callWiz.otherBiz=null; callWiz.surcharge=0;
+        result.innerHTML='<span style="color:#b91c1c;">Could not check that zip — try again.</span>';
+      }
     }
     zipInput.addEventListener('change', checkZip);
     zipInput.addEventListener('blur', checkZip);
-    document.getElementById('cwZipNext').addEventListener('click', ()=>{
-      callWiz.zip=zipInput.value.trim();
+    document.getElementById('cwZipNext').addEventListener('click', async()=>{
+      // The zip is load-bearing, not a formality: it resolves the service
+      // area, the travel fee, and the Austin price overrides. Skipping it
+      // quoted the wrong price for the rest of the call, so the funnel does
+      // not continue without a checked 5-digit zip.
+      const z=zipInput.value.trim();
+      if(z.length!==5){
+        result.innerHTML='<span style="color:#b91c1c;">A 5-digit zip is required before continuing.</span>';
+        zipInput.focus();
+        return;
+      }
+      const nextBtn=document.getElementById('cwZipNext');
+      nextBtn.disabled=true;
+      // Continue clicked straight after typing (no blur/change fired yet), or
+      // the earlier lookup failed silently — make sure the area/surcharge
+      // lookup has actually run for THIS zip before moving on.
+      if(z!==lastChecked){ await checkZip(); }
+      nextBtn.disabled=false;
+      callWiz.zip=z;
       api('call_update',{ method:'POST', body:{ id:callWiz.id, market:callWiz.areaName||null }}).catch(()=>{});
       cwTrack('zip_checked',{ zip:callWiz.zip, area:callWiz.areaName||null, in_area:!!callWiz.areaName, surcharge:callWiz.surcharge||0 });
       callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
