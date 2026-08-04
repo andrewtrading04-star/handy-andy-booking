@@ -9209,7 +9209,12 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
 // step from wherever the secretary is, so however the conversation went, the
 // call ends recorded rather than trailing off into an untracked state.
 document.getElementById('callWizEndBtn').addEventListener('click', ()=>{
-  if(callWiz && callWiz.id && !callWiz.resolution){ callWiz.step='resolution'; renderCallWiz(); }
+  if(callWiz && callWiz.id && !callWiz.resolution){
+    // Remember where they were so "Hang up" tapped by mistake isn't the end of
+    // the call — the resolution card can put them back exactly where they left.
+    if(callWiz.step!=='resolution') callWiz._beforeResolution=callWiz.step;
+    callWiz.step='resolution'; renderCallWiz();
+  }
   else closeCallWiz({resolved:true});
 });
 // A row of tappable choice buttons — the workhorse of this whole wizard,
@@ -9623,6 +9628,36 @@ function cwFrameRowHtml(){
     )+
   `</div>`;
 }
+// Every card gets a way back. A call is not a form the customer fills in order —
+// they remember a soundbar three screens later, or change the day after hearing
+// the price — and before this the only way to correct anything past the current
+// step was to hang up and re-run the whole script as a second call.
+function cwBackBtnHtml(label){
+  return `<button type="button" class="btn ghost sm" id="cwBack" style="margin-top:7px;">← ${esc(label||'Back')}</button>`;
+}
+// Wire the button rendered above. `to` is either a step name or a function that
+// performs the navigation itself (for steps that need to restore sub-state).
+function cwWireBack(to){
+  const b=document.getElementById('cwBack');
+  if(!b) return;
+  b.addEventListener('click', ()=>{
+    if(typeof to==='function'){ to(); return; }
+    callWiz.step=to; renderCallWiz();
+  });
+}
+// Step to return to from the schedule card: back into the LAST option question
+// for a TV job (so an add-on the customer just remembered can be added, then
+// stepped forward again), or the job description for handyman work.
+function cwBackFromSchedule(){
+  if(callWiz.service==='TV Mounting'){
+    const cards=(typeof callWizCards==='function') ? callWizCards() : [];
+    callWiz.optStep=Math.max(0, cards.length-1);
+    callWiz.step='tvopts';
+  } else {
+    callWiz.step='handydesc';
+  }
+  renderCallWiz();
+}
 async function renderCallWiz(){
   const body=document.getElementById('callWizBody');
   const err=document.getElementById('callWizErr');
@@ -9655,7 +9690,8 @@ async function renderCallWiz(){
     body.innerHTML=`${callWizScript("What's your zip code?")}
       <input class="search" id="cwZip" style="margin:0;" placeholder="ZIP" inputmode="numeric" maxlength="5" value="${esc(callWiz.zip)}" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)">
       <div id="cwZipResult" style="margin-top:8px;font-size:13px;color:var(--mute);"></div>
-      <button type="button" class="btn" id="cwZipNext" style="margin-top:10px;">Continue</button>`;
+      <button type="button" class="btn" id="cwZipNext" style="margin-top:10px;">Continue</button>
+      ${cwBackBtnHtml('They need a different service')}`;
     const zipInput=document.getElementById('cwZip');
     const result=document.getElementById('cwZipResult');
     // cwZipDone is set only when a lookup actually COMPLETES, so a lookup merely
@@ -9736,6 +9772,7 @@ async function renderCallWiz(){
       callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
       renderCallWiz();
     });
+    cwWireBack('greet');
     return;
   }
 
@@ -9831,10 +9868,16 @@ async function renderCallWiz(){
   if(s==='handydesc'){
     body.innerHTML=`${callWizScript('What do you need done?')}
       <textarea class="search" id="cwDesc" style="margin:0;min-height:70px;" placeholder="e.g. hang three shelves, fix a leaky faucet…">${esc(callWiz.handymanDesc)}</textarea>
-      <button type="button" class="btn" id="cwDescNext" style="margin-top:10px;">Continue</button>`;
+      <button type="button" class="btn" id="cwDescNext" style="margin-top:10px;">Continue</button>
+      ${cwBackBtnHtml('Back to the zip')}`;
     document.getElementById('cwDescNext').addEventListener('click', ()=>{
       callWiz.handymanDesc=document.getElementById('cwDesc').value.trim();
       callWiz.step='schedule'; renderCallWiz();
+    });
+    // Keep whatever they've typed when stepping back, so it isn't lost.
+    cwWireBack(()=>{
+      callWiz.handymanDesc=document.getElementById('cwDesc').value.trim();
+      callWiz.step='zip'; renderCallWiz();
     });
     return;
   }
@@ -9852,13 +9895,15 @@ async function renderCallWiz(){
         <div class="nb-cal-dow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
         <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
       </div>
+      <div id="cwCalNote" style="display:none;background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:11px 13px;margin-top:9px;font-size:12.5px;line-height:1.55;color:#9a3412;"></div>
       <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
         <div id="cwSlotAsk" style="margin-bottom:8px;">${callWizScript('Would you prefer morning or afternoon?').replace('margin-bottom:12px','margin-bottom:0')}</div>
         <div id="cwSlots" style="display:flex;flex-direction:column;gap:6px;"></div>
         <div id="cwSlotSay" style="margin-top:10px;"></div>
       </div>
       <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>
-      <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">They're not ready to pick a time</button>`;
+      <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">They're not ready to pick a time</button>
+      ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Add something to the job':'Change what they need done')}`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     let cwCalSeq=0;
     async function loadCwCalendar(){
@@ -9872,7 +9917,15 @@ async function renderCallWiz(){
         const r=await api('available_dates',{ params });
         if(mySeq!==cwCalSeq) return;
         callWiz.availDates=new Set(r.dates||[]);
-      }catch(e){ if(mySeq!==cwCalSeq) return; callWiz.availDates=new Set(); }
+        // A blank month has several very different causes and they all used to
+        // look the same: a grid of grey. Keep the reason so the grid can say it.
+        callWiz.calReason=(r.dates&&r.dates.length)?null:(r.reason||'none_open');
+        callWiz.calArea=r.area||callWiz.areaName||null;
+      }catch(e){
+        if(mySeq!==cwCalSeq) return;
+        callWiz.availDates=new Set();
+        callWiz.calReason='error'; callWiz.calError=e.message||'';
+      }
       renderCwCalendarGrid();
     }
     function renderCwCalendarGrid(){
@@ -9889,6 +9942,20 @@ async function renderCallWiz(){
         html+=`<div class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:''}>${d}</div>`;
       }
       grid.innerHTML=html;
+      // Nothing open this month: say WHY, with the line to read out loud. A
+      // silent grid of grey read as a broken screen and cost a whole call.
+      const note=document.getElementById('cwCalNote');
+      if(note){
+        const area=callWiz.calArea||callWiz.areaName||'that area';
+        const R=callWiz.calReason;
+        note.innerHTML = !R ? '' :
+          R==='zip_not_covered' ? `<b>We don't cover ${esc(callWiz.zip||'that zip')} yet.</b> Take their details and send an estimate — the office can follow up if we open the area.`
+          : R==='area_unstaffed' ? `<b>No technician in ${esc(area)} yet.</b> This zip is on the map but unstaffed, so there's nothing to book. Send an estimate instead.`
+          : R==='no_techs_in_area' ? `<b>No technician is assigned to ${esc(area)}.</b> Nothing can be booked here until someone covers it — send an estimate and tell the office.`
+          : R==='error' ? `<b>Couldn't load the calendar.</b> ${esc(callWiz.calError||'')} Try again, or send an estimate.`
+          : `<b>Nothing open in ${esc(callWiz.calMonth.toLocaleDateString('en-US',{month:'long'}))}.</b> Try the next month with ›, or send an estimate.`;
+        note.style.display=R?'':'none';
+      }
       grid.querySelectorAll('.nb-cal-day.avail').forEach(cell=>cell.addEventListener('click', async()=>{
         callWiz.prefDate=cell.dataset.date; callWiz.selectedSlot=null;
         cwTrack('date_picked',{ date:callWiz.prefDate });
@@ -9965,6 +10032,10 @@ async function renderCallWiz(){
       err.textContent='';
       callWiz.step='recap'; renderCallWiz();
     });
+    // Straight back into the option questions. This is the one Joey hit: the
+    // customer remembered a soundbar at the calendar and the only way to add it
+    // was to close the whole call and start over.
+    cwWireBack(cwBackFromSchedule);
     return;
   }
 
@@ -10157,7 +10228,8 @@ async function renderCallWiz(){
         <button type="button" class="btn" id="cwGoBooking">Continue to booking →</button>
         <button type="button" class="btn ghost" id="cwGoEstimate">Send an estimate instead</button>
         <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
-      </div>`;
+      </div>
+      ${cwBackBtnHtml('Back to the price')}`;
     body.querySelectorAll('[data-cwsrc]').forEach(b=>b.addEventListener('click', ()=>{
       const v=b.dataset.cwsrc;
       callWiz.discSource = callWiz.discSource===v ? null : v;   // tap again to clear
@@ -10173,7 +10245,16 @@ async function renderCallWiz(){
         const r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }});
         cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
         if(r.ok){ callWiz.discCoupon={code:r.code, amount:r.amount}; cwTrack('coupon_applied',{ code:r.code, amount:r.amount }); }
-        else { callWiz.discCoupon=null; msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`; return; }
+        else {
+          callWiz.discCoupon=null;
+          // "Not valid" alone leaves the secretary stuck mid-call with a
+          // customer insisting they have a code. A one-character typo is the
+          // common case (BOOKONLNE for BOOKONLINE), so offer the near match.
+          const near=(r.suggest||'').trim();
+          msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`+
+            (near?` <span style="color:var(--ink-2);">Did they mean <b>${esc(near)}</b>?</span>`:'');
+          return;
+        }
         renderCallWiz();
       }catch(e){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(e.message||'Could not check that code')}</span>`; }
     });
@@ -10194,6 +10275,7 @@ async function renderCallWiz(){
         if(section==='calls') renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     });
+    cwWireBack('recap');
     return;
   }
 
@@ -10324,7 +10406,8 @@ async function renderCallWiz(){
         <button type="button" class="btn ghost" data-cwres="estimate_sent">Estimate sent</button>
         <button type="button" class="btn ghost" data-cwres="refused">Customer declined</button>
         <button type="button" class="btn ghost" data-cwres="other">Other</button>
-      </div>`;
+      </div>
+      ${callWiz._beforeResolution?cwBackBtnHtml('Still on the call'):''}`;
     body.querySelectorAll('[data-cwres]').forEach(b=>b.addEventListener('click', async()=>{
       try{
         const res=b.dataset.cwres;
@@ -10334,6 +10417,11 @@ async function renderCallWiz(){
         if(section==='calls') renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
+    cwWireBack(()=>{
+      callWiz.step=callWiz._beforeResolution||'recap';
+      callWiz._beforeResolution=null;
+      renderCallWiz();
+    });
     return;
   }
 }

@@ -63,7 +63,7 @@ function bookingStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
-import { couponAmountFor } from './book.js';
+import { couponAmountFor, couponCodesFor } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 // What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
@@ -2256,6 +2256,10 @@ async function availableDates(req, res, db, auth) {
   // zip — otherwise the date picker lights up days only an out-of-metro tech
   // has open, which the slot/booking steps would then (rightly) refuse.
   const postalCode = (req.query.postal_code || '').toString();
+  // Resolved up front so an empty roster below can explain ITSELF (unknown zip
+  // vs. a known metro we simply don't staff). Reused for the timezone lookup
+  // further down rather than resolved twice.
+  const bookingAreaIdEarly = await serviceAreaIdFromPostal(db, biz.id, postalCode);
   const rosterIds = async (pool) => {
     const scopes = await rosterScopes(db, biz, pool, postalCode);
     const lists = await scopedRosterTechs(db, scopes);
@@ -2274,7 +2278,24 @@ async function availableDates(req, res, db, auth) {
       ? [techId2]
       : await rosterIds((req.query.pool2 || '').toString());
   }
-  if (!primaryIds.length || (wantPair && !secondaryIds.length)) return res.status(200).json({ dates: [], month });
+  // An empty roster is not "no open days" — it's "nobody covers this address",
+  // and the two look identical on a greyed-out calendar. Say which, so the
+  // office isn't left staring at a dead month wondering if it's a bug (it read
+  // as one on the phone script: every August date greyed with no explanation).
+  if (!primaryIds.length || (wantPair && !secondaryIds.length)) {
+    let reason = 'no_roster', areaName = null, unstaffed = false;
+    if (postalCode) {
+      if (!bookingAreaIdEarly) reason = 'zip_not_covered';
+      else {
+        const { data: sa } = await db.from('service_areas')
+          .select('name, unstaffed').eq('id', bookingAreaIdEarly).maybeSingle();
+        areaName = sa?.name || null;
+        unstaffed = !!sa?.unstaffed;
+        reason = unstaffed ? 'area_unstaffed' : 'no_techs_in_area';
+      }
+    }
+    return res.status(200).json({ dates: [], month, reason, area: areaName, unstaffed });
+  }
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
 
   const monthStart = `${month}-01`;
@@ -2284,7 +2305,7 @@ async function availableDates(req, res, db, auth) {
   // the single business tz drifts a Central (Houston/Austin) evening booking
   // onto the wrong slot key (and near-midnight ones onto the wrong date),
   // which can light up a day whose only slot is actually taken.
-  const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+  const bookingAreaId = bookingAreaIdEarly;   // resolved once, up top
   const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
   const winStart = localDateStartUTC(tz, monthStart);
   const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
@@ -7511,13 +7532,41 @@ async function callAnalytics(req, res, db, auth) {
 // Validate a promo code the customer read out over the phone. Resolves against
 // the SAME table the public booking widget uses, so the office can never tell a
 // caller a live code is invalid (or honor one that has been retired).
+// Levenshtein distance, small inputs only (promo codes) — used to suggest the
+// code the caller probably meant.
+function editDistance(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 99;   // too far apart to be a typo
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
 async function quoteCoupon(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const code = String(body.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'code required' });
   const amount = couponAmountFor(biz.slug, code);
-  if (!amount) return res.status(200).json({ ok: false, code, amount: 0 });
+  if (!amount) {
+    // Offer the closest real code when it's within one or two characters — a
+    // code read aloud over the phone is easy to mistype, and a bare "not valid"
+    // strands the secretary mid-call against a customer who is actually right.
+    let suggest = null, best = 3;
+    for (const c of couponCodesFor(biz.slug)) {
+      const d = editDistance(code, c);
+      if (d > 0 && d < best) { best = d; suggest = c; }
+    }
+    return res.status(200).json({ ok: false, code, amount: 0, suggest });
+  }
   return res.status(200).json({ ok: true, code, amount });
 }
 

@@ -248,6 +248,14 @@ export function couponAmountFor(businessSlug, rawCode) {
   const map = businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
   return Number(map[code]) || 0;
 }
+// Every code this business honors. Exported for the office's phone flow, which
+// offers a "did they mean…" on a near miss — a customer reading a code down the
+// phone is one dropped letter away from being told, wrongly, that their code is
+// no good (BOOKONLNE for BOOKONLINE, Aug 2026).
+export function couponCodesFor(businessSlug) {
+  const map = businessSlug === 'doms' ? DOMS_COUPONS : (NATIVE_COUPONS[businessSlug] || {});
+  return Object.keys(map);
+}
 
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
 // RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
