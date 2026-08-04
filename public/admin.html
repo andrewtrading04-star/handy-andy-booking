@@ -8837,8 +8837,8 @@ async function renderCallWiz(){
   // callWiz.tvIndex walks the tvs array; each TV must answer all three before
   // the next one starts, and only once every TV is done does it move on.
   if(s==='bracket'){
-    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
-    body.innerHTML=`${callWizScript(`Do you have a bracket yet for ${total>1?`TV ${n} of ${total} (${tv.size})`:'this TV'}?`)}
+    const tv=callWiz.tvs[callWiz.tvIndex], total=callWiz.tvs.length;
+    body.innerHTML=`${callWizScript(`Do you have a bracket yet for ${total>1?"these TV's":'this TV'}?`)}
       ${callWizChoiceRow([{value:'Yes',label:'Yes, has one'},{value:'No',label:'No, needs one'}])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
       tv.bracket=b.dataset.cwchoice;
