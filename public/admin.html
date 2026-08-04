@@ -9597,13 +9597,21 @@ async function renderCallWiz(){
     // card (one tap away) already knows its ceiling instead of making the
     // secretary wait mid-conversation.
     if(!callWiz.econ) cwLoadEconomics(priced, travelFee, ahFee);
-    // The quote itself — the number every later outcome is judged against.
-    // Logged once per call, not on every repaint of this card.
+    // The quote itself — the number every later outcome is judged against —
+    // and the "read to customer" moment. Both logged once per card render
+    // (the card doubles as the read-it-and-wait step, per the merged design),
+    // not on every repaint.
     if(!callWiz._quoteLogged){
       callWiz._quoteLogged=true;
       cwTrack('price_quoted',{ total:subtotal, after_tax:afterTax, tv_count:nbTotalTvs(),
         travel_fee:travelFee, after_hours_fee:ahFee, service:callWiz.service });
+      cwTrack('read_to_customer',{ total:subtotal });
+      api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:lines.join(' · ') }}).catch(()=>{});
     }
+    // The pause is a strip inside this same card, not its own screen — the
+    // price, the quiet reminder, and the two outcomes are all here at once so
+    // there's nothing to click through between hearing the number and
+    // reacting to what the customer says.
     body.innerHTML=`${callWizScript(sentence)}
       ${subtotal>0?`<div style="text-align:center;margin:-4px 0 12px;font-size:12px;color:var(--mute);">${esc(money(subtotal))} before tax</div>`:''}
       <div style="background:var(--line2);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:12px;">
@@ -9611,30 +9619,12 @@ async function renderCallWiz(){
         ${subtotal>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-weight:700;">Total before tax: ${esc(money(subtotal))}
           <div style="font-weight:700;margin-top:3px;">Total after tax: ${esc(money(afterTax))}</div></div>`:''}
       </div>
-      <button type="button" class="btn" id="cwReadIt">I've read this to them →</button>`;
-    document.getElementById('cwReadIt').addEventListener('click', async()=>{
-      await api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:lines.join(' · ') }}).catch(()=>{});
-      cwTrack('read_to_customer',{ total:subtotal });
-      callWiz.step='wait'; renderCallWiz();
-    });
-    return;
-  }
-
-  // The pause. Deliberately its own screen with nothing else on it: the whole
-  // point is that the secretary stops talking after the price and lets the
-  // customer react first. Putting this on the price card would have them read
-  // straight through it.
-  if(s==='wait'){
-    body.innerHTML=`
-      <div style="background:var(--line2);border-radius:10px;padding:22px 16px;text-align:center;margin-bottom:14px;">
-        <div style="font-size:34px;line-height:1;margin-bottom:10px;">🤫</div>
-        <div style="font-size:17px;font-weight:800;margin-bottom:6px;">Wait for the customer to respond.</div>
-        <div style="font-size:14px;color:var(--mute);line-height:1.5;">Stay quiet. Let them speak first.</div>
+      <div style="display:flex;align-items:center;gap:8px;background:var(--page,#1c2530);border:1px dashed var(--line);border-radius:9px;padding:9px 11px;margin-bottom:12px;">
+        <span style="font-size:16px;">🤫</span>
+        <span style="font-size:12px;color:var(--mute);">Stay quiet — let them respond.</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;">✓ Customer accepts — book it</button>
-        <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>
-      </div>`;
+      <button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">✓ Customer accepts — book it</button>
+      <button type="button" class="btn ghost" id="cwPushback">Customer pushes back on price</button>`;
     document.getElementById('cwAccepts').addEventListener('click', ()=>{ cwTrack('accepted'); cwGoToBooking(); });
     document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
     return;
