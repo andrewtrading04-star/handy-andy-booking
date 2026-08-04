@@ -8922,6 +8922,9 @@ function cwJobSummary(){
     return null;
   });
   each('extras',(o,ct)=>{
+    // "Other" with no note typed yet has nothing sayable — "a other" is broken
+    // English and would read as a garbled ad-lib, not a real add-on.
+    if(nbIsOtherOption(o) && !(nbOptionNotes[o.id]||'').trim()) return null;
     const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
     const label=(note||o.label).toLowerCase();
     return ct===1 ? `a ${label}` : `${ct} ${label}`;
