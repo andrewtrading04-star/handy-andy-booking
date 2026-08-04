@@ -9126,6 +9126,12 @@ function cwJobSummary(){
     return null;
   });
   each('extras',(o,ct)=>{
+    // Handyman labor is priced per hour, so the QUANTITY is the hours — reading
+    // the raw label back ("2 1 hour of Handyman Labor") is nonsense out loud.
+    if(nbIsHandymanLaborOption(o)){
+      const hNote=(nbOptionNotes[o.id]||'').trim();
+      return `${ct} hour${ct===1?'':'s'} of handyman labor${hNote?` for ${hNote.toLowerCase()}`:''}`;
+    }
     // "Other" with no note typed yet has nothing sayable — "a other" is broken
     // English and would read as a garbled ad-lib, not a real add-on.
     if(nbIsOtherOption(o) && !(nbOptionNotes[o.id]||'').trim()) return null;
@@ -10782,6 +10788,14 @@ function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in n
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
 function nbIsOtherOption(o){ return /^other$/i.test((o.label||'').trim()) || !!(o.metadata && o.metadata.allow_text); }
+// Handyman labor bought as an ADD-ON to a mounting job. "1 hour of Handyman
+// Labor" says nothing about what the hour is for, so the tech arrives blind
+// and payroll can't sanity-check the hours against the work. Same free-text
+// treatment as "Other".
+function nbIsHandymanLaborOption(o){ return /handyman/i.test((o && o.label) || ''); }
+// Any option the office should be able to describe in their own words.
+function nbTakesNote(o){ return nbIsOtherOption(o) || nbIsHandymanLaborOption(o); }
+function nbNotePlaceholder(o){ return nbIsHandymanLaborOption(o) ? 'What needs doing? (e.g. hang 3 shelves)' : 'Describe this'; }
 function nbPickGet(gid){ const m=nbQty[gid]; if(!m) return null; return Object.keys(m).find(k=>m[k]>0)||null; }
 function nbTotalTvs(){
   // The TV Type question (regular + Frame/Gallery counts) is the SINGLE source
@@ -11075,10 +11089,12 @@ function nbGroupOptsHtml(g, atCap){
               : `<button type="button" class="nb-q-btn"${plusDis} data-g="${g.id}" data-o="${o.id}" data-d="1">+</button>`
             )+
             `</div>`;
-      // "Other" add-on: when selected, let the admin describe it.
-      if(nbIsOtherOption(o) && ct>0){
+      // "Other" and Handyman Labor: once selected, let the office describe the
+      // actual work in their own words. Rendered here (not per-screen) so the
+      // phone script and the booking form get the same box automatically.
+      if(nbTakesNote(o) && ct>0){
         html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
-              `data-o="${o.id}" placeholder="Describe this" `+
+              `data-o="${o.id}" placeholder="${esc(nbNotePlaceholder(o))}" `+
               `value="${esc(nbOptionNotes[o.id]||'')}">`;
       }
     } else {
@@ -11318,9 +11334,11 @@ function nbCollectSelections(){
   if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
     Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o){
-      // For the "Other" add-on, append the admin's note to the label so it
-      // carries onto the booking (e.g. "Other: run extra HDMI").
-      const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
+      // For "Other" and Handyman Labor, append the office's note to the label
+      // so it carries onto the booking (e.g. "Other: run extra HDMI", or
+      // "1 hour of Handyman Labor: hang 3 shelves") — the tech reads the line
+      // items, so a note that stops here would never reach the job.
+      const note=(nbTakesNote(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
       const baseLabel=note?`${o.label}: ${note}`:o.label;
       out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:nbOptPrice(o), quantity:ct});
     } } });
