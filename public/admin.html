@@ -8713,7 +8713,7 @@ function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null,
-    size:null, bracket:null, fireplace:null, wires:null,
+    size:null, bracket:null, bracketType:null, fireplace:null, wires:null,
     handymanDesc:'',
     prefDate:'', prefTime:'',
     resolution:null,
@@ -8819,10 +8819,26 @@ async function renderCallWiz(){
     return;
   }
   if(s==='bracket'){
-    body.innerHTML=`${callWizScript('Do you have a bracket for it yet?')}
+    body.innerHTML=`${callWizScript('Do you have a bracket yet for this TV?')}
       ${callWizChoiceRow([{value:'Yes',label:'Yes, has one'},{value:'No',label:'No, needs one'}])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.bracket=b.dataset.cwchoice; callWiz.step='fireplace'; renderCallWiz();
+      callWiz.bracket=b.dataset.cwchoice;
+      // "No" means we're supplying it — ask which kind now instead of just
+      // moving on, same as the New Booking form does once "needs one" is picked.
+      callWiz.step = callWiz.bracket==='No' ? 'bracket_type' : 'fireplace';
+      renderCallWiz();
+    }));
+    return;
+  }
+  if(s==='bracket_type'){
+    body.innerHTML=`${callWizScript('Which bracket would you like?')}
+      ${callWizChoiceRow([
+        {value:'Flat',label:'Flat'},
+        {value:'Tilting',label:'Tilting (recommended)'},
+        {value:'Full Motion',label:'Full Motion'},
+      ])}`;
+    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
+      callWiz.bracketType=b.dataset.cwchoice; callWiz.step='fireplace'; renderCallWiz();
     }));
     return;
   }
@@ -8835,8 +8851,13 @@ async function renderCallWiz(){
     return;
   }
   if(s==='wires'){
-    body.innerHTML=`${callWizScript('Would you like the wires hidden behind the wall?')}
-      ${callWizChoiceRow([{value:'Yes',label:'Yes, hide them'},{value:'No',label:'No, leave visible'}])}`;
+    body.innerHTML=`${callWizScript('Would you like the wires hidden?')}
+      ${callWizChoiceRow([
+        {value:'Hide behind wall',label:'Hide behind the wall'},
+        {value:'Hide outside wall',label:'Hide outside the wall'},
+        {value:'Plug already behind TV',label:'Already has a plug behind the TV'},
+        {value:'Hang under TV',label:'Let them hang under the TV'},
+      ])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
       callWiz.wires=b.dataset.cwchoice; callWiz.step='schedule'; renderCallWiz();
     }));
@@ -8880,7 +8901,7 @@ async function renderCallWiz(){
     else if(callWiz.zip) lines.push(`Zip: ${callWiz.zip}`);
     if(callWiz.service==='TV Mounting'){
       if(callWiz.size) lines.push(`TV size: ${callWiz.size}`);
-      if(callWiz.bracket) lines.push(`Bracket: ${callWiz.bracket==='Yes'?'customer has one':'needs one'}`);
+      if(callWiz.bracket) lines.push(`Bracket: ${callWiz.bracket==='Yes'?'customer has one':'needs one — '+(callWiz.bracketType||'unspecified')}`);
       if(callWiz.fireplace) lines.push(`Over a fireplace: ${callWiz.fireplace}`);
       if(callWiz.wires) lines.push(`Hide wires: ${callWiz.wires}`);
     } else if(callWiz.handymanDesc){
@@ -8932,7 +8953,7 @@ async function renderCallWiz(){
       if(!name || !email){ err.textContent='Name and email are required to send an estimate.'; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
       const label = callWiz.service==='TV Mounting'
-        ? `TV mounting — ${[callWiz.size,callWiz.fireplace==='Yes'?'over fireplace':null,callWiz.wires==='Yes'?'wires hidden':null].filter(Boolean).join(', ')}`
+        ? `TV mounting — ${[callWiz.size,callWiz.fireplace==='Yes'?'over fireplace':null,callWiz.wires||null].filter(Boolean).join(', ')}`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
