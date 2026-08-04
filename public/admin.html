@@ -8713,7 +8713,7 @@ function callWizReset(){
   callWiz={
     id:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null,
-    sizes:[], bracket:null, bracketType:null, fireplace:null, wires:null,
+    tvs:[], tvIndex:0,
     handymanDesc:'',
     prefDate:'', selectedSlot:null,
     calMonth:null, availDates:null,
@@ -8807,35 +8807,51 @@ async function renderCallWiz(){
   }
 
   if(s==='size'){
-    // Multi-select — a call can be for more than one TV, same as New
-    // Booking's "tap + to add each TV" size step.
+    // Same qty-stepper pattern as New Booking's "tap + to add each TV": each
+    // tap of + adds one TV of that size to the job, not a single pick — this
+    // is what makes "2 TVs" a real count the later per-TV questions loop over.
     const opts=['32" Or Less','33"-59"','60"-69"','70"-85"','86"-97"','98+'];
-    body.innerHTML=`${callWizScript('What size is your TV? Select all that apply.')}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
-        ${opts.map(v=>`<button type="button" class="btn ${callWiz.sizes.includes(v)?'':'ghost'}" style="width:auto;flex:1;min-width:110px;" data-cwsize="${esc(v)}">${esc(v)}</button>`).join('')}
+    const countOf=v=>callWiz.tvs.filter(t=>t.size===v).length;
+    body.innerHTML=`${callWizScript('What size is your TV? Tap + for each one.')}
+      <div class="nb-opts">
+        ${opts.map(v=>{ const ct=countOf(v);
+          return `<div class="nb-optq${ct>0?' on':''}"><span class="nb-optlabel">${esc(v)}</span>`+
+            (ct>0
+              ? `<span class="nb-stepper"><button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="-1">−</button><span class="nb-qty">${ct}</span><button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="1">+</button></span>`
+              : `<button type="button" class="nb-q-btn" data-cwsizeadj="${esc(v)}" data-d="1">+</button>`)+
+            `</div>`;
+        }).join('')}
       </div>
-      <button type="button" class="btn" id="cwSizeNext" style="margin-top:10px;" ${callWiz.sizes.length?'':'disabled'}>Continue</button>`;
-    body.querySelectorAll('[data-cwsize]').forEach(b=>b.addEventListener('click', ()=>{
-      const v=b.dataset.cwsize, i=callWiz.sizes.indexOf(v);
-      if(i>=0) callWiz.sizes.splice(i,1); else callWiz.sizes.push(v);
+      <div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${callWiz.tvs.length} TV${callWiz.tvs.length===1?'':'s'} total</div>
+      <button type="button" class="btn" id="cwSizeNext" style="margin-top:10px;" ${callWiz.tvs.length?'':'disabled'}>Continue</button>`;
+    body.querySelectorAll('[data-cwsizeadj]').forEach(b=>b.addEventListener('click', ()=>{
+      const v=b.dataset.cwsizeadj, d=Number(b.dataset.d);
+      if(d>0) callWiz.tvs.push({size:v});
+      else { const i=callWiz.tvs.map(t=>t.size).lastIndexOf(v); if(i>=0) callWiz.tvs.splice(i,1); }
       renderCallWiz();
     }));
-    document.getElementById('cwSizeNext').addEventListener('click', ()=>{ callWiz.step='bracket'; renderCallWiz(); });
+    document.getElementById('cwSizeNext').addEventListener('click', ()=>{ callWiz.tvIndex=0; callWiz.step='bracket'; renderCallWiz(); });
     return;
   }
+  // Bracket/fireplace/wires loop once PER TV — same requirement New Booking
+  // enforces (bracket count capped to, and required to match, the TV count).
+  // callWiz.tvIndex walks the tvs array; each TV must answer all three before
+  // the next one starts, and only once every TV is done does it move on.
   if(s==='bracket'){
-    body.innerHTML=`${callWizScript('Do you have a bracket yet for this TV?')}
+    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
+    body.innerHTML=`${callWizScript(`Do you have a bracket yet for ${total>1?`TV ${n} of ${total} (${tv.size})`:'this TV'}?`)}
       ${callWizChoiceRow([{value:'Yes',label:'Yes, has one'},{value:'No',label:'No, needs one'}])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.bracket=b.dataset.cwchoice;
+      tv.bracket=b.dataset.cwchoice;
       // "No" means we're supplying it — ask which kind now instead of just
       // moving on, same as the New Booking form does once "needs one" is picked.
-      callWiz.step = callWiz.bracket==='No' ? 'bracket_type' : 'fireplace';
+      callWiz.step = tv.bracket==='No' ? 'bracket_type' : 'fireplace';
       renderCallWiz();
     }));
     return;
   }
   if(s==='bracket_type'){
+    const tv=callWiz.tvs[callWiz.tvIndex];
     body.innerHTML=`${callWizScript('Which bracket would you like?')}
       ${callWizChoiceRow([
         {value:'Flat',label:'Flat'},
@@ -8843,20 +8859,22 @@ async function renderCallWiz(){
         {value:'Full Motion',label:'Full Motion'},
       ])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.bracketType=b.dataset.cwchoice; callWiz.step='fireplace'; renderCallWiz();
+      tv.bracketType=b.dataset.cwchoice; callWiz.step='fireplace'; renderCallWiz();
     }));
     return;
   }
   if(s==='fireplace'){
-    body.innerHTML=`${callWizScript('Is it going over a fireplace?')}
+    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
+    body.innerHTML=`${callWizScript(`Is ${total>1?`TV ${n} of ${total}`:'it'} going over a fireplace?`)}
       ${callWizChoiceRow([{value:'Yes',label:'Yes'},{value:'No',label:'No'}])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.fireplace=b.dataset.cwchoice; callWiz.step='wires'; renderCallWiz();
+      tv.fireplace=b.dataset.cwchoice; callWiz.step='wires'; renderCallWiz();
     }));
     return;
   }
   if(s==='wires'){
-    body.innerHTML=`${callWizScript('Would you like the wires hidden?')}
+    const tv=callWiz.tvs[callWiz.tvIndex], n=callWiz.tvIndex+1, total=callWiz.tvs.length;
+    body.innerHTML=`${callWizScript(`Would you like the wires hidden${total>1?` for TV ${n} of ${total}`:''}?`)}
       ${callWizChoiceRow([
         {value:'Hide behind wall',label:'Hide behind the wall'},
         {value:'Hide outside wall',label:'Hide outside the wall'},
@@ -8864,7 +8882,12 @@ async function renderCallWiz(){
         {value:'Hang under TV',label:'Let them hang under the TV'},
       ])}`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
-      callWiz.wires=b.dataset.cwchoice; callWiz.step='schedule'; renderCallWiz();
+      tv.wires=b.dataset.cwchoice;
+      callWiz.tvIndex++;
+      // Next TV starts back at bracket; only once every TV is answered does
+      // the loop actually move on to scheduling.
+      callWiz.step = callWiz.tvIndex < callWiz.tvs.length ? 'bracket' : 'schedule';
+      renderCallWiz();
     }));
     return;
   }
@@ -8962,10 +8985,13 @@ async function renderCallWiz(){
     if(callWiz.areaName) lines.push(`Area: ${callWiz.areaName} (zip ${callWiz.zip})`);
     else if(callWiz.zip) lines.push(`Zip: ${callWiz.zip}`);
     if(callWiz.service==='TV Mounting'){
-      if(callWiz.sizes.length) lines.push(`TV size: ${callWiz.sizes.join(', ')}`);
-      if(callWiz.bracket) lines.push(`Bracket: ${callWiz.bracket==='Yes'?'customer has one':'needs one — '+(callWiz.bracketType||'unspecified')}`);
-      if(callWiz.fireplace) lines.push(`Over a fireplace: ${callWiz.fireplace}`);
-      if(callWiz.wires) lines.push(`Hide wires: ${callWiz.wires}`);
+      callWiz.tvs.forEach((tv,i)=>{
+        const n=i+1, bits=[];
+        if(tv.bracket) bits.push(tv.bracket==='Yes'?'has bracket':'needs bracket — '+(tv.bracketType||'unspecified'));
+        if(tv.fireplace==='Yes') bits.push('over fireplace');
+        if(tv.wires) bits.push(tv.wires);
+        lines.push(`TV ${n}: ${tv.size}${bits.length?' — '+bits.join(', '):''}`);
+      });
     } else if(callWiz.handymanDesc){
       lines.push(`Job: ${callWiz.handymanDesc}`);
     }
@@ -9018,7 +9044,7 @@ async function renderCallWiz(){
       if(!name || !email){ err.textContent='Name and email are required to send an estimate.'; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
       const label = callWiz.service==='TV Mounting'
-        ? `TV mounting — ${[callWiz.sizes.join('/'),callWiz.fireplace==='Yes'?'over fireplace':null,callWiz.wires||null].filter(Boolean).join(', ')}`
+        ? `TV mounting — ${callWiz.tvs.length} TV${callWiz.tvs.length===1?'':'s'} (${callWiz.tvs.map(t=>t.size).join('/')})`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
