@@ -9854,21 +9854,21 @@ async function renderCallWiz(){
       try{ day=new Date(callWiz.prefDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}); }catch(_){}
       whenTxt=callWiz.selectedSlot?`${day}, ${callWiz.selectedSlot.label}`:day;
     }
-    body.innerHTML=`${callWizScript('Perfect — let me get you booked in. Can I get your name, phone, and email?')}
+    body.innerHTML=`${callWizScript('Perfect. I\'ll schedule this now. Can I get your first and last name?')}
       <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">${esc(whenTxt)}${disc>0?` · ${esc(money(disc))} off applied`:''}</div>
       <input class="search" id="cwCustName" style="margin:0 0 8px;" placeholder="Full name *">
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <input class="search" id="cwCustPhone" style="margin:0;" placeholder="Phone *" inputmode="tel">
         <input class="search" id="cwCustEmail" style="margin:0;" placeholder="Email *" inputmode="email">
       </div>
-      ${callWizScript('And the address it\'s going to?')}
+      ${callWizScript('And what is the service address?')}
       <input class="search" id="cwCustAddr" style="margin:0 0 8px;" placeholder="Street address">
       <div style="display:flex;gap:8px;margin-bottom:14px;">
         <input class="search" id="cwCustCity" style="margin:0;" placeholder="City">
         <input class="search" id="cwCustState" style="margin:0;max-width:80px;" placeholder="ST">
         <input class="search" style="margin:0;max-width:90px;background:var(--line2);" value="${esc(callWiz.zip||'')}" disabled>
       </div>
-      ${callWizScript(isTv?'I just need a card to hold the appointment. It is not charged until the job is done.':'How will you be paying?')}
+      ${callWizScript(isTv?'Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.':'How will you be paying?')}
       <select class="search" id="cwPayMethod" style="margin:0 0 8px;width:100%;">
         <option value="">Select payment method</option>
         <option value="card"${isTv?' selected':''}>Credit Card</option>
