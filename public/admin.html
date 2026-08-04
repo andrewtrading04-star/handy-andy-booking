@@ -8746,6 +8746,23 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
   // handler enforces has to be lifted first or it would refuse the very click
   // that raises the count. Everything downstream is then re-synced and
   // re-clamped against the new total.
+  // Frame/Gallery is handled here rather than through the shared handler: on
+  // the form a frame TV is an ADDITIONAL TV, but on a call it just marks one of
+  // the TVs already counted by the size question as a frame. Routing it through
+  // the shared path made the total drop and silently deleted a size row.
+  const tvBtn=e.target.closest('.nb-tv-q-btn');
+  if(tvBtn){
+    if(tvBtn.disabled) return;
+    const sg=nbOptionGroups.find(g=>g.key==='size');
+    const sizeCount=sg?nbGroupCount(sg.id):0;
+    nbFrameTvQty.frame=Math.max(0, Math.min(sizeCount, nbFrameTvQty.frame+Number(tvBtn.dataset.d)));
+    cwSyncTvCounts();
+    nbPruneInvisibleOptions();
+    nbClampTvBound();
+    nbPruneBehindWall();
+    renderCallWiz();
+    return;
+  }
   const qBtn=e.target.closest('.nb-q-btn');
   if(qBtn && !qBtn.disabled && Number(qBtn.dataset.d)>0){
     const grp=nbOptionGroups.find(g=>g.id===qBtn.dataset.g);
