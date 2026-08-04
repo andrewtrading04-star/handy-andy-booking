@@ -7088,7 +7088,7 @@ async function renderReviews(){
 }
 
 // ── Estimates (customer quote requests) ─────────────────────────────────────
-const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:'Estimate approved' };
+const EST_STATUS = { new:'Needs Response', contacted:'Estimate sent', scheduled:'Estimate approved', declined:'Declined — not a fit' };
 // A sent estimate that the customer hasn't approved within this many days is
 // automatically filed under the "Not approved" folder. Derived from created_at
 // at render time — no background job, no stored status. Self-heals if approved.
@@ -7096,7 +7096,7 @@ const NOT_APPROVED_DAYS = 7;
 function estAgeDays(e){ return e&&e.created_at ? (Date.now()-new Date(e.created_at).getTime())/86400000 : 0; }
 function isNotApproved(e){ return e && e.status==='contacted' && !e.approved_at && estAgeDays(e)>=NOT_APPROVED_DAYS; }
 // Status colors: Needs Response = red, Estimate sent = black, Estimate approved = blue.
-const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb' };
+const EST_COLOR  = { new:'#dc2626', contacted:'#16181d', scheduled:'#2563eb', declined:'#71717a' };
 // A "Needs Response" (status 'new') estimate nobody has touched in this long is
 // STALE — the single definition the sidebar badge, the dashboard banner, and the
 // greeting sentence all key off, so they can never disagree with each other or
@@ -7167,6 +7167,7 @@ async function renderEstimates(){
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
+    document.querySelectorAll('#estWrap [data-est-decline]').forEach(b=>b.addEventListener('click',()=>declineEstimate(b.dataset.estDecline,b)));
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
     focusPendingEstimate();
@@ -7257,7 +7258,12 @@ function estCard(e){
   const acceptedLine=acceptedUps.length
     ? `<div class="est-approval-addons">+ ${acceptedUps.map(u=>esc(liCleanLabel(u.description||''))).join(' · ')}${e.approved_total!=null?` · <b>${money2(e.approved_total)}</b>`:''}</div>`
     : '';
-  const approved=e.approved_at
+  // A declined estimate was never going to be approved — the usual "waiting on
+  // approval" / "not approved in Nd" lines are about a quote the customer HAS,
+  // which isn't what happened here, so this replaces that block entirely.
+  const approved = e.status==='declined'
+    ? `<div class="est-approval not-approved">🚫 Declined — outside our scope, customer notified</div>`
+    : e.approved_at
     ? `<div class="est-approval approved">✓ Customer approved${approvedAt?` · ${esc(approvedAt)}`:''}</div>${acceptedLine}`
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
@@ -7297,6 +7303,7 @@ function estCard(e){
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
         ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
+        ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
     </div>
@@ -7501,6 +7508,24 @@ async function sendEstimateMessage(estimateId, type, btn){
   }catch(err){
     if(btn){ btn.disabled = false; btn.textContent = prev; }
     toast(err.message || `Could not send ${label}.`);
+  }
+}
+
+// Decline an estimate as outside what the business does — texts/emails the
+// customer a "sorry, here's what we DO handle" message (with a link to
+// services.html) and marks the estimate declined, instead of letting it just
+// silently age out with no word back to the customer.
+async function declineEstimate(estimateId, btn){
+  if(!confirm("Tell the customer this is outside what we do, and send them a list of what we handle?")) return;
+  const prev = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  try{
+    const r = await api('estimate_decline',{ method:'POST', body:{ business:current.slug, id:estimateId }});
+    toast(r.sms_sent||r.email_sent ? 'Customer notified ✓' : 'Marked declined — no phone/email on file to notify them.');
+    renderEstimates();
+  }catch(err){
+    if(btn){ btn.disabled = false; btn.textContent = prev; }
+    toast(err.message || 'Could not decline this estimate.');
   }
 }
 

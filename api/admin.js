@@ -18,7 +18,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
-import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
@@ -224,6 +224,9 @@ export default async function handler(req, res) {
     if (action === 'estimate_approve') return await estimateApprove(req, res, body);
     if (action === 'estimate_approve_info') return await estimateApproveInfo(req, res, body);
     if (action === 'estimate_slots') return await estimateSlots(req, res);
+    // Public "what we do" page (services.html) — no login, not customer-specific,
+    // so it skips the auth gate the same way estimate_approve_info does.
+    if (action === 'services_public') return await servicesPublic(req, res, body);
     if (action === 'gds_upsell_info') return await gdsUpsellInfo(req, res, body);
     if (action === 'gds_upsell_add') return await gdsUpsellAdd(req, res, body);
     if (action === 'reschedule_info') return await rescheduleInfo(req, res, body);
@@ -322,6 +325,7 @@ export default async function handler(req, res) {
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
+      case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -6637,7 +6641,7 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   const patch = {};
   if (body.status) {
-    const VALID = ['new', 'contacted', 'scheduled', 'closed', 'archived'];
+    const VALID = ['new', 'contacted', 'scheduled', 'closed', 'archived', 'declined'];
     if (!VALID.includes(body.status)) return res.status(400).json({ error: 'Invalid status' });
     patch.status = body.status;
     // Manually flipping the status dropdown to "Estimate sent" is the same
@@ -7036,6 +7040,76 @@ async function estimateSendEmail(req, res, db, auth, body) {
 
   await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth));
   return res.status(200).json({ ok: true });
+}
+
+// Decline an estimate as outside what the business does (a request for work
+// that isn't TV mounting or handyman repairs) — tells the customer directly
+// rather than letting the request silently age out, and points them at a
+// public "what we do" page instead of the priced-quote approve flow. Sends
+// both channels the estimate has (best-effort — a failed SMS must not block
+// the email, and vice versa), then marks the estimate declined either way so
+// it stops showing as "Needs Response".
+async function estimateDecline(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_phone, customer_email, sms_consent, notes');
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const servicesUrl = baseUrl ? `${baseUrl}/services.html?business=${encodeURIComponent(biz.slug)}` : '';
+  const brand = brandFor(biz.slug);
+
+  let smsResult = null, emailResult = null;
+
+  if (est.customer_phone && est.sms_consent !== false) {
+    const greeting = firstName ? `Hi ${firstName}, ` : '';
+    const msg = `${greeting}this is ${brand.name}. We're sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl}`;
+    smsResult = await sendSMSResult(est.customer_phone, msg);
+  }
+
+  if (est.customer_email) {
+    const { subject, html } = outOfScopeEmail({ firstName, servicesUrl }, brand);
+    emailResult = await sendEmail({ slug: biz.slug, to: est.customer_email, subject, html });
+  }
+
+  const patch = {
+    status: 'declined',
+    notes: [est.notes, `Declined as outside scope — notified via ${[smsResult && smsResult.ok && 'SMS', emailResult && emailResult.sent && 'email'].filter(Boolean).join(' + ') || 'no channel (no phone/email on file)'}.`]
+      .filter(Boolean).join('\n').slice(0, 2000),
+  };
+  const { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  if (error) throw error;
+
+  return res.status(200).json({
+    ok: true,
+    sms_sent: !!(smsResult && smsResult.ok),
+    email_sent: !!(emailResult && emailResult.sent),
+  });
+}
+
+// ── Public "what we do" services list (no admin auth) ────────────────────────
+// Backs services.html, the link sent by estimate_decline. Read-only, no
+// customer-specific data — just this business's active service categories, so
+// it skips the auth gate like estimate_approve_info does.
+async function servicesPublic(req, res, body) {
+  const slug = ((req.query && req.query.business) || (body && body.business) || '').toString().trim();
+  if (!slug) return res.status(400).json({ error: 'business required' });
+  const db = serviceClient();
+  const { data: biz } = await db.from('businesses').select('id, slug, name').eq('slug', slug).maybeSingle();
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+  const { data: rows } = await db.from('services')
+    .select('name, category')
+    .eq('business_id', biz.id).eq('active', true)
+    .order('sort_order').order('name');
+  const groups = {};
+  (rows || []).forEach(r => {
+    const cat = (r.category || 'Services').trim();
+    (groups[cat] = groups[cat] || []).push(r.name);
+  });
+  return res.status(200).json({ business: biz.slug, business_name: biz.name, groups });
 }
 
 // ── Public estimate approval (token-based, no admin auth) ────────────────────

@@ -905,3 +905,45 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
 
   return { subject, html };
 }
+
+// Sent when the office declines an estimate as outside what the business does
+// (e.g. a request for work that isn't TV mounting or handyman repairs). Short
+// and apologetic on purpose — this is a "we can't help with THIS" message, not
+// a sales pitch, so it stays out of the priced-quote template's layout and
+// just points at what the business does handle.
+export function outOfScopeEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
+  const b = brand || EMAIL_BRANDS['handy-andy'];
+  const firstName = (details.firstName || '').trim();
+  const servicesUrl = (details.servicesUrl || '').trim();
+  const subject = `About your ${b.name} estimate request`;
+  const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
+<body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">An update on your estimate request from ${esc(b.name)}.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
+        <tr><td style="background:${b.accent};padding:18px 28px;font-size:18px;font-weight:800;color:#ffffff;letter-spacing:.2px;">${esc(b.name)}</td></tr>
+        <tr><td style="padding:30px 28px;">
+          <div style="font-size:20px;font-weight:800;color:#11181c;margin:0 0 14px;">Sorry, this one's outside what we do</div>
+          <div style="font-size:15px;color:#3a4453;line-height:1.7;">Hi ${esc(firstName || 'there')}, thanks for reaching out. We took a look at your request, and it looks like it's outside of what we're able to help with.</div>
+          ${servicesUrl ? `
+          <div style="font-size:15px;color:#3a4453;line-height:1.7;margin-top:14px;">Here's a list of what we do handle, in case any of it's useful:</div>
+          <div style="text-align:center;margin-top:22px;">
+            <a href="${esc(servicesUrl)}" style="display:inline-block;background:${b.accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:800;padding:13px 32px;border-radius:10px;">See what we do &rarr;</a>
+          </div>` : ''}
+          <div style="font-size:13px;color:#9ca3af;line-height:1.6;margin-top:24px;">Sorry we couldn't help with this one — feel free to reach back out if anything changes.</div>
+        </td></tr>
+        <tr><td style="padding:8px 28px 32px;">
+          <div style="border-top:1px solid #eef0f2;padding-top:18px;text-align:center;">
+            <div style="font-size:12px;color:#9ca3af;">${esc(b.website)}</div>
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return { subject, html };
+}
