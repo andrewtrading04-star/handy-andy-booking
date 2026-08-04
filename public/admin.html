@@ -9639,7 +9639,8 @@ async function renderCallWiz(){
           try{ day=new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
           const fee=cwAfterHoursFeeFor(callWiz.selectedSlot.key, date);
           say.innerHTML=callWizScript(`We have ${day} at ${callWiz.selectedSlot.label} available.`+
-            (fee?` That is an after-hours slot, so there is an extra ${cwSpokenAmount(fee)} on it.`:''));
+            (fee?` That is an after-hours slot, so there is an extra ${cwSpokenAmount(fee)} on it.`:'')+
+            ` Does that work for you?`);
         };
         list.querySelectorAll('.nb-slot').forEach(b=>b.addEventListener('click', ()=>{
           callWiz.selectedSlot={ key:b.dataset.key, label:b.dataset.label };
