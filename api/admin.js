@@ -19,7 +19,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail } from './_lib/email.js';
-import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
@@ -5642,9 +5642,30 @@ async function reviewScoreboard(db, businessId, hasTrack) {
 // Resend the "How did we do?" email for one completed job.
 async function reviewResend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const id = body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
+
+  // Review Calls is deliberately CROSS-BUSINESS: Joey follows up with customers
+  // from both companies. Her token is scoped to 'doms' though, so resolving the
+  // business from body.business made resolveBusiness throw 403 on every Handy
+  // Andy card — the review request, which is the entire point of the call,
+  // could never be sent for half the queue.
+  //
+  // When the request comes from that queue, the business is resolved FROM THE
+  // BOOKING instead. That is strictly TIGHTER than the normal path, because the
+  // client no longer gets to name the business at all; it only names a booking
+  // it was already shown. The gate is the same one reviewCallLog uses, so
+  // exactly the accounts that can work the queue can send from it.
+  let biz;
+  if (body.from_review_call) {
+    if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
+    const { data: row } = await db.from('bookings')
+      .select('id, business:businesses ( id, slug, name )').eq('id', id).maybeSingle();
+    if (!row || !row.business) return res.status(404).json({ error: 'Booking not found' });
+    biz = row.business;
+  } else {
+    try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  }
   const channel = body.channel === 'sms' ? 'sms' : 'email';
   const { data: b, error } = await db.from('bookings')
     .select('id, review_token, metadata, sms_consent, customer:customers(name, email, phone)')
@@ -6207,6 +6228,11 @@ function rcMapRow(row, b) {
     id: row.id,
     business_slug: b.slug,
     business_name: b.name,
+    // The card SPEAKS this job's day out loud ("...how your installation went
+    // yesterday"), and "yesterday" is only true in the job's own timezone. Sent
+    // so the browser stops computing it in whatever zone the office happens to
+    // be sitting in.
+    business_timezone: b.timezone || RC_TZ,
     customer_name: row.customer?.name || '—',
     phone: row.customer?.phone || null,
     zip: row.postal_code || row.customer?.postal_code || null,   // booking zip first; imported customers often have it only on the booking
@@ -6379,7 +6405,16 @@ async function reviewCallLog(req, res, db, auth, body) {
   if (!id) return res.status(400).json({ error: 'id required' });
   if (status && !REVIEW_CALL_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  const { data: bk } = await db.from('bookings').select('id').eq('id', id).maybeSingle();
+  // Enough of the job to describe it in the owner's complaint alert below. The
+  // read is the same round trip that already had to happen to prove the booking
+  // exists, so this costs nothing on the calls that are not complaints.
+  const { data: bk } = await db.from('bookings')
+    .select(`id, scheduled_at,
+      business:businesses ( slug, name ),
+      customer:customers ( name, phone, email ),
+      technician:technicians!technician_id ( name ),
+      service:services ( name )`)
+    .eq('id', id).maybeSingle();
   if (!bk) return res.status(404).json({ error: 'Booking not found' });
 
   const patch = {
@@ -6388,12 +6423,55 @@ async function reviewCallLog(req, res, db, auth, body) {
     review_call_by: status ? displayNameFor(auth.scope) : null,
   };
   if (typeof body.notes === 'string') patch.review_call_notes = body.notes.trim().slice(0, 500) || null;
+  // What the customer actually said, as countable tags. Free text cannot be
+  // rolled up into "how did we do"; these can (unnest over review_call_tags).
+  // Bounded and de-duplicated so a stuck client can never write an unbounded array.
+  if (Array.isArray(body.tags)) {
+    const tags = [...new Set(body.tags
+      .map(t => String(t == null ? '' : t).trim().slice(0, 60))
+      .filter(Boolean))].slice(0, 12);
+    patch.review_call_tags = tags.length ? tags : null;
+  }
 
   let { error } = await db.from('bookings').update(patch).eq('id', id);
+  // The tags column is newer than the rest of the review-call columns, so a
+  // database that has 0049 but not the tags migration must still be able to log
+  // an outcome — the tags are dropped and the call is saved, rather than the
+  // whole outcome failing because of the one newest field.
+  if (error && /review_call_tags/.test(error.message || '')) {
+    delete patch.review_call_tags;
+    ({ error } = await db.from('bookings').update(patch).eq('id', id));
+    if (!error) return res.status(200).json({ ok: true, tags_skipped: true });
+  }
   if (error && /review_call_/.test(error.message || '')) {
     return res.status(503).json({ error: 'The review-call queue needs a quick database update (migration 0049) before outcomes can be saved.' });
   }
   if (error) throw error;
+
+  // A complaint is the one outcome the owner has to hear about the same day.
+  // Awaited, not fire-and-forget: on Vercel an un-awaited send is killed the
+  // moment this handler responds, and it would fail silently with no log line.
+  // Never allowed to fail the save — the complaint is already recorded.
+  if (status === 'complaint') {
+    const when = (() => {
+      try { return new Date(bk.scheduled_at).toLocaleDateString('en-US', { timeZone: RC_TZ, weekday: 'long', month: 'short', day: 'numeric' }); }
+      catch { return ''; }
+    })();
+    await sendReviewCallComplaintAlert({
+      slug: bk.business?.slug,
+      businessName: bk.business?.name,
+      customerName: bk.customer?.name,
+      phone: bk.customer?.phone,
+      email: bk.customer?.email,
+      serviceName: bk.service?.name,
+      techName: bk.technician?.name,
+      whenStr: when,
+      note: patch.review_call_notes,
+      tags: patch.review_call_tags || [],
+      loggedBy: patch.review_call_by,
+      bookingId: id,
+    }).catch(e => console.warn('[review_call_log] complaint alert failed:', e.message));
+  }
   return res.status(200).json({ ok: true });
 }
 

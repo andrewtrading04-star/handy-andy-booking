@@ -267,6 +267,63 @@ export async function sendCardSaveFailedAlert(d = {}) {
   }
 }
 
+// A customer told Joey on the follow-up call that something went wrong. This is
+// the ONLY way that ever reaches the owner: the complaint is typed into the
+// review-call card and would otherwise sit in a column nobody opens until the
+// customer has already left a public one-star review. Texts immediately (these
+// are time-sensitive: the window to fix it quietly is hours, not days) and
+// emails the detail, since a complaint rarely fits in an SMS.
+export async function sendReviewCallComplaintAlert(d = {}) {
+  // The text goes out even when email is switched off or unconfigured — the two
+  // channels fail independently on purpose, so a mail problem cannot swallow the
+  // only signal the owner gets that a job went badly.
+  try {
+    const phone = process.env.OWNER_PHONE_NUMBER;
+    if (phone) {
+      const who = d.customerName || 'A customer';
+      const note = String(d.note || '').replace(/\s+/g, ' ').trim();
+      const msg = `Complaint from ${who} (${d.businessName || 'job'}${d.techName ? `, tech ${d.techName}` : ''})`
+        + `${note ? `: "${note.slice(0, 220)}"` : '.'}`
+        + ` Logged by ${d.loggedBy || 'the office'} on the review call.`;
+      await sendSMS(phone, msg).catch(e => console.warn('[review-complaint] SMS failed:', e.message));
+    }
+  } catch (e) { console.warn('[review-complaint] SMS error:', e.message); }
+
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig(d.slug);
+    if (!cfg.apiKey) return;
+    const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
+    recipients.delete('');
+    if (!recipients.size) return;
+
+    const rows = [
+      ['Company', d.businessName],
+      ['Customer', d.customerName],
+      ['Phone', d.phone],
+      ['Email', d.email],
+      ['Job', d.serviceName],
+      ['Technician', d.techName],
+      ['Job date', d.whenStr],
+      ['Logged by', d.loggedBy],
+      ['What they said', (d.tags || []).join(', ')],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 4px;color:#b91c1c;">⚠ A customer said something went wrong</h2>
+      <p style="margin:0 0 14px;color:#374151;">This came up on the follow-up call, so they have told us before telling the internet. No review request was sent.</p>
+      ${d.note ? `<blockquote style="margin:0 0 14px;padding:11px 14px;background:#fef2f2;border-left:4px solid #b91c1c;border-radius:6px;color:#7f1d1d;">${escHtml(String(d.note))}</blockquote>` : ''}
+      <table style="border-collapse:collapse;">${tbl}</table>
+      ${d.bookingId ? `<p style="margin:14px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(d.bookingId)}</p>` : ''}
+    </div>`;
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: `⚠ Complaint on the review call — ${d.customerName || 'a customer'}`, html, replyTo: cfg.from });
+    }
+  } catch (e) {
+    console.warn('[review-complaint] non-fatal:', e.message);
+  }
+}
+
 // "Unrecognized line item" alert — fires when a public booking widget submits
 // a line item that matches NEITHER a known service_options catalog price NOR
 // one of our own fee/tax/coupon names (see reconcileLinesWithCatalog in

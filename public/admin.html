@@ -346,6 +346,58 @@
   .rc-cmp-text:focus{outline:none;border-color:#f59e0b;}
   .rc-badge.green{background:#dcfce7;color:#15803d;}
   .rc-note{background:#fffbeb;border:1.5px solid #fde68a;border-radius:9px;padding:9px 11px;font-size:13px;color:#78350f;line-height:1.5;margin-top:8px;max-width:52ch;}
+  /* ── Guided review call ── */
+  /* The card is now a script Joey works top to bottom, so it stacks instead of
+     splitting into a left/right two-column layout. */
+  .rc-card.guided{display:block;}
+  .rc-hero{background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.14), transparent 60%), var(--gnavy,#0b1f3a);
+    border-radius:14px;padding:16px;margin-bottom:16px;color:#fff;box-shadow:0 10px 28px rgba(11,31,58,.22);}
+  .rc-hero-hi{font-size:15px;font-weight:800;margin-bottom:3px;}
+  .rc-hero-sub{font-size:13px;opacity:.9;}
+  .rc-hero .greet-stats{grid-template-columns:repeat(4,1fr);}
+  @media (max-width:720px){ .rc-hero .greet-stats{grid-template-columns:repeat(2,1fr);} }
+  /* Say this out loud: same near-black panel the phone script uses, so "read
+     this word for word" looks identical everywhere in the app. */
+  .rc-say{background:#141a22;border-radius:11px;padding:14px 17px 15px 19px;margin:12px 0;position:relative;overflow:hidden;}
+  .rc-say i{position:absolute;left:0;top:0;bottom:0;width:4px;background:#f59e0b;}
+  .rc-say p{margin:0;font-size:17.5px;line-height:1.4;color:#fff;font-weight:600;}
+  .rc-say b{color:#ffd479;font-weight:800;}
+  .rc-say small{display:block;margin-top:8px;font-size:11px;font-weight:800;letter-spacing:.06em;
+    text-transform:uppercase;color:rgba(255,255,255,.45);}
+  .rc-step{font-size:11.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);
+    margin:14px 0 8px;display:flex;align-items:center;gap:8px;}
+  .rc-step::after{content:'';flex:1;height:1px;background:var(--line2);}
+  .rc-opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  @media (max-width:560px){ .rc-opts{grid-template-columns:1fr;} }
+  .rc-opt{display:flex;align-items:center;gap:9px;text-align:left;font:inherit;font-size:14.5px;font-weight:600;
+    background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:12px 13px;color:var(--ink);cursor:pointer;}
+  .rc-opt:hover{background:var(--line2);}
+  .rc-opt .d{flex-shrink:0;width:18px;height:18px;border-radius:50%;border:2px solid var(--line);position:relative;}
+  .rc-opt.on .d::after{content:'';position:absolute;inset:3px;border-radius:50%;background:currentColor;}
+  .rc-opt.on{border-color:currentColor;}
+  .rc-opt.on.good{background:#dcfce7;color:#15803d;border-color:#86efac;}
+  .rc-opt.on.warn{background:#fef3c7;color:#92400e;border-color:#fde68a;}
+  .rc-opt.on.bad{background:#fee2e2;color:#b91c1c;border-color:#fecaca;}
+  .rc-tags{display:flex;gap:7px;flex-wrap:wrap;}
+  .rc-tag{font:inherit;font-size:13px;font-weight:700;padding:8px 13px;border-radius:999px;
+    border:1.5px solid var(--line);background:#fff;color:var(--ink-2);cursor:pointer;}
+  .rc-tag.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .rc-chans{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;}
+  .rc-chan.main{width:100%;margin-bottom:8px;font-size:15.5px;padding:14px 10px;}
+  .rc-chan{font:inherit;padding:12px 8px;border-radius:10px;border:1.5px solid var(--line);background:#fff;
+    color:var(--ink-2);font-size:14px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;
+    align-items:center;gap:3px;}
+  .rc-chan .s{font-size:10.5px;font-weight:600;opacity:.7;}
+  .rc-chan.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .rc-chan:disabled{opacity:.4;cursor:not-allowed;}
+  .rc-go{font:inherit;border:none;border-radius:10px;padding:12px 16px;font-size:14.5px;font-weight:800;
+    cursor:pointer;width:100%;background:var(--ink);color:#fff;}
+  .rc-go:disabled{opacity:.45;cursor:not-allowed;}
+  .rc-go.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:600;}
+  .rc-gorow{display:flex;gap:8px;margin-top:10px;}
+  .rc-banner{border-radius:10px;padding:11px 14px;font-size:13.5px;font-weight:600;margin-top:12px;}
+  .rc-banner.good{background:#dcfce7;color:#15803d;border:1.5px solid #86efac;}
+  .rc-banner.warn{background:#fef3c7;color:#92400e;border:1.5px solid #fde68a;}
   .rc-week-nav{display:flex;align-items:center;gap:10px;background:var(--line2);border-radius:10px;padding:6px 10px;flex:none;}
   .rc-week-arrow{border:0;background:#fff;width:28px;height:28px;border-radius:8px;font-size:15px;font-weight:800;color:var(--ink-2);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);}
   .rc-week-arrow:disabled{opacity:.35;cursor:default;box-shadow:none;}
@@ -6424,16 +6476,67 @@ async function renderDisputes(){
 // ── Review Calls — Joey's daily review-outreach queue ────────────────────────
 let _rcDays=1, _rcData=[], _rcComplaintFor=null, _rcComplaintText='', _rcWarning=null;
 let _rcFolder='to_call', _rcWeekOffset=0, _rcFolderCounts={}, _rcWeekLabel='';
-const RC_SCRIPT = "Hi, this is Joey with [Business name] — just calling to make sure everything went well with your installation. Is there anything else we can help with? … Great! One more thing — we also do handyman work: hanging curtains, mounting shelves, furniture assembly, small repairs — so keep us in mind. And if you have a minute, a quick Google review would mean a lot; I can text or email you the link right now.";
-function rcRel(iso){
+// Per-card working state for the guided call, keyed by booking id. Lives outside
+// the render so tapping an outcome, a tag or the note never loses what is
+// already captured on the other cards on screen.
+let _rcWork={};
+function rcWork(id){ if(!_rcWork[id]) _rcWork[id]={outcome:null,tags:[],note:'',channel:null,busy:false}; return _rcWork[id]; }
+// Counted in the browser from what Joey has logged this session, so the header
+// reflects her own morning's work without another round trip. Reset whenever a
+// fresh queue is loaded.
+let _rcStats={ today:0, reached:0, good:0, issues:0 };
+function rcStat(label, value, sub, color){
+  return `<div class="gstat" style="align-items:center;text-align:center;">
+    <span class="gstat-l">${esc(label)}</span>
+    <span class="gstat-v"${color?` style="color:${color};"`:''}>${esc(value)}</span>
+    ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
+}
+function rcGreeting(){
+  const h=new Date().getHours();
+  return `Good ${h<12?'morning':h<18?'afternoon':'evening'}, ${(typeof userName!=='undefined'&&userName)?userName:'Joey'}`;
+}
+// Four outcomes, because a secretary mid-call picks the first thing that fits and
+// a longer list just means slower, less consistent logging. Each maps onto a
+// status the API already accepts, so no enum change and no migration.
+const RC_OUTCOMES=[
+  { v:'great',    tone:'good', label:'Went great, 5 stars' },
+  { v:'issue',    tone:'warn', label:'Something went wrong' },
+  { v:'noanswer', tone:'warn', label:'No answer' },
+  { v:'dnc',      tone:'bad',  label:'Do not contact' },
+];
+// What the customer actually said, captured as countable tags. Free text cannot
+// be rolled up into "how did we do"; these can (unnest over review_call_tags).
+const RC_TAGS={
+  issue:['Tech was late','Wall damage','Cable/wire issue','Mount not level','Price complaint','Rude or unprofessional','Had to come back'],
+};
+// The opener, built per customer so there is no placeholder to remember and no
+// wrong company name said out loud. Owner's wording, verbatim.
+function rcScript(r){
+  const first=String(r.customer_name||'').trim().split(/\s+/)[0]||'there';
+  return `Hey ${first}, this is Joey from ${r.business_name||'us'}. I was just calling to see how your installation went ${rcRelSpoken(r.when, r.business_timezone)}. Is there anything we can improve on?`;
+}
+function rcRel(iso, tz){
   if(!iso) return '';
-  const a=new Date(iso); a.setHours(0,0,0,0);
-  const b=new Date(); b.setHours(0,0,0,0);
-  const days=Math.round((b-a)/86400000);
+  // Compared as calendar days in the JOB's timezone. Computed browser-local, a
+  // Denver job viewed from another zone reads back the wrong day, and this
+  // sentence is said out loud to the customer.
+  const zone=tz||'America/Denver';
+  const dayIn=(d)=>{ try{ return new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).format(d); }catch(_){ return d.toISOString().slice(0,10); } };
+  const a=dayIn(new Date(iso)), b=dayIn(new Date());
+  const days=Math.round((Date.parse(b+'T00:00:00Z')-Date.parse(a+'T00:00:00Z'))/86400000);
   if(days===0) return 'today';
   if(days===1) return 'yesterday';
-  if(days>1 && days<7) return days+' days ago';
-  return new Date(iso).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  if(days>1 && days<7){
+    try{ return new Date(iso).toLocaleDateString('en-US',{timeZone:zone,weekday:'long'}); }catch(_){ return days+' days ago'; }
+  }
+  try{ return new Date(iso).toLocaleDateString('en-US',{timeZone:zone,weekday:'short',month:'short',day:'numeric'}); }
+  catch(_){ return new Date(iso).toLocaleDateString(); }
+}
+// "yesterday" is said bare; a weekday or a date needs "on" in front of it.
+// ("...went yesterday" but "...went on Friday".)
+function rcRelSpoken(iso, tz){
+  const r=rcRel(iso, tz);
+  return (r==='today'||r==='yesterday'||/ago$/.test(r)) ? r : ('on '+r);
 }
 function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Not interested',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
 // ── Call Performance ───────────────────────────────────────────────────────
@@ -6873,6 +6976,10 @@ async function renderReviewCalls(){
     const params = _rcFolder==='to_call' ? { days:_rcDays } : { folder:_rcFolder, week_offset:_rcWeekOffset };
     const d=await api('review_calls',{ params });
     _rcData=d.calls||[];
+    // Half-finished capture belongs to the queue it was started on: keeping it
+    // across a reload would re-attach an outcome to whatever row now holds that
+    // id in a different window.
+    _rcWork={};
     _rcWarning=d.warning||null;
     _rcFolderCounts=d.folder_counts||{};
     _rcWeekLabel=d.week_label||'';
@@ -6909,9 +7016,15 @@ function paintReviewCalls(){
     <div class="rc-seg" style="margin-bottom:14px;">
       ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
     </div>
-    ${isToCall?`<div class="rc-script">
-      <div class="rc-script-h">📋 Script <span>— say the company shown on each card</span></div>
-      <div class="rc-script-b">“${esc(RC_SCRIPT)}”</div>
+    ${isToCall?`<div class="rc-hero">
+      <div class="rc-hero-hi">${esc(rcGreeting())}</div>
+      <div class="rc-hero-sub">Customers from both companies who finished a job and have not left a review yet. The opener on each card is already filled in.</div>
+      <div class="greet-stats" style="margin-top:14px;">
+        ${rcStat('To call', String(toCall), 'both companies')}
+        ${rcStat('Logged today', String(_rcStats.today||0), `${_rcStats.reached||0} reached`, '#5ef0a0')}
+        ${rcStat('Went well', _rcStats.reached?Math.round((_rcStats.good/_rcStats.reached)*100)+'%':'—', `${_rcStats.good||0} of ${_rcStats.reached||0} reached`, '#5ef0a0')}
+        ${rcStat('Issues raised', String(_rcStats.issues||0), 'Andrew notified')}
+      </div>
     </div>`:''}
     ${_rcWarning?`<div class="nb-min-warn floored" style="margin-bottom:12px;">⚠ Couldn't load part of the list — ${esc(_rcWarning)}</div>`:''}
     <div class="rc-count">${isToCall?`${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}`:`${rows.length} logged · week of ${esc(_rcWeekLabel)}`}</div>
@@ -6921,6 +7034,28 @@ function paintReviewCalls(){
   view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));
   view.querySelectorAll('[data-rcweek]').forEach(b=>b.addEventListener('click',()=>{ _rcWeekOffset=Math.max(-520,Math.min(0,_rcWeekOffset+parseInt(b.dataset.rcweek))); renderReviewCalls(); }));
   view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz, b.dataset.rcChannel)));
+  // Guided-card controls. Every one is delegated off the freshly painted view,
+  // so a card that does not render a given control simply has none to wire.
+  view.querySelectorAll('[data-rc-out]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'outcome',null,b.dataset.rcOut)));
+  view.querySelectorAll('[data-rc-tag]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'tag',null,b.dataset.rcTag)));
+  view.querySelectorAll('[data-rc-chan]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'chan',null,b.dataset.rcChan)));
+  view.querySelectorAll('[data-rc-send]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'send')));
+  view.querySelectorAll('[data-rc-done]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'done',null,b.dataset.rcDone)));
+  // The note is NOT re-rendered on every keystroke — that would steal focus
+  // mid-sentence. It updates the working copy and, on a complaint, releases the
+  // save button and its banner in place as soon as something is typed.
+  view.querySelectorAll('[data-rc-note]').forEach(t=>t.addEventListener('input',()=>{
+    const id=t.dataset.rcNote, w=rcWork(id);
+    w.note=t.value;
+    if(w.outcome!=='issue') return;
+    const need=!w.note.trim();
+    const btn=view.querySelector(`[data-rc-done="issue"][data-rc-id="${id}"]`);
+    if(btn) btn.disabled=need;
+    const ban=document.getElementById('rcBan'+id);
+    if(ban) ban.textContent = need
+      ? 'Write down what they said first, in their words if you can.'
+      : 'No review is asked for on this one. Saved to the job so it can be put right.';
+  }));
   // Outcome dropdown (Promised review / Had a complaint / Left a voicemail /
   // Don't contact) — same rcAction() as the old button row, just triggered by
   // picking an option instead of a click. Reset back to the placeholder right
@@ -6941,7 +7076,7 @@ function rcFolderCard(r){
   const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
   const badges=[];
   if(r.rating && r.rating<4) badges.push(`<span class="rc-badge red">⚠ left ${r.rating}★ private feedback — handle gently</span>`);
-  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at))}`:''}</span>`);
+  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at, r.business_timezone))}`:''}</span>`);
   if(r.reviewed) badges.push(`<span class="rc-badge green">✅ Left a review since</span>`);
   const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
   const callBtn = r.call_status==='do_not_contact'
@@ -6953,7 +7088,7 @@ function rcFolderCard(r){
   return `<div class="rc-card">
     <div class="rc-main">
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
-      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}</div>
+      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when, r.business_timezone))}${r.zip?` · ${esc(r.zip)}`:''}</div>
       ${rcVoicemailRow(r)}
       <div class="rc-badges">${badges.join('')}</div>
       ${noteBox}
@@ -6999,89 +7134,185 @@ function rcVoicemailRow(r){
   </div>`;
 }
 function rcCard(r){
-  const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
+  const w=rcWork(r.id);
+  const biz=`<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
   const badges=[];
   if(r.email_opened) badges.push(`<span class="rc-badge blue">✉️ opened email</span>`);
   else if(r.email_count>0) badges.push(`<span class="rc-badge gray">✉️ email sent</span>`);
   if(r.rating && r.rating<4) badges.push(`<span class="rc-badge red">⚠ left ${r.rating}★ private feedback — handle gently</span>`);
-  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at))}`:''}</span>`);
+  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at, r.business_timezone))}`:''}</span>`);
   const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
-  const callBtn=tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`;
-  // Email and text each get their own resend button when both are possible
-  // (customer has that contact method + a review link); when only one is,
-  // it gets the full-width label it always had rather than looking like half
-  // a pair with nothing beside it.
-  const canEmailResend=r.has_email && r.has_review_link;
-  const canSmsResend=r.has_sms && r.has_review_link;
-  const resendBtn=(ch,label)=>`<button class="rc-btn ghost" style="flex:1;" data-rc-act="resend" data-rc-channel="${ch}" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">${label}</button>`;
-  let resend='';
-  if(canEmailResend && canSmsResend) resend=`<div class="rc-btn-row" style="gap:9px;">${resendBtn('email','✉️ Email')}${resendBtn('sms','💬 Text')}</div>`;
-  else if(canEmailResend) resend=`<button class="rc-btn ghost" data-rc-act="resend" data-rc-channel="email" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>`;
-  else if(canSmsResend) resend=`<button class="rc-btn ghost" data-rc-act="resend" data-rc-channel="sms" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">💬 Re-send review text</button>`;
-  // What the customer purchased, so Joey can reference it on the call — filtered
-  // to the real work (TVs, handyman, Assurion, priced add-ons); tax and $0 config
-  // answers are dropped as noise.
   const items=(Array.isArray(r.line_items)?r.line_items:[]).filter(rcRelevantItem);
   const itemsRow=items.length
     ? `<div class="rc-items">🛒 ${items.slice(0,8).map(li=>esc(liCleanLabel(li.name))+(li.qty>1?` ×${li.qty}`:'')).join(' · ')}${items.length>8?' …':''}</div>` : '';
-  // A voicemail the CUSTOMER left us, if there is one for this number. Whoever
-  // is about to ring them should know what they already said — chasing someone
-  // for a review while they are waiting on a callback reads badly.
-  // Middle of the card is either the outcome buttons or (if selected) the complaint note form.
-  const middle = _rcComplaintFor===r.id
-    ? `<div class="rc-complaint">
-         <textarea class="rc-cmp-text" placeholder="What was the complaint? (saved to the job for the owner)" oninput="_rcComplaintText=this.value">${esc(_rcComplaintText)}</textarea>
-         <div class="rc-btn-row">
-           <button class="rc-btn red" data-rc-act="complaint_save" data-rc-id="${r.id}">Save complaint</button>
-           <button class="rc-btn ghost" data-rc-act="complaint_cancel" data-rc-id="${r.id}">Cancel</button>
-         </div>
-       </div>`
-    : `<select class="rc-outcome-select" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">
-         <option value="">Log outcome…</option>
-         <option value="promised_review">✅ Promised review</option>
-         <option value="complaint_open">📝 Had a complaint</option>
-         <option value="voicemail">📭 Left a voicemail</option>
-         <option value="do_not_contact">🚫 Don't contact</option>
-       </select>`;
-  return `<div class="rc-card">
-    <div class="rc-main">
-      <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
-      <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when))}${r.zip?` · ${esc(r.zip)}`:''}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
-      ${itemsRow}
-      ${rcVoicemailRow(r)}
-      <div class="rc-badges">${badges.join('')}</div>
-    </div>
-    <div class="rc-actions">
-      ${callBtn}
-      ${middle}
-      ${resend}
-    </div>
-  </div>`;
+
+  // 1. who, so Joey can actually talk about the job
+  let h=`<div class="rc-card guided">
+    <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
+    <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when, r.business_timezone))}${r.zip?` · ${esc(r.zip)}`:''}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
+    ${itemsRow}
+    ${rcVoicemailRow(r)}
+    ${badges.length?`<div class="rc-badges">${badges.join('')}</div>`:''}`;
+
+  // 2. the opener, already filled in
+  h+=`<div class="rc-step">1 · Say this</div>
+    <div class="rc-say"><i></i><p>${esc(rcScript(r))}</p></div>
+    ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
+
+  // 3. how it went
+  h+=`<div class="rc-step">2 · How did it go?</div><div class="rc-opts">`
+    + RC_OUTCOMES.map(o=>`<button type="button" class="rc-opt ${o.tone}${w.outcome===o.v?' on':''}" data-rc-out="${o.v}" data-rc-id="${r.id}">
+         <span class="d"></span><span>${esc(o.label)}</span></button>`).join('')
+    + `</div>`;
+
+  // 4. what they said, as countable tags plus the detail
+  if(w.outcome==='issue'){
+    h+=`<div class="rc-step">What went wrong?</div>
+      <div class="rc-tags">${(RC_TAGS.issue||[]).map(t=>`<button type="button" class="rc-tag${w.tags.includes(t)?' on':''}" data-rc-tag="${esc(t)}" data-rc-id="${r.id}">${esc(t)}</button>`).join('')}</div>
+      <textarea class="rc-cmp-text" style="margin-top:9px;" data-rc-note="${r.id}"
+        placeholder="What happened? The more detail the better.">${esc(w.note)}</textarea>`;
+  }
+
+  // 5. the review ask — only on a call that actually went well
+  if(w.outcome==='great'){
+    const canSms=!!(r.has_sms && r.has_review_link);
+    const canEmail=!!(r.has_email && r.has_review_link);
+    const canBoth=canSms&&canEmail;
+    // Default to both whenever both are possible; otherwise to whichever is.
+    if(!w.channel) w.channel = canBoth?'both':canSms?'sms':canEmail?'email':null;
+    const chan=(v,label,ok,sub,extra)=>`<button type="button" class="rc-chan${extra?' '+extra:''}${w.channel===v?' on':''}" data-rc-chan="${v}" data-rc-id="${r.id}"${ok?'':' disabled'}>
+        <span>${label}</span>${sub?`<span class="s">${esc(sub)}</span>`:''}</button>`;
+    h+=`<div class="rc-step">3 · Ask for the review</div>
+      <div class="rc-say"><i></i><p>Would you mind if I send you something to leave us a review?</p>
+        <small>only when the call went well</small></div>`;
+    if(!r.has_review_link){
+      h+=`<div class="rc-banner warn">This job has no review link yet, so nothing can be sent. Log it as went well and the link can go out later.</div>
+        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="declined" data-rc-id="${r.id}">Log the call</button></div>`;
+    }else if(!canSms&&!canEmail){
+      h+=`<div class="rc-banner warn">No mobile with consent and no email on file, so there is nothing to send to.</div>
+        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="declined" data-rc-id="${r.id}">Log the call</button></div>`;
+    }else{
+      h+=`${chan('both','Both',canBoth,canBoth?'text and email · default':'needs a mobile and an email','main')}
+        <div class="rc-chans">
+          ${chan('sms','💬 Text',canSms,canSms?'':'no mobile on file')}
+          ${chan('email','✉️ Email',canEmail,canEmail?'':'no email on file')}
+        </div>
+        <div class="rc-gorow">
+          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':'Send and log call'}</button>
+          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}">They said no thanks</button>
+        </div>`;
+    }
+  }else if(w.outcome){
+    // A complaint is only worth alerting on with detail attached, so the note
+    // gates the save. The other two outcomes need nothing typed.
+    const needNote = w.outcome==='issue' && !w.note.trim();
+    const label = w.outcome==='issue' ? 'Save what they told us' : 'Log the call';
+    h+=`<div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="${w.outcome}" data-rc-id="${r.id}"${needNote?' disabled':''}>${label}</button></div>`;
+    if(w.outcome==='issue') h+=`<div class="rc-banner warn" id="rcBan${r.id}">${needNote
+      ? 'Write down what they said first, in their words if you can.'
+      : 'No review is asked for on this one. Saved to the job so it can be put right.'}</div>`;
+  }
+  return h+`</div>`;
 }
+// Outcome -> the status the API already accepts. No new enum values, so the
+// folder routing and the existing history views keep working untouched.
+const RC_OUT_STATUS={ great:'promised_review', issue:'complaint', noanswer:'voicemail', dnc:'do_not_contact' };
+// Which outcomes take the customer OFF the queue. 'noanswer' deliberately does
+// not: she should get another try tomorrow.
+const RC_OUT_RESOLVES={ great:true, issue:true, noanswer:false, dnc:true };
+
+async function rcSendReview(id, channel){
+  // The API sends ONE channel per call, so "both" is two calls. They are awaited
+  // separately and reported separately: a text landing and an email failing is a
+  // real outcome Joey needs to see, not a single blended "sent".
+  const chans = channel==='both' ? ['sms','email'] : [channel];
+  const okd=[], failed=[];
+  for(const ch of chans){
+    try{
+      // from_review_call makes the server resolve the business from the BOOKING.
+      // Joey's token is scoped to Doms, so naming the business here would 403 on
+      // every Handy Andy card in this deliberately cross-business queue.
+      await api('review_resend',{ method:'POST', body:{ id, channel:ch, from_review_call:true }});
+      okd.push(ch==='sms'?'text':'email');
+    }catch(e){ failed.push(`${ch==='sms'?'text':'email'} (${e.message})`); }
+  }
+  return { okd, failed };
+}
+
 async function rcAction(id, act, biz, channel){
+  // Legacy resend buttons on the folder (history) cards.
   if(act==='resend'){
     const ch=channel==='sms'?'sms':'email';
-    try{ await api('review_resend',{ method:'POST', body:{ business:biz, id, channel:ch }}); toast(ch==='sms'?'Review text re-sent ✓':'Review email re-sent ✓'); }
+    try{ await api('review_resend',{ method:'POST', body:{ id, channel:ch, from_review_call:true }}); toast(ch==='sms'?'Review text re-sent ✓':'Review email re-sent ✓'); }
     catch(e){ toast(e.message); }
     return;
   }
-  // Complaint note form (open / cancel don't hit the server).
-  if(act==='complaint_open'){ _rcComplaintFor=id; _rcComplaintText=''; paintReviewCalls(); return; }
-  if(act==='complaint_cancel'){ _rcComplaintFor=null; _rcComplaintText=''; paintReviewCalls(); return; }
-  let status=act, notes;
-  if(act==='complaint_save'){ status='complaint'; notes=_rcComplaintText.trim(); }
-  const RESOLVE=['promised_review','complaint','do_not_contact'];
-  try{
-    await api('review_call_log',{ method:'POST', body:{ id, status, ...(notes!=null?{notes}:{}) }});
-    const item=_rcData.find(x=>x.id===id);
-    if(item){
-      if(RESOLVE.includes(status)){ _rcData=_rcData.filter(x=>x.id!==id); }
-      else { item.call_status=status; item.call_at=new Date().toISOString(); item.call_by=(typeof userName!=='undefined'?userName:null)||null; }
+  const w=rcWork(id);
+
+  if(act==='outcome'){
+    w.outcome = w.outcome===channel ? null : channel;   // tap again to clear
+    w.tags=[]; w.channel=null;
+    paintReviewCalls(); return;
+  }
+  if(act==='tag'){
+    const i=w.tags.indexOf(channel);
+    if(i>=0) w.tags.splice(i,1); else w.tags.push(channel);
+    paintReviewCalls(); return;
+  }
+  if(act==='chan'){ w.channel=channel; paintReviewCalls(); return; }
+
+  // Commit. `channel` carries the outcome key for the log-only buttons.
+  const outcome = act==='send' ? 'great' : channel;
+  const status = act==='send' ? 'promised_review'
+               : outcome==='declined' ? 'declined'
+               : RC_OUT_STATUS[outcome];
+  if(!status) return;
+  if(outcome==='issue' && !w.note.trim()) return;   // the alert is worthless without detail
+
+  let sent=null;
+  if(act==='send'){
+    if(w.busy) return;
+    w.busy=true; paintReviewCalls();
+    sent=await rcSendReview(id, w.channel||'both');
+    w.busy=false;
+    // Nothing went out, so nothing is claimed: the call stays on the queue with
+    // the error visible rather than being filed as a review that was never sent.
+    if(!sent.okd.length){
+      paintReviewCalls();
+      toast('Could not send: '+sent.failed.join(', '));
+      return;
     }
-    _rcComplaintFor=null; _rcComplaintText='';
+  }
+  try{
+    await api('review_call_log',{ method:'POST', body:{
+      id, status,
+      notes: w.note.trim() || undefined,
+      tags: w.tags.length ? w.tags : undefined,
+    }});
+    // Header counters, from what she has actually logged this session.
+    _rcStats.today++;
+    if(status!=='voicemail'){ _rcStats.reached++; if(status==='promised_review'||status==='declined') _rcStats.good++; }
+    if(status==='complaint') _rcStats.issues++;
+    const resolves = act==='send' ? true : (outcome==='declined' ? true : RC_OUT_RESOLVES[outcome]);
+    const item=_rcData.find(x=>x.id===id);
+    if(resolves) _rcData=_rcData.filter(x=>x.id!==id);
+    else if(item){ item.call_status=status; item.call_at=new Date().toISOString(); item.call_by=(typeof userName!=='undefined'?userName:null)||null; }
+    delete _rcWork[id];
     paintReviewCalls();
-    toast(({promised_review:'Marked — promised a review 🎉',complaint:'Complaint saved for the owner',do_not_contact:'Removed from list',voicemail:'Voicemail logged'})[status]||'Saved ✓');
-  }catch(e){ toast(e.message); }
+    if(sent){
+      toast(sent.failed.length
+        ? `Review sent by ${sent.okd.join(' and ')} · ${sent.failed.length} failed`
+        : `Review sent by ${sent.okd.join(' and ')} ✓`);
+    }else{
+      toast(({ promised_review:'Logged — they are happy 🎉', declined:'Logged — no review this time',
+               complaint:'Saved with the job ✓', voicemail:'No answer logged — stays on the list',
+               do_not_contact:'Removed from the list' })[status]||'Saved ✓');
+    }
+  }catch(e){
+    w.busy=false; paintReviewCalls();
+    // The review already went out, so say so rather than implying nothing happened.
+    toast(sent&&sent.okd.length ? `Review sent, but the outcome did not save: ${e.message}` : e.message);
+  }
 }
 
 // ── Review requests: scoreboard + per-job Sent→Delivered→Opened pipeline ────
@@ -9254,6 +9485,19 @@ function callWizReset(){
     // econ holds the server's profit projection for THIS quote, which is what
     // caps how much can be given away.
     econ:null, discSource:null, discCoupon:null, discManual:0,
+    // Ladder position. The discount card hands over ONE concession at a time
+    // instead of showing all three levers at once, so it needs to remember
+    // which rung it is on and which it has already visited. `step` stays
+    // 'discount' for every rung, so the funnel in api/admin.js is untouched.
+    discRung:'source', discSeen:['source'], discCallId:null,
+    discEntry:{}, discSpoken:null,
+    // Uncommitted text carried across repaints, and the in-flight guard for the
+    // coupon round trip. All three were used but never initialized.
+    _couponDraft:null, _manualDraft:null, _couponBusy:false,
+    // Cached so a failed profit projection can be retried, and stamped with the
+    // call id so a stale ceiling from a previous call is detectable.
+    _econArgs:null, econCallId:null,
+    preDiscountTotal:0, discountLabel:null,
     prefDate:'', selectedSlot:null,
     calMonth:null, availDates:null,
     resolution:null,
@@ -9300,7 +9544,15 @@ function openTakeCall(){
 // explain later.
 function closeCallWiz(opts){
   document.getElementById('callWizModal').classList.add('hidden');
-  if(callWiz && callWiz.id && !(opts&&opts.resolved)) toast('Call still open — hit "Take a Call" to pick it back up.');
+  if(!callWiz || !callWiz.id) return;
+  // A RESOLVED call must be marked resolved on the local object, not just on the
+  // server row. `resolution` was read in two places and assigned in none, so it
+  // stayed null forever and the resume branch in openTakeCall always passed:
+  // the next "Take a Call" reopened the FINISHED call and callWizReset() was
+  // never reached, carrying the previous customer's discSource/discCoupon/
+  // discManual/econ straight onto the next caller's quote.
+  if(opts&&opts.resolved){ callWiz.resolution='closed'; return; }
+  toast('Call still open — hit "Take a Call" to pick it back up.');
 }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
 document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
@@ -9368,14 +9620,44 @@ function callWizChoiceRow(options){
     options.map(o=>`<button type="button" class="btn ghost" style="width:auto;flex:1;min-width:110px;" data-cwchoice="${esc(o.value)}">${esc(o.label)}</button>`).join('')+
   `</div>`;
 }
-function callWizScript(line){
-  // Editorial styling, not a UI label: an oversized quote mark stands in for
-  // an icon, and the line itself reads bigger and looser than surrounding
-  // controls so a secretary can catch it at a glance mid-conversation.
-  return `<div style="background:var(--line2);border-radius:10px;padding:12px 16px 14px;margin-bottom:12px;position:relative;">
-    <div style="font-family:Georgia,serif;font-size:40px;line-height:1;color:var(--mute);opacity:.35;position:absolute;top:2px;left:10px;" aria-hidden="true">&ldquo;</div>
-    <div style="font-size:18px;line-height:1.4;font-weight:400;padding-left:24px;">${esc(line)}</div>
+// Everything the secretary says out loud renders through this ONE component, in
+// near-black with white text and an amber edge, so "say this" is never confused
+// with the operator captions around it (grey = context, amber = your eyes only,
+// this = read it word for word). It has to survive being glanced at mid-sentence
+// while a customer is talking, which is why it is the loudest thing on the card.
+// `amt` is optionally pulled out in amber inside the sentence so the number she
+// has to land is findable without re-reading the whole line.
+function callWizScript(line, amt){
+  let body=esc(line);
+  if(amt){
+    const a=esc(String(amt));
+    body=body.split(a).join(`<span style="color:#ffd479;font-weight:800;">${a}</span>`);
+  }
+  return `<div style="background:#141a22;border-radius:11px;padding:15px 18px 17px 20px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.18);">
+    <div style="position:absolute;left:0;top:0;bottom:0;width:4px;background:#f59e0b;" aria-hidden="true"></div>
+    <div style="font-family:Georgia,serif;font-size:44px;line-height:1;color:rgba(255,255,255,.30);position:absolute;top:6px;left:14px;" aria-hidden="true">&ldquo;</div>
+    <div style="font-size:19.5px;line-height:1.38;font-weight:600;padding-left:28px;color:#fff;letter-spacing:-.015em;">${body}</div>
   </div>`;
+}
+// The beat after an offer. The single most common way a concession gets wasted
+// is the secretary talking through the customer's answer and stacking the next
+// discount on top before they have said a word.
+function cwWaitBar(){
+  return `<div style="background:#fff4d6;border:1.5px solid #e8c469;border-radius:10px;padding:11px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;color:#6b4c07;">
+    <span style="flex-shrink:0;width:22px;height:22px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;" aria-hidden="true">II</span>
+    <span><b style="font-size:15px;font-weight:800;">Wait!</b> <span style="font-size:13.5px;font-weight:600;opacity:.85;">Let them speak first.</span></span>
+  </div>`;
+}
+// Operator-facing guidance. NEVER spoken, and visually unmistakable from the
+// script bubble for exactly that reason: "you have $15 left to give" read out
+// loud hands the customer the number to ask for.
+function cwOpNote(tag, line){
+  return `<div style="background:#fdf6e7;border:1px solid #f0dcae;border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:#7a5a12;display:flex;gap:8px;align-items:baseline;">
+    <span style="font-weight:800;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;flex-shrink:0;">${esc(tag)}</span>
+    <span>${esc(line)}</span></div>`;
+}
+function cwAmber(line){
+  return `<div style="background:#fff4d6;border:1.5px solid #e8c469;border-radius:9px;padding:10px 13px;margin-bottom:12px;font-size:13.5px;color:#6b4c07;font-weight:600;">${esc(line)}</div>`;
 }
 // Log one action from the script. Fire-and-forget on purpose: analytics must
 // never add latency to, or fail, a call the secretary is actually on. Every
@@ -9498,11 +9780,41 @@ function cwSpokenAmountThousands(n){
 // "2 TVs, 1 tilting bracket, 1 over a fireplace, and a soundbar installation".
 // Built from the same selections that produce the price, so the sentence can
 // never describe a different job than the one being quoted.
+// "a" or "an", by how the word is SAID, not how it is spelled. This sentence is
+// read out loud to a customer, so "a apple tv installation" is heard as a stumble.
+function cwArticle(phrase){
+  const w=String(phrase||'').trim().toLowerCase();
+  if(/^(hour|honest|honou?r|mdf|led|rca|sd|hd|lcd|led)\b/.test(w)) return 'an';
+  if(/^(uni|use|useful|one|once|euro)/.test(w)) return 'a';   // vowel letter, consonant sound
+  return /^[aeiou]/.test(w) ? 'an' : 'a';
+}
+// A plural add-on takes no article at all: "a led lights" is broken English.
+function cwIsPluralPhrase(phrase){
+  const last=String(phrase||'').trim().split(/\s+/).pop().toLowerCase().replace(/[^a-z]/g,'');
+  return /s$/.test(last) && !/(ss|us|sis|ics)$/.test(last);
+}
+// Option labels are written for a CLICKABLE LIST ("Install shelf under TV"), and
+// several of them are imperative, which reads as broken English the moment it is
+// spoken inside a sentence ("and a install shelf under tv"). These are the spoken
+// forms; anything not listed falls through to the label unchanged.
+const CW_READBACK_PHRASE=[
+  [/^install\s+shelf\s+under\s+(the\s+)?tv$/i, 'shelf installed under the TV'],
+  [/^install\s+(.+?)\s+behind\s+the\s+tv$/i,   '$1 installed behind the TV'],
+  [/^install\s+(.+)$/i,                        '$1 installed'],
+];
+function cwSpokenAddon(label){
+  const s=String(label||'').trim();
+  for(const [re,to] of CW_READBACK_PHRASE) if(re.test(s)) return s.replace(re,to);
+  return s;
+}
 function cwJobSummary(){
   const parts=[];
-  const tvs=nbTotalTvs();
-  if(tvs>0) parts.push(`${tvs} TV${tvs===1?'':'s'}`);
-  if(nbFrameTvQty.frame>0) parts.push(`${nbFrameTvQty.frame} Frame TV${nbFrameTvQty.frame===1?'':'s'}`);
+  // Count REGULAR TVs only. nbTotalTvs() is regular + frame, so using it here
+  // said "1 TV, 1 Frame TV" about a single Frame TV — the same television read
+  // back to the customer twice.
+  const reg=nbFrameTvQty.regular, frame=nbFrameTvQty.frame;
+  if(reg>0) parts.push(`${reg} TV${reg===1?'':'s'}`);
+  if(frame>0) parts.push(`${frame} Frame TV${frame===1?'':'s'}`);
   const each=(key, fn)=>{
     const g=nbOptionGroups.find(x=>x.key===key); if(!g||!nbQty[g.id]) return;
     Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{
@@ -9536,11 +9848,17 @@ function cwJobSummary(){
     // English and would read as a garbled ad-lib, not a real add-on.
     if(nbIsOtherOption(o) && !(nbOptionNotes[o.id]||'').trim()) return null;
     const note=(nbIsOtherOption(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
-    const label=(note||o.label).toLowerCase();
-    return ct===1 ? `a ${label}` : `${ct} ${label}`;
+    const label=cwSpokenAddon(note||o.label).toLowerCase();
+    if(ct!==1) return `${ct} ${label}`;
+    // A plural add-on ("LED Lights") is named bare; a singular one takes the
+    // article that matches how it is SAID.
+    return cwIsPluralPhrase(label) ? label : `${cwArticle(label)} ${label}`;
   });
   if(!parts.length) return '';
   if(parts.length===1) return parts[0];
+  // Two items take no comma ("2 TVs and 1 Frame TV"); three or more get the
+  // serial comma. Reading "2 TVs, and 1 Frame TV" out loud is an audible stumble.
+  if(parts.length===2) return parts[0]+' and '+parts[1];
   return parts.slice(0,-1).join(', ')+', and '+parts[parts.length-1];
 }
 // Where the caller heard about us. Each is worth the same $10 — it is a
@@ -9562,6 +9880,276 @@ function cwDiscountMax(){
 function cwDiscountApplied(){
   return Math.min(cwDiscountRaw(), cwDiscountMax());
 }
+// ── Concession ladder ────────────────────────────────────────────────────────
+// The card hands over one lever at a time instead of showing all three at once.
+// Everything below is DISPLAY logic: cwDiscountRaw/Max/Applied above are the
+// only things that decide money, and they are untouched. Four consumers read
+// cwDiscountApplied() (recap, customer caption, booking line, estimate line)
+// and none of them know rungs exist.
+const CW_RUNGS = ['source','coupon','manual'];
+// Budget is attributed to the coupon FIRST. A customer who read a real code out
+// loud must never see that code credited $0 because a half-remembered referral
+// channel ate the ceiling first — that is an argument on a live call. Greedy
+// waterfill over any permutation sums to min(sum, max), so the order is free.
+const CW_ATTRIB_ORDER = ['coupon','source','manual'];
+// Every listener in the discount card goes through this. The card now paints
+// one rung at a time, so a missing node is the normal case; a bare
+// getElementById(...).addEventListener chain would throw on the first absent id
+// and silently leave every remaining control, including Back, dead.
+function cwOn(id, ev, fn){ const el=document.getElementById(id); if(el) el.addEventListener(ev, fn); return !!el; }
+function cwLadderSpend(){
+  const max=cwDiscountMax();
+  const face={
+    source: callWiz.discSource ? CW_SOURCE_DISCOUNT : 0,
+    coupon: callWiz.discCoupon ? (Number(callWiz.discCoupon.amount)||0) : 0,
+    manual: Number(callWiz.discManual)||0,
+  };
+  let left=max; const eff={source:0,coupon:0,manual:0};
+  for(const k of CW_ATTRIB_ORDER){ const t=Math.min(face[k], left); eff[k]=t; left-=t; }
+  const spent=eff.source+eff.coupon+eff.manual;
+  return { eff, face, max, spent, remaining:Math.max(0,max-spent) };
+}
+// Whole dollars still deliverable. FLOORED, never rounded: $15.60 of room reads
+// $15, so the secretary can never promise a dollar the clamp will not give.
+function cwRemainingRoom(){ return Math.floor(cwLadderSpend().remaining + 1e-9); }
+// One number feeds the screen and the mouth, so they cannot disagree.
+function cwCloseTotal(){ return Math.max(0,(Number(callWiz.preDiscountTotal)||0)-cwDiscountApplied()); }
+function cwCloseDisplay(){ return Math.round(cwCloseTotal()); }
+function cwCloseHasCents(){ return Math.abs(cwCloseTotal()-cwCloseDisplay())>0.004; }
+function cwMoneyCents(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
+// Is there a real ticket total we are allowed to quote at all? Handyman work is
+// hourly and `priced` is empty, so preDiscountTotal is just the travel fee —
+// quoting it would read a customer "$35" on a job that bills $130 or more.
+function cwCanQuoteTotal(){
+  return callWiz.service==='TV Mounting'
+      && Number.isFinite(Number(callWiz.preDiscountTotal))
+      && Number(callWiz.preDiscountTotal)>0;
+}
+// Branch ORDER is load-bearing. cwDiscountMax() returns 0 both while econ is
+// still loading and when the job genuinely cannot give anything, so checking
+// max first would announce "nothing to give" during a normal round trip. And
+// cwLoadEconomics's catch writes a TRUTHY stub with max_discount:0, so a
+// network failure would otherwise render as "this job is too thin".
+function cwEconState(){
+  if(!callWiz.econ || callWiz.econCallId!==callWiz.id) return 'loading';
+  if(callWiz.econ.error) return 'error';
+  if(!cwCanQuoteTotal() || cwDiscountMax()<=0) return 'noroom';
+  return 'ready';
+}
+function cwDiscountBits(){
+  const b=[];
+  if(callWiz.discSource) b.push(`heard via ${callWiz.discSource}`);
+  if(callWiz.discCoupon) b.push(`code ${callWiz.discCoupon.code}`);
+  if((Number(callWiz.discManual)||0)>0) b.push(`manual $${Number(callWiz.discManual)}`);
+  return b;
+}
+function cwSetDiscountLabel(){
+  const b=cwDiscountBits();
+  callWiz.discountLabel=`Discount${b.length?` (${b.join(', ')})`:''}`;
+}
+// Numeric, not string: '40' !== 40 would report a committed draft as dirty
+// forever, and an undefined draft as dirty before anything is typed.
+function cwManualDirty(){
+  if(callWiz._manualDraft==null) return false;
+  return Math.max(0,Number(callWiz._manualDraft)||0)!==(Number(callWiz.discManual)||0);
+}
+function cwCouponDirty(){
+  if(callWiz._couponDraft==null) return false;
+  return String(callWiz._couponDraft).trim().toUpperCase()
+      !== String(callWiz.discCoupon?callWiz.discCoupon.code:'').trim().toUpperCase();
+}
+// Claim the ladder for THIS call. Levers are cleared, not merely ignored:
+// cwDiscountApplied() reads them unconditionally and feeds consumers that have
+// never heard of a rung, so a view-only gate would still let the next caller
+// book with the previous caller's discount.
+function cwLadderClaim(){
+  callWiz.discSource=null; callWiz.discCoupon=null; callWiz.discManual=0;
+  callWiz._couponDraft=null; callWiz._manualDraft=null;
+  callWiz.discRung='source'; callWiz.discSeen=['source'];
+  callWiz.discSpoken=null; callWiz.discEntry={}; callWiz.discountLabel=null;
+  callWiz.discCallId=callWiz.id;
+}
+function cwSeen(r){ if(!callWiz.discSeen.includes(r)) callWiz.discSeen.push(r); }
+// What a rung delivered is measured against what was already applied when THAT
+// rung was first entered, recorded per rung rather than as one rolling figure.
+// A single rolling baseline was rebaselined by the Back button, so stepping back
+// made every rung report a zero concession: the screen claimed "that did not
+// change the total, there is no room left" on a ticket with most of its budget
+// intact, and dropped the only "They said yes" button on that screen.
+function cwEnterRung(r){
+  if(!callWiz.discEntry) callWiz.discEntry={};
+  if(callWiz.discEntry[r]==null) callWiz.discEntry[r]=cwDiscountApplied();
+  callWiz.discRung=r;
+  cwSeen(r);
+}
+function cwRungDelta(){
+  const b=(callWiz.discEntry||{})[callWiz.discRung];
+  return cwDiscountApplied()-(Number(b)||0);
+}
+// Re-derived on every paint, never cached, so a ceiling that shrinks under an
+// in-progress ladder immediately drops the rungs that now have nothing behind
+// them. A rung whose own lever is already committed is STICKY and never taken
+// away, otherwise money already given would vanish off the screen.
+function cwResolveRung(){
+  let r=callWiz.discRung||'source';
+  if(CW_RUNGS.indexOf(r)<0) r='source';
+  const committed={
+    source:!!callWiz.discSource,
+    coupon:!!callWiz.discCoupon,
+    manual:(Number(callWiz.discManual)||0)>0,
+  };
+  if((r==='coupon'||r==='manual') && !committed[r] && cwRemainingRoom()<=0) r='source';
+  cwEnterRung(r);   // idempotent: records the baseline once, on first entry only
+  return r;
+}
+function cwNextRung(){
+  const i=CW_RUNGS.indexOf(callWiz.discRung);
+  for(let j=i+1;j<CW_RUNGS.length;j++){
+    if(cwRemainingRoom()>0) return CW_RUNGS[j];
+  }
+  return null;   // nothing left to offer — the estimate is the next move
+}
+// Raw pre-clamp `requested` is what gets logged: capped_attempts in
+// callAnalytics counts manual_discount events where requested > allowed, so
+// pre-clamping the input would silently zero the owner's "the secretary keeps
+// trying to overspend" signal. The equality check is the double-tap guard.
+function cwManualCommit(){
+  const inp=document.getElementById('cwManualInput'); if(!inp) return false;
+  const requested=Math.max(0,Number(inp.value)||0);
+  if(requested===(Number(callWiz.discManual)||0)) return false;
+  callWiz.discManual=requested;
+  callWiz._manualDraft=null;
+  cwTrack('manual_discount',{ requested, allowed:cwDiscountMax(), applied:cwDiscountApplied() });
+  return true;
+}
+function cwAdvance(to){
+  // No implicit commit. A number typed into the cash-off box and never applied
+  // stays uncommitted, so the price on screen is always the price that books.
+  if(!to){ cwSetDiscountLabel(); callWiz.step='estimate'; renderCallWiz(); return; }
+  cwEnterRung(to);
+  renderCallWiz();
+}
+// Controls that exist on every rung. Wired in one place so a rung that happens
+// not to render one of them cannot break the rest.
+function cwWireLadderCommon(scope){
+  scope.querySelectorAll('[data-cwsrc]').forEach(b=>b.addEventListener('click',()=>{
+    const v=b.dataset.cwsrc;
+    callWiz.discSource = callWiz.discSource===v ? null : v;   // tap again to clear
+    if(callWiz.discSource) cwTrack('source_picked',{ source:callWiz.discSource });
+    renderCallWiz();
+  }));
+  cwOn('cwYes','click',e=>{
+    e.currentTarget.disabled=true;
+    // Deliberately does NOT commit a typed-but-unapplied manual draft. Booking
+    // on a number the customer never heard is the worst outcome this card can
+    // produce: discSpoken is captured here, so a commit AFTER it would book a
+    // lower price than the one just read out loud.
+    callWiz.discSpoken=cwCloseTotal();
+    cwGoToBooking();
+  });
+  cwOn('cwNo','click',()=>{
+    // Remember the number she just read out, so a later change that pushes the
+    // price back UP can warn her before the customer hears the old one.
+    callWiz.discSpoken=cwCloseTotal();
+    cwAdvance(cwNextRung());
+  });
+  cwOn('cwGoEstimate','click',()=>{
+    // Same rule as cwYes: an unapplied draft never rides onto the written
+    // estimate. The customer must receive the number they were actually quoted.
+    cwSetDiscountLabel();
+    callWiz.step='estimate'; renderCallWiz();
+  });
+  // Two-tap. This sits a few pixels under "They said no", which advances a rung,
+  // and a mis-tap here ends a live call and PATCHes the row to refused.
+  cwOn('cwGoDeclined','click',async e=>{
+    const btn=e.currentTarget;
+    if(btn.dataset.armed!=='1'){
+      btn.dataset.armed='1';
+      const was=btn.textContent;
+      btn.textContent='Tap again to log the decline';
+      setTimeout(()=>{ if(btn.isConnected&&btn.dataset.armed==='1'){ btn.dataset.armed=''; btn.textContent=was; } },4000);
+      return;
+    }
+    try{
+      cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
+      await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
+      closeCallWiz({resolved:true}); toast('Call logged.');
+      if(section==='calls') renderCalls();
+    }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
+  });
+}
+// Back one VISITED rung. discSeen is the source of truth, so a rung that was
+// skipped is skipped on the way back too. Going back never un-applies money.
+function cwWireLadderBack(){
+  cwWireBack(()=>{
+    // Neither commits a draft nor rebaselines the rung being returned to: the
+    // concession that rung already earned must still read as earned.
+    const i=callWiz.discSeen.indexOf(callWiz.discRung);
+    callWiz.discRung = i>0 ? callWiz.discSeen[i-1] : 'source';
+    renderCallWiz();
+  });
+}
+// The one place in this card that awaits. Order matters: log the attempt, then
+// COMMIT THE MONEY, and only then guard the UI. A valid code the customer read
+// out must never be silently dropped because she tapped away mid round trip.
+function cwWireCouponApply(){
+  cwOn('cwCouponApply','click', async ()=>{
+    if(callWiz._couponBusy) return;
+    const inp=document.getElementById('cwCouponInput'); if(!inp) return;
+    const code=inp.value.trim().toUpperCase();
+    if(!code){ callWiz.discCoupon=null; callWiz._couponDraft=null; renderCallWiz(); return; }
+    const fromStep=callWiz.step, fromRung=callWiz.discRung, fromCall=callWiz.id;
+    callWiz._couponBusy=true;
+    const btn=document.getElementById('cwCouponApply'); if(btn) btn.disabled=true;
+    { const m=document.getElementById('cwCouponMsg'); if(m) m.textContent='Checking…'; }
+    let r=null, errMsg=null;
+    try{ r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }}); }
+    catch(e){ errMsg=e.message||'Could not check that code'; }
+    callWiz._couponBusy=false;
+    if(r) cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
+    if(r&&r.ok){
+      callWiz.discCoupon={code:r.code, amount:r.amount};
+      callWiz._couponDraft=null;
+      cwTrack('coupon_applied',{ code:r.code, amount:r.amount });
+    }else if(r){
+      callWiz.discCoupon=null;   // the draft is KEPT on failure so a typo can be edited
+    }
+    // Guard only the UI, and re-query the node: the pre-await reference may be
+    // detached by a repaint that happened while this was in flight.
+    if(callWiz.id!==fromCall || callWiz.step!==fromStep || callWiz.discRung!==fromRung) return;
+    if(r&&r.ok){ renderCallWiz(); return; }
+    const msg=document.getElementById('cwCouponMsg'); if(!msg) return;
+    if(btn) btn.disabled=false;
+    if(errMsg){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(errMsg)}</span>`; return; }
+    // A one-character typo is the common case (BOOKONLNE for BOOKONLINE), and
+    // "not valid" alone strands her mid-call against a customer who insists.
+    const near=((r&&r.suggest)||'').trim();
+    msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`+
+      (near?` <span style="color:var(--ink-2);">Did they mean <b>${esc(near)}</b>?</span>`:'');
+  });
+}
+function cwWireManualApply(){
+  cwOn('cwManualApply','click',()=>{ cwManualCommit(); renderCallWiz(); });
+  cwOn('cwManualInput','keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); cwManualCommit(); renderCallWiz(); } });
+  // Typing has to SHOW that nothing has been applied yet, or the secretary reads
+  // the old price off a screen that looks like it already took the new number.
+  // Updated in place rather than through renderCallWiz, which would steal focus
+  // in the middle of typing a figure.
+  cwOn('cwManualInput','input',()=>{
+    const inp=document.getElementById('cwManualInput'); if(!inp) return;
+    callWiz._manualDraft=inp.value;
+    const dirty=cwManualDirty();
+    const btn=document.getElementById('cwManualApply');
+    if(btn){
+      btn.className='btn'+(dirty?'':' ghost');
+      btn.style.cssText='width:auto;'+(dirty?'background:#f59e0b;color:#3a2a00;':'');
+    }
+    const cap=document.getElementById('cwManualCap');
+    if(cap) cap.textContent=dirty
+      ? 'Not applied yet, tap Apply.'
+      : 'This is the total taken off by hand, not an amount added on top.';
+  });
+}
 // Ask the server what this job is actually worth to the business. The
 // projection runs through the real payroll engine (see quoteEconomics), so the
 // ceiling reflects the tech pay this specific job will incur — a 1-TV ticket
@@ -9571,16 +10159,28 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
   if(travelFee>0) lines.push({ name:'Travel Fee', quantity:1, line_total:travelFee, kind:'fee' });
   if(ahFee>0) lines.push({ name:'After-hours fee', quantity:1, line_total:ahFee, kind:'fee' });
   callWiz.preDiscountTotal=lines.reduce((t,l)=>t+l.line_total,0);
+  // Cached so a failed projection can be retried from the card instead of
+  // stranding the secretary with no authority to discount for the rest of the call.
+  callWiz._econArgs={ priced, travelFee, ahFee };
+  const forCall=callWiz.id;
+  let result;
   try{
-    callWiz.econ=await api('quote_economics',{ method:'POST', body:{
+    result=await api('quote_economics',{ method:'POST', body:{
       business:current.slug, line_items:lines,
       scheduled_at: callWiz.prefDate ? new Date(callWiz.prefDate+'T12:00:00').toISOString() : undefined,
     }});
   }catch(e){
     // Never let a failed projection quietly authorize an unlimited discount —
-    // no answer means no room to discount.
-    callWiz.econ={ max_discount:0, profit:null, error:e.message||'could not price this job' };
+    // no answer means no room to discount. `error` is what lets the card tell a
+    // CONNECTION failure apart from a genuinely thin ticket; both land here with
+    // max_discount 0, and only one of them should say "too thin".
+    result={ max_discount:0, profit:null, error:e.message||'could not price this job' };
   }
+  // A projection that lands after the secretary has moved to another call must
+  // not become that call's ceiling.
+  if(callWiz.id!==forCall) return;
+  callWiz.econ=result;
+  callWiz.econCallId=forCall;
   if(callWiz.step==='discount') renderCallWiz();
 }
 // Hand the whole call — answers, chosen slot, and any discount — into the real
@@ -10308,118 +10908,261 @@ async function renderCallWiz(){
   // ceiling comes from the server's profit projection for THIS job, so a thin
   // ticket simply has nothing to give and the screen says so rather than
   // letting the secretary talk their way into an unprofitable booking.
+  // The concession ladder. One lever per screen, highest price first: the
+  // referral question, then a promo code, then cash off by hand. Each rung ends
+  // with a real price said out loud and a hold beat, so every concession gets a
+  // chance to close the call BEFORE the next one is spent. The old card showed
+  // all three levers at once, which put the entire budget one tap from gone.
+  //
+  // `step` stays 'discount' on every rung (position lives in callWiz.discRung),
+  // so FUNNEL/STEP_ALIAS in api/admin.js are untouched and no call gets
+  // miscounted. Nothing here decides money: cwDiscountRaw/Max/Applied are the
+  // only authority and the clamp is still on the SUM.
   if(s==='discount'){
-    const max=cwDiscountMax();
-    const raw=cwDiscountRaw();
-    const applied=cwDiscountApplied();
-    const capped=raw>max;
-    const loading=!callWiz.econ;
-    const newTotal=Math.max(0,(Number(callWiz.preDiscountTotal)||0)-applied);
-    // Dark, bold, left-ruled — matches heading weight elsewhere in the app
-    // instead of the muted all-caps label these three used to share with
-    // ordinary field captions, which is why they read as blending in.
-    const secTitle=(label,sub)=>`<div style="border-left:3px solid var(--ink);padding-left:9px;margin:0 0 8px;">
-        <span style="font-size:13.5px;font-weight:700;color:var(--ink);">${esc(label)}</span>${sub?` <span style="font-size:12px;font-weight:400;color:var(--mute);">${esc(sub)}</span>`:''}
-      </div>`;
-    // This card re-renders on every source tap and again when the profit
-    // projection lands, and both used to wipe whatever the secretary was
-    // half-way through typing. Carry the uncommitted text across the repaint.
+    // A resumed call must never inherit the previous caller's levers.
+    if(callWiz.discCallId!==callWiz.id) cwLadderClaim();
+    // Carry uncommitted text across the repaint — this card re-renders on every
+    // tap and again when the profit projection lands, and both used to wipe
+    // whatever the secretary was halfway through typing.
     { const ci=document.getElementById('cwCouponInput'); if(ci) callWiz._couponDraft=ci.value;
       const mi=document.getElementById('cwManualInput'); if(mi) callWiz._manualDraft=mi.value; }
-    const couponVal = callWiz._couponDraft!=null ? callWiz._couponDraft : (callWiz.discCoupon?callWiz.discCoupon.code:'');
-    const manualVal = callWiz._manualDraft!=null ? callWiz._manualDraft : (callWiz.discManual||'');
-    body.innerHTML=`${callWizScript('I hear you. Let me see what I can do — how did you hear about us?')}
-      ${secTitle('Where they heard about us', '-'+money(CW_SOURCE_DISCOUNT))}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
-        ${CW_SOURCES.map(src=>`<button type="button" class="btn ${callWiz.discSource===src?'':'ghost'} sm" style="width:auto;" data-cwsrc="${esc(src)}">${esc(src)}</button>`).join('')}
-      </div>
 
-      ${secTitle('Coupon code they read out')}
-      <div style="display:flex;gap:6px;margin-bottom:6px;">
-        <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(couponVal)}">
-        <button type="button" class="btn ghost" id="cwCouponApply" style="width:auto;">Apply</button>
-      </div>
-      <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:16px;color:var(--mute);">${callWiz.discCoupon?`✓ ${esc(callWiz.discCoupon.code)} — -${money(callWiz.discCoupon.amount)}`:'Same codes that work on the website.'}</div>
+    const econState=cwEconState();
+    const rung=cwResolveRung();
+    const spend=cwLadderSpend();
+    const room=cwRemainingRoom();
+    const applied=cwDiscountApplied();
+    const delta=cwRungDelta();
+    const cents=cwCloseHasCents();
+    const canQuote=cwCanQuoteTotal();
+    const spokenTotal=cwSpokenAmount(cwCloseDisplay()).toUpperCase();
 
-      ${secTitle('Take something off manually')}
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-        <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${esc(String(manualVal))}">
-        <button type="button" class="btn ghost" id="cwManualApply" style="width:auto;">Apply</button>
-      </div>
+    const secTitle=(label,sub)=>`<div style="border-left:3px solid var(--ink);padding-left:9px;margin:0 0 10px;">
+        <span style="font-size:13.5px;font-weight:700;color:var(--ink);">${esc(label)}</span>${sub?` <span style="font-size:12px;font-weight:400;color:var(--mute);">${esc(sub)}</span>`:''}
+      </div>`;
 
-      <div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;">
-        ${loading
-          ? '<div style="color:var(--mute);font-size:13.5px;">Working out how much we can give…</div>'
-          : `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;">
-               <span style="font-size:12.5px;color:var(--ink-2);">New total</span>
-               <span style="font-size:24px;font-weight:800;color:#14532d;">${esc(money(newTotal))}</span>
-             </div>
-             <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute);padding-bottom:11px;border-bottom:1px solid var(--line2);">
-               <span>before tax</span><span>${esc(money(Math.round(newTotal*(1+TAX_RATE)*100)/100))} after tax</span>
-             </div>
-             <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin:10px 0 5px;">
-               <span>Discount used${capped?` <span style="color:#b45309;">(asked ${esc(money(raw))})</span>`:''}</span>
-               <span><b style="color:#b45309;">${esc(money(applied))}</b> of ${esc(money(max))}</span>
-             </div>
-             <div style="height:6px;background:var(--line2);border-radius:99px;overflow:hidden;">
-               <div style="width:${max>0?Math.min(100,Math.round(applied/max*100)):0}%;height:100%;background:#f59e0b;"></div>
-             </div>
-             ${callWiz.econ.capped_by&&max>0?`<div style="font-size:11px;color:var(--mute);margin-top:6px;text-align:right;">limit: ${esc(callWiz.econ.capped_by)}</div>`:''}
-             ${max<=0?'<div style="color:#b91c1c;margin-top:8px;font-size:12.5px;">This job is too thin to discount — there is nothing to give without losing money on it.</div>':''}`}
+    // Live price + how much of the ceiling is gone. Never rendered when there is
+    // no honest total to show (handyman work is hourly, so preDiscountTotal is
+    // just the travel fee and printing it would quote "$35" on a $130+ job).
+    const priceCard=()=>{
+      if(!canQuote) return '';
+      const t=cwCloseTotal();
+      return `<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="font-size:12.5px;color:var(--ink-2);">Price now</span>
+          <span style="font-size:26px;font-weight:800;color:#14532d;font-variant-numeric:tabular-nums;">${esc(cents?cwMoneyCents(t):money(cwCloseDisplay()))}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute);padding-bottom:11px;border-bottom:1px solid var(--line2);font-variant-numeric:tabular-nums;">
+          <span>before tax</span><span>${esc(money(Math.round(t*(1+TAX_RATE)*100)/100))} after tax</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin:10px 0 5px;font-variant-numeric:tabular-nums;">
+          <span>Given so far</span>
+          <span><b style="color:#b45309;">${esc(money(applied))}</b> of ${esc(money(spend.max))}</span>
+        </div>
+        <div style="height:6px;background:var(--line2);border-radius:99px;overflow:hidden;">
+          <div style="width:${spend.max>0?Math.min(100,Math.round(applied/spend.max*100)):0}%;height:100%;background:#f59e0b;"></div>
+        </div>
+        ${callWiz.econ&&callWiz.econ.capped_by&&spend.max>0?`<div style="font-size:11px;color:var(--mute);margin-top:6px;text-align:right;">limit: ${esc(callWiz.econ.capped_by)}</div>`:''}
+      </div>`;
+    };
+
+    // The two answers, plus the hold beat above them. Exactly one button on any
+    // rung books the job, so the secretary is never asked to choose between two
+    // controls that mean the same thing.
+    const answers=(nextLabel)=>`${cwWaitBar()}
+      <div style="display:flex;gap:8px;">
+        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They said yes</button>
+        <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--ink-2);">They said no</button>
       </div>
-      ${applied>0?callWizScript(`Best I can do is ${cwSpokenAmount(newTotal).toUpperCase()} before tax.`):''}
+      ${nextLabel?`<div style="font-size:12px;color:var(--mute);text-align:center;margin-top:8px;">If no, next up is ${esc(nextLabel)}.</div>`:''}`;
+
+    // Always available, on every rung, below a hairline. A customer who says
+    // "just email it to me" must never be trapped behind an uncommitted draft.
+    const exits=()=>`<div style="border-top:1px solid var(--line2);margin:14px 0 10px;"></div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button type="button" class="btn" id="cwGoBooking">Continue to booking →</button>
-        <button type="button" class="btn ghost" id="cwGoEstimate">Send an estimate instead</button>
+        <button type="button" class="btn ghost" id="cwGoEstimate">Send them the estimate</button>
         <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
-      </div>
-      ${cwBackBtnHtml('Back to the price')}`;
-    body.querySelectorAll('[data-cwsrc]').forEach(b=>b.addEventListener('click', ()=>{
-      const v=b.dataset.cwsrc;
-      callWiz.discSource = callWiz.discSource===v ? null : v;   // tap again to clear
-      if(callWiz.discSource) cwTrack('source_picked',{ source:callWiz.discSource });
-      renderCallWiz();
-    }));
-    document.getElementById('cwCouponApply').addEventListener('click', async()=>{
-      const code=document.getElementById('cwCouponInput').value.trim().toUpperCase();
-      const msg=document.getElementById('cwCouponMsg');
-      if(!code){ callWiz.discCoupon=null; renderCallWiz(); return; }
-      msg.textContent='Checking…';
-      try{
-        const r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }});
-        cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
-        if(r.ok){ callWiz.discCoupon={code:r.code, amount:r.amount}; cwTrack('coupon_applied',{ code:r.code, amount:r.amount }); }
-        else {
-          callWiz.discCoupon=null;
-          // "Not valid" alone leaves the secretary stuck mid-call with a
-          // customer insisting they have a code. A one-character typo is the
-          // common case (BOOKONLNE for BOOKONLINE), so offer the near match.
-          const near=(r.suggest||'').trim();
-          msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`+
-            (near?` <span style="color:var(--ink-2);">Did they mean <b>${esc(near)}</b>?</span>`:'');
-          return;
-        }
+      </div>`;
+
+    // A price that went back UP after she read a lower number out loud. Only
+    // ever fires upward: downward is the intended direction and warning on it
+    // would make this a false-positive machine.
+    const clawback=()=>{
+      if(callWiz.discSpoken==null || !canQuote) return '';
+      if(cwCloseTotal() <= callWiz.discSpoken + 0.5) return '';
+      return cwAmber(`You told them ${money(Math.round(callWiz.discSpoken))}. This ticket is back at ${money(cwCloseDisplay())} now. Say the new number, not the old one.`);
+    };
+
+    // ── Terminal: nothing to give ──────────────────────────────────────────
+    // Reached when the projection came back clean and the job genuinely cannot
+    // give a dollar. The ladder is never built; the estimate is the exit. The
+    // referral question is still asked, because this card is the only place in
+    // the wizard the channel is ever captured and a customer about to decline
+    // is exactly the one worth attributing.
+    if(econState==='noroom'){
+      const isTv=callWiz.service==='TV Mounting';
+      body.innerHTML=`${clawback()}
+        ${callWizScript(isTv
+          ? 'I hear you. That price already has everything in it, and on a job like this it is as low as we go. I can put it in writing and send it over if you want to sit with it.'
+          : 'I hear you. Handyman work is billed by the hour with a two hour minimum, and that rate is already our best, so there is nothing for me to take off. I can put it in writing and send it over if you want to sit with it.')}
+        ${cwOpNote('Your eyes only','There is no room to discount this one.'+(callWiz.econ&&callWiz.econ.capped_by?' Limit: '+callWiz.econ.capped_by+'.':''))}
+        ${secTitle('How did you hear about us?','just for our records, there is no money on this one')}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
+          ${CW_SOURCES.map(src=>`<button type="button" class="btn ${callWiz.discSource===src?'':'ghost'} sm" style="width:auto;" data-cwsrc="${esc(src)}">${esc(src)}</button>`).join('')}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button type="button" id="cwYes" style="font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They are okay with it, book it</button>
+          <button type="button" class="btn" id="cwGoEstimate">Send them the estimate</button>
+          <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
+        </div>
+        ${cwBackBtnHtml('Back to the price')}`;
+      cwWireLadderCommon(body);
+      cwWireBack('recap');
+      return;
+    }
+
+    // ── Projection failed ──────────────────────────────────────────────────
+    // NOT the same as a thin ticket, and must never say "too thin": the catch in
+    // cwLoadEconomics writes max_discount 0 for a network blip too. Without a
+    // ceiling there is no authority to discount, so the ladder is withheld, but
+    // booking and the estimate stay live and the retry is uncapped.
+    if(econState==='error'){
+      body.innerHTML=`${clawback()}
+        ${callWizScript('I hear you, and I get it. Let me see what I can do for you.')}
+        <div style="background:#fff4d6;border:1.5px solid #e8c469;border-radius:10px;padding:12px 14px;margin-bottom:14px;color:#6b4c07;">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:4px;">Our pricing check did not answer just now.</div>
+          <div style="font-size:12.5px;opacity:.85;margin-bottom:9px;">That is a connection thing on our end, not this ticket.</div>
+          <div style="font-size:11.5px;color:var(--mute);margin-bottom:9px;">${esc((callWiz.econ&&callWiz.econ.error)||'')}</div>
+          <button type="button" class="btn ghost sm" id="cwEconRetry">Try again</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button type="button" id="cwYes" style="font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They are okay with it, book it</button>
+        </div>
+        ${exits()}
+        ${cwBackBtnHtml('Back to the price')}`;
+      cwOn('cwEconRetry','click',()=>{
+        // Uncapped on purpose. A retry cap that falls through to the no-money
+        // screen would kill the whole concession script on a transient blip.
+        const now=Date.now();
+        if(callWiz._econRetryAt && now-callWiz._econRetryAt<2000) return;
+        callWiz._econRetryAt=now;
+        callWiz.econ=null; callWiz.econCallId=null;
+        const a=callWiz._econArgs;
+        if(a) cwLoadEconomics(a.priced,a.travelFee,a.ahFee);
         renderCallWiz();
-      }catch(e){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(e.message||'Could not check that code')}</span>`; }
-    });
-    document.getElementById('cwManualApply').addEventListener('click', ()=>{
-      callWiz.discManual=Math.max(0, Number(document.getElementById('cwManualInput').value)||0);
-      // Log what was ASKED for as well as what the caps allowed, so a secretary
-      // repeatedly trying to give away more than the rules permit is visible.
-      cwTrack('manual_discount',{ requested:callWiz.discManual, allowed:cwDiscountMax(), applied:cwDiscountApplied() });
-      renderCallWiz();
-    });
-    document.getElementById('cwGoBooking').addEventListener('click', e=>{ e.currentTarget.disabled=true; cwGoToBooking(); });
-    document.getElementById('cwGoEstimate').addEventListener('click', ()=>{ callWiz.step='estimate'; renderCallWiz(); });
-    document.getElementById('cwGoDeclined').addEventListener('click', async()=>{
-      try{
-        cwTrack('declined',{ after_discount_offer:cwDiscountApplied() });
-        await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
-        closeCallWiz({resolved:true}); toast('Call logged.');
-        if(section==='calls') renderCalls();
-      }catch(e){ err.textContent=e.message||'Could not log this call'; }
-    });
-    cwWireBack('recap');
+      });
+      cwWireLadderCommon(body);
+      cwWireBack('recap');
+      return;
+    }
+
+    // ── Rung 1: where they heard about us ──────────────────────────────────
+    if(rung==='source'){
+      const loading=econState==='loading';
+      // What tapping a source is ACTUALLY worth right now, which is not $10 when
+      // the ceiling is thinner than that. Saying "ten" and dropping seven is how
+      // a secretary loses the room.
+      const effSource=Math.min(CW_SOURCE_DISCOUNT, spend.remaining+spend.eff.source);
+      const committed=!!callWiz.discSource;
+      const moved=committed && delta>0;
+      let head;
+      if(moved && !cents){
+        head=callWizScript(`Ok. Great, I will add a discount for ${callWiz.discSource}. The total is now ${spokenTotal} before tax.`, spokenTotal);
+      }else if(moved && cents){
+        head=callWizScript(`Ok. Great, I will add a discount for ${callWiz.discSource}. Read this one off the screen, it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+      }else{
+        head=callWizScript('I hear you. Let me see what I can do for you. How did you hear about us?');
+      }
+      body.innerHTML=`${clawback()}${head}
+        ${secTitle('Where they heard about us', effSource>0?'-'+money(effSource):(loading?'':'no money left on this one'))}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+          ${CW_SOURCES.map(src=>{const on=callWiz.discSource===src;return `<button type="button" data-cwsrc="${esc(src)}" style="font-family:inherit;display:flex;align-items:center;gap:10px;text-align:left;background:${on?'#161b22':'#fff'};border:1.5px solid ${on?'#161b22':'#d9dee6'};border-radius:10px;padding:13px;font-size:15px;font-weight:${on?700:600};color:${on?'#fff':'var(--ink)'};cursor:pointer;min-width:0;">
+            <span style="flex-shrink:0;width:19px;height:19px;border-radius:50%;border:2px solid ${on?'#fff':'#d9dee6'};position:relative;display:inline-block;">${on?'<span style="position:absolute;inset:3px;border-radius:50%;background:#fff;display:block;"></span>':''}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(src)}</span></button>`;}).join('')}
+        </div>
+        ${loading?cwOpNote('Working','Checking what this ticket can give.'):''}
+        ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
+        ${priceCard()}
+        ${moved?answers(room>0?'a promo code':'sending the estimate'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
+        ${exits()}
+        ${cwBackBtnHtml('Back to the price')}`;
+      cwWireLadderCommon(body);
+      cwWireBack('recap');
+      return;
+    }
+
+    // ── Rung 2: promo code ─────────────────────────────────────────────────
+    if(rung==='coupon'){
+      const committed=!!callWiz.discCoupon;
+      const moved=committed && delta>0;
+      const couponVal=callWiz._couponDraft!=null?callWiz._couponDraft:(callWiz.discCoupon?callWiz.discCoupon.code:'');
+      // The face value is shown to the SECRETARY only when it does not all fit.
+      // Telling a customer already pushing back that they are being denied five
+      // dollars they believe they are owed turns a silent clamp into an argument.
+      const face=callWiz.discCoupon?(Number(callWiz.discCoupon.amount)||0):0;
+      const shortfall=committed&&face>spend.eff.coupon;
+      let head;
+      if(moved && !cents){
+        head=callWizScript(`Perfect, that code comes off too. The total is now ${spokenTotal} before tax.`, spokenTotal);
+      }else if(moved && cents){
+        head=callWizScript(`Perfect, that code comes off too. Read this one off the screen, it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+      }else{
+        head=callWizScript('Do you have a promo code?');
+      }
+      body.innerHTML=`${clawback()}${head}
+        ${secTitle('Promo code they read out')}
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <input class="search" id="cwCouponInput" style="margin:0;text-transform:uppercase;" placeholder="e.g. FB20" value="${esc(couponVal)}" autocomplete="off">
+          <button type="button" class="btn ${cwCouponDirty()?'':'ghost'}" id="cwCouponApply" style="width:auto;${cwCouponDirty()?'background:#f59e0b;color:#3a2a00;':''}">Apply</button>
+        </div>
+        <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:12px;color:var(--mute);">${cwCouponDirty()?'Not applied yet, tap Apply.':(callWiz.discCoupon?`&#10003; ${esc(callWiz.discCoupon.code)} applied`:'Same codes that work on the website.')}</div>
+        ${shortfall?cwAmber(`${callWiz.discCoupon.code} is a ${money(face)} code. Only ${money(spend.eff.coupon)} of it fits on this ticket.`):''}
+        ${committed&&delta<=0?cwAmber('That did not change the total. The discount already on this ticket covers it.'):''}
+        ${priceCard()}
+        ${moved?answers(room>0?'taking cash off':'sending the estimate')
+               :`${cwOpNote('If they have no code','Move straight on. A missing code is not a no.')}
+                 <button type="button" class="btn ghost" id="cwNoCode">They do not have one</button>`}
+        ${exits()}
+        ${cwBackBtnHtml('Back one step')}`;
+      cwWireLadderCommon(body);
+      cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
+      cwWireCouponApply();
+      cwWireLadderBack();
+      return;
+    }
+
+    // ── Rung 3: cash off by hand ───────────────────────────────────────────
+    const committed=(Number(callWiz.discManual)||0)>0;
+    const moved=committed && delta>0;
+    const manualVal=callWiz._manualDraft!=null?callWiz._manualDraft:(callWiz.discManual||'');
+    const overAsk=Math.max(0,Number(manualVal)||0)>room+(Number(callWiz.discManual)||0);
+    let head;
+    if(moved && !cents){
+      head=callWizScript(`The absolute best I can do is ${spokenTotal} before tax.`, spokenTotal);
+    }else if(moved && cents){
+      head=callWizScript(`The absolute best I can do is this, and read it off the screen because it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+    }else{
+      head=callWizScript('Let me see what else I have on this one, hang on one second.');
+    }
+    body.innerHTML=`${clawback()}${head}
+      ${cwOpNote('Your eyes only', room>0
+        ? `You have ${money(room)} more you can take off this ticket.`
+        : 'You are at the floor. There is nothing left to give on this job.')}
+      ${secTitle('Take something off','room left '+money(room))}
+      ${room>0?`<div style="display:flex;gap:6px;margin-bottom:6px;">
+        <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${esc(String(manualVal))}">
+        <button type="button" class="btn ${cwManualDirty()?'':'ghost'}" id="cwManualApply" style="width:auto;${cwManualDirty()?'background:#f59e0b;color:#3a2a00;':''}">Apply</button>
+      </div>
+      <div id="cwManualCap" style="font-size:12px;color:var(--mute);margin-bottom:12px;">${cwManualDirty()?'Not applied yet, tap Apply.':'This is the total taken off by hand, not an amount added on top.'}</div>`:''}
+      ${overAsk?cwAmber(`You asked for ${money(Math.max(0,Number(manualVal)||0))}. Only ${money(room+(Number(callWiz.discManual)||0))} fits on this ticket.`):''}
+      ${committed&&delta<=0?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
+      ${priceCard()}
+      ${(moved||room<=0)?answers('sending the estimate'):cwOpNote('Next','Put a number in, then read them the new price.')}
+      ${exits()}
+      ${cwBackBtnHtml('Back one step')}`;
+    cwWireLadderCommon(body);
+    cwWireManualApply();
+    cwWireLadderBack();
     return;
   }
 
