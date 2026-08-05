@@ -3281,12 +3281,45 @@ function mountLineItemsEditor(b){
   const totalEl=document.getElementById('bkLiTotal');
   if(!wrap||!totalEl) return;
   const qOf=r=>Math.max(1,Math.min(99,Math.round(Number(r.qty)||1)));
-  const recalc=()=>{ const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*qOf(r),0); totalEl.textContent=money(Math.round(t*100)/100); };
+  // A tax row's AMOUNT is computed, never typed: the rate lives in its label
+  // ("Tax (8.25%)") and the amount always follows that rate times the current
+  // taxable items. This is what prevents the Pete Borer bug (Aug 2026): the
+  // office added a $115 mount to his ticket after booking, the tax line kept
+  // the $51.81 computed for the ORIGINAL items, and the card was charged off a
+  // ticket whose own rows no longer summed to its own total. The rate itself
+  // is deliberately NOT hardcoded here; which rate a market should charge is a
+  // policy question. To charge a different rate, rename the line (e.g.
+  // "Tax (4.5%)") and the amount follows it; to hand-set the amount outright,
+  // remove the "%" from the label and the row becomes fully manual.
+  const liIsTaxRow=r=>/^tax\b/i.test((r.name||'').trim());
+  const liTaxRate=r=>{ const m=String(r.name||'').match(/([\d.]+)\s*%/); const v=m?parseFloat(m[1]):NaN; return (isFinite(v)&&v>0&&v<50)?v:null; };
+  const syncTaxRows=()=>{
+    // Taxable base mirrors the server (api/book.js): everything except coupon
+    // lines and the tax line itself.
+    const base=rows.reduce((s,r)=> (liIsTaxRow(r)||r.kind==='coupon') ? s : s+(Number(r.unit)||0)*qOf(r), 0);
+    rows.forEach((r,i)=>{
+      if(!liIsTaxRow(r)) return;
+      const rate=liTaxRate(r); if(rate==null) return;   // no % in the label = manual amount, left alone
+      const amt=Math.round(base*rate)/100;              // = round(base * rate% * 100)/100, exact to the cent
+      if(Math.abs((Number(r.unit)||0)-amt)<0.005) return;
+      r.unit=amt;
+      // recalc() runs on plain input events with no re-render, so the visible
+      // price box has to be updated in place or the screen would show the
+      // stale figure this whole mechanism exists to kill.
+      const inp=wrap.querySelector(`input[data-f="unit"][data-i="${i}"]`);
+      if(inp) inp.value=amt;
+    });
+  };
+  const recalc=()=>{ syncTaxRows(); const t=rows.reduce((s,r)=>s+(Number(r.unit)||0)*qOf(r),0); totalEl.textContent=money(Math.round(t*100)/100); };
   const render=()=>{
     const stepper=(i,r)=>`<div class="li-stepper" title="Quantity">
         <button type="button" data-act="dec" data-i="${i}">−</button><span>${qOf(r)}</span><button type="button" data-act="inc" data-i="${i}">+</button>
       </div>`;
-    const priceIn=(i,r)=>`<div class="li-pricebox"><span>$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="Price each"></div>`;
+    const priceIn=(i,r)=>{
+      const computed=liIsTaxRow(r)&&liTaxRate(r)!=null;
+      const tip=computed?'Tax is computed from the rate in the label and updates itself when items change. It cannot be typed over.':'Price each';
+      return `<div class="li-pricebox"><span>$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="${tip}"${computed?' style="opacity:.75;"':''}></div>`;
+    };
     const delBtn=i=>`<button type="button" class="li-x" data-del="${i}" title="Remove">×</button>`;
     const nameCell=(i,r)=>{
       const si=tvSizeIndex(r.name);
