@@ -7452,24 +7452,32 @@ async function callAnalytics(req, res, db, auth) {
   // convenience, this is the actual gate.
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const days = Math.min(180, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const RANGE_TO_DAYS = { today: 1, yesterday: 1, '7': 7, '30': 30, '90': 90 };
+  const range = String(req.query.range || '30');
+  const days = RANGE_TO_DAYS[range] ?? Math.min(180, Math.max(1, parseInt(range, 10) || 30));
   const tz = biz.timezone || 'America/Denver';
-  const since = localDayStartUTC(tz, -(days - 1));
+  // "Yesterday" is the one range that isn't "since X through now" — it needs an
+  // upper bound too, or it'd silently include today's calls.
+  const since = range === 'yesterday' ? localDayStartUTC(tz, -1) : localDayStartUTC(tz, -(days - 1));
+  const until = range === 'yesterday' ? localDayStartUTC(tz, 0) : null;
 
   // Live (script-taken) calls only. Grasshopper voicemails are a different
   // thing entirely and would wreck the conversion rate if mixed in.
-  const { data: calls, error } = await db.from('calls')
+  let callsQuery = db.from('calls')
     .select('id, handled_by, service, market, status, resolution, booking_id, quoted_total, discount_amount, discount_detail, tv_count, reached_step, occurred_at, ended_at')
     .eq('business_id', biz.id).eq('kind', 'live')
-    .gte('occurred_at', since.toISOString())
-    .order('occurred_at', { ascending: false });
+    .gte('occurred_at', since.toISOString());
+  if (until) callsQuery = callsQuery.lt('occurred_at', until.toISOString());
+  const { data: calls, error } = await callsQuery.order('occurred_at', { ascending: false });
   if (error) throw error;
   const rows = calls || [];
 
-  const { data: events } = await db.from('call_events')
+  let eventsQuery = db.from('call_events')
     .select('call_id, actor, event, step, meta, created_at')
     .eq('business_id', biz.id)
     .gte('created_at', since.toISOString());
+  if (until) eventsQuery = eventsQuery.lt('created_at', until.toISOString());
+  const { data: events } = await eventsQuery;
   const evs = events || [];
 
   const isBooked = r => !!r.booking_id || r.resolution === 'booked';
