@@ -369,6 +369,57 @@ function serveIcs(req, res) {
 // Stripe account, assigns an available Doms tech (so the slot is occupied), and
 // sends a Doms-branded confirmation. `selectedSlot` is the
 // 'doms_<YYYY-MM-DD>_<slotKey>' id returned by /api/slots?business=doms.
+// Multi-TV batching discount (3+ TVs on one ticket): rewards big jobs since
+// mounting several TVs in one drive is highly profitable. Shared by bookDoms
+// and bookNative so the two businesses can never drift out of sync. Computed
+// server-side from the REAL line items (never trusts the client's TV count),
+// so a stale/tampered widget can never grant a bigger discount than earned.
+// The cut depends on the travel-fee zone (`surcharge`) — the bigger the
+// existing fee, the bigger the cut, since that is exactly the case where the
+// fee is the reason a big job gets skipped. Zone with no travel fee instead
+// gets a flat $10 off PER TV. Mirrored client-side in public/widget.js
+// (multiTvDiscount / steppedMultiTvPriceDiscount) — keep in sync.
+//
+// isTvSizeLine excludes "Second Technician" explicitly: that line's admin
+// label embeds a size range (e.g. `70–85"`), so a naive "does the name
+// contain a quote mark" check would miscount a 2-TV job with a large TV as
+// 3 TVs and grant an unearned discount. Caught in a code audit before it
+// ever fired in production.
+const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+function isTvSizeLine(name) {
+  const n = String(name || '');
+  if (/second technician/i.test(n)) return false;
+  return /"/.test(n) || /or less/i.test(n) || /^98\+/i.test(n.trim());
+}
+function applyMultiTvDiscounts(lines, surcharge) {
+  const tvCount = lines.reduce((n, l) => isTvSizeLine(l.name) ? n + (Number(l.quantity) || 1) : n, 0);
+  let multiTvDiscountAmt = 0;
+  if (tvCount >= 3) {
+    if (!lines.some(l => /multi-tv discount/i.test(l.name))) {
+      if (surcharge <= 0) {
+        const perTvAmt = 10 * tvCount;
+        lines.push({ kind: 'coupon', name: `Multi-TV discount (-$10 × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
+        multiTvDiscountAmt = perTvAmt;
+      } else {
+        const cutPct = surcharge === 15 ? 1.00 : (surcharge === 65 || surcharge === 100) ? 0.60 : 0;
+        if (cutPct > 0) {
+          const cutAmt = Math.round(surcharge * cutPct * 100) / 100;
+          lines.push({ kind: 'coupon', name: 'Multi-TV discount', quantity: 1, unit_price: -cutAmt, line_total: -cutAmt });
+          multiTvDiscountAmt = cutAmt;
+        }
+      }
+    }
+    if (MULTI_TV_PRICE_DISCOUNT_ENABLED && !lines.some(l => /multi-tv price discount/i.test(l.name))) {
+      let priceDiscAmt = 0;
+      for (let i = 3; i <= tvCount; i++) priceDiscAmt += (i === 3 ? 20 : i === 4 ? 25 : 30);
+      if (priceDiscAmt > 0) {
+        lines.push({ kind: 'coupon', name: `Multi-TV price discount (${tvCount} TVs)`, quantity: 1, unit_price: -priceDiscAmt, line_total: -priceDiscAmt });
+      }
+    }
+  }
+  return multiTvDiscountAmt;
+}
+
 async function bookDoms(req, res) {
   const b = req.body || {};
   const customer = b.customer || {};
@@ -444,6 +495,7 @@ async function bookDoms(req, res) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
+  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge);
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
@@ -558,6 +610,12 @@ async function bookDoms(req, res) {
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
   });
+
+  maybeSendFirstMultiTvDiscountAlert(db, {
+    discountAmt: multiTvDiscountAmt,
+    customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+    whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
+  }).catch(e => console.warn('[book-doms] multi-tv-discount alert error:', e.message));
 
   maybeSendZeroOrLowProfitAlert({
     price, lines, techName: technicianName || '',
@@ -743,59 +801,10 @@ async function bookNative(req, res, slug) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
-  // Multi-TV batching discount (3+ TVs on one ticket): rewards big jobs since
-  // mounting several TVs in one drive is highly profitable. Computed
-  // server-side from the REAL line items (never trusts the client's TV count),
-  // so a stale/tampered widget can never grant a bigger discount than earned.
-  // The cut depends on the travel-fee zone (`surcharge`, resolved above from
-  // this customer's real zip) — the bigger the existing fee, the bigger the
-  // cut, since that is exactly the case where the fee is the reason a big job
-  // gets skipped. Zone with no travel fee instead gets a flat $10 off PER TV.
-  // Mirrored client-side in public/widget.js (multiTvDiscount) — keep in sync.
-  let multiTvDiscountAmt = 0;
-  if (!lines.some(l => /multi-tv discount/i.test(l.name))) {
-    const tvCount = lines.reduce((n, l) => {
-      const nm = String(l.name || '');
-      if (/"/.test(nm) || /or less/i.test(nm) || /^98\+/i.test(nm.trim())) return n + (Number(l.quantity) || 1);
-      return n;
-    }, 0);
-    if (tvCount >= 3) {
-      if (surcharge <= 0) {
-        const perTvAmt = 10 * tvCount;
-        lines.push({ kind: 'coupon', name: `Multi-TV discount (-$10 × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
-        multiTvDiscountAmt = perTvAmt;
-      } else {
-        const cutPct = surcharge === 15 ? 1.00 : (surcharge === 65 || surcharge === 100) ? 0.60 : 0;
-        if (cutPct > 0) {
-          const cutAmt = Math.round(surcharge * cutPct * 100) / 100;
-          lines.push({ kind: 'coupon', name: 'Multi-TV discount', quantity: 1, unit_price: -cutAmt, line_total: -cutAmt });
-          multiTvDiscountAmt = cutAmt;
-        }
-      }
-    }
-  }
-  // Multi-TV PRICE discount (stacks on top of the travel-fee cut above): TV
-  // #1-2 stay full price, TV #3 is -$20, TV #4 is -$25, TV #5+ is -$30 each.
-  // Flip MULTI_TV_PRICE_DISCOUNT_ENABLED to false to turn the whole thing off.
-  // Computed server-side from the REAL line items (never trusts the client),
-  // so a stale/tampered widget can never grant a bigger discount than earned.
-  // Mirrored client-side in public/widget.js (steppedMultiTvPriceDiscount) —
-  // keep in sync.
-  const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
-  if (MULTI_TV_PRICE_DISCOUNT_ENABLED && !lines.some(l => /multi-tv price discount/i.test(l.name))) {
-    const tvCount = lines.reduce((n, l) => {
-      const nm = String(l.name || '');
-      if (/"/.test(nm) || /or less/i.test(nm) || /^98\+/i.test(nm.trim())) return n + (Number(l.quantity) || 1);
-      return n;
-    }, 0);
-    if (tvCount >= 3) {
-      let priceDiscAmt = 0;
-      for (let i = 3; i <= tvCount; i++) priceDiscAmt += (i === 3 ? 20 : i === 4 ? 25 : 30);
-      if (priceDiscAmt > 0) {
-        lines.push({ kind: 'coupon', name: `Multi-TV price discount (${tvCount} TVs)`, quantity: 1, unit_price: -priceDiscAmt, line_total: -priceDiscAmt });
-      }
-    }
-  }
+  // Multi-TV batching + price discounts — see applyMultiTvDiscounts() above
+  // (shared with bookDoms). Mirrored client-side in public/widget.js
+  // (multiTvDiscount / steppedMultiTvPriceDiscount) — keep in sync.
+  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge);
   // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
   // an existing tax line) — added server-side so a stale/tampered widget can't
   // drop it. Placed before the coupon so tax is on the pre-discount amount.
