@@ -6627,10 +6627,16 @@ async function googleReviewUpdate(req, res, db, auth, body) {
   const patch = {};
   if (body.seen !== undefined) patch.seen = !!body.seen;
   if (body.dismissed !== undefined) patch.dismissed_at = body.dismissed ? new Date().toISOString() : null;
+  // Kept from the assignment branch so a NEWLY attributed tech can be texted
+  // after the update lands (owner's rule: a tech hears about every review of
+  // theirs, however it reaches them). `newTech` carries name+phone; `priorTid`
+  // is who held the review before, so re-saving the same tech, or a plain
+  // seen/dismiss tap, never re-texts anyone.
+  let newTech = null, priorTid;
   if (body.technician_id !== undefined) {
     const tid = (body.technician_id || '').toString() || null;
     if (tid) {
-      let { data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', biz.id).maybeSingle();
+      let { data: t } = await db.from('technicians').select('id, name, phone').eq('id', tid).eq('business_id', biz.id).maybeSingle();
       // A review can legitimately credit a cross-hire tech from the partner
       // company (e.g. a Dom's tech who helped on a Handy Andy job) — the
       // dropdown already offers them (public/admin.html renderReviews), so
@@ -6638,10 +6644,14 @@ async function googleReviewUpdate(req, res, db, auth, body) {
       if (!t) {
         const partner = await partnerBusiness(db, biz.slug);
         if (partner) {
-          ({ data: t } = await db.from('technicians').select('id').eq('id', tid).eq('business_id', partner.id).maybeSingle());
+          ({ data: t } = await db.from('technicians').select('id, name, phone').eq('id', tid).eq('business_id', partner.id).maybeSingle());
         }
       }
       if (!t) return res.status(404).json({ error: 'Technician not found' });
+      newTech = t;
+      const { data: prior } = await db.from('google_reviews')
+        .select('technician_id').eq('id', id).eq('business_id', biz.id).maybeSingle();
+      priorTid = prior?.technician_id || null;
     }
     patch.technician_id = tid;
   }
@@ -6655,6 +6665,27 @@ async function googleReviewUpdate(req, res, db, auth, body) {
     ({ error } = await db.from('google_reviews').update(patch).eq('id', id).eq('business_id', biz.id));
   }
   if (error) throw error;
+
+  // Text a NEWLY attributed tech about the review they just got credited with.
+  // The auto-match at ingest (migrate.js googleReviewSync) only texts when the
+  // reviewer's name matched a booking; a review that arrived unmatched and was
+  // hand-assigned here later would otherwise reach the tech's profile without
+  // the tech ever hearing about it. Same message rule as everywhere else:
+  // every rating texts, only a 5 congratulates. Best-effort, after the update
+  // has already succeeded, so a Twilio hiccup can never fail the attribution.
+  if (newTech && newTech.phone && newTech.id !== priorTid) {
+    try {
+      const { data: rev } = await db.from('google_reviews')
+        .select('rating, reviewer_name').eq('id', id).eq('business_id', biz.id).maybeSingle();
+      if (rev && rev.rating) {
+        const from = rev.reviewer_name ? ` from ${rev.reviewer_name}` : '';
+        const msg = rev.rating === 5
+          ? `${newTech.name || 'Hey'}, you just got a 5-star Google review${from}! Nice work.`
+          : `${newTech.name || 'Hey'}, a ${rev.rating}-star Google review came in${from}. Check your profile to view it.`;
+        await sendSMS(newTech.phone, msg).catch(e => console.warn('[google_review_update] tech SMS failed:', e.message));
+      }
+    } catch (e) { console.warn('[google_review_update] tech SMS non-fatal:', e.message); }
+  }
   return res.status(200).json({ ok: true });
 }
 
