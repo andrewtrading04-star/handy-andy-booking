@@ -9017,6 +9017,7 @@ function getTimeGreeting(name, tz) {
 }
 let netDailyView='today';   // 'today' | 'yesterday' for the Net Daily Profit card
 let profitView='week';      // 'week' | '30d' | 'year' for the tabbed Profit card
+let incomeView='week';      // 'week' | 'month' | 'quarter' for the private Income chart
 // Answers to the two expensive Profit ranges, kept so tabbing back and forth
 // doesn't refetch. Cleared on a business switch. Deliberately NOT cleared on
 // every greeting refresh: these are 30-day and year-to-date windows, where one
@@ -9109,6 +9110,18 @@ function paintGreeting(){
     const v=netDailyView==='yesterday'?(pf.net_daily_yesterday||0):(pf.net_daily||0);
     const vEl=document.getElementById('ndpVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-ndp]').forEach(b=>b.classList.toggle('on', b.dataset.ndp===netDailyView));
+  }));
+  // Income chart tab toggle: Weekly / Monthly / 3 Months. All three re-bucket
+  // the history the greeting payload already loaded (incomeAggregate), so
+  // this redraws the chart locally with no round trip, same as Net Daily
+  // Profit above.
+  el.querySelectorAll('[data-iv]').forEach(btn=>btn.addEventListener('click',()=>{
+    incomeView=btn.dataset.iv;
+    const pf=(greetingData&&greetingData.profit)||{};
+    const scale=incomeView==='week'?10000:incomeView==='month'?40000:120000;
+    const chartEl=document.getElementById('incomeChart');
+    if(chartEl) chartEl.innerHTML=incomeChartSvg(incomeAggregate(pf.income_history, incomeView), scale);
+    el.querySelectorAll('[data-iv]').forEach(b=>b.classList.toggle('on', b.dataset.iv===incomeView));
   }));
   // Profit card tab toggle: This week / Last 30 days / This year.
   //
@@ -9263,13 +9276,32 @@ function bizSplitHtml(bySlug, id){
 // Weekly-income line chart for the Income box: thin teal line + a dot per
 // week (peak dot/label highlighted), scaled to whatever history is given —
 // no hardcoded values, unlike the earlier 5-option mockup this is based on.
-function incomeChartSvg(history){
+// pay_date is a plain SQL `date` (YYYY-MM-DD, no time/timezone component), so
+// its year/month are read straight from the string -- never through a Date
+// object, which would silently shift the bucket by a day near midnight in
+// whatever zone the browser happens to be in.
+function incomeAggregate(history, view){
+  const items=(history||[]).filter(h=>h&&h.pay_date);
+  if(view==='week') return items.slice(-16);   // last 16 raw weeks, unaggregated
+  const buckets=new Map();   // key -> {label_date, total}
+  for(const h of items){
+    const y=h.pay_date.slice(0,4), m=+h.pay_date.slice(5,7);
+    const key = view==='quarter' ? `${y}-Q${Math.floor((m-1)/3)+1}` : `${y}-${h.pay_date.slice(5,7)}`;
+    const b=buckets.get(key) || { pay_date:h.pay_date, total_made:0 };
+    b.total_made += Number(h.total_made)||0;
+    b.pay_date = h.pay_date > b.pay_date ? h.pay_date : b.pay_date;   // newest date in the bucket, for sort order
+    buckets.set(key, b);
+  }
+  return [...buckets.values()].sort((a,b)=>a.pay_date<b.pay_date?-1:1).slice(view==='quarter'?-8:-12);
+}
+function incomeChartSvg(history, maxScale){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough weeks yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
-  // Fixed scale: floor $0, ceiling $10k, regardless of the actual data range.
-  // A week over $10k still plots (clamped to the top edge) rather than
-  // rescaling the whole chart and squashing every other week flat.
-  const min=0, max=10000, range=max-min;
+  // Fixed scale, sized to the bucket: floor $0, ceiling passed in by the
+  // caller (bigger for Monthly/3-month sums than for a single week), so a
+  // point over the ceiling still plots (clamped to the top edge) rather than
+  // rescaling the whole chart and squashing every other point flat.
+  const min=0, max=maxScale||10000, range=max-min;
   const maxIdx=vals.indexOf(Math.max(...vals));
   // Extra top padding (padY) leaves room for a value label above every dot,
   // not just the peak; alternating label height (near/far) keeps closely
@@ -9311,9 +9343,13 @@ function greetStatsHtml(){
   const profitCards = pf ?
     // Income box (bottom-left): private line chart of hand-entered weekly
     // "Total I made" figures from the payroll page's Actual Profit tracker.
+    // Weekly/Monthly/3-month tabs re-bucket the SAME already-loaded history
+    // client-side (see incomeAggregate) -- no refetch, unlike the Profit
+    // card's longer tabs, which need a fresh economics pass from the server.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;">`+
       `<span class="gstat-l">🔒 Income</span>`+
-      incomeChartSvg(pf.income_history)+
+      `<div class="ndp-seg" style="margin-top:6px;"><button data-iv="week" class="${incomeView==='week'?'on':''}">Weekly</button><button data-iv="month" class="${incomeView==='month'?'on':''}">Monthly</button><button data-iv="quarter" class="${incomeView==='quarter'?'on':''}">3 Months</button></div>`+
+      `<div id="incomeChart">${incomeChartSvg(incomeAggregate(pf.income_history, incomeView), incomeView==='week'?10000:incomeView==='month'?40000:120000)}</div>`+
     `</div>`+
     // Combined Profit box (tabbed): one number + split, swapped between
     // This week / Today / Yesterday by the tab row — replaces the old

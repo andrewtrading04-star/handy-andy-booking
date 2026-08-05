@@ -815,7 +815,11 @@ async function summary(req, res, db, auth) {
 
     // Income history for the dashboard's "Income" box (owner-only, hand-entered
     // via the payroll page's Actual Profit tracker). Only weeks with all three
-    // fields filled in have a real total_made; last 24 for a readable chart.
+    // fields filled in have a real total_made. Fetches up to 2 years of weekly
+    // entries; the box itself only PLOTS the last dozen or so raw weeks, but
+    // its Monthly/3-month tabs sum these into coarser buckets client-side, so
+    // they need real history behind them as it accumulates, not just enough
+    // for the weekly view alone.
     {
       const { data: apRows } = await db.from('actual_profit_weekly')
         .select('pay_date, doms_stripe_payout, handy_andy_stripe_payout, tech_pay')
@@ -823,7 +827,7 @@ async function summary(req, res, db, auth) {
         .not('handy_andy_stripe_payout', 'is', null)
         .not('tech_pay', 'is', null)
         .order('pay_date', { ascending: false })
-        .limit(24);
+        .limit(104);
       profit.income_history = (apRows || []).map(r => ({
         pay_date: r.pay_date,
         total_made: Math.round((Number(r.doms_stripe_payout) + Number(r.handy_andy_stripe_payout) - Number(r.tech_pay)) * 100) / 100,
