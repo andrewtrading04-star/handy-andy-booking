@@ -5462,11 +5462,24 @@ async function reviewSubmit(req, res, body) {
     }).catch(err => console.warn('[review] email send failed:', err));
   }
 
-  // Send SMS to technician on a poor review only. (5-star "great review" texts
-  // were removed for both businesses — no notification on a perfect rating.)
+  // Send SMS to technician: a poor review warns them, a 5-star congratulates
+  // them. The 5-star text existed once, was removed, and is back by owner
+  // request (Aug 2026): a tech who earns a perfect rating should hear about it,
+  // not only the bad ones. Applies to every tech with a phone on file, both
+  // businesses (this handler is shared). This covers the CRM review itself;
+  // if the customer then also posts to Google, the review-email sync
+  // (migrate.js googleReviewSync, fed by the bracket-tracker Action every 15
+  // minutes) sends its own separate text when that lands, by design.
   if (booking.technician?.phone && rating <= 4) {
     const techName = booking.technician.name || 'Technician';
     const msg = `${techName} you just received a bad review... Please check your profile to view.`;
+    await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
+  } else if (booking.technician?.phone && rating === 5) {
+    const techName = booking.technician.name || 'Technician';
+    const who = booking.customer?.name || 'A customer';
+    // "5-star" spelled out, not the star glyph: the glyph forces the whole SMS
+    // into UCS-2 encoding (70 chars/segment instead of 160) for no benefit.
+    const msg = `${techName}, ${who} just left you a 5-star review on ${booking.business?.name || 'the CRM'}! Nice work.`;
     await sendSMS(booking.technician.phone, msg).catch(err => console.warn('[review] tech SMS send failed:', err));
   }
 
