@@ -2928,7 +2928,8 @@ function openBooking(b){
       <span class="bk-dl">Assigned to</span>
       <div class="bk-dv"><span class="lead">${esc(b.technician?.name||'Unassigned')}</span>
         ${b.secondary_technician?`<br><span class="dim">2nd tech: ${esc(b.secondary_technician.name)}${b.secondary_technician.cross_company?' ('+esc(b.secondary_technician.company||'partner')+')':''}</span>`:''}
-        <br><span class="dim">Booked by ${esc(bookedBy)}</span></div>
+        <br><span class="dim">Booked by ${esc(bookedBy)}</span>
+        ${b.metadata?.landing_page?`<br><span class="dim">From ${esc(b.metadata.landing_page)}${b.metadata.traffic_source?' · '+esc(b.metadata.traffic_source):''}</span>`:''}</div>
       ${b.cross_company?`<div class="bk-xco" style="margin:9px 0 0;">⚠ Cross-company job — ${esc(b.technician?.name||'this tech')} is from ${esc(b.partner_company||'the partner company')}.</div>`:''}
       ${(b.needs_lifting||b.tv_size_category)?`<div class="bk-dv" style="margin-top:7px;"><span class="dim">Two-person lift${b.tv_size_category?' · '+esc(LIFT_LABEL[b.tv_size_category]||b.tv_size_category):''}</span></div>`:''}
     </div></div>
