@@ -5901,15 +5901,29 @@ async function calls(req, res, db, auth) {
     claimed_by_me: claimIsHot(r) && r.claimed_by === me,
   }));
   const open = mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status));
+  // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
+  // before anything about the customer is known, on purpose, so an abandoned
+  // call still shows up here instead of vanishing. But if the secretary never
+  // reaches the resolution step, it sits at status:'new' forever with no
+  // caller_phone and no transcript — nothing was ever left, and there is no
+  // number to return. The banner/badge previously could not tell that apart
+  // from a real customer voicemail, so an abandoned intake screen could
+  // permanently occupy the interruptive banner announcing "X left a voicemail,
+  // return their call" with no X and no number to call. It still appears in
+  // the Calls tab's own open list (with Booked/Estimate/Declined to close it
+  // out) — only the banner and badge, which exist to interrupt someone about a
+  // WAITING CUSTOMER, exclude it.
+  const openVoicemails = open.filter(r => r.kind !== 'live');
   return res.status(200).json({
     open,
     handled: mapped.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
     // The sidebar badge and the banner both count only what is genuinely
-    // waiting on a human: not the ones someone is already ringing, and not the
-    // ones that already turned into a booking.
-    open_count: mapped.filter(r => r.status === 'new' && !claimIsHot(r)).length,
+    // waiting on a human: not the ones someone is already ringing, not the
+    // ones that already turned into a booking, and not an abandoned live-call
+    // session with no customer to call back.
+    open_count: openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r)).length,
     // The newest thing worth interrupting someone about, for the banner.
-    banner: open.filter(r => r.status === 'new' && !claimIsHot(r))
+    banner: openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r))
       .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
     me,
   });
