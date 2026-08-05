@@ -510,11 +510,41 @@ async function bookDoms(req, res) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
   const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge);
+  // Sales tax (8.25%), same block as bookNative; Dom's never had this. Without
+  // it, `subtotal` was tax-EXCLUSIVE while the widget's own total is
+  // tax-INCLUSIVE, so the two were never comparable amounts to begin with; the
+  // gap happened to look like a safety margin only because tax+tip are
+  // (almost) always positive. Placed before the coupon so tax is on the
+  // pre-discount amount, matching what the Dom's widget itself already shows
+  // on screen (tax computed on sub+afterHoursFee+surcharge before the coupon).
+  if (!lines.some(l => /^tax\b/i.test(l.name))) {
+    const taxable = lines
+      .filter(l => l.kind !== 'coupon' && !/^tax\b/i.test(l.name || ''))
+      .reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+    const tax = Math.round(taxable * 0.0825 * 100) / 100;
+    if (tax > 0) lines.push({ kind: 'fee', name: 'Tax (8.25%)', quantity: 1, unit_price: tax, line_total: tax });
+  }
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
-  // Never below the surcharge-inclusive server subtotal.
-  const price = Math.max(subtotal, widgetTotal) || subtotal;
+  // `subtotal` is now the authoritative number: real surcharge, real
+  // server-validated coupon/multi-TV discount, and now real tax, all computed
+  // from data the server itself resolved. The OLD `Math.max(subtotal,
+  // widgetTotal)` treated the higher of the two as safer, which is backwards
+  // whenever the client's total is stale or simply did not know about a
+  // discount the server just validated (e.g. the live coupon fetch failed and
+  // the code was not in the widget's hardcoded fallback map), meaning a real,
+  // server-approved discount could never actually reduce what the customer
+  // was quoted, while the stored line items still listed it, so the receipt's
+  // own rows did not sum to its own total. A mismatch beyond a few cents is
+  // still worth knowing about (stale cache, a bug, or genuine tampering), so
+  // it is logged, but it no longer overrides the number the server just
+  // computed from real, validated data.
+  const price = subtotal;
+  if (Number.isFinite(widgetTotal) && Math.abs(widgetTotal - subtotal) > 0.5) {
+    console.warn('[book-doms] price mismatch: server', subtotal, 'vs widget', widgetTotal,
+      '- charging the server total; widget total is stale or the client-side preview did not match.');
+  }
 
   // ── Save the card on file in DOMS' Stripe account (best-effort). The card was
   // tokenized client-side with Doms' publishable key, so only Doms' secret key
