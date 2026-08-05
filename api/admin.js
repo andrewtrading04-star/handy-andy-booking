@@ -6358,7 +6358,41 @@ async function reviewCalls(req, res, db, auth) {
       to_call: out.filter(x => !x.call_status).length,
       called: out.filter(x => x.call_status).length,
     },
+    today_stats: await rcTodayStats(db, (bizs || []).map(b => b.id)),
   });
+}
+
+// What Joey has actually logged TODAY, across both businesses — real history,
+// not a browser-session counter. The old hero stats reset to zero on every
+// page load, so a morning's worth of real calls looked like "nothing was
+// recorded" the moment the tab was refreshed. 'Reached' excludes voicemail
+// (nobody picked up); 'good' is promised_review or declined, since 'declined'
+// only exists as the "no thanks" button on an already-great call, never a
+// bad one. Best-effort: an error here degrades to zeros, never fails the page.
+async function rcTodayStats(db, bizIds) {
+  const stats = { today: 0, reached: 0, good: 0, issues: 0 };
+  if (!bizIds.length) return stats;
+  try {
+    const todayStart = localDayStartUTC(RC_TZ, 0);
+    const todayEnd = localDayStartUTC(RC_TZ, 1);
+    const { data, error } = await db.from('bookings')
+      .select('review_call_status')
+      .in('business_id', bizIds)
+      .gte('review_call_at', todayStart.toISOString())
+      .lt('review_call_at', todayEnd.toISOString())
+      .not('review_call_status', 'is', null)
+      .limit(2000);
+    if (error) return stats;
+    for (const row of (data || [])) {
+      stats.today++;
+      if (row.review_call_status !== 'voicemail') {
+        stats.reached++;
+        if (row.review_call_status === 'promised_review' || row.review_call_status === 'declined') stats.good++;
+      }
+      if (row.review_call_status === 'complaint') stats.issues++;
+    }
+  } catch (e) { console.warn('[review_calls] today_stats failed:', e.message); }
+  return stats;
 }
 
 // Attach any voicemail THE CUSTOMER left us to their review-call card, so

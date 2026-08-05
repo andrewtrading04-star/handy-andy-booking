@@ -6513,7 +6513,7 @@ const RC_TAGS={
 // wrong company name said out loud. Owner's wording, verbatim.
 function rcScript(r){
   const first=String(r.customer_name||'').trim().split(/\s+/)[0]||'there';
-  return `Hey ${first}, this is Joey from ${r.business_name||'us'}. I was just calling to see how your installation went ${rcRelSpoken(r.when, r.business_timezone)}. Is there anything we can improve on?`;
+  return `Hey ${first}, this is Joey from ${r.business_name||'us'}. I was just calling to see how your installation went ${rcRelSpoken(r.when, r.business_timezone)} and if there's anything we can improve on?`;
 }
 function rcRel(iso, tz){
   if(!iso) return '';
@@ -6983,6 +6983,10 @@ async function renderReviewCalls(){
     _rcWarning=d.warning||null;
     _rcFolderCounts=d.folder_counts||{};
     _rcWeekLabel=d.week_label||'';
+    // Real numbers for what she has ALREADY logged today, from the database, not
+    // a counter that forgets everything on refresh. Local calls to rcAction() go
+    // on incrementing this on top of the real baseline for instant feedback.
+    if(d.today_stats) _rcStats=d.today_stats;
     paintReviewCalls();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
@@ -7023,7 +7027,7 @@ function paintReviewCalls(){
         ${rcStat('To call', String(toCall), 'both companies')}
         ${rcStat('Logged today', String(_rcStats.today||0), `${_rcStats.reached||0} reached`, '#5ef0a0')}
         ${rcStat('Went well', _rcStats.reached?Math.round((_rcStats.good/_rcStats.reached)*100)+'%':'—', `${_rcStats.good||0} of ${_rcStats.reached||0} reached`, '#5ef0a0')}
-        ${rcStat('Issues raised', String(_rcStats.issues||0), 'Andrew notified')}
+        ${rcStat('Issues raised', String(_rcStats.issues||0), 'saved to the job')}
       </div>
     </div>`:''}
     ${_rcWarning?`<div class="nb-min-warn floored" style="margin-bottom:12px;">⚠ Couldn't load part of the list — ${esc(_rcWarning)}</div>`:''}
