@@ -6209,10 +6209,13 @@ async function notifyCallRecipient(db, call) {
 // signed-in office user — this is a calling tool, so it deliberately spans both
 // businesses regardless of the secretary's normal single-business scope.
 const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint'];
-// Statuses that resolve a customer OFF the queue: they promised a review, raised
-// a complaint (handled + logged), or asked not to be contacted. 'voicemail' /
-// 'callback' stay on the list so Joey tries again. ('reviewed' kept for old data.)
-const REVIEW_CALL_RESOLVED = ['reviewed', 'do_not_contact', 'promised_review', 'complaint'];
+// Statuses that resolve a customer OFF the queue: they promised a review, said
+// no thanks to one ('declined' — the guided card's "They said no thanks"
+// button; without it here a customer who declined REAPPEARED on every reload
+// and got the same call again), raised a complaint (handled + logged), or
+// asked not to be contacted. 'voicemail' / 'callback' stay on the list so Joey
+// tries again. ('reviewed' kept for old data.)
+const REVIEW_CALL_RESOLVED = ['reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint'];
 const RC_TZ = 'America/Denver';
 // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
 // column) — it must be embedded as a relation, exactly like bookingSelect().
