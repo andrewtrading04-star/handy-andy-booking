@@ -385,11 +385,25 @@ function serveIcs(req, res) {
 // contain a quote mark" check would miscount a 2-TV job with a large TV as
 // 3 TVs and grant an unearned discount. Caught in a code audit before it
 // ever fired in production.
+//
+// SECOND BUG, caught in a later audit: "contains a quote mark anywhere" ALSO
+// matched the XL bracket options every large TV requires, since HA/Mile High
+// sell them as `85"-100" TV Tilting Bracket` and Dom's as `Tilting
+// (recommended) 85"-100"`; both embed the same size range as a descriptor
+// alongside the mount type. A 2-TV booking
+// with one 85"+ TV and its (mandatory) XL bracket was counted as 3 TVs and
+// granted an unearned multi-TV discount live in production. A genuine
+// TV-SIZE selection is nothing but the size (32" Or Less, 33"-59", 98+); a
+// bracket line always has extra words around the range. Matching the WHOLE
+// trimmed string against the size pattern, not just checking it contains one
+// anywhere, is what actually distinguishes them.
 const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
 function isTvSizeLine(name) {
-  const n = String(name || '');
+  const n = String(name || '').trim();
   if (/second technician/i.test(n)) return false;
-  return /"/.test(n) || /or less/i.test(n) || /^98\+/i.test(n.trim());
+  return /^\d{2,3}["″]\s*or less$/i.test(n)
+      || /^\d{2,3}["″]\s*[-–]\s*\d{2,3}["″]$/.test(n)
+      || /^98["″]?\s*\+$/.test(n);
 }
 function applyMultiTvDiscounts(lines, surcharge) {
   const tvCount = lines.reduce((n, l) => isTvSizeLine(l.name) ? n + (Number(l.quantity) || 1) : n, 0);

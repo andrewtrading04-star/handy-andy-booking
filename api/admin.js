@@ -6276,7 +6276,7 @@ function rcMapRow(row, b) {
 }
 // Which review_call_status values live in each browsable folder — 'voicemail'
 // and 'callback' both mean "left a message, try again," so they share a folder.
-const RC_STATUS_TO_FOLDER = { complaint: 'complaint', promised_review: 'promised_review', voicemail: 'voicemail', callback: 'voicemail', do_not_contact: 'do_not_contact' };
+const RC_STATUS_TO_FOLDER = { complaint: 'complaint', promised_review: 'promised_review', voicemail: 'voicemail', callback: 'voicemail', do_not_contact: 'do_not_contact', declined: 'declined' };
 
 async function reviewCalls(req, res, db, auth) {
   // Joey's (Doms) outreach tool — not part of Heather's (Handy Andy) platform.
@@ -6290,7 +6290,7 @@ async function reviewCalls(req, res, db, auth) {
     // contact) — grouped by the calendar week (Sun–Sat) the call was LOGGED
     // (review_call_at), not the job's scheduled date, so resolved calls are
     // still reachable weeks later instead of disappearing once handled.
-    if (!['complaint', 'promised_review', 'voicemail', 'do_not_contact'].includes(folder)) {
+    if (!['complaint', 'promised_review', 'voicemail', 'do_not_contact', 'declined'].includes(folder)) {
       return res.status(400).json({ error: 'Invalid folder' });
     }
     let weekOffset = parseInt(req.query.week_offset);
@@ -6301,7 +6301,7 @@ async function reviewCalls(req, res, db, auth) {
     const weekEnd = localDayStartUTC(RC_TZ, 7, weekStart);
 
     const out = [];
-    const folderCounts = { complaint: 0, promised_review: 0, voicemail: 0, do_not_contact: 0 };
+    const folderCounts = { complaint: 0, promised_review: 0, voicemail: 0, do_not_contact: 0, declined: 0 };
     for (const b of (bizs || [])) {
       const { data, error } = await db.from('bookings').select(rcSelFor(RC_CALL_COLS))
         .eq('business_id', b.id)

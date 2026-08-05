@@ -140,8 +140,12 @@ export async function mirrorBooking(ctx = {}) {
       // which tech happened to do the work (see Houston vs Greenway Plaza).
       metadata: {
         mirrored_at: new Date().toISOString(), source: ctx.source || 'widget',
-        ...(ctx.landing_page ? { landing_page: ctx.landing_page } : {}),
-        ...(ctx.traffic_source ? { traffic_source: ctx.traffic_source } : {}),
+        // Coerced and capped: this reaches an unauthenticated POST endpoint
+        // (CORS *), and unlike every other field here it was being spread into
+        // jsonb untouched, so a hostile or buggy caller could push a huge string
+        // or a nested object into every booking-list read that loads metadata.
+        ...(typeof ctx.landing_page === 'string' && ctx.landing_page ? { landing_page: ctx.landing_page.slice(0, 300) } : {}),
+        ...(typeof ctx.traffic_source === 'string' && ctx.traffic_source ? { traffic_source: ctx.traffic_source.slice(0, 300) } : {}),
       },
     };
     let booking_id = null;

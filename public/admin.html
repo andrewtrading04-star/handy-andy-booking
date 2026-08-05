@@ -6480,11 +6480,17 @@ let _rcFolder='to_call', _rcWeekOffset=0, _rcFolderCounts={}, _rcWeekLabel='';
 // the render so tapping an outcome, a tag or the note never loses what is
 // already captured on the other cards on screen.
 let _rcWork={};
-function rcWork(id){ if(!_rcWork[id]) _rcWork[id]={outcome:null,tags:[],note:'',channel:null,busy:false}; return _rcWork[id]; }
+function rcWork(id){ if(!_rcWork[id]) _rcWork[id]={outcome:null,tags:[],note:'',channel:null,busy:false,sentOk:null}; return _rcWork[id]; }
 // Counted in the browser from what Joey has logged this session, so the header
 // reflects her own morning's work without another round trip. Reset whenever a
 // fresh queue is loaded.
 let _rcStats={ today:0, reached:0, good:0, issues:0 };
+// Which calendar day (Joey's own timezone, matching the server's RC_TZ)
+// _rcStats represents. The dashboard is a long-lived tab with no periodic
+// refresh of this tab specifically, so a browser left open past midnight would
+// otherwise keep incrementing yesterday's tally forever under "Logged today".
+let _rcStatsDay=null;
+function rcTodayKey(){ try{ return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Denver'}).format(new Date()); }catch(_){ return new Date().toISOString().slice(0,10); } }
 function rcStat(label, value, sub, color){
   return `<div class="gstat" style="align-items:center;text-align:center;">
     <span class="gstat-l">${esc(label)}</span>
@@ -6538,7 +6544,7 @@ function rcRelSpoken(iso, tz){
   const r=rcRel(iso, tz);
   return (r==='today'||r==='yesterday'||/ago$/.test(r)) ? r : ('on '+r);
 }
-function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Not interested',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
+function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Said no thanks',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
 // ── Call Performance ───────────────────────────────────────────────────────
 // Everything the phone script records, rolled up. The headline is calls taken
 // vs calls booked; the per-person table answers who is converting and who is
@@ -6986,7 +6992,7 @@ async function renderReviewCalls(){
     // Real numbers for what she has ALREADY logged today, from the database, not
     // a counter that forgets everything on refresh. Local calls to rcAction() go
     // on incrementing this on top of the real baseline for instant feedback.
-    if(d.today_stats) _rcStats=d.today_stats;
+    if(d.today_stats){ _rcStats=d.today_stats; _rcStatsDay=rcTodayKey(); }
     paintReviewCalls();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
@@ -7018,7 +7024,7 @@ function paintReviewCalls(){
       ${rangeControl}
     </div>
     <div class="rc-seg" style="margin-bottom:14px;">
-      ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
+      ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('declined','No thanks')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
     </div>
     ${isToCall?`<div class="rc-hero">
       <div class="rc-hero-hi">${esc(rcGreeting())}</div>
@@ -7026,7 +7032,7 @@ function paintReviewCalls(){
       <div class="greet-stats" style="margin-top:14px;">
         ${rcStat('To call', String(toCall), 'both companies')}
         ${rcStat('Logged today', String(_rcStats.today||0), `${_rcStats.reached||0} reached`, '#5ef0a0')}
-        ${rcStat('Went well', _rcStats.reached?Math.round((_rcStats.good/_rcStats.reached)*100)+'%':'—', `${_rcStats.good||0} of ${_rcStats.reached||0} reached`, '#5ef0a0')}
+        ${rcStat('Went well', _rcStats.reached?Math.round((_rcStats.good/_rcStats.reached)*100)+'%':'n/a', `${_rcStats.good||0} of ${_rcStats.reached||0} reached`, '#5ef0a0')}
         ${rcStat('Issues raised', String(_rcStats.issues||0), 'saved to the job')}
       </div>
     </div>`:''}
@@ -7186,15 +7192,24 @@ function rcCard(r){
     if(!w.channel) w.channel = canBoth?'both':canSms?'sms':canEmail?'email':null;
     const chan=(v,label,ok,sub,extra)=>`<button type="button" class="rc-chan${extra?' '+extra:''}${w.channel===v?' on':''}" data-rc-chan="${v}" data-rc-id="${r.id}"${ok?'':' disabled'}>
         <span>${label}</span>${sub?`<span class="s">${esc(sub)}</span>`:''}</button>`;
+    // The "only when..." note is guidance for Joey, not part of the ask, so it
+    // sits OUTSIDE the say-panel. Everything inside .rc-say is read word for
+    // word app-wide; a caption living inside it risks getting read aloud too.
     h+=`<div class="rc-step">3 · Ask for the review</div>
-      <div class="rc-say"><i></i><p>Would you mind if I send you something to leave us a review?</p>
-        <small>only when the call went well</small></div>`;
+      <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">This step only appears after a call that went well.</div>
+      <div class="rc-say"><i></i><p>Would you mind if I send you something to leave us a review?</p></div>`;
     if(!r.has_review_link){
-      h+=`<div class="rc-banner warn">This job has no review link yet, so nothing can be sent. Log it as went well and the link can go out later.</div>
-        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="declined" data-rc-id="${r.id}">Log the call</button></div>`;
+      // MUST commit as 'great' (-> promised_review), never 'declined': declined
+      // resolves the customer off the queue permanently with no folder to find
+      // them in, mislabels a happy customer as "Not interested", and makes the
+      // banner's promise ("the link can go out later") impossible to keep. A
+      // promised_review row shows a resend button on its folder card the moment
+      // a review link actually exists (see the `resend` check in rcFolderCard).
+      h+=`<div class="rc-banner warn">This job has no review link yet, so nothing can be sent right now. Logged as went well, the link can go out once it exists.</div>
+        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="great" data-rc-id="${r.id}">Log the call</button></div>`;
     }else if(!canSms&&!canEmail){
-      h+=`<div class="rc-banner warn">No mobile with consent and no email on file, so there is nothing to send to.</div>
-        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="declined" data-rc-id="${r.id}">Log the call</button></div>`;
+      h+=`<div class="rc-banner warn">No mobile with consent and no email on file, so there is nothing to send to right now.</div>
+        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="great" data-rc-id="${r.id}">Log the call</button></div>`;
     }else{
       h+=`${chan('both','Both',canBoth,canBoth?'text and email · default':'needs a mobile and an email','main')}
         <div class="rc-chans">
@@ -7202,8 +7217,8 @@ function rcCard(r){
           ${chan('email','✉️ Email',canEmail,canEmail?'':'no email on file')}
         </div>
         <div class="rc-gorow">
-          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':'Send and log call'}</button>
-          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}">They said no thanks</button>
+          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send and log call'}</button>
+          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}"${w.busy?' disabled':''}>They said no thanks</button>
         </div>`;
     }
   }else if(w.outcome){
@@ -7211,7 +7226,7 @@ function rcCard(r){
     // gates the save. The other two outcomes need nothing typed.
     const needNote = w.outcome==='issue' && !w.note.trim();
     const label = w.outcome==='issue' ? 'Save what they told us' : 'Log the call';
-    h+=`<div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="${w.outcome}" data-rc-id="${r.id}"${needNote?' disabled':''}>${label}</button></div>`;
+    h+=`<div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="${w.outcome}" data-rc-id="${r.id}"${(needNote||w.busy)?' disabled':''}>${w.busy?'Saving…':label}</button></div>`;
     if(w.outcome==='issue') h+=`<div class="rc-banner warn" id="rcBan${r.id}">${needNote
       ? 'Write down what they said first, in their words if you can.'
       : 'No review is asked for on this one. Saved to the job so it can be put right.'}</div>`;
@@ -7254,18 +7269,30 @@ async function rcAction(id, act, biz, channel){
   const w=rcWork(id);
 
   if(act==='outcome'){
+    if(w.busy) return;
     w.outcome = w.outcome===channel ? null : channel;   // tap again to clear
-    w.tags=[]; w.channel=null;
+    // Every field a DIFFERENT outcome's screen would show is cleared, not just
+    // the ones the previous screen happened to render. Without this, typing a
+    // complaint note, then switching to "Went great" and sending, silently
+    // attached that note to a promised_review record with no complaint status
+    // filed and no way to see it on the guided card again.
+    w.tags=[]; w.channel=null; w.note=''; w.sentOk=null;
     paintReviewCalls(); return;
   }
   if(act==='tag'){
+    if(w.busy) return;
     const i=w.tags.indexOf(channel);
     if(i>=0) w.tags.splice(i,1); else w.tags.push(channel);
     paintReviewCalls(); return;
   }
-  if(act==='chan'){ w.channel=channel; paintReviewCalls(); return; }
+  if(act==='chan'){ if(w.busy) return; w.channel=channel; paintReviewCalls(); return; }
 
-  // Commit. `channel` carries the outcome key for the log-only buttons.
+  // Commit. `channel` carries the outcome key for the log-only buttons. Guarded
+  // for EVERY commit path, not just "send": without this, tapping "They said no
+  // thanks" while a send from the same card was still in flight ran both to
+  // completion concurrently, double-counted the header stats, and left the
+  // final saved status decided by whichever network call happened to land last.
+  if(w.busy) return;
   const outcome = act==='send' ? 'great' : channel;
   const status = act==='send' ? 'promised_review'
                : outcome==='declined' ? 'declined'
@@ -7275,17 +7302,26 @@ async function rcAction(id, act, biz, channel){
 
   let sent=null;
   if(act==='send'){
-    if(w.busy) return;
     w.busy=true; paintReviewCalls();
-    sent=await rcSendReview(id, w.channel||'both');
-    w.busy=false;
-    // Nothing went out, so nothing is claimed: the call stays on the queue with
-    // the error visible rather than being filed as a review that was never sent.
-    if(!sent.okd.length){
-      paintReviewCalls();
-      toast('Could not send: '+sent.failed.join(', '));
-      return;
+    if(w.sentOk){
+      // A previous attempt already delivered the review and only the SAVE
+      // failed (see the catch below). Retrying must never re-send the same
+      // text/email to the customer a second time; only the log is retried.
+      sent={ okd:w.sentOk, failed:[] };
+    }else{
+      sent=await rcSendReview(id, w.channel||'both');
+      // Nothing went out, so nothing is claimed: the call stays on the queue
+      // with the error visible rather than being filed as a review that was
+      // never sent.
+      if(!sent.okd.length){
+        w.busy=false; paintReviewCalls();
+        toast('Could not send: '+sent.failed.join(', '));
+        return;
+      }
+      w.sentOk=sent.okd;
     }
+  }else{
+    w.busy=true; paintReviewCalls();
   }
   try{
     await api('review_call_log',{ method:'POST', body:{
@@ -7293,7 +7329,11 @@ async function rcAction(id, act, biz, channel){
       notes: w.note.trim() || undefined,
       tags: w.tags.length ? w.tags : undefined,
     }});
-    // Header counters, from what she has actually logged this session.
+    // Header counters, from what she has actually logged. If the tab has sat
+    // open across midnight, the day rolled over under her without a refetch:
+    // start today's tally fresh rather than keep piling onto yesterday's.
+    const todayKey=rcTodayKey();
+    if(_rcStatsDay!==todayKey){ _rcStats={ today:0, reached:0, good:0, issues:0 }; _rcStatsDay=todayKey; }
     _rcStats.today++;
     if(status!=='voicemail'){ _rcStats.reached++; if(status==='promised_review'||status==='declined') _rcStats.good++; }
     if(status==='complaint') _rcStats.issues++;
@@ -7308,8 +7348,8 @@ async function rcAction(id, act, biz, channel){
         ? `Review sent by ${sent.okd.join(' and ')} · ${sent.failed.length} failed`
         : `Review sent by ${sent.okd.join(' and ')} ✓`);
     }else{
-      toast(({ promised_review:'Logged — they are happy 🎉', declined:'Logged — no review this time',
-               complaint:'Saved with the job ✓', voicemail:'No answer logged — stays on the list',
+      toast(({ promised_review:'Logged. They are happy 🎉', declined:'Logged. No review this time',
+               complaint:'Saved with the job ✓', voicemail:'No answer logged, stays on the list',
                do_not_contact:'Removed from the list' })[status]||'Saved ✓');
     }
   }catch(e){
@@ -10096,40 +10136,62 @@ function cwWireLadderBack(){
 // The one place in this card that awaits. Order matters: log the attempt, then
 // COMMIT THE MONEY, and only then guard the UI. A valid code the customer read
 // out must never be silently dropped because she tapped away mid round trip.
+async function cwCouponApplyNow(){
+  if(callWiz._couponBusy) return;
+  const inp=document.getElementById('cwCouponInput'); if(!inp) return;
+  const code=inp.value.trim().toUpperCase();
+  if(!code){ callWiz.discCoupon=null; callWiz._couponDraft=null; renderCallWiz(); return; }
+  const fromStep=callWiz.step, fromRung=callWiz.discRung, fromCall=callWiz.id;
+  callWiz._couponBusy=true;
+  const btn=document.getElementById('cwCouponApply'); if(btn) btn.disabled=true;
+  { const m=document.getElementById('cwCouponMsg'); if(m) m.textContent='Checking…'; }
+  let r=null, errMsg=null;
+  try{ r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }}); }
+  catch(e){ errMsg=e.message||'Could not check that code'; }
+  callWiz._couponBusy=false;
+  if(r) cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
+  if(r&&r.ok){
+    callWiz.discCoupon={code:r.code, amount:r.amount};
+    callWiz._couponDraft=null;
+    cwTrack('coupon_applied',{ code:r.code, amount:r.amount });
+  }else if(r){
+    callWiz.discCoupon=null;   // the draft is KEPT on failure so a typo can be edited
+  }
+  // Guard only the UI, and re-query the node: the pre-await reference may be
+  // detached by a repaint that happened while this was in flight.
+  if(callWiz.id!==fromCall || callWiz.step!==fromStep || callWiz.discRung!==fromRung) return;
+  if(r&&r.ok){ renderCallWiz(); return; }
+  const msg=document.getElementById('cwCouponMsg'); if(!msg) return;
+  if(btn) btn.disabled=false;
+  if(errMsg){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(errMsg)}</span>`; return; }
+  // A one-character typo is the common case (BOOKONLNE for BOOKONLINE), and
+  // "not valid" alone strands her mid-call against a customer who insists.
+  const near=((r&&r.suggest)||'').trim();
+  msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`+
+    (near?` <span style="color:var(--ink-2);">Did they mean <b>${esc(near)}</b>?</span>`:'');
+}
 function cwWireCouponApply(){
-  cwOn('cwCouponApply','click', async ()=>{
-    if(callWiz._couponBusy) return;
+  cwOn('cwCouponApply','click', cwCouponApplyNow);
+  // Mirrors cwWireManualApply: Enter submits (the box has no <form>, so nothing
+  // happened before this), and typing has to SHOW live that nothing has been
+  // applied yet. Without this, a code already applied (say FB20) stayed
+  // displayed as "✓ FB20 applied" with a ghost Apply button while she typed a
+  // DIFFERENT code the customer just read out, so she could read a price back
+  // that silently excluded the code actually on the line right now.
+  cwOn('cwCouponInput','keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); cwCouponApplyNow(); } });
+  cwOn('cwCouponInput','input', ()=>{
     const inp=document.getElementById('cwCouponInput'); if(!inp) return;
-    const code=inp.value.trim().toUpperCase();
-    if(!code){ callWiz.discCoupon=null; callWiz._couponDraft=null; renderCallWiz(); return; }
-    const fromStep=callWiz.step, fromRung=callWiz.discRung, fromCall=callWiz.id;
-    callWiz._couponBusy=true;
-    const btn=document.getElementById('cwCouponApply'); if(btn) btn.disabled=true;
-    { const m=document.getElementById('cwCouponMsg'); if(m) m.textContent='Checking…'; }
-    let r=null, errMsg=null;
-    try{ r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }}); }
-    catch(e){ errMsg=e.message||'Could not check that code'; }
-    callWiz._couponBusy=false;
-    if(r) cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
-    if(r&&r.ok){
-      callWiz.discCoupon={code:r.code, amount:r.amount};
-      callWiz._couponDraft=null;
-      cwTrack('coupon_applied',{ code:r.code, amount:r.amount });
-    }else if(r){
-      callWiz.discCoupon=null;   // the draft is KEPT on failure so a typo can be edited
+    callWiz._couponDraft=inp.value;
+    const dirty=cwCouponDirty();
+    const btn=document.getElementById('cwCouponApply');
+    if(btn){
+      btn.className='btn'+(dirty?'':' ghost');
+      btn.style.cssText='width:auto;'+(dirty?'background:#f59e0b;color:#3a2a00;':'');
     }
-    // Guard only the UI, and re-query the node: the pre-await reference may be
-    // detached by a repaint that happened while this was in flight.
-    if(callWiz.id!==fromCall || callWiz.step!==fromStep || callWiz.discRung!==fromRung) return;
-    if(r&&r.ok){ renderCallWiz(); return; }
-    const msg=document.getElementById('cwCouponMsg'); if(!msg) return;
-    if(btn) btn.disabled=false;
-    if(errMsg){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(errMsg)}</span>`; return; }
-    // A one-character typo is the common case (BOOKONLNE for BOOKONLINE), and
-    // "not valid" alone strands her mid-call against a customer who insists.
-    const near=((r&&r.suggest)||'').trim();
-    msg.innerHTML=`<span style="color:#b91c1c;">${esc(code)} is not a valid code.</span>`+
-      (near?` <span style="color:var(--ink-2);">Did they mean <b>${esc(near)}</b>?</span>`:'');
+    const msg=document.getElementById('cwCouponMsg');
+    if(msg) msg.innerHTML = dirty
+      ? 'Not applied yet, tap Apply.'
+      : (callWiz.discCoupon?`&#10003; ${esc(callWiz.discCoupon.code)} applied`:'Same codes that work on the website.');
   });
 }
 function cwWireManualApply(){
