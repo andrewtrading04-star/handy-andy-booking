@@ -556,6 +556,7 @@ async function bookDoms(req, res) {
   try {
     result = (await mirrorBooking({
       businessSlug: 'doms', source: 'widget',
+      landing_page: b.landing_page || null, traffic_source: b.traffic_source || null,
       service_area_id: area?.id || null,
       technician_id,
       status: technician_id ? 'assigned' : 'confirmed',
@@ -867,6 +868,7 @@ async function bookNative(req, res, slug) {
   try {
     result = (await mirrorBooking({
       businessSlug: slug, source: 'widget',
+      landing_page: b.landing_page || null, traffic_source: b.traffic_source || null,
       service_area_id: serviceAreaId,
       technician_id,
       status: technician_id ? 'assigned' : 'confirmed',

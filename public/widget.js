@@ -132,6 +132,11 @@
     return 'direct';
   }
   const TRAFFIC_SOURCE = trafficSource();
+  // The exact page the widget is embedded on (e.g. /houston-tv-mounting vs
+  // /houston-tv-mounting-greenwayplz) — captured once at boot so a booking can
+  // be traced back to which landing page sent it, instead of guessing from
+  // whichever tech happened to do the job.
+  const LANDING_PAGE = (() => { try { return window.location.pathname; } catch (e) { return null; } })();
   async function logEvent(event_type, step_name, value = null, error_message = null) {
     try {
       const loc = resolveLocation();
@@ -2218,6 +2223,7 @@
         preferred_slots:selectedRequestWindows,
         sms_consent:!!(root.querySelector('#c-sms-consent')||{}).checked,
         request_type:'unstaffed_area',
+        landing_page:LANDING_PAGE, traffic_source:TRAFFIC_SOURCE,
       };
       try{
         const r=await fetch(`${API_BASE}/estimate?action=submit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(reqPayload)});
@@ -2342,6 +2348,7 @@
       sms_consent:smsConsent,
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
+      landing_page:LANDING_PAGE, traffic_source:TRAFFIC_SOURCE,
       ...(NATIVE&&{business:BUSINESS}),
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),

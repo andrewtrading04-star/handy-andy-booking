@@ -135,7 +135,14 @@ export async function mirrorBooking(ctx = {}) {
       customer_notes: ctx.customer_notes || null,
       zenbooker_job_id: ctx.zenbooker_job_id ? String(ctx.zenbooker_job_id) : null,
       zenbooker_job_number: job.job_number ? String(job.job_number) : null,
-      metadata: { mirrored_at: new Date().toISOString(), source: ctx.source || 'widget' },
+      // landing_page/traffic_source: which page/campaign sent this booking, so
+      // jobs can be traced back to a specific listing instead of inferred from
+      // which tech happened to do the work (see Houston vs Greenway Plaza).
+      metadata: {
+        mirrored_at: new Date().toISOString(), source: ctx.source || 'widget',
+        ...(ctx.landing_page ? { landing_page: ctx.landing_page } : {}),
+        ...(ctx.traffic_source ? { traffic_source: ctx.traffic_source } : {}),
+      },
     };
     let booking_id = null;
     let hadReviewToken = false;
