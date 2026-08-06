@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Call Audit</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#FF6B35; --good:#15803d; --good-bg:#eaf7ee;
+    --bad:#b91c1c; --bad-bg:#fdecec; --warn:#7a5a12; --warn-bg:#fff4d6; --warn-line:#e8c469;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:780px;margin:0 auto;padding:20px 16px 80px;}
+  h1{font-size:19px;font-weight:800;margin:0;}
+  h2{font-size:15px;font-weight:800;margin:0;}
+  .sub{font-size:13px;color:var(--mute);}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 17px;margin-bottom:12px;}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .spread{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  input,select,textarea,button{font:inherit;color:inherit;}
+  input,select,textarea{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+  textarea{width:100%;resize:vertical;}
+  .btn{background:var(--ink);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+  .btn.wide{width:100%;}
+  .err{color:var(--bad);font-size:13px;margin-top:8px;min-height:1em;}
+  .ok{color:var(--good);font-size:13px;margin-top:8px;min-height:1em;}
+
+  /* The line worksheet */
+  .line{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;
+    padding:9px 11px;margin-bottom:6px;flex-wrap:wrap;}
+  .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;min-width:122px;}
+  .tag{font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;}
+  .tag.ha{background:#eaf1ff;color:#1d4ed8;} .tag.doms{background:#f3e8ff;color:#6b21a8;}
+  .line input[type=number]{width:66px;text-align:center;}
+  .cnt{font-size:12.5px;min-width:66px;text-align:right;color:var(--mute);}
+  .cnt.has{color:var(--ink);font-weight:700;}
+  .recon{border-radius:9px;padding:11px 13px;font-size:13.5px;margin-top:10px;}
+  .recon.gap{background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);}
+  .recon.clear{background:var(--good-bg);border:1px solid #bfe3cb;color:var(--good);}
+
+  /* "Say this" card, styled to match what the secretary actually sees on her
+     screen in Take a Call, so the auditor recognizes it as the script itself
+     rather than as our commentary about the script. */
+  .say{background:#141a22;border-radius:9px;padding:10px 13px 11px 16px;margin-bottom:6px;position:relative;overflow:hidden;}
+  .say i{position:absolute;left:0;top:0;bottom:0;width:3px;background:#f59e0b;}
+  .say p{margin:0;font-size:13.5px;line-height:1.45;color:#fff;}
+  .say b{color:#ffd479;}
+  .opnote{background:#fdf6e7;border:1px solid #f0dcae;border-radius:8px;padding:8px 11px;
+    margin-bottom:6px;font-size:12.5px;color:var(--warn);}
+
+  /* Scorecard */
+  .sec{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+  .sec-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;}
+  .sec-h b{font-size:14px;}
+  .cond{font-size:11px;font-weight:700;color:var(--mute);background:var(--line2);padding:2px 7px;border-radius:6px;}
+  .q{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line2);}
+  .q:first-of-type{border-top:none;}
+  .q .qt{font-size:13.5px;line-height:1.4;}
+  .q .qt b{background:#fff3cd;padding:0 3px;border-radius:3px;}
+  .yna{display:flex;gap:4px;flex:none;}
+  .yna button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px;
+    font-size:12.5px;font-weight:700;cursor:pointer;min-width:44px;}
+  .yna button.on-yes{background:var(--good-bg);border-color:#bfe3cb;color:var(--good);}
+  .yna button.on-no{background:var(--bad-bg);border-color:#f3c2c2;color:var(--bad);}
+  .yna button.on-na{background:var(--line2);color:var(--mute);}
+
+  .audited{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;
+    padding:8px 11px;margin-bottom:6px;font-size:13px;flex-wrap:wrap;cursor:pointer;}
+  .score{font-weight:800;font-size:13px;}
+  .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login -->
+  <div id="login" class="card" style="max-width:380px;margin:60px auto;">
+    <h1>Call audit</h1>
+    <p class="sub" style="margin:6px 0 14px;">Sign in to log today's calls.</p>
+    <input id="pw" type="password" placeholder="Password" style="width:100%;" autocomplete="current-password">
+    <button class="btn wide" id="loginBtn" style="margin-top:10px;">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <div class="spread" style="margin-bottom:14px;">
+      <div>
+        <h1>Call audit</h1>
+        <div class="sub" id="who"></div>
+      </div>
+      <button class="btn ghost" id="outBtn">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="spread" style="margin-bottom:4px;">
+        <h2>Step 1. Count the calls</h2>
+        <input type="date" id="date">
+      </div>
+      <p class="sub" style="margin:0 0 12px;">Open each number in Grasshopper and enter how many calls came in. Zero is an answer, so save it either way.</p>
+      <div id="lines"></div>
+      <div id="recon" class="recon clear"></div>
+      <div class="row" style="margin-top:11px;">
+        <button class="btn" id="saveDay">Save the count</button>
+        <span class="ok" id="dayOk" style="margin:0;"></span>
+      </div>
+      <div class="err" id="dayErr"></div>
+    </div>
+
+    <div class="card">
+      <div class="spread" style="margin-bottom:10px;">
+        <h2>Step 2. Grade the calls</h2>
+        <button class="btn ghost" id="newAudit">Add a call</button>
+      </div>
+      <div id="auditList"></div>
+    </div>
+
+    <div id="formCard" class="card hidden">
+      <div class="spread" style="margin-bottom:12px;">
+        <h2 id="formTitle">New call</h2>
+        <button class="btn ghost" id="cancelBtn">Cancel</button>
+      </div>
+
+      <div class="row" style="margin-bottom:10px;">
+        <select id="fLine" style="flex:1;min-width:190px;"></select>
+        <input type="time" id="fTime" style="width:120px;">
+        <select id="fDir"><option value="incoming">Incoming</option><option value="outgoing">Outgoing</option></select>
+        <select id="fWho"><option value="">Who answered</option><option>Heather</option><option>Joey</option><option value="Nobody">Nobody (missed)</option></select>
+        <select id="fSvc"><option value="TV Mounting">TV mounting</option><option value="Handyman">Handyman</option><option value="unknown">Never got that far</option></select>
+      </div>
+
+      <select id="fCall" style="width:100%;margin-bottom:8px;"></select>
+      <div id="ctx"></div>
+
+      <div id="score"></div>
+
+      <div class="sec">
+        <label class="row" style="cursor:pointer;">
+          <input type="checkbox" id="fFlag" style="width:auto;">
+          <span style="font-size:13.5px;font-weight:700;">Flag this call for Andrew to listen to</span>
+        </label>
+        <textarea id="fNotes" rows="2" placeholder="Notes" style="margin-top:9px;"></textarea>
+      </div>
+
+      <button class="btn wide" id="saveAudit">Save this call</button>
+      <div class="err" id="formErr"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+let token=localStorage.getItem('ha_audit_token')||'';
+let data=null, editing=null, answers={};
+
+async function api(action, opts){
+  const o=opts||{};
+  const qs=new URLSearchParams({action, ...(o.params||{})});
+  const r=await fetch('/api/audit?'+qs.toString(), {
+    method:o.method||'GET',
+    headers:{'Content-Type':'application/json', ...(token?{Authorization:'Bearer '+token}:{})},
+    body:o.body?JSON.stringify(o.body):undefined,
+  });
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||'Something went wrong');
+  return j;
+}
+
+// ── The scorecard ───────────────────────────────────────────────────────────
+// Every question traces to a line in the Take a Call script. `keys` are stable
+// slugs stored in the answers jsonb, never positions, so questions can be
+// added, reworded or retired without re-pointing answers already saved against
+// older calls.
+//
+// `when` decides whether a section is even shown. It gets the linked scripted
+// call row, which is null when the secretary never opened the script. Price and
+// discount default to VISIBLE in that case: she was still supposed to say all
+// of it, and a missing script row is the whole point of the audit, so hiding
+// the questions would hide the failure.
+//
+// The service branch is the exception. It cannot default to visible, because
+// "show both" would ask her the TV questions and the handyman questions on the
+// same call. It reads the auditor's own service pick instead, which the linked
+// call pre-fills when there is one.
+const hasPrice = c => !c || Number(c.quoted_total) > 0;
+const hasDisc  = c => !c || Number(c.discount_amount) > 0;
+const svcNow   = () => ($('fSvc') && $('fSvc').value) || 'TV Mounting';
+const isTv     = () => svcNow() === 'TV Mounting';
+const isHandy  = () => svcNow() === 'Handyman';
+
+const SECTIONS=[
+  { name:'Answering the phone',
+    say:[ct=>`Hello, thank you for calling <b>${esc(ct.brand)}</b>, how may I help you?`],
+    qs:[{k:'greet_named_business', t:'Did she open by naming the business and offering to help, before anything else?'}] },
+
+  { name:'Where the job is',
+    say:[()=>`What&rsquo;s your zip code?`],
+    qs:[{k:'asked_zip', t:'Did she ask the caller for the zip code out loud?'},
+        {k:'out_of_area_no_promise', t:'If the zip was outside the service area, did she avoid promising a booking?'}] },
+
+  { name:'Scoping the job', cond:'TV mounting calls', when:isTv,
+    say:[()=>`What size is your TV?`, ()=>`What kind of wall is it going on?`,
+         ()=>`Is your TV over a fireplace?`, ()=>`Do you have a bracket for this TV?`,
+         ()=>`Would you like to hide the wires?`, ()=>`Is there anything else you would like added?`],
+    qs:[{k:'asked_tv_size', t:'Did she ask what size the TV is, out loud?'},
+        {k:'asked_wall_fireplace', t:'Did she ask both what kind of wall it is going on AND whether it is over a fireplace?'},
+        {k:'asked_remaining_questions', t:'Did you hear her actually ask the rest of the questions above, rather than filling them in herself?'}] },
+
+  { name:'Scoping the job', cond:'handyman calls', when:isHandy,
+    say:[()=>`What do you need done?`],
+    qs:[{k:'asked_what_needed', t:'Did she ask what the job is and let the customer describe it?'},
+        {k:'handy_desc_detailed', t:'Was enough detail captured that a tech would know what he is walking into?'},
+        {k:'no_flat_handy_price', t:'Did she avoid giving a firm total price for handyman work?'}] },
+
+  { name:'Day and time',
+    say:[()=>`What day would you prefer to schedule for?`, ()=>`Would you prefer morning or afternoon?`,
+         ()=>`We have <b>[day]</b> at <b>[time]</b> available.`,
+         ()=>`That is an after-hours slot, so there is an extra <b>[amount]</b> on it. Does that work for you?`],
+    qs:[{k:'customer_picked_and_readback', t:'Did she let the customer pick the day and time, then read the choice back?'},
+        {k:'said_after_hours_fee', t:'If the slot carried an after-hours charge, did she say it before the customer agreed?'}] },
+
+  { name:'Giving the price', when:hasPrice,
+    say:[ct=>`Ok, I have <b>[the job]</b> for <b>[when]</b>. The total before tax for this installation is <b>${esc(ct.spokenTotal||'[amount]')}</b>.`],
+    qs:[{k:'read_job_back', t:'Before saying the number, did she read the job back to the customer?'},
+        {k:'said_price_matched', t:'Did she actually say the price out loud, and was it the same number shown above?'},
+        {k:'price_phone_wording', t:'Did she say the amount the scripted way, "four fifty six" rather than "four hundred and fifty six dollars"?'},
+        {k:'paused_after_price', t:'After the number, did she stop talking and let the customer respond first?'}] },
+
+  { name:'Pushback and discounts', cond:'only if they asked for a better price', when:hasDisc,
+    say:[()=>`I hear you. Let me see what I can do for you. How did you hear about us?`,
+         ()=>`Ok. Great, I will add a discount for <b>[source]</b>. The total is now <b>[new total]</b> before tax.`,
+         ()=>`Do you have a promo code?`,
+         ()=>`Perfect, that code comes off too. The total is now <b>[new total]</b> before tax.`,
+         ()=>`Let me see what else I have on this one, hang on one second.`,
+         ()=>`The absolute best I can do is <b>[final]</b> before tax.`],
+    op:['Her screen also shows notes meant only for her, including how much discount room she has left. None of that is ever supposed to be said out loud.'],
+    qs:[{k:'customer_actually_objected', t:'Did the customer actually push back on the price before she started offering money off?'},
+        {k:'no_operator_note_aloud', t:'Did she avoid reading anything off her screen that was meant only for her, especially how much room she had left?'},
+        {k:'paused_between_offers', t:'Did she stop after each offer and let the customer answer before offering anything else?'},
+        {k:'referral_question_first', t:'Was her first move the referral question, not money?'},
+        {k:'said_new_total_each_time', t:'Each time she took something off, did she say the new total out loud?'},
+        {k:'invalid_coupon_not_honored', t:'If a promo code came back invalid, did she avoid telling the customer it worked?'},
+        {k:'final_number_matched', t:'Was the final price she said out loud the same as the final discounted total shown above?'}] },
+
+  { name:'Closing the call',
+    say:[()=>`Perfect. I&rsquo;ll schedule this now. Can I get your first and last name?`,
+         ()=>`And what is the service address?`,
+         ()=>`Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.`],
+    qs:[{k:'contact_details_correct', t:'Do the name, phone number and address she took match what the customer actually said?'},
+        {k:'explained_card_hold', t:'If she took a card, did she explain it only holds the appointment and is not charged until the job is done?'},
+        {k:'offered_estimate', t:'If the customer would not book, did she offer to send the estimate and ask text or email?'}] },
+];
+
+function linkedCall(){
+  const id=$('fCall').value;
+  return id ? (data.calls||[]).find(c=>c.id===id)||null : null;
+}
+function ctxFor(call){
+  const num=$('fLine').value;
+  const line=(data.lines||[]).find(l=>l.number===num);
+  const brand=line ? (line.business==='doms'?"Dom's TV Mounting":'Handy Andy') : '[the business]';
+  return { brand, spokenTotal: call && call.quoted_total!=null ? money(call.quoted_total) : null };
+}
+
+function renderScore(){
+  const call=linkedCall(), ct=ctxFor(call), w=$('score');
+  w.innerHTML='';
+  SECTIONS.forEach((s,si)=>{
+    if(s.when && !s.when(call)) return;
+    const d=document.createElement('div'); d.className='sec';
+    let h='<div class="sec-h"><b>'+esc(s.name)+'</b>'+(s.cond?'<span class="cond">'+esc(s.cond)+'</span>':'')+'</div>';
+    s.say.forEach(fn=>{ h+='<div class="say"><i></i><p>'+fn(ct)+'</p></div>'; });
+    (s.op||[]).forEach(t=>{ h+='<div class="opnote">'+esc(t)+'</div>'; });
+    d.innerHTML=h;
+    s.qs.forEach(q=>{
+      const row=document.createElement('div'); row.className='q';
+      row.innerHTML='<div class="qt">'+esc(q.t)+'</div>';
+      const bs=document.createElement('div'); bs.className='yna';
+      [['yes','Yes'],['no','No'],['na','N/A']].forEach(([v,lab])=>{
+        const b=document.createElement('button'); b.type='button'; b.textContent=lab;
+        if(answers[q.k]===v) b.className='on-'+v;
+        b.onclick=()=>{ answers[q.k]=v;
+          [...bs.children].forEach(x=>x.className='');
+          b.className='on-'+v; };
+        bs.appendChild(b);
+      });
+      row.appendChild(bs); d.appendChild(row);
+    });
+    w.appendChild(d);
+  });
+}
+
+function renderCtx(){
+  const c=linkedCall(), w=$('ctx');
+  if(!c){
+    w.innerHTML='<div class="recon gap" style="margin:0 0 10px;">No scripted call linked. If the secretary never opened Take a Call for this one, that is itself worth knowing, and it is what the count above is checking.</div>';
+    renderScore(); return;
+  }
+  const bits=[];
+  if(c.service) bits.push(esc(c.service));
+  if(c.tv_count) bits.push(c.tv_count+(c.tv_count===1?' TV':' TVs'));
+  if(c.market) bits.push(esc(c.market));
+  if(c.quoted_total!=null) bits.push('quoted '+money(c.quoted_total));
+  if(Number(c.discount_amount)>0) bits.push(money(c.discount_amount)+' off'+(c.discount_detail?' ('+esc(c.discount_detail)+')':''));
+  if(c.resolution) bits.push('ended: '+esc(c.resolution));
+  if(c.reached_step) bits.push('got as far as '+esc(c.reached_step));
+  w.innerHTML='<div class="recon clear" style="margin:0 0 10px;"><b>What the system recorded:</b> '+(bits.join(' &middot; ')||'nothing beyond the call itself')+'</div>';
+  renderScore();
+}
+
+function renderLines(){
+  const w=$('lines'); w.innerHTML='';
+  (data.lines||[]).forEach(l=>{
+    const d=document.createElement('div'); d.className='line';
+    d.innerHTML='<span class="num">'+esc(l.pretty)+'</span>'+
+      '<span class="tag '+(l.business==='doms'?'doms':'ha')+'">'+(l.business==='doms'?"Dom's":'Handy Andy')+'</span>'+
+      '<span class="sub" style="flex:1;min-width:52px;">'+esc(l.market)+'</span>';
+    const inp=document.createElement('input');
+    inp.type='number'; inp.min='0'; inp.step='1';
+    inp.value=(data.counts&&data.counts[l.number]!=null)?data.counts[l.number]:'';
+    inp.placeholder='0'; inp.dataset.num=l.number;
+    inp.oninput=paintRecon;
+    const cnt=document.createElement('span'); cnt.className='cnt'; cnt.dataset.for=l.number;
+    d.append(inp,cnt); w.appendChild(d);
+  });
+  paintRecon();
+}
+
+function countsNow(){
+  const out={};
+  document.querySelectorAll('#lines input[type=number]').forEach(i=>{
+    out[i.dataset.num]=i.value===''?0:Math.max(0,parseInt(i.value,10)||0);
+  });
+  return out;
+}
+function paintRecon(){
+  const c=countsNow();
+  let tot=0;
+  Object.entries(c).forEach(([num,n])=>{
+    tot+=n;
+    const el=document.querySelector('.cnt[data-for="'+num+'"]');
+    if(!el) return;
+    const filled=document.querySelector('#lines input[data-num="'+num+'"]').value!=='';
+    el.textContent=!filled?'':(n===0?'no calls':n+(n===1?' call':' calls'));
+    el.className='cnt'+(n>0?' has':'');
+  });
+  const logged=(data.calls||[]).length, r=$('recon'), gap=tot-logged;
+  if(gap>0){
+    r.className='recon gap';
+    r.innerHTML='You counted <b>'+tot+'</b>. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+'. <b>'+gap+'</b> handled without the script.';
+  }else{
+    r.className='recon clear';
+    r.innerHTML='You counted <b>'+tot+'</b>. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+'.'+(tot?' Every call went through the script.':'');
+  }
+}
+
+function scoreOf(a){
+  const v=Object.values(a.answers||{});
+  const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
+  return (yes+no)?Math.round(100*yes/(yes+no)):null;
+}
+function renderAudits(){
+  const w=$('auditList'), list=data.audits||[];
+  if(!list.length){ w.innerHTML='<p class="sub" style="margin:0;">No calls graded yet for this day.</p>'; return; }
+  w.innerHTML='';
+  list.forEach(a=>{
+    const line=(data.lines||[]).find(l=>l.number===a.grasshopper_number);
+    const s=scoreOf(a);
+    const t=a.occurred_at?new Date(a.occurred_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
+    const d=document.createElement('div'); d.className='audited';
+    d.innerHTML='<span class="num">'+esc(line?line.pretty:a.grasshopper_number)+'</span>'+
+      '<span class="sub">'+esc(t)+(a.handled_by?' &middot; '+esc(a.handled_by):'')+'</span>'+
+      '<span style="flex:1;"></span>'+
+      (a.flagged?'<span class="flagpill">flagged</span>':'')+
+      (s!=null?'<span class="score" style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</span>':'');
+    d.onclick=()=>openForm(a);
+    w.appendChild(d);
+  });
+}
+
+function openForm(a){
+  editing=a||null;
+  answers=a?Object.assign({},a.answers||{}):{};
+  $('formTitle').textContent=a?'Edit this call':'New call';
+  $('fLine').innerHTML=(data.lines||[]).map(l=>
+    '<option value="'+l.number+'">'+esc(l.pretty)+' &middot; '+(l.business==='doms'?"Dom's":'Handy Andy')+'</option>').join('');
+  $('fCall').innerHTML='<option value="">No scripted call for this one</option>'+
+    (data.calls||[]).map(c=>{
+      const t=new Date(c.occurred_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+      return '<option value="'+c.id+'">'+esc(t)+' &middot; '+esc(c.handled_by||'unknown')+' &middot; '+esc(c.service||'')+'</option>';
+    }).join('');
+  if(a){
+    $('fLine').value=a.grasshopper_number;
+    $('fCall').value=a.call_id||'';
+    $('fDir').value=a.direction||'incoming';
+    $('fWho').value=a.handled_by||'';
+    $('fFlag').checked=!!a.flagged;
+    $('fSvc').value=a.service||'TV Mounting';
+    $('fNotes').value=a.notes||'';
+    $('fTime').value=a.occurred_at?new Date(a.occurred_at).toTimeString().slice(0,5):'';
+  }else{
+    $('fCall').value=''; $('fDir').value='incoming'; $('fWho').value=''; $('fSvc').value='TV Mounting';
+    $('fFlag').checked=false; $('fNotes').value=''; $('fTime').value='';
+  }
+  $('formErr').textContent='';
+  $('formCard').classList.remove('hidden');
+  renderCtx();
+  $('formCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// Picking a scripted call fills in who took it and when, so she is not
+// retyping what the system already knows.
+$('fCall').onchange=()=>{
+  const c=linkedCall();
+  if(c){
+    if(c.handled_by && [...$('fWho').options].some(o=>o.value===c.handled_by)) $('fWho').value=c.handled_by;
+    if(c.occurred_at) $('fTime').value=new Date(c.occurred_at).toTimeString().slice(0,5);
+    if(c.service) $('fSvc').value = c.service==='Handyman' ? 'Handyman' : 'TV Mounting';
+  }
+  renderCtx();
+};
+$('fLine').onchange=renderScore;
+$('fSvc').onchange=renderScore;
+
+async function load(){
+  const date=$('date').value;
+  if(!date) return;
+  try{
+    data=await api('day',{params:{date}});
+    $('who').textContent=data.auditor+' · '+new Date(date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+    renderLines(); renderAudits();
+    $('formCard').classList.add('hidden');
+  }catch(e){ $('dayErr').textContent=e.message; }
+}
+
+$('saveDay').onclick=async()=>{
+  $('dayErr').textContent=''; $('dayOk').textContent='';
+  try{
+    await api('day_save',{method:'POST',body:{date:$('date').value,counts:countsNow()}});
+    $('dayOk').textContent='Saved.';
+    setTimeout(()=>{$('dayOk').textContent='';},2500);
+  }catch(e){ $('dayErr').textContent=e.message; }
+};
+
+$('saveAudit').onclick=async()=>{
+  $('formErr').textContent='';
+  const date=$('date').value, t=$('fTime').value;
+  const body={
+    id: editing?editing.id:undefined,
+    date,
+    grasshopper_number:$('fLine').value,
+    call_id:$('fCall').value||null,
+    occurred_at: t?new Date(date+'T'+t).toISOString():null,
+    direction:$('fDir').value,
+    handled_by:$('fWho').value,
+    service:$('fSvc').value,
+    answers, flagged:$('fFlag').checked, notes:$('fNotes').value,
+  };
+  try{
+    await api('audit_save',{method:'POST',body});
+    await load();
+  }catch(e){ $('formErr').textContent=e.message; }
+};
+
+$('newAudit').onclick=()=>openForm(null);
+$('cancelBtn').onclick=()=>$('formCard').classList.add('hidden');
+$('date').onchange=load;
+
+$('loginBtn').onclick=async()=>{
+  $('loginErr').textContent='';
+  try{
+    const r=await api('login',{method:'POST',body:{password:$('pw').value}});
+    token=r.token; localStorage.setItem('ha_audit_token',token);
+    enter();
+  }catch(e){ $('loginErr').textContent=e.message; }
+};
+$('pw').onkeydown=e=>{ if(e.key==='Enter') $('loginBtn').click(); };
+$('outBtn').onclick=()=>{ localStorage.removeItem('ha_audit_token'); location.reload(); };
+
+function todayStr(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+async function enter(){
+  $('login').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  if(!$('date').value) $('date').value=todayStr();
+  await load();
+}
+// An expired or revoked token must drop back to the login form rather than
+// leaving her on an empty page wondering why nothing loads.
+if(token){
+  api('day',{params:{date:todayStr()}})
+    .then(enter)
+    .catch(()=>{ localStorage.removeItem('ha_audit_token'); token=''; });
+}
+</script>
+</body>
+</html>
