@@ -1338,6 +1338,7 @@
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="callanalytics" id="navCallAnalytics"><span class="ic" data-ico="analytics">📈</span> Call Performance</button>
+      <button data-nav="callaudit" id="navCallAudit"><span class="ic" data-ico="phone">🎧</span> Call Audit</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
       <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
@@ -2064,6 +2065,8 @@ function enterApp(){
   // Call Performance ranks the secretaries against each other by booking rate.
   // That is a management view, not something the people being measured should
   // be looking at during a shift — owner only, same as the other analytics.
+  const navCallAud=document.getElementById('navCallAudit');
+  if(navCallAud) navCallAud.style.display = role==='owner' ? '' : 'none';
   const navCallAna=document.getElementById('navCallAnalytics');
   if(navCallAna) navCallAna.style.display = role==='owner' ? '' : 'none';
   // Handyman Analytics: owner only (not techs/secretaries).
@@ -2211,6 +2214,7 @@ function navTo(s){
   if(s==='reviewcalls' && scope==='handy-andy') s='schedule';   // not on Heather's platform
   if(s==='analytics' && role!=='owner') s='schedule';   // Booking Analytics is owner-only; blocks direct calls too, not just the hidden nav button
   if(s==='callanalytics' && role!=='owner') s='schedule';   // same: hiding the button is not the gate
+  if(s==='callaudit' && role!=='owner') s='schedule';      // same again: the audit report is owner-only
   section=s;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -2220,7 +2224,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',calls:'Calls',reviewcalls:'Review Calls',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',calls:'Calls',reviewcalls:'Review Calls',callaudit:'Call Audit',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2232,6 +2236,7 @@ function navTo(s){
     else if(s==='reviews') renderReviews();
     else if(s==='calls') renderCalls();
     else if(s==='callanalytics') renderCallAnalytics();
+    else if(s==='callaudit') renderCallAudit();
     else if(s==='reviewcalls') renderReviewCalls();
     else if(s==='gallery') renderGallery();
     else if(s==='analytics') renderAnalytics();
@@ -6583,6 +6588,184 @@ function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',ca
 // vs calls booked; the per-person table answers who is converting and who is
 // not, and the funnel shows WHERE the ones that didn't book fell out.
 let _caRange='7';
+// Short labels for the audit scorecard keys. The full questions, with their
+// script lines and conditional rules, live in public/audit.html since that is
+// where they are answered; this map only has to be readable in a table. An
+// unknown key falls through to the raw key rather than being dropped, so if the
+// two ever drift the drift is visible here instead of silently shrinking the
+// coaching list.
+const AUDIT_LABELS={
+  greet_named_business:'Named the business when answering',
+  asked_zip:'Asked for the zip code',
+  out_of_area_no_promise:'Did not promise a booking out of area',
+  asked_tv_size:'Asked what size the TV is',
+  asked_wall_fireplace:'Asked about the wall and the fireplace',
+  asked_remaining_questions:'Actually asked the rest, did not self-answer',
+  asked_what_needed:'Asked what the job is',
+  handy_desc_detailed:'Captured enough detail for the tech',
+  no_flat_handy_price:'Did not quote a flat handyman price',
+  customer_picked_and_readback:'Let them pick, then read it back',
+  said_after_hours_fee:'Said the after-hours charge up front',
+  read_job_back:'Read the job back before the price',
+  said_price_matched:'Said the price, and it matched',
+  price_phone_wording:'Said the amount the scripted way',
+  paused_after_price:'Stopped talking after the number',
+  customer_actually_objected:'Customer really did push back',
+  no_operator_note_aloud:'Did not read her own screen notes aloud',
+  paused_between_offers:'Paused between discount offers',
+  referral_question_first:'Led with the referral question, not money',
+  said_new_total_each_time:'Said the new total after each discount',
+  invalid_coupon_not_honored:'Did not honor an invalid promo code',
+  final_number_matched:'Final number matched the ticket',
+  contact_details_correct:'Contact details taken correctly',
+  explained_card_hold:'Explained the card only holds the slot',
+  offered_estimate:'Offered the estimate properly',
+};
+let _cauRange='30';
+async function renderCallAudit(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await api('audit_report',{ params:{ business:current.slug, days:_cauRange }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const v=d.volume||{};
+  const rangeBtns=[['7','Last 7 days'],['30','Last 30 days'],['90','90 days']].map(([x,l])=>
+    `<button type="button" class="seg-btn ${_cauRange===x?'on':''}" data-cau="${x}">${l}</button>`).join('');
+  const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
+      <span class="gstat-l">${esc(label)}</span>
+      <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
+      ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
+
+  if(!d.audited && !v.counted){
+    view.innerHTML=`<div class="wrap">
+      <div class="rc-head"><div><h2 class="rc-title">🎧 Call Audit</h2>
+        <div class="rc-sub">Nothing logged yet for this range. Once the auditor saves a day, it shows up here.</div></div></div>
+      <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
+    view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
+    return;
+  }
+
+  // Calls handled without the script leads, because it is the cheapest read on
+  // "are they doing what I told them to do" and it needs no grading at all.
+  const offPct = v.counted ? Math.round(100*(v.off_script||0)/v.counted) : 0;
+  const offColor = offPct<=10 ? '#4ade80' : offPct<=30 ? '#fbbf24' : '#f87171';
+
+  const top=Math.max(1,...(d.daily||[]).map(x=>Math.max(x.counted||0,x.scripted||0)));
+  const dailyRows=(d.daily||[]).filter(x=>x.counted!=null||x.scripted).map(x=>{
+    const label=x.date.slice(5).replace('-','/');
+    const cw=Math.round(((x.counted||0)/top)*100), sw=Math.round(((x.scripted||0)/top)*100);
+    const skipped=x.counted==null;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
+      <div style="width:46px;flex-shrink:0;color:var(--mute);">${esc(label)}</div>
+      <div style="flex:1;">
+        <div style="background:var(--line2);border-radius:5px;height:11px;overflow:hidden;margin-bottom:2px;">
+          <div style="height:100%;width:${cw}%;background:#60a5fa;"></div></div>
+        <div style="background:var(--line2);border-radius:5px;height:11px;overflow:hidden;">
+          <div style="height:100%;width:${sw}%;background:#15803d;"></div></div>
+      </div>
+      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        ${skipped?'<span style="color:var(--mute);">not audited</span>':`<b>${x.counted}</b> in · ${x.scripted} scripted`}</div>
+    </div>`;
+  }).join('') || '<div class="empty">Nothing yet.</div>';
+
+  const lineRows=(v.by_line||[]).map(l=>{
+    const w=Math.round((l.calls/Math.max(1,...(v.by_line||[]).map(z=>z.calls)))*100);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+      <div style="width:118px;flex-shrink:0;font-family:ui-monospace,Menlo,monospace;">${esc(prettyNum(l.number))}</div>
+      <div style="flex:1;background:var(--line2);border-radius:6px;height:16px;overflow:hidden;">
+        <div style="height:100%;width:${w}%;background:#60a5fa;"></div></div>
+      <div style="width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${l.calls}</div>
+    </div>`;
+  }).join('') || '<div class="empty">No counts saved yet.</div>';
+
+  const peopleRows=(d.people||[]).map(p=>{
+    const c=p.pct==null?'var(--mute)':p.pct>=85?'#15803d':p.pct>=70?'#b45309':'#b91c1c';
+    return `<tr style="border-top:1px solid var(--line);text-align:center;">
+      <td style="padding:9px 8px;text-align:left;font-weight:700;">${esc(p.name)}</td>
+      <td style="padding:9px 8px;">${p.audited}</td>
+      <td style="padding:9px 8px;font-weight:800;color:${c};">${p.pct==null?'&mdash;':p.pct+'%'}</td>
+      <td style="padding:9px 8px;">${p.no}</td>
+      <td style="padding:9px 8px;">${p.flagged||0}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--mute);">No calls graded yet.</td></tr>';
+
+  const qRows=(d.questions||[]).slice(0,12).map(q=>{
+    const w=q.fail_rate;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+      <div style="width:250px;flex-shrink:0;color:var(--ink-2);">${esc(AUDIT_LABELS[q.key]||q.key)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:6px;height:16px;overflow:hidden;">
+        <div style="height:100%;width:${w}%;background:#ef4444;"></div></div>
+      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        <b>${q.no}</b>/${q.asked} · ${q.fail_rate}%</div>
+    </div>`;
+  }).join('') || '<div class="empty">Nothing is being missed yet.</div>';
+
+  const flagRows=(d.flagged||[]).map(f=>{
+    const t=f.occurred_at?new Date(f.occurred_at).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):f.audit_date;
+    return `<div style="border:1px solid #f3c2c2;background:#fdecec;border-radius:9px;padding:10px 12px;margin-bottom:7px;">
+      <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:13px;">
+        <b>${esc(f.handled_by||'Unknown')}</b>
+        <span style="color:var(--mute);">${esc(t)}</span>
+        <span style="font-family:ui-monospace,Menlo,monospace;color:var(--mute);">${esc(prettyNum(f.grasshopper_number))}</span>
+        ${f.pct!=null?`<span style="margin-left:auto;font-weight:800;color:#b91c1c;">${f.pct}%</span>`:''}
+      </div>
+      ${f.notes?`<div style="font-size:13px;color:#7c2d12;margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
+    </div>`;
+  }).join('') || '<div class="empty">Nothing flagged.</div>';
+
+  const missing=(d.missing_days||[]).length;
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">🎧 Call Audit</h2>
+      <div class="rc-sub">What the auditor found listening to real recordings, graded against the phone script. Counts come from Grasshopper by hand, so they cover calls the script never saw.</div>
+    </div></div>
+    <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
+
+    <div class="greet-stats" style="margin-bottom:18px;">
+      ${stat('Calls that came in', String(v.counted||0), `${missing?missing+' day'+(missing===1?'':'s')+' not audited':'every day audited'}`)}
+      ${stat('Went through the script', String(v.scripted||0), 'logged by the system')}
+      ${stat('Handled off script', String(v.off_script||0), `${offPct}% of all calls`, offColor)}
+      ${stat('Calls graded', String(d.audited||0), 'listened to end to end')}
+    </div>
+
+    <div class="rc-count">Where the calls came from</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${lineRows}</div>
+
+    <div class="rc-count">Who is following the script</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px;">
+        <thead><tr style="background:var(--line2);text-align:center;">
+          <th style="padding:9px 8px;text-align:left;">Person</th>
+          <th style="padding:9px 8px;">Calls graded</th>
+          <th style="padding:9px 8px;" title="Yes answers as a share of everything that applied">Score</th>
+          <th style="padding:9px 8px;">Things missed</th>
+          <th style="padding:9px 8px;">Flagged</th>
+        </tr></thead>
+        <tbody>${peopleRows}</tbody>
+      </table>
+    </div>
+
+    <div class="rc-count">What they get wrong most</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${qRows}</div>
+
+    <div class="rc-count">Calls flagged for you to hear</div>
+    <div style="margin-bottom:22px;">${flagRows}</div>
+
+    <div class="rc-count">Day by day</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
+    <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">
+      <span style="display:inline-block;width:10px;height:10px;background:#60a5fa;border-radius:2px;"></span> calls that came in
+      &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;"></span> went through the script
+    </div>
+  </div>`;
+  view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
+}
+function prettyNum(n){
+  const d=String(n||'').replace(/\D/g,'');
+  return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : String(n||'');
+}
 async function renderCallAnalytics(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';

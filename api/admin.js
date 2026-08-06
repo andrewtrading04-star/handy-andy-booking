@@ -337,6 +337,7 @@ export default async function handler(req, res) {
       case 'quote_coupon':      return await quoteCoupon(req, res, db, auth, body);
       case 'call_event':        return await callEvent(req, res, db, auth, body);
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
+      case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -7686,6 +7687,141 @@ async function callEvent(req, res, db, auth, body) {
 // Daily + weekly rollups for the phone script. The headline number the owner
 // asked for is calls-taken vs calls-booked, broken down by who took the call —
 // everything else on this payload exists to explain that ratio.
+// Rolls up the manual call audits (see api/audit.js) into the one question the
+// owner actually asks: are the secretaries doing what they were told. Owner
+// only, and unlike the profit endpoints this one genuinely needs to span both
+// businesses, since the auditor works every line regardless of brand.
+//
+// The reconciliation is the headline. Her per-line counts are the only record
+// of how many calls actually came in (live call rows carry handled_by but no
+// grasshopper_number), so counted-minus-scripted is the number of calls handled
+// without opening the script at all. That is a bigger finding than any single
+// question's score, which is why it leads.
+async function auditReport(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  const days = Math.min(180, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const { data: bizRows } = await db.from('businesses').select('id, slug, timezone').eq('active', true);
+  const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
+  const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
+  const from = dayStr(-(days - 1)), to = dayStr(0);
+
+  const [{ data: dayRows }, { data: audits }] = await Promise.all([
+    db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
+      .gte('audit_date', from).lte('audit_date', to),
+    db.from('call_audits')
+      .select('id, audit_date, grasshopper_number, call_id, occurred_at, handled_by, service, answers, flagged, notes')
+      .gte('audit_date', from).lte('audit_date', to)
+      .order('occurred_at', { ascending: false }),
+  ]);
+
+  // Scripted calls over the same window, bucketed by local day so they line up
+  // with audit_date, which is a plain calendar date the auditor typed.
+  const start = localDayStartUTC(tz, -(days - 1));
+  const end = localDayStartUTC(tz, 1);
+  const { data: liveCalls } = await db.from('calls')
+    .select('id, occurred_at, handled_by')
+    .eq('kind', 'live')
+    .gte('occurred_at', start.toISOString())
+    .lt('occurred_at', end.toISOString());
+
+  const scriptedByDay = {};
+  for (const c of (liveCalls || [])) {
+    const d = new Date(c.occurred_at).toLocaleDateString('en-CA', { timeZone: tz });
+    scriptedByDay[d] = (scriptedByDay[d] || 0) + 1;
+  }
+
+  const countedByDay = {}, byLine = {};
+  let totalCounted = 0;
+  for (const r of (dayRows || [])) {
+    const n = Number(r.calls_counted) || 0;
+    totalCounted += n;
+    countedByDay[r.audit_date] = (countedByDay[r.audit_date] || 0) + n;
+    byLine[r.grasshopper_number] = (byLine[r.grasshopper_number] || 0) + n;
+  }
+  const totalScripted = (liveCalls || []).length;
+
+  // Per-day series so a bad week is visible rather than averaged away.
+  const daily = [];
+  for (let i = 0; i < days; i++) {
+    const d = dayStr(-(days - 1) + i);
+    const counted = countedByDay[d];
+    daily.push({
+      date: d,
+      // null, not 0, when the auditor never saved that day. A day she skipped
+      // and a day with genuinely no calls must not look the same on the chart.
+      counted: counted == null ? null : counted,
+      scripted: scriptedByDay[d] || 0,
+    });
+  }
+
+  const scoreOf = (a) => {
+    const v = Object.values(a.answers || {});
+    const yes = v.filter(x => x === 'yes').length;
+    const no = v.filter(x => x === 'no').length;
+    return { yes, no, pct: (yes + no) ? Math.round(100 * yes / (yes + no)) : null };
+  };
+
+  const people = {};
+  const questions = {};
+  for (const a of (audits || [])) {
+    const s = scoreOf(a);
+    const who = a.handled_by || 'Unknown';
+    const p = people[who] || (people[who] = { name: who, audited: 0, yes: 0, no: 0, flagged: 0 });
+    p.audited++; p.yes += s.yes; p.no += s.no;
+    if (a.flagged) p.flagged++;
+    for (const [k, v] of Object.entries(a.answers || {})) {
+      if (v !== 'yes' && v !== 'no') continue;   // N/A is excluded from the denominator
+      const q = questions[k] || (questions[k] = { key: k, asked: 0, no: 0 });
+      q.asked++;
+      if (v === 'no') q.no++;
+    }
+  }
+
+  const peopleOut = Object.values(people).map(p => ({
+    ...p,
+    pct: (p.yes + p.no) ? Math.round(100 * p.yes / (p.yes + p.no)) : null,
+  })).sort((a, b) => b.audited - a.audited);
+
+  // Worst first: this is the coaching list, so the thing they get wrong most
+  // often has to be at the top. Ties break toward the more frequently asked
+  // question, since a 50% failure over 20 calls matters more than over 2.
+  const questionsOut = Object.values(questions)
+    .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
+    .filter(q => q.no > 0)
+    .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked);
+
+  const flagged = (audits || []).filter(a => a.flagged).slice(0, 25).map(a => ({
+    id: a.id,
+    audit_date: a.audit_date,
+    occurred_at: a.occurred_at,
+    grasshopper_number: a.grasshopper_number,
+    handled_by: a.handled_by,
+    service: a.service,
+    notes: a.notes,
+    pct: scoreOf(a).pct,
+  }));
+
+  return res.status(200).json({
+    from, to, days,
+    volume: {
+      counted: totalCounted,
+      scripted: totalScripted,
+      off_script: Math.max(0, totalCounted - totalScripted),
+      by_line: Object.entries(byLine).map(([number, calls]) => ({ number, calls }))
+        .sort((a, b) => b.calls - a.calls),
+    },
+    audited: (audits || []).length,
+    people: peopleOut,
+    questions: questionsOut,
+    flagged,
+    daily,
+    // Days in range the auditor never saved anything for, so a gap in her own
+    // coverage does not read as a quiet stretch for the business.
+    missing_days: daily.filter(d => d.counted == null).map(d => d.date),
+  });
+}
+
 async function callAnalytics(req, res, db, auth) {
   // Ranks staff against each other on booking rate — the hidden nav button is a
   // convenience, this is the actual gate.
