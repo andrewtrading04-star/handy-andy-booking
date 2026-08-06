@@ -302,6 +302,7 @@ export default async function handler(req, res) {
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'customer_detail':   return await customerDetail(req, res, db, auth);
       case 'profit_range':      return await profitRange(req, res, db, auth);
+      case 'net_daily_range':   return await netDailyRange(req, res, db, auth);
       case 'technicians':       return await technicians(req, res, db, auth);
       case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
@@ -1173,6 +1174,67 @@ async function profitRange(req, res, db, auth) {
   const by_slug = Object.fromEntries(parts);
   const total = Math.round(parts.reduce((a, [, v]) => a + v, 0));
   return res.status(200).json({ range, total, by_slug, from: start.toISOString(), to: end.toISOString() });
+}
+
+// Daily net-profit trend for the "Net Daily Profit" chart (7d / 30d). ONE
+// query per business over the whole window, economics computed once, then
+// bucketed per job into its LOCAL day, the same per-business day boundary the
+// single-day today/yesterday figure above the chart already uses (netDailyFor
+// in the greeting handler), so the chart's rightmost point always agrees with
+// that headline number instead of drifting from a different day definition.
+// Bucketing walks explicit localDayStartUTC() boundaries rather than dividing
+// by 86400000ms, since a day spans 23 or 25 hours across a DST transition and
+// naive division would misfile a job on those days.
+async function netDailyRange(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const range = (req.query.range || '').toString();
+  if (!['7d', '30d'].includes(range)) return res.status(400).json({ error: 'range must be 7d or 30d' });
+  const days = range === '7d' ? 7 : 30;
+
+  const { data: allBiz } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+
+  const travelCache = new Map();
+  const travelMapFor = async (bb) => {
+    if (travelCache.has(bb.id)) return travelCache.get(bb.id);
+    const m = await travelPayoutMap(db, bb.id);
+    travelCache.set(bb.id, m);
+    return m;
+  };
+
+  // index 0 = oldest day in the window, index days-1 = today. Combined across
+  // every active business.
+  const totals = new Array(days).fill(0);
+
+  await Promise.all((allBiz || []).map(async (bb) => {
+    const tz = bb.timezone || 'America/Denver';
+    const oldestStart = localDayStartUTC(tz, -(days - 1));
+    const end = localDayStartUTC(tz, 1);
+    const { data: rows } = await fetchEconomicsRows(sel => db.from('bookings').select(sel)
+      .eq('business_id', bb.id)
+      .gte('scheduled_at', oldestStart.toISOString())
+      .lt('scheduled_at', end.toISOString()));
+    const paid = (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    if (!paid.length) return;
+    const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
+    // Precompute this business's day boundaries once, then a cheap per-job scan.
+    const bounds = Array.from({ length: days }, (_, d) => localDayStartUTC(tz, -(days - 1) + d).getTime());
+    for (const b of paid) {
+      const t = new Date(b.scheduled_at).getTime();
+      let idx = -1;
+      for (let d = days - 1; d >= 0; d--) { if (t >= bounds[d]) { idx = d; break; } }
+      if (idx < 0) continue;   // scheduled before the window (shouldn't happen given the query bound, but never miscount)
+      totals[idx] += Number(e[b.id]?.profit) || 0;
+    }
+  }));
+
+  // Labels use the VIEWED business's own tz, display only; the bucketing
+  // above already happened per-business.
+  const tz = biz.timezone || 'America/Denver';
+  const series = totals.map((v, i) => ({
+    date: localDayStartUTC(tz, -(days - 1) + i).toISOString().slice(0, 10),
+    total: Math.round(v),
+  }));
+  return res.status(200).json({ range, days: series });
 }
 
 async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) {

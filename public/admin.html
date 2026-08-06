@@ -2180,7 +2180,7 @@ async function openAlertJob(slug, id){
     // renderGreeting) AND for 'estimates' (renderEstimates calls it itself) —
     // only call it here for every OTHER section, where neither runs, so the
     // badge/estStale banner still updates without a duplicate fetch.
-    current=biz; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    current=biz; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }
   try{
     const d=await api('bookings',{ params:{ business:slug, id }});
@@ -2199,7 +2199,7 @@ function renderSwitcher(){
     if(current) nbWarmDataCache(current.slug);
     // See the matching comment in openAlertJob — navTo(section) already covers
     // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
-    availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+    availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }));
 }
 
@@ -9057,6 +9057,12 @@ let incomeView='week';      // 'week' | 'month' | 'quarter' for the private Inco
 // more job landing barely moves the number, and refetching a full year on every
 // navigation would be a lot of work for no visible difference.
 let profitRangeCache={};
+// Net Daily Profit's trend chart. '7d' is fetched once right after the
+// greeting first paints (there is no pre-loaded daily series to reuse the way
+// Income's chart reuses payroll-entered history), '30d' on first click; both
+// cached for the rest of the session same as profitRangeCache above.
+let netDailyChartView='7d';
+let netDailyChartCache={};
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
@@ -9144,6 +9150,35 @@ function paintGreeting(){
     const vEl=document.getElementById('ndpVal'); if(vEl) vEl.textContent=money(v);
     el.querySelectorAll('[data-ndp]').forEach(b=>b.classList.toggle('on', b.dataset.ndp===netDailyView));
   }));
+  // Net Daily Profit's trend chart tab toggle: Last 7 days / Last 30 days.
+  // Unlike Income (client-side re-bucket, no network) and unlike Profit's
+  // "This week" tab (already in the greeting payload), NEITHER range here is
+  // preloaded -- there is no existing daily-profit series to draw from -- so
+  // every tab, including the default, needs its own fetch the first time it's
+  // opened. Cached in netDailyChartCache for the rest of the session.
+  const paintNdpChart=(view)=>{
+    const chartEl=document.getElementById('ndpChart');
+    if(chartEl) chartEl.innerHTML=ndpChartHtml(netDailyChartCache[view]);
+  };
+  const loadNdpChart=async(view)=>{
+    if(netDailyChartCache[view]) return;   // already have it; paint already happened synchronously
+    try{
+      const d=await api('net_daily_range',{ params:{ business:current.slug, range:view } });
+      netDailyChartCache[view]={ days:d.days||[] };
+    }catch(e){
+      const chartEl=document.getElementById('ndpChart');
+      if(netDailyChartView===view && chartEl) chartEl.innerHTML=`<div class="gstat-s" style="margin-top:8px;">Could not load the trend.</div>`;
+      return;
+    }
+    if(netDailyChartView===view) paintNdpChart(view);   // ignore a slow answer the user already tabbed away from
+  };
+  el.querySelectorAll('[data-ndv]').forEach(btn=>btn.addEventListener('click',()=>{
+    netDailyChartView=btn.dataset.ndv;
+    el.querySelectorAll('[data-ndv]').forEach(b=>b.classList.toggle('on', b.dataset.ndv===netDailyChartView));
+    paintNdpChart(netDailyChartView);
+    loadNdpChart(netDailyChartView);
+  }));
+  loadNdpChart(netDailyChartView);   // kick off the default (7d) load right after paint
   // Income chart tab toggle: Weekly / Monthly / 3 Months. All three re-bucket
   // the history the greeting payload already loaded (incomeAggregate), so
   // this redraws the chart locally with no round trip, same as Net Daily
@@ -9343,8 +9378,8 @@ function incomePeriodLabel(h, view){
   if(view==='month') return MON[m-1];
   return `Q${Math.floor((m-1)/3)+1}`;
 }
-function incomeChartSvg(history, maxScale, view){
-  if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough weeks yet to chart.</div>`;
+function incomeChartSvg(history, maxScale, view, unitWord){
+  if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough ${unitWord||'weeks'} yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
   // Fixed scale, sized to the bucket: floor $0, ceiling passed in by the
   // caller (bigger for Monthly/3-month sums than for a single week), so a
@@ -9390,6 +9425,19 @@ function incomeChartSvg(history, maxScale, view){
       dots+labels+periods+
     `</svg>`;
 }
+// Net Daily Profit's chart. `cached` is undefined until the first fetch lands
+// (net_daily_range), so this doubles as the loading state. Reuses
+// incomeChartSvg wholesale rather than a second chart implementation: adapts
+// {date,total} into the {pay_date,total_made} shape it already expects, and
+// passes view='week' purely to get its existing M/D-per-point label
+// formatting (incomePeriodLabel's 'week' case), not because this is weekly
+// data. $1,500/day ceiling: net PROFIT, not revenue, so a day that clips
+// against it is a genuinely exceptional day, not a normal one squashed flat.
+function ndpChartHtml(cached){
+  if(!cached) return `<div class="gstat-s" style="margin-top:8px;">Loading…</div>`;
+  const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
+  return incomeChartSvg(history, 1500, 'week', 'days');
+}
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
@@ -9428,7 +9476,16 @@ function greetStatsHtml(){
       `<span class="gstat-l">Net daily profit</span>`+
       `<span class="gstat-v" id="ndpVal" style="color:#4ade80;">${money(ndpVal)}</span>`+
       `<div class="ndp-seg"><button data-ndp="today" class="${netDailyView==='today'?'on':''}">Today</button><button data-ndp="yesterday" class="${netDailyView==='yesterday'?'on':''}">Yesterday</button></div>`+
-      `<span class="gstat-s" style="margin-top:1px;">Both companies combined</span></div>` : '';
+      `<span class="gstat-s" style="margin-top:1px;">Both companies combined</span>`+
+      // Trend chart underneath the existing Today/Yesterday figure -- same SVG
+      // line-chart component the Income box uses (incomeChartSvg expects
+      // {pay_date,total_made}; ndpDailySeries() below adapts the {date,total}
+      // shape net_daily_range returns into that, and reuses the 'week' label
+      // mode purely for its M/D-per-point formatting, not because this is
+      // weekly data).
+      `<div class="ndp-seg" style="margin-top:10px;"><button data-ndv="7d" class="${netDailyChartView==='7d'?'on':''}">Last 7 days</button><button data-ndv="30d" class="${netDailyChartView==='30d'?'on':''}">Last 30 days</button></div>`+
+      `<div id="ndpChart" style="width:100%;">${ndpChartHtml(netDailyChartCache[netDailyChartView])}</div>`+
+    `</div>` : '';
   // Revenue this week = every non-canceled job's price over the Sat–Fri work week,
   // both companies combined, with the per-business split below. Job-revenue based
   // (no Stripe). Falls back to the single-business week figure if the cross-business
