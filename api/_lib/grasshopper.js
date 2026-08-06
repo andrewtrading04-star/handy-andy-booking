@@ -37,7 +37,9 @@
 export const GRASSHOPPER_LINES = {
   '7206373707': { market: 'Denver',  business: 'handy-andy' },
   '7205418180': { market: 'Denver',  business: 'handy-andy' },
+  '7208006095': { market: 'Denver',  business: 'doms' },
   '2816388419': { market: 'Houston', business: 'handy-andy' },
+  '2816265853': { market: 'Houston', business: 'handy-andy' },
   '7138769032': { market: 'Houston', business: 'handy-andy' },
   '5126686643': { market: 'Austin',  business: 'handy-andy' },
 };
@@ -194,7 +196,13 @@ export function parseGrasshopperEmail({ subject = '', body = '', receivedAt = nu
   const line = GRASSHOPPER_LINES[grasshopper_number] || null;
   const market = line ? line.market : (AREA_CODE_MARKET[grasshopper_number.slice(0, 3)] || null);
   const business_slug = line ? line.business : 'handy-andy';
-  if (!market) warnings.push(`Unrecognized Grasshopper line ${prettyPhone(grasshopper_number) || '(none)'} — no market assigned`);
+  if (!market) warnings.push(`Unrecognized Grasshopper line ${prettyPhone(grasshopper_number) || '(none)'}, no market assigned`);
+  // The business fallback above is a GUESS, and a silent one is how every Dom's
+  // voicemail from the (720) 800-6095 line sat filed under Handy Andy until Aug
+  // 2026: the area code still resolved a market, so the market warning never
+  // fired and nothing looked wrong. Warn on the business gap separately, since
+  // the two can fail independently.
+  if (!line) warnings.push(`Grasshopper line ${prettyPhone(grasshopper_number) || '(none)'} is not in GRASSHOPPER_LINES, filed under ${business_slug} by default`);
 
   // Time. receivedAt is authoritative (see above); the body's own Timestamp is
   // the fallback and also a cross-check.
@@ -307,8 +315,21 @@ Sign in to your account`;
   eq(lineMarket('(713) 876-9032'), 'Houston', 'second Houston line');
   eq(lineMarket('(512) 668-6643'), 'Austin', 'Austin line');
   eq(lineMarket('(720) 541-8180'), 'Denver', 'second Denver line');
+  eq(lineMarket('(281) 626-5853'), 'Houston', 'third Houston line');
   // An unknown 720 number still routes by area code rather than being dropped.
   eq(lineMarket('(720) 111-2222'), 'Denver', 'unmapped 720 falls back to the area code');
+
+  // Which BUSINESS a line belongs to is separate from its market, and getting it
+  // wrong is silent: an unmapped number still resolves a market by area code, so
+  // nothing looks broken while the voicemail lands under the wrong brand. Every
+  // (720) 800-6095 voicemail was filed under Handy Andy for exactly this reason.
+  const lineBiz = (num) => parseGrasshopperEmail({
+    subject: 'Voicemail from (901) 212-3541',
+    body: `New Grasshopper Voicemail\nCaller: (901) 212-3541\nExtension: 1 - TV Mounting\nGrasshopper #: ${num}\nTimestamp: 7/28/2026 1:36:00 PM Central Daylight Time\n`,
+  }).business_slug;
+  eq(lineBiz('(720) 800-6095'), 'doms', "Dom's line files under doms, not the handy-andy default");
+  eq(lineBiz('(720) 637-3707'), 'handy-andy', 'a Denver Handy Andy line stays handy-andy');
+  eq(lineBiz('(720) 111-2222'), 'handy-andy', 'an unmapped line still falls back rather than dropping the voicemail');
 
   // Extension 2 is the handyman line.
   const ext2 = parseGrasshopperEmail({
