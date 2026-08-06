@@ -1167,6 +1167,21 @@
   .ndp-seg{display:inline-flex;background:rgba(0,0,0,.28);border-radius:8px;padding:2px;}
   .ndp-seg button{border:none;background:transparent;color:rgba(255,255,255,.72);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;cursor:pointer;}
   .ndp-seg button.on{background:var(--gaccent,#FF6B35);color:#fff;}
+  /* The 30-day chart is wider than its card, so it scrolls. The default OS
+     scrollbar is a light slab across the bottom of a dark box; this is the same
+     control reduced to a ghost, visible enough to signal there is more to the
+     right and nothing more than that. Firefox gets scrollbar-width/color, and
+     everything else the webkit pseudo-elements. */
+  /* Hub tab row. Sits above a screen that often has its own .est-filters range
+     row right under it, so it reads as a section switcher rather than a second
+     filter: separated by a rule, and spaced away from what it is switching. */
+  .hub-tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
+    padding-bottom:11px;margin-bottom:16px;border-bottom:1px solid var(--line);}
+  .ndp-scroll{overflow-x:auto;width:100%;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;}
+  .ndp-scroll::-webkit-scrollbar{height:5px;}
+  .ndp-scroll::-webkit-scrollbar-track{background:transparent;}
+  .ndp-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:3px;}
+  .ndp-scroll:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,.26);}
   .gstat-link{cursor:pointer;transition:background .15s;}
   .gstat-link:hover{background:rgba(255,255,255,.18);}
   /* Low-stock warning line inside the Predicted-income box (sits below the figure
@@ -1336,13 +1351,9 @@
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
-      <button data-nav="reviewcalls"><span class="ic" data-ico="phone">📞</span> Review Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
-      <button data-nav="callanalytics" id="navCallAnalytics"><span class="ic" data-ico="analytics">📈</span> Call Performance</button>
-      <button data-nav="callaudit" id="navCallAudit"><span class="ic" data-ico="phone">🎧</span> Call Audit</button>
+      <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
-      <button data-nav="analytics" id="navAnalytics"><span class="ic" data-ico="analytics">📊</span> Booking Analytics</button>
-      <button data-nav="handyman" id="navHandyman"><span class="ic" data-ico="handyman">🛠️</span> Handyman Analytics</button>
-      <button data-nav="webanalytics" id="navWebAnalytics"><span class="ic" data-ico="webanalytics">🌐</span> Website Analytics</button>
+      <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
@@ -2058,20 +2069,15 @@ function enterApp(){
   applyIconTheme();
   // Booking Analytics: owner only (Heather/Joey no longer get this — per
   // request; they used to see it for their own business).
-  const navAna=document.getElementById('navAnalytics');
-  if(navAna) navAna.style.display = role==='owner' ? '' : 'none';
-  const navWeb=document.getElementById('navWebAnalytics');
-  if(navWeb) navWeb.style.display = role==='owner' ? '' : 'none';
+  // Each hub shows only if it has at least one tab this login can open, so the
+  // visibility rule lives with the tabs instead of being restated per button.
+  const navAnaHub=document.getElementById('navAnalyticsHub');
+  if(navAnaHub) navAnaHub.style.display = ANALYTICS_TABS.some(t=>t.show()) ? '' : 'none';
+  const navCallHub=document.getElementById('navCallHub');
+  if(navCallHub) navCallHub.style.display = CALL_TABS.some(t=>t.show()) ? '' : 'none';
   // Call Performance ranks the secretaries against each other by booking rate.
   // That is a management view, not something the people being measured should
   // be looking at during a shift — owner only, same as the other analytics.
-  const navCallAud=document.getElementById('navCallAudit');
-  if(navCallAud) navCallAud.style.display = role==='owner' ? '' : 'none';
-  const navCallAna=document.getElementById('navCallAnalytics');
-  if(navCallAna) navCallAna.style.display = role==='owner' ? '' : 'none';
-  // Handyman Analytics: owner only (not techs/secretaries).
-  const navHandy=document.getElementById('navHandyman');
-  if(navHandy) navHandy.style.display = role==='owner' ? '' : 'none';
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
   // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
@@ -2087,8 +2093,6 @@ function enterApp(){
   if(navTech) navTech.style.display = '';
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
-  const navRc=document.querySelector('[data-nav="reviewcalls"]');
-  if(navRc) navRc.style.display = scope==='handy-andy' ? 'none' : '';
   renderSwitcher();
   // Arriving from the "new estimate" text (/admin.html?estimate=<id>): open the
   // Estimates tab straight away instead of the schedule, then focusPendingEstimate()
@@ -2211,10 +2215,16 @@ document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
   b.addEventListener('click',()=>{ navTo(b.dataset.nav); closeSidebar(); }));
 
 function navTo(s){
-  if(s==='reviewcalls' && scope==='handy-andy') s='schedule';   // not on Heather's platform
-  if(s==='analytics' && role!=='owner') s='schedule';   // Booking Analytics is owner-only; blocks direct calls too, not just the hidden nav button
-  if(s==='callanalytics' && role!=='owner') s='schedule';   // same: hiding the button is not the gate
-  if(s==='callaudit' && role!=='owner') s='schedule';      // same again: the audit report is owner-only
+  // The old per-screen names still route, so bookmarks and any in-app jump that
+  // targets one keep working; they just resolve to the hub with that tab open.
+  const HUB_ALIAS={reviewcalls:['callhub','reviewcalls'],callanalytics:['callhub','performance'],
+    callaudit:['callhub','audit'],calls:['callhub','voicemails'],
+    analytics:['analyticshub','bookings'],handyman:['analyticshub','handyman'],webanalytics:['analyticshub','website']};
+  if(HUB_ALIAS[s]){ const [hub,tab]=HUB_ALIAS[s]; if(hub==='callhub') callHubTab=tab; else analyticsHubTab=tab; s=hub; }
+  // Hiding a nav button was never the gate. A hub with nothing visible in it
+  // falls back to the schedule rather than rendering an empty shell.
+  if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
+  if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   section=s;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -2224,7 +2234,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',calls:'Calls',reviewcalls:'Review Calls',callaudit:'Call Audit',gallery:'Photos',analytics:'Booking Analytics',handyman:'Handyman Analytics',webanalytics:'Website Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2234,14 +2244,9 @@ function navTo(s){
     else if(s==='customers') renderCustomers();
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
-    else if(s==='calls') renderCalls();
-    else if(s==='callanalytics') renderCallAnalytics();
-    else if(s==='callaudit') renderCallAudit();
-    else if(s==='reviewcalls') renderReviewCalls();
+    else if(s==='callhub') renderCallHub();
     else if(s==='gallery') renderGallery();
-    else if(s==='analytics') renderAnalytics();
-    else if(s==='handyman') renderHandymanAnalytics();
-    else if(s==='webanalytics') renderWebAnalytics();
+    else if(s==='analyticshub') renderAnalyticsHub();
     else if(s==='payroll') renderPayroll();
     else if(s==='myavailability') renderMyAvailability();
     else if(s==='secretaries') renderSecretaries();
@@ -2256,12 +2261,11 @@ function refreshCurrent(){
   else if(section==='customers') renderCustomers();
   else if(section==='technicians') renderTechnicians();
   else if(section==='reviews') renderReviews();
-  else if(section==='calls') renderCalls();
-  else if(section==='callanalytics') renderCallAnalytics();
+  // Re-rendering the hub, not the child directly, so the tab row comes back with
+  // it. Calling the child alone would repaint the screen without its tabs.
+  else if(section==='callhub') renderCallHub();
   else if(section==='gallery') renderGallery();
-  else if(section==='analytics') renderAnalytics();
-  else if(section==='handyman') renderHandymanAnalytics();
-  else if(section==='webanalytics') renderWebAnalytics();
+  else if(section==='analyticshub') renderAnalyticsHub();
   else if(section==='payroll') renderPayroll();
   else if(section==='myavailability') renderMyAvailability();
   else if(section==='secretaries') renderSecretaries();
@@ -4488,7 +4492,7 @@ async function renderAnalytics(scope){
 
   await loadAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
-  pollTimer=setInterval(()=>{ if(document.hidden) return; if((section==='analytics'||section==='handyman') && !anaLoading) loadAnalytics(); }, 90000);
+  pollTimer=setInterval(()=>{ if(document.hidden) return; if((onScreen('analytics')||onScreen('handyman')) && !anaLoading) loadAnalytics(); }, 90000);
 }
 
 async function loadAnalytics(){
@@ -4844,7 +4848,7 @@ async function renderWebAnalytics(){
   });
   await loadWebAnalytics();
   if(pollTimer){ clearInterval(pollTimer); }
-  pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='webanalytics' && !webLoading) loadWebAnalytics(); }, 90000);
+  pollTimer=setInterval(()=>{ if(document.hidden) return; if(onScreen('webanalytics') && !webLoading) loadWebAnalytics(); }, 90000);
 }
 
 async function loadWebAnalytics(){
@@ -6621,6 +6625,61 @@ const AUDIT_LABELS={
   explained_card_hold:'Explained the card only holds the slot',
   offered_estimate:'Offered the estimate properly',
 };
+// ── Section hubs ─────────────────────────────────────────────────────────────
+// Four call screens and three analytics screens were seven sidebar buttons. They
+// are now two, each opening a tab row over the SAME render functions, which are
+// untouched: the hub awaits the child, then injects the tab row at the top of
+// whatever markup it produced. Wrapping rather than rewriting means the child
+// screens keep their own headers, filters and behavior exactly as before, and
+// nothing downstream had to learn about tabs.
+//
+// Tabs are filtered per login, not just hidden. Heather (Handy Andy secretary)
+// can see none of the call screens, so the Calls button does not render for her
+// at all; Joey sees only Review Calls, so he gets the screen with no tab row,
+// since a row with one tab is noise.
+const CALL_TABS=[
+  { id:'voicemails',  label:'Voicemails',   screen:'calls',         show:()=>role==='owner',       render:()=>renderCalls() },
+  { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>renderReviewCalls() },
+  { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
+  { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
+];
+const ANALYTICS_TABS=[
+  { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
+  { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner', render:()=>renderHandymanAnalytics() },
+  { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
+];
+let callHubTab='voicemails', analyticsHubTab='bookings';
+// `section` is now the hub, so a bare section==='calls' silently stops matching
+// and anything hanging off it (auto-refresh polls, "am I looking at this list
+// right now" checks) quietly dies. onScreen() asks the question that is actually
+// meant: is THIS screen the one on display, hub tab included.
+function onScreen(name){
+  if(section==='callhub')      return (CALL_TABS.find(t=>t.id===callHubTab)||{}).screen===name;
+  if(section==='analyticshub') return (ANALYTICS_TABS.find(t=>t.id===analyticsHubTab)||{}).screen===name;
+  return section===name;
+}
+async function renderHub(tabs, activeId, onPick){
+  const view=document.getElementById('view');
+  const vis=tabs.filter(t=>t.show());
+  if(!vis.length){ view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
+  const cur=vis.find(t=>t.id===activeId) || vis[0];
+  await cur.render();
+  if(vis.length<2) return cur.id;   // one screen is just that screen, no tab row
+  const bar=`<div class="hub-tabs">`+vis.map(t=>
+    `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
+  // The child owns .wrap; putting the row inside it keeps the page's existing
+  // horizontal padding instead of a full-bleed bar that lines up with nothing.
+  const wrap=view.querySelector('.wrap')||view;
+  wrap.insertAdjacentHTML('afterbegin', bar);
+  wrap.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
+  return cur.id;
+}
+async function renderCallHub(){
+  callHubTab = await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); }) || callHubTab;
+}
+async function renderAnalyticsHub(){
+  analyticsHubTab = await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); }) || analyticsHubTab;
+}
 let _cauRange='30';
 async function renderCallAudit(){
   const view=document.getElementById('view');
@@ -7173,7 +7232,7 @@ function paintCallBanner(call){
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
   try{
-    const d=(section==='calls'&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
+    const d=(onScreen('calls')&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
@@ -7187,7 +7246,7 @@ async function refreshCallsBadge(){
 // in the background so it costs nothing.
 setInterval(()=>{
   if(document.hidden||!current) return;
-  if(section==='calls') renderCalls();
+  if(onScreen('calls')) renderCalls();
   else refreshCallsBadge();
 }, 20000);
 
@@ -9623,7 +9682,7 @@ function ndpChartHtml(cached){
   if(!cached) return `<div class="gstat-s" style="margin-top:8px;">Loading…</div>`;
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
   const svg=incomeChartSvg(history, 1500, 'week', 'days', 44);
-  return `<div style="overflow-x:auto;width:100%;">${svg}</div>`;
+  return `<div class="ndp-scroll">${svg}</div>`;
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
@@ -9709,8 +9768,8 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
   try{
     if(section==='schedule' && calMode==='jobs') pollScheduleIfChanged();
-    else if(section==='analytics'||section==='handyman'){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
-    else if(section==='webanalytics'){ if(typeof loadWebAnalytics==='function' && !webLoading) loadWebAnalytics(); }
+    else if(onScreen('analytics')||onScreen('handyman')){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
+    else if(onScreen('webanalytics')){ if(typeof loadWebAnalytics==='function' && !webLoading) loadWebAnalytics(); }
   }catch(_){/* refresh-on-return is best-effort */}
 });
 
@@ -10455,7 +10514,7 @@ function cwWireLadderCommon(scope){
       cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
       await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
       closeCallWiz({resolved:true}); toast('Call logged.');
-      if(section==='calls') renderCalls();
+      if(onScreen('calls')) renderCalls();
     }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
   });
 }
@@ -11704,7 +11763,7 @@ async function renderCallWiz(){
         cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
         await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:res }});
         closeCallWiz({resolved:true}); toast('Call logged.');
-        if(section==='calls') renderCalls();
+        if(onScreen('calls')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
     cwWireBack(()=>{
