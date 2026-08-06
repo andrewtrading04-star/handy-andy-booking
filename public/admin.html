@@ -9244,10 +9244,14 @@ const AVG_SCALE_MAX=500;      // bars are full at $500 (fixed scale, not relativ
 function avgTicketBoxHtml(pf, r){
   const useCache = avgTicketRange!=='7d' && avgTicketCache[avgTicketRange];
   const abs = useCache ? avgTicketCache[avgTicketRange].avg_by_slug : (pf && pf.avg_by_slug);
-  const rangeBtn=(val,label)=>`<button type="button" onclick="avgTicketSetRange('${val}')" style="background:${avgTicketRange===val?'#fff':'rgba(255,255,255,.08)'};border:1px solid rgba(255,255,255,.18);color:${avgTicketRange===val?'#0b1220':'#fff'};border-radius:6px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;">${label}</button>`;
-  const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">`+
+  // Same .ndp-seg pill toggle Income/Profit/Net Daily Profit already use
+  // (orange-on-dark, not this box's old one-off white-on-dark), and stacked
+  // under the label instead of forced onto the same row, which is what was
+  // pushing "All time" past the edge of the box on a phone-width screen.
+  const rangeBtn=(val,label)=>`<button type="button" onclick="avgTicketSetRange('${val}')" class="${avgTicketRange===val?'on':''}">${label}</button>`;
+  const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">`+
       `<span class="gstat-l">Avg ticket</span>`+
-      `<span style="display:flex;gap:5px;flex:0 0 auto;">${rangeBtn('7d','7 days')}${rangeBtn('30d','30 days')}${rangeBtn('all','All time')}</span>`+
+      `<div class="ndp-seg">${rangeBtn('7d','7 days')}${rangeBtn('30d','30 days')}${rangeBtn('all','All time')}</div>`+
     `</div>`;
   if(!abs) return `<div class="gstat" id="avgTicketBox">${header}<div class="gstat-s" style="margin:6px 0;">Loading…</div></div>`;
   const items=[
