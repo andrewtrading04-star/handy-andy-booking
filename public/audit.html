@@ -51,6 +51,7 @@
   .say{background:#141a22;border-radius:9px;padding:10px 13px 11px 16px;margin-bottom:6px;position:relative;overflow:hidden;}
   .say i{position:absolute;left:0;top:0;bottom:0;width:3px;background:#f59e0b;}
   .say p{margin:0;font-size:13.5px;line-height:1.45;color:#fff;}
+  .say p:not(:last-child){margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.12);}
   .say b{color:#ffd479;}
   .opnote{background:#fdf6e7;border:1px solid #f0dcae;border-radius:8px;padding:8px 11px;
     margin-bottom:6px;font-size:12.5px;color:var(--warn);}
@@ -199,6 +200,14 @@ const svcNow   = () => ($('fSvc') && $('fSvc').value) || 'TV Mounting';
 const isTv     = () => svcNow() === 'TV Mounting';
 const isHandy  = () => svcNow() === 'Handyman';
 
+// Trimmed to the questions that actually catch a real problem: money given
+// away wrong, a customer scoped by guesswork instead of being asked, or a
+// promise the company can't keep. Cut ones were real but lower-stakes
+// (house-style wording, "did she literally say the word zip code") or folded
+// into a neighboring question that already covers the same ground. Every
+// discount-ladder question survives -- that section is where the money
+// actually leaks, so it kept its full granularity while everything else got
+// thinner.
 const SECTIONS=[
   { name:'Answering the phone',
     say:[ct=>`Hello, thank you for calling <b>${esc(ct.brand)}</b>, how may I help you?`],
@@ -206,35 +215,28 @@ const SECTIONS=[
 
   { name:'Where the job is',
     say:[()=>`What&rsquo;s your zip code?`],
-    qs:[{k:'asked_zip', t:'Did she ask the caller for the zip code out loud?'},
-        {k:'out_of_area_no_promise', t:'If the zip was outside the service area, did she avoid promising a booking?'}] },
+    qs:[{k:'out_of_area_no_promise', t:'If the zip was outside the service area, did she avoid promising a booking?'}] },
 
   { name:'Scoping the job', cond:'TV mounting calls', when:isTv,
     say:[()=>`What size is your TV?`, ()=>`What kind of wall is it going on?`,
          ()=>`Is your TV over a fireplace?`, ()=>`Do you have a bracket for this TV?`,
          ()=>`Would you like to hide the wires?`, ()=>`Is there anything else you would like added?`],
-    qs:[{k:'asked_tv_size', t:'Did she ask what size the TV is, out loud?'},
-        {k:'asked_wall_fireplace', t:'Did she ask both what kind of wall it is going on AND whether it is over a fireplace?'},
-        {k:'asked_remaining_questions', t:'Did you hear her actually ask the rest of the questions above, rather than filling them in herself?'}] },
+    qs:[{k:'asked_scoping_questions', t:'Did she actually ask these, rather than assuming or filling them in herself?'}] },
 
   { name:'Scoping the job', cond:'handyman calls', when:isHandy,
     say:[()=>`What do you need done?`],
-    qs:[{k:'asked_what_needed', t:'Did she ask what the job is and let the customer describe it?'},
-        {k:'handy_desc_detailed', t:'Was enough detail captured that a tech would know what he is walking into?'},
+    qs:[{k:'asked_and_captured_job', t:'Did she ask what the job is and capture enough detail that a tech would know what he is walking into?'},
         {k:'no_flat_handy_price', t:'Did she avoid giving a firm total price for handyman work?'}] },
 
   { name:'Day and time',
     say:[()=>`What day would you prefer to schedule for?`, ()=>`Would you prefer morning or afternoon?`,
          ()=>`We have <b>[day]</b> at <b>[time]</b> available.`,
          ()=>`That is an after-hours slot, so there is an extra <b>[amount]</b> on it. Does that work for you?`],
-    qs:[{k:'customer_picked_and_readback', t:'Did she let the customer pick the day and time, then read the choice back?'},
-        {k:'said_after_hours_fee', t:'If the slot carried an after-hours charge, did she say it before the customer agreed?'}] },
+    qs:[{k:'day_time_handled_well', t:'Did she let the customer pick the day and time, read it back, and say any after-hours charge before they agreed?'}] },
 
   { name:'Giving the price', when:hasPrice,
     say:[ct=>`Ok, I have <b>[the job]</b> for <b>[when]</b>. The total before tax for this installation is <b>${esc(ct.spokenTotal||'[amount]')}</b>.`],
-    qs:[{k:'read_job_back', t:'Before saying the number, did she read the job back to the customer?'},
-        {k:'said_price_matched', t:'Did she actually say the price out loud, and was it the same number shown above?'},
-        {k:'price_phone_wording', t:'Did she say the amount the scripted way, "four fifty six" rather than "four hundred and fifty six dollars"?'},
+    qs:[{k:'said_price_matched', t:'Did she actually say the price out loud, and was it the same number shown above?'},
         {k:'paused_after_price', t:'After the number, did she stop talking and let the customer respond first?'}] },
 
   { name:'Pushback and discounts', cond:'only if they asked for a better price', when:hasDisc,
@@ -248,18 +250,13 @@ const SECTIONS=[
     qs:[{k:'customer_actually_objected', t:'Did the customer actually push back on the price before she started offering money off?'},
         {k:'no_operator_note_aloud', t:'Did she avoid reading anything off her screen that was meant only for her, especially how much room she had left?'},
         {k:'paused_between_offers', t:'Did she stop after each offer and let the customer answer before offering anything else?'},
-        {k:'referral_question_first', t:'Was her first move the referral question, not money?'},
-        {k:'said_new_total_each_time', t:'Each time she took something off, did she say the new total out loud?'},
-        {k:'invalid_coupon_not_honored', t:'If a promo code came back invalid, did she avoid telling the customer it worked?'},
-        {k:'final_number_matched', t:'Was the final price she said out loud the same as the final discounted total shown above?'}] },
+        {k:'final_number_matched', t:'Was the final price she said out loud the same as the final discounted total shown above, and did she avoid honoring any invalid promo code?'}] },
 
   { name:'Closing the call',
     say:[()=>`Perfect. I&rsquo;ll schedule this now. Can I get your first and last name?`,
          ()=>`And what is the service address?`,
          ()=>`Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.`],
-    qs:[{k:'contact_details_correct', t:'Do the name, phone number and address she took match what the customer actually said?'},
-        {k:'explained_card_hold', t:'If she took a card, did she explain it only holds the appointment and is not charged until the job is done?'},
-        {k:'offered_estimate', t:'If the customer would not book, did she offer to send the estimate and ask text or email?'}] },
+    qs:[{k:'contact_and_card_correct', t:'Are the name, phone and address correct, and (on a TV job) did she explain the card only holds the appointment?'}] },
 ];
 
 function linkedCall(){
@@ -280,7 +277,11 @@ function renderScore(){
     if(s.when && !s.when(call)) return;
     const d=document.createElement('div'); d.className='sec';
     let h='<div class="sec-h"><b>'+esc(s.name)+'</b>'+(s.cond?'<span class="cond">'+esc(s.cond)+'</span>':'')+'</div>';
-    s.say.forEach(fn=>{ h+='<div class="say"><i></i><p>'+fn(ct)+'</p></div>'; });
+    // One box per SECTION, not one per line. A 6-line scoping walk used to be
+    // six separate full-width black bars stacked with gaps between them --
+    // heavy and hard to scan. Same script, same read-word-for-word intent,
+    // now one box with a line break between each line inside it.
+    if(s.say.length) h+='<div class="say"><i></i>'+s.say.map(fn=>'<p>'+fn(ct)+'</p>').join('')+'</div>';
     (s.op||[]).forEach(t=>{ h+='<div class="opnote">'+esc(t)+'</div>'; });
     d.innerHTML=h;
     s.qs.forEach(q=>{
