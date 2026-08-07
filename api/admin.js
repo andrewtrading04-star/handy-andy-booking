@@ -6320,7 +6320,14 @@ const rcSelFor = (cc) => `id, status, completed_at, scheduled_at, review_rating,
     service:services ( id, name ),
     line_items:booking_line_items ( name, quantity, unit_price, line_total )`;
 const RC_CALL_COLS = 'review_call_status, review_call_at, review_call_by, review_call_notes,';
-function rcMapRow(row, b) {
+function rcMapRow(row, b, zipTzMap) {
+  const zip = row.postal_code || row.customer?.postal_code || null;
+  // Where THIS customer actually is, for "is it a good time to call them right
+  // now"; separate from business_timezone below, which is about the job's own
+  // calendar day, not the live clock. Falls back to the business default (Denver
+  // for both companies) when the zip isn't in service_area_zips, e.g. an
+  // imported job with no address on file.
+  const zoned = (zip && zipTzMap && zipTzMap.get(zip)) || null;
   return {
     id: row.id,
     business_slug: b.slug,
@@ -6330,9 +6337,11 @@ function rcMapRow(row, b) {
     // so the browser stops computing it in whatever zone the office happens to
     // be sitting in.
     business_timezone: b.timezone || RC_TZ,
+    call_timezone: zoned ? zoned.tz : (b.timezone || RC_TZ),
+    call_area: zoned ? zoned.area : null,
     customer_name: row.customer?.name || '—',
     phone: row.customer?.phone || null,
-    zip: row.postal_code || row.customer?.postal_code || null,   // booking zip first; imported customers often have it only on the booking
+    zip,   // booking zip first; imported customers often have it only on the booking
     has_email: !!row.customer?.email,
     has_sms: !!(row.customer?.phone && row.sms_consent),
     technician_name: row.technician?.name || '—',
@@ -6358,12 +6367,41 @@ function rcMapRow(row, b) {
 // and 'callback' both mean "left a message, try again," so they share a folder.
 const RC_STATUS_TO_FOLDER = { complaint: 'complaint', promised_review: 'promised_review', voicemail: 'voicemail', callback: 'voicemail', do_not_contact: 'do_not_contact', declined: 'declined' };
 
+// Zip -> {tz, area} for one business, batched (two queries total, not one per
+// row). Handy Andy spans Mountain (Denver) and Central (Houston/Austin/DFW/San
+// Antonio) under a SINGLE business.timezone value, which is why Joey calling a
+// Houston customer at "2pm" by the office clock was actually reaching them at
+// 3pm; the real per-metro zone lives on service_areas, keyed to a zip through
+// service_area_zips, so this reads the same two tables the booking flow itself
+// uses to price a job by zip (serviceAreaIdFromPostal / areaTimezone above),
+// just batched instead of looked up one row at a time.
+async function zipTimezoneMap(db, businessId) {
+  const map = new Map();
+  const { data: areas } = await db.from('service_areas').select('id, name, timezone').eq('business_id', businessId);
+  const areaById = new Map((areas || []).map(a => [a.id, { area: a.name, tz: a.timezone }]));
+  const { data: zips } = await db.from('service_area_zips').select('postal_code, service_area_id').eq('business_id', businessId);
+  for (const z of (zips || [])) {
+    const a = areaById.get(z.service_area_id);
+    if (a && a.tz) map.set(String(z.postal_code), a);
+  }
+  return map;
+}
+
 async function reviewCalls(req, res, db, auth) {
   // Joey's (Doms) outreach tool — not part of Heather's (Handy Andy) platform.
   if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
   const folder = (req.query.folder || 'to_call').toString();
   const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
   const warnings = [];
+  // One zipTimezoneMap() per business for the whole request, not per row; both
+  // branches below (folder browsing and the to_call queue) share it.
+  const zipTzCache = new Map();
+  const zipTzFor = async (bb) => {
+    if (zipTzCache.has(bb.id)) return zipTzCache.get(bb.id);
+    const m = await zipTimezoneMap(db, bb.id);
+    zipTzCache.set(bb.id, m);
+    return m;
+  };
 
   if (folder !== 'to_call') {
     // Folder browsing (Complaints / Promised review / Voicemail / Do not
@@ -6388,11 +6426,12 @@ async function reviewCalls(req, res, db, auth) {
         .gte('review_call_at', weekStart.toISOString()).lt('review_call_at', weekEnd.toISOString())
         .order('review_call_at', { ascending: false }).limit(500);
       if (error) { console.warn('[review_calls:folder]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
+      const tzMap = await zipTzFor(b);
       for (const row of (data || [])) {
         const fkey = RC_STATUS_TO_FOLDER[row.review_call_status];
         if (!fkey) continue;
         folderCounts[fkey]++;
-        if (fkey === folder) out.push(rcMapRow(row, b));
+        if (fkey === folder) out.push(rcMapRow(row, b, tzMap));
       }
     }
     out.sort((a, c) => new Date(c.call_at || 0) - new Date(a.call_at || 0));
@@ -6426,6 +6465,7 @@ async function reviewCalls(req, res, db, auth) {
     let { data, error } = await run(RC_CALL_COLS);
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
     if (error) { console.warn('[review_calls]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
+    const tzMap = await zipTzFor(b);
     for (const row of (data || [])) {
       // Skip anyone who already left us a rating through our review filter:
       // reviewed_at is stamped whenever a customer submits ANY 1–5★ (Google-routed
@@ -6434,7 +6474,7 @@ async function reviewCalls(req, res, db, auth) {
       // rating (no submission → no reviewed_at) stays callable.
       if (row.reviewed_at != null || Number(row.review_rating) >= 4) continue;
       if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey — find it under its folder tab now
-      out.push(rcMapRow(row, b));
+      out.push(rcMapRow(row, b, tzMap));
     }
   }
   // Not-yet-called first, then most-recently-completed first.

@@ -346,6 +346,18 @@
   .rc-cmp-text:focus{outline:none;border-color:#f59e0b;}
   .rc-badge.green{background:#dcfce7;color:#15803d;}
   .rc-note{background:#fffbeb;border:1.5px solid #fde68a;border-radius:9px;padding:9px 11px;font-size:13px;color:#78350f;line-height:1.5;margin-top:8px;max-width:52ch;}
+  /* Whether it's a good time to dial THIS customer, right now, in their own
+     timezone -- deliberately louder than the small .rc-badge pills above (a
+     full-width bar, not a chip) since it has to be seen before she dials, not
+     found while scanning. Red gets a border on top of the fill; a solid-red
+     block reads as "already handled" at a glance, same visual weight as the
+     status badges, and the one color that must never be skimmed past. */
+  .rc-timeband{margin:10px 0;padding:9px 12px;border-radius:9px;font-size:13px;font-weight:700;text-align:center;}
+  .rc-timeband.red{background:#fee2e2;color:#b91c1c;border:1.5px solid #fca5a5;}
+  .rc-timeband.yellow{background:#fef3c7;color:#92400e;}
+  .rc-timeband.green{background:#dcfce7;color:#15803d;}
+  .rc-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--mute);margin:2px 0 14px;}
+  .rc-legend b{color:var(--ink-2);}
   /* ── Guided review call ── */
   /* The card is now a script Joey works top to bottom, so it stacks instead of
      splitting into a left/right two-column layout. */
@@ -6577,6 +6589,61 @@ function rcRelSpoken(iso, tz){
   return (r==='today'||r==='yesterday'||/ago$/.test(r)) ? r : ('on '+r);
 }
 function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',callback:'Call back',reviewed:'Got review',declined:'Said no thanks',do_not_contact:'Do not contact',promised_review:'Promised a review',complaint:'Had a complaint'})[s]||s; }
+// Is it a good time to call THIS customer right now, in THEIR timezone.
+// Denver is the reference clock; a Houston/Austin customer's real local time
+// runs an hour ahead of it, which is exactly the gap a single "it's 2pm, go"
+// rule misses. Computed fresh off the current instant (not the job's
+// scheduled time) and re-evaluated every render, including the periodic
+// repaint below, so a card sitting in yellow at 1:59 flips to green at 2:00
+// without a page reload.
+//   red    12:00am-9:00am and 8:00pm-12:00am -- do not contact
+//   green  2:00pm-5:00pm -- best time
+//   yellow everything else
+function rcCallBand(tz){
+  const zone=tz||'America/Denver';
+  let hh=9, mm=0;
+  try{
+    const p=new Intl.DateTimeFormat('en-US',{timeZone:zone,hour12:false,hour:'2-digit',minute:'2-digit'}).formatToParts(new Date());
+    hh=Number(p.find(x=>x.type==='hour').value)%24; mm=Number(p.find(x=>x.type==='minute').value);
+  }catch(_){ /* bad/unknown tz string -- falls through as if it were 9:00am, a yellow hour, rather than throwing */ }
+  const mins=hh*60+mm;
+  const band = (mins<9*60 || mins>=20*60) ? 'red' : (mins>=14*60 && mins<17*60) ? 'green' : 'yellow';
+  const label = mm===0 ? `${hh%12||12}:00 ${hh<12?'AM':'PM'}` : `${hh%12||12}:${String(mm).padStart(2,'0')} ${hh<12?'AM':'PM'}`;
+  return { band, hhmm:label };
+}
+function rcTimeBandLabel(band, hhmm, area){
+  const a=esc(area);
+  if(band==='red')    return `🔴 Do not contact · ${hhmm} in ${a}`;
+  if(band==='green')  return `🟢 Best time to call · ${hhmm} in ${a}`;
+  return `🟡 OK to call · ${hhmm} in ${a}`;
+}
+function rcTimeBandHtml(r){
+  const tz=r.call_timezone||r.business_timezone;
+  const area=r.call_area||r.business_name||'their area';
+  const {band,hhmm}=rcCallBand(tz);
+  return `<div class="rc-timeband ${band}" data-rc-tzcard="${esc(tz)}" data-rc-area="${esc(area)}">${rcTimeBandLabel(band,hhmm,area)}</div>`;
+}
+// Repaints only the time-band pills already on screen, in place, every minute
+// -- never a full re-render, which would blow away a note she's mid-typing or
+// reset her scroll position. Scoped to Review Calls: started in
+// paintReviewCalls, and it's a no-op once she's navigated elsewhere since the
+// query just finds nothing.
+let _rcClockTimer=null;
+function rcRepaintTimeBands(){
+  // Self-cleaning rather than hooked to every possible way off this screen
+  // (navTo, a Calls-hub tab click, the business switcher). onScreen() is
+  // already the one source of truth for "is Review Calls what's actually on
+  // screen right now" -- ask it instead of trying to catch each exit.
+  if(!onScreen('reviewcalls')){ if(_rcClockTimer){ clearInterval(_rcClockTimer); _rcClockTimer=null; } return; }
+  document.querySelectorAll('[data-rc-tzcard]').forEach(el=>{
+    const {band,hhmm}=rcCallBand(el.dataset.rcTzcard);
+    const area=el.dataset.rcArea||'their area';
+    el.className='rc-timeband '+band;
+    // innerHTML, not textContent: the label carries an emoji + escaped text,
+    // same as the initial render, so a repaint can't drift from first paint.
+    el.innerHTML=rcTimeBandLabel(band,hhmm,area);
+  });
+}
 // ── Call Performance ───────────────────────────────────────────────────────
 // Everything the phone script records, rolled up. The headline is calls taken
 // vs calls booked; the per-person table answers who is converting and who is
@@ -7290,6 +7357,8 @@ function paintReviewCalls(){
     <div class="rc-seg" style="margin-bottom:14px;">
       ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('declined','No thanks')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
     </div>
+    <div class="rc-legend"><b>Call times, in the customer's own timezone:</b>
+      🔴 Do not contact 12am-9am and 8pm-12am &nbsp; 🟢 Best 2pm-5pm &nbsp; 🟡 OK the rest of the day</div>
     ${isToCall?`<div class="rc-hero">
       <div class="rc-hero-hi">${esc(rcGreeting())}</div>
       <div class="rc-hero-sub">Customers from both companies who finished a job and have not left a review yet. The opener on each card is already filled in.</div>
@@ -7342,6 +7411,12 @@ function paintReviewCalls(){
   }));
   const badge=document.getElementById('rcBadge');
   if(badge){ if(isToCall && toCall>0){ badge.textContent=toCall; badge.style.display=''; } else if(isToCall) badge.style.display='none'; }
+  // Keep the time-band pills honest while she works the list without a full
+  // reload. Cleared and restarted on every paint rather than left running
+  // forever, since navigating elsewhere replaces this view's DOM entirely and
+  // an uncleared interval would just keep ticking against nothing.
+  if(_rcClockTimer) clearInterval(_rcClockTimer);
+  _rcClockTimer=setInterval(rcRepaintTimeBands, 60000);
 }
 // Read-only history card for the folder views (Complaints / Promised review /
 // Voicemail / Do not contact) — no outcome buttons (that's already resolved),
@@ -7359,6 +7434,9 @@ function rcFolderCard(r){
   const resend=(r.has_email && r.has_review_link && !r.reviewed && r.call_status!=='do_not_contact')
     ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
   const noteBox = r.call_notes ? `<div class="rc-note">“${esc(r.call_notes)}”</div>` : '';
+  // No point telling her whether it's a good time to dial a number she is
+  // already permanently blocked from dialing.
+  const timeband = r.call_status!=='do_not_contact' ? rcTimeBandHtml(r) : '';
   return `<div class="rc-card">
     <div class="rc-main">
       <div class="rc-name">${esc(r.customer_name)} ${biz}</div>
@@ -7368,6 +7446,7 @@ function rcFolderCard(r){
       ${noteBox}
     </div>
     <div class="rc-actions">
+      ${timeband}
       ${callBtn}
       ${resend}
     </div>
@@ -7428,8 +7507,10 @@ function rcCard(r){
     ${rcVoicemailRow(r)}
     ${badges.length?`<div class="rc-badges">${badges.join('')}</div>`:''}`;
 
-  // 2. the opener, already filled in
-  h+=`<div class="rc-step">1 · Say this</div>
+  // 2. the opener, already filled in -- time band sits right above the actual
+  // dial action, since that's the one moment it needs to be seen.
+  h+=`${rcTimeBandHtml(r)}
+    <div class="rc-step">1 · Say this</div>
     <div class="rc-say"><i></i><p>${esc(rcScript(r))}</p></div>
     ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
 
