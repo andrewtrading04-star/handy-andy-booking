@@ -15,7 +15,7 @@
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-  .wrap{max-width:780px;margin:0 auto;padding:20px 16px 80px;}
+  .wrap{max-width:920px;margin:0 auto;padding:20px 16px 80px;}
   h1{font-size:19px;font-weight:800;margin:0;}
   h2{font-size:15px;font-weight:800;margin:0;}
   .sub{font-size:13px;color:var(--mute);}
@@ -57,12 +57,26 @@
     margin-bottom:6px;font-size:12.5px;color:var(--warn);}
 
   /* Scorecard */
-  .sec{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
-  .sec-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;}
-  .sec-h b{font-size:14px;}
+  /* Script on the left, questions on the right, paired row by row so a
+     section's own questions never drift from its own script as you scroll --
+     each section contributes one full-width header (spans both columns) then
+     one script cell and one question cell, which CSS Grid's normal row-major
+     auto-placement lines up in the same row without any extra markup. */
+  #score{display:grid;grid-template-columns:1.3fr 1fr;gap:0 18px;}
+  .sr-head{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    padding-top:18px;margin-top:18px;border-top:1px solid var(--line);}
+  .sr-head:first-child{padding-top:0;margin-top:0;border-top:none;}
+  .sr-head b{font-size:14px;}
+  .sr-script{padding-top:9px;}
+  .sr-qs{padding-top:9px;}
   .cond{font-size:11px;font-weight:700;color:var(--mute);background:var(--line2);padding:2px 7px;border-radius:6px;}
-  .q{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line2);}
+  .q{padding:8px 0;border-top:1px solid var(--line2);}
   .q:first-of-type{border-top:none;}
+  .q .qt{margin-bottom:8px;}
+  @media (max-width:720px){
+    #score{grid-template-columns:1fr;}
+    .sr-qs{padding-top:4px;margin-bottom:4px;}
+  }
   .q .qt{font-size:13.5px;line-height:1.4;}
   .q .qt b{background:#fff3cd;padding:0 3px;border-radius:3px;}
   .yna{display:flex;gap:4px;flex:none;}
@@ -269,17 +283,33 @@ function ctxFor(call){
 function renderScore(){
   const call=linkedCall(), ct=ctxFor(call), w=$('score');
   w.innerHTML='';
-  SECTIONS.forEach((s,si)=>{
+  SECTIONS.forEach(s=>{
     if(s.when && !s.when(call)) return;
-    const d=document.createElement('div'); d.className='sec';
-    let h='<div class="sec-h"><b>'+esc(s.name)+'</b>'+(s.cond?'<span class="cond">'+esc(s.cond)+'</span>':'')+'</div>';
+
+    // Three grid items per section: one full-width header, then a script
+    // cell and a questions cell. #score is a 2-column grid, so plain
+    // row-major auto-placement lines the script and its own questions up in
+    // the same row -- she can read straight down the left column and answer
+    // straight down the right without the two ever drifting apart, even
+    // though sections vary a lot in how much script vs how many questions
+    // they carry (six lines/one question here, one line/four questions
+    // there).
+    const head=document.createElement('div'); head.className='sr-head';
+    head.innerHTML='<b>'+esc(s.name)+'</b>'+(s.cond?'<span class="cond">'+esc(s.cond)+'</span>':'');
+    w.appendChild(head);
+
+    const scriptCol=document.createElement('div'); scriptCol.className='sr-script';
+    let sh='';
     // One box per SECTION, not one per line. A 6-line scoping walk used to be
     // six separate full-width black bars stacked with gaps between them --
     // heavy and hard to scan. Same script, same read-word-for-word intent,
     // now one box with a line break between each line inside it.
-    if(s.say.length) h+='<div class="say"><i></i>'+s.say.map(fn=>'<p>'+fn(ct)+'</p>').join('')+'</div>';
-    (s.op||[]).forEach(t=>{ h+='<div class="opnote">'+esc(t)+'</div>'; });
-    d.innerHTML=h;
+    if(s.say.length) sh+='<div class="say"><i></i>'+s.say.map(fn=>'<p>'+fn(ct)+'</p>').join('')+'</div>';
+    (s.op||[]).forEach(t=>{ sh+='<div class="opnote">'+esc(t)+'</div>'; });
+    scriptCol.innerHTML=sh;
+    w.appendChild(scriptCol);
+
+    const qCol=document.createElement('div'); qCol.className='sr-qs';
     s.qs.forEach(q=>{
       const row=document.createElement('div'); row.className='q';
       row.innerHTML='<div class="qt">'+esc(q.t)+'</div>';
@@ -292,9 +322,9 @@ function renderScore(){
           b.className='on-'+v; };
         bs.appendChild(b);
       });
-      row.appendChild(bs); d.appendChild(row);
+      row.appendChild(bs); qCol.appendChild(row);
     });
-    w.appendChild(d);
+    w.appendChild(qCol);
   });
 }
 
