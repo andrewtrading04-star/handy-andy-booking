@@ -2218,7 +2218,7 @@ function navTo(s){
   // The old per-screen names still route, so bookmarks and any in-app jump that
   // targets one keep working; they just resolve to the hub with that tab open.
   const HUB_ALIAS={reviewcalls:['callhub','reviewcalls'],callanalytics:['callhub','performance'],
-    callaudit:['callhub','audit'],calls:['callhub','voicemails'],
+    callaudit:['callhub','audit'],
     analytics:['analyticshub','bookings'],handyman:['analyticshub','handyman'],webanalytics:['analyticshub','website']};
   if(HUB_ALIAS[s]){ const [hub,tab]=HUB_ALIAS[s]; if(hub==='callhub') callHubTab=tab; else analyticsHubTab=tab; s=hub; }
   // Hiding a nav button was never the gate. A hub with nothing visible in it
@@ -5916,10 +5916,6 @@ async function renderOther(){
         <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Heather's and Joey's weekly work/off schedule, plus every schedule change they make.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherSecCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
-      <div id="otherCalls" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div><div style="font-weight:700;">📨 Calls</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Voicemails from the office phone, with transcripts, plus calls logged through "Take a Call".</div></div>
-        <div style="display:flex;align-items:center;gap:8px;"><span id="otherCallsCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
-      </div>
       <div id="otherCoupons" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🎟️ Coupons</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every promo code the website and the phone script honor — add, reprice, retire, and see which ones are actually used.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
@@ -5937,18 +5933,12 @@ async function renderOther(){
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
   document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
-  document.getElementById('otherCalls').onclick=()=>navTo('calls');
   document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();
   document.getElementById('otherCoupons').onclick=()=>renderCoupons();
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
-  let dispN=0, secN=0, callN=0;
-  try{
-    const c=await api('calls',{ params:{ limit:1 }});
-    callN=Number(c.open_count)||0;
-    const el=document.getElementById('otherCallsCount'); if(el) el.textContent=callN?`${callN} to call back`:'';
-  }catch(_){}
+  let dispN=0, secN=0;
   try{
     const d=await api('disputes',{ params:{ business:current.slug }});
     dispN=(d.disputes||[]).length;
@@ -5960,7 +5950,7 @@ async function renderOther(){
     const c=document.getElementById('otherSecCount'); if(c) c.textContent=secN?`${secN} new`:'';
   }catch(_){}
   const badge=document.getElementById('dispBadge');
-  if(badge){ const total=dispN+secN+callN; if(total){ badge.textContent=total; badge.style.display=''; } else badge.style.display='none'; }
+  if(badge){ const total=dispN+secN; if(total){ badge.textContent=total; badge.style.display=''; } else badge.style.display='none'; }
 }
 
 // ── Widget Pricing ───────────────────────────────────────────────────────────
@@ -6638,7 +6628,6 @@ const AUDIT_LABELS={
 // at all; Joey sees only Review Calls, so he gets the screen with no tab row,
 // since a row with one tab is noise.
 const CALL_TABS=[
-  { id:'voicemails',  label:'Voicemails',   screen:'calls',         show:()=>role==='owner',       render:()=>renderCalls() },
   { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
@@ -6648,7 +6637,7 @@ const ANALYTICS_TABS=[
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner', render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
 ];
-let callHubTab='voicemails', analyticsHubTab='bookings';
+let callHubTab='reviewcalls', analyticsHubTab='bookings';
 // `section` is now the hub, so a bare section==='calls' silently stops matching
 // and anything hanging off it (auto-refresh polls, "am I looking at this list
 // right now" checks) quietly dies. onScreen() asks the question that is actually
