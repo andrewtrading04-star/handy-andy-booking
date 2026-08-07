@@ -213,10 +213,6 @@ const SECTIONS=[
     say:[ct=>`Hello, thank you for calling <b>${esc(ct.brand)}</b>, how may I help you?`],
     qs:[{k:'greet_named_business', t:'Did she open by naming the business and offering to help, before anything else?'}] },
 
-  { name:'Where the job is',
-    say:[()=>`What&rsquo;s your zip code?`],
-    qs:[{k:'out_of_area_no_promise', t:'If the zip was outside the service area, did she avoid promising a booking?'}] },
-
   { name:'Scoping the job', cond:'TV mounting calls', when:isTv,
     say:[()=>`What size is your TV?`, ()=>`What kind of wall is it going on?`,
          ()=>`Is your TV over a fireplace?`, ()=>`Do you have a bracket for this TV?`,
