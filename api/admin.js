@@ -7741,10 +7741,16 @@ async function auditReport(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
   const days = Math.min(180, Math.max(1, parseInt(req.query.days, 10) || 30));
+  // offset shifts the whole window back in whole days: 0 = ending today (the
+  // default for every multi-day range), -1 = ending yesterday. Combined with
+  // days=1 this is what makes "Today" and "Yesterday" single-day views rather
+  // than a 1-day slice of a rolling window; every other range stays anchored
+  // to today the way it always has.
+  const offset = Math.max(-365, Math.min(0, parseInt(req.query.offset, 10) || 0));
   const { data: bizRows } = await db.from('businesses').select('id, slug, timezone').eq('active', true);
   const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
   const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
-  const from = dayStr(-(days - 1)), to = dayStr(0);
+  const to = dayStr(offset), from = dayStr(offset - (days - 1));
 
   const [{ data: dayRows }, { data: audits }] = await Promise.all([
     db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
@@ -7757,8 +7763,8 @@ async function auditReport(req, res, db, auth) {
 
   // Scripted calls over the same window, bucketed by local day so they line up
   // with audit_date, which is a plain calendar date the auditor typed.
-  const start = localDayStartUTC(tz, -(days - 1));
-  const end = localDayStartUTC(tz, 1);
+  const start = localDayStartUTC(tz, offset - (days - 1));
+  const end = localDayStartUTC(tz, offset + 1);
   const { data: liveCalls } = await db.from('calls')
     .select('id, occurred_at, handled_by')
     .eq('kind', 'live')
@@ -7784,7 +7790,7 @@ async function auditReport(req, res, db, auth) {
   // Per-day series so a bad week is visible rather than averaged away.
   const daily = [];
   for (let i = 0; i < days; i++) {
-    const d = dayStr(-(days - 1) + i);
+    const d = dayStr(offset - (days - 1) + i);
     const counted = countedByDay[d];
     daily.push({
       date: d,

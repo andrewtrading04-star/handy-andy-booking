@@ -6736,17 +6736,28 @@ async function renderCallHub(){
 async function renderAnalyticsHub(){
   analyticsHubTab = await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); }) || analyticsHubTab;
 }
+// days/offset per the auditReport API: offset shifts the window back in whole
+// days (0 = ending today), days is the window size. Today and Yesterday are
+// both a 1-day window, just anchored on a different day -- that's what makes
+// them single days rather than a 1-day slice of a rolling range.
+const CAU_RANGES={
+  today:     { days:1,  offset:0,  label:'Today' },
+  yesterday: { days:1,  offset:-1, label:'Yesterday' },
+  '7':       { days:7,  offset:0,  label:'Past 7 days' },
+  '30':      { days:30, offset:0,  label:'Last 30 days' },
+};
 let _cauRange='30';
 async function renderCallAudit(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   let d;
-  try{ d=await api('audit_report',{ params:{ business:current.slug, days:_cauRange }}); }
+  const rc=CAU_RANGES[_cauRange]||CAU_RANGES['30'];
+  try{ d=await api('audit_report',{ params:{ business:current.slug, days:rc.days, offset:rc.offset }}); }
   catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
 
   const v=d.volume||{};
-  const rangeBtns=[['7','Last 7 days'],['30','Last 30 days'],['90','90 days']].map(([x,l])=>
-    `<button type="button" class="seg-btn ${_cauRange===x?'on':''}" data-cau="${x}">${l}</button>`).join('');
+  const rangeBtns=Object.entries(CAU_RANGES).map(([x,r])=>
+    `<button type="button" class="seg-btn ${_cauRange===x?'on':''}" data-cau="${x}">${r.label}</button>`).join('');
   const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
       <span class="gstat-l">${esc(label)}</span>
       <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
