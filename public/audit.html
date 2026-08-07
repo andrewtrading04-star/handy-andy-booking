@@ -137,7 +137,8 @@
         <select id="fSvc"><option value="TV Mounting">TV mounting</option><option value="Handyman">Handyman</option><option value="unknown">Never got that far</option></select>
       </div>
 
-      <select id="fCall" style="width:100%;margin-bottom:8px;"></select>
+      <select id="fCall" style="width:100%;margin-bottom:3px;"></select>
+      <p class="sub" style="margin:0 0 8px;">If one of these matches the call you're listening to by time and who answered, pick it, it fills in details below. If none match, leave it on "No scripted call for this one" -- that's the right answer for a call handled without the script.</p>
       <div id="ctx"></div>
 
       <div id="score"></div>
@@ -355,12 +356,17 @@ function paintRecon(){
     el.className='cnt'+(n>0?' has':'');
   });
   const logged=(data.calls||[]).length, r=$('recon'), gap=tot-logged;
+  // This adds up EVERY line's box above, not just the one you just typed
+  // into -- there's no way to tell which phone line a scripted call came in
+  // on, so the comparison can only be done for the whole day, across every
+  // number combined. Say that plainly here, since "you counted 10" right
+  // after editing one line's count reads as if it's about that line alone.
   if(gap>0){
     r.className='recon gap';
-    r.innerHTML='You counted <b>'+tot+'</b>. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+'. <b>'+gap+'</b> handled without the script.';
+    r.innerHTML='Across all lines today, you counted <b>'+tot+'</b> calls. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+' (any line). <b>'+gap+'</b> '+(gap===1?'call was':'calls were')+' handled without the script.';
   }else{
     r.className='recon clear';
-    r.innerHTML='You counted <b>'+tot+'</b>. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+'.'+(tot?' Every call went through the script.':'');
+    r.innerHTML='Across all lines today, you counted <b>'+tot+'</b> calls. The system logged <b>'+logged+'</b> scripted '+(logged===1?'call':'calls')+' (any line).'+(tot?' Every call went through the script.':'');
   }
 }
 
