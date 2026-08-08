@@ -12558,6 +12558,14 @@ function renderNoChargeStep(){
 function nbLiftingKind(label){
   const l=(label||'').toLowerCase();
   if(/under\s*70/.test(l)) return 'under70';
+  // "2 technicians" is the relabeled 70-85" option (was "...customer cannot
+  // help lift"). Checked before the generic 'can' pattern below so it can
+  // never be misread as the $0 "can help lift" choice, and it must return
+  // 'cannot', not fall through to the 'big' default -- 'big' means the 86"+
+  // option, and once misclassified as that this option only shows for a TV
+  // 86" or larger, disappearing entirely for the 70-85" TVs it actually
+  // belongs to (found live, mid-call, the day this label shipped).
+  if(/\d\s*technicians?\b/.test(l)) return 'cannot';
   if(/can\s*not|cannot|can'?t/.test(l)) return 'cannot';
   if(/can\s*help|help\s*lift|can\s*lift/.test(l)) return 'can';
   return 'big';   // "86 inches or larger" / "85"+ (second technician required)"
