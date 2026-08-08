@@ -3655,6 +3655,34 @@ async function bookingUpdate(req, res, db, auth, body) {
         console.error(`[bracket] decrement failed for booking ${id}:`, e.message);
       }
     }
+
+    // Auto-decrement Apple TV brackets when this job used one -- same rule as
+    // the tech app. Stamped (appletv_bracket_deducted_at) so completing/
+    // reopening never double-deducts.
+    if (newStatus === 'completed' && !existing.metadata?.appletv_bracket_deducted_at) {
+      try {
+        const { data: liRows } = await db.from('booking_line_items')
+          .select('name, quantity').eq('booking_id', id);
+        const qty = detectAppleTvBracketQty(liRows || []);
+        if (qty > 0) {
+          let chargeTech = existing.technician_id || null;
+          try {
+            const { data: sup } = await db.from('bookings')
+              .select('bracket_supplied_by').eq('id', id).maybeSingle();
+            if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
+          } catch (_) { /* column may not exist; fall back to assigned tech */ }
+          if (chargeTech) {
+            await adjustAppleTvBracketInventory(db, biz.id, chargeTech, qty, id);
+            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+            await db.from('bookings').update({
+              metadata: { ...(cur?.metadata || existing.metadata || {}), appletv_bracket_deducted_at: now },
+            }).eq('id', id);
+          }
+        }
+      } catch (e) {
+        console.error(`[appletv_bracket] decrement failed for booking ${id}:`, e.message);
+      }
+    }
   }
 
   // Notify the technician when they are newly assigned to this job (only when the
@@ -9885,9 +9913,18 @@ async function bracketInventory(req, res, db, auth) {
   const bizId = biz.id;
 
   let { data: inv, error } = await db.from('bracket_inventory')
-    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
+    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, appletv_bracket_qty, updated_at,
              technician:technicians ( id, name )`)
     .eq('business_id', bizId);
+  // appletv_bracket_qty arrives with migration 0087; degrade to the pre-0087
+  // select, then the pre-0039 select, so this endpoint never breaks on an
+  // environment that hasn't run every migration yet.
+  if (error && /appletv_bracket_qty/.test(error.message || '')) {
+    ({ data: inv, error } = await db.from('bracket_inventory')
+      .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
+               technician:technicians ( id, name )`)
+      .eq('business_id', bizId));
+  }
   // wire_plate_qty arrives with migration 0039; degrade gracefully if not applied yet.
   if (error && /wire_plate_qty/.test(error.message || '')) {
     ({ data: inv, error } = await db.from('bracket_inventory')
@@ -9952,6 +9989,7 @@ async function bracketInventory(req, res, db, auth) {
       total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
       wire_plate: i.wire_plate_qty || 0,
       wire_plate_tracked: bizPlateTracked || (i.wire_plate_qty || 0) > 0,
+      appletv_bracket: i.appletv_bracket_qty || 0,
       updated_at: i.updated_at,
     })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
   });
@@ -10163,8 +10201,16 @@ async function bracketUpdate(req, res, db, auth, body) {
   const hasWirePlateCol = Object.prototype.hasOwnProperty.call(inv, 'wire_plate_qty');
   const wirePlate = (inv.wire_plate_qty || 0) + (body.wire_plate_delta || 0);
 
+  // Apple TV brackets (migration 0087). No email pipeline for these -- Amazon's
+  // order-confirmation email for this product carries no distinguishing text,
+  // so a tech's stock is credited by typing the new total here, same as wire
+  // plates, just always by hand instead of usually by the Amazon sync.
+  const wantsAppleTv = body.appletv_bracket_delta != null && body.appletv_bracket_delta !== 0;
+  const hasAppleTvCol = Object.prototype.hasOwnProperty.call(inv, 'appletv_bracket_qty');
+  const appleTv = (inv.appletv_bracket_qty || 0) + (body.appletv_bracket_delta || 0);
+
   // Ensure no negative inventory
-  if (flat < 0 || tilting < 0 || fullMotion < 0 || (wantsWirePlate && wirePlate < 0)) {
+  if (flat < 0 || tilting < 0 || fullMotion < 0 || (wantsWirePlate && wirePlate < 0) || (wantsAppleTv && appleTv < 0)) {
     return res.status(400).json({ error: 'Insufficient inventory for this operation' });
   }
 
@@ -10175,12 +10221,13 @@ async function bracketUpdate(req, res, db, auth, body) {
     full_motion_qty: fullMotion,
   };
   if (wantsWirePlate && hasWirePlateCol) patch.wire_plate_qty = wirePlate;
+  if (wantsAppleTv && hasAppleTvCol) patch.appletv_bracket_qty = appleTv;
   const { error: e1 } = await db.from('bracket_inventory').update(patch)
     .eq('technician_id', techId).eq('business_id', bizId);
   if (e1) throw e1;
 
   // Log usage if applicable
-  if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta || wantsWirePlate)) {
+  if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta || wantsWirePlate || wantsAppleTv)) {
     const log = {
       business_id: bizId,
       booking_id: body.booking_id || null,
@@ -10192,7 +10239,22 @@ async function bracketUpdate(req, res, db, auth, body) {
       notes: body.notes || null,
     };
     if (wantsWirePlate && hasWirePlateCol) log.wire_plate_used = Math.abs(body.wire_plate_delta || 0);
+    if (wantsAppleTv && hasAppleTvCol) log.appletv_bracket_used = Math.abs(body.appletv_bracket_delta || 0);
     await db.from('bracket_usage_logs').insert(log);
+  }
+
+  // A positive Apple TV delta from a non-usage action is a manual "these
+  // arrived" entry -- log it for a future history view even though nothing
+  // reads this table yet. Best-effort: never blocks the inventory write above,
+  // which already succeeded by this point.
+  if (wantsAppleTv && hasAppleTvCol && action !== 'usage' && body.appletv_bracket_delta > 0) {
+    try {
+      await db.from('appletv_bracket_log').insert({
+        business_id: bizId, technician_id: techId,
+        qty: body.appletv_bracket_delta, added_by: auth.name || auth.role || 'owner',
+        notes: body.notes || null,
+      });
+    } catch (e) { console.error('[appletv_bracket] arrival log failed:', e.message); }
   }
 
   return res.status(200).json({
@@ -10202,6 +10264,7 @@ async function bracketUpdate(req, res, db, auth, body) {
       tilting_qty: tilting,
       full_motion_qty: fullMotion,
       wire_plate_qty: hasWirePlateCol ? wirePlate : 0,
+      appletv_bracket_qty: hasAppleTvCol ? appleTv : 0,
       total: flat + tilting + fullMotion,
     },
   });
@@ -10298,6 +10361,53 @@ async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) 
       business_id: businessId, booking_id: bookingId || null, technician_id: techId,
       flat_used: 0, tilting_used: 0, full_motion_used: 0, wire_plate_used: qty,
       logged_by_kind: 'admin', notes: 'Behind-the-wall wire concealment',
+    });
+  } catch (_) { /* usage log is best-effort */ }
+}
+
+// Apple TV brackets used on a job: one per unit of "Apple TV installation
+// (mounting bracket included)". Requires BOTH "apple tv" and "bracket" in the
+// name, not just "apple tv install" -- the catalog also has a plain "Apple TV
+// installation" option (no bracket, presumably the customer already has one
+// mounted) that must never decrement stock.
+function detectAppleTvBracketQty(lineItems) {
+  let n = 0;
+  for (const li of lineItems || []) {
+    const name = (li.name || '').toLowerCase();
+    if (/apple\s*tv\b.*\bbracket\b/.test(name)) n += Number(li.quantity) || 1;
+  }
+  return n;
+}
+
+// Subtract Apple TV brackets from a tech's inventory (floor 0) and log it.
+// No-ops gracefully if migration 0087 isn't applied; never throws into the
+// completion path. Same cross-hire fix as the other adjust* functions above:
+// the STOCK row lives under the tech's own home business, never the job's.
+async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookingId) {
+  if (!qty || !techId) return;
+  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const homeBizId = techRow?.business_id || businessId;
+  let { data: inv, error } = await db.from('bracket_inventory')
+    .select('id, appletv_bracket_qty')
+    .eq('business_id', homeBizId).eq('technician_id', techId).maybeSingle();
+  if (error) { if (/appletv_bracket_qty/.test(error.message || '')) return; throw error; }
+  if (!inv) {
+    const { data: created } = await db.from('bracket_inventory')
+      .insert({ business_id: homeBizId, technician_id: techId, appletv_bracket_qty: 0 })
+      .select('id, appletv_bracket_qty').maybeSingle();
+    inv = created || { id: null, appletv_bracket_qty: 0 };
+  }
+  const nextQty = Math.max(0, (Number(inv.appletv_bracket_qty) || 0) - qty);
+  if (inv.id) {
+    await db.from('bracket_inventory')
+      .update({ appletv_bracket_qty: nextQty, updated_at: new Date().toISOString() })
+      .eq('id', inv.id);
+  }
+  try {
+    await db.from('bracket_usage_logs').insert({
+      business_id: businessId, booking_id: bookingId || null, technician_id: techId,
+      flat_used: 0, tilting_used: 0, full_motion_used: 0, appletv_bracket_used: qty,
+      logged_by_kind: 'admin', notes: 'Apple TV installation, mounting bracket included',
     });
   } catch (_) { /* usage log is best-effort */ }
 }

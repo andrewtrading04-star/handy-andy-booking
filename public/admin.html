@@ -8930,6 +8930,35 @@ async function renderBrackets(){
     html+=`</tbody></table></div>`;
     html+=`</div>`;
 
+    // ── Apple TV Brackets ────────────────────────────────────────────────────
+    // No email pipeline, unlike the other two -- Amazon's order-confirmation
+    // email for this product never names it, only "N Device Accessories
+    // items", so there is nothing reliable to auto-match on without a
+    // dedicated ordering mailbox. Arrivals are logged by hand through the same
+    // Edit control the other tables use. Simpler layout than Wire Concealment
+    // Plates on purpose: no order-status tracking to show since there is no
+    // async delivery pipeline behind it.
+    html+=`<div class="bracket-section">
+      <h3>Apple TV Brackets <span style="font-weight:400;font-size:12px;color:var(--mute);">· logged by hand · −1 per install with a bracket</span></h3>
+      <table class="bracket-table">
+        <thead>
+          <tr>
+            <th>Technician</th>
+            <th>On hand</th>
+            ${role==='owner'?'<th>Action</th>':''}
+          </tr>
+        </thead>
+        <tbody>`;
+    for(const tech of inv.inventory||[]){
+      const atv=tech.appletv_bracket||0;
+      html+=`<tr>
+        <td>${esc(tech.technician_name)}</td>
+        <td class="bracket-qty"><strong>${atv}</strong></td>
+        ${role==='owner'?`<td><button class="seg-btn" onclick="openAppleTvBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${atv})">Edit</button></td>`:''}
+      </tr>`;
+    }
+    html+=`</tbody></table></div>`;
+
     // Orders split: active (incoming) shown up top; DELIVERED ones tucked into
     // a collapsed "archived" section below — findable but out of the way.
     const allOrders = purch.purchases || [];
@@ -9168,6 +9197,52 @@ async function saveWirePlateCount(techId, techName, cur){
       }
     });
     toast('✓ Updated wire plates for '+techName);
+    closeBracketModal();
+    renderBrackets();
+  }catch(e){
+    toast('Error: '+e.message);
+  }
+}
+
+// Apple TV brackets: same "enter the new total" pattern as wire plates. A
+// higher number than what's already on hand reads as brackets that just
+// arrived (logged for history server-side); a lower number is a correction.
+async function openAppleTvBracketEdit(techId, techName, cur){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`
+    <div class="sheet">
+      <h2>Apple TV Brackets: ${esc(techName)}</h2>
+      <p style="color:var(--mute);font-size:13px;margin:-4px 0 12px;">Currently <strong>${cur}</strong> on hand. Enter the new total they have.</p>
+      <label class="fld">Brackets on hand</label>
+      <input type="number" id="atvQty" min="0" value="${cur}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
+        <button class="btn" onclick="saveAppleTvBracketCount('${techId}','${esc(techName)}',${cur})" style="flex:1;">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeBracketModal(); });
+  window.bracketModal=modal;
+}
+
+async function saveAppleTvBracketCount(techId, techName, cur){
+  const target=parseInt(document.getElementById('atvQty').value);
+  if(isNaN(target)||target<0){ toast('Enter a valid number'); return; }
+  const delta=target-cur;
+  if(delta===0){ closeBracketModal(); return; }
+  try{
+    await api('bracket_update',{
+      method:'POST',
+      body:{
+        business:current.slug,
+        technician_id:techId,
+        appletv_bracket_delta:delta,
+        action:'adjust',
+      }
+    });
+    toast('✓ Updated Apple TV brackets for '+techName);
     closeBracketModal();
     renderBrackets();
   }catch(e){
