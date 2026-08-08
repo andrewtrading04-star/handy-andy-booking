@@ -3267,7 +3267,7 @@ const TV_SIZES = [
 // answers ("My TV is 70-85 inches…") embed a range but are NOT a size selection.
 function tvSizeIndex(name){
   const n=String(name||'').toLowerCase();
-  if(/my tv is|\b(?:lift|help|larger)\b/.test(n)) return -1;
+  if(/my tv is|\b(?:lift|help|larger|technicians?)\b/.test(n)) return -1;
   // A line that describes WORK is never a TV-size selection, even when it
   // happens to contain a number that looks like one ("Correction of Previous
   // Job - 60 - 69"", "TV Install 33-59""). Without this, such a line renders

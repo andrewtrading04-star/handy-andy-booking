@@ -194,10 +194,11 @@ function stripQtySuffix(s) {
 function matchSize(name) {
   const n = String(name || '').toLowerCase();
   // The booking widget's LIFTING question answers ("My TV is 70-85 inches and I
-  // can help lift it", "My TV is 85 inches or larger") embed a size range but are
-  // NOT a TV-size base selection. Never let them score base pay — the real size
-  // options ("70\"-85\"", "33\"-59\"") never say "my tv is" / "lift" / "help" / "larger".
-  if (/my tv is|\b(?:lift|help|larger)\b/i.test(n)) return null;
+  // can help lift it", "My TV is 85 inches or larger", "2 technicians") embed a
+  // size range but are NOT a TV-size base selection. Never let them score base
+  // pay; the real size options ("70\"-85\"", "33\"-59\"") never say "my tv is" /
+  // "lift" / "help" / "larger" / "technician".
+  if (/my tv is|\b(?:lift|help|larger|technicians?)\b/i.test(n)) return null;
   for (const r of TV_SIZE_RATES) if (r.test.test(n)) return r;
   // A bare inch value ('75"', '75 inch') — some bookings store the exact size
   // instead of the range. Map the number to the bracket it belongs to so it still
@@ -357,7 +358,13 @@ function tipFor(job) {
 // unrecognized item instead of adding the $60. (Austin runs one tech, so Zach
 // does the second-tech work himself and earns the whole $60 — the same amount
 // this pays a solo tech on any "Second Technician" job.)
-const SECOND_TECH_RE = /(?:second|2nd|extra)\s*tech(?:nician)?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
+// "2 technicians" (bare digit, not "2nd") is the relabeled Handy Andy catalog
+// option, formerly "70-85\" - customer cannot help lift"; added when that
+// option's display text changed so the $60 bonus keeps firing for every
+// booking made with the new wording. The old "cannot...lift" pattern stays:
+// bookings made before the relabel still have the old text frozen in their
+// line items and must keep paying correctly.
+const SECOND_TECH_RE = /(?:second|2nd|extra)\s*tech(?:nician)?\b|\d\s*technicians?\b|cannot\s*(?:help\s*)?lift|lifting\s*help|8[56]\s*inch(?:es)?\s*or\s*larger/i;
 
 // Guaranteed Dismount REDEEMED payout drops $60 -> $50, effective the job's
 // scheduled date (owner-announced to the crew, communicated as "effective
@@ -1194,6 +1201,17 @@ function runSelfTests() {
     { name: '70"–84"', line_total: 169 },
     { name: 'Lifting Help', line_total: 70 }
   ] }), 'Kregg').pay, 70, 'two techs lifting help (80/2 + 30 = 40 + 30)');
+
+  // "2 technicians" is the relabeled Handy Andy catalog option, formerly
+  // "70-85\" - customer cannot help lift". Must trigger the exact same $30
+  // half-bonus as the old wording, and NOT get read back as a real TV-size
+  // line (it embeds no size the fallback bare-inch matcher could misfire on,
+  // but the exclusion guard is what actually stops it).
+  eq(computeJobPay(job({ second_tech: true, line_items: [
+    { name: '70"–84"', line_total: 169 },
+    { name: 'Second Technician (Large TVs): 2 technicians', line_total: 70 }
+  ] }), 'Kregg').pay, 70, 'two techs, relabeled "2 technicians" line (80/2 + 30 = 40 + 30)');
+  eq(matchSize('Second Technician (Large TVs): 2 technicians'), null, '"2 technicians" is never read as a TV-size base line');
 
   // Two techs, Second Technician line under $70 → no $60 add-on, just a base split.
   eq(computeJobPay(job({ second_tech: true, line_items: [

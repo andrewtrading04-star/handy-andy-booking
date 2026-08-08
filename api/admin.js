@@ -1803,7 +1803,7 @@ const TV_OPTION_GROUPS = [
   { key: 'lifting',   label: 'Second Technician (Large TVs)', min: 0, max: 1, sort: 6, options: [
     { label: 'TV under 70" (no lifting fee)',        price: 0,  zbk: '1685657521270x971699776821509000', sort: 1 },
     { label: '70–85" — customer can help lift',      price: 0,  zbk: '1685657521270x242389337506608420', sort: 2 },
-    { label: '70–85" — customer cannot help lift',   price: 70, zbk: '1685657521270x264421370121691100', sort: 3 },
+    { label: '2 technicians',                        price: 70, zbk: '1685657521270x264421370121691100', sort: 3 },
     { label: '85"+ (second technician required)',    price: 70, zbk: '1747842781494x315473919196528640', sort: 4 },
   ]},
   { key: 'dismount',  label: 'Dismount',                      min: 0, max: 1, sort: 7, options: [
