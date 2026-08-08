@@ -8939,8 +8939,11 @@ async function renderBrackets(){
     // Plates on purpose: no order-status tracking to show since there is no
     // async delivery pipeline behind it.
     html+=`<div class="bracket-section">
-      <h3>Apple TV Brackets <span style="font-weight:400;font-size:12px;color:var(--mute);">· logged by hand · −1 per install with a bracket</span></h3>
-      <table class="bracket-table">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <h3 style="margin:0;">Apple TV Brackets <span style="font-weight:400;font-size:12px;color:var(--mute);">· logged by hand · −1 per install with a bracket</span></h3>
+        ${role==='owner'?'<button class="seg-btn" onclick="openAppleTvBracketArrival()">+ Log arrival</button>':''}
+      </div>
+      <table class="bracket-table" style="margin-top:10px;">
         <thead>
           <tr>
             <th>Technician</th>
@@ -9243,6 +9246,63 @@ async function saveAppleTvBracketCount(techId, techName, cur){
       }
     });
     toast('✓ Updated Apple TV brackets for '+techName);
+    closeBracketModal();
+    renderBrackets();
+  }catch(e){
+    toast('Error: '+e.message);
+  }
+}
+
+// "N just arrived for this tech" -- a straight add, no mental math against the
+// current count first. Edit (above) is for correcting a count that's wrong;
+// this is for the day-to-day case of a box actually showing up. Uses the same
+// bracket_update action underneath (a positive appletv_bracket_delta), just
+// without making the office compute "current + new = target" themselves.
+function openAppleTvBracketArrival(){
+  const techs=window._bracketInv||[];
+  const opts=techs.map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)} (${t.appletv_bracket||0} on hand)</option>`).join('');
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`
+    <div class="sheet">
+      <h2>Log Apple TV brackets</h2>
+      <p style="color:var(--mute);font-size:13px;margin:-4px 0 12px;">For a box that just arrived. This ADDS to whatever they already have; you don't need to work out the new total yourself.</p>
+      <label class="fld">Technician</label>
+      <select id="atvArrTech" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:10px;">${opts}</select>
+      <label class="fld">How many arrived</label>
+      <input type="number" id="atvArrQty" min="1" value="1" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:10px;">
+      <label class="fld">Note <span style="text-transform:none;font-weight:500;color:var(--mute);">(optional)</span></label>
+      <input type="text" id="atvArrNote" placeholder="e.g. order 112-1772869-4226635" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
+        <button class="btn" onclick="saveAppleTvBracketArrival()" style="flex:1;">Log arrival</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeBracketModal(); });
+  window.bracketModal=modal;
+}
+
+async function saveAppleTvBracketArrival(){
+  const techId=document.getElementById('atvArrTech').value;
+  const qty=parseInt(document.getElementById('atvArrQty').value);
+  const note=document.getElementById('atvArrNote').value.trim();
+  if(!techId){ toast('Pick a technician'); return; }
+  if(isNaN(qty)||qty<1){ toast('Enter how many arrived (at least 1)'); return; }
+  const techName=(window._bracketInv||[]).find(t=>t.technician_id===techId)?.technician_name||'that tech';
+  try{
+    await api('bracket_update',{
+      method:'POST',
+      body:{
+        business:current.slug,
+        technician_id:techId,
+        appletv_bracket_delta:qty,
+        action:'adjust',
+        notes:note||undefined,
+      }
+    });
+    toast(`✓ Logged ${qty} Apple TV bracket${qty===1?'':'s'} for ${techName}`);
     closeBracketModal();
     renderBrackets();
   }catch(e){
