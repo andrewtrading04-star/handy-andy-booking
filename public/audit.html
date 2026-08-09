@@ -509,6 +509,13 @@ $('saveDay').onclick=async()=>{
   }catch(e){ $('dayErr').textContent=e.message; }
 };
 
+// Disabled the instant it's tapped, re-enabled only in `finally`. This is
+// exactly the bug Jiyah hit: a slow network makes the button look like
+// nothing happened, so she taps it again -- and for a NEW call (editing is
+// null, so `id` is undefined on both requests) that second tap hits the
+// INSERT branch of audit_save twice, creating the duplicate row she then
+// has to find and delete. Disabling it removes the ability to double-tap at
+// all, rather than relying on catching the duplicate after the fact.
 $('saveAudit').onclick=async()=>{
   $('formErr').textContent='';
   const date=$('date').value, t=$('fTime').value;
@@ -523,10 +530,13 @@ $('saveAudit').onclick=async()=>{
     service:$('fSvc').value,
     answers, flagged:$('fFlag').checked, notes:$('fNotes').value,
   };
+  const btn=$('saveAudit'), prevText=btn.textContent;
+  btn.disabled=true; btn.textContent='Saving...';
   try{
     await api('audit_save',{method:'POST',body});
     await load();
   }catch(e){ $('formErr').textContent=e.message; }
+  finally{ btn.disabled=false; btn.textContent=prevText; }
 };
 
 $('newAudit').onclick=()=>openForm(null);
