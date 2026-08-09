@@ -90,6 +90,9 @@
     padding:8px 11px;margin-bottom:6px;font-size:13px;flex-wrap:wrap;cursor:pointer;}
   .score{font-weight:800;font-size:13px;}
   .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;}
+  .del-audit{flex:none;width:26px;height:26px;line-height:24px;text-align:center;padding:0;
+    font-size:16px;color:var(--mute);background:transparent;border:1px solid var(--line);border-radius:7px;}
+  .del-audit:hover{color:var(--bad);border-color:#f3c2c2;background:var(--bad-bg);}
   .hidden{display:none;}
 </style>
 </head>
@@ -417,6 +420,27 @@ function renderAudits(){
       (a.flagged?'<span class="flagpill">flagged</span>':'')+
       (s!=null?'<span class="score" style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</span>':'');
     d.onclick=()=>openForm(a);
+    // For a call graded twice by accident (a double-tap on Save, or logged
+    // again without noticing). stopPropagation so tapping the X deletes it
+    // instead of also opening it for editing, since the X sits inside the
+    // same row the click-to-edit handler is on.
+    const del=document.createElement('button');
+    del.type='button'; del.className='del-audit'; del.title='Delete this entry';
+    del.textContent='×';
+    del.onclick=async(e)=>{
+      e.stopPropagation();
+      const who=(line?line.pretty:a.grasshopper_number)+(t?' at '+t:'')+(a.handled_by?' ('+a.handled_by+')':'');
+      if(!confirm('Delete this graded call?\n\n'+who+'\n\nThis cannot be undone.')) return;
+      del.disabled=true;
+      try{
+        await api('audit_delete',{method:'POST',body:{id:a.id}});
+        await load();
+      }catch(err){
+        del.disabled=false;
+        alert('Could not delete: '+err.message);
+      }
+    };
+    d.appendChild(del);
     w.appendChild(d);
   });
 }

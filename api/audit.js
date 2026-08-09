@@ -62,10 +62,11 @@ export default async function handler(req, res) {
 
     const db = serviceClient();
     switch (action) {
-      case 'day':        return await day(req, res, db, auth);
-      case 'day_save':   return await daySave(req, res, db, auth, body);
-      case 'audit_save': return await auditSave(req, res, db, auth, body);
-      default:           return res.status(400).json({ error: 'Unknown action' });
+      case 'day':          return await day(req, res, db, auth);
+      case 'day_save':     return await daySave(req, res, db, auth, body);
+      case 'audit_save':   return await auditSave(req, res, db, auth, body);
+      case 'audit_delete': return await auditDelete(req, res, db, auth, body);
+      default:             return res.status(400).json({ error: 'Unknown action' });
     }
   } catch (e) {
     console.error('[audit]', action, e);
@@ -250,4 +251,17 @@ async function auditSave(req, res, db, auth, body) {
   const { data, error } = await db.from('call_audits').insert(row).select('id').single();
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ ok: true, id: data.id });
+}
+
+// Removes one graded call, for the duplicate-entry case: the same call saved
+// twice (a double-tap on Save, or logged again by accident). The confirm
+// dialog lives client-side; this endpoint deletes on request with no
+// secondary check, same trust level as auditSave's update-by-id above -- every
+// row in this table belongs to the auditor and the table holds nothing else.
+async function auditDelete(req, res, db, auth, body) {
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('call_audits').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }
