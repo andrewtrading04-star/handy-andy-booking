@@ -90,6 +90,9 @@
     padding:8px 11px;margin-bottom:6px;font-size:13px;flex-wrap:wrap;cursor:pointer;}
   .score{font-weight:800;font-size:13px;}
   .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;}
+  .edit-audit{flex:none;padding:4px 10px;font-size:12px;font-weight:700;
+    color:var(--ink-2);background:transparent;border:1px solid var(--line);border-radius:7px;}
+  .edit-audit:hover{border-color:var(--mute);background:var(--line2);}
   .del-audit{flex:none;width:26px;height:26px;line-height:24px;text-align:center;padding:0;
     font-size:16px;color:var(--mute);background:transparent;border:1px solid var(--line);border-radius:7px;}
   .del-audit:hover{color:var(--bad);border-color:#f3c2c2;background:var(--bad-bg);}
@@ -420,6 +423,16 @@ function renderAudits(){
       (a.flagged?'<span class="flagpill">flagged</span>':'')+
       (s!=null?'<span class="score" style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</span>':'');
     d.onclick=()=>openForm(a);
+    // Tapping anywhere on the row already opened it for editing, but with an
+    // explicit Delete button sitting right there, "click the row itself" isn't
+    // a visible enough affordance to find on its own -- Jiyah asked for an
+    // actual Edit button. stopPropagation on both so they don't also trigger
+    // the row's own click-to-edit underneath them.
+    const edit=document.createElement('button');
+    edit.type='button'; edit.className='edit-audit'; edit.title='Edit this entry';
+    edit.textContent='Edit';
+    edit.onclick=(e)=>{ e.stopPropagation(); openForm(a); };
+    d.appendChild(edit);
     // For a call graded twice by accident (a double-tap on Save, or logged
     // again without noticing). stopPropagation so tapping the X deletes it
     // instead of also opening it for editing, since the X sits inside the
