@@ -232,34 +232,51 @@
 
   // Multi-TV batching discount (3+ TVs on one ticket): rewards big jobs since
   // mounting several TVs in one drive is highly profitable. The cut depends on
-  // the travel-fee zone — the bigger the existing fee, the bigger the cut,
+  // the travel-fee zone, the bigger the existing fee, the bigger the cut,
   // since that is exactly the case where the fee is the reason a big job gets
-  // skipped. Zone #1 (no travel fee) instead gets a flat $10 off PER TV, since
-  // there is no fee left to cut. Mirrored server-side in api/book.js — keep
-  // the two in sync if these tiers ever change.
+  // skipped. Zone #1 (no travel fee) instead gets a flat per-TV amount off,
+  // since there is no fee left to cut. Owner-editable since 2026-08 (Other ->
+  // Multi-TV Discount in the dashboard); loadMultiTvDiscountConfig() below
+  // fetches the live numbers, and MULTI_TV_CFG_DEFAULTS is only the fallback
+  // used until that fetch resolves or if it ever fails. Mirrored server-side
+  // in api/book.js (applyMultiTvDiscounts reads the same table) so a job
+  // booked here gets exactly what api/book.js would also charge.
+  const MULTI_TV_CFG_DEFAULTS = {
+    tv_threshold: 3, zero_fee_per_tv: 10, full_cut_fee: 15,
+    partial_cut_pct: 0.60, partial_cut_fees: [65, 100],
+    price_discount_enabled: true, price_tier3: 20, price_tier4: 25, price_tier5plus: 30,
+  };
+  let MULTI_TV_CFG = MULTI_TV_CFG_DEFAULTS;
+  async function loadMultiTvDiscountConfig(){
+    try{
+      const r=await fetch(`${API_BASE}/book?action=multi_tv_discount`);
+      const d=await r.json();
+      if(d&&d.config) MULTI_TV_CFG=d.config;
+    }catch(e){ /* keep the built-in fallback numbers */ }
+  }
   function multiTvDiscount(){
+    const c=MULTI_TV_CFG;
     const tvs=totalTVs();
-    if(tvs<3) return {perTv:0,feeCutPct:0};
+    if(tvs<c.tv_threshold) return {perTv:0,feeCutPct:0};
     const fee=territoryAdjustment();
-    if(fee<=0) return {perTv:10,feeCutPct:0};
-    if(fee===15) return {perTv:0,feeCutPct:1.00};
-    if(fee===65||fee===100) return {perTv:0,feeCutPct:0.60};
+    if(fee<=0) return {perTv:Number(c.zero_fee_per_tv),feeCutPct:0};
+    if(fee===Number(c.full_cut_fee)) return {perTv:0,feeCutPct:1.00};
+    if((c.partial_cut_fees||[]).map(Number).includes(fee)) return {perTv:0,feeCutPct:Number(c.partial_cut_pct)};
     return {perTv:0,feeCutPct:0};
   }
   function multiTvPerTvAmount(){ const d=multiTvDiscount(); return d.perTv*totalTVs(); }
   function multiTvFeeAmount(){ const d=multiTvDiscount(); return Math.round(territoryAdjustment()*d.feeCutPct*100)/100; }
 
   // ── Multi-TV PRICE discount (stacks on top of the travel-fee cut above) ────
-  // Flip this to false to turn the whole thing off — nothing else to touch.
-  // TV #1–2 stay full price; TV #3 is -$20, TV #4 is -$25, TV #5+ is -$30 each.
-  // Mirrored server-side in api/book.js (steppedMultiTvPriceDiscount) — keep in sync.
-  const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+  // TV #1-2 stay full price; TV #3/#4/#5+ get the price_tier3/4/5plus credit.
+  // Mirrored server-side in api/book.js (applyMultiTvDiscounts), same config source.
   function steppedMultiTvPriceDiscount(){
-    if(!MULTI_TV_PRICE_DISCOUNT_ENABLED) return 0;
+    const c=MULTI_TV_CFG;
+    if(!c.price_discount_enabled) return 0;
     const tvs=totalTVs();
-    if(tvs<3) return 0;
+    if(tvs<c.tv_threshold) return 0;
     let total=0;
-    for(let i=3;i<=tvs;i++) total += (i===3?20:i===4?25:30);
+    for(let i=3;i<=tvs;i++) total += (i===3?Number(c.price_tier3):i===4?Number(c.price_tier4):Number(c.price_tier5plus));
     return total;
   }
 
@@ -2124,6 +2141,7 @@
       serviceConfig=SERVICE_CONFIGS[configKey];
       await applyWidgetPriceOverrides(priceCity);
       await loadCoupons();
+      await loadMultiTvDiscountConfig();
       await ensureStripeKey();
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();

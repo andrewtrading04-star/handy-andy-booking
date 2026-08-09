@@ -171,6 +171,20 @@ async function couponsPublic(req, res) {
   }
 }
 
+// No business param -- the config is global, not per-business (see
+// multiTvDiscountConfigFor above). Falls back to MULTI_TV_CFG_DEFAULTS on any
+// failure so a DB hiccup degrades to today's known-correct numbers rather than
+// to a broken widget quote.
+async function multiTvDiscountPublic(req, res) {
+  try {
+    const cfg = await multiTvDiscountConfigFor(serviceClient());
+    return res.status(200).json({ config: cfg });
+  } catch (e) {
+    console.warn('[book] multi-TV discount config lookup failed:', e.message);
+    return res.status(200).json({ config: MULTI_TV_CFG_DEFAULTS });
+  }
+}
+
 // GET/POST /api/book?action=review_click&token=<review_token>&ch=email|sms
 // Records the first time a customer clicks the review link from either channel,
 // then redirects to review.html. Replaces the old email open-pixel with a
@@ -315,6 +329,36 @@ export async function couponCodesFor(db, businessSlug) {
   return Object.keys(await couponMapFor(db, businessSlug));
 }
 
+// The multi-TV discount used to be these exact numbers hardcoded three times
+// (here, public/widget.js, and public/admin.html's phone-in booking form) with
+// no way to change one without a deploy. Same cache-with-TTL / graceful-
+// fallback shape as couponMapFor above: one global row (not per-business --
+// today's rule is identical for both companies), and if the table or row is
+// ever missing (migration not applied, or someone deletes the row), these
+// DEFAULTS are the exact values that were hardcoded before this existed, so a
+// missing config degrades to today's behavior rather than to no discount at all.
+const MULTI_TV_CFG_TTL_MS = 60000;
+let _multiTvCfgCache = null;   // { at, cfg }
+const MULTI_TV_CFG_DEFAULTS = {
+  tv_threshold: 3, zero_fee_per_tv: 10, full_cut_fee: 15,
+  partial_cut_pct: 0.60, partial_cut_fees: [65, 100],
+  price_discount_enabled: true, price_tier3: 20, price_tier4: 25, price_tier5plus: 30,
+};
+export async function multiTvDiscountConfigFor(db) {
+  if (_multiTvCfgCache && Date.now() - _multiTvCfgCache.at < MULTI_TV_CFG_TTL_MS) return _multiTvCfgCache.cfg;
+  let cfg = null;
+  try {
+    const { data, error } = await db.from('multi_tv_discount_config').select('*').limit(1).maybeSingle();
+    if (!error && data) cfg = data;
+  } catch { /* table not applied yet, fall through to the hardcoded defaults */ }
+  if (!cfg) cfg = MULTI_TV_CFG_DEFAULTS;
+  _multiTvCfgCache = { at: Date.now(), cfg };
+  return cfg;
+}
+// So the owner's dashboard edit takes effect on the very next booking, not up
+// to a minute later, same reasoning as couponCacheClear above.
+export function multiTvDiscountConfigCacheClear() { _multiTvCfgCache = null; }
+
 // ── Calendar (.ics) generation for confirmation-email "Add to calendar" ──────
 // RFC 5545 text escaping: backslash, comma, semicolon, and newlines.
 function icsEscape(s) {
@@ -397,7 +441,6 @@ function serveIcs(req, res) {
 // bracket line always has extra words around the range. Matching the WHOLE
 // trimmed string against the size pattern, not just checking it contains one
 // anywhere, is what actually distinguishes them.
-const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
 function isTvSizeLine(name) {
   const n = String(name || '').trim();
   if (/second technician/i.test(n)) return false;
@@ -405,17 +448,24 @@ function isTvSizeLine(name) {
       || /^\d{2,3}["″]\s*[-–]\s*\d{2,3}["″]$/.test(n)
       || /^98["″]?\s*\+$/.test(n);
 }
-function applyMultiTvDiscounts(lines, surcharge) {
+// `cfg` is a row from multi_tv_discount_config (or MULTI_TV_CFG_DEFAULTS),
+// fetched once by the caller via multiTvDiscountConfigFor() above and passed
+// in here rather than re-fetched per call. This function itself stays sync
+// and side-effect-free apart from mutating `lines`, same as before the config
+// became editable.
+function applyMultiTvDiscounts(lines, surcharge, cfg) {
+  const c = cfg || MULTI_TV_CFG_DEFAULTS;
   const tvCount = lines.reduce((n, l) => isTvSizeLine(l.name) ? n + (Number(l.quantity) || 1) : n, 0);
   let multiTvDiscountAmt = 0;
-  if (tvCount >= 3) {
+  if (tvCount >= c.tv_threshold) {
     if (!lines.some(l => /multi-tv discount/i.test(l.name))) {
       if (surcharge <= 0) {
-        const perTvAmt = 10 * tvCount;
-        lines.push({ kind: 'coupon', name: `Multi-TV discount (-$10 × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
+        const perTvAmt = c.zero_fee_per_tv * tvCount;
+        lines.push({ kind: 'coupon', name: `Multi-TV discount (-$${c.zero_fee_per_tv} × ${tvCount} TVs)`, quantity: 1, unit_price: -perTvAmt, line_total: -perTvAmt });
         multiTvDiscountAmt = perTvAmt;
       } else {
-        const cutPct = surcharge === 15 ? 1.00 : (surcharge === 65 || surcharge === 100) ? 0.60 : 0;
+        const partialFees = (c.partial_cut_fees || []).map(Number);
+        const cutPct = surcharge === Number(c.full_cut_fee) ? 1.00 : partialFees.includes(surcharge) ? Number(c.partial_cut_pct) : 0;
         if (cutPct > 0) {
           const cutAmt = Math.round(surcharge * cutPct * 100) / 100;
           lines.push({ kind: 'coupon', name: 'Multi-TV discount', quantity: 1, unit_price: -cutAmt, line_total: -cutAmt });
@@ -423,9 +473,9 @@ function applyMultiTvDiscounts(lines, surcharge) {
         }
       }
     }
-    if (MULTI_TV_PRICE_DISCOUNT_ENABLED && !lines.some(l => /multi-tv price discount/i.test(l.name))) {
+    if (c.price_discount_enabled && !lines.some(l => /multi-tv price discount/i.test(l.name))) {
       let priceDiscAmt = 0;
-      for (let i = 3; i <= tvCount; i++) priceDiscAmt += (i === 3 ? 20 : i === 4 ? 25 : 30);
+      for (let i = 3; i <= tvCount; i++) priceDiscAmt += (i === 3 ? Number(c.price_tier3) : i === 4 ? Number(c.price_tier4) : Number(c.price_tier5plus));
       if (priceDiscAmt > 0) {
         lines.push({ kind: 'coupon', name: `Multi-TV price discount (${tvCount} TVs)`, quantity: 1, unit_price: -priceDiscAmt, line_total: -priceDiscAmt });
       }
@@ -509,7 +559,7 @@ async function bookDoms(req, res) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
-  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge);
+  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge, await multiTvDiscountConfigFor(db));
   // Sales tax (8.25%), same block as bookNative; Dom's never had this. Without
   // it, `subtotal` was tax-EXCLUSIVE while the widget's own total is
   // tax-INCLUSIVE, so the two were never comparable amounts to begin with; the
@@ -846,10 +896,12 @@ async function bookNative(req, res, slug) {
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
-  // Multi-TV batching + price discounts — see applyMultiTvDiscounts() above
-  // (shared with bookDoms). Mirrored client-side in public/widget.js
-  // (multiTvDiscount / steppedMultiTvPriceDiscount) — keep in sync.
-  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge);
+  // Multi-TV batching + price discounts -- see applyMultiTvDiscounts() above
+  // (shared with bookDoms). Numbers live in multi_tv_discount_config now, not
+  // hardcoded here; the widget (public/widget.js, multiTvDiscount /
+  // steppedMultiTvPriceDiscount) fetches the same row via the public
+  // multi_tv_discount action below.
+  const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge, await multiTvDiscountConfigFor(db));
   // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
   // an existing tax line) — added server-side so a stale/tampered widget can't
   // drop it. Placed before the coupon so tax is on the pre-discount amount.
@@ -1179,6 +1231,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && (req.query || {}).action === 'widget_prices') return widgetPricesPublic(req, res);
   // Live promo codes for the widget — see couponsPublic() above.
   if (req.method === 'GET' && (req.query || {}).action === 'coupons') return couponsPublic(req, res);
+  // Live multi-TV discount numbers for the widget, see multiTvDiscountPublic() below.
+  if (req.method === 'GET' && (req.query || {}).action === 'multi_tv_discount') return multiTvDiscountPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.

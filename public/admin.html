@@ -5940,6 +5940,10 @@ async function renderOther(){
         <div><div style="font-weight:700;">💲 Widget Pricing</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every price the public booking widget charges customers — edit directly, no code or deploy needed.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
       </div>
+      <div id="otherMultiTvDiscount" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">📺 Multi-TV Discount</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">The automatic discount on a 3+ TV job, both the travel-fee cut and the per-TV price credit.</div></div>
+        <span style="color:var(--mute);font-size:20px;">›</span>
+      </div>
     </div>
   </div>`;
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
@@ -5947,6 +5951,7 @@ async function renderOther(){
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
   document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();
   document.getElementById('otherCoupons').onclick=()=>renderCoupons();
+  document.getElementById('otherMultiTvDiscount').onclick=()=>renderMultiTvDiscount();
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
@@ -6145,6 +6150,7 @@ async function cpDelete(id){
 // without seeing the other is how a zip ends up charging $65 while paying the
 // tech nothing, which is exactly what this screen surfaces.
 let tfAreas=[], tfZips=[], tfOpen=null, tfShowZips=null;
+let mtvCfg=null;
 async function renderTravelFees(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
@@ -6267,6 +6273,82 @@ async function tfSave(btn){
     }
     toast(`${tier.zips.length} zip${tier.zips.length===1?'':'s'} updated ✓`);
     await renderTravelFees();
+  }catch(e){
+    errEl.textContent=e.message||'Could not save that change.';
+    btn.disabled=false; btn.textContent='Save';
+  }
+}
+async function renderMultiTvDiscount(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('multi_tv_discount_get');
+    mtvCfg=d.config;
+    renderMultiTvDiscountBody();
+  }catch(e){
+    view.innerHTML=`<div class="wrap"><button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;">← Other</button><div class="empty">${esc(e.message)}</div></div>`;
+  }
+}
+function renderMultiTvDiscountBody(){
+  const view=document.getElementById('view');
+  const c=mtvCfg;
+  const field=(label,id,val,step)=>`<label style="display:block;font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${label}
+      <input class="search" type="number" min="0" step="${step||1}" value="${val}" id="${id}" style="margin:4px 0 0;max-width:160px;">
+    </label>`;
+  view.innerHTML=`<div class="wrap" style="max-width:560px;">
+    <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
+    <h2 style="margin:0 0 4px;">📺 Multi-TV Discount</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:20px;line-height:1.6;">
+      Once a job reaches the TV threshold below, two discounts stack automatically: a cut on the travel fee, and a per-TV price credit. Changes take effect on the very next booking, phone-in and online both. Nothing already booked is repriced.
+    </div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+      ${field('TV count that triggers the discount','mtvThreshold',c.tv_threshold,1)}
+    </div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:10px;">Travel-fee cut</div>
+      ${field('$ off per TV when the travel fee is $0','mtvZeroFeePerTv',c.zero_fee_per_tv,1)}
+      ${field('Travel fee that gets cut 100%','mtvFullCutFee',c.full_cut_fee,1)}
+      <label style="display:block;font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">Other travel fees that get a partial cut (comma-separated)
+        <input class="search" type="text" value="${esc((c.partial_cut_fees||[]).join(', '))}" id="mtvPartialFees" style="margin:4px 0 0;max-width:220px;">
+      </label>
+      ${field('Percent cut for those fees, e.g. 0.60 = 60%','mtvPartialPct',c.partial_cut_pct,0.05)}
+      <div style="color:var(--mute);font-size:12px;">Any travel fee not listed above gets no cut at all.</div>
+    </div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:12px;cursor:pointer;">
+        <input type="checkbox" id="mtvPriceEnabled" ${c.price_discount_enabled?'checked':''} style="width:auto;"> Price credit
+      </label>
+      ${field('$ credit for the 3rd TV','mtvTier3',c.price_tier3,1)}
+      ${field('$ credit for the 4th TV','mtvTier4',c.price_tier4,1)}
+      ${field('$ credit for the 5th TV and every one after','mtvTier5plus',c.price_tier5plus,1)}
+    </div>
+    <div id="mtvErr" style="color:#b91c1c;font-size:13px;margin-bottom:10px;"></div>
+    <button type="button" class="btn" style="width:auto;" id="mtvSave">Save</button>
+  </div>`;
+  document.getElementById('mtvSave').addEventListener('click', mtvSave);
+}
+async function mtvSave(){
+  const errEl=document.getElementById('mtvErr'); errEl.textContent='';
+  const btn=document.getElementById('mtvSave');
+  const body={
+    tv_threshold: document.getElementById('mtvThreshold').value,
+    zero_fee_per_tv: document.getElementById('mtvZeroFeePerTv').value,
+    full_cut_fee: document.getElementById('mtvFullCutFee').value,
+    partial_cut_fees: document.getElementById('mtvPartialFees').value,
+    partial_cut_pct: document.getElementById('mtvPartialPct').value,
+    price_discount_enabled: document.getElementById('mtvPriceEnabled').checked,
+    price_tier3: document.getElementById('mtvTier3').value,
+    price_tier4: document.getElementById('mtvTier4').value,
+    price_tier5plus: document.getElementById('mtvTier5plus').value,
+  };
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    await api('multi_tv_discount_save',{ method:'POST', body });
+    // The phone-in form's own cached copy is now stale too, clear it so the
+    // very next New Booking / Take a Call price uses the new numbers.
+    nbMultiTvCfg=null;
+    toast('Multi-TV discount saved ✓');
+    await renderMultiTvDiscount();
   }catch(e){
     errEl.textContent=e.message||'Could not save that change.';
     btn.disabled=false; btn.textContent='Save';
@@ -13097,29 +13179,43 @@ function nbTotalTvs(){
   // (size, bracket, fireplace, wires, surface) is capped to this number.
   return nbFrameTvQty.regular + nbFrameTvQty.frame;
 }
-// ── Multi-TV discount for phone-in bookings — mirrors public/widget.js +
+// ── Multi-TV discount for phone-in bookings, mirrors public/widget.js +
 // api/book.js exactly, so a job booked here gets the same deal as one booked
-// online. Previously this only existed in the customer widget; a secretary
-// booking a 5-TV job by hand had no automatic discount to match it with.
-// Flip MULTI_TV_PRICE_DISCOUNT_ENABLED to false to turn off just the price-tier
-// piece (same toggle name/pattern as the other two files) — the travel-fee cut
-// has no toggle, matching its original widget implementation.
-const MULTI_TV_PRICE_DISCOUNT_ENABLED = true;
+// online. Owner-editable since 2026-08 (Other tab -> Multi-TV Discount); the
+// numbers below are only the DEFAULTS, used until the live config loads and
+// as the fallback if it ever fails to load. This keeps price computation
+// synchronous (it runs on every keystroke) instead of blocking on a fetch.
+const NB_MULTI_TV_DEFAULTS = {
+  tv_threshold: 3, zero_fee_per_tv: 10, full_cut_fee: 15,
+  partial_cut_pct: 0.60, partial_cut_fees: [65, 100],
+  price_discount_enabled: true, price_tier3: 20, price_tier4: 25, price_tier5plus: 30,
+};
+let nbMultiTvCfg = null;
+let nbMultiTvCfgFetching = false;
+function nbEnsureMultiTvCfg(){
+  if(nbMultiTvCfg || nbMultiTvCfgFetching) return;
+  nbMultiTvCfgFetching = true;
+  api('multi_tv_discount_get').then(d => { nbMultiTvCfg = d.config; }).catch(() => {}).finally(() => { nbMultiTvCfgFetching = false; });
+}
 function nbMultiTvFeeDiscount(){
+  nbEnsureMultiTvCfg();
+  const c = nbMultiTvCfg || NB_MULTI_TV_DEFAULTS;
   const tvs=nbTotalTvs();
-  if(tvs<3) return 0;
+  if(tvs<c.tv_threshold) return 0;
   const fee=parseFloat(document.getElementById('nbTravelFee')?.value)||0;
-  if(fee<=0) return 10*tvs;
-  if(fee===15) return fee;
-  if(fee===65||fee===100) return Math.round(fee*0.60*100)/100;
+  if(fee<=0) return Number(c.zero_fee_per_tv)*tvs;
+  if(fee===Number(c.full_cut_fee)) return fee;
+  if((c.partial_cut_fees||[]).map(Number).includes(fee)) return Math.round(fee*Number(c.partial_cut_pct)*100)/100;
   return 0;
 }
 function nbMultiTvPriceDiscount(){
-  if(!MULTI_TV_PRICE_DISCOUNT_ENABLED) return 0;
+  nbEnsureMultiTvCfg();
+  const c = nbMultiTvCfg || NB_MULTI_TV_DEFAULTS;
+  if(!c.price_discount_enabled) return 0;
   const tvs=nbTotalTvs();
-  if(tvs<3) return 0;
+  if(tvs<c.tv_threshold) return 0;
   let total=0;
-  for(let i=3;i<=tvs;i++) total += (i===3?20:i===4?25:30);
+  for(let i=3;i<=tvs;i++) total += (i===3?Number(c.price_tier3):i===4?Number(c.price_tier4):Number(c.price_tier5plus));
   return total;
 }
 function nbGroupCount(gid){ const m=nbQty[gid]; if(!m) return 0; return Object.values(m).reduce((s,c)=>s+(c>0?c:0),0); }

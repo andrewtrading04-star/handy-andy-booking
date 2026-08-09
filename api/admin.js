@@ -63,7 +63,7 @@ function bookingStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
-import { couponAmountFor, couponCodesFor, couponCacheClear } from './book.js';
+import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 // What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
@@ -271,6 +271,8 @@ export default async function handler(req, res) {
       case 'coupons_list':      return await couponsList(req, res, db, auth);
       case 'coupons_save':      return await couponsSave(req, res, db, auth, body);
       case 'coupons_delete':    return await couponsDelete(req, res, db, auth, body);
+      case 'multi_tv_discount_get':  return await multiTvDiscountGet(req, res, db, auth);
+      case 'multi_tv_discount_save': return await multiTvDiscountSave(req, res, db, auth, body);
       case 'seed_tv_options':   return await seedTvOptions(req, res, db, auth);
       case 'relabel_tv_size':   return await relabelTvSize(req, res, db, auth);
       case 'available_slots':   return await availableSlots(req, res, db, auth);
@@ -1650,6 +1652,77 @@ async function travelFeesSave(req, res, db, auth, body) {
     .in('id', ids).eq('business_id', biz.id).select('id');
   if (error) throw error;
   return res.status(200).json({ ok: true, updated: (data || []).length });
+}
+
+// ── Multi-TV discount (Other -> Multi-TV Discount) ──────────────────────────
+// One global row (see supabase/migrations/0088), read through the same
+// cached getter api/book.js uses for the live discount so this always shows
+// what a booking would actually get. multiTvDiscountConfigFor() already
+// falls back to the pre-2026-08 hardcoded defaults if the table or row is
+// somehow missing, so this never 500s even on a fresh/unmigrated database.
+const MULTI_TV_FEE_CEILING = 100;   // dollars per TV, a fat-fingered number never silently saves
+const MULTI_TV_PRICE_TIER_CEILING = 200; // dollars per TV on the price side
+async function multiTvDiscountGet(req, res, db, auth) {
+  const cfg = await multiTvDiscountConfigFor(db);
+  return res.status(200).json({ config: cfg });
+}
+async function multiTvDiscountSave(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // This changes what every multi-TV job is charged going forward, owner only.
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change the multi-TV discount' });
+
+  const threshold = parseInt(body.tv_threshold, 10);
+  if (!Number.isFinite(threshold) || threshold < 2 || threshold > 10) {
+    return res.status(400).json({ error: 'TV threshold must be a whole number between 2 and 10' });
+  }
+  const zeroFeePerTv = Number(body.zero_fee_per_tv);
+  const fullCutFee = Number(body.full_cut_fee);
+  const partialCutPct = Number(body.partial_cut_pct);
+  const tier3 = Number(body.price_tier3);
+  const tier4 = Number(body.price_tier4);
+  const tier5plus = Number(body.price_tier5plus);
+  for (const [label, val, ceiling] of [
+    ['Zero-fee-per-TV amount', zeroFeePerTv, MULTI_TV_FEE_CEILING],
+    ['Full-cut fee', fullCutFee, MULTI_TV_FEE_CEILING],
+    ['3rd-TV price credit', tier3, MULTI_TV_PRICE_TIER_CEILING],
+    ['4th-TV price credit', tier4, MULTI_TV_PRICE_TIER_CEILING],
+    ['5th-TV+ price credit', tier5plus, MULTI_TV_PRICE_TIER_CEILING],
+  ]) {
+    if (!Number.isFinite(val) || val < 0) return res.status(400).json({ error: `${label} must be a number of $0 or more` });
+    if (val > ceiling) return res.status(400).json({ error: `$${val} is above the $${ceiling} sanity ceiling for ${label.toLowerCase()}, double-check this isn't a typo.` });
+  }
+  if (!Number.isFinite(partialCutPct) || partialCutPct < 0 || partialCutPct > 1) {
+    return res.status(400).json({ error: 'Partial-cut percent must be between 0 and 1 (e.g. 0.60 for 60%)' });
+  }
+  const partialFees = String(body.partial_cut_fees || '')
+    .split(',').map(s => s.trim()).filter(Boolean).map(Number);
+  if (!partialFees.length || partialFees.some(n => !Number.isFinite(n) || n < 0)) {
+    return res.status(400).json({ error: 'Partial-cut fees must be a comma-separated list of dollar amounts, e.g. 65, 100' });
+  }
+
+  const patch = {
+    tv_threshold: threshold,
+    zero_fee_per_tv: zeroFeePerTv,
+    full_cut_fee: fullCutFee,
+    partial_cut_pct: partialCutPct,
+    partial_cut_fees: partialFees,
+    price_discount_enabled: body.price_discount_enabled !== false,
+    price_tier3: tier3,
+    price_tier4: tier4,
+    price_tier5plus: tier5plus,
+    updated_at: new Date().toISOString(),
+    updated_by: auth.name || auth.role || 'office',
+  };
+  const existing = await multiTvDiscountConfigFor(db);
+  let error;
+  if (existing && existing.id) {
+    ({ error } = await db.from('multi_tv_discount_config').update(patch).eq('id', existing.id));
+  } else {
+    ({ error } = await db.from('multi_tv_discount_config').insert(patch));
+  }
+  if (error) throw error;
+  multiTvDiscountConfigCacheClear();
+  return res.status(200).json({ ok: true });
 }
 
 // ── Coupons (Other -> Coupons) ───────────────────────────────────────────────
