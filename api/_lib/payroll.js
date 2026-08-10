@@ -312,6 +312,22 @@ function matchItem(name, lt) {
     if (/\btilt/i.test(name)) return { key: 'tilting bracket', juan: 35, other: 0 };
     if (/\bflat\b|fixed/i.test(name)) return { key: 'flat bracket', juan: 25, other: 0 };
   }
+  // Any OTHER line that calls itself a bracket. A bracket is a material the
+  // owner buys, never tech labor, so it pays $0 to everyone -- including Juan,
+  // whose 25/35/60 reimbursements above exist only for the three standard
+  // types he stocks himself. Without this, a hand-typed bracket name the
+  // catalog doesn't know fell through to the custom-hourly fallback and was
+  // paid as if it were labor: "Custom bracket" ($250) paid $195 and "soundbar
+  // bracket" ($164) paid $130 on one real job (Jay Kapoor, Aug 2026), which
+  // the owner had to correct by hand with a payroll override.
+  //
+  // Deliberately last among the bracket rules so the three standard types keep
+  // their own rates, and after the frame-in-box check above ($15, a genuine
+  // paid install) which also carries the word "bracket". The consequence to
+  // know: a line naming a bracket can no longer be billed as labor through
+  // this path, so real bracket-related LABOR must be written as its own line
+  // that doesn't say "bracket" (e.g. "Fabricate custom mount, 3 hours").
+  if (/\bbrackets?\b/i.test(name)) return { key: 'unrecognized bracket (material)', juan: 0, other: 0 };
   // Wall surface worded outside the exact keys above. The catalog label is
   // "Wall Surface: Brick or Stone", but normalize() strips filler words without
   // stripping "or", so it never reached the 'brick stone' key and a real $25
@@ -1361,6 +1377,19 @@ function runSelfTests() {
   eq(computeJobPay(job(wall('Wall Surface: Uneven Stone or Tile', 50)), 'Gregory').pay, 100, '"Uneven Stone or Tile" pays $40, not the $25 brick/stone rate');
   eq(computeJobPay(job(wall('Wall Surface: Outdoor Stucco', 35)), 'Gregory').pay, 95, 'stucco surface pays $35');
   eq(computeJobPay(job(wall('Wall Surface: Drywall', 0)), 'Gregory').pay, 60, 'drywall surface pays $0');
+
+  // A bracket the catalog doesn't recognize is still a MATERIAL the owner buys,
+  // never labor. These two hand-typed lines were being paid as custom hours
+  // ($195 and $130) until the owner corrected the job by hand.
+  eq(computeJobPay(job(wall('Custom bracket', 250)), 'Gregory').pay, 60, 'unrecognized "Custom bracket" pays $0, not $195 of custom hours');
+  eq(computeJobPay(job(wall('soundbar bracket', 164)), 'Gregory').pay, 60, 'unrecognized "soundbar bracket" pays $0, not $130 of custom hours');
+  eq(computeJobPay(job(wall('Custom bracket', 250)), 'Juan').pay, 60, 'unrecognized bracket pays $0 for Juan too (his 25/35/60 covers only the three types he stocks)');
+  // Lines that mention a bracket but ARE genuine paid work must survive it.
+  eq(computeJobPay(job(wall('Apple TV installation, mounting bracket included', 25)), 'Gregory').pay, 75, 'Apple TV install still pays $15 despite the word "bracket"');
+  eq(computeJobPay(job(wall('I will be using the bracket that comes in the box (Samsung Frame TV)', 25)), 'Gregory').pay, 75, 'Frame in-box bracket still pays its $15');
+  eq(computeJobPay(job(wall('Mantel Mount', 195)), 'Gregory').pay, 170, 'Mantel Mount still pays its $110 of real labor');
+  // And a genuine custom job with no bracket wording is untouched.
+  eq(computeJobPay(job(wall('TV Setup - Gaming System, VCR, and Blu Ray', 129)), 'Gregory').pay, 190, 'a real custom job still bills hourly');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
