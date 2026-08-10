@@ -295,6 +295,36 @@ function matchItem(name, lt) {
       ? { key: 'outside wall wires', juan: 15, other: 15 }
       : { key: 'behind wall wires', juan: 45, other: 35 };
   }
+  // Bracket type mentioned anywhere in the name, worded outside the exact
+  // catalog keys above (e.g. a hand-typed "Full Motion Mount" instead of the
+  // catalog's "Full Motion Bracket"). Same substring test detectBracketQtys()
+  // in api/tech.js and api/admin.js already uses for inventory deduction. If
+  // the inventory side correctly reads a line as "sold a full motion bracket",
+  // payroll must reach the exact same conclusion, not miss the match and fall
+  // through to the generic custom-hourly guess (paid Gregory $65 for a bracket
+  // that should be $0, Aug 2026). Checked full-motion first, then tilting,
+  // then flat, matching detectBracketQtys' own priority order so identical
+  // text is classified identically by both systems. Customer-supplied brackets
+  // are excluded (those pay $0 either way, but for a different reason: no
+  // material cost to reimburse Juan for).
+  if (!/customer.?supplied/i.test(name)) {
+    if (/full.?motion/i.test(name)) return { key: 'full motion bracket', juan: 60, other: 0 };
+    if (/\btilt/i.test(name)) return { key: 'tilting bracket', juan: 35, other: 0 };
+    if (/\bflat\b|fixed/i.test(name)) return { key: 'flat bracket', juan: 25, other: 0 };
+  }
+  // Wall surface worded outside the exact keys above. The catalog label is
+  // "Wall Surface: Brick or Stone", but normalize() strips filler words without
+  // stripping "or", so it never reached the 'brick stone' key and a real $25
+  // surface silently paid $0 (Gregory / Elliot job, Aug 2026). Matching on the
+  // material words themselves is wording-proof.
+  //
+  // Order matters: "Uneven Stone or Tile" also contains "stone", so the pricier
+  // uneven/tile surface MUST be tested before plain brick/stone or it would be
+  // underpaid at $25 instead of $40.
+  if (/uneven|\btile\b/i.test(name)) return { key: 'tile uneven stone', juan: 40, other: 40 };
+  if (/stucco/i.test(name)) return { key: 'stucco outdoor', juan: 35, other: 35 };
+  if (/\bbrick\b|\bstone\b/i.test(name)) return { key: 'brick stone surface', juan: 25, other: 25 };
+  if (/\bdrywall\b|\bsheetrock\b/i.test(name)) return { key: 'drywall surface', juan: 0, other: 0 };
   return null;
 }
 
@@ -1304,6 +1334,33 @@ function runSelfTests() {
     { name: 'After-Hours Service Fee (8 PM)', kind: 'fee', line_total: 75 },
     { name: 'Second Technician', line_total: 70 }
   ] }), 'Zach').pay, 140, '8pm two techs (70/2 + 30 + 75 = 35 + 30 + 75)');
+
+  // ── Bracket/surface wording variants (Gregory week of Aug 2 2026) ──────────
+  // A bracket typed by hand as "Full Motion Mount" instead of the catalog's
+  // "Full Motion Bracket" fell through every exact key and hit the generic
+  // custom-hourly fallback, paying $65 for a bracket that owes the tech $0.
+  // Inventory ALREADY read the same text as a full-motion bracket and deducted
+  // stock, so the two systems disagreed about the same line. These lock the
+  // agreement in place.
+  const wall = (nm, lt) => ({ line_items: [
+    { kind: 'option', name: '33"-59"', line_total: 109 },
+    { kind: 'option', name: nm, line_total: lt },
+  ] });
+  eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Gregory').pay, 60, 'hand-typed "Full Motion Mount" pays $0 like any bracket (not a $65 custom hour)');
+  eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Juan').pay, 120, 'Juan still gets his $60 full-motion bracket reimbursement on the variant wording');
+  eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Gregory').flags.length, 0, '"Full Motion Mount" raises no review flag');
+  eq(computeJobPay(job(wall('Bracket: Tilting Mount', 65)), 'Gregory').pay, 60, 'hand-typed "Tilting Mount" pays $0');
+  eq(computeJobPay(job(wall('Customer supplied bracket', 0)), 'Gregory').pay, 60, 'customer-supplied bracket still $0 (never reaches the new fallback)');
+  // "Wall Surface: Brick or Stone" is the catalog's own label, but normalize()
+  // strips filler words WITHOUT stripping "or", so it never reached the
+  // 'brick stone' key and a real $25 surface silently paid nothing.
+  eq(computeJobPay(job(wall('Wall Surface: Brick or Stone', 35)), 'Gregory').pay, 85, 'catalog "Brick or Stone" pays its $25 surface rate (was silently $0)');
+  eq(computeJobPay(job(wall('Wall Surface: Brick or Stone', 35)), 'Gregory').flags.length, 0, '"Brick or Stone" raises no unmatched-line flag');
+  // Ordering guard: "Uneven Stone or Tile" contains "stone", so the pricier
+  // uneven/tile rate MUST win over plain brick/stone or it underpays $15.
+  eq(computeJobPay(job(wall('Wall Surface: Uneven Stone or Tile', 50)), 'Gregory').pay, 100, '"Uneven Stone or Tile" pays $40, not the $25 brick/stone rate');
+  eq(computeJobPay(job(wall('Wall Surface: Outdoor Stucco', 35)), 'Gregory').pay, 95, 'stucco surface pays $35');
+  eq(computeJobPay(job(wall('Wall Surface: Drywall', 0)), 'Gregory').pay, 60, 'drywall surface pays $0');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
