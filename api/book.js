@@ -13,6 +13,18 @@ import { sendEnRouteSms } from './_lib/en-route.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
+// service_area_zips stores bare 5-digit zips; a ZIP+4 ("80220-1032") from any
+// caller misses the exact-match lookup and reads a covered address as
+// out-of-area. Keep the leading 5 digits (same helper as api/admin.js and
+// api/service-area.js). STRICT shape: only a bare zip or a real ZIP+4 tail
+// normalizes; a 6-digit typo ("800122") must NOT silently become the
+// different-but-real zip 80012, it stays as typed and fails closed.
+function zip5(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(\d{5})(?:[-\s]\d{1,4})?$/);
+  return m ? m[1] : s;
+}
+
 // Best-effort record of whether the confirmation email actually sent, so the
 // booking detail card can show real status instead of nothing at all. Never
 // allowed to affect the booking itself — swallow a missing-column error the
@@ -519,7 +531,7 @@ async function bookDoms(req, res) {
   const { data: area } = await db.from('service_areas')
     .select('id').eq('business_id', biz.id).eq('name', 'Denver').maybeSingle();
 
-  const zip = String(b.postal_code || customer.zip || '').trim();
+  const zip = zip5(b.postal_code || customer.zip || '');
   let surcharge = 0;
   if (zip) {
     const { data: z } = await db.from('service_area_zips').select('*')
@@ -809,7 +821,7 @@ async function bookNative(req, res, slug) {
   // ZIP -> service area: timezone, tech roster scope, per-zip surcharge, and
   // the per-zip FLAT price adjustment (0 = no-op; resilient select in case
   // migration 0083 hasn't landed on this deploy yet).
-  const zip = String(b.postal_code || customer.zip || '').trim();
+  const zip = zip5(b.postal_code || customer.zip || '');
   if (!zip) return res.status(400).json({ error: 'A ZIP code is required' });
   let z, zErr;
   ({ data: z, error: zErr } = await db.from('service_area_zips')

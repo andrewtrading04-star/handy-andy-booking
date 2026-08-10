@@ -2872,8 +2872,19 @@ function bkPrimaryTechOptionsHtml(b){
   if(!assignableTechs.length) assignableTechs=ownRoster; // no tech tagged to this metro yet — don't leave the dropdown empty
   const currentTech = ownRoster.find(t=>t.id===b.technician_id);
   if(currentTech && !assignableTechs.some(t=>t.id===currentTech.id)) assignableTechs=[...assignableTechs, currentTech];
+  // Metro name per area id, from the calendar payload's own areas list
+  // (techCache rows carry service_area_id but not the area's NAME).
+  const areaNm=id=>{ const a=((typeof areaCache!=='undefined'&&areaCache)||[]).find(x=>x.id===id); return (a&&a.name)||null; };
   return ['<option value="">— Unassigned —</option>', xcoOpt,
-    ...assignableTechs.map(t=>`<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+    // Same metro tag as the New Booking picker: whenever this list falls back
+    // to the whole roster (unmapped-zip booking) or keeps an out-of-metro
+    // assignment visible, the tech's own metro rides on the label so "Zach
+    // (Austin)" can't be mistaken for a local pick.
+    ...assignableTechs.map(t=>{
+      const nm=areaNm(t.service_area_id);
+      const tag=(nm && (!b.service_area_id || t.service_area_id!==b.service_area_id))?` (${esc(nm)})`:'';
+      return `<option value="${t.id}" ${t.id===b.technician_id?'selected':''}>${esc(t.name)}${tag}</option>`;
+    })].join('');
 }
 // ── Job detail header pieces ────────────────────────────────────────────────
 // The rail is five gates, and deliberately NOT the nine values in the status
@@ -3726,9 +3737,18 @@ async function loadBkCardInfo(b){
 async function apiConfirmUnavailable(action, body){
   let curBody={...body};
   const forced=[];
-  for(let attempt=0; attempt<3; attempt++){
+  const crossMetroOk=[];
+  // 6 attempts, not 3: the server surfaces at most ONE confirmable conflict
+  // per round trip, and a fully-confirmed worst case is now five distinct
+  // confirms (two cross-metro techs + two off-schedule techs + a high-price
+  // flag) plus the succeeding request. At 3, a booking the office had said
+  // yes to three times died with the generic failure below and could NEVER
+  // be saved, since a fresh submit resets the flags and replays the same
+  // wall. Every iteration still requires an explicit human confirm, so the
+  // bound is a runaway stop, not a budget the office can actually spend.
+  for(let attempt=0; attempt<6; attempt++){
     try{
-      return await api(action,{ method:'POST', body:{...curBody, force_unavailable_ids:forced} });
+      return await api(action,{ method:'POST', body:{...curBody, force_unavailable_ids:forced, confirm_cross_metro_ids:crossMetroOk} });
     }catch(err){
       // A price/total the server flagged as implausible (e.g. a $80,123
       // "fee" — the real incident this guards against was a browser
@@ -3739,6 +3759,19 @@ async function apiConfirmUnavailable(action, body){
       if(err.code==='high_price_confirm_required'){
         if(!confirm(`${err.message}\n\nSave it anyway as entered?`)) throw err;
         curBody={...curBody, confirm_high_price:true};
+        continue;
+      }
+      // A tech tagged to a DIFFERENT metro than this job's zip (e.g. the
+      // Austin tech on a Denver booking, the exact Jul 2026 mistake this
+      // guards). The server refuses unless explicitly confirmed, so a slip
+      // in the dropdown can never silently save; a deliberate cross-market
+      // drive is one confirm click PER TECH: the confirm is pinned to the
+      // tech id the dialog named (same per-person rule as forced above), so
+      // saying yes to one mismatched tech can never silently bless a second
+      // one, that one surfaces as its own named question on the next attempt.
+      if(err.code==='cross_metro_confirm' && err.tech_id){
+        if(!confirm(err.message)) throw err;
+        crossMetroOk.push(err.tech_id);
         continue;
       }
       if(err.code!=='tech_unavailable' || !err.tech_id) throw err;
@@ -12464,7 +12497,19 @@ function nbTechOptionsHtml(excludeNames = []){
     return `<optgroup label="${esc(g.name)} Team">`+
       `<option value="any:${g.pool}">Any ${esc(g.name)} Technician</option>`+
       techs.filter(t=> !excludeNames.some(n=> t.name.toLowerCase() === n.toLowerCase()))
-        .map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
+        // Metro tag on each name whenever the list isn't already narrowed to
+        // the job's own metro (no zip yet, or an out-of-metro tech surfaced by
+        // a fallback) -- "Zach (Austin)" can't be mistaken for a Denver pick.
+        // Compared by metro NAME, not area id: a partner tech carries the
+        // partner company's own area id, whose NAME still matches the zip's
+        // metro (Dom's Denver vs Handy Andy's Denver are both "Denver").
+        // The server refuses a cross-metro save without an explicit confirm
+        // either way; this label stops the mistake before it's even clicked.
+        .map(t=>{
+          const sameMetro=nbAreaName && t.area_name && t.area_name.toLowerCase()===nbAreaName.toLowerCase();
+          const tag=(t.area_name && !sameMetro)?` (${esc(t.area_name)})`:'';
+          return `<option value="${esc(t.id)}">${esc(t.name)}${tag}</option>`;
+        }).join('')+
     `</optgroup>`;
   }).join('');
 }

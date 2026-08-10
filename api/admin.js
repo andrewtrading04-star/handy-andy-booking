@@ -145,14 +145,77 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
 
 // Look up the service_area_id for a postal code in a given business.
 // Returns null if postal_code is not provided or not found.
+//
+// The table stores bare 5-digit zips, but the office form accepts whatever the
+// customer read out, and a ZIP+4 slipped through at least once ("80220-1032",
+// Jul 2026): the exact-match lookup missed, the booking resolved to NO metro,
+// and every downstream guard weakened at once (calendar dead, roster dropdown
+// unfiltered, auto-pick refused). Normalize to the leading 5 digits before the
+// lookup so a ZIP+4 or stray whitespace can never unmap a real metro again.
+//
+// STRICT shape on purpose: only a bare 5-digit zip or a real ZIP+4 tail
+// ("80220-1032", "80220 1032") normalizes. A 6-digit typo like "800122" must
+// NOT silently become the different-but-real zip 80012; it stays as typed,
+// misses the lookup, and fails closed for a human to fix, exactly as before.
+function zip5(postalCode) {
+  const s = String(postalCode || '').trim();
+  const m = s.match(/^(\d{5})(?:[-\s]\d{1,4})?$/);
+  return m ? m[1] : s;
+}
 async function serviceAreaIdFromPostal(db, businessId, postalCode) {
   if (!postalCode) return null;
   const { data } = await db.from('service_area_zips')
     .select('service_area_id')
     .eq('business_id', businessId)
-    .eq('postal_code', postalCode)
+    .eq('postal_code', zip5(postalCode))
     .maybeSingle();
   return data?.service_area_id || null;
+}
+
+// Cross-metro assignment backstop (the Zach-on-a-Denver-job mistake, Jul 2026:
+// five bookings created with the Austin tech on Denver-area jobs before the
+// roster scoping fix landed, each caught and reassigned by hand). The scoped
+// "any" auto-pick can no longer produce one, so this guards the paths that
+// still legitimately CAN: an explicit dropdown pick, or any future code path
+// that slips a concrete tech id into a write. Metros are compared by AREA
+// NAME, not id, because a cross-company assignment is normal (Handy Andy's
+// Denver and Dom's Denver are different area rows that both read "Denver").
+// Returns null when nothing is provably wrong: an unmapped zip or an untagged
+// tech stays permissive, since the point is to catch a provable mismatch, not
+// to block bookings the data can't judge. Callers turn a hit into a 409 with
+// code 'cross_metro_confirm' + tech_id that the office can confirm through,
+// so a real cross-market drive (e.g. covering an unstaffed metro) is one
+// extra click per tech, never impossible.
+//
+// `confirmedIds` is the per-TECH confirm list (body.confirm_cross_metro_ids),
+// deliberately NOT a request-wide boolean: confirming Zach must never also
+// silently wave through a second, never-shown mismatched tech in the same
+// request. Same doctrine as force_unavailable_ids below. Each remaining
+// unconfirmed mismatch surfaces as its own 409 on the next attempt.
+async function crossMetroMismatch(db, bookingAreaId, techIds, confirmedIds) {
+  const confirmed = new Set((confirmedIds || []).map(String));
+  const ids = (techIds || []).filter(id => id && id !== 'any' && !confirmed.has(String(id)));
+  if (!bookingAreaId || !ids.length) return null;
+  const { data: techs } = await db.from('technicians')
+    .select('id, name, service_area_id').in('id', ids);
+  const areaIds = [...new Set([bookingAreaId, ...(techs || []).map(t => t.service_area_id).filter(Boolean)])];
+  const { data: areas } = await db.from('service_areas').select('id, name').in('id', areaIds);
+  const byId = new Map((areas || []).map(a => [a.id, a]));
+  const norm = (id) => String(byId.get(id)?.name || '').trim().toLowerCase();
+  const bookingMetro = norm(bookingAreaId);
+  if (!bookingMetro) return null;
+  for (const t of techs || []) {
+    if (!t.service_area_id) continue;
+    const techMetro = norm(t.service_area_id);
+    if (techMetro && techMetro !== bookingMetro) {
+      return {
+        techId: t.id, techName: t.name,
+        techMetro: byId.get(t.service_area_id)?.name || 'another metro',
+        bookingMetro: byId.get(bookingAreaId)?.name || 'this metro',
+      };
+    }
+  }
+  return null;
 }
 
 // The timezone of a service area (its metro), or `fallbackTz` if none. Handy
@@ -2937,6 +3000,26 @@ async function bookingCreate(req, res, db, auth, body) {
     return res.status(400).json({ error: 'The two technicians must be different.' });
   }
 
+  // Cross-metro backstop: a tech tagged to a DIFFERENT metro than this
+  // booking's zip must be explicitly confirmed, never silently saved (see
+  // crossMetroMismatch above for the Jul 2026 Zach/Denver incident this
+  // exists for). Auto-picked techs pass trivially, they came from the scoped
+  // roster; this catches explicit picks and anything a stale client sends.
+  // Confirmation is per-TECH (confirm_cross_metro_ids); two mismatched techs
+  // on one booking each get their own named 409 rather than one confirm
+  // silently blessing both.
+  {
+    const mm = await crossMetroMismatch(db, bookingAreaId,
+      [technician_id, secondary_technician_id], body.confirm_cross_metro_ids);
+    if (mm) {
+      return res.status(409).json({
+        code: 'cross_metro_confirm',
+        tech_id: mm.techId,
+        error: `${mm.techName} works ${mm.techMetro}, but this job is in ${mm.bookingMetro}. Book ${mm.techName} on it anyway?`,
+      });
+    }
+  }
+
   // Guard against double-booking AND against booking a tech during a time
   // they've marked unavailable (a requested day off, or off their recurring
   // schedule). Picking a CONCRETE tech from the dropdown used to skip the
@@ -3552,6 +3635,27 @@ async function bookingUpdate(req, res, db, auth, body) {
     // The same person can't be both technicians on one job.
     if (effTech && effSecondTech && effTech === effSecondTech) {
       return res.status(400).json({ error: 'The two technicians must be different.' });
+    }
+    // Cross-metro backstop, same as bookingCreate: a NEWLY assigned tech tagged
+    // to a different metro than this booking's zip needs an explicit per-tech
+    // confirm (confirm_cross_metro_ids). Only techs actually CHANGING in this
+    // request are checked, so a booking that already carries a confirmed
+    // cross-metro tech can still be rescheduled to a new time without
+    // re-answering the same question.
+    {
+      const changedIds = [
+        ('technician_id' in patch) && patch.technician_id !== existing.technician_id ? patch.technician_id : null,
+        ('secondary_technician_id' in patch) && patch.secondary_technician_id !== existing.secondary_technician_id ? patch.secondary_technician_id : null,
+      ];
+      const mmArea = await serviceAreaIdFromPostal(db, biz.id, existing.postal_code);
+      const mm = await crossMetroMismatch(db, mmArea, changedIds, body.confirm_cross_metro_ids);
+      if (mm) {
+        return res.status(409).json({
+          code: 'cross_metro_confirm',
+          tech_id: mm.techId,
+          error: `${mm.techName} works ${mm.techMetro}, but this job is in ${mm.bookingMetro}. Assign ${mm.techName} anyway?`,
+        });
+      }
     }
     const effAt = patch.scheduled_at || existing.scheduled_at;
     if (effAt && (effTech || effSecondTech)) {
@@ -5023,6 +5127,20 @@ async function technicians(req, res, db, auth) {
   // Never leak the hash; just say whether a PIN is set.
   const techs = (data || []).map(({ pin_hash, ...t }) => ({ ...t, pin_set: !!pin_hash }));
 
+  // Each tech's metro NAME rides along so every dropdown can read "Zach
+  // (Austin)" instead of a bare name. Before a zip is typed, the New Booking
+  // tech picker legitimately lists the whole roster (the metro isn't known
+  // yet), and an unlabeled list is how an Austin tech reads as pickable for a
+  // Denver caller. Best-effort: on any error the names just don't show.
+  try {
+    const areaIds = [...new Set(techs.map(t => t.service_area_id).filter(Boolean))];
+    if (areaIds.length) {
+      const { data: areas } = await db.from('service_areas').select('id, name').in('id', areaIds);
+      const nameOf = new Map((areas || []).map(a => [a.id, a.name]));
+      for (const t of techs) t.area_name = nameOf.get(t.service_area_id) || null;
+    }
+  } catch { /* labels are cosmetic, never fail the roster over them */ }
+
   // Average rating per technician, in ONE batched query. This used to be a
   // serial per-tech loop (N+1) fetching every reviewed booking one tech at a
   // time — on a 10-tech roster that alone added ~10 round-trips to every New
@@ -5085,13 +5203,25 @@ async function partnerTechnicians(req, res, db, auth) {
   }
 
   let query = db.from('technicians')
-    .select('id, name').eq('business_id', partner.id).eq('active', true);
+    .select('id, name, service_area_id').eq('business_id', partner.id).eq('active', true);
   if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
   const { data, error } = await query.order('name');
   if (error) throw error;
+  // Metro name per tech, same as the own-roster technicians endpoint: when no
+  // zip is entered yet this list is the partner's WHOLE roster, and unlabeled
+  // names are how an out-of-metro tech reads as a valid pick. Best-effort.
+  const partnerTechs = data || [];
+  try {
+    const areaIds = [...new Set(partnerTechs.map(t => t.service_area_id).filter(Boolean))];
+    if (areaIds.length) {
+      const { data: areas } = await db.from('service_areas').select('id, name').in('id', areaIds);
+      const nameOf = new Map((areas || []).map(a => [a.id, a.name]));
+      for (const t of partnerTechs) t.area_name = nameOf.get(t.service_area_id) || null;
+    }
+  } catch { /* labels are cosmetic */ }
   return res.status(200).json({
     partner: { slug: partner.slug, name: partner.name },
-    technicians: data || [],
+    technicians: partnerTechs,
   });
 }
 

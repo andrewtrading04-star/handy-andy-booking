@@ -6,10 +6,22 @@
 import { serviceClient } from './_lib/supabase.js';
 import { NATIVE_SLUGS } from './_lib/native-businesses.js';
 
+// The table stores bare 5-digit zips; callers sometimes send a ZIP+4
+// ("80220-1032", office form, Jul 2026), which the exact-match lookup missed,
+// reading a real Denver address as "not covered". Keep the leading 5 digits.
+// STRICT shape: only a bare zip or a real ZIP+4 tail normalizes; a 6-digit
+// typo ("800122") must NOT silently become the different-but-real zip 80012,
+// it stays as typed and fails closed.
+function zip5(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(\d{5})(?:[-\s]\d{1,4})?$/);
+  return m ? m[1] : s;
+}
+
 // Native CRM zip check for Doms — no Zenbooker. Returns whether the zip is
 // covered, the per-zip surcharge, and a metro default city/state.
 async function domsServiceArea(req, res) {
-  const zip = String((req.body && (req.body.zip || req.body.postal_code)) || '').trim();
+  const zip = zip5((req.body && (req.body.zip || req.body.postal_code)) || '');
   if (!zip) return res.status(400).json({ error: 'zip is required' });
   try {
     const db = serviceClient();
@@ -40,7 +52,7 @@ async function domsServiceArea(req, res) {
 // metro's timezone + the per-zip surcharge. The widget passes service_area_id
 // back to /api/slots so availability is scoped to the right metro's techs/tz.
 async function nativeServiceArea(req, res, slug) {
-  const zip = String((req.body && (req.body.zip || req.body.postal_code)) || '').trim();
+  const zip = zip5((req.body && (req.body.zip || req.body.postal_code)) || '');
   if (!zip) return res.status(400).json({ error: 'zip is required' });
   try {
     const db = serviceClient();
