@@ -11031,7 +11031,12 @@ async function cwSubmitBooking(){
     if(!isTv && callWiz.handymanDesc){
       selections.push({ option_id:null, label:'Handyman — '+callWiz.handymanDesc, price:0, quantity:1 });
     }
-    const travelFee=Number(callWiz.surcharge)||0;
+    // Never stack this call's own travel fee on top of one already riding in via
+    // a converted estimate's carried lines (nbConvertLines), same guard as the
+    // New Booking form's auto-fill (see nbCarriedTravelLine()). This path had its
+    // own separate travelFee push that the guard never covered, so a Call Wizard
+    // booking from a converted estimate still double-charged the fee.
+    const travelFee=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
     if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
     const ah=cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate);
     if(ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
@@ -12005,7 +12010,9 @@ async function renderCallWiz(){
       // A travel fee and any discount already offered out loud have to be on the
       // estimate too, or the written number contradicts the one the customer
       // was just read on the phone.
-      const estTravel=Number(callWiz.surcharge)||0;
+      // Same nbCarriedTravelLine() guard as cwSubmitBooking() above, a written
+      // estimate must not show the fee twice either.
+      const estTravel=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
       if(estTravel!==0) sels.push({ label:estTravel>0?'Travel Fee':'Travel discount', price:estTravel, quantity:1 });
       const estDisc=cwDiscountApplied();
       if(estDisc>0) sels.push({ label:callWiz.discountLabel||'Discount', price:-estDisc, quantity:1 });
@@ -13004,9 +13011,12 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // already carry a travel fee: the customer approved that priced quote, and
   // stacking the surcharge on top of the carried line double-charged the fee in
   // both the on-screen total and the booked price (Cady Valentine, Aug 2026:
-  // quoted $873.58, booked $943.94 with two $65 Travel Fee lines). A travel fee
-  // the office TYPES into the field on a converted booking still counts — this
-  // only stops the silent automatic top-up.
+  // quoted $873.58, booked $943.94 with two $65 Travel Fee lines; Jay Kapoor,
+  // Aug 2026: two $15 Travel Fee lines from the same gap on a different code
+  // path). This field is now IGNORED entirely at submit time whenever a travel
+  // line is already carried (see nbCarriedTravelLine() and its callers below) --
+  // the estimate's own line is the one true number on a converted booking. To
+  // change it, edit the carried line itself, not this field.
   const tf=document.getElementById('nbTravelFee');
   if(nbCarriedTravelLine()){
     if(nbAutoTravel!=='' && tf.value.trim()===nbAutoTravel){ tf.value=''; nbAutoTravel=''; }
@@ -13917,7 +13927,10 @@ async function sendEstimateFromBooking(upsells){
   // The travel fee is part of the price the secretary is looking at — it was
   // silently dropped from sent estimates, so the customer-approved total never
   // matched the modal display (or the eventual converted booking).
-  const estTravel=parseFloat(document.getElementById('nbTravelFee').value)||0;
+  // Never stack this field's value on a travel line already carried in via
+  // nbConvertLines (see nbCarriedTravelLine()), same bug class as the booking
+  // submit handler below, just on the estimate-send path instead.
+  const estTravel=nbCarriedTravelLine()?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   if(estTravel!==0) selections.push({option_id:null,label:estTravel>0?'Travel Fee':'Travel discount',price:estTravel,quantity:1});
 
   const withBtn=document.getElementById('nbUpsSendWith');
@@ -14183,7 +14196,15 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
   const noCharge=nbNoChargeActive;
-  const travelFee=(assurion||gds||noCharge)?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
+  // Never stack the field's value on a travel line already carried in via a
+  // converted estimate's nbConvertLines (nbCarriedTravelLine()). The zip
+  // handler's auto-fill already skips filling this field in that case, but
+  // this submit-time read had no matching guard, so a manually-typed or
+  // stale field value still doubled the fee here even when the field looked
+  // right on screen (Jay Kapoor job, Aug 2026: two $15 Travel Fee lines,
+  // customer charged $30 instead of $15). This is the actual fix; the
+  // earlier auto-fill guard only ever stopped the SYMPTOM on-screen.
+  const travelFee=(assurion||gds||noCharge||nbCarriedTravelLine())?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
   // A NEGATIVE travel fee (an office-entered discount) must ride onto the
   // booking too — it was shown in the displayed total but silently excluded
   // here (only >0 was pushed), so the booking saved HIGHER than the screen.
