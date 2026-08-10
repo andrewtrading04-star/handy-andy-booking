@@ -1885,7 +1885,7 @@ async function techPayroll(req, res, db, auth) {
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
       tip, notes, customer_notes, zenbooker_job_number, postal_code, technician_id, ${secCol}
       customers(name), services(name),
-      line_items:booking_line_items(kind, name, unit_price, line_total)
+      line_items:booking_line_items(kind, name, quantity, unit_price, line_total)
     `;
   // A job counts for this tech whether they're the primary OR the secondary
   // (helper) technician — otherwise a two-tech job's helper leg is silently

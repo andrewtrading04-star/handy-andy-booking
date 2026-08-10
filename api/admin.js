@@ -9316,14 +9316,21 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
     .select('id, name').eq('business_id', biz.id).eq('active', true).order('name');
   if (techErr) throw techErr;
 
-  // Completed jobs for all techs in the week with payroll computation
+  // Completed jobs for all techs in the week with payroll computation.
+  //
+  // `quantity` is REQUIRED in the line-items embed. Most rates survive without
+  // it because payQty() can infer the count from line_total/unit_price, but
+  // dismountQty() has no such fallback and returns 1, so a job with 2 dismounts
+  // charged $120 read as ONE $120 dismount and paid $60 instead of 2 x $50.
+  // economicsSelect() (the profit side) has always selected quantity, so
+  // omitting it here also made profit and payroll disagree about the same job.
   const { data: jobs, error: jobErr } = await db.from('bookings')
     .select(`
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid, payment_method,
       tip, notes, customer_notes, zenbooker_job_number, postal_code,
       technician_id, secondary_technician_id,
       customers(name), services(name),
-      line_items:booking_line_items(kind, name, unit_price, line_total)
+      line_items:booking_line_items(kind, name, quantity, unit_price, line_total)
     `)
     .eq('business_id', biz.id)
     .eq('status', 'completed')

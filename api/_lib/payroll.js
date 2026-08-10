@@ -1391,6 +1391,20 @@ function runSelfTests() {
   // And a genuine custom job with no bracket wording is untouched.
   eq(computeJobPay(job(wall('TV Setup - Gaming System, VCR, and Blu Ray', 129)), 'Gregory').pay, 190, 'a real custom job still bills hourly');
 
+  // ── Dismount quantity depends on the CALLER selecting `quantity` ───────────
+  // Every other rate survives a missing quantity because payQty() infers the
+  // count from line_total/unit_price. dismountQty() cannot: it has no price
+  // fallback and returns 1. Two dismounts charged $120 therefore read as one
+  // $120 dismount ($60) instead of 2 x $50 ($100). The callers in api/admin.js
+  // (payroll) and api/tech.js (the tech's own view) must keep `quantity` in
+  // their line-items embed; these two cases are what breaks if either drops it.
+  const dis = q => ({ line_items: [
+    { kind: 'option', name: '33"-59"', line_total: 109 },
+    { kind: 'service', name: 'Dismount', line_total: 120, unit_price: 60, ...(q ? { quantity: 2 } : {}) },
+  ] });
+  eq(computeJobPay(job(dis(true)), 'Gregory').pay, 160, 'dismount qty 2 @ $120 pays 2 x $50 = $100 (+$60 base) when quantity is selected');
+  eq(computeJobPay(job(dis(false)), 'Gregory').pay, 120, 'the same line WITHOUT quantity pays only $60 -- this is the regression to guard against');
+
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
 }
