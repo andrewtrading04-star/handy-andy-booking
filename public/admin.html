@@ -1155,6 +1155,11 @@
      header above it was removed), so it carries a little more weight than the
      alert lines that share .greet-line. */
   .greet-main{font-size:15px;opacity:1;}
+  /* The two numbers the owner actually scans for, 2px above the rest of the
+     line. Scoped to .greet-main so the trend percentage and the risk counts
+     (also <b>) keep the base size and the line stays visually anchored on
+     the clock and the profit. */
+  .greet-main .gm-big{font-size:17px;}
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-line b.urgent{color:#ff8a8a;}
   .greet-line b.good{color:#5ef0a0;}
@@ -1221,6 +1226,7 @@
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
     .greet-line{font-size:12.5px;}
     .greet-main{font-size:13.5px;}
+    .greet-main .gm-big{font-size:15.5px;}
     .greet-stats{grid-template-columns:repeat(2,1fr);gap:6px;}
     .gstat{padding:10px 9px;gap:4px;}
     .gstat-l{font-size:10px;}
@@ -9745,7 +9751,13 @@ function paintGreeting(){
   // than the Profit box's own "This week" total right below it.
   const weekProfit=Number(pf.week_total)||0;
   const pct=pf.week_change_pct;
-  const trendTxt = pct==null ? '' : (pct>=0 ? ` — <b class="good">up ${pct}%</b> over last week` : ` — <b class="urgent">down ${Math.abs(pct)}%</b> over last week`);
+  // Arrow instead of the word, and no "over last week" tail: the comparison is
+  // always against last week, so saying so every time was noise. The arrow
+  // still carries the direction for anyone who reads colour poorly, so this
+  // does not lean on red-vs-green alone.
+  const trendTxt = pct==null ? '' : (pct>=0
+    ? ` — <b class="good">&#8593;${pct}%</b>`
+    : ` — <b class="urgent">&#8595;${Math.abs(pct)}%</b>`);
   const riskParts=[];
   if(greetingData.unassigned>0) riskParts.push(`<b class="urgent">${greetingData.unassigned}</b> unassigned`);
   if(greetingData.lowStockTechs>0) riskParts.push(`<b class="urgent">${greetingData.lowStockTechs}</b> tech${greetingData.lowStockTechs===1?'':'s'} low on bracket stock`);
@@ -9754,7 +9766,7 @@ function paintGreeting(){
   // an actual problem still speaks up. Separated with a middot rather than a
   // second dash so it cannot be misread as part of the trend clause.
   const ownerRiskTxt = riskParts.length ? ` · ${riskParts.join(', ')}` : '';
-  const ownerSentence = `Profit <b>${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}`;
+  const ownerSentence = `Profit <b class="gm-big">${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}`;
   const summarySentence = role==='owner'
     ? ownerSentence
     : scope==='handy-andy'
@@ -9768,7 +9780,7 @@ function paintGreeting(){
     // "Good afternoon <name>" header and the "Today is… It's currently…"
     // phrasing were dropped at the owner's request; he reads this many times
     // a day and wanted the facts, not the pleasantries.
-    `<div class="greet-line greet-main">${esc(dateStr)}. <b>${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`+
+    `<div class="greet-line greet-main">${esc(dateStr)}. <b class="gm-big">${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`+
     greetStatsHtml()+
     greetNoteHtml();
   // Net Daily Profit's trend chart tab toggle: Last 7 days / Last 30 days.
