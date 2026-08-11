@@ -149,6 +149,7 @@ export default async function handler(req, res) {
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
       case 'review_listings': return await techReviewListings(req, res, db, auth);
       case 'review_checkin_set': return await techReviewCheckinSet(req, res, db, auth, body);
+      case 'me': return await me(req, res, db, auth);
       case 'wire_plate_set': return await wirePlateSet(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
@@ -1963,6 +1964,32 @@ async function techPayroll(req, res, db, auth) {
     }
   }
 
+  // ── $100 review bonus (all 5 Google listings, migration 0090) ────────────
+  // Shown as its own labeled line in the week containing completed_at, so the
+  // tech sees exactly when the money lands. Bucketed by UTC calendar date to
+  // match how the jobs query above bounds the week. Best-effort: a missing
+  // table just means the line doesn't show.
+  try {
+    const { data: bonus } = await db.from('tech_review_bonus')
+      .select('amount, completed_at').eq('technician_id', techId).maybeSingle();
+    const day = bonus ? String(bonus.completed_at).slice(0, 10) : '';
+    if (bonus && day >= weekStart && day <= weekEnd) {
+      const amt = Math.round(Number(bonus.amount) || 0);
+      paidJobs.push({
+        id: 'review-bonus',
+        bonus: true,   // mirrors admin payroll's flag: not a worked job
+        customer_name: 'Review bonus',
+        service: 'All 5 Google listings reviewed',
+        time: '',
+        tech_pay: amt,
+        breakdown: [{ label: 'Review bonus, all 5 Google listings', amount: amt }],
+        flags: [],
+        needs_review: false,
+      });
+      totalPay += amt;
+    }
+  } catch { /* migration 0090 not applied yet */ }
+
   return res.status(200).json({
     week_start: weekStart,
     week_end: weekEnd,
@@ -2079,18 +2106,23 @@ async function techGoogleReviewDismiss(req, res, db, auth, body) {
 // listings, while this one needs a stable per-listing KEY for tracking one
 // checkbox per listing. If a listing URL ever changes, update both places.
 // Mile High is deliberately absent: it borrows Handy Andy's Denver roster and
-// has no listing of its own (owner confirmed, Aug 2026).
+// has no listing of its own (owner confirmed, Aug 2026). Dom's
+// (https://g.page/r/Cffr7Tp2DSNOEBM/review, key 'doms') is deliberately
+// REMOVED for now, owner wants the $100 program to be the 5 Handy Andy pages
+// only and will add Dom's back later; any old 'doms' checkins stay in the
+// table and simply are not listed or counted.
 const REVIEW_LISTINGS = [
   { key: 'ha-houston-1', label: 'Handy Andy, Houston (1)', url: 'https://g.page/r/CdizxHwpwcE0EBM/review' },
   { key: 'ha-houston-2', label: 'Handy Andy, Houston (2)', url: 'https://g.page/r/CeA7fWzbLgO8EBM/review' },
   { key: 'ha-austin',    label: 'Handy Andy, Austin',      url: 'https://g.page/r/CYE7aX6tVMnkEBM/review' },
   { key: 'ha-denver-1',  label: 'Handy Andy, Denver (1)',  url: 'https://g.page/r/Ccj-ZjdeLtzfEBM/review' },
   { key: 'ha-denver-2',  label: 'Handy Andy, Denver (2)',  url: 'https://g.page/r/CWcIi45TvszbEBM/review' },
-  { key: 'doms',         label: "Dom's TV Mounting",        url: 'https://g.page/r/Cffr7Tp2DSNOEBM/review' },
 ];
 const REVIEW_LISTING_KEYS = new Set(REVIEW_LISTINGS.map(l => l.key));
+const REVIEW_BONUS_AMOUNT = 100;   // dollars, added to payroll when all 5 are checked
 
-// Every listing, each with this tech's own checked/confirmed state. Auth-scoped
+// Every listing, each with this tech's own checked/confirmed state, plus the
+// tech's $100 bonus record if they've completed the program. Auth-scoped
 // (technician_id from the signed token) so a tech only ever sees their own
 // checkmarks, never another tech's.
 async function techReviewListings(req, res, db, auth) {
@@ -2103,7 +2135,20 @@ async function techReviewListings(req, res, db, auth) {
     const r = byKey.get(l.key);
     return { ...l, checked_at: r?.checked_at || null, confirmed_at: r?.confirmed_at || null };
   });
-  return res.status(200).json({ listings, all_done: listings.every(l => l.checked_at) });
+  // The locked one-time bonus record (migration 0090). Heal-on-load first: if
+  // this tech is at 5 of 5 but the award insert failed at the moment of
+  // completion (transient DB error, migration lag), land it now rather than
+  // losing the $100 forever. Insert-once semantics make this re-run safe on
+  // every load. Best-effort: if the migration isn't applied yet the card just
+  // shows the in-progress state.
+  let bonus = null;
+  try {
+    if (listings.every(l => l.checked_at)) await awardReviewBonusIfComplete(db, auth.tech_id);
+    const { data: b } = await db.from('tech_review_bonus')
+      .select('amount, completed_at').eq('technician_id', auth.tech_id).maybeSingle();
+    if (b) bonus = { amount: Math.round(Number(b.amount) || 0), completed_at: b.completed_at };
+  } catch { /* migration 0090 not applied yet */ }
+  return res.status(200).json({ listings, all_done: listings.every(l => l.checked_at), bonus });
 }
 
 // Toggle this tech's own checkbox for one listing. `checked:false` deletes the
@@ -2126,7 +2171,69 @@ async function techReviewCheckinSet(req, res, db, auth, body) {
     .upsert({ technician_id: auth.tech_id, listing_key: key, checked_at: new Date().toISOString() },
       { onConflict: 'technician_id,listing_key' });
   if (error) throw error;
-  return res.status(200).json({ ok: true, checked: true });
+
+  // ── The $100 completion bonus ─────────────────────────────────────────────
+  // The award failing here must not fail the checkbox save, and a failure is
+  // NOT silent-forever: techReviewListings re-runs the same award on every
+  // card load, so a transient DB error (or migration 0090 lagging the
+  // deploy) heals the next time the tech opens the Reviews tab instead of
+  // losing the $100 permanently. The client uses bonus_awarded to show the
+  // congratulations exactly once.
+  let allDone = false, bonusAwarded = false;
+  try {
+    const r = await awardReviewBonusIfComplete(db, auth.tech_id);
+    allDone = r.allDone; bonusAwarded = r.awarded;
+  } catch (e) {
+    console.warn('[tech] review bonus award failed (listings load will retry):', e.message);
+  }
+  return res.status(200).json({ ok: true, checked: true, all_done: allDone, bonus_awarded: bonusAwarded });
+}
+
+// Insert-once $100 award, shared by the 5th-checkbox path (which powers the
+// live congratulations) and techReviewListings (a lazy heal on every card
+// load, so an award that failed at the moment of completion still lands
+// instead of being lost forever; it also covers a tech who reached 5 of 5
+// before this code deployed). Count only CURRENT program listings: an old
+// 'doms' row from before Dom's was pulled from the program must not count
+// toward the 5. Never awards a deactivated tech: their token or invite link
+// keeps working for up to 14 days after dismissal, and without this gate
+// they could complete the program after being let go and inject $100 into
+// payroll. The PK on technician_id plus ignoreDuplicates keeps every caller
+// insert-once, so re-completion, uncheck/re-check cycles, racing taps, and
+// the heal path can never pay twice.
+async function awardReviewBonusIfComplete(db, techId) {
+  const { data: rows, error } = await db.from('tech_review_checkins')
+    .select('listing_key').eq('technician_id', techId);
+  if (error) throw error;
+  const done = (rows || []).filter(r => REVIEW_LISTING_KEYS.has(r.listing_key)).length;
+  if (done < REVIEW_LISTINGS.length) return { allDone: false, awarded: false };
+  const { data: t } = await db.from('technicians').select('active').eq('id', techId).maybeSingle();
+  if (!t || t.active === false) return { allDone: true, awarded: false };
+  const { data: bRow, error: bErr } = await db.from('tech_review_bonus')
+    .upsert({ technician_id: techId, amount: REVIEW_BONUS_AMOUNT },
+      { onConflict: 'technician_id', ignoreDuplicates: true })
+    .select('technician_id');
+  if (bErr) throw bErr;
+  // ignoreDuplicates returns the row ONLY when it was actually inserted, so
+  // an already-awarded tech reads all_done:true, awarded:false.
+  return { allDone: true, awarded: Array.isArray(bRow) ? bRow.length > 0 : !!bRow };
+}
+
+// Who am I: the same technician object login returns, for the magic-link
+// sign-in path (the SMS review invite). The link carries only a signed token,
+// so the client exchanges it here for the name/tz/slug it would normally get
+// from the login response.
+async function me(req, res, db, auth) {
+  const { data: t, error } = await db.from('technicians')
+    .select('id, name, status, businesses(slug, timezone)').eq('id', auth.tech_id).single();
+  if (error || !t) return res.status(404).json({ error: 'Technician not found' });
+  return res.status(200).json({
+    technician: {
+      id: t.id, name: t.name, status: t.status,
+      slug: t.businesses?.slug || '', tz: t.businesses?.timezone || 'America/Denver',
+      demo: demoMode(),
+    },
+  });
 }
 
 // ── Bracket inventory (read-only) ────────────────────────────────────────────

@@ -372,6 +372,7 @@ export default async function handler(req, res) {
       case 'zip_area':          return await zipArea(req, res, db, auth);
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
+      case 'review_invite_send': return await reviewInviteSend(req, res, db, auth, body);
       case 'technician_photo_upload': return await technicianPhotoUpload(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
@@ -5114,7 +5115,7 @@ async function technicians(req, res, db, auth) {
   // (0034) is the per-tech daily cap; photo_url/bio_years/bio_blurb (0060) power
   // the "Meet your tech" confirmation-email block. All optional — drop whichever
   // column the DB doesn't have yet so the roster always loads.
-  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash, photo_url, bio_years, bio_blurb';
+  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash, photo_url, bio_years, bio_blurb, review_invite_sent_at';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('technicians').select(cols).eq('business_id', biz.id).order('name'));
@@ -5223,6 +5224,43 @@ async function partnerTechnicians(req, res, db, auth) {
     partner: { slug: partner.slug, name: partner.name },
     technicians: partnerTechs,
   });
+}
+
+// ── "$100 review invite" text (Technicians screen) ───────────────────────────
+// Owner-only: texts a technician the review-program pitch with a magic link
+// that signs them into the tech app and lands directly on the Reviews tab.
+// The link carries a standard signed tech token (the exact shape login
+// issues), 14-day expiry. Same trust model as texting the tech their PIN,
+// since it goes only to the phone number on their own record. Stamps
+// technicians.review_invite_sent_at so the button shows who has been asked
+// and when; the owner sends these a few techs at a time on purpose.
+async function reviewInviteSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can send review invites' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = (body.technician_id || '').toString();
+  if (!id) return res.status(400).json({ error: 'technician_id required' });
+  const { data: t, error } = await db.from('technicians')
+    .select('id, name, phone, business_id, active').eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (error) throw error;
+  if (!t) return res.status(404).json({ error: 'Technician not found' });
+  if (t.active === false) return res.status(400).json({ error: `${t.name} is deactivated. Reactivate them before sending a review invite.` });
+  if (!t.phone) return res.status(400).json({ error: `${t.name} has no phone number set` });
+
+  const token = signToken({ kind: 'tech', tech_id: t.id, business_id: t.business_id }, 14 * 24 * 3600);
+  const base = process.env.PUBLIC_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://handy-andy-booking.vercel.app');
+  const link = `${base}/tech.html?login=${encodeURIComponent(token)}#reviews`;
+  const message = `Want a FREE $100 added to your payroll? Leave us a review. Tap the link, it signs you in and shows you exactly what to do: ${link}`;
+  const r = await sendSMSResult(t.phone, message);
+  if (!r.ok) {
+    const why = r.error ? `: ${r.error}` : (r.skipped ? ` (${r.skipped})` : '');
+    return res.status(502).json({ error: `Text did not send${why}` });
+  }
+  const sentAt = new Date().toISOString();
+  // Stamp is cosmetic bookkeeping; never fail a sent text over it.
+  try { await db.from('technicians').update({ review_invite_sent_at: sentAt }).eq('id', t.id); } catch { /* column may predate 0090 */ }
+  return res.status(200).json({ ok: true, sent_at: sentAt });
 }
 
 async function technicianUpdate(req, res, db, auth, body) {
@@ -9572,6 +9610,48 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
       }
     }
   }
+
+  // ── $100 review bonus (all 5 Google listings, migration 0090) ────────────
+  // One locked row per tech; surfaced as its own labeled pseudo-job in the
+  // Sun-Sat week containing completed_at, under the TECH's home business, so
+  // it flows through this screen's totals (and payrollCombined's merge) into
+  // exactly what the owner types into the payroll processor. Pushed as a
+  // jobs[] entry on purpose: the renderer is generic over job rows, and the
+  // "jobs.length > 0" keep-filter below then retains a tech whose only line
+  // this week is the bonus. Best-effort: a missing table never breaks payroll.
+  try {
+    // Half-open week window [Sunday, next Sunday): completed_at is a real
+    // wall-clock now() with fractional seconds, and an lte on 23:59:59 would
+    // drop a completion landing inside the final second of Saturday into NO
+    // week at all (the jobs query above gets away with lte only because slot
+    // times are hour-aligned).
+    const { data: bonuses } = await db.from('tech_review_bonus')
+      .select('technician_id, amount, completed_at, technician:technicians!technician_id(name, business_id)')
+      .gte('completed_at', parsedWeek + 'T00:00:00Z')
+      .lt('completed_at', addDaysStr(weekEnd, 1) + 'T00:00:00Z');
+    for (const bns of bonuses || []) {
+      if (bns.technician?.business_id !== biz.id) continue;   // shows under the tech's own business only
+      const tId = bns.technician_id;
+      // A tech with no jobs this week (or inactive) still gets their bonus row.
+      if (!techPayroll[tId]) techPayroll[tId] = { name: bns.technician?.name || 'Technician', jobs: [], deferred: [], total: 0 };
+      const amt = Math.round(Number(bns.amount) || 0);
+      techPayroll[tId].jobs.push({
+        id: `review-bonus-${tId}`,
+        bonus: true,   // the client excludes bonus rows from "jobs worked" counts
+        customer_name: 'Review bonus',
+        service: 'All 5 Google listings reviewed',
+        time: '',
+        scheduled_at: bns.completed_at,
+        business_name: biz.name,
+        business_slug: biz.slug,
+        tech_pay: amt,
+        breakdown: [{ label: 'Review bonus, all 5 Google listings', amount: amt }],
+        flags: [],
+        needs_review: false,
+      });
+      techPayroll[tId].total += amt;
+    }
+  } catch (e) { console.warn('[payroll] review bonus lookup failed:', e.message); }
 
   return Object.entries(techPayroll)
     .map(([id, t]) => ({ ...t, _id: id }))

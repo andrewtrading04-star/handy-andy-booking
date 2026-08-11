@@ -291,6 +291,12 @@
   .rl-qr-svg{background:#fff;border-radius:10px;padding:12px;display:inline-block;}
   .rl-qr-svg svg{display:block;width:100%;height:auto;}
   .rl-qr-hint{color:var(--mute);font-size:12px;margin:12px 0 16px;}
+  .rl-rules{color:var(--ink);font-size:12.5px;margin:10px 0 8px;font-weight:700;}
+  .rl-rules ul{margin:6px 0 0;padding-left:20px;font-weight:400;color:var(--mute);line-height:1.55;}
+  .rl-progress{color:var(--ink);font-size:12.5px;margin-top:10px;}
+  .rl-card.rl-won{text-align:center;border-color:#4ade80;box-shadow:0 0 0 1px #4ade80 inset;padding:26px 18px;}
+  .rl-won-big{font-size:26px;font-weight:900;color:#4ade80;}
+  .rl-won-sub{color:var(--ink);font-size:14px;margin-top:10px;line-height:1.55;}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -2172,9 +2178,32 @@ async function showReviews(){
   }
 }
 
+// The Sunday (week start) containing an instant, formatted "Aug 9". Payroll
+// weeks are Sun-Sat bucketed by UTC date, so this mirrors that math.
+function rlWeekOf(iso){
+  try{
+    const d=new Date(String(iso).slice(0,10)+'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate()-d.getUTCDay());
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+  }catch(e){ return ''; }
+}
 function reviewListingsCardHtml(){
   if(!_reviewListings) return '';
-  const {listings,all_done}=_reviewListings;
+  const {listings,bonus,justAwarded}=_reviewListings;
+  // Program complete + already congratulated: a quiet one-liner from then on.
+  if(bonus && !justAwarded){
+    return `<div class="rl-card" id="rlCard">
+      <div class="rl-title" style="color:#4ade80;">✓ Review bonus complete</div>
+      <div class="rl-sub">All ${listings.length} done. $${bonus.amount} added to your payroll (week of ${esc(rlWeekOf(bonus.completed_at))}).</div>
+    </div>`;
+  }
+  // The 5th box was JUST checked: the one-time congratulations moment.
+  if(bonus && justAwarded){
+    return `<div class="rl-card rl-won" id="rlCard">
+      <div class="rl-won-big">🎉 YOU DID IT!</div>
+      <div class="rl-won-sub">All ${listings.length} reviews done. A <b>$${bonus.amount} bonus</b> is being added to your payroll this week.</div>
+    </div>`;
+  }
   const rows=listings.map(l=>{
     const checked=!!l.checked_at;
     const confirmed=!!l.confirmed_at;
@@ -2194,8 +2223,18 @@ function reviewListingsCardHtml(){
   return `<div class="rl-card" id="rlCard">
     <div class="rl-head">
       <div>
-        <div class="rl-title">📣 Leave us a review</div>
-        <div class="rl-sub">${all_done?'All done! Thank you 🎉':`Help us grow, pick any location below (${doneCount} of ${listings.length} done). Send the link to your family and friends. Anyone can leave us a review.`}</div>
+        <div class="rl-title">📣 Leave us a review, get $100</div>
+        <div class="rl-sub">Leave a 5-star Google review on all ${listings.length} of our pages below and get a <b>FREE $100</b> added to your payroll.</div>
+        <div class="rl-rules">Every review must:
+          <ul>
+            <li>Mention one of these: your city (Houston, Austin or Denver), TV mounting, home theater, or Samsung Frame</li>
+            <li>Not mention any names</li>
+            <li>Be 5 stars</li>
+          </ul>
+        </div>
+        <div class="rl-sub">Already reviewed one of our pages? Tap the same Review button. Your old review opens, add one of the words above, hit save. That counts.</div>
+        <div class="rl-sub" style="margin-top:6px;">You can also send these links to family and friends. Anyone can leave us a review.</div>
+        <div class="rl-progress">Check the box after each one. <b>(${doneCount} of ${listings.length} done)</b></div>
       </div>
     </div>
     ${rows}
@@ -2218,13 +2257,21 @@ function wireReviewListingsCard(){
 async function toggleReviewCheckin(key, checked, cb){
   cb.disabled=true;
   try{
-    await api('review_checkin_set',{ method:'POST', body:{ listing_key:key, checked } });
+    const r=await api('review_checkin_set',{ method:'POST', body:{ listing_key:key, checked } });
     // Update local state and repaint just this card, not the whole screen,
     // the customer-review breakdown above it has its own filter/sort state
     // that a full re-render would otherwise reset.
     const l=_reviewListings.listings.find(x=>x.key===key);
     if(l){ l.checked_at = checked ? new Date().toISOString() : null; if(!checked) l.confirmed_at=null; }
     _reviewListings.all_done = _reviewListings.listings.every(x=>x.checked_at);
+    // The 5th box just landed: the server wrote the one-time $100 bonus row
+    // (bonus_awarded is true exactly once, ever). Flip the card into its
+    // congratulations state; on later visits review_listings returns the
+    // bonus and the card shows the quiet completed state instead.
+    if(r && r.bonus_awarded){
+      _reviewListings.bonus={ amount:100, completed_at:new Date().toISOString() };
+      _reviewListings.justAwarded=true;
+    }
     const card=document.getElementById('rlCard');
     if(card){ card.outerHTML=reviewListingsCardHtml(); wireReviewListingsCard(); }
   }catch(e){
@@ -2624,7 +2671,47 @@ document.getElementById('logoHelpModal').addEventListener('click',e=>{
 });
 
 // Boot
-if(token&&tech) showJobs(); else { show('login'); }
+// ── Boot ─────────────────────────────────────────────────────────────────────
+// Magic-link sign-in (?login=<signed tech token>): the "$100 review invite"
+// text carries a link that signs the tech in without phone+PIN and lands on
+// the Reviews tab. The token is the exact shape login issues; the client
+// exchanges it via the 'me' action for the name/tz the login response would
+// have carried, then strips it from the URL so it never lingers in the
+// address bar or history. On any failure (expired/garbled token) fall back
+// to the normal login screen rather than a broken half-session.
+// #reviews also deep-links for an ALREADY signed-in tech, so re-tapping the
+// text after the token was consumed still lands on the right tab.
+(function boot(){
+  const magic=new URLSearchParams(location.search).get('login');
+  const wantReviews=location.hash==='#reviews';
+  // The #reviews deep link routes past showJobs(), which is where the icon
+  // theme and the overdue-payment bar normally initialize at boot. Run them
+  // here so the deep-linked view isn't missing them until the tech taps Jobs.
+  const route=()=>{ applyIconTheme(); renderOverdueBar(); if(wantReviews) showReviews(); else showJobs(); };
+  if(magic){
+    // Validate BEFORE committing anything: the magic token is only trusted
+    // once 'me' accepts it. Nothing is written to localStorage until then,
+    // and on failure (expired or garbled link) whatever session existed
+    // before the tap is restored untouched. A dead link must never log a
+    // working tech out.
+    const prevToken=token, prevTech=tech;
+    token=magic;
+    history.replaceState(null,'',location.pathname+location.hash);
+    api('me').then(d=>{
+      tech=d.technician;
+      lsSet('ha_tech_token',token); lsSet('ha_tech_info',JSON.stringify(tech));
+      bizTz=(tech&&tech.tz)||bizTz;
+      route();
+    }).catch(()=>{
+      token=prevToken; tech=prevTech;
+      if(token&&tech) route();
+      else show('login');
+    });
+    return;
+  }
+  if(token&&tech) route();
+  else show('login');
+})();
 </script>
 </body>
 </html>

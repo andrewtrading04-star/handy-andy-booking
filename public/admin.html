@@ -5412,7 +5412,11 @@ function renderPayrollData(d){
   const techs = payrollTechFilter ? allTechs.filter(t=>t.name===payrollTechFilter) : allTechs;
   const total = payrollTechFilter ? techs.filter(t=>t.currency!=='PHP').reduce((s,t)=>s+(Number(t.total)||0),0) : d.total;
 
-  const jobsCount = techs.reduce((s,t)=>s+(t.jobs?t.jobs.length:0),0);
+  // The $100 review bonus rides in jobs[] as a pseudo-job so it flows through
+  // every total, but it is NOT a worked job: every count on this screen
+  // excludes rows flagged bonus so "Jobs Worked" stays the real job tally.
+  const realJobs = t => (t.jobs||[]).filter(j=>!j.bonus).length;
+  const jobsCount = techs.reduce((s,t)=>s+realJobs(t),0);
   const deferredCount = techs.reduce((s,t)=>s+(t.deferred?t.deferred.length:0),0);
 
   // ── Tech filter ──────────────────────────────────────────────────────────
@@ -5491,7 +5495,7 @@ function renderPayrollData(d){
     }
     html+=`<tr class="${i%2?'z':''}">
       <td class="pr-name">${esc(t.name)}</td>
-      <td class="r">${t.jobs.length}</td>
+      <td class="r">${realJobs(t)}${t.jobs.some(j=>j.bonus)?' <span title="Plus the $100 review bonus" style="color:var(--green,#16a34a);">+💵</span>':''}</td>
       <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
       <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
     </tr>`;
@@ -5512,7 +5516,7 @@ function renderPayrollData(d){
     html+=`<div class="pr-sec">Per-Tech Job Breakdown</div>`;
     html+=`<div class="pr-note">Every paid job per technician — customer, pay breakdown, and total pay. ⚠️ flags a job that needs review.</div>`;
     for(const t of techsWithJobs){
-      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${t.jobs.length} job${t.jobs.length===1?'':'s'}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
+      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${realJobs(t)} job${realJobs(t)===1?'':'s'}${t.jobs.some(j=>j.bonus)?' + $100 review bonus':''}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
       html+=`<table class="pr-tbl"><thead><tr>
           <th>Time</th><th>Customer</th><th>Pay breakdown</th><th class="r">Pay</th>
         </tr></thead><tbody>`;
@@ -5867,11 +5871,32 @@ function techBioText(t){
   if (Number(t.bio_years) > 0) return `${name} has been doing this for over ${Number(t.bio_years)} years, so you're in good hands.`;
   return `${name} is your installer for this job.`;
 }
+// Last-loaded Technicians roster, so the invite confirm can show the tech's
+// real name and phone without re-parsing them out of the card's DOM.
+let techRoster=[];
+// Owner taps "Send $100 review invite" on a tech card: confirm with the exact
+// text and the number it goes to, send, then re-render so the button becomes
+// the "Invite sent <date>" stamp. Re-sending later is allowed on purpose (the
+// "I lost the text" case); the confirm dialog makes that a deliberate act.
+async function sendReviewInvite(id, card, btn){
+  const t=techRoster.find(x=>x.id===id)||{};
+  const name=t.name||'this technician';
+  if(!t.phone){ toast(name+' has no phone number set'); return; }
+  const preview='Want a FREE $100 added to your payroll? Leave us a review. Tap the link, it signs you in and shows you exactly what to do: <their personal sign-in link>';
+  if(!confirm(`Text this to ${name} at ${t.phone}?\n\n"${preview}"`)) return;
+  btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
+  try{
+    await api('review_invite_send',{ method:'POST', body:{ business:current.slug, technician_id:id }});
+    toast('Invite texted to '+name+' ✓');
+    renderTechnicians();
+  }catch(e){ toast(e.message||'Could not send'); btn.disabled=false; btn.textContent=prev; }
+}
 async function renderTechnicians(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('technicians',{ params:{ business:current.slug }});
+    techRoster=d.technicians||[];
     document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
@@ -5889,6 +5914,7 @@ async function renderTechnicians(){
           <button class="btn ghost sm" data-act="phone">Set phone</button>
           <button class="btn ghost sm" data-act="pin">Set PIN</button>
           <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
+          ${role==='owner'?`<button class="btn ghost sm" data-act="reviewinvite" ${t.phone?'':'disabled title="No phone number set"'}>💵 ${t.review_invite_sent_at?`Invite sent ${new Date(t.review_invite_sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})} ✓`:'Send $100 review invite'}</button>`:''}
         </div>
         <div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
           <span class="meta" style="font-size:13px;font-weight:700;">Meet-your-tech email photo</span>
@@ -5933,6 +5959,7 @@ async function renderTechnicians(){
         if(btn.dataset.act==='photo'){ card.querySelector('.techPhotoFile').click(); }
         if(btn.dataset.act==='bioyears'){ const v=prompt('Years of experience (blank to clear):'); if(v!=null) saveTech({ id, bio_years:v }); }
         if(btn.dataset.act==='bioblurb'){ const v=prompt('Short bio line for the confirmation email (blank to clear):\n\ne.g. "Juan has been mounting TVs for over 7 years, so you\'re in good hands."'); if(v!=null) saveTech({ id, bio_blurb:v }); }
+        if(btn.dataset.act==='reviewinvite'){ sendReviewInvite(id, card, btn); }
       }));
       card.querySelector('.techPhotoFile').addEventListener('change', async e=>{
         const f=e.target.files[0]; e.target.value=''; if(!f) return;
