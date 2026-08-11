@@ -5891,13 +5891,27 @@ async function sendReviewInvite(id, card, btn){
     renderTechnicians();
   }catch(e){ toast(e.message||'Could not send'); btn.disabled=false; btn.textContent=prev; }
 }
+// The Technicians screen shows ACTIVE techs only by default. The July 2026
+// Zenbooker history import created ~20 inactive placeholder techs per business
+// ("Denver Tech 1 (2022-2025)", "Former Austin Tech", ...) purely so imported
+// historical jobs have someone to reference; they are not deletable without
+// orphaning that history, but they buried the real roster (owner: "on handy
+// andy i only want kregg, zach, steve, and juan"). They stay reachable behind
+// the Show-inactive toggle so a real deactivated tech can still be reactivated.
+let showInactiveTechs=false;
 async function renderTechnicians(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('technicians',{ params:{ business:current.slug }});
     techRoster=d.technicians||[];
-    document.getElementById('techWrap').innerHTML = d.technicians.map(t=>`
+    const activeTechs=techRoster.filter(t=>t.active);
+    const inactiveTechs=techRoster.filter(t=>!t.active);
+    const shown=showInactiveTechs?[...activeTechs,...inactiveTechs]:activeTechs;
+    const inactiveToggle=inactiveTechs.length
+      ? `<button type="button" id="toggleInactiveTechs" class="btn ghost sm" style="width:auto;margin-top:6px;">${showInactiveTechs?'Hide':'Show'} ${inactiveTechs.length} inactive tech${inactiveTechs.length===1?'':'s'} (former techs and imported history)</button>`
+      : '';
+    document.getElementById('techWrap').innerHTML = shown.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
           <div style="display:flex;align-items:center;gap:10px;">
@@ -5945,7 +5959,9 @@ async function renderTechnicians(){
           <input type="number" min="0" inputmode="numeric" class="maxjobs" value="${t.max_jobs_per_day!=null?t.max_jobs_per_day:''}" placeholder="No limit" style="width:110px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
           <span class="meta" style="font-size:12px;color:var(--mute);">leave blank for no limit</span>
         </div>`:''}
-      </div>`).join('') || '<div class="empty">No technicians.</div>';
+      </div>`).join('') + inactiveToggle || '<div class="empty">No technicians.</div>';
+    const tgl=document.getElementById('toggleInactiveTechs');
+    if(tgl) tgl.addEventListener('click',()=>{ showInactiveTechs=!showInactiveTechs; renderTechnicians(); });
 
     document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
       const id=card.dataset.id;
@@ -9541,7 +9557,7 @@ async function renderGreeting(){
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
-      jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).length),
+      jobs: (s.counts && s.counts.todayTotal!=null) ? s.counts.todayTotal : ((s.today||[]).filter(b=>b.status!=='cancelled').length),
       unassigned: (s.counts && s.counts.unassigned) || 0,
       estimates: newEst,
       photosToPost: (s.counts && s.counts.photos_to_post) || 0,

@@ -1019,7 +1019,13 @@ async function summary(req, res, db, auth) {
     profit,
     technicians: techs || [],
     counts: {
-      todayTotal: (today || []).length,
+      // Cancelled jobs are NOT "on the schedule": the calendar's day columns
+      // hide them (passFilters), so counting them here made the greeting say
+      // "There is 1 job on the schedule today" over a day the calendar
+      // correctly showed as empty (Dom's, Aug 11 2026: the only booking that
+      // day was cancelled the night before, and the secretary reported the
+      // mismatch as a glitch). Same exclusion `unassigned` below always had.
+      todayTotal: (today || []).filter(b => b.status !== 'cancelled').length,
       unassigned: (today || []).filter(b => !b.technician_id && b.status !== 'cancelled').length,
       photos_to_post: photosToPost,
     },
