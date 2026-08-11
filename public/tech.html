@@ -2195,7 +2195,7 @@ function reviewListingsCardHtml(){
     <div class="rl-head">
       <div>
         <div class="rl-title">📣 Leave us a review</div>
-        <div class="rl-sub">${all_done?'All done! Thank you 🎉':`Help us grow, pick any location below (${doneCount} of ${listings.length} done)`}</div>
+        <div class="rl-sub">${all_done?'All done! Thank you 🎉':`Help us grow, pick any location below (${doneCount} of ${listings.length} done). Send the link to your family and friends. Anyone can leave us a review.`}</div>
       </div>
     </div>
     ${rows}
@@ -2314,8 +2314,7 @@ function renderReviews(data){
   }
 
   v.innerHTML=`<div class="detail">
-    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Reviews</div>
-      <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">What your customers are saying</div></div>
+    <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Reviews</div></div>
 
     ${reviewListingsCardHtml()}
 
