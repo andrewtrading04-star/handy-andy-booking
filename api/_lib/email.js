@@ -947,3 +947,179 @@ export function outOfScopeEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']
 </html>`;
   return { subject, html };
 }
+
+// ── Receipt / invoice ────────────────────────────────────────────────────────
+// One template, two headings, driven by whether the job is actually paid:
+//   paid      -> "RECEIPT", with a PAID stamp showing how and when it was paid
+//   not paid  -> "INVOICE", with an AMOUNT DUE block instead
+// A receipt is a document a customer files, forwards to an insurer, or hands to
+// an accountant, so this is deliberately plain and light (not the dark branded
+// shell the confirmation email uses) and prints cleanly.
+//
+// `details`:
+//   kind         'receipt' | 'invoice'   (caller decides from payment state)
+//   receiptNo    short human reference (first 8 of the booking id, uppercased)
+//   customerName
+//   serviceDate  long-form date string, already formatted in the metro tz
+//   paidDate     long-form date string, or null
+//   technicianName
+//   address      { line1, city, state, zip }
+//   lines        [{ label, qty, amount }]  pre-tax items (tax passed separately)
+//   tax, adjustment, tip, total
+//   netPaid, amountDue   computed ONCE server-side (paid minus refunds) and
+//                        rendered verbatim, so the status stamp can never
+//                        derive a figure that contradicts the printed Total
+//   amountRefunded, refundedDate
+//   paymentLabel e.g. "Visa ending 4242" / "Cash" / "Zelle"
+//   businessPhone
+export function receiptEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
+  const b = brand || EMAIL_BRANDS['handy-andy'];
+  const accent = b.accent;
+  // Three documents, one template. The caller decides which from the booking's
+  // real payment state; this never infers it, so the heading and the stamp can
+  // never disagree with each other.
+  //   receipt   money cleared and stayed  -> green PAID
+  //   refunded  money cleared then went back -> grey REFUNDED, never "PAID"
+  //   invoice   money still owed          -> orange AMOUNT DUE
+  const kind = ['receipt', 'invoice', 'refunded'].includes(details.kind) ? details.kind : 'receipt';
+  const isReceipt = kind === 'receipt';
+  const isRefunded = kind === 'refunded';
+  const heading = kind === 'invoice' ? 'Invoice' : 'Receipt';
+  const a = details.address || {};
+  // "123 Main St, Houston, TX 77006" -- no comma before the ZIP, which is the
+  // standard US postal form and matters on a document a customer may file or
+  // forward to an insurer.
+  const cityState = [a.city, a.state].filter(Boolean).join(', ');
+  const addressLine = [a.line1, [cityState, a.zip].filter(Boolean).join(' ')]
+    .filter(Boolean).join(', ');
+
+  // Money lines. Tax and tip are their own rows; a coupon/discount already
+  // arrives as a negative line item and renders naturally.
+  const lines = Array.isArray(details.lines)
+    ? details.lines.filter(li => li && li.amount != null && !isDefaultTypeLabel(li.label))
+    : [];
+  const lineRows = lines.map(li => `
+          <tr>
+            <td style="padding:7px 0;font-size:14px;color:#374151;border-bottom:1px solid #f1f2f4;">${esc(cleanLineLabel(li.label))}${Number(li.qty) > 1 ? ` &times; ${Number(li.qty)}` : ''}</td>
+            <td align="right" style="padding:7px 0;font-size:14px;color:#374151;white-space:nowrap;border-bottom:1px solid #f1f2f4;">${money(li.amount)}</td>
+          </tr>`).join('');
+  const subtotal = lines.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+  const sumRow = (label, val, strong) => `
+          <tr>
+            <td style="padding:${strong ? '11px 0 0' : '5px 0 0'};font-size:${strong ? '15px' : '13.5px'};color:${strong ? '#11181c' : '#6b7280'};font-weight:${strong ? '800' : '400'};">${esc(label)}</td>
+            <td align="right" style="padding:${strong ? '11px 0 0' : '5px 0 0'};font-size:${strong ? '18px' : '13.5px'};color:${strong ? accent : '#6b7280'};font-weight:${strong ? '900' : '400'};white-space:nowrap;">${money(val)}</td>
+          </tr>`;
+  const taxRow = Number(details.tax) > 0 ? sumRow('Tax', details.tax) : '';
+  const tipRow = Number(details.tip) > 0 ? sumRow('Tip for technician', details.tip) : '';
+  const refunded = Number(details.amountRefunded) || 0;
+  const refundRow = refunded > 0 ? sumRow('Refunded', -refunded) : '';
+  // Caller-supplied reconciling line, so subtotal + tax + adjustment always
+  // equals the Total actually charged. See receiptSend: some older jobs carry
+  // a discount in `price` that was never itemized, and a customer must never
+  // be handed a document whose own numbers do not add up.
+  const adjustment = Number(details.adjustment) || 0;
+  const adjustmentRow = Math.abs(adjustment) > 0.005 ? sumRow('Adjustment', adjustment) : '';
+
+  const meta = (label, val) => !val ? '' : `
+          <tr>
+            <td style="padding:3px 0;font-size:12px;color:#8b93a1;text-transform:uppercase;letter-spacing:.04em;">${esc(label)}</td>
+            <td align="right" style="padding:3px 0;font-size:13.5px;color:#11181c;font-weight:600;">${esc(val)}</td>
+          </tr>`;
+
+  // Status stamp. Every number here is supplied by the caller (amountDue and
+  // netPaid are computed once, server-side, from the booking's real payment
+  // state) so this block can never derive a figure that contradicts the Total
+  // printed above it.
+  const total = Number(details.total) || 0;
+  const tip = Number(details.tip) || 0;
+  const netPaid = Number(details.netPaid) || 0;
+  const due = Math.max(0, Number(details.amountDue) || 0);
+  const stamp = (bg, border, fg, dim, title, sub) => `
+      <tr><td style="padding:18px 30px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${bg};border:1px solid ${border};border-radius:12px;">
+          <tr><td style="padding:14px 18px;">
+            <div style="font-size:15px;font-weight:900;color:${fg};letter-spacing:.04em;">${title}</div>
+            ${sub ? `<div style="font-size:13px;color:${dim};margin-top:3px;">${sub}</div>` : ''}
+          </td></tr>
+        </table>
+      </td></tr>`;
+  let statusBlock;
+  if (isRefunded) {
+    statusBlock = stamp('#f8fafc', '#cbd5e1', '#334155', '#475569', 'REFUNDED',
+      `${esc(money(refunded))} refunded${details.refundedDate ? ' on ' + esc(details.refundedDate) : ''}. Nothing is owed.`);
+  } else if (isReceipt) {
+    statusBlock = stamp('#ecfdf5', '#a7f3d0', '#047857', '#065f46',
+      `PAID${refunded > 0 ? ' (partially refunded)' : ''}`,
+      esc([details.paymentLabel, details.paidDate].filter(Boolean).join(' · ')) || 'Thank you for your payment');
+  } else {
+    statusBlock = `
+      <tr><td style="padding:18px 30px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;">
+          <tr><td style="padding:14px 18px;">
+            <div style="font-size:12px;font-weight:800;color:#9a3412;letter-spacing:.06em;text-transform:uppercase;">Amount due</div>
+            <div style="font-size:22px;font-weight:900;color:#9a3412;margin-top:2px;">${money(due)}</div>
+            ${netPaid > 0 ? `<div style="font-size:13px;color:#9a3412;margin-top:3px;">${money(netPaid)} already paid</div>` : ''}
+          </td></tr>
+        </table>
+      </td></tr>`;
+  }
+
+  const subject = `${heading} from ${b.name}${details.receiptNo ? ` (#${details.receiptNo})` : ''}`;
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(subject)}</title></head>
+<body style="margin:0;padding:0;background:#f4f5f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:26px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+
+        <tr><td style="padding:26px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="font-size:17px;font-weight:900;color:#11181c;">${esc(b.name)}</td>
+            <td align="right" style="font-size:13px;font-weight:800;color:${accent};letter-spacing:.1em;text-transform:uppercase;">${esc(heading)}</td>
+          </tr></table>
+          <div style="border-top:1px solid #e9ebee;margin-top:16px;"></div>
+        </td></tr>
+
+        <tr><td style="padding:16px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${meta(heading + ' #', details.receiptNo)}
+            ${meta('Service date', details.serviceDate)}
+            ${isReceipt ? meta('Date paid', details.paidDate) : ''}
+            ${meta('Technician', details.technicianName)}
+          </table>
+        </td></tr>
+
+        <tr><td style="padding:16px 30px 0;">
+          <div style="font-size:12px;color:#8b93a1;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Billed to</div>
+          <div style="font-size:14.5px;color:#11181c;font-weight:700;">${esc(details.customerName || 'Customer')}</div>
+          ${addressLine ? `<div style="font-size:13.5px;color:#4b5563;margin-top:2px;line-height:1.5;">${esc(addressLine)}</div>` : ''}
+        </td></tr>
+
+        <tr><td style="padding:20px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${lineRows}
+            ${sumRow('Subtotal', subtotal)}
+            ${taxRow}
+            ${adjustmentRow}
+            ${tipRow}
+            ${sumRow('Total', total + tip, true)}
+            ${refundRow}
+          </table>
+        </td></tr>
+
+        ${statusBlock}
+
+        <tr><td style="padding:22px 30px 28px;">
+          <div style="border-top:1px solid #e9ebee;padding-top:14px;font-size:12.5px;color:#8b93a1;line-height:1.6;">
+            Questions about this ${esc(heading.toLowerCase())}? Just reply to this email${details.businessPhone ? ' or call ' + esc(details.businessPhone) : ''}.
+            <br>${esc(b.name)}${b.website ? ' · ' + esc(b.website) : ''}
+          </div>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+  return { subject, html };
+}

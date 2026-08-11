@@ -18,7 +18,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
-import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
@@ -381,6 +381,7 @@ export default async function handler(req, res) {
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
+      case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
@@ -5230,6 +5231,170 @@ async function partnerTechnicians(req, res, db, auth) {
     partner: { slug: partner.slug, name: partner.name },
     technicians: partnerTechs,
   });
+}
+
+// ── Send a receipt (or invoice) for one job ─────────────────────────────────
+// Secretary-facing: the booking modal's "Send receipt" button. One template
+// serves both documents (see receiptEmail in _lib/email.js) and WHICH one goes
+// out is decided here from the booking's real payment state, never from the
+// caller -- a client can't talk us into telling a customer they paid when they
+// haven't. Works on any job at any age, including a call months later asking
+// for a copy for taxes or an insurance claim.
+async function receiptSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  // stripe_account is optional (older DBs); degrade rather than fail the send.
+  const cols = (withAcct) => `id, scheduled_at, price, tip, amount_paid, amount_refunded, payment_status,
+      payment_method, paid_at, ${withAcct ? 'stripe_account, ' : ''}stripe_payment_method_id, stripe_payment_intent_id,
+      address_line1, city, state, postal_code,
+      customer:customers ( name, email ),
+      technician:technicians!technician_id ( name ),
+      service_area:service_areas ( timezone ),
+      line_items:booking_line_items ( name, kind, quantity, line_total )`;
+  let { data: b, error } = await db.from('bookings').select(cols(true)).eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (error && missingColumn(error.message) === 'stripe_account') {
+    ({ data: b, error } = await db.from('bookings').select(cols(false)).eq('id', id).eq('business_id', biz.id).maybeSingle());
+  }
+  if (error) throw error;
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b.customer?.email) return res.status(400).json({ error: 'No customer email on file for this job.' });
+  if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
+
+  const total = Number(b.price) || 0;
+  const tip = Number(b.tip) || 0;
+  const paid = Number(b.amount_paid) || 0;
+  const refunded = Number(b.amount_refunded) || 0;
+  const netPaid = Math.max(0, Math.round((paid - refunded) * 100) / 100);
+  const amountDue = Math.max(0, Math.round((total + tip - netPaid) * 100) / 100);
+
+  // WHICH document to send is decided by payment_status, the same field the
+  // rest of the dashboard trusts (it gates the Charge / Refund buttons), NOT
+  // by comparing amount_paid to price. That arithmetic looks stricter but is
+  // wrong on real data: 7 live bookings are marked paid while amount_paid is
+  // short of price+tip, almost all because a tip was recorded on the booking
+  // without being charged through Stripe. Deciding by arithmetic would have
+  // emailed those already-paid customers a dunning invoice for the tip.
+  //
+  // Refunds are folded in separately because a refund never decrements
+  // amount_paid anywhere in this codebase (bookingPayment writes only
+  // payment_status + amount_refunded), so a fully refunded job would
+  // otherwise still satisfy any "was it paid" test and print a green PAID.
+  const status = String(b.payment_status || '').toLowerCase();
+  // Everything that was collected has gone back to the customer.
+  const allCollectedReturned = refunded > 0.005 && refunded + 0.005 >= paid;
+  // ...and the bill had actually been settled before that refund. Both must be
+  // true to call a job "refunded, nothing owed": a customer who paid only half
+  // and then got that half back still owes the whole bill, so that case has to
+  // fall through to an invoice for the full amount rather than a reassuring
+  // "nothing is owed" document.
+  const wasSettled = paid > 0 && paid + 0.005 >= total + tip;
+  const kind = (allCollectedReturned && wasSettled) ? 'refunded'
+    : allCollectedReturned ? 'invoice'
+    : (status === 'paid' ? 'receipt' : 'invoice');
+
+  // Never bill someone $0.00. A price-less job is a data problem, not a
+  // document, and an invoice for nothing only generates a confused phone call.
+  if (kind === 'invoice' && total + tip <= 0) {
+    return res.status(400).json({ error: 'This job has no price set, so there is nothing to invoice. Add the line items first.' });
+  }
+
+  // Tax rides in the line items as its own row; split it out so the receipt
+  // shows a true subtotal + tax rather than burying tax among the services.
+  const allLines = b.line_items || [];
+  const isTax = (li) => /^tax\b/i.test(String(li.name || ''));
+  const explicitTax = allLines.filter(isTax).reduce((s, li) => s + (Number(li.line_total) || 0), 0);
+  const lines = allLines.filter(li => !isTax(li))
+    .map(li => ({ label: li.name, qty: li.quantity, amount: li.line_total }));
+
+  // Make the document reconcile BY CONSTRUCTION. `price` is authoritative (it
+  // is what the customer was actually charged), but the itemization does not
+  // always sum to it: measured across every non-imported booking, 226 of 226
+  // jobs WITH a stored tax row reconcile exactly, while 29 jobs WITHOUT one
+  // sit ~8.96% under price -- that gap is tax that was folded into price and
+  // never written as its own line. So a positive gap is tax; a negative gap
+  // (an un-itemized discount, seen only on imported jobs) becomes a neutral
+  // "Adjustment" rather than being guessed at. Either way the customer never
+  // receives a receipt whose subtotal + tax does not equal its total.
+  const subtotal = lines.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+  const gap = Math.round((total - (subtotal + explicitTax)) * 100) / 100;
+  // A positive gap is only callable "tax" when there is something to have
+  // taxed; with no itemization at all (not present in any live booking, but
+  // cheap to guard) it falls to the neutral Adjustment row instead of
+  // labelling the entire charge as tax.
+  const gapIsTax = gap > 0 && subtotal > 0;
+  const tax = explicitTax + (gapIsTax ? gap : 0);
+  const adjustment = gapIsTax ? 0 : gap;
+
+  // Metro timezone, so the dates read correctly for a Houston/Austin job.
+  const tz = b.service_area?.timezone || biz.timezone || 'America/Denver';
+  const longDate = (iso) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('en-US', { timeZone: tz, month: 'long', day: 'numeric', year: 'numeric' }); }
+    catch { return ''; }
+  };
+
+  // How they paid, for the PAID stamp. The card claim is driven by
+  // stripe_payment_intent_id (an actual captured charge), NOT by the presence
+  // of a saved payment method: most card jobs leave payment_method null (122
+  // of 124 null-method paid jobs carry a real charge), while a cash job can
+  // still have a card sitting on file from booking time. Keying off the card
+  // on file would print "Visa ending 4242" on a job the customer paid in cash.
+  // When neither signal is present we say nothing rather than guess.
+  let paymentLabel = '';
+  if (kind === 'receipt') {
+    const method = String(b.payment_method || '').toLowerCase();
+    if (method === 'cash') paymentLabel = 'Cash';
+    else if (b.stripe_payment_intent_id) {
+      paymentLabel = 'Card';
+      if (b.stripe_payment_method_id) {
+        try {
+          const card = await retrieveCard(b.stripe_payment_method_id, { account: b.stripe_account || null, slug: biz.slug });
+          if (card.brand || card.last4) {
+            const brandName = card.brand ? card.brand.charAt(0).toUpperCase() + card.brand.slice(1) : 'Card';
+            paymentLabel = card.last4 ? `${brandName} ending ${card.last4}` : brandName;
+          }
+        } catch (_) { /* a Stripe hiccup degrades to plain "Card" */ }
+      }
+    } else if (method && method !== 'quote') {
+      paymentLabel = method.charAt(0).toUpperCase() + method.slice(1);
+    }
+  }
+
+  const { subject, html } = receiptEmail({
+    kind,
+    receiptNo: String(b.id).replace(/-/g, '').slice(0, 8).toUpperCase(),
+    customerName: b.customer.name || 'Customer',
+    serviceDate: longDate(b.scheduled_at),
+    paidDate: longDate(b.paid_at),
+    technicianName: b.technician?.name || null,
+    address: { line1: b.address_line1, city: b.city, state: b.state, zip: b.postal_code },
+    lines, tax, adjustment, tip, total,
+    netPaid, amountDue,
+    amountRefunded: refunded,
+    paymentLabel,
+  }, brandFor(biz.slug));
+
+  const { from } = emailConfig(biz.slug);
+  const result = await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from });
+  if (!result.sent) return res.status(502).json({ error: 'Email failed to send: ' + (result.skipped || result.error || 'unknown error') });
+  // Leave a record on the job itself. A financial document going to a customer
+  // should be answerable later ("did anyone already send this?", "who sent
+  // it?"), and a booking note is the one place the office already looks.
+  // Best-effort: the document HAS been delivered by this point, so a failure
+  // to log it must never turn a successful send into an error.
+  try {
+    await db.from('booking_notes').insert({
+      booking_id: b.id, business_id: biz.id,
+      body: `${kind === 'invoice' ? 'Invoice' : kind === 'refunded' ? 'Refund receipt' : 'Receipt'} emailed to ${b.customer.email}`,
+      author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null,
+      author_name: adminAuthorName(auth),
+    });
+  } catch (e) { console.warn('[receipt] note log failed:', e.message); }
+  console.log(`[receipt] ${kind} for ${id} sent by ${auth.name || auth.role} to ${b.customer.email}`);
+  return res.status(200).json({ ok: true, kind, to: b.customer.email });
 }
 
 // ── "$100 review invite" text (Technicians screen) ───────────────────────────

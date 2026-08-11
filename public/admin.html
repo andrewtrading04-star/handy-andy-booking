@@ -2779,6 +2779,19 @@ document.getElementById('bkTitle')?.addEventListener('click', async (e)=>{
   }
 });
 
+// Which document the "Send" button will produce, mirroring receiptSend's own
+// rule (payment_status, with a full refund outranking it) so the button label
+// and the confirm dialog can never promise a different document than the one
+// the server actually emails. The server remains the decider; this is preview.
+function bkReceiptWord(b){
+  const refunded=Number(b.amount_refunded)||0, paid=Number(b.amount_paid)||0;
+  const total=(Number(b.price)||0)+(Number(b.tip)||0);
+  const allReturned=refunded>0.005 && refunded+0.005>=paid;
+  const wasSettled=paid>0 && paid+0.005>=total;
+  if(allReturned && wasSettled) return 'refund receipt';
+  if(allReturned) return 'invoice';
+  return b.payment_status==='paid' ? 'receipt' : 'invoice';
+}
 // True when a booking already carries a two-person / lift fee, so we never add a
 // second one. Matches the same wordings the payroll engine treats as a 2nd-tech
 // line (so the $30/tech bonus is already accounted for).
@@ -3087,6 +3100,7 @@ function openBooking(b){
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkMarkPaid">Mark paid (cash)</button>`:''}
         ${(b.payment_status!=='paid'&&b.payment_status!=='refunded')?`<button class="btn ghost sm" id="bkChangeCard">💳 Change card</button>`:''}
         ${b.payment_status==='paid'?`<button class="btn ghost sm" id="bkRefund">Refund</button>`:''}
+        <button class="btn ghost sm" id="bkSendReceipt" ${b.customer&&b.customer.email?'':'disabled title="No customer email on file"'}>📧 Send ${bkReceiptWord(b)}</button>
       </div>
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Photos</div><div id="bkPhotos"><div class="sub" style="font-size:13px;">Loading…</div></div>
@@ -3126,6 +3140,21 @@ function openBooking(b){
   const ro=document.getElementById('bkReopen'); if(ro) ro.onclick=async()=>{ if(confirm('Reopen this completed job? It will be marked as assigned or confirmed.')){  await updateBooking({ id:b.id, action:'reopen' }); close(); } };
   const ch=document.getElementById('bkCharge'); if(ch) ch.onclick=()=>openChargeFlowAdmin(b);
   const mp=document.getElementById('bkMarkPaid'); if(mp) mp.onclick=async()=>{ if(confirm('Mark this booking as paid (e.g. cash collected at service)?')){ await paymentAction(b.id,'mark_paid'); close(); } };
+  // Send the customer their receipt (or an invoice when the job isn't paid).
+  // The server decides which document from the booking's real payment state,
+  // so the button label here is only a preview of what it will send.
+  const sr=document.getElementById('bkSendReceipt');
+  if(sr) sr.onclick=async()=>{
+    const email=(b.customer&&b.customer.email)||'';
+    const doc=bkReceiptWord(b);
+    if(!confirm(`Email this ${doc} to ${email}?`)) return;
+    sr.disabled=true; const prev=sr.textContent; sr.textContent='Sending…';
+    try{
+      const r=await api('receipt_send',{ method:'POST', body:{ business:current.slug, id:b.id }});
+      toast(`${(r.kind==='invoice'?'Invoice':'Receipt')} sent to ${r.to} ✓`);
+      sr.textContent='Sent ✓';
+    }catch(err){ toast(err.message||'Could not send'); sr.disabled=false; sr.textContent=prev; }
+  };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{
     let max;
     try{ const r=await api('booking_payment',{method:'POST',body:{business:current.slug,id:b.id,action:'refund_status'}}); max=r.remaining; }
