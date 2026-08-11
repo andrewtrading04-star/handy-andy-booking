@@ -147,6 +147,8 @@ export default async function handler(req, res) {
       case 'tech_google_review_dismiss': return await techGoogleReviewDismiss(req, res, db, auth, body);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
+      case 'review_listings': return await techReviewListings(req, res, db, auth);
+      case 'review_checkin_set': return await techReviewCheckinSet(req, res, db, auth, body);
       case 'wire_plate_set': return await wirePlateSet(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
@@ -2067,6 +2069,64 @@ async function techGoogleReviewDismiss(req, res, db, auth, body) {
     .update({ seen: true }).eq('id', id).eq('technician_id', auth.tech_id);
   if (error) throw error;
   return res.status(200).json({ ok: true });
+}
+
+// ── "Leave us a review" (tech self-report + Google listing links) ───────────
+// The company's Google listings a tech can be pointed at to leave a review.
+// Mirrors GMB_LISTINGS in api/admin.js (the customer-facing review router) --
+// same URLs, same source of truth conceptually, kept as a second literal here
+// because that map is keyed by metro for ROUTING a customer to one of several
+// listings, while this one needs a stable per-listing KEY for tracking one
+// checkbox per listing. If a listing URL ever changes, update both places.
+// Mile High is deliberately absent: it borrows Handy Andy's Denver roster and
+// has no listing of its own (owner confirmed, Aug 2026).
+const REVIEW_LISTINGS = [
+  { key: 'ha-houston-1', label: 'Handy Andy, Houston (1)', url: 'https://g.page/r/CdizxHwpwcE0EBM/review' },
+  { key: 'ha-houston-2', label: 'Handy Andy, Houston (2)', url: 'https://g.page/r/CeA7fWzbLgO8EBM/review' },
+  { key: 'ha-austin',    label: 'Handy Andy, Austin',      url: 'https://g.page/r/CYE7aX6tVMnkEBM/review' },
+  { key: 'ha-denver-1',  label: 'Handy Andy, Denver (1)',  url: 'https://g.page/r/Ccj-ZjdeLtzfEBM/review' },
+  { key: 'ha-denver-2',  label: 'Handy Andy, Denver (2)',  url: 'https://g.page/r/CWcIi45TvszbEBM/review' },
+  { key: 'doms',         label: "Dom's TV Mounting",        url: 'https://g.page/r/Cffr7Tp2DSNOEBM/review' },
+];
+const REVIEW_LISTING_KEYS = new Set(REVIEW_LISTINGS.map(l => l.key));
+
+// Every listing, each with this tech's own checked/confirmed state. Auth-scoped
+// (technician_id from the signed token) so a tech only ever sees their own
+// checkmarks, never another tech's.
+async function techReviewListings(req, res, db, auth) {
+  const { data: rows, error } = await db.from('tech_review_checkins')
+    .select('listing_key, checked_at, confirmed_at')
+    .eq('technician_id', auth.tech_id);
+  if (error) throw error;
+  const byKey = new Map((rows || []).map(r => [r.listing_key, r]));
+  const listings = REVIEW_LISTINGS.map(l => {
+    const r = byKey.get(l.key);
+    return { ...l, checked_at: r?.checked_at || null, confirmed_at: r?.confirmed_at || null };
+  });
+  return res.status(200).json({ listings, all_done: listings.every(l => l.checked_at) });
+}
+
+// Toggle this tech's own checkbox for one listing. `checked:false` deletes the
+// row outright rather than storing a false flag -- unchecking is "I haven't
+// (or take it back)", and a deleted row can't carry a stale confirmed_at from
+// a previous claim forward into a new, unverified one.
+async function techReviewCheckinSet(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const key = (body.listing_key || '').toString().trim();
+  if (!REVIEW_LISTING_KEYS.has(key)) return res.status(400).json({ error: 'Unknown listing' });
+  if (body.checked === false) {
+    const { error } = await db.from('tech_review_checkins')
+      .delete().eq('technician_id', auth.tech_id).eq('listing_key', key);
+    if (error) throw error;
+    return res.status(200).json({ ok: true, checked: false });
+  }
+  // confirmed_at/confirmed_via are never set here -- only the (future) email
+  // reconciliation pass sets those, never the tech's own request.
+  const { error } = await db.from('tech_review_checkins')
+    .upsert({ technician_id: auth.tech_id, listing_key: key, checked_at: new Date().toISOString() },
+      { onConflict: 'technician_id,listing_key' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, checked: true });
 }
 
 // ── Bracket inventory (read-only) ────────────────────────────────────────────

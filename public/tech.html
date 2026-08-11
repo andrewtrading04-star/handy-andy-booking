@@ -269,6 +269,28 @@
   .gtext{font-size:13px;color:var(--ink);line-height:1.5;margin-top:9px;}
   .gtext.empty{color:var(--mute);font-style:italic;}
   .gflag{display:inline-block;background:rgba(255,176,32,.15);color:var(--amber);font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:8px;}
+
+  /* "Leave us a review" card */
+  .rl-card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  .rl-head{margin-bottom:10px;}
+  .rl-title{font-weight:800;font-size:15px;color:var(--ink);}
+  .rl-sub{color:var(--mute);font-size:12px;margin-top:3px;}
+  .rl-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);flex-wrap:wrap;}
+  .rl-row:first-of-type{border-top:none;}
+  .rl-check{display:flex;align-items:center;gap:9px;cursor:pointer;min-width:0;}
+  .rl-check input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--orange);}
+  .rl-name{font-size:12.5px;color:var(--ink);line-height:1.3;}
+  .rl-confirmed{color:#4ade80;font-size:10.5px;font-weight:700;white-space:nowrap;}
+  .rl-pending{color:var(--mute);font-size:10.5px;font-style:italic;}
+  .rl-actions{display:flex;gap:6px;flex:none;}
+  .rl-btn{background:var(--navy);border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:700;padding:6px 10px;border-radius:8px;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer;}
+  .rl-btn.ghost{padding:6px 9px;color:var(--mute);}
+  .rl-qr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;}
+  .rl-qr-box{background:var(--navy-2);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:300px;width:100%;text-align:center;}
+  .rl-qr-title{font-weight:800;font-size:14px;color:var(--ink);margin-bottom:14px;}
+  .rl-qr-svg{background:#fff;border-radius:10px;padding:12px;display:inline-block;}
+  .rl-qr-svg svg{display:block;width:100%;height:auto;}
+  .rl-qr-hint{color:var(--mute);font-size:12px;margin:12px 0 16px;}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -2122,16 +2144,120 @@ function reviewCardGoogle(r){
   </div>`;
 }
 
+// ── "Leave us a review" ──────────────────────────────────────────────────────
+// Pre-rendered QR codes for every listing (see api/tech.js REVIEW_LISTINGS and
+// scripts/gen-review-qr.mjs, regenerate that script's output here if a
+// listing URL ever changes). Inlined so opening a code is instant and needs
+// no network request; six of these together are under 10KB.
+const REVIEW_QR_SVG = {"ha-houston-1":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m4 0h3m2 0h3m1 0h1m1 0h7M1 2.5h1m5 0h1m3 0h1m1 0h1m2 0h1m2 0h1m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h5m1 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m2 0h1m4 0h1m2 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m4 0h4m4 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3m1 0h1m1 0h3m2 0h1M1 9.5h1m1 0h5m4 0h1m1 0h3m1 0h1m1 0h2m1 0h5M1 10.5h2m3 0h1m1 0h2m1 0h1m3 0h1m1 0h1m2 0h6m3 0h1M1 11.5h4m1 0h2m1 0h1m2 0h1m1 0h3m2 0h1m1 0h1m2 0h2M3 12.5h1m1 0h1m3 0h1m3 0h1m1 0h1m3 0h1m3 0h1m1 0h2m1 0h1M2 13.5h2m2 0h3m3 0h1m3 0h3m1 0h1m5 0h2M1 14.5h2m2 0h1m2 0h1m1 0h3m1 0h1m2 0h1m2 0h6m3 0h1M1 15.5h1m2 0h1m2 0h2m1 0h2m2 0h5m6 0h3M1 16.5h2m1 0h1m1 0h1m2 0h2m1 0h3m2 0h1m3 0h1m3 0h1m2 0h1M1 17.5h2m4 0h3m1 0h2m2 0h1m2 0h1m3 0h1m1 0h1m1 0h2M1 18.5h1m2 0h3m2 0h2m2 0h1m5 0h7m1 0h1m1 0h1M1 19.5h1m2 0h1m1 0h3m1 0h2m4 0h4m1 0h1m1 0h1m3 0h1M1 20.5h1m3 0h2m3 0h2m3 0h3m2 0h1m2 0h2m3 0h1M1 21.5h1m1 0h3m1 0h2m2 0h2m8 0h5m1 0h3M9 22.5h1m1 0h1m2 0h4m1 0h1m1 0h1m3 0h5M1 23.5h7m2 0h7m4 0h1m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h1m2 0h1m1 0h1m5 0h2m3 0h1m3 0h1M1 25.5h1m1 0h3m1 0h1m1 0h4m2 0h2m1 0h2m1 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m2 0h2m2 0h2m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h1m3 0h1m2 0h2m1 0h3m1 0h1m1 0h4M1 28.5h1m5 0h1m4 0h6m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h5m1 0h2m5 0h4m1 0h1\"/></svg>","ha-houston-2":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m5 0h2m2 0h1m3 0h1m1 0h7M1 2.5h1m5 0h1m3 0h1m4 0h1m1 0h1m4 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h1m1 0h1m2 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h5m4 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h1m4 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m2 0h1m1 0h5m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3m3 0h3m1 0h3M1 9.5h1m1 0h5m6 0h3m1 0h1m2 0h1m1 0h5M1 10.5h3m2 0h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h2m1 0h4m3 0h1M2 11.5h1m1 0h4m3 0h1m2 0h3m1 0h2m1 0h1m2 0h2M4 12.5h3m2 0h1m3 0h1m1 0h1m3 0h1m3 0h1m1 0h2m1 0h1M2 13.5h2m1 0h3m2 0h2m4 0h2m8 0h2M2 14.5h1m1 0h2m2 0h2m1 0h1m1 0h2m2 0h3m1 0h5m3 0h1M4 15.5h1m2 0h3m2 0h1m1 0h4m3 0h1m3 0h3M1 16.5h2m1 0h2m3 0h2m3 0h1m2 0h1m1 0h1m1 0h1m3 0h1m2 0h1M5 17.5h1m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m3 0h1m1 0h1m1 0h2M1 18.5h1m1 0h1m1 0h2m1 0h3m1 0h2m5 0h7m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h2m3 0h3m2 0h1m1 0h1m3 0h1M1 20.5h1m1 0h1m2 0h1m1 0h1m1 0h4m1 0h3m2 0h1m2 0h2m3 0h1M1 21.5h1m1 0h5m1 0h1m2 0h1m8 0h5m1 0h3M9 22.5h1m2 0h1m1 0h6m1 0h1m3 0h5M1 23.5h7m2 0h1m1 0h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h3m1 0h2m5 0h2m3 0h1m3 0h1M1 25.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h2m1 0h2m1 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h3m1 0h2m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h1m2 0h1m3 0h2m1 0h3m1 0h1m1 0h4M1 28.5h1m5 0h1m4 0h2m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h2m1 0h3m1 0h1m5 0h4m1 0h1\"/></svg>","ha-austin":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m3 0h1m1 0h2m2 0h2m2 0h1m1 0h7M1 2.5h1m5 0h1m2 0h1m1 0h2m2 0h1m2 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h6m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h2m4 0h1m2 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h5m1 0h4m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h1m2 0h3m1 0h3M1 9.5h1m1 0h5m2 0h1m2 0h4m1 0h1m2 0h1m1 0h5M1 10.5h1m2 0h1m1 0h1m1 0h2m1 0h1m3 0h1m1 0h1m2 0h1m1 0h4m3 0h1M2 11.5h1m2 0h1m1 0h1m2 0h1m3 0h3m4 0h1m2 0h2M4 12.5h1m1 0h1m1 0h2m3 0h1m1 0h1m3 0h1m1 0h1m1 0h1m1 0h2m1 0h1M4 13.5h1m1 0h4m1 0h2m3 0h2m8 0h2M8 14.5h1m2 0h4m2 0h1m3 0h5m3 0h1M1 15.5h1m1 0h1m1 0h1m1 0h2m1 0h2m1 0h6m2 0h1m3 0h3M2 16.5h2m1 0h1m3 0h3m2 0h1m2 0h1m1 0h1m5 0h1m2 0h1M2 17.5h1m1 0h5m3 0h1m2 0h1m4 0h3m1 0h1m1 0h2M1 18.5h1m1 0h2m1 0h1m3 0h3m5 0h2m1 0h5m1 0h1m1 0h1M1 19.5h1m1 0h1m1 0h3m1 0h1m2 0h1m3 0h2m3 0h1m1 0h1m3 0h1M1 20.5h1m1 0h1m1 0h1m5 0h1m3 0h3m2 0h1m2 0h2m3 0h1M1 21.5h1m3 0h1m1 0h2m2 0h1m6 0h1m2 0h5m1 0h3M9 22.5h1m1 0h1m2 0h6m1 0h1m3 0h5M1 23.5h7m3 0h2m1 0h3m1 0h1m2 0h1m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h2m1 0h3m4 0h3m3 0h1m3 0h1M1 25.5h1m1 0h3m1 0h1m1 0h3m3 0h2m1 0h1m2 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m1 0h6m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m1 0h6m1 0h1m1 0h4M1 28.5h1m5 0h1m3 0h1m3 0h3m3 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h5m2 0h1m5 0h4m1 0h1\"/></svg>","ha-denver-1":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m4 0h3m2 0h5m1 0h7M1 2.5h1m5 0h1m3 0h3m2 0h1m1 0h2m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h4m2 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h5m1 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h3m3 0h3m3 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3m3 0h3m1 0h1m1 0h1M1 9.5h1m1 0h5m2 0h1m3 0h3m1 0h1m1 0h1m2 0h5M8 10.5h1m3 0h2m1 0h1m1 0h1m1 0h2m1 0h4m3 0h1M1 11.5h8m1 0h1m1 0h5m7 0h2M3 12.5h2m1 0h1m1 0h3m1 0h1m2 0h1m4 0h1m2 0h1m1 0h2m1 0h1M1 13.5h2m1 0h1m2 0h2m3 0h2m2 0h2m2 0h1m5 0h2M1 14.5h4m3 0h2m1 0h2m1 0h1m2 0h9m3 0h1M4 15.5h1m1 0h3m2 0h1m2 0h4m3 0h1m3 0h3M1 16.5h1m1 0h1m2 0h1m2 0h2m2 0h2m2 0h1m1 0h2m4 0h1m2 0h1M1 17.5h2m1 0h1m2 0h3m2 0h1m2 0h1m2 0h1m3 0h1m1 0h1m1 0h2M1 18.5h2m1 0h1m1 0h1m1 0h2m1 0h1m1 0h1m6 0h6m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h3m3 0h2m3 0h1m1 0h1m3 0h1M1 20.5h1m1 0h1m2 0h1m2 0h5m1 0h3m1 0h2m2 0h2m3 0h1M1 21.5h1m2 0h1m1 0h7m5 0h1m2 0h5m1 0h3M9 22.5h1m2 0h7m2 0h1m3 0h5M1 23.5h7m2 0h7m1 0h2m1 0h1m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h1m1 0h1m1 0h2m4 0h3m3 0h1m3 0h1M1 25.5h1m1 0h3m1 0h1m1 0h4m2 0h2m1 0h1m2 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h3m1 0h2m1 0h2m1 0h3m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m1 0h3m1 0h2m1 0h1m1 0h4M1 28.5h1m5 0h1m2 0h1m1 0h6m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h2m3 0h1m1 0h1m5 0h4m1 0h1\"/></svg>","ha-denver-2":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m1 0h1m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m1 0h1m2 0h2m4 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h2m3 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h4m3 0h4m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m4 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h4m2 0h1m2 0h2M1 9.5h1m2 0h7m1 0h2m1 0h3m4 0h1m2 0h1m1 0h3M1 10.5h1m1 0h2m1 0h1m3 0h1m2 0h1m2 0h1m7 0h2m1 0h2M1 11.5h1m1 0h3m1 0h1m1 0h3m2 0h1m1 0h1m1 0h1m6 0h1m1 0h1M1 12.5h3m1 0h2m6 0h1m1 0h6m1 0h1m1 0h3m2 0h1M1 13.5h4m2 0h2m1 0h1m3 0h3m3 0h2m1 0h2m4 0h1M1 14.5h3m2 0h1m5 0h2m1 0h3m5 0h7M1 15.5h1m2 0h1m1 0h3m6 0h2m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1M1 16.5h1m2 0h1m1 0h1m3 0h2m1 0h4m2 0h2m1 0h2m1 0h1m1 0h1m1 0h1M1 17.5h1m1 0h5m1 0h1m3 0h1m8 0h1m3 0h1M1 18.5h1m2 0h2m4 0h1m1 0h2m2 0h3m2 0h1m3 0h1m1 0h2M1 19.5h5m1 0h1m2 0h3m1 0h3m2 0h2m3 0h1m1 0h1m2 0h1M1 20.5h5m2 0h2m1 0h1m1 0h2m2 0h1m3 0h4m1 0h2M1 21.5h3m1 0h1m1 0h2m1 0h1m2 0h2m2 0h2m1 0h9M9 22.5h2m2 0h2m3 0h1m2 0h1m3 0h2M1 23.5h7m1 0h2m2 0h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h2M1 24.5h1m5 0h1m1 0h1m4 0h1m1 0h6m3 0h1m2 0h1M1 25.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m1 0h2m2 0h7m2 0h1M1 26.5h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h1m1 0h1m1 0h1m2 0h1m6 0h1M1 27.5h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h2m1 0h2m1 0h1m3 0h1m1 0h3M1 28.5h1m5 0h1m2 0h1m1 0h2m1 0h1m3 0h1m3 0h2m1 0h2m1 0h1M1 29.5h7m1 0h1m2 0h3m1 0h1m1 0h1m2 0h3m1 0h1\"/></svg>","doms":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 31 31\" shape-rendering=\"crispEdges\"><path fill=\"#ffffff\" d=\"M0 0h31v31H0z\"/><path stroke=\"#000000\" d=\"M1 1.5h7m2 0h1m1 0h3m2 0h1m3 0h1m1 0h7M1 2.5h1m5 0h1m2 0h1m5 0h1m4 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h4m1 0h5m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m3 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h3m1 0h1m3 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h2m2 0h3m1 0h2M1 9.5h1m1 0h5m2 0h1m3 0h3m1 0h2m1 0h1m1 0h5M1 10.5h2m3 0h1m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m2 0h6m3 0h1M2 11.5h3m1 0h3m1 0h7m1 0h2m4 0h2M1 12.5h1m1 0h2m1 0h1m1 0h2m1 0h1m3 0h1m3 0h3m1 0h1m1 0h2m1 0h1M3 13.5h1m2 0h3m3 0h2m2 0h2m8 0h2M2 14.5h4m3 0h4m1 0h1m2 0h1m1 0h7m3 0h1M1 15.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h4m7 0h3M1 16.5h2m1 0h1m1 0h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h3m3 0h1m2 0h1M1 17.5h2m3 0h2m1 0h3m3 0h1m6 0h1m1 0h1m1 0h2M1 18.5h1m1 0h2m5 0h3m7 0h6m1 0h1m1 0h1M1 19.5h1m4 0h5m1 0h2m2 0h4m1 0h1m1 0h1m3 0h1M1 20.5h1m1 0h1m1 0h1m2 0h4m1 0h1m1 0h3m2 0h1m2 0h2m3 0h1M1 21.5h1m1 0h1m2 0h2m1 0h1m1 0h3m7 0h5m1 0h3M9 22.5h3m1 0h7m1 0h1m3 0h5M1 23.5h7m2 0h1m3 0h3m1 0h1m2 0h1m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h1m1 0h4m4 0h3m3 0h1m3 0h1M1 25.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h2m4 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h6m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h1m4 0h5m1 0h2m1 0h1m1 0h4M1 28.5h1m5 0h1m2 0h1m2 0h1m1 0h3m3 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h1m4 0h1m1 0h1m5 0h4m1 0h1\"/></svg>"};
+
+let _reviewListings=null;  // last-loaded state, so a checkbox toggle can repaint without a refetch
+
 async function showReviews(){
   show('reviewsView');
   const v=document.getElementById('reviewsView');
   v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
   try{
-    const d=await api('tech_reviews');
+    // Reviews (customer feedback about the tech) and this tech's own listing
+    // checkins load together; the listings card is best-effort, a failure
+    // there must never block the customer-review breakdown from showing.
+    const [d, listings] = await Promise.all([
+      api('tech_reviews'),
+      api('review_listings').catch(()=>null),
+    ]);
+    _reviewListings=listings;
     renderReviews(d);
   }catch(e){
     v.innerHTML=`<div class="detail"><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
   }
+}
+
+function reviewListingsCardHtml(){
+  if(!_reviewListings) return '';
+  const {listings,all_done}=_reviewListings;
+  const rows=listings.map(l=>{
+    const checked=!!l.checked_at;
+    const confirmed=!!l.confirmed_at;
+    return `<div class="rl-row">
+      <label class="rl-check">
+        <input type="checkbox" data-key="${esc(l.key)}" ${checked?'checked':''}>
+        <span class="rl-name">${esc(l.label)}${confirmed?' <span class="rl-confirmed" title="Matched to a real review that came in">✓ confirmed</span>':(checked?' <span class="rl-pending">pending</span>':'')}</span>
+      </label>
+      <div class="rl-actions">
+        <a class="rl-btn" href="${esc(l.url)}" target="_blank" rel="noopener">Review ↗</a>
+        <button type="button" class="rl-btn ghost" data-copy="${esc(l.url)}">🔗</button>
+        <button type="button" class="rl-btn ghost" data-qr="${esc(l.key)}">▦</button>
+      </div>
+    </div>`;
+  }).join('');
+  const doneCount=listings.filter(l=>l.checked_at).length;
+  return `<div class="rl-card" id="rlCard">
+    <div class="rl-head">
+      <div>
+        <div class="rl-title">📣 Leave us a review</div>
+        <div class="rl-sub">${all_done?'All done! Thank you 🎉':`Help us grow, pick any location below (${doneCount} of ${listings.length} done)`}</div>
+      </div>
+    </div>
+    ${rows}
+  </div>`;
+}
+
+function wireReviewListingsCard(){
+  const card=document.getElementById('rlCard'); if(!card) return;
+  card.querySelectorAll('input[type=checkbox][data-key]').forEach(cb=>{
+    cb.addEventListener('change', ()=>toggleReviewCheckin(cb.dataset.key, cb.checked, cb));
+  });
+  card.querySelectorAll('[data-copy]').forEach(b=>{
+    b.addEventListener('click', ()=>copyReviewLink(b.dataset.copy));
+  });
+  card.querySelectorAll('[data-qr]').forEach(b=>{
+    b.addEventListener('click', ()=>openReviewQr(b.dataset.qr));
+  });
+}
+
+async function toggleReviewCheckin(key, checked, cb){
+  cb.disabled=true;
+  try{
+    await api('review_checkin_set',{ method:'POST', body:{ listing_key:key, checked } });
+    // Update local state and repaint just this card, not the whole screen,
+    // the customer-review breakdown above it has its own filter/sort state
+    // that a full re-render would otherwise reset.
+    const l=_reviewListings.listings.find(x=>x.key===key);
+    if(l){ l.checked_at = checked ? new Date().toISOString() : null; if(!checked) l.confirmed_at=null; }
+    _reviewListings.all_done = _reviewListings.listings.every(x=>x.checked_at);
+    const card=document.getElementById('rlCard');
+    if(card){ card.outerHTML=reviewListingsCardHtml(); wireReviewListingsCard(); }
+  }catch(e){
+    toast(e.message||'Could not save, try again');
+    cb.checked=!checked; cb.disabled=false;
+  }
+}
+
+// Same copy-with-fallback pattern used elsewhere in this app: clipboard needs
+// HTTPS + a user gesture, so a blocked/unsupported browser falls back to a
+// plain prompt() the tech can copy from by hand instead of silently failing.
+async function copyReviewLink(url){
+  try{ await navigator.clipboard.writeText(url); toast('Link copied ✓'); }
+  catch(e){ prompt('Copy this review link:', url); }
+}
+
+// QR code, mainly for switching devices: a tech looking at this on a shared
+// tablet can scan it with their OWN phone and leave the review from their
+// personal Google account, no typing required.
+function openReviewQr(key){
+  const svg=REVIEW_QR_SVG[key]; if(!svg) return;
+  const listing=(_reviewListings?.listings||[]).find(l=>l.key===key);
+  const overlay=document.createElement('div');
+  overlay.className='rl-qr-overlay';
+  overlay.innerHTML=`<div class="rl-qr-box">
+      <div class="rl-qr-title">${esc(listing?.label||'Scan to review')}</div>
+      <div class="rl-qr-svg">${svg}</div>
+      <div class="rl-qr-hint">Scan with your phone's camera</div>
+      <button type="button" class="rl-btn" id="rlQrClose">Close</button>
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  document.getElementById('rlQrClose').addEventListener('click', ()=>overlay.remove());
 }
 
 // Reviews — redesigned to work like Google's own review breakdown: a bar per
@@ -2191,6 +2317,8 @@ function renderReviews(data){
     <div style="padding:0 2px 12px;"><div class="big-name" style="font-size:19px;">My Reviews</div>
       <div class="sub" style="color:var(--mute);font-size:13px;margin-top:4px;">What your customers are saying</div></div>
 
+    ${reviewListingsCardHtml()}
+
     <div class="rs-card">
       <div class="rs-top">
         <div class="rs-avgcol">
@@ -2213,6 +2341,7 @@ function renderReviews(data){
 
   document.getElementById('rsLabel').addEventListener('click',()=>{ if(activeFilter){ activeFilter=null; paint(); } });
   document.getElementById('rsSortPill').addEventListener('click',()=>{ sortMode = sortMode==='newest' ? 'lowest' : 'newest'; paint(); });
+  wireReviewListingsCard();
   paint();
 }
 
