@@ -1150,8 +1150,11 @@
     box-shadow:0 10px 28px rgba(11,31,58,.22);position:relative;overflow:hidden;}
   .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
     background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
-  .greet-hi{font-size:21px;font-weight:800;letter-spacing:.2px;margin-bottom:5px;}
   .greet-line{font-size:13.5px;line-height:1.6;opacity:.94;}
+  /* The single summary line is now the banner's headline (the "Good afternoon"
+     header above it was removed), so it carries a little more weight than the
+     alert lines that share .greet-line. */
+  .greet-main{font-size:15px;opacity:1;}
   .greet-line b{color:var(--gaccent,#ffb27a);font-weight:800;}
   .greet-line b.urgent{color:#ff8a8a;}
   .greet-line b.good{color:#5ef0a0;}
@@ -1216,8 +1219,8 @@
   .greet-note .gn-ic{font-size:16px;line-height:1.4;flex-shrink:0;}
   @media (max-width:760px){
     .greeting{margin:10px 12px 2px;padding:15px 16px;border-radius:14px;}
-    .greet-hi{font-size:18px;}
     .greet-line{font-size:12.5px;}
+    .greet-main{font-size:13.5px;}
     .greet-stats{grid-template-columns:repeat(2,1fr);gap:6px;}
     .gstat{padding:10px 9px;gap:4px;}
     .gstat-l{font-size:10px;}
@@ -9670,16 +9673,6 @@ function staleEstimateAlertHtml(){
 }
 function goToEstimates(){ const b=document.querySelector('[data-nav="estimates"]'); if(b) b.click(); }
 function greetCity(z){ return String(z||'').split('/').pop().replace(/_/g,' ') || 'local'; }
-function getTimeGreeting(name, tz) {
-  const now = new Date();
-  const timeStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-  const [hour, minute] = timeStr.split(':').map(Number);
-  let timeOfDay = 'evening';
-  if (hour < 12) timeOfDay = 'morning';
-  else if (hour < 17 || (hour === 17 && minute === 0)) timeOfDay = 'afternoon';
-  if (name) return `Good ${timeOfDay} ${esc(name)}.`;
-  return `Good ${timeOfDay}.`;
-}
 let profitView='week';      // 'week' | '30d' | 'year' for the tabbed Profit card
 let incomeView='week';      // 'week' | 'month' | 'quarter' for the private Income chart
 // Answers to the two expensive Profit ranges, kept so tabbing back and forth
@@ -9703,7 +9696,6 @@ function paintGreeting(){
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
   const jobs=greetingData.jobs||0, est=greetingData.estimates||0, photos=greetingData.photosToPost||0;
-  const hi = getTimeGreeting(userName, z);
   // "You have 3 jobs scheduled today, 1 estimate waiting on a response, and 4
   // photos to post to social media." Each count handles zero + singular/plural,
   // and the estimate/photo counts link to their section.
@@ -9757,8 +9749,12 @@ function paintGreeting(){
   const riskParts=[];
   if(greetingData.unassigned>0) riskParts.push(`<b class="urgent">${greetingData.unassigned}</b> unassigned`);
   if(greetingData.lowStockTechs>0) riskParts.push(`<b class="urgent">${greetingData.lowStockTechs}</b> tech${greetingData.lowStockTechs===1?'':'s'} low on bracket stock`);
-  const ownerRiskTxt = riskParts.length ? `, ${jobsPart} today — ${riskParts.join(', ')}` : `, ${jobsPart} today`;
-  const ownerSentence = `This week's profit is <b>${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}.`;
+  // Risk flags only. The routine "N jobs today" count was dropped from the
+  // owner line at his request (it is already the calendar he is looking at);
+  // an actual problem still speaks up. Separated with a middot rather than a
+  // second dash so it cannot be misread as part of the trend clause.
+  const ownerRiskTxt = riskParts.length ? ` · ${riskParts.join(', ')}` : '';
+  const ownerSentence = `Profit <b>${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}`;
   const summarySentence = role==='owner'
     ? ownerSentence
     : scope==='handy-andy'
@@ -9768,9 +9764,11 @@ function paintGreeting(){
     addressAlertHtml()+
     estimateAlertHtml()+
     staleEstimateAlertHtml()+
-    `<div class="greet-hi">${hi}</div>`+
-    `<div class="greet-line">Today is ${esc(dateStr)}. It's currently <b>${esc(timeStr)}</b> (${esc(greetCity(z))}).</div>`+
-    `<div class="greet-line">${summarySentence}</div>`+
+    // One dense line: date, local time, then the day's summary. The
+    // "Good afternoon <name>" header and the "Today is… It's currently…"
+    // phrasing were dropped at the owner's request; he reads this many times
+    // a day and wanted the facts, not the pleasantries.
+    `<div class="greet-line greet-main">${esc(dateStr)}. <b>${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`+
     greetStatsHtml()+
     greetNoteHtml();
   // Net Daily Profit's trend chart tab toggle: Last 7 days / Last 30 days.
