@@ -17,6 +17,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
+import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard, findLandedCharge } from './_lib/stripe.js';
@@ -2207,7 +2208,7 @@ async function awardReviewBonusIfComplete(db, techId) {
   if (error) throw error;
   const done = (rows || []).filter(r => REVIEW_LISTING_KEYS.has(r.listing_key)).length;
   if (done < REVIEW_LISTINGS.length) return { allDone: false, awarded: false };
-  const { data: t } = await db.from('technicians').select('active').eq('id', techId).maybeSingle();
+  const { data: t } = await db.from('technicians').select('active, name').eq('id', techId).maybeSingle();
   if (!t || t.active === false) return { allDone: true, awarded: false };
   const { data: bRow, error: bErr } = await db.from('tech_review_bonus')
     .upsert({ technician_id: techId, amount: REVIEW_BONUS_AMOUNT },
@@ -2216,7 +2217,18 @@ async function awardReviewBonusIfComplete(db, techId) {
   if (bErr) throw bErr;
   // ignoreDuplicates returns the row ONLY when it was actually inserted, so
   // an already-awarded tech reads all_done:true, awarded:false.
-  return { allDone: true, awarded: Array.isArray(bRow) ? bRow.length > 0 : !!bRow };
+  const awarded = Array.isArray(bRow) ? bRow.length > 0 : !!bRow;
+  // Text the owner, but ONLY on the insert that actually won. Because the
+  // award is insert-once on a primary key, this can never fire twice for the
+  // same tech, including from the heal-on-load path. Awaited so Vercel cannot
+  // freeze the lambda before the request is issued (the un-awaited-send
+  // hazard documented in _lib/tech-notify.js), and never allowed to fail the
+  // checkbox save.
+  if (awarded) {
+    try { await sendReviewBonusEarnedAlert({ techName: t.name, amount: REVIEW_BONUS_AMOUNT }); }
+    catch (e) { console.warn('[tech] review bonus alert failed:', e.message); }
+  }
+  return { allDone: true, awarded };
 }
 
 // Who am I: the same technician object login returns, for the magic-link

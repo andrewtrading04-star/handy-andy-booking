@@ -1150,6 +1150,11 @@
     box-shadow:0 10px 28px rgba(11,31,58,.22);position:relative;overflow:hidden;}
   .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
     background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
+  /* $100 review-program progress, on each tech's card */
+  .rvchip{display:inline-flex;align-items:center;font-size:12px;font-weight:700;padding:5px 10px;
+    border-radius:100px;background:var(--line2);color:var(--mute);white-space:nowrap;}
+  .rvchip.done{background:rgba(22,163,74,.12);color:#16a34a;}
+
   .greet-line{font-size:13.5px;line-height:1.6;opacity:.94;}
   /* The single summary line is now the banner's headline (the "Good afternoon"
      header above it was removed), so it carries a little more weight than the
@@ -5912,6 +5917,27 @@ function techBioText(t){
 // Last-loaded Technicians roster, so the invite confirm can show the tech's
 // real name and phone without re-parsing them out of the card's DOM.
 let techRoster=[];
+// How far this tech is through the $100 review program. Silent until they
+// actually start, so an untouched roster is not littered with "0 of 5" chips;
+// once the bonus is earned it says so with the date, which is also the week
+// the $100 lands on their payroll.
+// Short date in the BUSINESS timezone, not the browser's. Without the explicit
+// zone these read in whatever timezone the laptop happens to be set to: an
+// invite sent 2:01 PM Denver on Aug 11 displayed as "Aug 12" on a machine set
+// to Asia/Bangkok, which is how this was noticed. Every other date on the
+// dashboard is already metro-anchored; these now match.
+function shortDateBiz(iso){
+  try{ return new Date(iso).toLocaleDateString('en-US',{ timeZone:tz(), month:'short', day:'numeric' }); }
+  catch(e){ return ''; }
+}
+function reviewProgressChip(t){
+  const done=Number(t.review_done)||0, total=Number(t.review_total)||5;
+  if(t.review_bonus_at){
+    return `<span class="rvchip done" title="All ${total} Google reviews done. $100 added to payroll.">🎉 $100 earned ${esc(shortDateBiz(t.review_bonus_at))}</span>`;
+  }
+  if(!done) return '';
+  return `<span class="rvchip" title="${done} of ${total} Google reviews checked off">${done} of ${total} reviews</span>`;
+}
 // Owner taps "Send $100 review invite" on a tech card: confirm with the exact
 // text and the number it goes to, send, then re-render so the button becomes
 // the "Invite sent <date>" stamp. Re-sending later is allowed on purpose (the
@@ -5966,7 +5992,8 @@ async function renderTechnicians(){
           <button class="btn ghost sm" data-act="phone">Set phone</button>
           <button class="btn ghost sm" data-act="pin">Set PIN</button>
           <button class="btn ghost sm" data-act="toggle">${t.active?'Deactivate':'Activate'}</button>
-          ${role==='owner'?`<button class="btn ghost sm" data-act="reviewinvite" ${t.phone?'':'disabled title="No phone number set"'}>💵 ${t.review_invite_sent_at?`Invite sent ${new Date(t.review_invite_sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})} ✓`:'Send $100 review invite'}</button>`:''}
+          ${role==='owner'?`<button class="btn ghost sm" data-act="reviewinvite" ${t.phone?'':'disabled title="No phone number set"'}>💵 ${t.review_invite_sent_at?`Invite sent ${shortDateBiz(t.review_invite_sent_at)} ✓`:'Send $100 review invite'}</button>`:''}
+          ${role==='owner'?reviewProgressChip(t):''}
         </div>
         <div class="actions" style="align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
           <span class="meta" style="font-size:13px;font-weight:700;">Meet-your-tech email photo</span>

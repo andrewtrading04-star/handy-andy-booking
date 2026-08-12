@@ -5149,6 +5149,32 @@ async function technicians(req, res, db, auth) {
     }
   } catch { /* labels are cosmetic, never fail the roster over them */ }
 
+  // $100 review-program progress per tech, so the Technicians screen shows how
+  // far each one has got instead of only whether an invite went out. Counts
+  // only listings currently IN the program (an old 'doms' checkin from before
+  // Dom's was pulled must not inflate the count), matching the same rule the
+  // award itself uses in api/tech.js. Best-effort: on any error the roster
+  // still renders, just without progress.
+  const REVIEW_PROGRAM_KEYS = ['ha-houston-1', 'ha-houston-2', 'ha-austin', 'ha-denver-1', 'ha-denver-2'];
+  for (const t of techs) { t.review_done = 0; t.review_total = REVIEW_PROGRAM_KEYS.length; t.review_bonus_at = null; }
+  try {
+    const ids = techs.map(t => t.id);
+    if (ids.length) {
+      const byId = new Map(techs.map(t => [t.id, t]));
+      const { data: cks } = await db.from('tech_review_checkins')
+        .select('technician_id, listing_key').in('technician_id', ids);
+      for (const c of cks || []) {
+        if (!REVIEW_PROGRAM_KEYS.includes(c.listing_key)) continue;
+        const t = byId.get(c.technician_id); if (t) t.review_done++;
+      }
+      const { data: bns } = await db.from('tech_review_bonus')
+        .select('technician_id, completed_at').in('technician_id', ids);
+      for (const b of bns || []) {
+        const t = byId.get(b.technician_id); if (t) t.review_bonus_at = b.completed_at;
+      }
+    }
+  } catch { /* migrations 0089/0090 not applied yet */ }
+
   // Average rating per technician, in ONE batched query. This used to be a
   // serial per-tech loop (N+1) fetching every reviewed booking one tech at a
   // time — on a 10-tech roster that alone added ~10 round-trips to every New

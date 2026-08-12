@@ -434,3 +434,22 @@ export async function sendOwnerEstimateAlert(d = {}) {
     console.warn('[owner-notify] non-fatal:', e.message);
   }
 }
+
+// ── "<Tech> finished the $100 review program" SMS ───────────────────────────
+// Fires the moment a technician checks off the fifth and final Google listing
+// (see awardReviewBonusIfComplete in api/tech.js). Sent ONLY alongside the
+// award insert, which is itself insert-once on a primary key, so a tech can
+// never generate a second text by unchecking and re-checking a box.
+//
+// The owner hand-enters payroll from the dashboard, so this is the signal that
+// a $100 line is about to appear on someone's check; without it he would only
+// find out by opening the payroll screen at the end of the week.
+export async function sendReviewBonusEarnedAlert({ techName, amount }) {
+  try {
+    const phone = process.env.OWNER_PHONE_NUMBER;
+    if (!phone) return;
+    const msg = `${techName || 'A technician'} just finished all 5 Google reviews. `
+      + `A $${Number(amount) || 100} bonus has been added to their payroll for this week.`;
+    await sendSMS(phone, msg).catch(e => console.warn('[review-bonus] alert SMS failed:', e.message));
+  } catch (e) { console.warn('[review-bonus] alert error:', e.message); }
+}
