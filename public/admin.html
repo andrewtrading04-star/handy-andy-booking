@@ -8985,20 +8985,20 @@ function brokerModalEl(){
   m=document.createElement('div');
   m.id='brokerModal';
   m.className='modal hidden';
-  m.innerHTML=`<div class="card" style="max-width:660px;width:94%;max-height:90vh;overflow:auto;">
+  m.innerHTML=`<div class="sheet" style="max-width:660px;">
     <h3 style="margin:0 0 4px;">Get this estimate filled</h3>
-    <div id="bkCust" class="meta" style="margin-bottom:2px;"></div>
-    <div id="bkArea" class="meta" style="margin-bottom:14px;"></div>
-    <div id="bkSlots"></div>
-    <div id="bkBook" style="margin-top:18px;"></div>
-    <div id="bkErr" style="color:#b91c1c;font-size:13px;margin-top:10px;"></div>
+    <div id="brkCust" class="meta" style="margin-bottom:2px;"></div>
+    <div id="brkArea" class="meta" style="margin-bottom:14px;"></div>
+    <div id="brkSlots"></div>
+    <div id="brkBook" style="margin-top:18px;"></div>
+    <div id="brkErr" style="color:#b91c1c;font-size:13px;margin-top:10px;"></div>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px;">
-      <button class="btn ghost" id="bkClose">Close</button>
+      <button class="btn ghost sm" id="brkClose">Close</button>
     </div>
   </div>`;
   document.body.appendChild(m);
   m.addEventListener('click',ev=>{ if(ev.target.id==='brokerModal') closeBrokerPanel(); });
-  m.querySelector('#bkClose').addEventListener('click',closeBrokerPanel);
+  m.querySelector('#brkClose').addEventListener('click',closeBrokerPanel);
   return m;
 }
 function closeBrokerPanel(){ const m=document.getElementById('brokerModal'); if(m) m.classList.add('hidden'); _brokerEstId=null; }
@@ -9007,49 +9007,49 @@ async function openBrokerPanel(id){
   const e=estCache[id]; if(!e) return;
   _brokerEstId=id;
   const m=brokerModalEl();
-  m.querySelector('#bkCust').textContent=`${e.customer_name||'No name'} · ${e.service_label||'Estimate request'}`;
-  m.querySelector('#bkArea').textContent='Loading…';
-  m.querySelector('#bkSlots').innerHTML='';
-  m.querySelector('#bkBook').innerHTML='';
-  m.querySelector('#bkErr').textContent='';
+  m.querySelector('#brkCust').textContent=`${e.customer_name||'No name'} · ${e.service_label||'Estimate request'}`;
+  m.querySelector('#brkArea').textContent='Loading…';
+  m.querySelector('#brkSlots').innerHTML='';
+  m.querySelector('#brkBook').innerHTML='';
+  m.querySelector('#brkErr').textContent='';
   m.classList.remove('hidden');
   try{
     const d=await api('estimate_broker',{ method:'POST', body:{ business:current.slug, id }});
     paintBrokerPanel(d);
-  }catch(err){ m.querySelector('#bkArea').textContent=''; m.querySelector('#bkErr').textContent=err.message; }
+  }catch(err){ m.querySelector('#brkArea').textContent=''; m.querySelector('#brkErr').textContent=err.message; }
 }
 
 function paintBrokerPanel(d){
   const m=brokerModalEl();
-  m.querySelector('#bkArea').innerHTML=`No techs in <b>${esc(d.area.name)}</b>, so this one gets subbed out. Call around, then type what each company quotes.`;
+  m.querySelector('#brkArea').innerHTML=`No techs in <b>${esc(d.area.name)}</b>, so this one gets subbed out. Call around, then type what each company quotes.`;
 
   // The directory datalist: empty until companies have actually been typed in.
   // Nothing is pre-seeded, so this is blank on day one by design.
   const dir=(d.directory||[]);
-  const dlist=`<datalist id="bkDirList">${dir.map(c=>`<option value="${esc(c.company_name)}" data-phone="${esc(c.phone||'')}"></option>`).join('')}</datalist>`;
+  const dlist=`<datalist id="brkDirList">${dir.map(c=>`<option value="${esc(c.company_name)}" data-phone="${esc(c.phone||'')}"></option>`).join('')}</datalist>`;
 
-  m.querySelector('#bkSlots').innerHTML=dlist+d.slots.map(s=>{
-    const tel=s.phone?`<a href="tel:${esc(s.phone)}" class="bk-call" style="text-decoration:none;font-weight:800;color:var(--accent);white-space:nowrap;">📞 Call</a>`:'';
+  m.querySelector('#brkSlots').innerHTML=dlist+d.slots.map(s=>{
+    const tel=s.phone?`<a href="tel:${esc(s.phone)}" class="brk-call" style="text-decoration:none;font-weight:800;color:var(--accent);white-space:nowrap;">📞 Call</a>`:'';
     const min=s.min_sell!=null?`<div class="meta" style="margin-top:4px;">They quote <b>${Number(s.sub_price).toFixed(2)}</b> · you sell at <b>${s.min_sell}</b> minimum</div>`:'';
-    return `<div class="bk-slot" data-slot="${s.slot}" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;">
+    return `<div class="brk-slot" data-slot="${s.slot}" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;">
       <div style="font-weight:800;font-size:13px;margin-bottom:6px;">Company ${s.slot}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input class="bk-co" list="bkDirList" placeholder="Company name" value="${esc(s.company_name||'')}" style="flex:2;min-width:150px;">
-        <input class="bk-ph" placeholder="Phone" value="${esc(s.phone||'')}" style="flex:1;min-width:120px;">
-        <input class="bk-pr" placeholder="Their price" inputmode="decimal" value="${s.sub_price!=null?s.sub_price:''}" style="width:110px;">
+        <input class="brk-co" list="brkDirList" placeholder="Company name" value="${esc(s.company_name||'')}" style="flex:2;min-width:150px;">
+        <input class="brk-ph" placeholder="Phone" value="${esc(s.phone||'')}" style="flex:1;min-width:120px;">
+        <input class="brk-pr" placeholder="Their price" inputmode="decimal" value="${s.sub_price!=null?s.sub_price:''}" style="width:110px;">
         ${tel}
-        <button class="btn ghost sm bk-save">Save</button>
+        <button class="btn ghost sm brk-save">Save</button>
       </div>
-      <div class="bk-min">${min}</div>
+      <div class="brk-min">${min}</div>
     </div>`;
   }).join('');
 
   // Live minimum as she types, and auto-fill a known company's phone.
-  m.querySelectorAll('.bk-slot').forEach(row=>{
-    const pr=row.querySelector('.bk-pr'), co=row.querySelector('.bk-co'), ph=row.querySelector('.bk-ph');
+  m.querySelectorAll('.brk-slot').forEach(row=>{
+    const pr=row.querySelector('.brk-pr'), co=row.querySelector('.brk-co'), ph=row.querySelector('.brk-ph');
     pr.addEventListener('input',()=>{
       const min=brokerMinSell(pr.value);
-      row.querySelector('.bk-min').innerHTML=min!=null
+      row.querySelector('.brk-min').innerHTML=min!=null
         ? `<div class="meta" style="margin-top:4px;">They quote <b>${Number(pr.value).toFixed(2)}</b> · you sell at <b>${min}</b> minimum</div>` : '';
     });
     co.addEventListener('change',()=>{
@@ -9057,9 +9057,9 @@ function paintBrokerPanel(d){
       const hit=dir.find(c=>c.company_name.toLowerCase()===co.value.trim().toLowerCase());
       if(hit&&hit.phone) ph.value=hit.phone;
     });
-    row.querySelector('.bk-save').addEventListener('click',async()=>{
-      const btn=row.querySelector('.bk-save'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
-      m.querySelector('#bkErr').textContent='';
+    row.querySelector('.brk-save').addEventListener('click',async()=>{
+      const btn=row.querySelector('.brk-save'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
+      m.querySelector('#brkErr').textContent='';
       try{
         await api('estimate_broker_save_bid',{ method:'POST', body:{
           business:current.slug, id:_brokerEstId, slot:Number(row.dataset.slot),
@@ -9068,7 +9068,7 @@ function paintBrokerPanel(d){
         const d2=await api('estimate_broker',{ method:'POST', body:{ business:current.slug, id:_brokerEstId }});
         paintBrokerPanel(d2);
         toast('Bid saved ✓');
-      }catch(err){ m.querySelector('#bkErr').textContent=err.message; btn.disabled=false; btn.textContent=prev; }
+      }catch(err){ m.querySelector('#brkErr').textContent=err.message; btn.disabled=false; btn.textContent=prev; }
     });
   });
 
@@ -9078,7 +9078,7 @@ function paintBrokerPanel(d){
 function paintBrokerBook(d){
   const m=brokerModalEl();
   const priced=d.slots.filter(s=>s.sub_price!=null);
-  const wrap=m.querySelector('#bkBook');
+  const wrap=m.querySelector('#brkBook');
   if(!priced.length){ wrap.innerHTML=`<div class="meta">Enter at least one company's price above to set what we sell it for.</div>`; return; }
 
   const booked=d.booked;
@@ -9093,7 +9093,7 @@ function paintBrokerBook(d){
   const opts=priced.map(s=>{
     const min=s.min_sell;
     return `<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;">
-      <input type="radio" name="bkPick" value="${s.slot}" data-min="${min}" data-sub="${s.sub_price}">
+      <input type="radio" name="brkPick" value="${s.slot}" data-min="${min}" data-sub="${s.sub_price}">
       <span>${esc(s.company_name||('Company '+s.slot))} · they get <b>${Number(s.sub_price).toFixed(2)}</b> · minimum sell <b>${min}</b></span>
     </label>`;
   }).join('');
@@ -9103,21 +9103,21 @@ function paintBrokerBook(d){
     ${opts}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
       <label style="font-size:13px;">We sell at $</label>
-      <input id="bkSell" inputmode="decimal" placeholder="0.00" style="width:120px;">
-      <span id="bkSpread" class="meta"></span>
-      <button class="btn" id="bkBookBtn">Book it</button>
+      <input id="brkSell" inputmode="decimal" placeholder="0.00" style="width:120px;">
+      <span id="brkSpread" class="meta"></span>
+      <button class="btn" id="brkBookBtn">Book it</button>
     </div>
-    <label id="bkOverrideWrap" style="display:none;align-items:center;gap:7px;font-size:12.5px;margin-top:9px;color:#b91c1c;">
-      <input type="checkbox" id="bkOverride">
+    <label id="brkOverrideWrap" style="display:none;align-items:center;gap:7px;font-size:12.5px;margin-top:9px;color:#b91c1c;">
+      <input type="checkbox" id="brkOverride">
       <span>This is below the 20 percent minimum. Sell it anyway.</span>
     </label>`;
 
-  const sell=wrap.querySelector('#bkSell');
-  const spreadEl=wrap.querySelector('#bkSpread');
-  const ovWrap=wrap.querySelector('#bkOverrideWrap');
-  const ov=wrap.querySelector('#bkOverride');
+  const sell=wrap.querySelector('#brkSell');
+  const spreadEl=wrap.querySelector('#brkSpread');
+  const ovWrap=wrap.querySelector('#brkOverrideWrap');
+  const ov=wrap.querySelector('#brkOverride');
 
-  function picked(){ return wrap.querySelector('input[name=bkPick]:checked'); }
+  function picked(){ return wrap.querySelector('input[name=brkPick]:checked'); }
   function refresh(){
     const p=picked(); if(!p){ spreadEl.textContent=''; ovWrap.style.display='none'; return; }
     const min=Number(p.dataset.min), sub=Number(p.dataset.sub);
@@ -9128,18 +9128,18 @@ function paintBrokerBook(d){
     ovWrap.style.display = v<min ? 'flex' : 'none';
     if(v>=min) ov.checked=false;
   }
-  wrap.querySelectorAll('input[name=bkPick]').forEach(r=>r.addEventListener('change',()=>{
+  wrap.querySelectorAll('input[name=brkPick]').forEach(r=>r.addEventListener('change',()=>{
     // Prefill the minimum so the common case is one click.
     const p=picked(); if(p) sell.value=p.dataset.min;
     refresh();
   }));
   sell.addEventListener('input',refresh);
 
-  wrap.querySelector('#bkBookBtn').addEventListener('click',async()=>{
+  wrap.querySelector('#brkBookBtn').addEventListener('click',async()=>{
     const p=picked();
-    m.querySelector('#bkErr').textContent='';
-    if(!p){ m.querySelector('#bkErr').textContent='Pick which company is doing it.'; return; }
-    const btn=wrap.querySelector('#bkBookBtn'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
+    m.querySelector('#brkErr').textContent='';
+    if(!p){ m.querySelector('#brkErr').textContent='Pick which company is doing it.'; return; }
+    const btn=wrap.querySelector('#brkBookBtn'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
     try{
       await api('estimate_broker_book',{ method:'POST', body:{
         business:current.slug, id:_brokerEstId, slot:Number(p.value),
@@ -9150,7 +9150,7 @@ function paintBrokerBook(d){
       paintBrokerPanel(d2);
       renderEstimates();
     }catch(err){
-      m.querySelector('#bkErr').textContent=err.message;
+      m.querySelector('#brkErr').textContent=err.message;
       if(/below the \$/.test(err.message||'')) ovWrap.style.display='flex';
     }
     finally{ btn.disabled=false; btn.textContent=prev; }
