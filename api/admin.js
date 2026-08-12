@@ -31,7 +31,7 @@ import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js
 import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
-import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems } from './_lib/broker-spec.js';
+import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines } from './_lib/broker-spec.js';
 import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
 
 // Search Console domain per business — the free "what did people search to
@@ -8117,7 +8117,7 @@ async function estimateBroker(req, res, db, auth, body) {
   const spec = brokerResolveSpec(ctx.est, catalog);
 
   const { data: bids, error: bErr } = await db.from('estimate_broker_bids')
-    .select('slot, subcontractor_id, company_name, phone, sub_price')
+    .select('slot, subcontractor_id, company_name, phone, sub_price, breakdown')
     .eq('estimate_id', body.id).eq('business_id', biz.id).order('slot');
   if (bErr) throw bErr;
 
@@ -8142,21 +8142,35 @@ async function estimateBroker(req, res, db, auth, body) {
     return hit ? Number(hit.price) : null;
   };
 
+  // A custom line's price is job-specific, so it lives on the BID's breakdown
+  // rather than on the company's reusable rate card.
+  const customPriceFor = (bid, id) => {
+    const rows = Array.isArray(bid && bid.breakdown) ? bid.breakdown : [];
+    const hit = rows.find(r => r && r.section_key === 'custom' && r.row_key === id);
+    return hit && hit.price !== null && hit.price !== undefined ? Number(hit.price) : null;
+  };
+
+  const required = brokerRequiredLines(spec);
   const bySlot = new Map((bids || []).map(b => [b.slot, b]));
   const slots = [1, 2, 3].map(n => {
-    const b = bySlot.get(n) || { slot: n, subcontractor_id: null, company_name: '', phone: '', sub_price: null };
-    const lines = BROKER_SECTIONS.map(s => ({ section_key: s.key, label: s.label, price: rateFor(b.subcontractor_id, s.key) }));
-    // Their total is the sum of the three, and only counts once every line is
-    // filled in -- a partial card must not read as a cheap bid.
-    const complete = lines.every(l => l.price !== null);
+    const b = bySlot.get(n) || { slot: n, subcontractor_id: null, company_name: '', phone: '', sub_price: null, breakdown: null };
+    const lines = required.map(l => ({
+      section_key: l.key, label: l.label, custom: l.custom,
+      price: l.custom ? customPriceFor(b, l.key) : rateFor(b.subcontractor_id, l.key),
+    }));
+    // Their total is the sum of EVERY required line, and only counts once all
+    // of them are filled in -- a partial card must not read as a cheap bid.
+    const complete = lines.length > 0 && lines.every(l => l.price !== null);
     const total = complete ? Math.round(lines.reduce((t, l) => t + l.price, 0) * 100) / 100 : null;
-    return { ...b, slot: n, lines, sub_price: total, min_sell: minSellPrice(total) };
+    return { slot: n, subcontractor_id: b.subcontractor_id, company_name: b.company_name, phone: b.phone,
+             lines, sub_price: total, min_sell: minSellPrice(total) };
   });
 
   return res.status(200).json({
     ok: true,
     area: { name: ctx.area.name, unstaffed: true },
     catalog, spec, sections: BROKER_SECTIONS.map(s => ({ key: s.key, label: s.label })),
+    custom: customLinesOf(spec),
     slots, directory: directory || [],
     booked: ctx.est.broker_company_name ? {
       company_name: ctx.est.broker_company_name,
@@ -8186,6 +8200,10 @@ async function estimateBrokerSaveSpec(req, res, db, auth, body) {
     }
     spec[s.key] = v;
   }
+  // Free-text scope lines. Blank labels are dropped, which is how the UI
+  // deletes one; ids are preserved so typed prices stay with their line.
+  spec.custom = normalizeCustomLines(body.spec && body.spec.custom);
+
   const { error } = await db.from('estimates').update({ broker_spec: spec }).eq('id', body.id).eq('business_id', biz.id);
   if (error) throw error;
   return res.status(200).json({ ok: true, spec });
@@ -8211,7 +8229,8 @@ async function estimateBrokerSaveBid(req, res, db, auth, body) {
   const company = String(body.company_name || '').trim().slice(0, 200);
   const phone   = String(body.phone || '').trim().slice(0, 40);
   const prices  = (body.prices && typeof body.prices === 'object') ? body.prices : {};
-  const anyPrice = BROKER_SECTIONS.some(s => parseMoney(prices[s.key]) !== null);
+  const required = brokerRequiredLines(spec);
+  const anyPrice = required.some(l => parseMoney(prices[l.key]) !== null);
 
   if (!company && !phone && !anyPrice) {
     const { error } = await db.from('estimate_broker_bids').delete()
@@ -8242,22 +8261,27 @@ async function estimateBrokerSaveBid(req, res, db, auth, body) {
 
   // Write each typed price onto the company's rate card.
   const breakdown = [];
-  for (const s of BROKER_SECTIONS) {
-    const row_key = spec[s.key];
-    const price = parseMoney(prices[s.key]);
-    if (!row_key || price === null) continue;
-    const opt = (catalog[s.key] || []).find(o => o.row_key === row_key);
+  for (const l of required) {
+    const price = parseMoney(prices[l.key]);
+    if (price === null) continue;
+    if (l.custom) {
+      // Job-specific: recorded on this bid only, never on the rate card.
+      breakdown.push({ section_key: 'custom', row_key: l.key, label: l.label, price });
+      continue;
+    }
+    if (!l.row_key) continue;   // section not chosen yet
+    const opt = (catalog[l.key] || []).find(o => o.row_key === l.row_key);
     const { error: upErr } = await db.from('subcontractor_rates').upsert({
       business_id: biz.id, subcontractor_id: subId,
-      section_key: s.key, row_key, price,
+      section_key: l.key, row_key: l.row_key, price,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'subcontractor_id,section_key,row_key' });
     if (upErr) throw upErr;
-    breakdown.push({ section_key: s.key, row_key, label: opt ? opt.label : row_key, price });
+    breakdown.push({ section_key: l.key, row_key: l.row_key, label: opt ? opt.label : l.row_key, price });
   }
 
   // Their price only counts when all three lines are in.
-  const complete = breakdown.length === BROKER_SECTIONS.length;
+  const complete = breakdown.length === required.length;
   const subPrice = complete ? Math.round(breakdown.reduce((t, l) => t + l.price, 0) * 100) / 100 : null;
 
   const { error } = await db.from('estimate_broker_bids').upsert({

@@ -9038,6 +9038,7 @@ function paintBrokerPanel(d){
   // but always correctable: the option labels have been renamed before, so an
   // older estimate can read differently from today's catalog.
   const missing=d.sections.some(s=>!d.spec[s.key]);
+  const customLines=d.custom||[];
   m.querySelector('#brkSpec').innerHTML=`
     <div style="border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:14px;background:#f8fafc;">
       <div style="font-weight:800;font-size:13px;margin-bottom:8px;">What this job is</div>
@@ -9049,17 +9050,64 @@ function paintBrokerPanel(d){
             ${(d.catalog[s.key]||[]).map(o=>`<option value="${esc(o.row_key)}" ${d.spec[s.key]===o.row_key?'selected':''}>${esc(o.label)}</option>`).join('')}
           </select>
         </div>`).join('')}
+      <div id="brkCustomRows">
+        ${customLines.map(c=>`
+        <div class="brk-custom-row" style="display:flex;gap:8px;align-items:center;margin-bottom:7px;">
+          <label style="font-size:12.5px;width:120px;flex:none;color:var(--mute);">Extra</label>
+          <input class="brk-custom" data-id="${esc(c.id)}" value="${esc(c.label)}" placeholder="What else does this job need" style="flex:1;min-width:0;">
+          <button type="button" class="btn ghost sm brk-custom-del" title="Remove this line">✕</button>
+        </div>`).join('')}
+      </div>
+      <button type="button" class="btn ghost sm" id="brkAddCustom" style="margin-top:4px;">+ Add a line</button>
+      <div class="meta" style="margin-top:6px;">Every company prices the same list, so the bids stay comparable.</div>
       ${missing?`<div class="meta" style="color:#b45309;margin-top:2px;">Pick the missing one before entering prices.</div>`:''}
     </div>`;
-  m.querySelectorAll('.brk-spec').forEach(sel=>sel.addEventListener('change',async()=>{
-    const spec={};
+
+  // One save path for the whole scope: the three catalog picks plus every
+  // custom line. Ids are sent back so a company's typed price stays attached
+  // to its line when the labels are edited or reordered.
+  async function saveBrokerSpec(){
+    const spec={ custom:[] };
     m.querySelectorAll('.brk-spec').forEach(x=>{ spec[x.dataset.section]=x.value||null; });
+    m.querySelectorAll('.brk-custom').forEach(x=>{ spec.custom.push({ id:x.dataset.id||'', label:x.value.trim() }); });
     m.querySelector('#brkErr').textContent='';
     try{
       await api('estimate_broker_save_spec',{ method:'POST', body:{ business:current.slug, id:_brokerEstId, spec }});
       await reloadBrokerPanel();
     }catch(err){ m.querySelector('#brkErr').textContent=err.message; }
+  }
+  m.querySelectorAll('.brk-spec').forEach(sel=>sel.addEventListener('change',saveBrokerSpec));
+  // Save on blur, not on every keystroke, so a repaint cannot steal focus
+  // mid-word. Enter commits too.
+  m.querySelectorAll('.brk-custom').forEach(inp=>{
+    inp.addEventListener('change',saveBrokerSpec);
+    inp.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); inp.blur(); } });
+  });
+  m.querySelectorAll('.brk-custom-del').forEach(btn=>btn.addEventListener('click',()=>{
+    // Blanking the label is how the server deletes a line.
+    const row=btn.closest('.brk-custom-row');
+    const inp=row&&row.querySelector('.brk-custom');
+    if(inp) inp.value='';
+    saveBrokerSpec();
   }));
+  const addBtn=m.querySelector('#brkAddCustom');
+  if(addBtn) addBtn.addEventListener('click',()=>{
+    // Added locally with no id; the server assigns one once it has a label,
+    // so an empty row costs nothing and never reaches the database.
+    const wrap=m.querySelector('#brkCustomRows');
+    const row=document.createElement('div');
+    row.className='brk-custom-row';
+    row.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:7px;';
+    row.innerHTML=`<label style="font-size:12.5px;width:120px;flex:none;color:var(--mute);">Extra</label>`+
+      `<input class="brk-custom" data-id="" placeholder="What else does this job need" style="flex:1;min-width:0;">`+
+      `<button type="button" class="btn ghost sm brk-custom-del" title="Remove this line">✕</button>`;
+    wrap.appendChild(row);
+    const inp=row.querySelector('.brk-custom');
+    inp.addEventListener('change',saveBrokerSpec);
+    inp.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); inp.blur(); } });
+    row.querySelector('.brk-custom-del').addEventListener('click',()=>{ row.remove(); saveBrokerSpec(); });
+    inp.focus();
+  });
 
   // --- the three companies ---------------------------------------------------
   const dir=(d.directory||[]);
@@ -13025,7 +13073,7 @@ function nbPopulateSecondTechs(){
 function renderNbServices(category){
   const svcDiv=document.getElementById('nbService');
   // TV Mounting auto-picks its service; Assurion uses its own multi-select UI.
-  if(!category || category==='TV Mounting' || category==='Assurion' || category==='Guaranteed Dismount Service' || category==='No Charge / Callback'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
+  if(!category || category==='TV Mounting' || category==='Assurion' || category==='Guaranteed Dismount Service' || category==='No Charge / Callback' || category==='Custom Task'){ svcDiv.style.display='none'; svcDiv.innerHTML=''; return; }
   const list = nbServices.filter(s=>s.category===category);
   svcDiv.style.display='';
   svcDiv.innerHTML='<option value="">— Task —</option>'+

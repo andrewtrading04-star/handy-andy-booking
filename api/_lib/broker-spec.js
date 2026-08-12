@@ -78,7 +78,54 @@ export function brokerResolveSpec(est, catalog) {
     const hit = brokerBestMatch(brokerValueFor(s, items), options);
     spec[s.key] = hit ? hit.row_key : null;
   }
+  // Carry the office's custom scope lines through. This object is rebuilt from
+  // scratch on every load, so anything not copied here is silently lost.
+  spec.custom = normalizeCustomLines(saved.custom);
   return spec;
+}
+
+// Extra scope this particular job needs that the widget catalog does not
+// cover: "haul away the old mount", "second TV", "scaffold for a 20ft wall".
+// Job-specific free text, so unlike the three catalog sections these are NOT
+// written to a company's reusable rate card -- they live on the estimate, and
+// each company's price for them lives on that company's bid.
+export const MAX_CUSTOM_LINES = 8;
+
+// Stable ids matter: a company's typed price is keyed to the line's id, so
+// renaming or reordering lines must not silently move prices between them.
+export function normalizeCustomLines(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const item of (Array.isArray(raw) ? raw : [])) {
+    const label = String((item && item.label) || '').trim().slice(0, 120);
+    if (!label) continue;                       // a blank row is a deleted row
+    let id = String((item && item.id) || '').trim().slice(0, 40);
+    if (!id || seen.has(id)) {
+      // New line, or a duplicated id we cannot trust. Derive a fresh one that
+      // does not collide with the fixed section keys.
+      let n = out.length + 1;
+      do { id = `custom_${n++}`; } while (seen.has(id));
+    }
+    seen.add(id);
+    out.push({ id, label });
+    if (out.length >= MAX_CUSTOM_LINES) break;
+  }
+  return out;
+}
+
+// The custom lines currently on an estimate. Anything a bid priced that is no
+// longer here has been deleted and must stop counting toward a total.
+export function customLinesOf(spec) {
+  return normalizeCustomLines(spec && spec.custom);
+}
+
+// Every line a company has to price for this job: the three catalog sections
+// plus whatever custom lines the office added. One list so the total, the
+// completeness check and the UI can never disagree about what is required.
+export function brokerRequiredLines(spec) {
+  const fixed = BROKER_SECTIONS.map(s => ({ key: s.key, label: s.label, custom: false, row_key: (spec && spec[s.key]) || null }));
+  const custom = customLinesOf(spec).map(c => ({ key: c.id, label: c.label, custom: true, row_key: c.id }));
+  return fixed.concat(custom);
 }
 
 // The customer's quote for a brokered job: ONE line at the sell price.

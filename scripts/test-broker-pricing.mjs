@@ -10,7 +10,7 @@
 
 import { minSellPrice, spread, checkSellPrice, parseMoney } from '../api/_lib/broker-pricing.js';
 import { unstaffedZipMatcher, resolveServiceArea, zip5 } from '../api/_lib/service-area-resolve.js';
-import { brokerResolveSpec, brokerQuoteLineItems } from '../api/_lib/broker-spec.js';
+import { brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines, MAX_CUSTOM_LINES } from '../api/_lib/broker-spec.js';
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -252,6 +252,83 @@ eq('described as the service', quoted[0].description, 'TV Mounting');
 eq('qty is 1 so the total is not zeroed', quoted[0].qty, 1);
 ok('uses unit_price, the field both senders total', 'unit_price' in quoted[0]);
 eq('falls back to a sane label', brokerQuoteLineItems(null, 100)[0].description, 'Scheduled service');
+
+
+console.log('\n=== 12. Custom scope lines ===');
+// Ids must be stable and must never collide with the three fixed section keys,
+// because a company's typed price is keyed by line id.
+const c1 = normalizeCustomLines([{ label: 'Haul away old mount' }, { label: 'Second TV' }]);
+eq('two lines get ids', c1.length, 2);
+ok('ids are namespaced away from size/bracket/wires',
+   c1.every(l => l.id.startsWith('custom_')), JSON.stringify(c1.map(l => l.id)));
+ok('ids are unique', new Set(c1.map(l => l.id)).size === 2);
+
+// Renaming a line must keep its id, or a priced bid would silently reattach to
+// the wrong line.
+const renamed = normalizeCustomLines([{ id: c1[0].id, label: 'Haul away the OLD mount' }, { id: c1[1].id, label: 'Second TV' }]);
+eq('renaming keeps the id', renamed[0].id, c1[0].id);
+eq('and the new label sticks', renamed[0].label, 'Haul away the OLD mount');
+// Reordering likewise.
+const reordered = normalizeCustomLines([{ id: c1[1].id, label: 'Second TV' }, { id: c1[0].id, label: 'Haul away old mount' }]);
+eq('reordering keeps ids attached to their labels', reordered[0].id, c1[1].id);
+
+// A blank label is how the UI deletes a line.
+eq('blank label deletes the line', normalizeCustomLines([{ id: 'custom_1', label: '   ' }]).length, 0);
+eq('non-array input is safe', normalizeCustomLines(null).length, 0);
+eq('lines are capped', normalizeCustomLines(Array.from({ length: 50 }, (_, i) => ({ label: 'line ' + i }))).length, MAX_CUSTOM_LINES);
+// Duplicate ids coming back from a tampered client must not merge two lines.
+const dup = normalizeCustomLines([{ id: 'custom_1', label: 'A' }, { id: 'custom_1', label: 'B' }]);
+eq('duplicate ids are split apart', new Set(dup.map(l => l.id)).size, 2);
+eq('and both lines survive', dup.length, 2);
+
+console.log('\n=== 13. Custom lines join the priced list ===');
+const spec13 = { size: 'size_3', bracket: 'bracket_13', wires: 'wires_41', custom: [{ id: 'custom_1', label: 'Haul away old mount' }] };
+const req = brokerRequiredLines(spec13);
+eq('three fixed plus one custom', req.length, 4);
+eq('the custom line is flagged', req[3].custom, true);
+eq('and keyed by its id', req[3].key, 'custom_1');
+ok('the fixed three are not flagged custom', req.slice(0, 3).every(l => l.custom === false));
+eq('a job with no custom lines still needs three', brokerRequiredLines({ size: 'size_3' }).length, 3);
+
+// The completeness rule: a total only exists once EVERY required line is in.
+const priced = { size: 140, bracket: 90, wires: 30, custom_1: 40 };
+const allIn = req.every(l => priced[l.key] !== undefined);
+ok('all four priced counts as complete', allIn === true);
+const total13 = Math.round(req.reduce((t, l) => t + priced[l.key], 0) * 100) / 100;
+eq('total includes the custom line', total13, 300);
+eq('minimum sell on the four-line total', minSellPrice(total13), 360);
+eq('spread at that minimum', spread(total13, 360), 60);
+
+// Missing the custom price must NOT quietly total the other three, or the
+// cheapest-looking bid would be the one that skipped a line.
+const partial = { size: 140, bracket: 90, wires: 30 };
+ok('a missing custom price makes the bid incomplete', req.some(l => partial[l.key] === undefined));
+eq('and an incomplete bid has no total', minSellPrice(null), null);
+
+// Deleting a custom line drops it from the required list, so previously
+// priced-but-removed lines stop counting toward the total.
+const afterDelete = brokerRequiredLines({ ...spec13, custom: [] });
+eq('deleting the line shrinks the list', afterDelete.length, 3);
+ok('and its id is gone', !afterDelete.some(l => l.key === 'custom_1'));
+
+console.log('\n=== 14. Custom lines stay off the customer quote ===');
+// Scope detail is internal. The customer still sees one line at the sell price.
+const q14 = brokerQuoteLineItems('TV Mounting', 360);
+eq('still exactly one line', q14.length, 1);
+eq('at the sell price', q14[0].unit_price, 360);
+ok('and never names a subcontractor line item', !JSON.stringify(q14).includes('Haul away'));
+
+
+console.log('\n=== 15. Custom lines survive a panel reload ===');
+// brokerResolveSpec rebuilds the spec object from scratch on every load, so
+// anything it forgets to copy is lost the moment the panel is reopened. This
+// pins that: the custom lines were dropped on the first cut of the feature.
+const reloaded = brokerResolveSpec({ line_items: LA_ITEMS, broker_spec: { custom: [{ id: 'custom_1', label: 'Haul away old mount' }] } }, CATALOG);
+eq('the custom line is still there after a reload', customLinesOf(reloaded).length, 1);
+eq('with its label intact', customLinesOf(reloaded)[0].label, 'Haul away old mount');
+eq('and its id intact, so priced bids stay attached', customLinesOf(reloaded)[0].id, 'custom_1');
+eq('and the catalog matching still ran alongside it', reloaded.size, 'size_3');
+eq('an estimate with no custom lines resolves to none', customLinesOf(brokerResolveSpec({ line_items: LA_ITEMS }, CATALOG)).length, 0);
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'}: ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
