@@ -10,6 +10,7 @@
 
 import { minSellPrice, spread, checkSellPrice, parseMoney } from '../api/_lib/broker-pricing.js';
 import { unstaffedZipMatcher, resolveServiceArea, zip5 } from '../api/_lib/service-area-resolve.js';
+import { brokerResolveSpec, brokerQuoteLineItems } from '../api/_lib/broker-spec.js';
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -170,6 +171,87 @@ eq('minimum sell', min, 652);
 ok('booking at the minimum is accepted', chk.ok === true);
 eq('recorded spread', chk.spread, 109);
 eq('and the line item written for the customer is the sell price', chk.sell, 652);
+
+
+console.log('\n=== 9. Rate card: three real lines sum, then mark up ===');
+// Real handy-andy catalog options this LA job needs (size_3 / bracket_13 /
+// wires_41). The subcontractor prices below are ARBITRARY TEST INPUTS, not
+// real quotes: no real company has given us a price yet.
+const bidLines = [140, 90, 30];               // size, bracket, wires
+const bidTotal = Math.round(bidLines.reduce((a, b) => a + b, 0) * 100) / 100;
+eq('their total is the sum of the three lines', bidTotal, 260);
+eq('minimum sell on that total', minSellPrice(bidTotal), 312);
+eq('spread at the minimum', spread(bidTotal, minSellPrice(bidTotal)), 52);
+// A partial card must not read as a cheap bid.
+ok('an incomplete card yields no total', minSellPrice(null) === null);
+
+console.log('\n=== 10. Matching the REAL LA estimate to the REAL catalog ===');
+// Real app.widget_prices rows for handy-andy, city_key 'default'.
+const CATALOG = {
+  size: [
+    { row_key: 'size_1', label: '32" Or Less' }, { row_key: 'size_2', label: '33"-59"' },
+    { row_key: 'size_3', label: '60"-69"' },     { row_key: 'size_4', label: '70"-85"' },
+    { row_key: 'size_5', label: '86"-97"' },     { row_key: 'size_6', label: '98+' },
+  ],
+  bracket: [
+    { row_key: 'bracket_10', label: 'I have my own bracket' }, { row_key: 'bracket_11', label: 'Flat' },
+    { row_key: 'bracket_12', label: 'Tilting (recommended)' }, { row_key: 'bracket_13', label: 'Full Motion' },
+    { row_key: 'bracket_14', label: '85"-100" TV Flat Bracket' },
+    { row_key: 'bracket_15', label: '85"-100" TV Tilting Bracket' },
+    { row_key: 'bracket_16', label: '85"-100" TV Full Motion Bracket' },
+    { row_key: 'bracket_17', label: 'Samsung Frame in-box bracket' },
+  ],
+  wires: [
+    { row_key: 'wires_40', label: 'Hide wires BEHIND the wall' },
+    { row_key: 'wires_41', label: 'Hide wires OUTSIDE the wall' },
+    { row_key: 'wires_42', label: 'Wall already has a plug' },
+    { row_key: 'wires_43', label: 'Hang wires under the TV' },
+  ],
+};
+// The REAL line_items on estimate b18ae7fa, verbatim from the database. Note
+// the wires text no longer matches any catalog label word for word: the option
+// was renamed after this estimate came in.
+const LA_ITEMS = [
+  { qty: 1, unit_price: 119, description: 'TV Size: 60"-69"' },
+  { qty: 1, unit_price: 110, description: 'Bracket: Full Motion' },
+  { qty: 1, unit_price: 0,   description: 'Fireplace: I have 1 TV not over a fireplace' },
+  { qty: 1, unit_price: 0,   description: 'Wall Surface: Drywall' },
+  { qty: 1, unit_price: 25,  description: 'Wire Hiding: Yes, hide the wires OUTSIDE the wall' },
+  { qty: 1, unit_price: 0,   description: "Dismount: No, I'll handle TV removal myself" },
+  { qty: 1, unit_price: 0,   description: 'I agree to the Terms of Service' },
+];
+const laSpec = brokerResolveSpec({ line_items: LA_ITEMS }, CATALOG);
+eq('size matches exactly', laSpec.size, 'size_3');
+eq('bracket matches exactly', laSpec.bracket, 'bracket_13');
+eq('wires still matches after the rename', laSpec.wires, 'wires_41');
+ok('and NOT the BEHIND variant, which is the costly mistake', laSpec.wires !== 'wires_40');
+
+// A saved correction always beats the guess.
+const corrected = brokerResolveSpec({ line_items: LA_ITEMS, broker_spec: { size: 'size_4', bracket: null, wires: null } }, CATALOG);
+eq('saved choice overrides the match', corrected.size, 'size_4');
+// A saved value that is not in the catalog is ignored rather than trusted.
+const bogus = brokerResolveSpec({ line_items: LA_ITEMS, broker_spec: { size: 'size_99' } }, CATALOG);
+eq('a stale saved row_key falls back to the match', bogus.size, 'size_3');
+// Nothing to go on stays null so the UI asks instead of assuming.
+const blank = brokerResolveSpec({ line_items: [{ qty: 1, unit_price: 0, description: 'Furniture Assembly' }] }, CATALOG);
+eq('no size line leaves size unset', blank.size, null);
+eq('no wires line leaves wires unset', blank.wires, null);
+
+console.log('\n=== 11. What the customer is actually quoted ===');
+// The bug this replaced: the brokered line used to be APPENDED to the
+// estimate's own itemization, so booking the LA job at 652 quoted 254 + 652.
+const oldWay = LA_ITEMS.filter(it => !it.broker).concat([{ description: 'TV Mounting', qty: 1, unit_price: 652, broker: true }]);
+const oldTotal = oldWay.reduce((t, it) => t + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0);
+eq('the old behaviour really did overquote', oldTotal, 906);
+
+const quoted = brokerQuoteLineItems('TV Mounting', 652);
+const newTotal = quoted.reduce((t, it) => t + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0);
+eq('brokered quote is exactly one line', quoted.length, 1);
+eq('and totals the sell price, not sell plus itemization', newTotal, 652);
+eq('described as the service', quoted[0].description, 'TV Mounting');
+eq('qty is 1 so the total is not zeroed', quoted[0].qty, 1);
+ok('uses unit_price, the field both senders total', 'unit_price' in quoted[0]);
+eq('falls back to a sane label', brokerQuoteLineItems(null, 100)[0].description, 'Scheduled service');
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'}: ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

@@ -31,6 +31,7 @@ import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js
 import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
+import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems } from './_lib/broker-spec.js';
 import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
 
 // Search Console domain per business — the free "what did people search to
@@ -403,6 +404,7 @@ export default async function handler(req, res) {
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
+      case 'estimate_broker_save_spec': return await estimateBrokerSaveSpec(req, res, db, auth, body);
       case 'estimate_broker_save_bid': return await estimateBrokerSaveBid(req, res, db, auth, body);
       case 'estimate_broker_book':     return await estimateBrokerBook(req, res, db, auth, body);
       case 'quote_economics':   return await quoteEconomics(req, res, db, auth, body);
@@ -8057,16 +8059,42 @@ async function estimateSendEmail(req, res, db, auth, body) {
 // the email, and vice versa), then marks the estimate declined either way so
 // it stops showing as "Needs Response".
 // ---------------------------------------------------------------------------
-// Subcontractor brokering (migration 0091). Only for estimates whose zip lands
-// in an UNSTAFFED service area (DFW / Los Angeles / Phoenix / San Antonio as
-// of Aug 2026). The gate is service_areas.unstaffed via the shared resolver --
-// NOT a city list -- so staffing a market turns this off by itself.
+// Subcontractor brokering (migrations 0092 + 0093). Only for estimates whose
+// zip lands in an UNSTAFFED service area (DFW / Los Angeles / Phoenix / San
+// Antonio as of Aug 2026). The gate is service_areas.unstaffed via the shared
+// resolver -- NOT a city list -- so staffing a market turns this off by itself.
+//
+// A TV mount is priced off three things: the size tier, the bracket, and the
+// wire concealment. Those three are picked ONCE per estimate (so all three
+// companies quote the same scope), and each company's price for them lives on
+// that company's rate card, keyed by the same (section_key, row_key) the
+// booking widget uses. Fill a company's card once and every later estimate
+// prices itself.
 // ---------------------------------------------------------------------------
 
-// Shared by every broker action: load the estimate, resolve its zip, and
-// refuse to broker anything in a staffed market. Returns { est, area }.
+// The option catalog the booking widget already uses. city_key 'default' is the
+// canonical option list; per-city rows only differ in OUR price, which is not
+// what a subcontractor charges.
+async function brokerCatalog(db, businessId) {
+  const { data, error } = await db.from('widget_prices')
+    .select('section_key, row_key, label, price, sort_order')
+    .eq('business_id', businessId).eq('city_key', 'default')
+    .in('section_key', ['size', 'bracket', 'wires'])
+    .order('sort_order');
+  if (error) throw error;
+  const out = {};
+  for (const s of BROKER_SECTIONS) out[s.key] = [];
+  for (const r of (data || [])) {
+    if (out[r.section_key]) out[r.section_key].push({ row_key: r.row_key, label: r.label, our_price: Number(r.price) || 0 });
+  }
+  return out;
+}
+
+// Shared by every broker action: load the estimate, resolve its zip, and refuse
+// to broker anything in a staffed market. Returns { est, area }.
 async function brokerContext(db, biz, estimateId) {
-  const est = await fetchEstimate(db, estimateId, biz.id, 'id, customer_zip, customer_name, service_label, broker_sub_price, broker_sell_price, broker_company_name');
+  const est = await fetchEstimate(db, estimateId, biz.id,
+    'id, customer_zip, customer_name, service_label, broker_sub_price, broker_sell_price, broker_company_name, broker_spec');
   if (!est) return { error: { code: 404, msg: 'Estimate not found' } };
   const area = await resolveServiceArea(db, biz.id, biz.slug, est.customer_zip);
   if (!area || !area.unstaffed) {
@@ -8075,8 +8103,8 @@ async function brokerContext(db, biz, estimateId) {
   return { est, area };
 }
 
-// Panel load: the three slots, plus the directory to build the dropdown from.
-// Both come back empty until a human types something; nothing is seeded.
+// Panel load: the job's three options, the three bid slots with each company's
+// rates for exactly those options, and the directory for the dropdown.
 async function estimateBroker(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -8085,39 +8113,87 @@ async function estimateBroker(req, res, db, auth, body) {
   const ctx = await brokerContext(db, biz, body.id);
   if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
 
+  const catalog = await brokerCatalog(db, biz.id);
+  const spec = brokerResolveSpec(ctx.est, catalog);
+
   const { data: bids, error: bErr } = await db.from('estimate_broker_bids')
     .select('slot, subcontractor_id, company_name, phone, sub_price')
     .eq('estimate_id', body.id).eq('business_id', biz.id).order('slot');
   if (bErr) throw bErr;
 
   const { data: directory, error: dErr } = await db.from('subcontractors')
-    .select('id, company_name, phone').eq('business_id', biz.id).eq('active', true)
-    .order('company_name');
+    .select('id, company_name, phone').eq('business_id', biz.id).eq('active', true).order('company_name');
   if (dErr) throw dErr;
 
-  // Always hand the UI exactly three slots so the panel shape is stable.
+  // Every rate any of these companies has for the three options this job needs.
+  const subIds = (bids || []).map(b => b.subcontractor_id).filter(Boolean);
+  let rates = [];
+  if (subIds.length) {
+    const { data: r, error: rErr } = await db.from('subcontractor_rates')
+      .select('subcontractor_id, section_key, row_key, price')
+      .eq('business_id', biz.id).in('subcontractor_id', subIds);
+    if (rErr) throw rErr;
+    rates = r || [];
+  }
+  const rateFor = (subId, section) => {
+    const wanted = spec[section];
+    if (!subId || !wanted) return null;
+    const hit = rates.find(x => x.subcontractor_id === subId && x.section_key === section && x.row_key === wanted);
+    return hit ? Number(hit.price) : null;
+  };
+
   const bySlot = new Map((bids || []).map(b => [b.slot, b]));
   const slots = [1, 2, 3].map(n => {
     const b = bySlot.get(n) || { slot: n, subcontractor_id: null, company_name: '', phone: '', sub_price: null };
-    return { ...b, slot: n, min_sell: minSellPrice(b.sub_price) };
+    const lines = BROKER_SECTIONS.map(s => ({ section_key: s.key, label: s.label, price: rateFor(b.subcontractor_id, s.key) }));
+    // Their total is the sum of the three, and only counts once every line is
+    // filled in -- a partial card must not read as a cheap bid.
+    const complete = lines.every(l => l.price !== null);
+    const total = complete ? Math.round(lines.reduce((t, l) => t + l.price, 0) * 100) / 100 : null;
+    return { ...b, slot: n, lines, sub_price: total, min_sell: minSellPrice(total) };
   });
 
   return res.status(200).json({
     ok: true,
     area: { name: ctx.area.name, unstaffed: true },
-    slots,
-    directory: directory || [],
+    catalog, spec, sections: BROKER_SECTIONS.map(s => ({ key: s.key, label: s.label })),
+    slots, directory: directory || [],
     booked: ctx.est.broker_company_name ? {
       company_name: ctx.est.broker_company_name,
-      sub_price:    ctx.est.broker_sub_price,
-      sell_price:   ctx.est.broker_sell_price,
+      sub_price: ctx.est.broker_sub_price,
+      sell_price: ctx.est.broker_sell_price,
     } : null,
   });
 }
 
-// Save one of the three bid slots. Typing a company name here is also how the
-// directory gets populated, so the next Phoenix job can pick it from the
-// dropdown. Blank company AND blank price clears the slot.
+// The office correcting which size/bracket/wires this job actually is. Shared
+// by all three bids, so everyone quotes the same scope.
+async function estimateBrokerSaveSpec(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const ctx = await brokerContext(db, biz, body.id);
+  if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
+
+  const catalog = await brokerCatalog(db, biz.id);
+  const spec = {};
+  for (const s of BROKER_SECTIONS) {
+    const v = body.spec && body.spec[s.key];
+    if (!v) { spec[s.key] = null; continue; }
+    if (!(catalog[s.key] || []).some(o => o.row_key === v)) {
+      return res.status(400).json({ error: `"${v}" is not a valid ${s.label} option.` });
+    }
+    spec[s.key] = v;
+  }
+  const { error } = await db.from('estimates').update({ broker_spec: spec }).eq('id', body.id).eq('business_id', biz.id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true, spec });
+}
+
+// Save one bid slot. The three prices are written to the COMPANY'S rate card
+// (keyed by this job's row_keys), so the next estimate needing the same options
+// fills itself in. Blank everything clears the slot.
 async function estimateBrokerSaveBid(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -8129,11 +8205,15 @@ async function estimateBrokerSaveBid(req, res, db, auth, body) {
   const ctx = await brokerContext(db, biz, body.id);
   if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
 
+  const catalog = await brokerCatalog(db, biz.id);
+  const spec = brokerResolveSpec(ctx.est, catalog);
+
   const company = String(body.company_name || '').trim().slice(0, 200);
   const phone   = String(body.phone || '').trim().slice(0, 40);
-  const price   = parseMoney(body.sub_price);
+  const prices  = (body.prices && typeof body.prices === 'object') ? body.prices : {};
+  const anyPrice = BROKER_SECTIONS.some(s => parseMoney(prices[s.key]) !== null);
 
-  if (!company && price === null && !phone) {
+  if (!company && !phone && !anyPrice) {
     const { error } = await db.from('estimate_broker_bids').delete()
       .eq('estimate_id', body.id).eq('business_id', biz.id).eq('slot', slot);
     if (error) throw error;
@@ -8141,15 +8221,13 @@ async function estimateBrokerSaveBid(req, res, db, auth, body) {
   }
   if (!company) return res.status(400).json({ error: 'Enter the company name for this slot.' });
 
-  // Upsert the directory row so the company is reusable next time. Matched
-  // case-insensitively against the unique index from migration 0091.
+  // Directory upsert, matched case-insensitively against the unique index.
   let subId = body.subcontractor_id || null;
   if (!subId) {
     const { data: existing } = await db.from('subcontractors')
       .select('id, phone').eq('business_id', biz.id).ilike('company_name', company).maybeSingle();
     if (existing) {
       subId = existing.id;
-      // Fill in a phone we did not have before; never blank out a known one.
       if (phone && !existing.phone) {
         await db.from('subcontractors').update({ phone, updated_at: new Date().toISOString() }).eq('id', subId);
       }
@@ -8162,24 +8240,42 @@ async function estimateBrokerSaveBid(req, res, db, auth, body) {
     }
   }
 
-  const row = {
+  // Write each typed price onto the company's rate card.
+  const breakdown = [];
+  for (const s of BROKER_SECTIONS) {
+    const row_key = spec[s.key];
+    const price = parseMoney(prices[s.key]);
+    if (!row_key || price === null) continue;
+    const opt = (catalog[s.key] || []).find(o => o.row_key === row_key);
+    const { error: upErr } = await db.from('subcontractor_rates').upsert({
+      business_id: biz.id, subcontractor_id: subId,
+      section_key: s.key, row_key, price,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'subcontractor_id,section_key,row_key' });
+    if (upErr) throw upErr;
+    breakdown.push({ section_key: s.key, row_key, label: opt ? opt.label : row_key, price });
+  }
+
+  // Their price only counts when all three lines are in.
+  const complete = breakdown.length === BROKER_SECTIONS.length;
+  const subPrice = complete ? Math.round(breakdown.reduce((t, l) => t + l.price, 0) * 100) / 100 : null;
+
+  const { error } = await db.from('estimate_broker_bids').upsert({
     estimate_id: body.id, business_id: biz.id, slot,
-    subcontractor_id: subId, company_name: company,
-    phone: phone || null, sub_price: price,
+    subcontractor_id: subId, company_name: company, phone: phone || null,
+    sub_price: subPrice, breakdown: breakdown.length ? breakdown : null,
     updated_at: new Date().toISOString(),
-  };
-  const { error } = await db.from('estimate_broker_bids')
-    .upsert(row, { onConflict: 'estimate_id,slot' });
+  }, { onConflict: 'estimate_id,slot' });
   if (error) throw error;
 
-  return res.status(200).json({ ok: true, slot, min_sell: minSellPrice(price) });
+  return res.status(200).json({ ok: true, slot, sub_price: subPrice, min_sell: minSellPrice(subPrice) });
 }
 
-// Pick a winning bid and set the price we sell at. This is the money step:
-// the sell price is validated against the 20 percent minimum, recorded on the
-// estimate for profit reporting, AND written into line_items so the EXISTING
-// estimate_send_sms / estimate_send_email actions quote the right number. The
-// customer never sees the subcontractor or the spread.
+// Pick a winning bid and set the price we sell at. The sell price is validated
+// against the 20 percent minimum, recorded for profit reporting, and written
+// into line_items as the SINGLE line the customer sees, so the EXISTING
+// estimate_send_sms / estimate_send_email actions quote exactly that number.
+// The customer never sees the subcontractor, the breakdown, or the spread.
 async function estimateBrokerBook(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -8192,26 +8288,23 @@ async function estimateBrokerBook(req, res, db, auth, body) {
   if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
 
   const { data: bid, error: bErr } = await db.from('estimate_broker_bids')
-    .select('subcontractor_id, company_name, phone, sub_price')
+    .select('subcontractor_id, company_name, phone, sub_price, breakdown')
     .eq('estimate_id', body.id).eq('business_id', biz.id).eq('slot', slot).maybeSingle();
   if (bErr) throw bErr;
   if (!bid) return res.status(400).json({ error: 'That bid slot is empty.' });
-  if (parseMoney(bid.sub_price) === null) return res.status(400).json({ error: 'That bid has no subcontractor price yet.' });
+  if (parseMoney(bid.sub_price) === null) {
+    return res.status(400).json({ error: 'That company still needs a price for all three lines.' });
+  }
 
   const check = checkSellPrice(bid.sub_price, body.sell_price, !!body.override_below_min);
   if (!check.ok) return res.status(400).json({ error: check.error, below_min: !!check.belowMin, min_sell: check.min });
 
-  // Replace any previous brokered line item rather than stacking them up if
-  // the office re-books at a different price. Non-broker line items are left
-  // exactly as they are.
-  const existingItems = Array.isArray(ctx.est.line_items) ? ctx.est.line_items : [];
-  const items = existingItems.filter(it => !it || !it.broker);
-  items.push({
-    description: ctx.est.service_label || 'Scheduled service',
-    qty: 1,
-    unit_price: check.sell,
-    broker: true,   // internal marker, ignored by lineItemsTotal and by both senders
-  });
+  // ONE line at the sell price, replacing whatever was there. The estimate's
+  // own itemization is OUR pricing for a job we are not doing ourselves, and
+  // leaving it in place would add to the brokered price rather than replace it
+  // (a 254 dollar itemized LA quote plus a 652 dollar brokered line quoted the
+  // customer 906). The breakdown stays on the bid row for reporting.
+  const items = brokerQuoteLineItems(ctx.est.service_label, check.sell);
 
   const patch = {
     broker_subcontractor_id: bid.subcontractor_id || null,
@@ -8229,11 +8322,9 @@ async function estimateBrokerBook(req, res, db, auth, body) {
   return res.status(200).json({
     ok: true,
     company_name: bid.company_name,
-    sub_price: check.sub,
-    sell_price: check.sell,
-    min_sell: check.min,
-    below_min: !!check.belowMin,
-    spread: check.spread,
+    sub_price: check.sub, sell_price: check.sell, min_sell: check.min,
+    below_min: !!check.belowMin, spread: check.spread,
+    breakdown: bid.breakdown || [],
   });
 }
 
