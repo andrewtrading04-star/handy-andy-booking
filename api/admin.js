@@ -62,7 +62,7 @@ function bookingStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
-import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
+import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
@@ -718,7 +718,7 @@ async function summary(req, res, db, auth) {
       travelPayoutMap(db, biz.id),
     ]);
 
-    const earned = (rows) => (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    const earned = (rows) => (rows || []).filter(countsTowardProfit);
     // Per-business travel-payout map cache (this business already fetched), so the
     // cross-business loops never refetch the same map.
     const travelCache = new Map([[biz.id, travelBiz]]);
@@ -799,7 +799,7 @@ async function summary(req, res, db, auth) {
             .gte('scheduled_at', d0.toISOString())
             .lt('scheduled_at', d1.toISOString())));
         }
-        const paidDone = (rows || []).filter(x => x.status === 'completed' && x.payment_status === 'paid');
+        const paidDone = (rows || []).filter(countsTowardProfit);
         if (!paidDone.length) return [bb.slug, 0];
         const e = await computeJobEconomics(db, bb, paidDone, true, await travelMapFor(bb));
         return [bb.slug, Math.round(paidDone.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
@@ -1239,7 +1239,7 @@ async function profitRange(req, res, db, auth) {
       .eq('business_id', bb.id)
       .gte('scheduled_at', start.toISOString())
       .lt('scheduled_at', end.toISOString()));
-    const paid = (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    const paid = (rows || []).filter(countsTowardProfit);
     if (!paid.length) return [bb.slug, 0];
     const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
     return [bb.slug, Math.round(paid.reduce((n, j) => n + (Number(e[j.id]?.profit) || 0), 0))];
@@ -1287,7 +1287,7 @@ async function netDailyRange(req, res, db, auth) {
       .eq('business_id', bb.id)
       .gte('scheduled_at', oldestStart.toISOString())
       .lt('scheduled_at', end.toISOString()));
-    const paid = (rows || []).filter(b => b.status === 'completed' && b.payment_status === 'paid');
+    const paid = (rows || []).filter(countsTowardProfit);
     if (!paid.length) return;
     const e = await computeJobEconomics(db, bb, paid, true, await travelMapFor(bb));
     // Precompute this business's day boundaries once, then a cheap per-job scan.
@@ -1309,6 +1309,27 @@ async function netDailyRange(req, res, db, auth) {
     total: Math.round(v),
   }));
   return res.status(200).json({ range, days: series });
+}
+
+// Which completed jobs count toward REALIZED profit.
+//
+// Profit now uses the payroll engine's own settled/deferred rule instead of a
+// bare payment_status check, so profit and payroll can never disagree about
+// whether a job has happened yet. paymentState() treats a $0 ticket as settled
+// and an unpaid job that still owes a balance as deferred, which is exactly the
+// distinction profit wants:
+//
+//   $0 redeemed GDS   the customer owes nothing and never will, but the tech IS
+//                     paid ($50-60) this week, so the job is real and its cost
+//                     belongs in today's profit. The old check excluded it
+//                     forever, because a $0 job can never become "paid": 7
+//                     redemptions and $380 of tech pay had gone out since July
+//                     12 without appearing in any profit figure (owner spotted
+//                     it as "Aug 11 says $105 but should be $55").
+//   unpaid, owes $215 payroll defers the tech's pay until the customer pays, so
+//                     profit keeps deferring it too. Unchanged behaviour.
+function countsTowardProfit(b) {
+  return b.status === 'completed' && paymentState(b) !== 'deferred';
 }
 
 async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) {
