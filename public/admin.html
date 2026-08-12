@@ -1362,7 +1362,10 @@
     <div class="side-head">
       <div class="logo"><span class="dot" data-ico="tools">🛠️</span><span class="ttl" id="bizName">Schedule</span></div>
       <button class="plus" id="takeCallBtn" title="Take a call" style="margin-right:6px;">📞</button>
-      <button class="plus" id="newBookingBtn" title="New booking">＋</button>
+      <!-- Removed for now, per Andrew; may come back later. New Booking is
+           still reachable from Customers > Create Appointment, and from
+           Take a Call's "Something else". -->
+      <!-- <button class="plus" id="newBookingBtn" title="New booking">＋</button> -->
     </div>
     <div class="switcher" id="switcher"></div>
 
@@ -10712,10 +10715,15 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
 });
 
 // ── New booking modal ──────────────────────────────────────────────────────
-document.getElementById('newBookingBtn').addEventListener('click', openNewBooking);
-// mousedown fires before click — a few extra ms head start on the same warm-up,
-// and re-primes the cache if the 60s TTL lapsed since the last business switch.
-document.getElementById('newBookingBtn').addEventListener('mousedown', ()=>{ if(current) nbWarmDataCache(current.slug); });
+// newBookingBtn is currently removed from the sidebar (see side-head above),
+// so this is null-guarded rather than deleted; dropping the button back in
+// later is then the only step needed, no JS to restore.
+{ const nbb=document.getElementById('newBookingBtn'); if(nbb){
+  nbb.addEventListener('click', openNewBooking);
+  // mousedown fires before click, a few extra ms head start on the same warm-up,
+  // and re-primes the cache if the 60s TTL lapsed since the last business switch.
+  nbb.addEventListener('mousedown', ()=>{ if(current) nbWarmDataCache(current.slug); });
+} }
 // Close New Booking by clicking the backdrop (no Cancel button needed).
 document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') document.getElementById('modal').classList.add('hidden'); });
 
