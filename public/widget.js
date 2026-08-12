@@ -1458,6 +1458,42 @@
       </div>`;
   }
 
+  // ── "See what our customers say" (Guaranteed Dismount step) ───────────────
+  // The REAL Google screenshot, shown unaltered. An earlier attempt rebuilt the
+  // review as styled markup; the owner wants customers to see the genuine
+  // screenshot, so it is served as an image rather than recreated.
+  //
+  // Sat on a white panel because the screenshot's own background is white:
+  // dropped straight onto the dark card it would read as a bright rectangle
+  // bleeding off the edges instead of a deliberately framed screenshot.
+  // Tapping opens the full-size image, since at phone width the review text
+  // renders smaller than comfortable reading size.
+  //
+  // Lazy-loaded and only fetched when opened: this is a ~230KB PNG sitting in
+  // the middle of a booking funnel, and most customers will never expand it.
+  //
+  // HANDY ANDY ONLY. The review names Handy Andy, so it would read as another
+  // company's testimonial on the Mile High widget that shares this file. Doms
+  // has no code in this file and cannot be affected either way.
+  const GDS_REVIEW_IMG = SURFACE_IMG_BASE + 'reviews/alanna-review.png';
+  function gdsReviewHtml(){
+    if (BUSINESS !== 'handy-andy') return '';
+    return `
+      <div style="margin-bottom:12px!important;">
+        <button id="btn-gds-review" type="button" aria-expanded="false" style="background:transparent!important;border:none!important;padding:9px 4px!important;width:100%!important;display:block!important;cursor:pointer!important;font-size:12.5px!important;font-weight:700!important;color:#d4d4d8!important;text-align:center!important;font-family:inherit!important;">
+          <span style="color:#fbbf24!important;letter-spacing:1px!important;">★★★★★</span>
+          <span style="text-decoration:underline!important;text-underline-offset:2px!important;margin-left:6px!important;">See what our customers say</span>
+          <span id="gds-review-caret" style="display:inline-block!important;margin-left:5px!important;font-size:10px!important;color:#71717a!important;">▼</span>
+        </button>
+        <div id="gds-review-panel" style="display:none!important;background:#fff!important;border-radius:10px!important;padding:8px!important;margin-top:2px!important;">
+          <a id="gds-review-full" href="${GDS_REVIEW_IMG}" target="_blank" rel="noopener" style="display:block!important;text-decoration:none!important;">
+            <img id="gds-review-img" alt="Five star Google review from a customer who bought the dismount coverage and used it two years later" loading="lazy" style="display:block!important;width:100%!important;height:auto!important;border-radius:6px!important;">
+          </a>
+          <div style="font-size:10.5px!important;color:#5f6368!important;text-align:center!important;padding:6px 4px 2px!important;">Real Google review · tap to enlarge</div>
+        </div>
+      </div>`;
+  }
+
   function bDismount(){
     const sec=getSec('dismount');
     const cur=(selections[sec.id]||[])[0]?.option_id;
@@ -1491,6 +1527,7 @@
         </div>
         <div style="font-size:12.5px!important;color:#c7ccd4!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
       </div>
+      ${gdsReviewHtml()}
 
       <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
 
@@ -1916,6 +1953,23 @@
     });
     root.querySelector('#btn-dis-no')?.addEventListener('click',()=>{
       const s=getSec('dismount');if(s)selectOnly(s.id,s.options[1].id);render();
+    });
+    // Review expander. Toggles the panel directly rather than calling render():
+    // a full re-render of this step would snap the customer back to the top of
+    // a long card at the moment they are reading partway down it. The image
+    // src is set on FIRST open, not in the markup, so the ~230KB screenshot is
+    // never fetched for the majority who do not expand it.
+    root.querySelector('#btn-gds-review')?.addEventListener('click',(e)=>{
+      const panel=root.querySelector('#gds-review-panel');
+      const caret=root.querySelector('#gds-review-caret');
+      const img=root.querySelector('#gds-review-img');
+      if(!panel) return;
+      const open=panel.style.display==='none';
+      if(open && img && !img.getAttribute('src')) img.setAttribute('src', GDS_REVIEW_IMG);
+      panel.style.setProperty('display', open?'block':'none', 'important');
+      if(caret) caret.textContent = open?'▲':'▼';
+      e.currentTarget.setAttribute('aria-expanded', open?'true':'false');
+      if(open) logEvent('answer','gds_review_opened');
     });
 
     root.querySelectorAll('.ha-tv-type').forEach(c=>c.addEventListener('click',()=>{
