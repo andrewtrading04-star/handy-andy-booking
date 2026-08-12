@@ -267,6 +267,57 @@ export async function sendCardSaveFailedAlert(d = {}) {
   }
 }
 
+// A widget booking ended up with NO technician attached. Both public booking
+// paths now reject instead of booking techless, so this only fires when a lost
+// tech+slot race could not be auto-recovered. The office must know NOW, not
+// when someone happens to open the dashboard: the customer already holds a
+// confirmation email promising a time window that nobody is scheduled to
+// cover. (First real case: Connor Hasselman, 2026-08-12 8am Denver, found 25
+// minutes after the job's start time.)
+export async function sendUnassignedBookingAlert(d = {}) {
+  try {
+    // This alert is the last line of defense for the no-techless-jobs
+    // invariant, so being gated off must at least be LOUD in the logs.
+    if (!emailNotificationsOn()) {
+      console.error('[owner-notify] UNASSIGNED BOOKING but email notifications are OFF; booking', d.bookingId, 'has no technician and nobody was alerted');
+      return;
+    }
+    const cfg = emailConfig(d.slug);
+    if (!cfg.apiKey) {
+      console.error('[owner-notify] UNASSIGNED BOOKING but no email API key for', d.slug, '; booking', d.bookingId, 'has no technician and nobody was alerted');
+      return;
+    }
+
+    const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
+    const slug = String(d.slug || '').toLowerCase();
+    if (slug === 'handy-andy' || slug === 'mile-high') {
+      recipients.add(process.env.MILE_HIGH_SECRETARY_EMAIL || process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
+    } else if (slug === 'doms') {
+      recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
+    }
+    recipients.delete('');
+    if (!recipients.size) return;
+
+    const rows = [
+      ['Company', d.businessName],
+      ['Customer', d.customerName],
+      ['When', d.whenStr],
+    ].filter(r => r[1]);
+    const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
+      <h2 style="margin:0 0 4px;color:#b91c1c;">⚠ A job was booked with NO technician</h2>
+      <p style="margin:0 0 14px;color:#374151;">Two customers grabbed the same time at once and no other tech was free, so this booking saved without anyone assigned. The customer already has a confirmation email for this window. Open the job and assign a tech, or call the customer to reschedule, right away.</p>
+      <table style="border-collapse:collapse;">${tbl}</table>
+      ${d.bookingId ? `<p style="margin:10px 0 0;font-size:12px;color:#6b7280;">Booking #${escHtml(d.bookingId)}</p>` : ''}
+    </div>`;
+    for (const to of recipients) {
+      await sendEmail({ slug: d.slug, to, subject: `⚠ NO TECH on a new booking: ${d.customerName || 'a customer'}${d.whenStr ? ` (${d.whenStr})` : ''}`, html, replyTo: cfg.from });
+    }
+  } catch (e) {
+    console.warn('[owner-notify] non-fatal:', e.message);
+  }
+}
+
 // A customer told Joey on the follow-up call that something went wrong. This is
 // the ONLY way that ever reaches the owner: the complaint is typed into the
 // review-call card and would otherwise sit in a column nobody opens until the

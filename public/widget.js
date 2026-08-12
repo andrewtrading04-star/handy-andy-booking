@@ -525,7 +525,12 @@
   let isSubmitting=false;
   // Stable per-page idempotency key, reused across retries of the same booking so
   // the server can recognize a repeat submission instead of creating a new job.
-  const BOOKING_IDEM_KEY='ha_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+  // `let`, not `const`: a 409 slot-conflict bounce burns this key (the server
+  // may have already recorded a booking under it), and the customer's NEXT
+  // attempt is a new booking intent for a different slot, so the conflict
+  // handler in doSubmit regenerates it. Plain network retries of the SAME
+  // submit keep the same key, which is the whole point of the key.
+  let BOOKING_IDEM_KEY='ha_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
   // Stripe
   let _stripe=null, _stripeElements=null, _stripeCard=null;
   // Live card validity, driven by the Element's `change` event. Lets us block a
@@ -2448,7 +2453,27 @@
         if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
         const err=await r.json().catch(()=>({}));
         logEvent('booking_failed','customer',null,err.error||('HTTP '+r.status));
-        alert(err.error||'Booking failed. Please try again.');
+        if(err&&err.conflict){
+          // The slot filled (or slipped inside the 1-hour lead window) while
+          // they were checking out. Send them back to a FRESH calendar; the
+          // old list is the stale snapshot that caused this. Their contact
+          // details live in state vars, so nothing they typed is lost.
+          // slotsByDate is cleared SYNCHRONOUSLY so the stale list (with the
+          // dead slot still in it) can never be re-clicked while the refresh
+          // is in flight; the customer sees the loading state instead.
+          const si=STEP_KEYS.indexOf('slots');if(si!==-1)stepIdx=si;
+          selectedSlot=null;selectedDate=null;
+          slotsByDate={};calYear=null;calMonth=null;
+          // New booking intent from here on (their next submit is a different
+          // slot), so the old idempotency key must not be reused: the server
+          // may already hold a booking under it from a lost-response retry.
+          BOOKING_IDEM_KEY='ha_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+          fetchSlots();
+          alert(err.error||'That time is no longer available. Please pick another time.');
+          render();
+        }else{
+          alert(err.error||'Booking failed. Please try again.');
+        }
       }
     }catch{
       // Ambiguous failure (timeout / dropped connection): the request may have

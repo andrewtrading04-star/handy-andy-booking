@@ -209,9 +209,14 @@ export async function mirrorBooking(ctx = {}) {
       if (!ins.error) {
         booking_id = ins.data?.id || null;
       } else if (ins.error.code === '23505' || /duplicate key|idempotency/i.test(ins.error.message || '')) {
-        const { data: existing } = await db.from('bookings').select('id')
+        // Return the EXISTING row's technician_id/status, not this retry's
+        // locally-picked ctx values: callers key their "meet your tech" email,
+        // tech SMS, techless recovery, and response status off what comes back
+        // here, and the retry's fresh pick can name a tech who is not actually
+        // on the stored booking (or mask a techless row as assigned).
+        const { data: existing } = await db.from('bookings').select('id, technician_id, status')
           .eq('business_id', biz.id).eq('idempotency_key', String(ctx.idempotency_key)).maybeSingle();
-        if (existing?.id) return { booking_id: existing.id, customer_id, business_id: biz.id, technician_id, duplicate: true };
+        if (existing?.id) return { booking_id: existing.id, customer_id, business_id: biz.id, technician_id: existing.technician_id || null, status: existing.status, duplicate: true };
         return;
       } else if (/idempotency_key/.test(ins.error.message || '')) {
         // DB predates migration 0024 (no idempotency_key column) — insert without it.
@@ -232,6 +237,13 @@ export async function mirrorBooking(ctx = {}) {
       booking_id = ins.data?.id || null;
     }
     if (!booking_id) return;
+
+    // From here on the booking row EXISTS. A failure in any of the follow-up
+    // steps (review token, line items, status event) must not hide the id from
+    // the caller: book.js keys its techless recovery and the office "NO TECH"
+    // alert off booking_id, so swallowing it here would recreate the silent
+    // techless-booking class this file's callers were hardened against.
+    try {
 
     // Generate a review token with the now-known booking_id (30-day TTL: 2592000
     // seconds) — but only if the booking doesn't already have one, so a re-mirror
@@ -269,6 +281,10 @@ export async function mirrorBooking(ctx = {}) {
     // Note: online (widget) bookings no longer send Heather/Joey a "someone just
     // booked" email — per owner request, that heads-up email is only sent for
     // ESTIMATE requests now (see sendOwnerEstimateAlert in api/estimate.js).
+
+    } catch (e) {
+      console.warn('[mirror] post-insert step failed (booking kept):', e.message);
+    }
 
     // Native callers (e.g. the Doms widget) need the new row's id to confirm /
     // email the booking. Zenbooker callers ignore the return value.

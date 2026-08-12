@@ -7,7 +7,7 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
-import { sendCardSaveFailedAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
+import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 
@@ -496,6 +496,82 @@ function applyMultiTvDiscounts(lines, surcharge, cfg) {
   return multiTvDiscountAmt;
 }
 
+// Shared copy for the "your slot filled while you were checking out" rejection
+// (no em dashes in customer-facing text, per owner style rule).
+const SLOT_TAKEN_MSG = 'That time was just booked by another customer. Please pick a different time.';
+
+function fmtWhen(startUTC, tz, fallback) {
+  try { return startUTC.toLocaleString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+  catch { return fallback; }
+}
+
+// An idempotent RETRY of a submit whose first attempt already created a
+// booking must be answered with that booking's original success, never a 409
+// (the first attempt's own row is what makes the tech pick come up empty).
+// Returns a ready-to-send response body, or null when there is no prior row.
+async function idempotentPrior(db, bizId, idempotencyKey) {
+  if (!idempotencyKey) return null;
+  try {
+    const { data: prev } = await db.from('bookings')
+      .select('id, technician_id, status, payment_status')
+      .eq('business_id', bizId).eq('idempotency_key', String(idempotencyKey)).maybeSingle();
+    if (!prev) return null;
+    return {
+      success: true, booking_id: prev.id, job_id: prev.id,
+      status: prev.technician_id ? 'assigned' : (prev.status || 'confirmed'),
+      card_saved: prev.payment_status === 'card_on_file',
+      duplicate: true,
+    };
+  } catch (e) { console.warn('[book] idempotent lookup failed:', e.message); return null; }
+}
+
+// A widget booking must never sit in the CRM without a technician (the Connor
+// Hasselman job, 2026-08-12 8am Denver: booked techless, discovered 25 minutes
+// after its start time). Both public paths now guarantee a tech BEFORE the
+// booking is created (they 409 instead), so the main way a booking can still
+// land techless is losing the bookings_tech_slot_unique race inside
+// mirrorBooking. This re-runs the pick (the race winner's booking now occupies
+// that tech, so a different tech can still come back), updates the row, and if
+// nobody is left it alerts the office immediately so a human assigns or calls
+// the customer while they are still at their screen.
+async function recoverUnassignedBooking(db, { slug, bizId, bookingId, dateStr, slotKey, serviceAreaId = null, timezone = null, businessName, customerName, whenStr }) {
+  let rescueId = null;
+  try { rescueId = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone, crossHire: true }); }
+  catch (e) { console.warn('[book] rescue pick failed:', e.message); }
+  if (rescueId) {
+    try {
+      // `.is('technician_id', null)` so a tech the office assigned in the
+      // meantime is never clobbered, and `.neq('status','cancelled')` so a
+      // just-cancelled booking is never resurrected to 'assigned'. A 23505
+      // here (rescue tech also got taken) falls through to the re-read below.
+      const upd = await db.from('bookings')
+        .update({ technician_id: rescueId, status: 'assigned' })
+        .eq('id', bookingId).is('technician_id', null).neq('status', 'cancelled')
+        .select('id').maybeSingle();
+      if (upd.error) throw upd.error;
+      if (upd.data) {
+        const ev = await db.from('booking_status_events').insert({
+          booking_id: bookingId, business_id: bizId, technician_id: rescueId,
+          status: 'assigned', note: 'Auto-assigned on retry after losing the slot race',
+        });
+        if (ev.error) console.warn('[book] rescue event insert failed:', ev.error.message);
+        return rescueId;
+      }
+    } catch (e) { console.warn('[book] rescue assign failed:', e.message); }
+  }
+  // No rescue landed. Re-read before crying wolf: the office may have assigned
+  // someone in the window (update matched 0 rows), or the booking may have
+  // been cancelled; neither is owed an emergency alert.
+  try {
+    const { data: row } = await db.from('bookings').select('technician_id, status').eq('id', bookingId).maybeSingle();
+    if (row?.technician_id) return row.technician_id;
+    if (row?.status === 'cancelled') return null;
+  } catch (e) { /* fall through: better a false alarm than silence */ }
+  await sendUnassignedBookingAlert({ slug, businessName, customerName, whenStr, bookingId })
+    .catch(e => console.warn('[book] unassigned alert failed:', e.message));
+  return null;
+}
+
 async function bookDoms(req, res) {
   const b = req.body || {};
   const customer = b.customer || {};
@@ -518,7 +594,7 @@ async function bookDoms(req, res) {
   // re-check here so a stale page can never book a same-hour job. Strict "not
   // more than 60 min out", matching the listing filter exactly.
   if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
-    return res.status(409).json({ error: "That time is too soon to book now — please pick a later slot.", conflict: true });
+    return res.status(409).json({ error: "That time is too soon to book now. Please pick a later time.", conflict: true });
   }
 
   let db;
@@ -608,9 +684,50 @@ async function bookDoms(req, res) {
       '- charging the server total; widget total is stale or the client-side preview did not match.');
   }
 
+  // ── Pick an available Doms tech BEFORE saving the card or writing anything.
+  // The customer's slot list is a snapshot from when they reached the calendar
+  // step; while they type their details, another customer (on either company's
+  // widget, the Denver cross-hire pool is shared) can take the last free tech
+  // for this slot. That is exactly how the Connor Hasselman job (2026-08-12
+  // 8am) was created with no technician. If nobody is available anymore,
+  // REJECT with a 409 so the widget sends them back to a fresh calendar; a job
+  // must never be created without a technician. One retry so a transient
+  // database hiccup does not turn into a lost booking.
+  let technician_id = null, pickBroken = false;
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
+  catch (e) {
+    console.warn('[book-doms] tech pick failed, retrying once:', e.message);
+    try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
+    catch (e2) { pickBroken = true; console.error('[book-doms] tech pick failed twice:', e2.message); }
+  }
+  if (!technician_id) {
+    // An idempotent RETRY of a submit that already succeeded must not be
+    // turned away: the first attempt's own booking is what is occupying the
+    // tech, so re-picking finds nobody. Return the existing booking as the
+    // success it already is.
+    const dup = await idempotentPrior(db, biz.id, b.idempotency_key);
+    if (dup) return res.status(200).json(dup);
+    if (pickBroken) {
+      // Both pick attempts THREW (a database problem, not a full slot). Be
+      // honest instead of blaming a phantom competing customer.
+      return res.status(409).json({ error: 'We could not confirm that time is still open. Please try again in a moment.', conflict: true });
+    }
+    return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
+  }
+  // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
+  // confirmation-email block) — best-effort.
+  let technicianName = null, technicianPhoto = null;
+  try {
+    const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+    technicianName = _t?.name || null;
+    technicianPhoto = _t || null;
+  } catch (e) { /* name is best-effort */ }
+
   // ── Save the card on file in DOMS' Stripe account (best-effort). The card was
   // tokenized client-side with Doms' publishable key, so only Doms' secret key
-  // can attach/charge it. Never fail the booking if this errors.
+  // can attach/charge it. Never fail the booking if this errors. Runs AFTER the
+  // tech guard on purpose: a rejected booking must not leave a customer + card
+  // sitting in Stripe.
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
     if (!stripeConfigured('doms')) {
@@ -629,21 +746,6 @@ async function bookDoms(req, res) {
         cardNote = `Card capture failed: ${e.message}`;
       }
     }
-  }
-
-  // ── Assign an available Doms tech so the slot is actually occupied.
-  let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
-  catch (e) { console.warn('[book-doms] tech pick failed:', e.message); }
-  // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
-  // confirmation-email block) — best-effort.
-  let technicianName = null, technicianPhoto = null;
-  if (technician_id) {
-    try {
-      const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
-      technicianName = _t?.name || null;
-      technicianPhoto = _t || null;
-    } catch (e) { /* name is best-effort */ }
   }
 
   if (cardNote) console.log('[book-doms] card:', cardNote);
@@ -690,14 +792,37 @@ async function bookDoms(req, res) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
+  // mirrorBooking swallows its own pre-insert failures and returns undefined.
+  // No booking id means NOTHING was created; claiming success would leave the
+  // customer confident in a booking that does not exist.
+  if (!bookingId) {
+    console.error('[book-doms] mirror returned no booking id');
+    return res.status(500).json({ error: 'Could not save your booking. Please try again.' });
+  }
   // mirrorBooking falls back to unassigned if this exact tech+slot lost a race
-  // to a concurrent booking (bookings_tech_slot_unique, migration 0073) —
-  // when that happens the booking's real technician_id comes back null even
-  // though `technician_id` here still holds the tech we ORIGINALLY picked.
+  // to a concurrent booking (bookings_tech_slot_unique, migration 0073). A
+  // technician-less job must never sit in the CRM silently, so try once to
+  // assign a different free tech, and failing that alert the office right now.
+  if (bookingId && !result.technician_id) {
+    result.technician_id = await recoverUnassignedBooking(db, {
+      slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, timezone: tz,
+      businessName: "Dom's TV Mounting",
+      customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+      whenStr: fmtWhen(startUTC, tz, dateStr),
+    });
+  }
   // Never let the confirmation email say "Meet [Tech]" for a job that isn't
-  // actually assigned to them.
-  if (technician_id && result.technician_id !== technician_id) {
+  // actually assigned to them (the recovery above may have landed on a
+  // different tech than the one picked before the insert).
+  if (result.technician_id !== technician_id) {
     technicianName = null; technicianPhoto = null;
+    if (result.technician_id) {
+      try {
+        const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', result.technician_id).maybeSingle();
+        technicianName = _t?.name || null;
+        technicianPhoto = _t || null;
+      } catch (e) { /* best-effort */ }
+    }
   }
 
   // Text the assigned tech. This is the whole reason techs stopped hearing about
@@ -850,7 +975,7 @@ async function bookNative(req, res, slug) {
   // re-check here so a stale page can never book a same-hour job. Strict "not
   // more than 60 min out", matching the listing filter exactly.
   if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
-    return res.status(409).json({ error: "That time is too soon to book now — please pick a later slot.", conflict: true });
+    return res.status(409).json({ error: "That time is too soon to book now. Please pick a later time.", conflict: true });
   }
 
   // After-hours fee: the 8 PM slot (s5) is charged $100 on Sundays, $75 otherwise.
@@ -929,9 +1054,41 @@ async function bookNative(req, res, slug) {
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
   const price = Math.max(subtotal, widgetTotal) || subtotal;
 
+  // ── Pick a tech from THIS metro's roster BEFORE saving the card or writing
+  // anything, and REJECT with a 409 if nobody is available anymore. Same guard
+  // as bookDoms above (see the comment there): the customer's slot list is a
+  // snapshot, and a job must never be created without a technician.
+  let technician_id = null, pickBroken = false;
+  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+  catch (e) {
+    console.warn('[book-ha] tech pick failed, retrying once:', e.message);
+    try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+    catch (e2) { pickBroken = true; console.error('[book-ha] tech pick failed twice:', e2.message); }
+  }
+  if (!technician_id) {
+    // See the matching comment in bookDoms: an idempotent retry of an
+    // already-successful submit finds its OWN booking occupying the tech
+    // (guaranteed in single-tech metros: Houston, Austin) and must get its
+    // original success back, not a phantom 409.
+    const dup = await idempotentPrior(db, biz.id, b.idempotency_key);
+    if (dup) return res.status(200).json(dup);
+    if (pickBroken) {
+      return res.status(409).json({ error: 'We could not confirm that time is still open. Please try again in a moment.', conflict: true });
+    }
+    return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
+  }
+  let technicianName = null, technicianPhoto = null;
+  try {
+    const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+    technicianName = _t?.name || null;
+    technicianPhoto = _t || null;
+  } catch (e) { /* name is best-effort */ }
+
   // ── Save the card on file in this business's own Stripe account (best-effort), using
   // HANDY_ANDY_STRIPE_SECRET_KEY. The card is tokenized in the browser with the
   // matching publishable key, so the publishable/secret pair are the same account.
+  // Runs AFTER the tech guard on purpose: a rejected booking must not leave a
+  // customer + card sitting in Stripe.
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
     if (!stripeConfigured({ account: slug })) {
@@ -950,19 +1107,6 @@ async function bookNative(req, res, slug) {
         cardNote = `Card capture failed: ${e.message}`;
       }
     }
-  }
-
-  // ── Assign a tech from THIS metro's roster so the slot is occupied.
-  let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
-  catch (e) { console.warn('[book-ha] tech pick failed:', e.message); }
-  let technicianName = null, technicianPhoto = null;
-  if (technician_id) {
-    try {
-      const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
-      technicianName = _t?.name || null;
-      technicianPhoto = _t || null;
-    } catch (e) { /* name is best-effort */ }
   }
 
   const city = b.city || area.name || null;
@@ -1004,9 +1148,30 @@ async function bookNative(req, res, slug) {
     return res.status(500).json({ error: 'Could not save booking', message: e.message });
   }
   const bookingId = result.booking_id || null;
-  // Same race-fallback check as bookDoms above — see the comment there.
-  if (technician_id && result.technician_id !== technician_id) {
+  // See the matching comment in bookDoms: no id means nothing was created.
+  if (!bookingId) {
+    console.error('[book-ha] mirror returned no booking id');
+    return res.status(500).json({ error: 'Could not save your booking. Please try again.' });
+  }
+  // Same race-fallback recovery as bookDoms above (see the comment there): a
+  // technician-less job must never sit in the CRM silently.
+  if (bookingId && !result.technician_id) {
+    result.technician_id = await recoverUnassignedBooking(db, {
+      slug, bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId, timezone: tz,
+      businessName: DISPLAY.name,
+      customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+      whenStr: fmtWhen(startUTC, tz, dateStr),
+    });
+  }
+  if (result.technician_id !== technician_id) {
     technicianName = null; technicianPhoto = null;
+    if (result.technician_id) {
+      try {
+        const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', result.technician_id).maybeSingle();
+        technicianName = _t?.name || null;
+        technicianPhoto = _t || null;
+      } catch (e) { /* best-effort */ }
+    }
   }
 
   // Text the assigned tech — see the matching comment in bookDoms. `tz` here is

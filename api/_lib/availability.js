@@ -434,8 +434,9 @@ async function bookedSlotsOneTech(db, techId, dateStr, tz) {
   // decides whether a tech is free to actually BE ASSIGNED a booking — treating
   // an error as "no bookings found" would let pickOpenTech hand a slot to a
   // tech who may already be booked then, a real double-book, not just a
-  // display glitch. book.js already degrades a thrown pickOpenTech to an
-  // unassigned booking (office assigns manually) rather than crashing.
+  // display glitch. book.js fails CLOSED on a thrown pickOpenTech: it retries
+  // once, then rejects the booking with a 409 rather than ever creating a
+  // technician-less job (see the tech guard in bookDoms/bookNative).
   if (error) throw error;
   const taken = new Set();
   let jobCount = 0;
