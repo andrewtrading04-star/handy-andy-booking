@@ -10905,23 +10905,22 @@ function callWizChoiceRow(options){
     options.map(o=>`<button type="button" class="btn ghost" style="width:auto;flex:1;min-width:110px;" data-cwchoice="${esc(o.value)}">${esc(o.label)}</button>`).join('')+
   `</div>`;
 }
-// Everything the secretary says out loud renders through this ONE component, in
-// near-black with white text and an amber edge, so "say this" is never confused
-// with the operator captions around it (grey = context, amber = your eyes only,
-// this = read it word for word). It has to survive being glanced at mid-sentence
-// while a customer is talking, which is why it is the loudest thing on the card.
-// `amt` is optionally pulled out in amber inside the sentence so the number she
-// has to land is findable without re-reading the whole line.
+// Everything the secretary says out loud renders through this ONE component, so
+// "say this" is never confused with the operator captions around it (grey =
+// context, this = read it word for word). A slim accent rule along the top
+// edge is the only color -- flat white card, no dark box -- it still has to
+// stand out while a customer is talking, just without the heavier contrast
+// the old dark-box version leaned on.
+// `amt` is optionally bolded in the business accent color inside the sentence
+// so the number she has to land is findable without re-reading the whole line.
 function callWizScript(line, amt){
   let body=esc(line);
   if(amt){
     const a=esc(String(amt));
-    body=body.split(a).join(`<span style="color:#ffd479;font-weight:800;">${a}</span>`);
+    body=body.split(a).join(`<span style="color:var(--accent);font-weight:800;">${a}</span>`);
   }
-  return `<div style="background:#141a22;border-radius:11px;padding:15px 18px 17px 20px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.18);">
-    <div style="position:absolute;left:0;top:0;bottom:0;width:4px;background:#f59e0b;" aria-hidden="true"></div>
-    <div style="font-family:Georgia,serif;font-size:44px;line-height:1;color:rgba(255,255,255,.30);position:absolute;top:6px;left:14px;" aria-hidden="true">&ldquo;</div>
-    <div style="font-size:19.5px;line-height:1.38;font-weight:600;padding-left:28px;color:#fff;letter-spacing:-.015em;">${body}</div>
+  return `<div style="background:#fff;border:1px solid var(--line);border-top:2.5px solid var(--accent);border-radius:10px;padding:16px 18px 15px;margin-bottom:12px;">
+    <div style="font-size:18.5px;line-height:1.46;font-weight:600;color:var(--ink);letter-spacing:-.01em;">${body}</div>
   </div>`;
 }
 // The beat after an offer. The single most common way a concession gets wasted
