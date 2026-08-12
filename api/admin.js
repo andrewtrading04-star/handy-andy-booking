@@ -410,6 +410,7 @@ export default async function handler(req, res) {
       case 'call_event':        return await callEvent(req, res, db, auth, body);
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
+      case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -8439,7 +8440,7 @@ async function auditReport(req, res, db, auth) {
     db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
       .gte('audit_date', from).lte('audit_date', to),
     db.from('call_audits')
-      .select('id, audit_date, grasshopper_number, call_id, occurred_at, handled_by, service, answers, flagged, notes')
+      .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes')
       .gte('audit_date', from).lte('audit_date', to)
       .order('occurred_at', { ascending: false }),
   ]);
@@ -8524,9 +8525,12 @@ async function auditReport(req, res, db, auth) {
     id: a.id,
     audit_date: a.audit_date,
     occurred_at: a.occurred_at,
+    time_local: a.time_local,
     grasshopper_number: a.grasshopper_number,
     handled_by: a.handled_by,
     service: a.service,
+    caller_name: a.caller_name,
+    caller_phone: a.caller_phone,
     notes: a.notes,
     pct: scoreOf(a).pct,
   }));
@@ -8548,6 +8552,98 @@ async function auditReport(req, res, db, auth) {
     // Days in range the auditor never saved anything for, so a gap in her own
     // coverage does not read as a quiet stretch for the business.
     missing_days: daily.filter(d => d.counted == null).map(d => d.date),
+  });
+}
+
+// A secretary's own slice of the call audit -- built so Joey can see how she's
+// doing without seeing Heather's grades, the other secretary's flagged-call
+// notes, or anything about revenue/volume. Heather stays excluded entirely:
+// that's an existing, deliberate choice (see CALL_TABS in admin.html, "Heather
+// can see none of the call screens"), not something this endpoint changes --
+// it only serves the secretary role on the doms scope.
+//
+// auth.role === 'secretary' covers both a real Joey login AND the owner's
+// "View As Joey", which mints an identical secretary-role token on purpose
+// (see viewAs() above) so he can see exactly what she sees.
+async function myCallPerformance(req, res, db, auth) {
+  if (auth.role !== 'secretary' || auth.scope !== 'doms') {
+    return res.status(403).json({ error: 'Not available for this login' });
+  }
+  const name = displayNameFor(auth.scope);
+
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const offset = Math.max(-365, Math.min(0, parseInt(req.query.offset, 10) || 0));
+  const { data: bizRows } = await db.from('businesses').select('id, timezone').eq('slug', 'doms').limit(1);
+  const domsId = bizRows && bizRows[0] && bizRows[0].id;
+  const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
+  const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
+  const to = dayStr(offset), from = dayStr(offset - (days - 1));
+  // Should never happen -- 'doms' is a seeded business row every other part of
+  // this file assumes exists -- but failing closed with an empty report beats
+  // a 500 or, worse, silently dropping the business_id filter above.
+  if (!domsId) {
+    return res.status(200).json({ name, from, to, days, audited: 0, pct: null, yes: 0, no: 0, flagged: 0, daily: [], questions: [] });
+  }
+
+  // handled_by alone is a free-text dropdown value, not scoped to a business --
+  // the auditor picks the line first but 'who answered' isn't cross-checked
+  // against it. Filtering on business_id too means a call mis-graded under
+  // Joey's name on a Handy Andy line can never surface in HER performance
+  // view, which is the whole point of this being Dom's-only.
+  const { data: audits } = await db.from('call_audits')
+    .select('audit_date, handled_by, answers, flagged')
+    .eq('handled_by', name)
+    .eq('business_id', domsId)
+    .gte('audit_date', from).lte('audit_date', to);
+
+  const scoreOf = (a) => {
+    const v = Object.values(a.answers || {});
+    const yes = v.filter(x => x === 'yes').length;
+    const no = v.filter(x => x === 'no').length;
+    return { yes, no };
+  };
+
+  let totalYes = 0, totalNo = 0, flaggedCount = 0;
+  const byDay = {};
+  const questions = {};
+  for (const a of (audits || [])) {
+    const s = scoreOf(a);
+    totalYes += s.yes; totalNo += s.no;
+    if (a.flagged) flaggedCount++;
+    const bucket = byDay[a.audit_date] || (byDay[a.audit_date] = { audited: 0, yes: 0, no: 0 });
+    bucket.audited++; bucket.yes += s.yes; bucket.no += s.no;
+    for (const [k, v] of Object.entries(a.answers || {})) {
+      if (v !== 'yes' && v !== 'no') continue;
+      const q = questions[k] || (questions[k] = { key: k, asked: 0, no: 0 });
+      q.asked++;
+      if (v === 'no') q.no++;
+    }
+  }
+
+  const daily = [];
+  for (let i = 0; i < days; i++) {
+    const d = dayStr(offset - (days - 1) + i);
+    const b = byDay[d];
+    daily.push({
+      date: d,
+      audited: b ? b.audited : 0,
+      pct: b && (b.yes + b.no) ? Math.round(100 * b.yes / (b.yes + b.no)) : null,
+    });
+  }
+
+  const questionsOut = Object.values(questions)
+    .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
+    .filter(q => q.no > 0)
+    .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked);
+
+  return res.status(200).json({
+    name, from, to, days,
+    audited: (audits || []).length,
+    pct: (totalYes + totalNo) ? Math.round(100 * totalYes / (totalYes + totalNo)) : null,
+    yes: totalYes, no: totalNo,
+    flagged: flaggedCount,
+    daily,
+    questions: questionsOut,
   });
 }
 

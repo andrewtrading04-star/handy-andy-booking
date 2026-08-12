@@ -150,17 +150,24 @@
         <button class="btn ghost" id="cancelBtn">Cancel</button>
       </div>
 
-      <div class="row" style="margin-bottom:10px;">
+      <div class="row" style="margin-bottom:6px;">
         <select id="fLine" style="flex:1;min-width:190px;"></select>
-        <input type="time" id="fTime" style="width:120px;">
+        <input type="time" id="fTime" style="width:120px;" title="Central time, same as Grasshopper shows">
         <select id="fDir"><option value="incoming">Incoming</option><option value="outgoing">Outgoing</option></select>
         <select id="fWho"><option value="">Who answered</option><option>Heather</option><option>Joey</option><option value="Nobody">Nobody (missed)</option></select>
         <select id="fSvc"><option value="TV Mounting">TV mounting</option><option value="Handyman">Handyman</option><option value="unknown">Never got that far</option></select>
       </div>
+      <p class="sub" style="margin:0 0 10px;">Time is Central, exactly as Grasshopper shows it, no matter what timezone you're in.</p>
 
       <select id="fCall" style="width:100%;margin-bottom:3px;"></select>
       <p class="sub" style="margin:0 0 8px;">If one of these matches the call you're listening to by time and who answered, pick it, it fills in details below. If none match, leave it on "No scripted call for this one" -- that's the right answer for a call handled without the script.</p>
       <div id="ctx"></div>
+
+      <div class="row" style="margin:10px 0;">
+        <input type="tel" id="fCallerPhone" placeholder="Caller's phone number" style="flex:1;min-width:180px;">
+        <input type="text" id="fCallerName" placeholder="Caller's name, if the recording gives one" style="flex:1;min-width:180px;">
+      </div>
+      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it.</p>
 
       <div id="score"></div>
 
@@ -408,6 +415,17 @@ function scoreOf(a){
   const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
   return (yes+no)?Math.round(100*yes/(yes+no)):null;
 }
+// Always shown in Central, matching Grasshopper, regardless of the browser's
+// own timezone. Rows saved before the 0091 migration have no time_local and
+// their occurred_at was built client-side in whatever tz the auditor was in
+// at the time -- not reliably Central -- so this can only show what it's
+// actually confident about for those.
+function centralTime(a){
+  if(!a.time_local) return '';
+  const [hh,mm]=a.time_local.split(':').map(Number);
+  const h12=((hh+11)%12)+1;
+  return h12+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM')+' CT';
+}
 function renderAudits(){
   const w=$('auditList'), list=data.audits||[];
   if(!list.length){ w.innerHTML='<p class="sub" style="margin:0;">No calls graded yet for this day.</p>'; return; }
@@ -415,10 +433,10 @@ function renderAudits(){
   list.forEach(a=>{
     const line=(data.lines||[]).find(l=>l.number===a.grasshopper_number);
     const s=scoreOf(a);
-    const t=a.occurred_at?new Date(a.occurred_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
+    const t=centralTime(a);
     const d=document.createElement('div'); d.className='audited';
     d.innerHTML='<span class="num">'+esc(line?line.pretty:a.grasshopper_number)+'</span>'+
-      '<span class="sub">'+esc(t)+(a.handled_by?' &middot; '+esc(a.handled_by):'')+'</span>'+
+      '<span class="sub">'+esc(t)+(a.handled_by?' &middot; '+esc(a.handled_by):'')+(a.caller_name?' &middot; '+esc(a.caller_name):'')+'</span>'+
       '<span style="flex:1;"></span>'+
       (a.flagged?'<span class="flagpill">flagged</span>':'')+
       (s!=null?'<span class="score" style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</span>':'');
@@ -442,7 +460,7 @@ function renderAudits(){
     del.textContent='×';
     del.onclick=async(e)=>{
       e.stopPropagation();
-      const who=(line?line.pretty:a.grasshopper_number)+(t?' at '+t:'')+(a.handled_by?' ('+a.handled_by+')':'');
+      const who=(line?line.pretty:a.grasshopper_number)+(t?' at '+t:'')+(a.handled_by?' ('+a.handled_by+')':'')+(a.caller_name?' -- '+a.caller_name:'');
       if(!confirm('Delete this graded call?\n\n'+who+'\n\nThis cannot be undone.')) return;
       del.disabled=true;
       try{
@@ -466,8 +484,11 @@ function openForm(a){
     '<option value="'+l.number+'">'+esc(l.pretty)+' &middot; '+(l.business==='doms'?"Dom's":'Handy Andy')+'</option>').join('');
   $('fCall').innerHTML='<option value="">No scripted call for this one</option>'+
     (data.calls||[]).map(c=>{
-      const t=new Date(c.occurred_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
-      return '<option value="'+c.id+'">'+esc(t)+' &middot; '+esc(c.handled_by||'unknown')+' &middot; '+esc(c.service||'')+'</option>';
+      // Central, matching Grasshopper and the fTime autofill below -- not the
+      // auditor's own browser tz, or a call at "2:16 AM" here could sit at a
+      // different hour than what she's listening to and matching by time.
+      const t=new Date(c.occurred_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Chicago'});
+      return '<option value="'+c.id+'">'+esc(t)+' CT &middot; '+esc(c.handled_by||'unknown')+' &middot; '+esc(c.service||'')+'</option>';
     }).join('');
   if(a){
     $('fLine').value=a.grasshopper_number;
@@ -477,10 +498,17 @@ function openForm(a){
     $('fFlag').checked=!!a.flagged;
     $('fSvc').value=a.service||'TV Mounting';
     $('fNotes').value=a.notes||'';
-    $('fTime').value=a.occurred_at?new Date(a.occurred_at).toTimeString().slice(0,5):'';
+    // time_local is the trustworthy value (see api/_lib/time.js). Rows saved
+    // before the 0091 migration have none -- left blank rather than derived
+    // from occurred_at, which was shifted by whatever tz the auditor's
+    // browser happened to be in that day and can't be un-shifted reliably.
+    $('fTime').value=a.time_local||'';
+    $('fCallerPhone').value=a.caller_phone||'';
+    $('fCallerName').value=a.caller_name||'';
   }else{
     $('fCall').value=''; $('fDir').value='incoming'; $('fWho').value=''; $('fSvc').value='TV Mounting';
     $('fFlag').checked=false; $('fNotes').value=''; $('fTime').value='';
+    $('fCallerPhone').value=''; $('fCallerName').value='';
   }
   $('formErr').textContent='';
   $('formCard').classList.remove('hidden');
@@ -494,8 +522,14 @@ $('fCall').onchange=()=>{
   const c=linkedCall();
   if(c){
     if(c.handled_by && [...$('fWho').options].some(o=>o.value===c.handled_by)) $('fWho').value=c.handled_by;
-    if(c.occurred_at) $('fTime').value=new Date(c.occurred_at).toTimeString().slice(0,5);
+    // The scripted call's occurred_at is a real UTC instant (the widget
+    // stamped it server-side), so converting it TO Central here is safe --
+    // unlike occurred_at on an audit row, which may have been built from the
+    // auditor's own mistyped-timezone client code. Central is what she reads
+    // off Grasshopper, so that's what the field should show.
+    if(c.occurred_at) $('fTime').value=new Date(c.occurred_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/Chicago'});
     if(c.service) $('fSvc').value = c.service==='Handyman' ? 'Handyman' : 'TV Mounting';
+    if(c.caller_phone && !$('fCallerPhone').value) $('fCallerPhone').value=c.caller_phone;
   }
   renderCtx();
 };
@@ -531,16 +565,25 @@ $('saveDay').onclick=async()=>{
 // all, rather than relying on catching the duplicate after the fact.
 $('saveAudit').onclick=async()=>{
   $('formErr').textContent='';
+  if($('fFlag').checked && !$('fCallerPhone').value.trim()){
+    $('formErr').textContent="Flagging a call needs the caller's phone number, so it can be found in Grasshopper later.";
+    return;
+  }
   const date=$('date').value, t=$('fTime').value;
   const body={
     id: editing?editing.id:undefined,
     date,
     grasshopper_number:$('fLine').value,
     call_id:$('fCall').value||null,
-    occurred_at: t?new Date(date+'T'+t).toISOString():null,
+    // occurred_at is no longer built here -- the server computes it from
+    // date + time_local anchored to Central, so it's correct regardless of
+    // the auditor's own browser timezone. See api/audit.js auditSave.
+    time_local: t||null,
     direction:$('fDir').value,
     handled_by:$('fWho').value,
     service:$('fSvc').value,
+    caller_phone:$('fCallerPhone').value.trim(),
+    caller_name:$('fCallerName').value.trim(),
     answers, flagged:$('fFlag').checked, notes:$('fNotes').value,
   };
   const btn=$('saveAudit'), prevText=btn.textContent;

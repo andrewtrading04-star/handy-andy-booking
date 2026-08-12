@@ -6902,10 +6902,13 @@ const AUDIT_LABELS={
 //
 // Tabs are filtered per login, not just hidden. Heather (Handy Andy secretary)
 // can see none of the call screens, so the Calls button does not render for her
-// at all; Joey sees only Review Calls, so he gets the screen with no tab row,
-// since a row with one tab is noise.
+// at all -- deliberate, unchanged by 'My Performance' below. Joey (Dom's
+// secretary) sees Review Calls plus her own My Performance tab: her graded-call
+// score and trend, never Heather's grades or the owner's Audit/Performance
+// comparison views, which stay owner-only.
 const CALL_TABS=[
   { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>renderReviewCalls() },
+  { id:'myperf',      label:'My Performance', screen:'mycallperf',  show:()=>role==='secretary'&&scope==='doms', render:()=>renderMyCallPerformance() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
 ];
@@ -7038,7 +7041,12 @@ async function renderCallAudit(){
   }).join('') || '<div class="empty">Nothing is being missed yet.</div>';
 
   const flagRows=(d.flagged||[]).map(f=>{
-    const t=f.occurred_at?new Date(f.occurred_at).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):f.audit_date;
+    // Central, matching Grasshopper -- see api/_lib/time.js localDateTimeUTC.
+    // Rows saved before the 0091 migration have no time_local; fall back to
+    // the audit date alone rather than showing a time that may be wrong.
+    const dateLabel=new Date(f.audit_date+'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric'});
+    const h12=f.time_local?(()=>{const [hh,mm]=f.time_local.split(':').map(Number);return ((hh+11)%12)+1+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM');})():null;
+    const t=dateLabel+(h12?', '+h12+' CT':'');
     return `<div style="border:1px solid #f3c2c2;background:#fdecec;border-radius:9px;padding:10px 12px;margin-bottom:7px;">
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:13px;">
         <b>${esc(f.handled_by||'Unknown')}</b>
@@ -7046,6 +7054,10 @@ async function renderCallAudit(){
         <span style="font-family:ui-monospace,Menlo,monospace;color:var(--mute);">${esc(prettyNum(f.grasshopper_number))}</span>
         ${f.pct!=null?`<span style="margin-left:auto;font-weight:800;color:#b91c1c;">${f.pct}%</span>`:''}
       </div>
+      ${(f.caller_name||f.caller_phone)?`<div style="font-size:12.5px;margin-top:6px;">
+        ${f.caller_name?`<span style="font-weight:700;">${esc(f.caller_name)}</span> `:''}
+        ${f.caller_phone?`<a href="tel:${esc(f.caller_phone)}" style="color:var(--accent);text-decoration:none;font-family:ui-monospace,Menlo,monospace;">📞 ${esc(f.caller_phone)}</a>`:'<span style="color:var(--mute);">no caller number saved</span>'}
+      </div>`:`<div style="font-size:12.5px;margin-top:6px;color:var(--mute);">no caller number saved</div>`}
       ${f.notes?`<div style="font-size:13px;color:#7c2d12;margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
     </div>`;
   }).join('') || '<div class="empty">Nothing flagged.</div>';
@@ -7097,6 +7109,85 @@ async function renderCallAudit(){
     </div>
   </div>`;
   view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
+}
+
+// Joey's own slice of the same audit data the owner sees on the Audit tab --
+// her score, her trend, what she gets wrong most -- with nothing about any
+// other person or business. api/admin.js myCallPerformance() enforces that
+// server-side (role must be secretary + scope doms), this just renders it.
+// Separate range state from _cauRange so switching one doesn't jump the other.
+let _mpRange='30';
+async function renderMyCallPerformance(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  const rc=CAU_RANGES[_mpRange]||CAU_RANGES['30'];
+  try{ d=await api('my_call_performance',{ params:{ days:rc.days, offset:rc.offset }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const rangeBtns=Object.entries(CAU_RANGES).map(([x,r])=>
+    `<button type="button" class="seg-btn ${_mpRange===x?'on':''}" data-mp="${x}">${r.label}</button>`).join('');
+  const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
+      <span class="gstat-l">${esc(label)}</span>
+      <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
+      ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
+
+  if(!d.audited){
+    view.innerHTML=`<div class="wrap">
+      <div class="rc-head"><div><h2 class="rc-title">📞 Call Performance</h2>
+        <div class="rc-sub">Nothing graded yet for this range.</div></div></div>
+      <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
+    view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
+    return;
+  }
+
+  const pctColor = d.pct==null?'var(--mute)':d.pct>=85?'#15803d':d.pct>=70?'#b45309':'#b91c1c';
+  const top=Math.max(1,...(d.daily||[]).map(x=>x.audited||0));
+  const dailyRows=(d.daily||[]).filter(x=>x.audited>0).map(x=>{
+    const label=x.date.slice(5).replace('-','/');
+    const w=Math.round(((x.audited||0)/top)*100);
+    const c=x.pct==null?'#60a5fa':x.pct>=85?'#15803d':x.pct>=70?'#b45309':'#b91c1c';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
+      <div style="width:46px;flex-shrink:0;color:var(--mute);">${esc(label)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:5px;height:14px;overflow:hidden;">
+        <div style="height:100%;width:${w}%;background:${c};"></div></div>
+      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        ${x.audited} call${x.audited===1?'':'s'}${x.pct!=null?' · '+x.pct+'%':''}</div>
+    </div>`;
+  }).join('') || '<div class="empty">Nothing graded in this range yet.</div>';
+
+  const qRows=(d.questions||[]).slice(0,12).map(q=>{
+    const w=q.fail_rate;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+      <div style="width:250px;flex-shrink:0;color:var(--ink-2);">${esc(AUDIT_LABELS[q.key]||q.key)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:6px;height:16px;overflow:hidden;">
+        <div style="height:100%;width:${w}%;background:#ef4444;"></div></div>
+      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        <b>${q.no}</b>/${q.asked} · ${q.fail_rate}%</div>
+    </div>`;
+  }).join('') || '<div class="empty">Nothing missed in this range. Keep it up.</div>';
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">📞 Call Performance</h2>
+      <div class="rc-sub">How your graded calls are scoring against the phone script. ${esc(d.flagged)} of them were flagged for Andrew to listen to himself.</div>
+    </div></div>
+    <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
+
+    <div class="greet-stats" style="margin-bottom:18px;">
+      ${stat('Calls graded', String(d.audited||0), 'listened to end to end')}
+      ${stat('Score', d.pct==null?'N/A':d.pct+'%', 'yes answers as a share of everything that applied', pctColor)}
+      ${stat('Things missed', String(d.no||0), 'no answers across all graded calls')}
+      ${stat('Flagged', String(d.flagged||0), 'sent to Andrew to listen to')}
+    </div>
+
+    <div class="rc-count">Day by day</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${dailyRows}</div>
+
+    <div class="rc-count">What you get wrong most</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${qRows}</div>
+  </div>`;
+  view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
 }
 function prettyNum(n){
   const d=String(n||'').replace(/\D/g,'');

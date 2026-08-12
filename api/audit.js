@@ -20,7 +20,14 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { GRASSHOPPER_LINES, prettyPhone } from './_lib/grasshopper.js';
-import { localDateStartUTC, addDaysStr } from './_lib/time.js';
+import { localDateStartUTC, localDateTimeUTC, addDaysStr } from './_lib/time.js';
+
+// Grasshopper always displays call times in Central, regardless of which
+// market the line serves (Denver, Austin and Houston lines all show Central
+// in the Grasshopper UI). The auditor's typed time is matched against that
+// screen, so it has to be interpreted as Central no matter what timezone her
+// own browser is in.
+const AUDITOR_TZ = 'America/Chicago';
 
 // The lines the auditor works through each day, in the order she sees them.
 // Derived from the same GRASSHOPPER_LINES map the voicemail parser routes on,
@@ -117,7 +124,7 @@ async function day(req, res, db, auth) {
   const end = localDateStartUTC(tz, addDaysStr(date, 1));
 
   const { data: callRows } = await db.from('calls')
-    .select('id, business_id, occurred_at, handled_by, service, market, resolution, quoted_total, discount_amount, discount_detail, tv_count, reached_step, ended_at')
+    .select('id, business_id, occurred_at, handled_by, service, market, resolution, quoted_total, discount_amount, discount_detail, tv_count, reached_step, ended_at, caller_phone')
     .eq('kind', 'live')
     .gte('occurred_at', start.toISOString())
     .lt('occurred_at', end.toISOString())
@@ -129,6 +136,7 @@ async function day(req, res, db, auth) {
     id: c.id,
     business: slugById[c.business_id] || null,
     occurred_at: c.occurred_at,
+    caller_phone: c.caller_phone || null,
     handled_by: c.handled_by,
     service: c.service,
     market: c.market,
@@ -141,7 +149,7 @@ async function day(req, res, db, auth) {
   }));
 
   const { data: audits } = await db.from('call_audits')
-    .select('id, grasshopper_number, call_id, occurred_at, direction, handled_by, service, answers, flagged, notes')
+    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, answers, flagged, notes')
     .eq('audit_date', date)
     .order('occurred_at', { ascending: true });
 
@@ -223,17 +231,50 @@ async function auditSave(req, res, db, auth, body) {
     return res.status(400).json({ error: 'service must be TV Mounting, Handyman, or unknown' });
   }
 
+  const flagged = !!body.flagged;
+  const callerPhone = (body.caller_phone || '').toString().trim() || null;
+  // A flagged call is a request for the owner to go listen to it in
+  // Grasshopper. Without the caller's number he has nothing to search on --
+  // the whole point of flagging is lost -- so it's required at exactly the
+  // moment it's needed, not on every call.
+  if (flagged && !callerPhone) {
+    return res.status(400).json({ error: "Flagging a call needs the caller's phone number, so it can be found in Grasshopper later." });
+  }
+
+  const timeLocal = (body.time_local || '').toString().trim() || null;
+  // Shape AND range. Date.UTC() does not reject an out-of-range hour/minute --
+  // it silently rolls over into a different day -- so '99:99' would pass a
+  // shape-only check and land occurred_at on the wrong date entirely, exactly
+  // the class of bug this server-side computation exists to prevent.
+  if (timeLocal) {
+    const m = /^(\d{2}):(\d{2})$/.exec(timeLocal);
+    const hh = m && Number(m[1]), mm = m && Number(m[2]);
+    if (!m || hh > 23 || mm > 59) {
+      return res.status(400).json({ error: 'time_local must be a valid HH:MM (00:00-23:59)' });
+    }
+  }
+  // occurred_at is computed here, server-side, from the auditor's own typed
+  // date + time -- never trusted as a client-built ISO string. Grasshopper
+  // always shows Central, so anchoring to AUDITOR_TZ keeps this correct no
+  // matter what timezone the auditor's browser is actually in. See
+  // api/_lib/time.js localDateTimeUTC and the 0091 migration note on
+  // time_local for the bug this replaced.
+  const occurredAt = timeLocal ? localDateTimeUTC(AUDITOR_TZ, date, timeLocal) : null;
+
   const row = {
     audit_date: date,
     grasshopper_number: number,
     business_id: idBySlug[line.business] || null,
     call_id: body.call_id || null,
-    occurred_at: body.occurred_at || null,
+    occurred_at: occurredAt ? occurredAt.toISOString() : null,
+    time_local: timeLocal,
     direction,
     service: service || null,
     handled_by: (body.handled_by || '').toString().trim() || null,
+    caller_phone: callerPhone,
+    caller_name: (body.caller_name || '').toString().trim() || null,
     answers,
-    flagged: !!body.flagged,
+    flagged,
     notes: (body.notes || '').toString().trim() || null,
     audited_by: auth.name || 'Auditor',
     updated_at: new Date().toISOString(),

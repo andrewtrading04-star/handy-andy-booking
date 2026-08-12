@@ -33,6 +33,20 @@ export function localDateStartUTC(tz, dateStr) {
   return new Date(ms - tzOffsetMs(tz, new Date(ms)));
 }
 
+// UTC Date for an EXPLICIT calendar date + 'HH:MM' wall-clock time in tz.
+// Built for the call auditor: she types a time she read off Grasshopper, which
+// always displays Central regardless of which market the line serves. Doing
+// this conversion on the server, anchored to a named tz, means the result is
+// correct no matter what timezone the auditor's own browser is set to -- the
+// bug this replaced was building the Date client-side with
+// `new Date(date+'T'+time)`, which silently parses in the BROWSER's tz.
+export function localDateTimeUTC(tz, dateStr, timeStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = (timeStr || '00:00').split(':').map(Number);
+  const ms = Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0);
+  return new Date(ms - tzOffsetMs(tz, new Date(ms)));
+}
+
 // Calendar date string 'YYYY-MM-DD' that is `days` after the given one (UTC math).
 export function addDaysStr(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00Z');
