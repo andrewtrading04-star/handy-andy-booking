@@ -7032,7 +7032,7 @@ async function renderCallAudit(){
     </tr>`;
   }).join('') || '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--mute);">No calls graded yet.</td></tr>';
 
-  const qRows=(d.questions||[]).slice(0,12).map(q=>{
+  const qRowsHtml=(qs)=>(qs||[]).slice(0,12).map(q=>{
     const w=q.fail_rate;
     return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
       <div style="width:250px;flex-shrink:0;color:var(--ink-2);">${esc(AUDIT_LABELS[q.key]||q.key)}</div>
@@ -7041,7 +7041,17 @@ async function renderCallAudit(){
       <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
         <b>${q.no}</b>/${q.asked} · ${q.fail_rate}%</div>
     </div>`;
-  }).join('') || '<div class="empty">Nothing is being missed yet.</div>';
+  }).join('') || '<div class="empty">Nothing missed in this range.</div>';
+
+  // Per person, not just combined -- a 50/50 split between two secretaries
+  // missing two different things reads identically to one of them missing
+  // everything in a single pooled list, and that's the actual coaching
+  // question ("who" is missing "what", not just "what").
+  const perPersonWrong=(d.people||[]).map(p=>`
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;">${esc(p.name)}</div>
+      ${qRowsHtml(p.questions)}
+    </div>`).join('') || '<div class="empty">No calls graded yet.</div>';
 
   const flagRows=(d.flagged||[]).map(f=>{
     // Central, matching Grasshopper -- see api/_lib/time.js localDateTimeUTC.
@@ -7099,7 +7109,7 @@ async function renderCallAudit(){
     </div>
 
     <div class="rc-count">What they get wrong most</div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${qRows}</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${perPersonWrong}</div>
 
     <div class="rc-count">Calls flagged for you to hear</div>
     <div style="margin-bottom:22px;">${flagRows}</div>

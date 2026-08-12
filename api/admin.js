@@ -8609,32 +8609,47 @@ async function auditReport(req, res, db, auth) {
 
   const people = {};
   const questions = {};
+  // Same tally as `questions`, kept separately per person too. The combined
+  // list answers "what goes wrong on these calls" but not "who", which is the
+  // actual coaching question the owner is asking; Heather and Joey missing
+  // different things at a 50/50 split reads identically to one of them
+  // missing everything, in a list that only ever names the question.
+  const questionsByPerson = {};
   for (const a of (audits || [])) {
     const s = scoreOf(a);
     const who = a.handled_by || 'Unknown';
     const p = people[who] || (people[who] = { name: who, audited: 0, yes: 0, no: 0, flagged: 0 });
     p.audited++; p.yes += s.yes; p.no += s.no;
     if (a.flagged) p.flagged++;
+    const pq = questionsByPerson[who] || (questionsByPerson[who] = {});
     for (const [k, v] of Object.entries(a.answers || {})) {
       if (v !== 'yes' && v !== 'no') continue;   // N/A is excluded from the denominator
       const q = questions[k] || (questions[k] = { key: k, asked: 0, no: 0 });
       q.asked++;
       if (v === 'no') q.no++;
+      const pqk = pq[k] || (pq[k] = { key: k, asked: 0, no: 0 });
+      pqk.asked++;
+      if (v === 'no') pqk.no++;
     }
   }
+
+  // Worst first, same rule as the combined list below: fail rate, then volume
+  // to break ties, and only questions actually missed at least once.
+  const rankQuestions = (map) => Object.values(map)
+    .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
+    .filter(q => q.no > 0)
+    .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked);
 
   const peopleOut = Object.values(people).map(p => ({
     ...p,
     pct: (p.yes + p.no) ? Math.round(100 * p.yes / (p.yes + p.no)) : null,
+    questions: rankQuestions(questionsByPerson[p.name] || {}),
   })).sort((a, b) => b.audited - a.audited);
 
   // Worst first: this is the coaching list, so the thing they get wrong most
   // often has to be at the top. Ties break toward the more frequently asked
   // question, since a 50% failure over 20 calls matters more than over 2.
-  const questionsOut = Object.values(questions)
-    .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
-    .filter(q => q.no > 0)
-    .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked);
+  const questionsOut = rankQuestions(questions);
 
   const flagged = (audits || []).filter(a => a.flagged).slice(0, 25).map(a => ({
     id: a.id,
