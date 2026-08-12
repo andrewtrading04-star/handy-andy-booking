@@ -29,6 +29,8 @@ import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
+import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
+import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
 import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
 
 // Search Console domain per business — the free "what did people search to
@@ -400,6 +402,9 @@ export default async function handler(req, res) {
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
+      case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
+      case 'estimate_broker_save_bid': return await estimateBrokerSaveBid(req, res, db, auth, body);
+      case 'estimate_broker_book':     return await estimateBrokerBook(req, res, db, auth, body);
       case 'quote_economics':   return await quoteEconomics(req, res, db, auth, body);
       case 'quote_coupon':      return await quoteCoupon(req, res, db, auth, body);
       case 'call_event':        return await callEvent(req, res, db, auth, body);
@@ -7564,7 +7569,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -7588,6 +7593,16 @@ async function estimates(req, res, db, auth) {
     ({ data, error } = await runQuery());
   }
   if (error) throw error;
+
+  // Flag which rows get the "Get this estimate filled" button. Keyed off
+  // service_areas.unstaffed (DFW / Los Angeles / Phoenix / San Antonio today),
+  // never a city list, so staffing a market removes the button by itself.
+  // Best-effort: a lookup failure must not take down the Estimates screen.
+  try {
+    const isUnstaffed = await unstaffedZipMatcher(db, biz.id, biz.slug);
+    for (const e of (data || [])) e.broker_eligible = isUnstaffed(e.customer_zip);
+  } catch (e) { console.warn("[admin] estimates: unstaffed check failed:", e.message); }
+
   return res.status(200).json({ estimates: data || [] });
 }
 
@@ -8040,6 +8055,187 @@ async function estimateSendEmail(req, res, db, auth, body) {
 // both channels the estimate has (best-effort — a failed SMS must not block
 // the email, and vice versa), then marks the estimate declined either way so
 // it stops showing as "Needs Response".
+// ---------------------------------------------------------------------------
+// Subcontractor brokering (migration 0091). Only for estimates whose zip lands
+// in an UNSTAFFED service area (DFW / Los Angeles / Phoenix / San Antonio as
+// of Aug 2026). The gate is service_areas.unstaffed via the shared resolver --
+// NOT a city list -- so staffing a market turns this off by itself.
+// ---------------------------------------------------------------------------
+
+// Shared by every broker action: load the estimate, resolve its zip, and
+// refuse to broker anything in a staffed market. Returns { est, area }.
+async function brokerContext(db, biz, estimateId) {
+  const est = await fetchEstimate(db, estimateId, biz.id, 'id, customer_zip, customer_name, service_label, broker_sub_price, broker_sell_price, broker_company_name');
+  if (!est) return { error: { code: 404, msg: 'Estimate not found' } };
+  const area = await resolveServiceArea(db, biz.id, biz.slug, est.customer_zip);
+  if (!area || !area.unstaffed) {
+    return { error: { code: 400, msg: 'This estimate is in a staffed market, so it is not brokered out.' } };
+  }
+  return { est, area };
+}
+
+// Panel load: the three slots, plus the directory to build the dropdown from.
+// Both come back empty until a human types something; nothing is seeded.
+async function estimateBroker(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const ctx = await brokerContext(db, biz, body.id);
+  if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
+
+  const { data: bids, error: bErr } = await db.from('estimate_broker_bids')
+    .select('slot, subcontractor_id, company_name, phone, sub_price')
+    .eq('estimate_id', body.id).eq('business_id', biz.id).order('slot');
+  if (bErr) throw bErr;
+
+  const { data: directory, error: dErr } = await db.from('subcontractors')
+    .select('id, company_name, phone').eq('business_id', biz.id).eq('active', true)
+    .order('company_name');
+  if (dErr) throw dErr;
+
+  // Always hand the UI exactly three slots so the panel shape is stable.
+  const bySlot = new Map((bids || []).map(b => [b.slot, b]));
+  const slots = [1, 2, 3].map(n => {
+    const b = bySlot.get(n) || { slot: n, subcontractor_id: null, company_name: '', phone: '', sub_price: null };
+    return { ...b, slot: n, min_sell: minSellPrice(b.sub_price) };
+  });
+
+  return res.status(200).json({
+    ok: true,
+    area: { name: ctx.area.name, unstaffed: true },
+    slots,
+    directory: directory || [],
+    booked: ctx.est.broker_company_name ? {
+      company_name: ctx.est.broker_company_name,
+      sub_price:    ctx.est.broker_sub_price,
+      sell_price:   ctx.est.broker_sell_price,
+    } : null,
+  });
+}
+
+// Save one of the three bid slots. Typing a company name here is also how the
+// directory gets populated, so the next Phoenix job can pick it from the
+// dropdown. Blank company AND blank price clears the slot.
+async function estimateBrokerSaveBid(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const slot = Number(body.slot);
+  if (![1, 2, 3].includes(slot)) return res.status(400).json({ error: 'slot must be 1, 2 or 3' });
+
+  const ctx = await brokerContext(db, biz, body.id);
+  if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
+
+  const company = String(body.company_name || '').trim().slice(0, 200);
+  const phone   = String(body.phone || '').trim().slice(0, 40);
+  const price   = parseMoney(body.sub_price);
+
+  if (!company && price === null && !phone) {
+    const { error } = await db.from('estimate_broker_bids').delete()
+      .eq('estimate_id', body.id).eq('business_id', biz.id).eq('slot', slot);
+    if (error) throw error;
+    return res.status(200).json({ ok: true, cleared: true, slot });
+  }
+  if (!company) return res.status(400).json({ error: 'Enter the company name for this slot.' });
+
+  // Upsert the directory row so the company is reusable next time. Matched
+  // case-insensitively against the unique index from migration 0091.
+  let subId = body.subcontractor_id || null;
+  if (!subId) {
+    const { data: existing } = await db.from('subcontractors')
+      .select('id, phone').eq('business_id', biz.id).ilike('company_name', company).maybeSingle();
+    if (existing) {
+      subId = existing.id;
+      // Fill in a phone we did not have before; never blank out a known one.
+      if (phone && !existing.phone) {
+        await db.from('subcontractors').update({ phone, updated_at: new Date().toISOString() }).eq('id', subId);
+      }
+    } else {
+      const { data: created, error: cErr } = await db.from('subcontractors')
+        .insert({ business_id: biz.id, company_name: company, phone: phone || null })
+        .select('id').single();
+      if (cErr) throw cErr;
+      subId = created.id;
+    }
+  }
+
+  const row = {
+    estimate_id: body.id, business_id: biz.id, slot,
+    subcontractor_id: subId, company_name: company,
+    phone: phone || null, sub_price: price,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await db.from('estimate_broker_bids')
+    .upsert(row, { onConflict: 'estimate_id,slot' });
+  if (error) throw error;
+
+  return res.status(200).json({ ok: true, slot, min_sell: minSellPrice(price) });
+}
+
+// Pick a winning bid and set the price we sell at. This is the money step:
+// the sell price is validated against the 20 percent minimum, recorded on the
+// estimate for profit reporting, AND written into line_items so the EXISTING
+// estimate_send_sms / estimate_send_email actions quote the right number. The
+// customer never sees the subcontractor or the spread.
+async function estimateBrokerBook(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+
+  const slot = Number(body.slot);
+  if (![1, 2, 3].includes(slot)) return res.status(400).json({ error: 'slot must be 1, 2 or 3' });
+
+  const ctx = await brokerContext(db, biz, body.id);
+  if (ctx.error) return res.status(ctx.error.code).json({ error: ctx.error.msg });
+
+  const { data: bid, error: bErr } = await db.from('estimate_broker_bids')
+    .select('subcontractor_id, company_name, phone, sub_price')
+    .eq('estimate_id', body.id).eq('business_id', biz.id).eq('slot', slot).maybeSingle();
+  if (bErr) throw bErr;
+  if (!bid) return res.status(400).json({ error: 'That bid slot is empty.' });
+  if (parseMoney(bid.sub_price) === null) return res.status(400).json({ error: 'That bid has no subcontractor price yet.' });
+
+  const check = checkSellPrice(bid.sub_price, body.sell_price, !!body.override_below_min);
+  if (!check.ok) return res.status(400).json({ error: check.error, below_min: !!check.belowMin, min_sell: check.min });
+
+  // Replace any previous brokered line item rather than stacking them up if
+  // the office re-books at a different price. Non-broker line items are left
+  // exactly as they are.
+  const existingItems = Array.isArray(ctx.est.line_items) ? ctx.est.line_items : [];
+  const items = existingItems.filter(it => !it || !it.broker);
+  items.push({
+    description: ctx.est.service_label || 'Scheduled service',
+    qty: 1,
+    unit_price: check.sell,
+    broker: true,   // internal marker, ignored by lineItemsTotal and by both senders
+  });
+
+  const patch = {
+    broker_subcontractor_id: bid.subcontractor_id || null,
+    broker_company_name:     bid.company_name,
+    broker_sub_price:        check.sub,
+    broker_sell_price:       check.sell,
+    broker_below_min:        !!check.belowMin,
+    broker_booked_at:        new Date().toISOString(),
+    line_items:              items,
+    // broker_spread is a GENERATED column -- never written here on purpose.
+  };
+  const { error } = await db.from('estimates').update(patch).eq('id', body.id).eq('business_id', biz.id);
+  if (error) throw error;
+
+  return res.status(200).json({
+    ok: true,
+    company_name: bid.company_name,
+    sub_price: check.sub,
+    sell_price: check.sell,
+    min_sell: check.min,
+    below_min: !!check.belowMin,
+    spread: check.spread,
+  });
+}
+
 async function estimateDecline(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }

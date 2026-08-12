@@ -8519,6 +8519,7 @@ async function renderEstimates(){
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
+    document.querySelectorAll('#estWrap [data-est-broker]').forEach(b=>b.addEventListener('click',()=>openBrokerPanel(b.dataset.estBroker)));
     document.querySelectorAll('#estWrap [data-est-decline]').forEach(b=>b.addEventListener('click',()=>declineEstimate(b.dataset.estDecline,b)));
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
@@ -8655,6 +8656,7 @@ function estCard(e){
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
         ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
+        ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
         ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
       </span>
@@ -8861,6 +8863,209 @@ async function sendEstimateMessage(estimateId, type, btn){
     if(btn){ btn.disabled = false; btn.textContent = prev; }
     toast(err.message || `Could not send ${label}.`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Subcontractor brokering panel. Shown only on estimates in UNSTAFFED markets
+// (the server sets broker_eligible off service_areas.unstaffed, so this UI
+// never needs to know a city list). Heather calls around, types up to three
+// bids, picks one, and sets the price we sell at. Quoting the customer then
+// happens through the EXISTING 💬 / ✉️ buttons on the card, which read the
+// line item this panel writes -- there is no separate brokered sender.
+// ---------------------------------------------------------------------------
+
+// Mirror of api/_lib/broker-pricing.js minSellPrice(), for live preview only.
+// The SERVER is authoritative and re-validates every save; if these two ever
+// disagree the save is refused rather than silently accepted at the wrong
+// price. Integer cents on purpose: Math.ceil(sub*1.2) overcharges by a full
+// dollar on values like 1.67 because of binary floating point.
+function brokerMinSell(subPrice){
+  const n=Number(String(subPrice==null?'':subPrice).replace(/[$,\s]/g,''));
+  if(!Number.isFinite(n)||n<0||String(subPrice||'').trim()==='') return null;
+  const cents=Math.round(n*100);
+  return Math.ceil(Math.round(cents*12/10)/100);
+}
+
+let _brokerEstId=null;
+
+function brokerModalEl(){
+  let m=document.getElementById('brokerModal');
+  if(m) return m;
+  m=document.createElement('div');
+  m.id='brokerModal';
+  m.className='modal hidden';
+  m.innerHTML=`<div class="card" style="max-width:660px;width:94%;max-height:90vh;overflow:auto;">
+    <h3 style="margin:0 0 4px;">Get this estimate filled</h3>
+    <div id="bkCust" class="meta" style="margin-bottom:2px;"></div>
+    <div id="bkArea" class="meta" style="margin-bottom:14px;"></div>
+    <div id="bkSlots"></div>
+    <div id="bkBook" style="margin-top:18px;"></div>
+    <div id="bkErr" style="color:#b91c1c;font-size:13px;margin-top:10px;"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px;">
+      <button class="btn ghost" id="bkClose">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click',ev=>{ if(ev.target.id==='brokerModal') closeBrokerPanel(); });
+  m.querySelector('#bkClose').addEventListener('click',closeBrokerPanel);
+  return m;
+}
+function closeBrokerPanel(){ const m=document.getElementById('brokerModal'); if(m) m.classList.add('hidden'); _brokerEstId=null; }
+
+async function openBrokerPanel(id){
+  const e=estCache[id]; if(!e) return;
+  _brokerEstId=id;
+  const m=brokerModalEl();
+  m.querySelector('#bkCust').textContent=`${e.customer_name||'No name'} · ${e.service_label||'Estimate request'}`;
+  m.querySelector('#bkArea').textContent='Loading…';
+  m.querySelector('#bkSlots').innerHTML='';
+  m.querySelector('#bkBook').innerHTML='';
+  m.querySelector('#bkErr').textContent='';
+  m.classList.remove('hidden');
+  try{
+    const d=await api('estimate_broker',{ method:'POST', body:{ business:current.slug, id }});
+    paintBrokerPanel(d);
+  }catch(err){ m.querySelector('#bkArea').textContent=''; m.querySelector('#bkErr').textContent=err.message; }
+}
+
+function paintBrokerPanel(d){
+  const m=brokerModalEl();
+  m.querySelector('#bkArea').innerHTML=`No techs in <b>${esc(d.area.name)}</b>, so this one gets subbed out. Call around, then type what each company quotes.`;
+
+  // The directory datalist: empty until companies have actually been typed in.
+  // Nothing is pre-seeded, so this is blank on day one by design.
+  const dir=(d.directory||[]);
+  const dlist=`<datalist id="bkDirList">${dir.map(c=>`<option value="${esc(c.company_name)}" data-phone="${esc(c.phone||'')}"></option>`).join('')}</datalist>`;
+
+  m.querySelector('#bkSlots').innerHTML=dlist+d.slots.map(s=>{
+    const tel=s.phone?`<a href="tel:${esc(s.phone)}" class="bk-call" style="text-decoration:none;font-weight:800;color:var(--accent);white-space:nowrap;">📞 Call</a>`:'';
+    const min=s.min_sell!=null?`<div class="meta" style="margin-top:4px;">They quote <b>${Number(s.sub_price).toFixed(2)}</b> · you sell at <b>${s.min_sell}</b> minimum</div>`:'';
+    return `<div class="bk-slot" data-slot="${s.slot}" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;">
+      <div style="font-weight:800;font-size:13px;margin-bottom:6px;">Company ${s.slot}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input class="bk-co" list="bkDirList" placeholder="Company name" value="${esc(s.company_name||'')}" style="flex:2;min-width:150px;">
+        <input class="bk-ph" placeholder="Phone" value="${esc(s.phone||'')}" style="flex:1;min-width:120px;">
+        <input class="bk-pr" placeholder="Their price" inputmode="decimal" value="${s.sub_price!=null?s.sub_price:''}" style="width:110px;">
+        ${tel}
+        <button class="btn ghost sm bk-save">Save</button>
+      </div>
+      <div class="bk-min">${min}</div>
+    </div>`;
+  }).join('');
+
+  // Live minimum as she types, and auto-fill a known company's phone.
+  m.querySelectorAll('.bk-slot').forEach(row=>{
+    const pr=row.querySelector('.bk-pr'), co=row.querySelector('.bk-co'), ph=row.querySelector('.bk-ph');
+    pr.addEventListener('input',()=>{
+      const min=brokerMinSell(pr.value);
+      row.querySelector('.bk-min').innerHTML=min!=null
+        ? `<div class="meta" style="margin-top:4px;">They quote <b>${Number(pr.value).toFixed(2)}</b> · you sell at <b>${min}</b> minimum</div>` : '';
+    });
+    co.addEventListener('change',()=>{
+      if(ph.value.trim()) return;
+      const hit=dir.find(c=>c.company_name.toLowerCase()===co.value.trim().toLowerCase());
+      if(hit&&hit.phone) ph.value=hit.phone;
+    });
+    row.querySelector('.bk-save').addEventListener('click',async()=>{
+      const btn=row.querySelector('.bk-save'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
+      m.querySelector('#bkErr').textContent='';
+      try{
+        await api('estimate_broker_save_bid',{ method:'POST', body:{
+          business:current.slug, id:_brokerEstId, slot:Number(row.dataset.slot),
+          company_name:co.value.trim(), phone:ph.value.trim(), sub_price:pr.value.trim(),
+        }});
+        const d2=await api('estimate_broker',{ method:'POST', body:{ business:current.slug, id:_brokerEstId }});
+        paintBrokerPanel(d2);
+        toast('Bid saved ✓');
+      }catch(err){ m.querySelector('#bkErr').textContent=err.message; btn.disabled=false; btn.textContent=prev; }
+    });
+  });
+
+  paintBrokerBook(d);
+}
+
+function paintBrokerBook(d){
+  const m=brokerModalEl();
+  const priced=d.slots.filter(s=>s.sub_price!=null);
+  const wrap=m.querySelector('#bkBook');
+  if(!priced.length){ wrap.innerHTML=`<div class="meta">Enter at least one company's price above to set what we sell it for.</div>`; return; }
+
+  const booked=d.booked;
+  const bookedLine=booked&&booked.sell_price!=null
+    ? `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:13px;">
+         ✓ Booked with <b>${esc(booked.company_name||'')}</b> · they get <b>${Number(booked.sub_price).toFixed(2)}</b> ·
+         we sell at <b>${Number(booked.sell_price).toFixed(2)}</b> ·
+         your cut <b>${(Number(booked.sell_price)-Number(booked.sub_price)).toFixed(2)}</b>
+         <div class="meta" style="margin-top:5px;">The quote is on the estimate. Close this and use the 💬 and ✉️ buttons on the card to send it to the customer.</div>
+       </div>` : '';
+
+  const opts=priced.map(s=>{
+    const min=s.min_sell;
+    return `<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;">
+      <input type="radio" name="bkPick" value="${s.slot}" data-min="${min}" data-sub="${s.sub_price}">
+      <span>${esc(s.company_name||('Company '+s.slot))} · they get <b>${Number(s.sub_price).toFixed(2)}</b> · minimum sell <b>${min}</b></span>
+    </label>`;
+  }).join('');
+
+  wrap.innerHTML=`${bookedLine}
+    <div style="font-weight:800;margin-bottom:8px;">Pick who does it, and what we sell it for</div>
+    ${opts}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+      <label style="font-size:13px;">We sell at $</label>
+      <input id="bkSell" inputmode="decimal" placeholder="0.00" style="width:120px;">
+      <span id="bkSpread" class="meta"></span>
+      <button class="btn" id="bkBookBtn">Book it</button>
+    </div>
+    <label id="bkOverrideWrap" style="display:none;align-items:center;gap:7px;font-size:12.5px;margin-top:9px;color:#b91c1c;">
+      <input type="checkbox" id="bkOverride">
+      <span>This is below the 20 percent minimum. Sell it anyway.</span>
+    </label>`;
+
+  const sell=wrap.querySelector('#bkSell');
+  const spreadEl=wrap.querySelector('#bkSpread');
+  const ovWrap=wrap.querySelector('#bkOverrideWrap');
+  const ov=wrap.querySelector('#bkOverride');
+
+  function picked(){ return wrap.querySelector('input[name=bkPick]:checked'); }
+  function refresh(){
+    const p=picked(); if(!p){ spreadEl.textContent=''; ovWrap.style.display='none'; return; }
+    const min=Number(p.dataset.min), sub=Number(p.dataset.sub);
+    const v=Number(String(sell.value).replace(/[$,\s]/g,''));
+    if(!sell.value.trim()||!Number.isFinite(v)){ spreadEl.textContent=`minimum ${min}`; ovWrap.style.display='none'; return; }
+    spreadEl.innerHTML=`your cut <b>${(v-sub).toFixed(2)}</b>`;
+    // Below the minimum: reveal the override rather than blocking silently.
+    ovWrap.style.display = v<min ? 'flex' : 'none';
+    if(v>=min) ov.checked=false;
+  }
+  wrap.querySelectorAll('input[name=bkPick]').forEach(r=>r.addEventListener('change',()=>{
+    // Prefill the minimum so the common case is one click.
+    const p=picked(); if(p) sell.value=p.dataset.min;
+    refresh();
+  }));
+  sell.addEventListener('input',refresh);
+
+  wrap.querySelector('#bkBookBtn').addEventListener('click',async()=>{
+    const p=picked();
+    m.querySelector('#bkErr').textContent='';
+    if(!p){ m.querySelector('#bkErr').textContent='Pick which company is doing it.'; return; }
+    const btn=wrap.querySelector('#bkBookBtn'); btn.disabled=true; const prev=btn.textContent; btn.textContent='…';
+    try{
+      await api('estimate_broker_book',{ method:'POST', body:{
+        business:current.slug, id:_brokerEstId, slot:Number(p.value),
+        sell_price:sell.value.trim(), override_below_min:!!ov.checked,
+      }});
+      toast('Booked ✓ Now send it to the customer');
+      const d2=await api('estimate_broker',{ method:'POST', body:{ business:current.slug, id:_brokerEstId }});
+      paintBrokerPanel(d2);
+      renderEstimates();
+    }catch(err){
+      m.querySelector('#bkErr').textContent=err.message;
+      if(/below the \$/.test(err.message||'')) ovWrap.style.display='flex';
+    }
+    finally{ btn.disabled=false; btn.textContent=prev; }
+  });
+
+  refresh();
 }
 
 // Decline an estimate as outside what the business does — texts/emails the
