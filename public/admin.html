@@ -7119,16 +7119,19 @@ async function renderCallAudit(){
 // other person or business. api/admin.js myCallPerformance() enforces that
 // server-side (role must be secretary + scope doms), this just renders it.
 // Separate range state from _cauRange so switching one doesn't jump the other.
+// Her own picker is just 7/30 -- Today/Yesterday come from CAU_RANGES too but
+// aren't offered here; Andrew asked for those two only.
+const MP_RANGES={ '7':CAU_RANGES['7'], '30':CAU_RANGES['30'] };
 let _mpRange='30';
 async function renderMyCallPerformance(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   let d;
-  const rc=CAU_RANGES[_mpRange]||CAU_RANGES['30'];
+  const rc=MP_RANGES[_mpRange]||MP_RANGES['30'];
   try{ d=await api('my_call_performance',{ params:{ days:rc.days, offset:rc.offset }}); }
   catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
 
-  const rangeBtns=Object.entries(CAU_RANGES).map(([x,r])=>
+  const rangeBtns=Object.entries(MP_RANGES).map(([x,r])=>
     `<button type="button" class="seg-btn ${_mpRange===x?'on':''}" data-mp="${x}">${r.label}</button>`).join('');
   const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
       <span class="gstat-l">${esc(label)}</span>
@@ -7137,7 +7140,7 @@ async function renderMyCallPerformance(){
 
   if(!d.audited){
     view.innerHTML=`<div class="wrap">
-      <div class="rc-head"><div><h2 class="rc-title">📞 Call Performance</h2>
+      <div class="rc-head"><div><h2 class="rc-title">📞 My Call Performance</h2>
         <div class="rc-sub">Nothing graded yet for this range.</div></div></div>
       <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
     view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
@@ -7172,7 +7175,7 @@ async function renderMyCallPerformance(){
 
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div>
-      <h2 class="rc-title">📞 Call Performance</h2>
+      <h2 class="rc-title">📞 My Call Performance</h2>
       <div class="rc-sub">How your graded calls are scoring against the phone script. ${esc(d.flagged)} of them were flagged for Andrew to listen to himself.</div>
     </div></div>
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
