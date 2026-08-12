@@ -1381,6 +1381,7 @@
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
+      <button data-nav="mycallperf" id="navMyCallPerf"><span class="ic" data-ico="phone">📞</span> My Call Performance</button>
       <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
@@ -2104,6 +2105,11 @@ function enterApp(){
   if(navAnaHub) navAnaHub.style.display = ANALYTICS_TABS.some(t=>t.show()) ? '' : 'none';
   const navCallHub=document.getElementById('navCallHub');
   if(navCallHub) navCallHub.style.display = CALL_TABS.some(t=>t.show()) ? '' : 'none';
+  // My Call Performance: Joey's own screen, in the main menu rather than
+  // nested in the Calls hub -- her graded-call score and trend, never
+  // Heather's grades or the owner's Audit/Performance comparison views.
+  const navMyCallPerf=document.getElementById('navMyCallPerf');
+  if(navMyCallPerf) navMyCallPerf.style.display = (role==='secretary'&&scope==='doms') ? '' : 'none';
   // Call Performance ranks the secretaries against each other by booking rate.
   // That is a management view, not something the people being measured should
   // be looking at during a shift — owner only, same as the other analytics.
@@ -2263,7 +2269,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2274,6 +2280,7 @@ function navTo(s){
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
     else if(s==='callhub') renderCallHub();
+    else if(s==='mycallperf') renderMyCallPerformance();
     else if(s==='gallery') renderGallery();
     else if(s==='analyticshub') renderAnalyticsHub();
     else if(s==='payroll') renderPayroll();
@@ -2293,6 +2300,7 @@ function refreshCurrent(){
   // Re-rendering the hub, not the child directly, so the tab row comes back with
   // it. Calling the child alone would repaint the screen without its tabs.
   else if(section==='callhub') renderCallHub();
+  else if(section==='mycallperf') renderMyCallPerformance();
   else if(section==='gallery') renderGallery();
   else if(section==='analyticshub') renderAnalyticsHub();
   else if(section==='payroll') renderPayroll();
@@ -6905,13 +6913,12 @@ const AUDIT_LABELS={
 //
 // Tabs are filtered per login, not just hidden. Heather (Handy Andy secretary)
 // can see none of the call screens, so the Calls button does not render for her
-// at all -- deliberate, unchanged by 'My Performance' below. Joey (Dom's
-// secretary) sees Review Calls plus her own My Performance tab: her graded-call
-// score and trend, never Heather's grades or the owner's Audit/Performance
-// comparison views, which stay owner-only.
+// at all -- deliberate. Joey's own performance is NOT one of these tabs -- it
+// lives in the sidebar as its own top-level "My Call Performance" screen (see
+// navMyCallPerf below), so Review Calls is the only thing left in her Calls
+// hub, and she gets it with no tab row (a row with one tab is noise).
 const CALL_TABS=[
   { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>renderReviewCalls() },
-  { id:'myperf',      label:'My Performance', screen:'mycallperf',  show:()=>role==='secretary'&&scope==='doms', render:()=>renderMyCallPerformance() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
 ];
