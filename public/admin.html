@@ -10808,7 +10808,11 @@ function closeCallWiz(opts){
   toast('Call still open — hit "Take a Call" to pick it back up.');
 }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
-document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal') closeCallWiz(); });
+// On the greet card nothing has been picked yet and no call is logged, so a
+// stray backdrop click must not dismiss it, only a service choice, "Something
+// else", or Hang Up may leave this card. Every later step already resumes
+// safely (see closeCallWiz above), so the guard is scoped to 'greet' only.
+document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.target.id==='callWizModal' && callWiz && callWiz.step!=='greet') closeCallWiz(); });
 // Option-step clicks are delegated from the container ONCE — the card's HTML is
 // replaced on every render, so attaching inside the render would stack a fresh
 // listener per repaint and fire one click N times. Routed through the SAME
@@ -11694,9 +11698,11 @@ async function renderCallWiz(){
     // reads both lines in one breath, and picking an answer both starts the
     // call log and records the service in a single tap.
     body.innerHTML=`${callWizScript(`Hello, thank you for calling ${bizName}, how may I help you?`)}
-      ${callWizChoiceRow([{value:'TV Mounting',label:'TV mounting'},{value:'Handyman',label:'Handyman'}])}`;
+      ${callWizChoiceRow([{value:'TV Mounting',label:'TV mounting'},{value:'Handyman',label:'Handyman'}])}
+      <button type="button" class="btn ghost" style="width:100%;margin-top:8px;" id="cwSomethingElse">Something else</button>`;
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', async()=>{
       body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
+      document.getElementById('cwSomethingElse').disabled=true;
       const service=b.dataset.cwchoice;
       try{
         const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
@@ -11705,8 +11711,28 @@ async function renderCallWiz(){
         cwTrack('started');
         cwTrack('service_picked',{ service });
         callWiz.step='zip'; renderCallWiz();
-      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); }
+      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); document.getElementById('cwSomethingElse').disabled=false; }
     }));
+    // Off-catalog request (e.g. "conceal my wires but don't mount the TV", "come
+    // look at my TV"), not TV Mounting, not Handyman. Logs the call like the
+    // other two options, then hands straight to New Booking's Custom Task
+    // category, where the office types the job and their own price by hand.
+    // Resolution is set immediately (not left open) so the next "Take a Call"
+    // starts a fresh call instead of resuming this one.
+    document.getElementById('cwSomethingElse').addEventListener('click', async()=>{
+      body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
+      document.getElementById('cwSomethingElse').disabled=true;
+      try{
+        const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
+        callWiz.id=r.id; callWiz.service='Other';
+        api('call_update',{ method:'POST', body:{ id:callWiz.id, service:'Other', resolution:'other' }}).catch(()=>{});
+        cwTrack('started');
+        cwTrack('service_picked',{ service:'Other' });
+        callWiz.resolution='other';
+        document.getElementById('callWizModal').classList.add('hidden');
+        openNewBooking({ _customTask:true, _linkCallId:callWiz.id });
+      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); document.getElementById('cwSomethingElse').disabled=false; }
+    });
     return;
   }
 
@@ -12612,6 +12638,11 @@ async function openNewBooking(prefill){
     notes: { ...nbOptionNotes },
     serviceId: nbServiceId,
   } : null;
+  // The phone script's "Something else": which call this booking session came
+  // from, if any. One New Booking session = at most one linked call, so this
+  // resets on every open rather than inside resetNbSteps (which also fires on
+  // an in-session category switch, where the link must survive).
+  nbLinkedCallId = (prefill && prefill._linkCallId) || null;
   const modal=document.getElementById('modal');
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
@@ -12702,6 +12733,12 @@ async function openNewBooking(prefill){
     // tech $60 (redeemed GDS). Bottom of the list for BOTH businesses. Links to the
     // TV-mounting service row (a dismount is a TV job); the price is $0. Hidden in demo.
     if(!appConfig.demo) cats.push('Guaranteed Dismount Service');
+    // Custom Task: an off-catalog job (concealed wiring with no mount, a TV
+    // diagnostic, anything that isn't TV Mounting or Handyman). No option walk
+    // at all: the office types one or more line items by hand under "+ Add
+    // custom line" and prices them themselves. Reached mainly via "Something
+    // else" on the phone script, but selectable here too.
+    cats.push('Custom Task');
     // No Charge / Callback — a $0 visit for something that needs fixing from a
     // previous job (warranty redo). Skips TV Mounting's required-question flow
     // entirely and never applies the branch minimum or after-hours fee, so the
@@ -12762,6 +12799,14 @@ async function openNewBooking(prefill){
     if(catSel) catSel.value='TV Mounting';
     renderNbServices('TV Mounting');
     renderNbSteps();
+  }
+  // "Something else" on the phone script: open straight into Custom Task,
+  // dispatched (not set directly) so the real change handler runs and wires
+  // up nbCustomTaskActive/nbServiceId/renderCustomTaskStep exactly as if the
+  // office had picked it from the dropdown themselves.
+  if(prefill && prefill._customTask){
+    const catSel=document.getElementById('nbCategory');
+    if(catSel){ catSel.value='Custom Task'; catSel.dispatchEvent(new Event('change')); }
   }
   // A discount agreed on the phone rides in as a negative custom line, so it
   // lands in the booking's real line items — visible, editable, and counted by
@@ -12882,6 +12927,7 @@ const NB_STEPS=[
       try{
         if(nbGdsActive) return true;   // GDS has no options to pick
         if(nbNoChargeActive) return true;   // No Charge / Callback has no options to pick
+        if(nbCustomTaskActive) return nbCustomItems().length>0;
         if(nbAssurionActive) return nbAssurionSel.size>0;
         if(nbHandymanActive) return nbHandymanHours>0;
         if(nbOptionGroups.length) return !nbValidateTvMountingRequired();
@@ -13124,6 +13170,13 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
     return;
   }
 
+  if(cat==='Custom Task'){
+    nbCustomTaskActive=true;
+    nbServiceId=nbGdsServiceId;   // link to the TV-mounting service row (just needs SOME real service_id)
+    renderCustomTaskStep();
+    return;
+  }
+
   if(cat==='TV Mounting'){
     const tvMountService = nbServices.find(s=>s.category===cat);
     if(tvMountService){
@@ -13173,6 +13226,22 @@ function renderNoChargeStep(){
       `<label style="display:block;font-size:12px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">What needs to be fixed?</label>`+
       `<textarea class="search" style="margin:0;min-height:60px;resize:vertical;" id="nbNoChargeNote" placeholder="e.g. bracket came loose, re-level the TV"></textarea>`+
     `</div>`;
+  updateNbTotal();
+}
+
+// Custom Task step: no catalog, no options walk. The office describes and
+// prices the job entirely through the "+ Add custom line" fields, which are
+// always present lower on the form for every category; this just points at
+// them and makes sure at least one blank row is ready to type into, so the
+// office isn't hunting for the button on a call.
+function renderCustomTaskStep(){
+  const steps=document.getElementById('nbSteps');
+  if(!steps) return;
+  steps.innerHTML=
+    `<div class="nb-step-t">Custom Task</div>`+
+    `<div class="nb-hint">Not TV Mounting or Handyman. Add each task below as its own line with your own price.</div>`;
+  if(!nbCustomLines.length){ nbCustomLines=[{label:'',price:''}]; }
+  nbRenderCustomLines();
   updateNbTotal();
 }
 
@@ -13707,9 +13776,14 @@ const ASSURION_GROUPS = [
 ];
 const ASSURION_PRICE = (()=>{ const m={}; ASSURION_GROUPS.forEach(g=>g.items.forEach(([n,p])=>{ m[n]=p; })); return m; })();
 let nbAssurionActive=false; let nbAssurionSel=new Set(); let nbSteveTechId=null, nbAssurionServiceId=null;
-let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false;
+let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false, nbCustomTaskActive=false;
+// Set only via openNewBooking's {_linkCallId} prefill (the "Something else"
+// handoff from the phone script). When a Custom Task booking created from that
+// session succeeds, the linked call's resolution is corrected to 'booked' and
+// stamped with the real booking id, see the booking_create success handler.
+let nbLinkedCallId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // The "Other" extras option lets the admin describe a custom add-on.
@@ -14251,6 +14325,12 @@ function nbCollectSelections(){
     const note=(document.getElementById('nbNoChargeNote')?.value||'').trim();
     return [{option_id:null, label:'No Charge / Callback'+(note?`: ${note}`:''), price:0, quantity:1}];
   }
+  // Custom Task: exactly what the office typed, nothing else, no branch
+  // minimum, no multi-TV discount, no TV-type lines, none of which apply to
+  // an off-catalog job priced by hand.
+  if(nbCustomTaskActive){
+    return nbCustomItems().map(ci=>({option_id:null, label:ci.label, price:ci.price, quantity:1}));
+  }
   // Assurion: one line per selected service, priced at Steve's payout. The
   // customer is charged $0 (handled at submit); these amounts feed his pay.
   if(nbAssurionActive){
@@ -14303,7 +14383,7 @@ const TAX_RATE = 0.0825;
 // undercharged while still costing the extra tech pay. Read by BOTH the total
 // display and the submit path so the screen always matches the booking.
 function nbAfterHoursFee(){
-  if(nbAssurionActive || nbGdsActive || nbHandymanActive || nbNoChargeActive) return 0;
+  if(nbAssurionActive || nbGdsActive || nbHandymanActive || nbNoChargeActive || nbCustomTaskActive) return 0;
   if(!nbSelectedSlot || nbSelectedSlot.key!=='s5') return 0;
   const ds=document.getElementById('nbDate').value;
   const isSunday=ds ? new Date(ds+'T12:00:00').getDay()===0 : false;
@@ -14875,6 +14955,15 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       if(nbSourceEstimateId){
         const _eid=nbSourceEstimateId; nbSourceEstimateId=null;
         api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'archived' }}).catch(()=>{});
+      }
+      // Opened via "Something else" on the phone script: that call was already
+      // marked resolved:'other' the moment it handed off here (so the next
+      // "Take a Call" doesn't resume it), but now that a real booking exists,
+      // correct it to 'booked' with the real id, same correction the call
+      // script's own booking path makes at its own booking_create call.
+      if(nbLinkedCallId){
+        const _cid=nbLinkedCallId; nbLinkedCallId=null;
+        api('call_update',{ method:'POST', body:{ id:_cid, resolution:'booked', booking_id: resp&&resp.id?resp.id:undefined }}).catch(()=>{});
       }
       // Only hide the modal if it still belongs to THIS attempt — if the office
       // closed it and reopened for a different job while this request was in
