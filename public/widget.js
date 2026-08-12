@@ -1458,6 +1458,62 @@
       </div>`;
   }
 
+  // ── "See what our customers say" (Guaranteed Dismount step) ───────────────
+  // A real 5-star Google review from a customer who bought this exact coverage
+  // and then actually used it two years later. It answers the objection this
+  // step has to overcome ("will they really honor it years from now?") better
+  // than any copy we could write, and it independently confirms the "bolt
+  // holes patched" bullet directly above it.
+  //
+  // Rebuilt as native HTML rather than embedding the Google screenshot: the
+  // screenshot is a tall white image that renders unreadably small in this
+  // ~500px column on a phone and glares against the dark card. Styled to read
+  // as a Google review (avatar, gold stars, Local Guide line) so it still
+  // looks like what it is.
+  //
+  // HANDY ANDY ONLY. The review names Handy Andy, so it would read as a
+  // different company's testimonial on the Mile High widget, which shares this
+  // file. Doms has no code in this file at all and cannot be affected.
+  //
+  // Surname abbreviated to "Alanna W." deliberately: the full name is public
+  // on Google, but this is a marketing surface and the owner blurred it in the
+  // screenshot he sent, so that intent is honored here.
+  //
+  // The text is the FULL review as posted. app.google_reviews stores a
+  // truncated copy ("...purchased a bracket from them as..."), so it is
+  // hardcoded here rather than fetched, which also keeps this step free of a
+  // network call.
+  const GDS_REVIEW = {
+    name: 'Alanna W.',
+    initials: 'AW',
+    meta: 'Local Guide · 13 reviews',
+    text: 'Almost two years ago, we hired Handy Andy to hang a TV and we also purchased a bracket from them as well. It was a great service and looked great. During that service, I purchased the takedown service. Today, they came and took down the TV and filled the holes in the wall. After a little touch paint, it will look brand new. Thank you! I will be a returning customer.',
+  };
+  function gdsReviewHtml(){
+    if (BUSINESS !== 'handy-andy') return '';
+    const r = GDS_REVIEW;
+    return `
+      <div style="margin-bottom:12px!important;">
+        <button id="btn-gds-review" type="button" aria-expanded="false" style="background:transparent!important;border:none!important;padding:9px 4px!important;width:100%!important;display:block!important;cursor:pointer!important;font-size:12.5px!important;font-weight:700!important;color:#d4d4d8!important;text-align:center!important;font-family:inherit!important;">
+          <span style="color:#fbbf24!important;letter-spacing:1px!important;">★★★★★</span>
+          <span style="text-decoration:underline!important;text-underline-offset:2px!important;margin-left:6px!important;">See what our customers say</span>
+          <span id="gds-review-caret" style="display:inline-block!important;margin-left:5px!important;font-size:10px!important;color:#71717a!important;">▼</span>
+        </button>
+        <div id="gds-review-panel" style="display:none!important;background:#18181b!important;border:1px solid #3f3f46!important;border-radius:10px!important;padding:14px!important;margin-top:2px!important;text-align:left!important;">
+          <div style="display:flex!important;align-items:center!important;gap:10px!important;margin-bottom:9px!important;">
+            <div style="width:34px!important;height:34px!important;border-radius:50%!important;background:#4285F4!important;color:#fff!important;font-size:13px!important;font-weight:800!important;display:flex!important;align-items:center!important;justify-content:center!important;flex:none!important;">${r.initials}</div>
+            <div style="min-width:0!important;flex:1!important;">
+              <div style="font-size:13px!important;font-weight:700!important;color:#fff!important;">${r.name}</div>
+              <div style="font-size:11px!important;color:#a0a0ab!important;margin-top:1px!important;">${r.meta}</div>
+            </div>
+            <div title="Google review" style="width:20px!important;height:20px!important;border-radius:50%!important;background:#fff!important;color:#4285F4!important;font-size:12px!important;font-weight:800!important;display:flex!important;align-items:center!important;justify-content:center!important;flex:none!important;">G</div>
+          </div>
+          <div style="color:#fbbf24!important;font-size:13px!important;letter-spacing:1.5px!important;margin-bottom:7px!important;">★★★★★</div>
+          <div style="font-size:12.5px!important;color:#d4d4d8!important;line-height:1.65!important;">${r.text}</div>
+        </div>
+      </div>`;
+  }
+
   function bDismount(){
     const sec=getSec('dismount');
     const cur=(selections[sec.id]||[])[0]?.option_id;
@@ -1472,7 +1528,6 @@
 
       <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid ${ACCENT}!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
         <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
-        <div style="font-size:10.5px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important;color:${ACCENT_LIGHT}!important;margin-bottom:10px!important;position:relative!important;">🛡️ TV Removal Coverage</div>
         <div style="background:rgba(34,197,94,0.12)!important;border:1.5px solid rgba(34,197,94,0.5)!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:12px!important;position:relative!important;">
           <div style="font-size:15px!important;font-weight:800!important;color:#fff!important;line-height:1.45!important;">We come back to your home <span style="color:#4ade80!important;">ANYTIME</span>, even years from now, and take your TV down</div>
           <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
@@ -1491,8 +1546,8 @@
           </div>
         </div>
         <div style="font-size:12.5px!important;color:#c7ccd4!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
-        <div style="margin-top:12px!important;padding-top:10px!important;border-top:1px dashed #3f3f46!important;font-size:11.5px!important;color:#71717a!important;position:relative!important;">One-time cost: $35 · Added to today's ticket · No expiration</div>
       </div>
+      ${gdsReviewHtml()}
 
       <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
 
@@ -1918,6 +1973,19 @@
     });
     root.querySelector('#btn-dis-no')?.addEventListener('click',()=>{
       const s=getSec('dismount');if(s)selectOnly(s.id,s.options[1].id);render();
+    });
+    // Review expander. Toggles the panel directly instead of going through
+    // render(): a full re-render of this step would jump the customer back to
+    // the top of a long card, right when they are reading partway down it.
+    root.querySelector('#btn-gds-review')?.addEventListener('click',(e)=>{
+      const panel=root.querySelector('#gds-review-panel');
+      const caret=root.querySelector('#gds-review-caret');
+      if(!panel) return;
+      const open=panel.style.display==='none';
+      panel.style.setProperty('display', open?'block':'none', 'important');
+      if(caret) caret.textContent = open?'▲':'▼';
+      e.currentTarget.setAttribute('aria-expanded', open?'true':'false');
+      if(open) logEvent('answer','gds_review_opened');
     });
 
     root.querySelectorAll('.ha-tv-type').forEach(c=>c.addEventListener('click',()=>{
