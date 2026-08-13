@@ -312,7 +312,7 @@ function renderSummary(){
     html += `<div class="sline${add>0?' added':''}"><span>Upgrades added</span><span class="sv tabnums">${money(add)}</span></div>`;
   }
   if (rate>0){
-    html += `<div class="sline"><span>Tax (${(rate*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span class="sv tabnums">${money(taxAmt)}</span></div>`;
+    html += `<div class="sline"><span>Tax</span><span class="sv tabnums">${money(taxAmt)}</span></div>`;
   }
   html += `<div class="sline grand"><span>Estimated total</span><span class="sv tabnums">${money(total)}</span></div></div>`;
   $('summaryBox').innerHTML = html;

@@ -134,6 +134,13 @@ export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customer
 }
 
 function escHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// Tax reads as just "Tax" in owner alerts, matching every customer-facing
+// surface; the rate stays only in the stored line name.
+function tidyLineName(name) {
+  const s = String(name || '');
+  if (/^\s*tax\b/i.test(s)) return s.replace(/\s*\(\s*[\d.]+\s*%\s*\)/, '').trim() || 'Tax';
+  return s;
+}
 
 export async function sendOwnerBookingAlert(d = {}) {
   try {
@@ -194,7 +201,7 @@ export async function sendOwnerBookingAlert(d = {}) {
     ].filter(r => r[1]);
     const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
     const items = (Array.isArray(d.lineItems) ? d.lineItems : []).filter(Boolean)
-      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(li.name || 'Item')}${(Number(li.quantity) || 1) > 1 ? ` ×${li.quantity}` : ''}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
+      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(tidyLineName(li.name) || 'Item')}${(Number(li.quantity) || 1) > 1 ? ` ×${li.quantity}` : ''}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
     const notes = d.customerNotes ? `<p style="margin:14px 0 0;"><b>Customer notes:</b> ${escHtml(d.customerNotes)}</p>` : '';
     const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
       <h2 style="margin:0 0 12px;">Someone just booked an appointment.</h2>
@@ -413,7 +420,7 @@ export async function sendPriceMismatchAlert(d = {}) {
     ].filter(r => r[1]);
     const tbl = rows.map(([k, v]) => `<tr><td style="padding:3px 14px 3px 0;color:#6b7280;font-weight:600;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 0;color:#111;">${escHtml(String(v))}</td></tr>`).join('');
     const items = (Array.isArray(d.lineItems) ? d.lineItems : []).filter(Boolean)
-      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(li.name || 'Item')}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
+      .map(li => `<tr><td style="padding:2px 10px 2px 0;">${escHtml(tidyLineName(li.name) || 'Item')}</td><td style="padding:2px 0;text-align:right;">${money(li.line_total != null ? li.line_total : li.unit_price)}</td></tr>`).join('');
     const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5;">
       <h2 style="margin:0 0 4px;color:#b91c1c;">⚠ Unrecognized line item on a new booking</h2>
       <p style="margin:0 0 14px;color:#374151;">One or more line items on this booking didn't match anything in the price catalog — the booking still went through at the price submitted, but it's worth a quick look to confirm it's correct.</p>

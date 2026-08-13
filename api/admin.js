@@ -3404,7 +3404,7 @@ async function bookingCreate(req, res, db, auth, body) {
           const unit = Number(s.price) || 0;
           return { label: s.label || 'Option', qty, amount: unit * qty };
         });
-        if (emailLines.length && Number(body.tax) > 0) emailLines.push({ label: 'Tax (8.25%)', qty: 1, amount: Number(body.tax) });
+        if (emailLines.length && Number(body.tax) > 0) emailLines.push({ label: 'Tax', qty: 1, amount: Number(body.tax) });
         if (!emailLines.length) emailLines.push({ label: 'Service total', qty: 1, amount: Number(body.price) });
       }
 
@@ -3469,7 +3469,7 @@ async function bookingCreate(req, res, db, auth, body) {
         name: s.label || 'Option', quantity: Number(s.quantity) || 1,
         line_total: (Number(s.price) || 0) * (Number(s.quantity) || 1),
       }));
-      if (Number(body.tax) > 0) lineItems.push({ name: 'Tax (8.25%)', quantity: 1, line_total: Number(body.tax) });
+      if (Number(body.tax) > 0) lineItems.push({ name: 'Tax', quantity: 1, line_total: Number(body.tax) });
       await sendOwnerBookingAlert({
         slug: biz.slug, businessName: biz.name, timezone: tz,
         bookedBy: auth.name || 'Office',

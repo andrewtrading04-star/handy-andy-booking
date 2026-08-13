@@ -3262,6 +3262,10 @@ function editBookingContact(b){
 function liCleanLabel(name){
   const s=String(name||'');
   if(/guaranteed\s+dismount/i.test(s)) return 'GDS';
+  // Tax shows as just "Tax"; the rate stays in the STORED name (it's what
+  // drives the auto-recompute below and the server's recalcTaxLine), the
+  // customer/office just doesn't need to read it on every ticket.
+  if(/^\s*tax\b/i.test(s)) return s.replace(/\s*\(\s*[\d.]+\s*%\s*\)/,'').trim()||'Tax';
   const i=s.indexOf(':');
   let out=(i>-1?s.slice(i+1):s).trim()||s;
   // Drop a trailing "×3" baked into the label — the qty shows as a separate
@@ -3367,16 +3371,17 @@ function mountLineItemsEditor(b){
   const totalEl=document.getElementById('bkLiTotal');
   if(!wrap||!totalEl) return;
   const qOf=r=>Math.max(1,Math.min(99,Math.round(Number(r.qty)||1)));
-  // A tax row's AMOUNT is computed, never typed: the rate lives in its label
-  // ("Tax (8.25%)") and the amount always follows that rate times the current
-  // taxable items. This is what prevents the Pete Borer bug (Aug 2026): the
-  // office added a $115 mount to his ticket after booking, the tax line kept
+  // A tax row's AMOUNT is computed, never typed: the rate lives in its STORED
+  // name ("Tax (8.25%)") and the amount always follows that rate times the
+  // current taxable items. This is what prevents the Pete Borer bug (Aug 2026):
+  // the office added a $115 mount to his ticket after booking, the tax line kept
   // the $51.81 computed for the ORIGINAL items, and the card was charged off a
   // ticket whose own rows no longer summed to its own total. The rate itself
   // is deliberately NOT hardcoded here; which rate a market should charge is a
-  // policy question. To charge a different rate, rename the line (e.g.
-  // "Tax (4.5%)") and the amount follows it; to hand-set the amount outright,
-  // remove the "%" from the label and the row becomes fully manual.
+  // policy question. The EDITOR shows the row as just "Tax" (liCleanLabel
+  // strips the rate per Andrew, Aug 2026) while r.name keeps it; typing in the
+  // name field takes the row over as usual, so entering "Tax (4.5%)" still
+  // changes the rate, and a typed name with no "%" makes the row fully manual.
   const liIsTaxRow=r=>/^tax\b/i.test((r.name||'').trim());
   const liTaxRate=r=>{ const m=String(r.name||'').match(/([\d.]+)\s*%/); const v=m?parseFloat(m[1]):NaN; return (isFinite(v)&&v>0&&v<50)?v:null; };
   const syncTaxRows=()=>{
@@ -3403,7 +3408,7 @@ function mountLineItemsEditor(b){
       </div>`;
     const priceIn=(i,r)=>{
       const computed=liIsTaxRow(r)&&liTaxRate(r)!=null;
-      const tip=computed?'Tax is computed from the rate in the label and updates itself when items change. It cannot be typed over.':'Price each';
+      const tip=computed?'Tax is computed automatically and updates itself when items change. It cannot be typed over.':'Price each';
       return `<div class="li-pricebox"><span>$</span><input type="number" step="0.01" inputmode="decimal" data-i="${i}" data-f="unit" value="${r.unit}" title="${tip}"${computed?' style="opacity:.75;"':''}></div>`;
     };
     const delBtn=i=>`<button type="button" class="li-x" data-del="${i}" title="Remove">×</button>`;
@@ -8711,7 +8716,7 @@ function estCard(e){
   const t=estTotals(lines,eTax);
   const taxLines=eTax>0?
     `<div class="est-quote-sub"><span>Subtotal</span><span>${money2(t.subtotal)}</span></div>`+
-    `<div class="est-quote-sub"><span>Tax (${(eTax*100).toFixed(2).replace(/\.?0+$/,'')}%)</span><span>${money2(t.tax)}</span></div>`:'';
+    `<div class="est-quote-sub"><span>Tax</span><span>${money2(t.tax)}</span></div>`:'';
   const quote=lines.length?`<div class="est-quote">${lines.map(it=>{
     const qty=liQty(it); const lt=qty*(Number(it.unit_price)||0);
     return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
@@ -14440,7 +14445,7 @@ function updateNbTotal(){
   const ahNote=afterHours?` <span style="color:#6b7f9c;">(incl. $${afterHours} after-hours)</span>`:'';
   document.getElementById('nbTotalDisplay').innerHTML=`
     <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Subtotal${ahNote}</span><span>$${subtotal.toFixed(2)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Tax (8.25%)</span><span>$${tax.toFixed(2)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#8aa0c4;padding:3px 0;"><span>Tax</span><span>$${tax.toFixed(2)}</span></div>
     <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:#eef2f7;border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:8px;"><span>Total</span><span style="color:#4ade80;">$${total.toFixed(2)}</span></div>`;
   renderNbMinWarn(selections);
 }

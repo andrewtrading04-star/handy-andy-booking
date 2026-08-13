@@ -155,6 +155,9 @@ function shade(hex, amt) {
 function cleanLineLabel(name) {
   const s = String(name || '');
   if (/guaranteed\s+dismount/i.test(s)) return 'GDS';
+  // Tax reads as just "Tax"; the rate stays in the stored line name (the
+  // booking editor's auto-recompute keys off it), customers don't see it.
+  if (/^\s*tax\b/i.test(s)) return s.replace(/\s*\(\s*[\d.]+\s*%\s*\)/, '').trim() || 'Tax';
   const i = s.indexOf(':');
   let out = (i > -1 ? s.slice(i + 1) : s).trim() || s;
   // Drop a trailing "×3" baked into the label — the qty renders separately. Only
@@ -809,7 +812,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
           <td style="padding:12px 0 0;font-size:14px;color:#11181c;text-align:right;white-space:nowrap;">${money(subtotal)}</td>
         </tr>
         <tr>
-          <td style="padding:4px 0 0;font-size:14px;color:#5b6470;">Tax (${(taxRate * 100).toFixed(2).replace(/\.?0+$/, '')}%)</td>
+          <td style="padding:4px 0 0;font-size:14px;color:#5b6470;">Tax</td>
           <td style="padding:4px 0 0;font-size:14px;color:#11181c;text-align:right;white-space:nowrap;">${money(taxAmt)}</td>
         </tr>` : '';
     // No description paragraph here — the line-item list below IS the breakdown,

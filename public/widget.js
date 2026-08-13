@@ -1907,7 +1907,7 @@
             <span style="color:#4ade80!important;">-$${mtvPriceDisc}</span>
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
-            <span>Tax (8.25%)</span>
+            <span>Tax</span>
             <span id="ha-tax" style="color:#fff!important;">$${Math.round(base*TAX_RATE*100)/100}</span>
           </div>
           ${tipAmount>0?`<div id="ha-tip-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
