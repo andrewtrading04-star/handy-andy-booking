@@ -12506,10 +12506,7 @@ async function renderCallWiz(){
       head=callWizScript('Let me see what else I have on this one, hang on one second.');
     }
     body.innerHTML=`${clawback()}${head}
-      ${cwOpNote('Your eyes only', room>0
-        ? `You have ${money(room)} more you can take off this ticket.`
-        : 'You are at the floor. There is nothing left to give on this job.')}
-      ${secTitle('Take something off','room left '+money(room))}
+      ${secTitle(room>0?'You can give a discount as much as '+money(room):'You are at the floor. There is nothing left to give on this job.')}
       ${room>0?`<div style="display:flex;gap:6px;margin-bottom:6px;">
         <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${esc(String(manualVal))}">
         <button type="button" class="btn ${cwManualDirty()?'':'ghost'}" id="cwManualApply" style="width:auto;${cwManualDirty()?'background:#f59e0b;color:#3a2a00;':''}">Apply</button>
