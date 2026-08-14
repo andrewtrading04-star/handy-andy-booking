@@ -2115,11 +2115,13 @@ function enterApp(){
   // not something a secretary needs day to day, and one less thing in her menu.
   const navGallery=document.getElementById('navGallery');
   if(navGallery) navGallery.style.display = role==='secretary' ? 'none' : '';
-  // My Call Performance: Joey's own screen, in the main menu rather than
-  // nested in the Calls hub -- her graded-call score and trend, never
-  // Heather's grades or the owner's Audit/Performance comparison views.
+  // My Call Performance: each secretary's own screen, in the main menu rather
+  // than nested in the Calls hub -- her own graded-call score and trend, never
+  // the other secretary's grades or the owner's Audit/Performance comparison
+  // views. Scoped server-side by the login's own token, so this is only about
+  // whether the button is worth showing.
   const navMyCallPerf=document.getElementById('navMyCallPerf');
-  if(navMyCallPerf) navMyCallPerf.style.display = (role==='secretary'&&scope==='doms') ? '' : 'none';
+  if(navMyCallPerf) navMyCallPerf.style.display = (role==='secretary'&&['handy-andy','doms'].includes(scope)) ? '' : 'none';
   // Call Performance ranks the secretaries against each other by booking rate.
   // That is a management view, not something the people being measured should
   // be looking at during a shift — owner only, same as the other analytics.
@@ -10968,6 +10970,17 @@ function cwTrack(event, meta){
     step:callWiz.step, meta:meta||{},
   }}).catch(()=>{});
 }
+// Every write to the call record goes through here. There may be no record to
+// write to: the owner's runs through the script are deliberately not logged
+// (api/admin.js callLiveStart returns a null id for role 'owner'), so this
+// no-ops instead of posting an update for id null. Doing it in one place means
+// the awaited call sites -- "customer declined", the end-of-call resolution
+// picker -- cannot surface "Could not log this call" at someone who was only
+// ever testing, and any call site added later inherits the same guard.
+function cwCallUpdate(patch){
+  if(!callWiz || !callWiz.id) return Promise.resolve(null);
+  return api('call_update',{ method:'POST', body:{ id:callWiz.id, ...patch }});
+}
 // Which option groups the secretary must answer before moving on — the same
 // set New Booking validates at submit (nbValidateTvMountingRequired), asked up
 // front here because on a phone call there is no going back later.
@@ -11378,7 +11391,7 @@ function cwWireLadderCommon(scope){
     }
     try{
       cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
-      await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:'refused' }});
+      await cwCallUpdate({ resolution:'refused' });
       closeCallWiz({resolved:true}); toast('Call logged.');
       if(onScreen('calls')) renderCalls();
     }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
@@ -11539,8 +11552,8 @@ async function cwGoToBookingInner(){
     // breakdown the recap already saved or the call record loses what was
     // actually quoted and keeps only the discount line.
     const _note=`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).`;
-    await api('call_update',{ method:'POST', body:{ id:callWiz.id,
-      notes: callWiz.quoteNote ? `${callWiz.quoteNote} · ${_note}` : _note }}).catch(()=>{});
+    await cwCallUpdate({
+      notes: callWiz.quoteNote ? `${callWiz.quoteNote} · ${_note}` : _note }).catch(()=>{});
   }
   // Stay in the script and take the details here. Bouncing to the New Booking
   // form mid-call meant re-orienting to a different screen while the customer
@@ -11665,8 +11678,8 @@ async function cwSubmitBooking(){
     });
     nbKeyCache.delete(_fp);
     // Conversion is only counted once a booking genuinely exists.
-    api('call_update',{ method:'POST', body:{ id:callWiz.id,
-      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' }}).catch(()=>{});
+    cwCallUpdate({
+      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' }).catch(()=>{});
     cwTrack('booking_created',{ booking_id: resp&&resp.id?resp.id:null, total: totalPrice });
     if(resp&&resp.warning) alert('⚠ '+resp.warning);
     closeCallWiz({resolved:true});
@@ -11756,7 +11769,7 @@ async function renderCallWiz(){
       try{
         const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
         callWiz.id=r.id; callWiz.service=service;
-        api('call_update',{ method:'POST', body:{ id:callWiz.id, service }}).catch(()=>{});
+        cwCallUpdate({ service }).catch(()=>{});
         cwTrack('started');
         cwTrack('service_picked',{ service });
         callWiz.step='zip'; renderCallWiz();
@@ -11774,7 +11787,7 @@ async function renderCallWiz(){
       try{
         const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
         callWiz.id=r.id; callWiz.service='Other';
-        api('call_update',{ method:'POST', body:{ id:callWiz.id, service:'Other', resolution:'other' }}).catch(()=>{});
+        cwCallUpdate({ service:'Other', resolution:'other' }).catch(()=>{});
         cwTrack('started');
         cwTrack('service_picked',{ service:'Other' });
         callWiz.resolution='other';
@@ -11866,7 +11879,7 @@ async function renderCallWiz(){
       // rather than trapping them mid-call on a network blip.
       if(z!==cwZipDone && cwZipFailed!==z) return;
       callWiz.zip=z;
-      api('call_update',{ method:'POST', body:{ id:callWiz.id, market:callWiz.areaName||null }}).catch(()=>{});
+      cwCallUpdate({ market:callWiz.areaName||null }).catch(()=>{});
       cwTrack('zip_checked',{ zip:callWiz.zip, area:callWiz.areaName||null, in_area:!!callWiz.areaName, surcharge:callWiz.surcharge||0 });
       callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
       renderCallWiz();
@@ -12209,7 +12222,7 @@ async function renderCallWiz(){
         travel_fee:travelFee, after_hours_fee:ahFee, service:callWiz.service });
       cwTrack('read_to_customer',{ total:subtotal });
       callWiz.quoteNote=lines.join(' · ');
-      api('call_update',{ method:'POST', body:{ id:callWiz.id, notes:callWiz.quoteNote }}).catch(()=>{});
+      cwCallUpdate({ notes:callWiz.quoteNote }).catch(()=>{});
     }
     // The pause is a strip inside this same card, not its own screen — the
     // price, the quiet reminder, and the two outcomes are all here at once so
@@ -12634,10 +12647,10 @@ async function renderCallWiz(){
           selections:sels,
         }});
         cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:cwDiscountApplied() });
-        await api('call_update',{ method:'POST', body:{
-          id:callWiz.id, resolution:'estimate_sent',
+        await cwCallUpdate({
+          resolution:'estimate_sent',
           notes:`Estimate sent (${label})${callWiz.prefDate?' · preferred '+callWiz.prefDate:''}`,
-        }}).catch(()=>{});
+        }).catch(()=>{});
         closeCallWiz({resolved:true});
         // Say which channel it actually went out on, and never claim "sent"
         // when nothing left — the customer would be waiting on nothing.
@@ -12664,7 +12677,7 @@ async function renderCallWiz(){
       try{
         const res=b.dataset.cwres;
         cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
-        await api('call_update',{ method:'POST', body:{ id:callWiz.id, resolution:res }});
+        await cwCallUpdate({ resolution:res });
         closeCallWiz({resolved:true}); toast('Call logged.');
         if(onScreen('calls')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }

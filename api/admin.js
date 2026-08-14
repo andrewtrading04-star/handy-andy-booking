@@ -6592,6 +6592,18 @@ async function callUpdate(req, res, db, auth, body) {
 async function callLiveStart(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  // The owner is not on the phones -- when he opens the script it is to check
+  // that it still works, and those runs were landing in Call Performance as a
+  // person with a 0% booking rate, dragging the real conversion number down
+  // (21 of 43 calls in one week were his). Logging nothing at all, rather than
+  // logging-then-filtering, means there is no test data to keep excluding
+  // later. The wizard itself is unaffected: every call-logging path on the
+  // client already no-ops when there is no id (cwTrack returns early, the
+  // call_update calls are .catch()'d), so the script runs start to finish and
+  // can still open a real booking -- it just leaves no call record behind.
+  if (auth.role === 'owner') {
+    return res.status(200).json({ ok: true, id: null, untracked: true });
+  }
   const now = new Date().toISOString();
   const { data, error } = await db.from('calls').insert({
     business_id: biz.id,
@@ -8708,34 +8720,37 @@ async function auditReport(req, res, db, auth) {
 // "View As Joey", which mints an identical secretary-role token on purpose
 // (see viewAs() above) so he can see exactly what she sees.
 async function myCallPerformance(req, res, db, auth) {
-  if (auth.role !== 'secretary' || auth.scope !== 'doms') {
+  // Any secretary, scoped to their OWN business by their own token -- Heather
+  // on Handy Andy, Joey on Dom's. The scope comes from auth, never from the
+  // request, so one secretary can never read the other's grades by asking.
+  if (auth.role !== 'secretary' || !['handy-andy', 'doms'].includes(auth.scope)) {
     return res.status(403).json({ error: 'Not available for this login' });
   }
   const name = displayNameFor(auth.scope);
 
   const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
   const offset = Math.max(-365, Math.min(0, parseInt(req.query.offset, 10) || 0));
-  const { data: bizRows } = await db.from('businesses').select('id, timezone').eq('slug', 'doms').limit(1);
-  const domsId = bizRows && bizRows[0] && bizRows[0].id;
+  const { data: bizRows } = await db.from('businesses').select('id, timezone').eq('slug', auth.scope).limit(1);
+  const bizId = bizRows && bizRows[0] && bizRows[0].id;
   const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
   const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
   const to = dayStr(offset), from = dayStr(offset - (days - 1));
-  // Should never happen -- 'doms' is a seeded business row every other part of
-  // this file assumes exists -- but failing closed with an empty report beats
+  // Should never happen -- both slugs are seeded business rows every other part
+  // of this file assumes exist -- but failing closed with an empty report beats
   // a 500 or, worse, silently dropping the business_id filter above.
-  if (!domsId) {
+  if (!bizId) {
     return res.status(200).json({ name, from, to, days, audited: 0, pct: null, yes: 0, no: 0, flagged: 0, daily: [], questions: [] });
   }
 
   // handled_by alone is a free-text dropdown value, not scoped to a business --
   // the auditor picks the line first but 'who answered' isn't cross-checked
-  // against it. Filtering on business_id too means a call mis-graded under
-  // Joey's name on a Handy Andy line can never surface in HER performance
-  // view, which is the whole point of this being Dom's-only.
+  // against it. Filtering on business_id too means a call mis-graded under one
+  // secretary's name on the other's line can never surface in the wrong
+  // person's performance view.
   const { data: audits } = await db.from('call_audits')
     .select('audit_date, handled_by, answers, flagged')
     .eq('handled_by', name)
-    .eq('business_id', domsId)
+    .eq('business_id', bizId)
     .gte('audit_date', from).lte('audit_date', to);
 
   const scoreOf = (a) => {
