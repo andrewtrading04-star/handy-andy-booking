@@ -11993,8 +11993,8 @@ async function renderCallWiz(){
         <div id="cwSlots" style="display:flex;flex-direction:column;gap:6px;"></div>
         <div id="cwSlotSay" style="margin-top:10px;"></div>
       </div>
-      <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Continue</button>
-      <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">They're not ready to pick a time</button>
+      <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Customer agrees to date</button>
+      <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">Customer not ready to choose time</button>
       ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Add something to the job':'Change what they need done')}`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     let cwCalSeq=0;
