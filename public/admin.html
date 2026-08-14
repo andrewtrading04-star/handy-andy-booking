@@ -12232,10 +12232,13 @@ async function renderCallWiz(){
         <div style="font-size:12.5px;color:#c2410c;margin-top:2px;">Let them respond first.</div>
       </div>
       ${callWiz.selectedSlot
-        ? `<button type="button" class="btn" id="cwAccepts" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Customer accepts price</button>`
-        : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet — send it over, or go back and pick one to book it now.</div>`}
+        ? `<div style="display:flex;gap:8px;margin-bottom:7px;">
+            <button type="button" class="btn" id="cwAccepts" style="flex:1;background:#15803d;border-color:#15803d;">Customer accepts price</button>
+            <button type="button" class="btn ghost" id="cwPushback" style="flex:1;">Customer doesnt accept price</button>
+          </div>`
+        : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet, send it over, or go back and pick one to book it now.</div>
+          <button type="button" class="btn ghost" id="cwPushback" style="margin-bottom:7px;">Customer doesnt accept price</button>`}
       <button type="button" class="btn${callWiz.selectedSlot?' ghost':''}" id="cwRecapEstimate" style="margin-bottom:7px;">Send them the estimate instead</button>
-      <button type="button" class="btn ghost" id="cwPushback">Customer doesnt accept price</button>
       <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← ${callWiz.selectedSlot?'Pick a different day or time':'Pick a day and time'}</button>`;
     // Only rendered once a slot is chosen — there is nothing to book without one.
     { const acc=document.getElementById('cwAccepts');
