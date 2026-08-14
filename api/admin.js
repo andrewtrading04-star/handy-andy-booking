@@ -8709,20 +8709,21 @@ async function auditReport(req, res, db, auth) {
   });
 }
 
-// A secretary's own slice of the call audit -- built so Joey can see how she's
-// doing without seeing Heather's grades, the other secretary's flagged-call
-// notes, or anything about revenue/volume. Heather stays excluded entirely:
-// that's an existing, deliberate choice (see CALL_TABS in admin.html, "Heather
-// can see none of the call screens"), not something this endpoint changes --
-// it only serves the secretary role on the doms scope.
+// A secretary's own booking numbers: how many calls she took, how many became
+// jobs, and what those jobs were worth. The SAME definition of "booked" the
+// owner's Call Performance screen uses (callAnalytics isBooked), so her
+// conversion figure and his agree to the decimal rather than being two
+// different ideas of the word.
 //
-// auth.role === 'secretary' covers both a real Joey login AND the owner's
-// "View As Joey", which mints an identical secretary-role token on purpose
-// (see viewAs() above) so he can see exactly what she sees.
+// Deliberately her own row only -- no other person's conversion rate, and none
+// of the owner's cross-staff ranking. Scope comes from the token, never the
+// request, so Heather's login can only ever total Heather's calls on Handy
+// Andy and Joey's only Joey's on Dom's.
+//
+// auth.role === 'secretary' covers a real secretary login AND the owner's
+// "View As" (see viewAs above), which mints an identical secretary-role token
+// on purpose so he can see exactly what she sees.
 async function myCallPerformance(req, res, db, auth) {
-  // Any secretary, scoped to their OWN business by their own token -- Heather
-  // on Handy Andy, Joey on Dom's. The scope comes from auth, never from the
-  // request, so one secretary can never read the other's grades by asking.
   if (auth.role !== 'secretary' || !['handy-andy', 'doms'].includes(auth.scope)) {
     return res.status(403).json({ error: 'Not available for this login' });
   }
@@ -8735,46 +8736,42 @@ async function myCallPerformance(req, res, db, auth) {
   const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
   const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
   const to = dayStr(offset), from = dayStr(offset - (days - 1));
+  const empty = {
+    name, from, to, days, calls: 0, booked: 0, not_booked: 0, estimates: 0,
+    conversion: 0, booked_value: 0, avg_quote: 0, daily: [],
+  };
   // Should never happen -- both slugs are seeded business rows every other part
   // of this file assumes exist -- but failing closed with an empty report beats
-  // a 500 or, worse, silently dropping the business_id filter above.
-  if (!bizId) {
-    return res.status(200).json({ name, from, to, days, audited: 0, pct: null, yes: 0, no: 0, flagged: 0, daily: [], questions: [] });
-  }
+  // a 500 or, worse, silently dropping the business_id filter below.
+  if (!bizId) return res.status(200).json(empty);
 
-  // handled_by alone is a free-text dropdown value, not scoped to a business --
-  // the auditor picks the line first but 'who answered' isn't cross-checked
-  // against it. Filtering on business_id too means a call mis-graded under one
-  // secretary's name on the other's line can never surface in the wrong
-  // person's performance view.
-  const { data: audits } = await db.from('call_audits')
-    .select('audit_date, handled_by, answers, flagged')
+  // Live (script-taken) calls only, exactly as callAnalytics does: Grasshopper
+  // voicemails are a different thing and would wreck the conversion rate if
+  // mixed in. The window is [from 00:00, to 24:00) in the BUSINESS timezone.
+  const since = localDayStartUTC(tz, offset - (days - 1));
+  const until = localDayStartUTC(tz, offset + 1);
+  const { data: calls, error } = await db.from('calls')
+    .select('handled_by, resolution, booking_id, quoted_total, occurred_at')
+    .eq('business_id', bizId).eq('kind', 'live')
     .eq('handled_by', name)
-    .eq('business_id', bizId)
-    .gte('audit_date', from).lte('audit_date', to);
+    .gte('occurred_at', since.toISOString())
+    .lt('occurred_at', until.toISOString());
+  if (error) throw error;
+  const rows = calls || [];
 
-  const scoreOf = (a) => {
-    const v = Object.values(a.answers || {});
-    const yes = v.filter(x => x === 'yes').length;
-    const no = v.filter(x => x === 'no').length;
-    return { yes, no };
-  };
+  const isBooked = r => !!r.booking_id || r.resolution === 'booked';
+  const dayKeyOf = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
 
-  let totalYes = 0, totalNo = 0, flaggedCount = 0;
+  let booked = 0, notBooked = 0, estimates = 0, bookedValue = 0, quotedTotal = 0, quotedCount = 0;
   const byDay = {};
-  const questions = {};
-  for (const a of (audits || [])) {
-    const s = scoreOf(a);
-    totalYes += s.yes; totalNo += s.no;
-    if (a.flagged) flaggedCount++;
-    const bucket = byDay[a.audit_date] || (byDay[a.audit_date] = { audited: 0, yes: 0, no: 0 });
-    bucket.audited++; bucket.yes += s.yes; bucket.no += s.no;
-    for (const [k, v] of Object.entries(a.answers || {})) {
-      if (v !== 'yes' && v !== 'no') continue;
-      const q = questions[k] || (questions[k] = { key: k, asked: 0, no: 0 });
-      q.asked++;
-      if (v === 'no') q.no++;
-    }
+  for (const r of rows) {
+    const b = isBooked(r);
+    if (b) { booked++; bookedValue += Number(r.quoted_total) || 0; }
+    else { notBooked++; if (r.resolution === 'estimate_sent') estimates++; }
+    if (r.quoted_total != null) { quotedTotal += Number(r.quoted_total) || 0; quotedCount++; }
+    const k = dayKeyOf(r.occurred_at);
+    const d = byDay[k] || (byDay[k] = { calls: 0, booked: 0 });
+    d.calls++; if (b) d.booked++;
   }
 
   const daily = [];
@@ -8783,24 +8780,20 @@ async function myCallPerformance(req, res, db, auth) {
     const b = byDay[d];
     daily.push({
       date: d,
-      audited: b ? b.audited : 0,
-      pct: b && (b.yes + b.no) ? Math.round(100 * b.yes / (b.yes + b.no)) : null,
+      calls: b ? b.calls : 0,
+      booked: b ? b.booked : 0,
+      conversion: b && b.calls ? Math.round((b.booked / b.calls) * 1000) / 10 : 0,
     });
   }
 
-  const questionsOut = Object.values(questions)
-    .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
-    .filter(q => q.no > 0)
-    .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked);
-
   return res.status(200).json({
     name, from, to, days,
-    audited: (audits || []).length,
-    pct: (totalYes + totalNo) ? Math.round(100 * totalYes / (totalYes + totalNo)) : null,
-    yes: totalYes, no: totalNo,
-    flagged: flaggedCount,
+    calls: rows.length,
+    booked, not_booked: notBooked, estimates,
+    conversion: rows.length ? Math.round((booked / rows.length) * 1000) / 10 : 0,
+    booked_value: Math.round(bookedValue),
+    avg_quote: quotedCount ? Math.round(quotedTotal / quotedCount) : 0,
     daily,
-    questions: questionsOut,
   });
 }
 

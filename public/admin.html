@@ -7148,10 +7148,10 @@ async function renderCallAudit(){
   view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
 }
 
-// Joey's own slice of the same audit data the owner sees on the Audit tab --
-// her score, her trend, what she gets wrong most -- with nothing about any
-// other person or business. api/admin.js myCallPerformance() enforces that
-// server-side (role must be secretary + scope doms), this just renders it.
+// Each secretary's own booking numbers -- her calls, how many became jobs, her
+// conversion rate -- with nothing about the other secretary and none of the
+// owner's cross-staff ranking. api/admin.js myCallPerformance() enforces the
+// scoping server-side off her own token; this just renders it.
 // Separate range state from _cauRange so switching one doesn't jump the other.
 // Her own picker is just 7/30 -- Today/Yesterday come from CAU_RANGES too but
 // aren't offered here; Andrew asked for those two only.
@@ -7172,60 +7172,53 @@ async function renderMyCallPerformance(){
       <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
       ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
 
-  if(!d.audited){
+  if(!d.calls){
     view.innerHTML=`<div class="wrap">
       <div class="rc-head"><div><h2 class="rc-title">📞 My Call Performance</h2>
-        <div class="rc-sub">Nothing graded yet for this range.</div></div></div>
+        <div class="rc-sub">No calls taken through the phone script in this range yet.</div></div></div>
       <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
     view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
     return;
   }
 
-  const pctColor = d.pct==null?'var(--mute)':d.pct>=85?'#15803d':d.pct>=70?'#b45309':'#b91c1c';
-  const top=Math.max(1,...(d.daily||[]).map(x=>x.audited||0));
-  const dailyRows=(d.daily||[]).filter(x=>x.audited>0).map(x=>{
+  // Same thresholds the owner's Performance table uses for its rate column, so
+  // a number that reads green to her reads green to him.
+  const convColor = d.conversion>=50?'#15803d':d.conversion>=30?'#b45309':'#b91c1c';
+  const top=Math.max(1,...(d.daily||[]).map(x=>x.calls||0));
+  const dailyRows=(d.daily||[]).filter(x=>x.calls>0).map(x=>{
     const label=x.date.slice(5).replace('-','/');
-    const w=Math.round(((x.audited||0)/top)*100);
-    const c=x.pct==null?'#60a5fa':x.pct>=85?'#15803d':x.pct>=70?'#b45309':'#b91c1c';
+    const w=Math.round(((x.calls||0)/top)*100);
+    const bw=x.calls?Math.round((x.booked/x.calls)*100):0;
     return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
       <div style="width:46px;flex-shrink:0;color:var(--mute);">${esc(label)}</div>
-      <div style="flex:1;background:var(--line2);border-radius:5px;height:14px;overflow:hidden;">
-        <div style="height:100%;width:${w}%;background:${c};"></div></div>
-      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
-        ${x.audited} call${x.audited===1?'':'s'}${x.pct!=null?' · '+x.pct+'%':''}</div>
+      <div style="flex:1;background:var(--line2);border-radius:5px;height:14px;overflow:hidden;position:relative;">
+        <div style="height:100%;width:${w}%;background:#cbd5e1;"></div>
+        <div style="position:absolute;inset:0 auto 0 0;height:100%;width:${Math.round(w*bw/100)}%;background:#15803d;"></div></div>
+      <div style="width:110px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
+        <b>${x.booked}</b>/${x.calls} · ${x.conversion}%</div>
     </div>`;
-  }).join('') || '<div class="empty">Nothing graded in this range yet.</div>';
-
-  const qRows=(d.questions||[]).slice(0,12).map(q=>{
-    const w=q.fail_rate;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
-      <div style="width:250px;flex-shrink:0;color:var(--ink-2);">${esc(AUDIT_LABELS[q.key]||q.key)}</div>
-      <div style="flex:1;background:var(--line2);border-radius:6px;height:16px;overflow:hidden;">
-        <div style="height:100%;width:${w}%;background:#ef4444;"></div></div>
-      <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
-        <b>${q.no}</b>/${q.asked} · ${q.fail_rate}%</div>
-    </div>`;
-  }).join('') || '<div class="empty">Nothing missed in this range. Keep it up.</div>';
+  }).join('') || '<div class="empty">No calls in this range yet.</div>';
 
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div>
       <h2 class="rc-title">📞 My Call Performance</h2>
-      <div class="rc-sub">How your graded calls are scoring against the phone script. ${esc(d.flagged)} of them were flagged for Andrew to listen to himself.</div>
+      <div class="rc-sub">Your calls taken through the phone script. Booked means a real booking was created from that call, not just that the script reached the end.</div>
     </div></div>
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
 
     <div class="greet-stats" style="margin-bottom:18px;">
-      ${stat('Calls graded', String(d.audited||0), 'listened to end to end')}
-      ${stat('Score', d.pct==null?'N/A':d.pct+'%', 'yes answers as a share of everything that applied', pctColor)}
-      ${stat('Things missed', String(d.no||0), 'no answers across all graded calls')}
-      ${stat('Flagged', String(d.flagged||0), 'sent to Andrew to listen to')}
+      ${stat('Calls taken', String(d.calls||0), `${d.not_booked||0} did not book`)}
+      ${stat('Booked', String(d.booked||0), `${d.estimates||0} estimate${(d.estimates||0)===1?'':'s'} sent`,'#15803d')}
+      ${stat('Conversion', (d.conversion||0)+'%', 'calls that became jobs', convColor)}
+      ${stat('Booked value', money(d.booked_value||0), `${esc(money(d.avg_quote||0))} average quote`)}
     </div>
 
     <div class="rc-count">Day by day</div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${dailyRows}</div>
-
-    <div class="rc-count">What you get wrong most</div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${qRows}</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
+    <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">
+      <span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;"></span> booked
+      &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:#cbd5e1;border-radius:2px;"></span> calls taken
+    </div>
   </div>`;
   view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
 }
