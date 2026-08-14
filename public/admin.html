@@ -1380,9 +1380,9 @@
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
-      <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> Calls <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
+      <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> <span id="navCallHubLabel">Calls</span> <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <button data-nav="mycallperf" id="navMyCallPerf"><span class="ic" data-ico="phone">📞</span> My Call Performance</button>
-      <button data-nav="gallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
+      <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
@@ -2105,6 +2105,16 @@ function enterApp(){
   if(navAnaHub) navAnaHub.style.display = ANALYTICS_TABS.some(t=>t.show()) ? '' : 'none';
   const navCallHub=document.getElementById('navCallHub');
   if(navCallHub) navCallHub.style.display = CALL_TABS.some(t=>t.show()) ? '' : 'none';
+  // Joey's Calls hub only ever holds Review Calls (Performance/Audit are
+  // owner-only, My Performance moved to its own top-level screen above), so
+  // the button should say what it actually opens for her instead of the
+  // generic "Calls" the owner sees over Performance/Audit/Review Calls.
+  const navCallHubLabel=document.getElementById('navCallHubLabel');
+  if(navCallHubLabel) navCallHubLabel.textContent = (role==='secretary'&&scope==='doms') ? 'Review Calls' : 'Calls';
+  // Photos: office/owner tool for browsing job photos across the business --
+  // not something a secretary needs day to day, and one less thing in her menu.
+  const navGallery=document.getElementById('navGallery');
+  if(navGallery) navGallery.style.display = role==='secretary' ? 'none' : '';
   // My Call Performance: Joey's own screen, in the main menu rather than
   // nested in the Calls hub -- her graded-call score and trend, never
   // Heather's grades or the owner's Audit/Performance comparison views.
