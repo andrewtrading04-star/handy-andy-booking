@@ -12443,9 +12443,9 @@ async function renderCallWiz(){
         </div>
         ${loading?cwOpNote('Working','Checking what this ticket can give.'):''}
         ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
-        ${priceCard()}
-        ${moved?answers(room>0?'a promo code':'sending the estimate','Customer agrees to price','Customer doesnt agree'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
-        ${exits()}
+        ${committed?`${priceCard()}
+        ${moved?answers(room>0?'a promo code':'sending the estimate','Customer agrees to price','Customer doesnt agree'):''}
+        ${exits()}`:cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
         ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwWireBack('recap');
