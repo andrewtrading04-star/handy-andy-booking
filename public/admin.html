@@ -12481,8 +12481,8 @@ async function renderCallWiz(){
         ${priceCard()}
         ${moved?answers(room>0?'taking cash off':'sending the estimate','Customer agrees to price','Customer doesnt agree')
                :`${cwOpNote('If they have no code','Move straight on. A missing code is not a no.')}
-                 <button type="button" class="btn ghost" id="cwNoCode">They do not have one</button>`}
-        ${cwBackBtnHtml('Back one step')}`;
+                 <button type="button" class="btn ghost" id="cwNoCode">They dont have a coupon</button>`}
+        ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
       cwWireCouponApply();
