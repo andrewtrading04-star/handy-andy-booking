@@ -12479,10 +12479,9 @@ async function renderCallWiz(){
         ${shortfall?cwAmber(`${callWiz.discCoupon.code} is a ${money(face)} code. Only ${money(spend.eff.coupon)} of it fits on this ticket.`):''}
         ${committed&&delta<=0?cwAmber('That did not change the total. The discount already on this ticket covers it.'):''}
         ${priceCard()}
-        ${moved?answers(room>0?'taking cash off':'sending the estimate')
+        ${moved?answers(room>0?'taking cash off':'sending the estimate','Customer agrees to price','Customer doesnt agree')
                :`${cwOpNote('If they have no code','Move straight on. A missing code is not a no.')}
                  <button type="button" class="btn ghost" id="cwNoCode">They do not have one</button>`}
-        ${exits()}
         ${cwBackBtnHtml('Back one step')}`;
       cwWireLadderCommon(body);
       cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
