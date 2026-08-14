@@ -11994,8 +11994,8 @@ async function renderCallWiz(){
         <div id="cwSlotSay" style="margin-top:10px;"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;">
-        <button type="button" class="btn" id="cwSchedNext" style="flex:1;display:${callWiz.selectedSlot?'':'none'};">Customer agrees to date</button>
         <button type="button" class="btn ghost" id="cwSchedSkip" style="flex:1;">Customer not ready to choose time</button>
+        <button type="button" class="btn" id="cwSchedNext" style="flex:1;display:${callWiz.selectedSlot?'':'none'};">Customer agrees to date</button>
       </div>
       ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Back':'Change what they need done')}`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
