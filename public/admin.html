@@ -11977,7 +11977,7 @@ async function renderCallWiz(){
   if(s==='schedule'){
     if(!callWiz.calMonth){ const d=new Date(); d.setDate(1); callWiz.calMonth=d; }
     if(!callWiz.availDates) callWiz.availDates=new Set();
-    body.innerHTML=`${callWizScript('What day would you prefer to schedule for?')}
+    body.innerHTML=`${callWizScript("What's a good day for you?")}
       <div id="cwCalWrap" style="width:100%;min-width:0;background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
         <div class="nb-cal-head">
           <button type="button" class="nb-cal-nav" id="cwCalPrev">‹</button>
