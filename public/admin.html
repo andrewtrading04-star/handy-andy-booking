@@ -11995,7 +11995,7 @@ async function renderCallWiz(){
       </div>
       <button type="button" class="btn" id="cwSchedNext" style="margin-top:10px;">Customer agrees to date</button>
       <button type="button" class="btn ghost sm" id="cwSchedSkip" style="margin-top:7px;">Customer not ready to choose time</button>
-      ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Add something to the job':'Change what they need done')}`;
+      ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Back':'Change what they need done')}`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     let cwCalSeq=0;
     async function loadCwCalendar(){
@@ -12431,7 +12431,7 @@ async function renderCallWiz(){
         ${loading?cwOpNote('Working','Checking what this ticket can give.'):''}
         ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
         ${priceCard()}
-        ${moved?answers(room>0?'a promo code':'sending the estimate','They agree to the new price','They don\'t approve of the price'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
+        ${moved?answers(room>0?'a promo code':'sending the estimate','Customer agrees to price','Customer doesnt agree'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
         ${exits()}
         ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
@@ -12505,7 +12505,7 @@ async function renderCallWiz(){
       ${overAsk?cwAmber(`You asked for ${money(Math.max(0,Number(manualVal)||0))}. Only ${money(room+(Number(callWiz.discManual)||0))} fits on this ticket.`):''}
       ${committed&&delta<=0?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
       ${priceCard()}
-      ${(moved||room<=0)?answers('sending the estimate','They accept the new price','They said no'):cwOpNote('Next','Put a number in, then read them the new price.')}
+      ${(moved||room<=0)?answers('sending the estimate','Customer agrees to price','Customer doesnt agree'):cwOpNote('Next','Put a number in, then read them the new price.')}
       ${exits()}
       ${cwBackBtnHtml('Back one step')}`;
     cwWireLadderCommon(body);
