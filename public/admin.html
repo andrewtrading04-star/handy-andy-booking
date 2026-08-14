@@ -11216,6 +11216,13 @@ function cwCloseTotal(){ return Math.max(0,(Number(callWiz.preDiscountTotal)||0)
 function cwCloseDisplay(){ return Math.round(cwCloseTotal()); }
 function cwCloseHasCents(){ return Math.abs(cwCloseTotal()-cwCloseDisplay())>0.004; }
 function cwMoneyCents(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
+// The five fixed slot labels are always "H:MM AM/PM – H:MM AM/PM" (see SLOTS
+// in api/_lib/availability.js) and always start on the hour, so a secretary
+// reading one out loud never needs the "– H:MM AM/PM" end half or the
+// redundant ":00" -- just "Wednesday at 11 AM", not "11:00 AM – 1:00 PM".
+function cwSlotStart(label){
+  return String(label||'').split('–')[0].trim().replace(':00 ', ' ');
+}
 // Is there a real ticket total we are allowed to quote at all? Handyman work is
 // hourly and `priced` is empty, so preDiscountTotal is just the travel fee —
 // quoting it would read a customer "$35" on a job that bills $130 or more.
@@ -12094,7 +12101,7 @@ async function renderCallWiz(){
           let day=date;
           try{ day=new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
           const fee=cwAfterHoursFeeFor(callWiz.selectedSlot.key, date);
-          say.innerHTML=callWizScript(`We have ${day} at ${callWiz.selectedSlot.label} available.`+
+          say.innerHTML=callWizScript(`We have ${day} at ${cwSlotStart(callWiz.selectedSlot.label)} available.`+
             (fee?` That is an after-hours slot, so there is an extra ${cwSpokenAmount(fee)} on it.`:'')+
             ` Does that work for you?`);
         };
@@ -12171,7 +12178,7 @@ async function renderCallWiz(){
     if(callWiz.prefDate){
       let day=callWiz.prefDate;
       try{ day=new Date(callWiz.prefDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}); }catch(_){}
-      whenTxt = callWiz.selectedSlot ? `${day} at ${callWiz.selectedSlot.label}` : day;
+      whenTxt = callWiz.selectedSlot ? `${day} at ${cwSlotStart(callWiz.selectedSlot.label)}` : day;
       context.push(['Scheduled', whenTxt]);
     }
     const preDiscount=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
