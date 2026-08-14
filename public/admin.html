@@ -12243,7 +12243,7 @@ async function renderCallWiz(){
       ${callWiz.selectedSlot
         ? `<div style="display:flex;gap:8px;margin-bottom:7px;">
             <button type="button" class="btn ghost" id="cwPushback" style="flex:1;">Customer doesnt accept price</button>
-            <button type="button" class="btn" id="cwAccepts" style="flex:1;background:#15803d;border-color:#15803d;">Customer accepts price</button>
+            <button type="button" class="btn" id="cwAccepts" style="flex:1;">Customer accepts price</button>
           </div>`
         : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet, send it over, or go back and pick one to book it now.</div>
           <button type="button" class="btn ghost" id="cwPushback" style="margin-bottom:7px;">Customer doesnt accept price</button>
@@ -12342,7 +12342,7 @@ async function renderCallWiz(){
     const answers=(nextLabel,yesLabel,noLabel)=>`${cwWaitBar()}
       <div style="display:flex;gap:8px;">
         <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
-        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;cursor:pointer;border:1px solid #15803d;background:#15803d;color:#fff;">${esc(yesLabel||'They said yes')}</button>
+        <button type="button" id="cwYes" class="btn" style="flex:1;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;">${esc(yesLabel||'They said yes')}</button>
       </div>
       ${nextLabel?`<div style="font-size:12px;color:var(--mute);text-align:center;margin-top:8px;">If no, next up is ${esc(nextLabel)}.</div>`:''}`;
 
@@ -12381,7 +12381,7 @@ async function renderCallWiz(){
           ${CW_SOURCES.map(src=>`<button type="button" class="btn ${callWiz.discSource===src?'':'ghost'} sm" style="width:auto;" data-cwsrc="${esc(src)}">${esc(src)}</button>`).join('')}
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          <button type="button" id="cwYes" style="font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They are okay with it, book it</button>
+          <button type="button" id="cwYes" class="btn" style="border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;">They are okay with it, book it</button>
           <button type="button" class="btn" id="cwGoEstimate">Send them the estimate</button>
           <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
         </div>
@@ -12406,7 +12406,7 @@ async function renderCallWiz(){
           <button type="button" class="btn ghost sm" id="cwEconRetry">Try again</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          <button type="button" id="cwYes" style="font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They are okay with it, book it</button>
+          <button type="button" id="cwYes" class="btn" style="border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;">They are okay with it, book it</button>
         </div>
         ${exits()}
         ${cwBackBtnHtml('Back')}`;
@@ -12489,8 +12489,7 @@ async function renderCallWiz(){
         ${committed&&delta<=0?cwAmber('That did not change the total. The discount already on this ticket covers it.'):''}
         ${priceCard()}
         ${moved?answers(room>0?'taking cash off':'sending the estimate','Customer agrees to price','Customer doesnt agree')
-               :`${cwOpNote('If they have no code','Move straight on. A missing code is not a no.')}
-                 <button type="button" class="btn ghost" id="cwNoCode">They dont have a coupon</button>`}
+               :`<button type="button" class="btn ghost" id="cwNoCode">They dont have a coupon</button>`}
         ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
@@ -12574,7 +12573,7 @@ async function renderCallWiz(){
         <input type="checkbox" id="cwSmsConsent" checked style="cursor:pointer;width:16px;height:16px;">
         <span>Okay to text them about this job</span>
       </label>
-      <button type="button" class="btn" id="cwBookNow" style="background:#15803d;border-color:#15803d;margin-bottom:7px;">Book it</button>
+      <button type="button" class="btn" id="cwBookNow" style="margin-bottom:7px;">Book it</button>
       <button type="button" class="btn ghost" id="cwCustBack">Back</button>`;
     const pmSel=document.getElementById('cwPayMethod');
     const syncCard=async()=>{
