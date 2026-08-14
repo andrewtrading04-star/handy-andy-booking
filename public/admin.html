@@ -12239,7 +12239,7 @@ async function renderCallWiz(){
         : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet, send it over, or go back and pick one to book it now.</div>
           <button type="button" class="btn ghost" id="cwPushback" style="margin-bottom:7px;">Customer doesnt accept price</button>
           <button type="button" class="btn ghost" id="cwRecapEstimate" style="margin-bottom:7px;">Send them the estimate instead</button>`}
-      <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← ${callWiz.selectedSlot?'Pick a different day or time':'Pick a day and time'}</button>`;
+      <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← ${callWiz.selectedSlot?'Back':'Pick a day and time'}</button>`;
     // Only rendered once a slot is chosen — there is nothing to book without one.
     { const acc=document.getElementById('cwAccepts');
       if(acc) acc.addEventListener('click', e=>{ e.currentTarget.disabled=true; cwTrack('accepted'); cwGoToBooking(); }); }
