@@ -12519,8 +12519,7 @@ async function renderCallWiz(){
       ${committed&&delta<=0?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
       ${priceCard()}
       ${(moved||room<=0)?answers('sending the estimate','Customer agrees to price','Customer doesnt agree'):cwOpNote('Next','Put a number in, then read them the new price.')}
-      ${exits()}
-      ${cwBackBtnHtml('Back one step')}`;
+      ${cwBackBtnHtml('Back')}`;
     cwWireLadderCommon(body);
     cwWireManualApply();
     cwWireLadderBack();
