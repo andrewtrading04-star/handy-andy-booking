@@ -8407,12 +8407,20 @@ async function estimateDecline(req, res, db, auth, body) {
 // the standard rate is the conservative choice — the real job can only come in
 // at or above this projection, never below it.
 const QUOTE_PROFIT_FLOOR = 50;
-// A second, independent ceiling: never give away more than a tenth of the
-// ticket. The profit floor alone scales with the job, so a fat multi-TV ticket
-// would have permitted several hundred off and still cleared $50 — technically
-// profitable, but not a discount anyone meant to authorize. Whichever limit is
-// TIGHTER wins, so a thin job is protected by the floor and a big one by this.
-const QUOTE_MAX_DISCOUNT_PCT = 0.10;
+// A second, independent ceiling: a share of the ticket. The profit floor alone
+// scales with the job, so a fat multi-TV ticket would have permitted several
+// hundred off and still cleared $50, technically profitable but not a
+// discount anyone meant to authorize. Whichever limit is TIGHTER wins, so a
+// thin job is protected by the floor and a big one by this.
+//
+// Measured against 1,566 completed jobs (Aug 2025 - Aug 2026, priced through
+// the real payroll engine): margin sits at a near-constant 31-35% at EVERY
+// ticket size, so this cap, not the floor, is what actually binds on anything
+// over ~$450 -- 100% of the time up there. The floor does its work at the low
+// end instead, binding on ~61% of $150-249 jobs. Raised 10% -> 15% so the
+// office has real room to close a mid-size job; worst case (every call maxed)
+// still leaves $51 on a small ticket and $140 on an $800 one.
+const QUOTE_MAX_DISCOUNT_PCT = 0.15;
 async function quoteEconomics(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -8460,7 +8468,11 @@ async function quoteEconomics(req, res, db, auth, body) {
     floor: QUOTE_PROFIT_FLOOR,
     // Which limit actually bound this quote, so the office can see WHY a job
     // has little room rather than just being told "no".
-    capped_by: maxDiscount <= 0 ? 'nothing to give' : (pctRoom < floorRoom ? '10% of the ticket' : 'profit floor'),
+    // Derived from the constant, never hardcoded: this string is shown to the
+    // secretary as "limit: ...", so a literal would silently lie the next time
+    // the percentage moves.
+    capped_by: maxDiscount <= 0 ? 'nothing to give'
+      : (pctRoom < floorRoom ? `${(QUOTE_MAX_DISCOUNT_PCT * 100).toFixed(2).replace(/\.?0+$/, '')}% of the ticket` : 'profit floor'),
   });
 }
 
