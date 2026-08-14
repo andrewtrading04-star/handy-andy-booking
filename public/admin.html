@@ -12317,10 +12317,10 @@ async function renderCallWiz(){
     // The two answers, plus the hold beat above them. Exactly one button on any
     // rung books the job, so the secretary is never asked to choose between two
     // controls that mean the same thing.
-    const answers=(nextLabel)=>`${cwWaitBar()}
+    const answers=(nextLabel,yesLabel,noLabel)=>`${cwWaitBar()}
       <div style="display:flex;gap:8px;">
-        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They said yes</button>
-        <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--ink-2);">They said no</button>
+        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">${esc(yesLabel||'They said yes')}</button>
+        <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
       </div>
       ${nextLabel?`<div style="font-size:12px;color:var(--mute);text-align:center;margin-top:8px;">If no, next up is ${esc(nextLabel)}.</div>`:''}`;
 
@@ -12363,7 +12363,7 @@ async function renderCallWiz(){
           <button type="button" class="btn" id="cwGoEstimate">Send them the estimate</button>
           <button type="button" class="btn ghost" id="cwGoDeclined" style="color:var(--danger,#b91c1c);">Customer says no</button>
         </div>
-        ${cwBackBtnHtml('Back to the price')}`;
+        ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwWireBack('recap');
       return;
@@ -12387,7 +12387,7 @@ async function renderCallWiz(){
           <button type="button" id="cwYes" style="font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">They are okay with it, book it</button>
         </div>
         ${exits()}
-        ${cwBackBtnHtml('Back to the price')}`;
+        ${cwBackBtnHtml('Back')}`;
       cwOn('cwEconRetry','click',()=>{
         // Uncapped on purpose. A retry cap that falls through to the no-money
         // screen would kill the whole concession script on a transient blip.
@@ -12415,9 +12415,9 @@ async function renderCallWiz(){
       const moved=committed && delta>0;
       let head;
       if(moved && !cents){
-        head=callWizScript(`Ok. Great, I will add a discount for ${callWiz.discSource}. The total is now ${spokenTotal} before tax.`, spokenTotal);
+        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total is ${spokenTotal}.`, spokenTotal);
       }else if(moved && cents){
-        head=callWizScript(`Ok. Great, I will add a discount for ${callWiz.discSource}. Read this one off the screen, it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total is this, read it off the screen since it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
       }else{
         head=callWizScript('I hear you. Let me see what I can do for you. How did you hear about us?');
       }
@@ -12431,9 +12431,9 @@ async function renderCallWiz(){
         ${loading?cwOpNote('Working','Checking what this ticket can give.'):''}
         ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
         ${priceCard()}
-        ${moved?answers(room>0?'a promo code':'sending the estimate'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
+        ${moved?answers(room>0?'a promo code':'sending the estimate','They agree to the new price','They don\'t approve of the price'):cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
         ${exits()}
-        ${cwBackBtnHtml('Back to the price')}`;
+        ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwWireBack('recap');
       return;
