@@ -10942,9 +10942,9 @@ function callWizScript(line, amt){
 // is the secretary talking through the customer's answer and stacking the next
 // discount on top before they have said a word.
 function cwWaitBar(){
-  return `<div style="background:#fff4d6;border:1.5px solid #e8c469;border-radius:10px;padding:11px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;color:#6b4c07;">
+  return `<div style="background:#fdecec;border:1.5px solid #f3c2c2;border-radius:10px;padding:11px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;color:#b91c1c;">
     <span style="flex-shrink:0;width:22px;height:22px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;" aria-hidden="true">II</span>
-    <span><b style="font-size:15px;font-weight:800;">Wait!</b> <span style="font-size:13.5px;font-weight:600;opacity:.85;">Let them speak first.</span></span>
+    <span><b style="font-size:15px;font-weight:800;">Wait!</b> <span style="font-size:13.5px;font-weight:700;">Let them speak first.</span></span>
   </div>`;
 }
 // Operator-facing guidance. NEVER spoken, and visually unmistakable from the
@@ -12332,8 +12332,8 @@ async function renderCallWiz(){
     // controls that mean the same thing.
     const answers=(nextLabel,yesLabel,noLabel)=>`${cwWaitBar()}
       <div style="display:flex;gap:8px;">
-        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid #bbe5c8;background:#eefaf1;color:#15803d;">${esc(yesLabel||'They said yes')}</button>
-        <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:800;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
+        <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
+        <button type="button" id="cwYes" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;cursor:pointer;border:1px solid #15803d;background:#15803d;color:#fff;">${esc(yesLabel||'They said yes')}</button>
       </div>
       ${nextLabel?`<div style="font-size:12px;color:var(--mute);text-align:center;margin-top:8px;">If no, next up is ${esc(nextLabel)}.</div>`:''}`;
 
