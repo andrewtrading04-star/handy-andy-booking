@@ -12237,19 +12237,21 @@ async function renderCallWiz(){
             <button type="button" class="btn ghost" id="cwPushback" style="flex:1;">Customer doesnt accept price</button>
           </div>`
         : `<div style="font-size:12.5px;color:var(--mute);text-align:center;margin-bottom:9px;">No time picked yet, send it over, or go back and pick one to book it now.</div>
-          <button type="button" class="btn ghost" id="cwPushback" style="margin-bottom:7px;">Customer doesnt accept price</button>`}
-      <button type="button" class="btn${callWiz.selectedSlot?' ghost':''}" id="cwRecapEstimate" style="margin-bottom:7px;">Send them the estimate instead</button>
+          <button type="button" class="btn ghost" id="cwPushback" style="margin-bottom:7px;">Customer doesnt accept price</button>
+          <button type="button" class="btn ghost" id="cwRecapEstimate" style="margin-bottom:7px;">Send them the estimate instead</button>`}
       <button type="button" class="btn ghost sm" id="cwRecapBack" style="margin-top:7px;">← ${callWiz.selectedSlot?'Pick a different day or time':'Pick a day and time'}</button>`;
     // Only rendered once a slot is chosen — there is nothing to book without one.
     { const acc=document.getElementById('cwAccepts');
       if(acc) acc.addEventListener('click', e=>{ e.currentTarget.disabled=true; cwTrack('accepted'); cwGoToBooking(); }); }
-    // Straight to the estimate. Wanting it in writing is not a price objection,
-    // so this no longer has to be reached by claiming the customer pushed back
-    // and walking them through a discount offer they never asked for.
-    document.getElementById('cwRecapEstimate').addEventListener('click', ()=>{
-      cwTrack('estimate_chosen',{ had_slot:!!callWiz.selectedSlot });
-      callWiz.step='estimate'; renderCallWiz();
-    });
+    // Straight to the estimate. Only rendered when there's no slot yet (nothing
+    // to book without one) -- once a time is picked, the screen is a clean
+    // accept/reject pair, and "doesn't accept" already reaches the estimate one
+    // step later via the discount ladder's own exit button.
+    { const est=document.getElementById('cwRecapEstimate');
+      if(est) est.addEventListener('click', ()=>{
+        cwTrack('estimate_chosen',{ had_slot:!!callWiz.selectedSlot });
+        callWiz.step='estimate'; renderCallWiz();
+      }); }
     document.getElementById('cwPushback').addEventListener('click', ()=>{ cwTrack('pushback'); callWiz.step='discount'; renderCallWiz(); });
     // Customers routinely accept the price and then want a different day. Before
     // this the schedule step was forward-only, so the only way to change it was
