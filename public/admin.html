@@ -12505,7 +12505,7 @@ async function renderCallWiz(){
       ${overAsk?cwAmber(`You asked for ${money(Math.max(0,Number(manualVal)||0))}. Only ${money(room+(Number(callWiz.discManual)||0))} fits on this ticket.`):''}
       ${committed&&delta<=0?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
       ${priceCard()}
-      ${(moved||room<=0)?answers('sending the estimate'):cwOpNote('Next','Put a number in, then read them the new price.')}
+      ${(moved||room<=0)?answers('sending the estimate','They accept the new price','They said no'):cwOpNote('Next','Put a number in, then read them the new price.')}
       ${exits()}
       ${cwBackBtnHtml('Back one step')}`;
     cwWireLadderCommon(body);
