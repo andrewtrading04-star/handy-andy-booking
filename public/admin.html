@@ -10971,7 +10971,7 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
     nbOptionPrices[px.dataset.o]=px.value;
     const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
     const chip=row?row.querySelector('.nb-price'):null;
-    if(chip){ const v=Math.max(0,Number(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
+    if(chip){ const v=Math.max(0,nbParsePrice(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
   }
 });
 // "Hang up" is the ONLY way a call gets an outcome. It jumps to the resolution
@@ -11672,6 +11672,8 @@ async function cwSubmitBooking(){
   if(!phone){ err.textContent='Phone number is required.'; return; }
   if(!email){ err.textContent='Email is required — the confirmation goes there.'; return; }
   if(!callWiz.prefDate || !callWiz.selectedSlot){ err.textContent='Go back and pick a date and time first.'; return; }
+  const unpriced=nbUnpricedOtherLabel();
+  if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before booking, it's currently $0.`; return; }
 
   const payMethod=val('cwPayMethod');
   const skipCard=document.getElementById('cwSkipCard') && document.getElementById('cwSkipCard').checked;
@@ -12692,6 +12694,8 @@ async function renderCallWiz(){
       const phone=document.getElementById('cwPhone').value.trim();
       const email=document.getElementById('cwEmail').value.trim();
       if(!phone && !email){ err.textContent='A phone number or an email is needed to send it — whichever they prefer.'; return; }
+      const unpriced=nbUnpricedOtherLabel();
+      if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
       // Same priced lines the booking would carry, so the estimate the customer
       // receives matches what they were quoted on the call.
@@ -13942,12 +13946,49 @@ function nbIsOtherOption(o){ return /^other$/i.test((o.label||'').trim()) || !!(
 // office has set one on an "Other" line, otherwise the catalog price. Both the
 // on-screen price and the collected line item read through here so the number
 // shown and the number charged cannot drift apart.
+// Accepts what a phone keyboard actually produces for a price -- "$125",
+// "125.50", stray spaces, or a comma some locales use as the decimal point
+// (Number("125,50") is NaN, which used to fall straight through to the
+// catalog's $0 with no error shown at all). Returns null, not 0, when nothing
+// usable was typed, so the caller can tell "typed something we can't read"
+// apart from "left it blank" and 0 apart from "invalid".
+function nbParsePrice(v){
+  if(v==null) return null;
+  let s=String(v).trim();
+  if(!s) return null;
+  s=s.replace(/[$\s]/g,'');
+  if(/^-?\d+,\d{1,2}$/.test(s)) s=s.replace(',','.');  // "125,50" -> "125.50"
+  else s=s.replace(/,/g,'');                            // "1,250" -> "1250"
+  const n=Number(s);
+  return Number.isFinite(n) ? n : null;
+}
 function nbOptPriceEff(o){
   if(o && nbIsOtherOption(o)){
-    const v=nbOptionPrices[o.id];
-    if(v!=null && v!=='' && Number.isFinite(Number(v))) return Math.max(0, Number(v));
+    const n=nbParsePrice(nbOptionPrices[o.id]);
+    if(n!=null) return Math.max(0, n);
   }
   return nbOptPrice(o);
+}
+// A selected "Other" with no usable price would otherwise ship as a silent $0
+// line -- described on the job, never charged for. Checked right before every
+// send/book path (call-script estimate, call-script booking, New Booking form,
+// New Booking's own estimate send) so the office is stopped and told exactly
+// which line needs a number, instead of finding out from a customer holding an
+// estimate that's missing a price. Returns the option's own description (or
+// "Other" if none was typed) so the error names the actual line, not just says
+// "something's wrong".
+function nbUnpricedOtherLabel(){
+  for(const g of nbOptionGroups){
+    const m=nbQty[g.id]; if(!m) continue;
+    for(const oid in m){
+      if(!(m[oid]>0)) continue;
+      const o=g.options.find(x=>x.id===oid);
+      if(o && nbIsOtherOption(o) && nbOptPriceEff(o)===0){
+        return (nbOptionNotes[oid]||'').trim() || 'Other';
+      }
+    }
+  }
+  return null;
 }
 // Handyman labor bought as an ADD-ON to a mounting job. "1 hour of Handyman
 // Labor" says nothing about what the hour is for, so the tech arrives blind
@@ -14472,7 +14513,7 @@ document.getElementById('nbSteps').addEventListener('input',e=>{
     nbOptionPrices[px.dataset.o]=px.value;
     const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
     const chip=row?row.querySelector('.nb-price'):null;
-    if(chip){ const v=Math.max(0,Number(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
+    if(chip){ const v=Math.max(0,nbParsePrice(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
     updateNbTotal();
   }
 });
@@ -14907,6 +14948,8 @@ function toggleNbUpsellPanel(){
   if(!document.getElementById('nbName').value.trim()){ err.textContent='Customer name required'; return; }
   if(!document.getElementById('nbEmail').value.trim()){ err.textContent='Customer email required'; return; }
   if(nbCollectSelections().length===0){ err.textContent='Select at least one service before sending an estimate'; return; }
+  const unpriced=nbUnpricedOtherLabel();
+  if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
   // Seed smart defaults for this job type (pre-select the hero add-ons).
   nbUpsSel={}; nbUpsCustom=[]; document.getElementById('nbUpsCustom').innerHTML='';
   nbUpsShown().forEach(c=>{ nbUpsSel[c.id]=!!c.defOn; });
@@ -15007,6 +15050,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   if(!assurion && !gds && selections.length===0){ err.textContent='Choose a service category and an option — or add a custom line item (label + price; negative price = discount) — before creating this booking.'; return; }
   const tvMountingErr=nbValidateTvMountingRequired();
   if(tvMountingErr){ err.textContent=tvMountingErr; return; }
+  const unpriced=nbUnpricedOtherLabel();
+  if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before creating this booking, it's currently $0.`; return; }
   const noCharge=nbNoChargeActive;
   // Never stack the field's value on a travel line already carried in via a
   // converted estimate's nbConvertLines (nbCarriedTravelLine()). The zip
