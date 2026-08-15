@@ -7194,7 +7194,7 @@ async function renderMyCallPerformance(){
     const label=x.date.slice(5).replace('-','/');
     const w=Math.round(((x.calls||0)/top)*100);
     const bw=x.calls?Math.round((x.booked/x.calls)*100):0;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
+    return `<div data-cdd-date="${esc(x.date)}" style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;cursor:pointer;">
       <div style="width:46px;flex-shrink:0;color:var(--mute);">${esc(label)}</div>
       <div style="flex:1;background:var(--line2);border-radius:5px;height:14px;overflow:hidden;position:relative;">
         <div style="height:100%;width:${w}%;background:#cbd5e1;"></div>
@@ -7218,7 +7218,7 @@ async function renderMyCallPerformance(){
       ${stat('Booked value', money(d.booked_value||0), `${esc(money(d.avg_quote||0))} average quote`)}
     </div>
 
-    <div class="rc-count">Day by day</div>
+    <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(click a day to see the calls)</span></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
     <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">
       <span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;"></span> booked
@@ -7226,7 +7226,62 @@ async function renderMyCallPerformance(){
     </div>
   </div>`;
   view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
+  view.querySelectorAll('[data-cdd-date]').forEach(el=>el.addEventListener('click',()=>{
+    const dateStr=el.dataset.cddDate;
+    let lbl=dateStr; try{ lbl=new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }catch(_){}
+    openCallDayDetail(dateStr,lbl,d.name);
+  }));
 }
+// Click-a-day drill-down for both Call Performance screens (owner's ranked
+// view and each secretary's own). Server-side scoping in call_day_detail is
+// what actually keeps a secretary to her own calls -- this just displays
+// whatever it returns. `person` is omitted on the owner's screen to show
+// everyone that day; my_call_performance's own screen never passes one
+// either, since the server already knows who's asking.
+const CDD_RESOLUTION_LABEL={booked:'Booked',estimate_sent:'Estimate sent',refused:'Declined',other:'Other'};
+async function openCallDayDetail(dateStr,label,person){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`<div class="sheet" style="max-width:460px;">
+    <h2 style="margin-bottom:2px;">${esc(label||dateStr)}</h2>
+    <div class="sub" style="font-size:13px;margin:-2px 0 14px;">${esc(person?`${person}'s calls that day`:'Calls that day')}</div>
+    <div id="cddBody"><div class="empty">Loading…</div></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn ghost" type="button" onclick="closeCallDayDetail()" style="flex:1;">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeCallDayDetail(); });
+  window._cddModal=modal;
+
+  try{
+    const params={ date:dateStr };
+    if(person) params.person=person;
+    if(current && current.slug) params.business=current.slug;
+    const d=await api('call_day_detail',{ params });
+    const rows=d.calls||[];
+    document.getElementById('cddBody').innerHTML = rows.length
+      ? rows.map(r=>{
+          const time=new Date(r.occurred_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+          const outcome=r.booked?'Booked':(CDD_RESOLUTION_LABEL[r.resolution]||'Not booked');
+          const color=r.booked?'#15803d':'var(--mute)';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;">
+            <div>
+              <div style="font-weight:700;">${esc(time)}${person?'':(r.handled_by?' · '+esc(r.handled_by):'')}</div>
+              ${r.service?`<div style="color:var(--mute);font-size:12px;margin-top:1px;">${esc(r.service)}</div>`:''}
+            </div>
+            <div style="text-align:right;">
+              <div style="font-weight:700;color:${color};">${esc(outcome)}</div>
+              ${r.quoted_total!=null?`<div style="color:var(--mute);font-size:12px;margin-top:1px;">${esc(money(r.quoted_total))}</div>`:''}
+            </div>
+          </div>`;
+        }).join('')
+      : '<div class="empty">No calls found for this day.</div>';
+  }catch(e){
+    document.getElementById('cddBody').innerHTML=`<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+function closeCallDayDetail(){ if(window._cddModal){ window._cddModal.remove(); window._cddModal=null; } }
 function prettyNum(n){
   const d=String(n||'').replace(/\D/g,'');
   return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : String(n||'');
@@ -7276,7 +7331,7 @@ async function renderCallAnalytics(){
     const w=Math.round((x.calls/maxDay)*100);
     const bw=x.calls?Math.round((x.booked/x.calls)*100):0;
     let lbl=x.date; try{ lbl=new Date(x.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }catch(_){}
-    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;">
+    return `<div data-cdd-date="${esc(x.date)}" data-cdd-label="${esc(lbl)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;cursor:pointer;">
       <div style="width:120px;flex-shrink:0;color:var(--ink-2);">${esc(lbl)}</div>
       <div style="flex:1;background:var(--line2);border-radius:6px;height:20px;position:relative;overflow:hidden;">
         <div style="position:absolute;inset:0 auto 0 0;width:${w}%;background:#cbd5e1;"></div>
@@ -7329,7 +7384,7 @@ async function renderCallAnalytics(){
       </table>
     </div>
 
-    <div class="rc-count">Day by day</div>
+    <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(click a day to see the calls)</span></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${dailyRows}</div>
 
     <div class="rc-count">Where calls drop off</div>
@@ -7409,6 +7464,9 @@ async function renderCallAnalytics(){
 
   view.querySelectorAll('[data-cad]').forEach(b=>b.addEventListener('click',()=>{
     _caRange=b.dataset.cad; renderCallAnalytics();
+  }));
+  view.querySelectorAll('[data-cdd-date]').forEach(el=>el.addEventListener('click',()=>{
+    openCallDayDetail(el.dataset.cddDate, el.dataset.cddLabel);
   }));
 }
 

@@ -413,6 +413,7 @@ export default async function handler(req, res) {
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
+      case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -8829,6 +8830,60 @@ async function myCallPerformance(req, res, db, auth) {
     booked_value: Math.round(bookedValue),
     avg_quote: quotedCount ? Math.round(quotedTotal / quotedCount) : 0,
     daily,
+  });
+}
+
+// Backs the click-a-day-to-see-the-calls drill-down on both Call Performance
+// screens. A secretary can only ever see her OWN calls for HER OWN business:
+// the query/body params are trusted for the date only; person and business
+// are always derived from the auth token for that role, never taken from the
+// client, so Heather can't page through Joey's calls by editing the request.
+// An owner may pass a person to filter by, or omit it to see everyone's.
+async function callDayDetail(req, res, db, auth) {
+  const dateStr = (req.query.date || (req.body && req.body.date) || '').toString();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
+
+  let bizId, tz, person = null;
+  if (auth.role === 'secretary') {
+    if (!['handy-andy', 'doms'].includes(auth.scope)) return res.status(403).json({ error: 'Not available for this login' });
+    const { data: bizRows } = await db.from('businesses').select('id, timezone').eq('slug', auth.scope).limit(1);
+    if (!bizRows || !bizRows[0]) return res.status(200).json({ date: dateStr, calls: [] });
+    bizId = bizRows[0].id;
+    tz = bizRows[0].timezone || 'America/Denver';
+    person = displayNameFor(auth.scope);
+  } else if (auth.role === 'owner') {
+    let biz; try { biz = await resolveBusiness(db, auth, req.query.business || (req.body && req.body.business)); } catch (e) { return bail(res, e); }
+    bizId = biz.id;
+    tz = biz.timezone || 'America/Denver';
+    const p = (req.query.person || (req.body && req.body.person) || '').toString();
+    if (p) person = p;
+  } else {
+    return res.status(403).json({ error: 'Not available for this login' });
+  }
+
+  const since = localDateStartUTC(tz, dateStr);
+  const until = new Date(since.getTime() + 24 * 60 * 60 * 1000);
+  let q = db.from('calls')
+    .select('id, handled_by, resolution, booking_id, quoted_total, service, occurred_at')
+    .eq('business_id', bizId).eq('kind', 'live')
+    .gte('occurred_at', since.toISOString()).lt('occurred_at', until.toISOString())
+    .order('occurred_at', { ascending: true });
+  if (person) q = q.eq('handled_by', person);
+  const { data: rows, error } = await q;
+  if (error) throw error;
+
+  const isBooked = r => !!r.booking_id || r.resolution === 'booked';
+  return res.status(200).json({
+    date: dateStr,
+    calls: (rows || []).map(r => ({
+      id: r.id,
+      handled_by: r.handled_by,
+      occurred_at: r.occurred_at,
+      service: r.service,
+      booked: isBooked(r),
+      resolution: r.resolution,
+      quoted_total: r.quoted_total,
+    })),
   });
 }
 
