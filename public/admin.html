@@ -1660,7 +1660,11 @@
 <div id="estModal" class="modal hidden">
   <div class="sheet">
     <h2>Build Estimate</h2>
-    <div class="sub" id="esCustLine" style="font-size:13px;color:var(--mute);margin:-8px 0 16px;"></div>
+    <div class="sub" id="esCustLine" style="font-size:13px;color:var(--mute);margin:-8px 0 6px;"></div>
+    <div style="display:flex;gap:6px;align-items:center;margin:0 0 16px;">
+      <input class="search" id="esEmail" type="email" placeholder="Customer email (for sending this quote)" style="margin:0;flex:1;min-width:0;">
+      <span id="esEmailNote" style="font-size:11.5px;color:var(--mute);white-space:nowrap;"></span>
+    </div>
     <input type="hidden" id="esId">
     <label class="fld">Service / Title</label>
     <input class="search" id="esService" placeholder="e.g. Drywall Repair">
@@ -8920,7 +8924,11 @@ function renderUpsellPresets(){
 function openEstimateEdit(id){
   const e=estCache[id]; if(!e) return;
   document.getElementById('esId').value=e.id;
-  document.getElementById('esCustLine').textContent=`${e.customer_name||'—'}${e.customer_email?' · '+e.customer_email:''}${e.customer_phone?' · '+e.customer_phone:''}`;
+  // Name and phone stay read-only here; the email is the one the office
+  // routinely has to correct before sending (see estimateUpdate's comment).
+  document.getElementById('esCustLine').textContent=`${e.customer_name||'—'}${e.customer_phone?' · '+e.customer_phone:''}`;
+  document.getElementById('esEmail').value=e.customer_email||'';
+  document.getElementById('esEmailNote').textContent=e.customer_email?'':'no email on file';
   document.getElementById('esService').value=e.service_label||'';
   document.getElementById('esDesc').value=e.description||'';
   document.getElementById('esNotes').value=e.notes||'';
@@ -8956,6 +8964,7 @@ document.getElementById('esSave').addEventListener('click',async()=>{
       business: current.slug, id,
       service_label: document.getElementById('esService').value.trim(),
       description: document.getElementById('esDesc').value.trim(),
+      customer_email: document.getElementById('esEmail').value.trim(),
       notes: document.getElementById('esNotes').value.trim(),
       line_items: esReadLines(),
       tax_rate: esCurrentTaxRate(),
@@ -10895,6 +10904,16 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
 document.getElementById('callWizBody').addEventListener('input', e=>{
   const note=e.target.closest('.nb-other-note');
   if(note) nbOptionNotes[note.dataset.o]=note.value;
+  // Typing a price on an "Other" line has to move the quote the secretary is
+  // about to read out. Only the price chip is repainted, never the whole card:
+  // a re-render would take focus off the box she is still typing in.
+  const px=e.target.closest('.nb-other-price');
+  if(px){
+    nbOptionPrices[px.dataset.o]=px.value;
+    const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
+    const chip=row?row.querySelector('.nb-price'):null;
+    if(chip){ const v=Math.max(0,Number(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
+  }
 });
 // "Hang up" is the ONLY way a call gets an outcome. It jumps to the resolution
 // step from wherever the secretary is, so however the conversation went, the
@@ -12699,6 +12718,7 @@ async function openNewBooking(prefill){
     qty: JSON.parse(JSON.stringify(nbQty)),
     frame: { ...nbFrameTvQty },
     notes: { ...nbOptionNotes },
+    prices: { ...nbOptionPrices },
     serviceId: nbServiceId,
   } : null;
   // The phone script's "Something else": which call this booking session came
@@ -12857,6 +12877,7 @@ async function openNewBooking(prefill){
     Object.entries(carry.qty).forEach(([k,v])=>{ nbQty[k]=v; });
     nbFrameTvQty={ ...carry.frame };
     Object.entries(carry.notes).forEach(([k,v])=>{ nbOptionNotes[k]=v; });
+    Object.entries(carry.prices||{}).forEach(([k,v])=>{ nbOptionPrices[k]=v; });
     nbServiceId=carry.serviceId;
     const catSel=document.getElementById('nbCategory');
     if(catSel) catSel.value='TV Mounting';
@@ -13846,11 +13867,29 @@ let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false, nbCustomTask
 // stamped with the real booking id, see the booking_create success handler.
 let nbLinkedCallId=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; for(const k in nbOptionPrices) delete nbOptionPrices[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
+// Price typed by hand for an "Other" add-on, keyed by option id. The catalog
+// row for "Other" is $0 on purpose -- it is a placeholder for work nobody has
+// priced yet -- so without this the office could describe the job but never
+// charge for it, which is exactly what Joey hit on a live call. Only "Other"
+// is editable: every real catalog option has a price the business set, and
+// letting those be retyped per booking would quietly break the price list.
+const nbOptionPrices={};
 // The "Other" extras option lets the admin describe a custom add-on.
 function nbIsOtherOption(o){ return /^other$/i.test((o.label||'').trim()) || !!(o.metadata && o.metadata.allow_text); }
+// What this option actually costs on THIS job: the hand-typed price when the
+// office has set one on an "Other" line, otherwise the catalog price. Both the
+// on-screen price and the collected line item read through here so the number
+// shown and the number charged cannot drift apart.
+function nbOptPriceEff(o){
+  if(o && nbIsOtherOption(o)){
+    const v=nbOptionPrices[o.id];
+    if(v!=null && v!=='' && Number.isFinite(Number(v))) return Math.max(0, Number(v));
+  }
+  return nbOptPrice(o);
+}
 // Handyman labor bought as an ADD-ON to a mounting job. "1 hour of Handyman
 // Labor" says nothing about what the hour is for, so the tech arrives blind
 // and payroll can't sanity-check the hours against the work. Same free-text
@@ -14147,7 +14186,7 @@ function nbGroupOptsHtml(g, atCap){
   const qtyMode=NB_QTY_KEYS.has(g.key);
   let html='<div class="nb-opts">';
   nbVisibleOptions(g).forEach(o=>{
-    const price=nbOptPrice(o); const priceLbl=price?'+$'+price:'$0';
+    const price=nbOptPriceEff(o); const priceLbl=price?'+$'+price:'$0';
     if(qtyMode){
       const ct=(nbQty[g.id]&&nbQty[g.id][o.id])||0;
       // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
@@ -14170,9 +14209,29 @@ function nbGroupOptsHtml(g, atCap){
       // actual work in their own words. Rendered here (not per-screen) so the
       // phone script and the booking form get the same box automatically.
       if(nbTakesNote(o) && ct>0){
-        html+=`<input type="text" class="search nb-other-note" style="margin:6px 0 2px" `+
+        // "Other" also gets a price box: it is the one option with no catalog
+        // price to fall back on, so describing it without pricing it produces a
+        // $0 line on a real job. Handyman Labor is left alone -- it bills at the
+        // hourly rate and the quantity above is the hours.
+        // Deliberately NOT type="number". #nbSteps renders inside <form
+        // id="nbForm">, which has no novalidate and submits via a real
+        // type="submit" button, so a constraint-validated field here silently
+        // blocks "Create booking" on any value it dislikes -- $112.50 against
+        // step="1", or a negative -- with no app-level error, just a native
+        // tooltip on a field that may be scrolled out of view. Every other
+        // money input in this form (nbTravelFee, nb-custom-price) avoids
+        // type="number" for exactly this reason; matching them.
+        const priceBox = nbIsOtherOption(o)
+          ? `<input class="search nb-other-price" inputmode="decimal" autocomplete="off" `+
+            `style="margin:6px 0 2px;width:110px;flex:none;" data-o="${o.id}" placeholder="Price $" `+
+            `value="${esc(nbOptionPrices[o.id]!=null?nbOptionPrices[o.id]:'')}">`
+          : '';
+        html+=`<div style="display:flex;gap:6px;align-items:center;">`+
+              `<input type="text" class="search nb-other-note" style="margin:6px 0 2px;flex:1;min-width:0;" `+
               `data-o="${o.id}" placeholder="${esc(nbNotePlaceholder(o))}" `+
-              `value="${esc(nbOptionNotes[o.id]||'')}">`;
+              `value="${esc(nbOptionNotes[o.id]||'')}">`+
+              priceBox+
+              `</div>`;
       }
     } else {
       const on=nbPickGet(g.id)===o.id;
@@ -14346,6 +14405,17 @@ document.getElementById('nbSteps').addEventListener('input',e=>{
   if(note){ nbOptionNotes[note.dataset.o]=note.value; }
   const hmNote=e.target.closest('.nb-handyman-note');
   if(hmNote){ nbHandymanNote=hmNote.value; }
+  // Same as the call script: keep the typed "Other" price in state, repaint
+  // just its price chip, and roll it into the running total. Re-rendering the
+  // step here would pull focus out of the field mid-type.
+  const px=e.target.closest('.nb-other-price');
+  if(px){
+    nbOptionPrices[px.dataset.o]=px.value;
+    const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
+    const chip=row?row.querySelector('.nb-price'):null;
+    if(chip){ const v=Math.max(0,Number(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
+    updateNbTotal();
+  }
 });
 document.getElementById('nbSteps').addEventListener('click',e=>{
   const hmBtn=e.target.closest('.nb-hm-btn');
@@ -14423,7 +14493,7 @@ function nbCollectSelections(){
       // items, so a note that stops here would never reach the job.
       const note=(nbTakesNote(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
       const baseLabel=note?`${o.label}: ${note}`:o.label;
-      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:nbOptPrice(o), quantity:ct});
+      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:nbOptPriceEff(o), quantity:ct});
     } } });
   });
   // Enforce the branch service minimum by topping up to the floor (waivable).

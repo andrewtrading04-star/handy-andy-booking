@@ -7628,7 +7628,7 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   // Confirm the estimate belongs to this business before touching it.
   const { data: existing } = await db.from('estimates')
-    .select('id, photo_path').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+    .select('id, photo_path, customer_email').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Estimate not found' });
 
   if (body.op === 'delete') {
@@ -7655,6 +7655,30 @@ async function estimateUpdate(req, res, db, auth, body) {
   if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
   if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
   if (typeof body.description === 'string') patch.description = body.description.trim();
+  // The address the quote gets emailed to. Editable because the office often
+  // has to create the estimate BEFORE the full scope is known (Joey typed a
+  // placeholder so she could add a TV dismount, then had no way to correct it
+  // before sending). estimate_send_email re-reads this column at send time, so
+  // fixing it here is genuinely enough -- there is no cached copy to miss.
+  // Validated rather than trusted: a malformed address fails silently at the
+  // provider, and the office would think the quote went out when it never did.
+  if (typeof body.customer_email === 'string') {
+    const em = body.customer_email.trim();
+    // The modal posts this field on EVERY save, prefilled from the row, so an
+    // unchanged value must never be able to fail. Nothing has ever validated
+    // this column on the way in (the public widget, estimateCreate and the
+    // legacy importer all store it raw), so addresses like "mikeb@gmail" with
+    // no TLD are already sitting in the table. Validating those on save would
+    // 400 the whole request -- losing the line items and price the office just
+    // typed -- over a field they never touched. Only a CHANGED value is
+    // checked; leaving a bad one alone is not an error.
+    if (em !== ((existing.customer_email || '').trim())) {
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        return res.status(400).json({ error: 'That does not look like a valid email address.' });
+      }
+      patch.customer_email = em || null;
+    }
+  }
   if (Array.isArray(body.line_items)) patch.line_items = sanitizeLineItems(body.line_items);
   if (Array.isArray(body.upsells)) patch.upsells = sanitizeUpsells(body.upsells);
   if (body.tax_rate !== undefined) patch.tax_rate = normalizeTaxRate(body.tax_rate);
