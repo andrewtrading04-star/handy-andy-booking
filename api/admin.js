@@ -3579,6 +3579,14 @@ async function bookingUpdate(req, res, db, auth, body) {
       {
         const existMetaResched = existing.metadata || {};
         const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMetaResched } = existMetaResched;
+        // Andrew wants a visible record on the job card when a customer's time
+        // changes, not just buried in the notes list. Stamp the time being
+        // REPLACED so the card can show "rescheduled from <old time>", only
+        // when the time is actually moving, so a reschedule that only swaps
+        // the tech doesn't paint a false history.
+        if (existing.scheduled_at && existing.scheduled_at !== patch.scheduled_at) {
+          restMetaResched.rescheduled_from = existing.scheduled_at;
+        }
         patch.metadata = restMetaResched;
       }
       break;
@@ -5756,6 +5764,9 @@ function shapeBooking(b) {
     // Who booked it: 'Admin' / 'Heather' / 'Joey' (stored at create), or null on
     // older/widget bookings (the client falls back to source for "Booking widget").
     booked_by: b.metadata?.booked_by || null,
+    // Set when a reschedule (office or customer self-service) actually moved
+    // the time. Shown as a small note under Date & time on the job card.
+    rescheduled_from: b.metadata?.rescheduled_from || null,
     // Publishable key for the "Change card" UI, by the booking's business.
     stripe_pk: bookingStripePk(b.business?.slug || null),
     scheduled_at: b.scheduled_at,
@@ -9299,7 +9310,7 @@ function rescheduleTokenBookingId(raw) {
 async function fetchBookingForReschedule(db, id) {
   const { data, error } = await db.from('bookings')
     .select(`id, business_id, status, scheduled_at, scheduled_end, duration_minutes, service_area_id, postal_code,
-             technician_id, secondary_technician_id, extra_slots,
+             technician_id, secondary_technician_id, extra_slots, metadata,
              service:services ( name ), customer:customers ( name )`)
     .eq('id', id).maybeSingle();
   if (error) throw error;
@@ -9423,6 +9434,9 @@ async function rescheduleSubmit(req, res, body) {
     scheduled_end: endUTC ? endUTC.toISOString() : null,
     technician_id,
     status: 'assigned',
+    // Same "rescheduled from" stamp the office-side reschedule writes, so the
+    // job card shows this under Date & time regardless of which path moved it.
+    metadata: { ...(b.metadata || {}), rescheduled_from: b.scheduled_at },
   }).eq('id', id);
   if (updErr) return res.status(500).json({ error: 'Could not reschedule this appointment. Please try again.' });
 

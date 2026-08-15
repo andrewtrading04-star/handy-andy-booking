@@ -3045,6 +3045,7 @@ function openBooking(b){
       <span class="bk-dl">Date &amp; time</span>
       <div class="bk-dv"><span class="lead">${esc(_startDate)}</span><br>
         <span class="dim">${esc(_startTime||'')}${_bktz.label?' · '+esc(_bktz.label):''}${b.paid_at?' · paid '+esc(fmtDateTime(b.paid_at)):''}</span></div>
+      ${b.rescheduled_from?`<div style="font-size:11.5px;color:var(--mute);margin-top:2px;">Customer rescheduled appointment from ${esc(fmtDateTimeTz(b.rescheduled_from,_bktz.tz))}</div>`:''}
     </div></div>
     <div class="bk-d" id="bkAddrRow"><div class="bk-dtile">${bkIcon('pin')}</div><div>
       <span class="bk-dl">Service address</span>
