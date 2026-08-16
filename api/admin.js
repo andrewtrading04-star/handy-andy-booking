@@ -334,6 +334,7 @@ export default async function handler(req, res) {
       case 'widget_prices_save': return await widgetPricesSave(req, res, db, auth, body);
       case 'travel_fees_list':  return await travelFeesList(req, res, db, auth);
       case 'travel_fees_save':  return await travelFeesSave(req, res, db, auth, body);
+      case 'travel_distance_preview': return await travelDistancePreview(req, res, db, auth, body);
       case 'coupons_list':      return await couponsList(req, res, db, auth);
       case 'coupons_save':      return await couponsSave(req, res, db, auth, body);
       case 'coupons_delete':    return await couponsDelete(req, res, db, auth, body);
@@ -1777,6 +1778,63 @@ async function travelFeesSave(req, res, db, auth, body) {
     .in('id', ids).eq('business_id', biz.id).select('id');
   if (error) throw error;
   return res.status(200).json({ ok: true, updated: (data || []).length });
+}
+
+// ── Travel distance preview (Other -> Travel Fees -> Check drive distances) ──
+// Real driving distance/time from the tech's home zip to every zip in a
+// service area, via Google's Distance Matrix API (same GOOGLE_MAPS_API_KEY
+// that already powers address autocomplete and the job-detail map). READ-ONLY:
+// it changes no pricing, it exists so the owner can see today's fee next to
+// the actual drive and re-tier with real numbers instead of guessing. Cost is
+// about half a cent per zip checked, so a full Houston run is under a dollar.
+async function travelDistancePreview(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+
+  const areaId = (body.area_id || '').toString();
+  const originZip = (body.origin_zip || '').toString().replace(/\D/g, '').slice(0, 5);
+  if (!areaId) return res.status(400).json({ error: 'area_id required' });
+  if (originZip.length !== 5) return res.status(400).json({ error: 'A 5-digit origin zip (where the tech lives) is required.' });
+
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return res.status(503).json({ error: 'Google Maps key is not configured.' });
+
+  const { data: zips, error: zErr } = await db.from('service_area_zips')
+    .select('postal_code, surcharge, tech_payout')
+    .eq('business_id', biz.id).eq('service_area_id', areaId).order('postal_code');
+  if (zErr) throw zErr;
+  if (!zips || !zips.length) return res.status(404).json({ error: 'No zips in that service area.' });
+
+  // Distance Matrix caps destinations at 25 per request; batch and stitch.
+  // Zips are sent as "zip, USA" strings -- for a within-metro run the state is
+  // unambiguous, and the same shortcut is how the office already thinks.
+  const out = [];
+  for (let i = 0; i < zips.length; i += 25) {
+    const batch = zips.slice(i, i + 25);
+    const u = new URL('https://maps.googleapis.com/maps/api/distancematrix/json');
+    u.searchParams.set('origins', `${originZip}, USA`);
+    u.searchParams.set('destinations', batch.map(z => `${z.postal_code}, USA`).join('|'));
+    u.searchParams.set('units', 'imperial');
+    u.searchParams.set('key', key);
+    const r = await fetch(u).then(x => x.json()).catch(e => ({ status: 'FETCH_ERROR', error_message: e.message }));
+    if (r.status !== 'OK') {
+      return res.status(502).json({ error: `Distance lookup failed: ${r.error_message || r.status}. If this says the API isn't enabled, turn on "Distance Matrix API" for this key in the Google Cloud console.` });
+    }
+    const row = (r.rows && r.rows[0] && r.rows[0].elements) || [];
+    batch.forEach((z, j) => {
+      const el = row[j] || {};
+      out.push({
+        postal_code: z.postal_code,
+        surcharge: Number(z.surcharge) || 0,
+        tech_payout: Number(z.tech_payout) || 0,
+        miles: el.status === 'OK' ? Math.round((el.distance.value / 1609.34) * 10) / 10 : null,
+        minutes: el.status === 'OK' ? Math.round(el.duration.value / 60) : null,
+      });
+    });
+  }
+  out.sort((a, b) => (a.minutes ?? 9999) - (b.minutes ?? 9999));
+  return res.status(200).json({ origin_zip: originZip, zips: out });
 }
 
 // ── Multi-TV discount (Other -> Multi-TV Discount) ──────────────────────────

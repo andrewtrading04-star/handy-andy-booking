@@ -1464,7 +1464,7 @@
 <!-- New booking modal -->
 <div id="modal" class="modal hidden">
   <div class="sheet">
-    <h2>New Booking</h2>
+    <h2 id="nbModalTitle">New Booking</h2>
     <div id="nbProgress" class="nb-progress">
       <div class="nb-progress-track"><div id="nbProgressFill" class="nb-progress-fill"></div></div>
       <div id="nbProgressLabel" class="nb-progress-label">Step 1 of 7 · ZIP code</div>
@@ -8696,10 +8696,20 @@ async function renderEstimates(){
   const filters=Object.entries({all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
-    <div class="est-filters" id="estFilters">${filters}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:2px;">
+      <div class="est-filters" id="estFilters">${filters}</div>
+      <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
+    </div>
     <div id="estWrap"><div class="empty">Loading…</div></div>
   </div>`;
   document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
+  // Same New Booking engine everything else uses to price an estimate -- this
+  // just opens it with the estimate-first intent made visible (title swaps to
+  // "New Estimate"), so a secretary isn't stuck routing through Schedule ->
+  // New Booking and remembering to click "Send estimate" instead of "Create
+  // booking". Both buttons still work either way; nothing about how an
+  // estimate actually gets priced or sent changes.
+  document.getElementById('estNewBtn').addEventListener('click', ()=>openNewBooking({ _estimateOnly:true }));
   try{
     // A sent estimate the customer hasn't approved stays right here in "Estimate
     // sent" no matter how old it gets — there's no separate "not approved" folder
@@ -12792,6 +12802,10 @@ document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpse
 async function openNewBooking(prefill){
   if(!current) return;
   closeSidebar();
+  // Reset on every open (not just when _estimateOnly is set) since this modal
+  // is reused for both jobs and estimates: without an unconditional reset,
+  // a job booked right after an estimate would still say "New Estimate".
+  { const t=document.getElementById('nbModalTitle'); if(t) t.textContent = (prefill && prefill._estimateOnly) ? 'New Estimate' : 'New Booking'; }
   // Handed over from the Take a Call script: the secretary already answered
   // every option question on the phone, against this same engine. Snapshot the
   // selections before resetNbSteps() wipes them, and put them back once the
