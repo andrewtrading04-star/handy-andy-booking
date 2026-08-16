@@ -2115,10 +2115,10 @@ function enterApp(){
   // generic "Calls" the owner sees over Performance/Audit/Review Calls.
   const navCallHubLabel=document.getElementById('navCallHubLabel');
   if(navCallHubLabel) navCallHubLabel.textContent = (role==='secretary'&&scope==='doms') ? 'Review Calls' : 'Calls';
-  // Photos: office/owner tool for browsing job photos across the business --
-  // not something a secretary needs day to day, and one less thing in her menu.
+  // Photos: hidden from both secretaries 2026-08-14, restored for Joey (Dom's)
+  // per Andrew's ask -- Heather (Handy Andy) stays hidden, unchanged.
   const navGallery=document.getElementById('navGallery');
-  if(navGallery) navGallery.style.display = role==='secretary' ? 'none' : '';
+  if(navGallery) navGallery.style.display = (role==='secretary'&&scope!=='doms') ? 'none' : '';
   // My Call Performance: each secretary's own screen, in the main menu rather
   // than nested in the Calls hub -- her own graded-call score and trend, never
   // the other secretary's grades or the owner's Audit/Performance comparison
