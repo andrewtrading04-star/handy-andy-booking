@@ -2306,6 +2306,13 @@ function navTo(s){
   }
 }
 function refreshCurrent(){
+  // Every booking create/reschedule/cancel funnels through here, and a booking
+  // changes who is free: drop the Availability grid's cache so its next paint
+  // refetches occupancy. Without this the grid kept a session-old bookedSet and
+  // showed a just-booked slot as still open (and a just-freed one as busy)
+  // until something unrelated happened to clear it. Nulling is free when the
+  // tab isn't being viewed -- the grid only fetches when actually rendered.
+  availData=null;
   document.getElementById('jobSearchWrap').style.display = section==='schedule'?'flex':'none';
   if(section==='schedule'){ renderSchedule(); renderGreeting(); }
   else if(section==='estimates') renderEstimates();
@@ -2635,6 +2642,17 @@ function renderListView(dates){
 }
 
 // ── Availability view (all techs, who's free per day/slot) ─────────────────
+// Guards a fetch that resolves after the office has already moved on. #view is
+// the one shared content container every screen paints into, and there is no
+// framework to scope a write to the screen that asked for it -- so a slow
+// availability_overview response landing after a switch to the Jobs view (or a
+// whole different section) used to stamp the availability board right over it.
+// Rare when the grid cached for the whole session; routine now that every
+// booking mutation drops the cache and refetches. The token kills superseded
+// fetches; the section/calMode re-check kills current-but-no-longer-wanted
+// ones. Same idea as _scheduleRenderSeq, kept separate on purpose: a schedule
+// repaint must not invalidate an availability fetch it itself triggered.
+let _availFetchSeq=0;
 async function renderAvailabilityGrid(dates){
   const view=document.getElementById('view');
   // Default the Availability tab to YOUR OWN business; the toggle can switch it
@@ -2642,14 +2660,17 @@ async function renderAvailabilityGrid(dates){
   if(!availViewSlug) availViewSlug=current.slug;
   if(!availData || availData.slug!==availViewSlug){
     view.innerHTML='<div class="empty">Loading…</div>';
+    const mySeq=++_availFetchSeq;
+    const gone=()=>mySeq!==_availFetchSeq || section!=='schedule' || calMode!=='availability';
     try{
       const d=await api('availability_overview',{ params:{ business: availViewSlug }});
+      if(gone()) return;
       availData={ slug:availViewSlug, slots:d.slots, days:d.days, technicians:d.technicians||[],
         businesses:d.businesses||[],
         recurringSet:new Set((d.availability||[]).map(a=>`${a.technician_id}:${a.day_of_week}:${a.slot_key}`)),
         exMap:Object.fromEntries((d.exceptions||[]).map(e=>[`${e.technician_id}:${e.date}:${e.slot_key}`, e.is_available])),
         bookedSet:new Set((d.bookings||[]).map(b=>`${b.technician_id}:${b.date}:${b.slot_key}`)) };
-    }catch(err){ view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
+    }catch(err){ if(gone()) return; view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
   }
   const techs=availData.technicians, slots=availData.slots;
   // Business toggle pills — only when there's more than one company to view. Your

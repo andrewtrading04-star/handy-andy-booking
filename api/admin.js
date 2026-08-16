@@ -1449,10 +1449,20 @@ async function availabilityOverview(req, res, db, auth) {
     // secondary_technician_id leg, a tech booked only as a helper would wrongly
     // show free here (the bug that let the same helper be stacked onto two jobs).
     const idList = ids.join(',');
+    // Bounded to yesterday-onward (one day of slack covers every US metro's
+    // offset from the business tz). This query used to have NO lower bound
+    // while sorting oldest-first with limit(2000) -- once the July 2026
+    // Zenbooker import pushed these techs past 2000 historical rows, the
+    // whole window sat in 2022-2025 and NO current booking ever occupied a
+    // chip (Kregg showed free at 11a while standing in Debbie Mulqueen's
+    // living room). The grid only renders today-forward (exceptions are
+    // already fetched today-forward), so the past contributes nothing.
+    const occSince = localDayStartUTC(tz, -1).toISOString();
     const runBk = (withSecond) => {
       let q = db.from('bookings')
-        .select((withSecond ? 'technician_id, secondary_technician_id, scheduled_at' : 'technician_id, scheduled_at') + esCol())
+        .select((withSecond ? 'technician_id, secondary_technician_id, scheduled_at, service_area_id' : 'technician_id, scheduled_at, service_area_id') + esCol())
         .neq('status', 'cancelled').not('scheduled_at', 'is', null)
+        .gte('scheduled_at', occSince)
         .order('scheduled_at', { ascending: true }).limit(2000);
       return withSecond
         ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
@@ -1464,12 +1474,26 @@ async function availabilityOverview(req, res, db, auth) {
       if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
       ({ data: bk } = await runBk(bookingLiftCols));
     }
+    // Each booking's slot is derived in ITS OWN metro's timezone, not the
+    // business's. Handy Andy spans Mountain and Central: a 5 PM Houston job
+    // read in Denver time is 4 PM, which falls in the gap between the fixed
+    // slots and mapped to NO slot at all -- so Juan's (and any Central) jobs
+    // never occupied a chip, and an 8 PM Central job landed on the 5p chip.
+    // All areas are fetched (no business filter) because the occupancy query
+    // itself is cross-company on purpose. Falls back to the business tz for
+    // bookings with no service area, same as areaTimezone() does.
+    const areaTzMap = new Map();
+    try {
+      const { data: saRows } = await db.from('service_areas').select('id, timezone');
+      for (const sa of (saRows || [])) if (sa.timezone) areaTzMap.set(sa.id, sa.timezone);
+    } catch { /* fall back to business tz below */ }
     const idSet = new Set(ids);
     const occRows = [];
     for (const b of (bk || [])) {
-      const slot_key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
+      const btz = areaTzMap.get(b.service_area_id) || tz;
+      const slot_key = slotKeyForLocalTime(localHHMM(btz, b.scheduled_at));
       if (!slot_key) continue;
-      const date = localDateStr(tz, b.scheduled_at);
+      const date = localDateStr(btz, b.scheduled_at);
       // Each slot the job holds (main + any extra) is a busy row for its tech(s).
       const keys = [slot_key, ...esOf(b)];
       for (const k of keys) {
