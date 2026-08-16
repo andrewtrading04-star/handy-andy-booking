@@ -564,11 +564,17 @@ export function computeJobPay(job, techName) {
   // travel is SPLIT between the techs (one trip, one surcharge — see below).
   let travelPayout = 0;
   for (const li of job.line_items || []) {
-    // "Service Area Surcharge" (widget) and "Travel Fee" / "Service Area Fee"
+    // "Service Area Surcharge" (widget) and "Travel" / "Service Area Fee"
     // (office New Booking) are the same thing — the tech earns the matching tier
     // ($65→$50, …) from whichever the ticket carries. Only a CHARGED line (>$0)
     // counts; a $0 travel line means the customer wasn't billed, so no payout.
-    if (Number(li.line_total) > 0 && /service area surcharge|travel fee|service.?area fee/i.test(li.name || '')) {
+    // Bare \btravel\b (rather than the old "travel fee") on purpose: the office
+    // dropped "Fee" from the label everywhere in 2026-08, but jobs booked before
+    // that still have "Travel Fee" stored on the ticket forever, so \btravel\b
+    // matches both, so payroll pays correctly on old AND new jobs without
+    // needing to know which era priced the job. A negative "Travel discount"
+    // line also contains the word but can never pass the >0 gate above it.
+    if (Number(li.line_total) > 0 && /service area surcharge|\btravel\b|service.?area fee/i.test(li.name || '')) {
       travelPayout = travelPayoutForSurcharge(li.line_total);
       break;
     }
@@ -1318,7 +1324,21 @@ function runSelfTests() {
   eq(computeJobPay(job({ line_items: [
     { name: '33"–59"', line_total: 109 },
     { name: 'Travel Fee', line_total: 50 },
-  ] }), 'Zach').pay, 100, 'off-tier $50 travel fee -> +$40 travel (60 base + 40)');
+  ] }), 'Zach').pay, 100, 'off-tier $50 travel fee (legacy "Travel Fee" label, jobs booked before 2026-08) -> +$40 travel (60 base + 40)');
+  // Same job, current bare "Travel" label (the 2026-08 rename dropped the word
+  // "Fee" everywhere it's generated) -- must pay identically to the legacy
+  // label above, or every job booked after the rename underpays its tech.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Travel', line_total: 50 },
+  ] }), 'Zach').pay, 100, 'off-tier $50, current "Travel" label -> +$40 travel (60 base + 40), same as the legacy label');
+  // A negative "Travel discount" line (some zones discount travel instead of
+  // charging it) must never be mistaken for a charged surcharge -- the >0 gate
+  // on line_total is what protects this, not the name pattern excluding it.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"–59"', line_total: 109 },
+    { name: 'Travel discount', line_total: -10 },
+  ] }), 'Zach').pay, 60, 'a negative "Travel discount" line pays $0 travel share, not a payout off its magnitude');
   eq(computeJobPay(job({ line_items: [
     { name: '33"–59"', line_total: 109 },
     { name: 'Service area surcharge', line_total: 15 },

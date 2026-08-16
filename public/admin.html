@@ -1484,7 +1484,7 @@
       <div id="nbCustomLinesWrap" style="margin-top:10px;"></div>
       <button type="button" id="nbAddCustomLine" class="seg-btn" style="margin:6px 0 0;">+ Add custom line</button>
       <div style="display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border-radius:10px;margin:10px 0 12px;padding:11px 13px;">
-        <span style="font-size:14px;font-weight:500;color:#0f1b33;white-space:nowrap;">+ Travel fee</span>
+        <span style="font-size:14px;font-weight:500;color:#0f1b33;white-space:nowrap;">+ Travel</span>
         <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="width:90px;background:transparent;border:none;color:#0f1b33;font-size:14px;outline:none;text-align:center;">
       </div>
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
@@ -11589,7 +11589,7 @@ function cwWireManualApply(){
 // and a 4-TV ticket get very different answers rather than one flat rule.
 async function cwLoadEconomics(priced, travelFee, ahFee){
   const lines=(priced||[]).map(l=>({ name:l.label, quantity:l.quantity, line_total:l.price*l.quantity }));
-  if(travelFee>0) lines.push({ name:'Travel Fee', quantity:1, line_total:travelFee, kind:'fee' });
+  if(travelFee>0) lines.push({ name:'Travel', quantity:1, line_total:travelFee, kind:'fee' });
   if(ahFee>0) lines.push({ name:'After-hours fee', quantity:1, line_total:ahFee, kind:'fee' });
   callWiz.preDiscountTotal=lines.reduce((t,l)=>t+l.line_total,0);
   // Cached so a failed projection can be retried from the card instead of
@@ -11725,7 +11725,7 @@ async function cwSubmitBooking(){
     // own separate travelFee push that the guard never covered, so a Call Wizard
     // booking from a converted estimate still double-charged the fee.
     const travelFee=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
-    if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
+    if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel':'Travel discount',price:travelFee,quantity:1});
     const ah=cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate);
     if(ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
       selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:ah,quantity:1});
@@ -12278,7 +12278,7 @@ async function renderCallWiz(){
     // pays before tax, so they belong in the number read out on the call —
     // quoting the options-only figure would under-quote every out-of-area job.
     const travelFee=Number(callWiz.surcharge)||0;
-    if(travelFee>0) items.push(['Travel fee', travelFee]);
+    if(travelFee>0) items.push(['Travel', travelFee]);
     const ahFee=callWiz.selectedSlot?cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate):0;
     if(ahFee>0) items.push(['After-hours (8 PM start)', ahFee]);
     let whenTxt='';
@@ -12733,7 +12733,7 @@ async function renderCallWiz(){
       // Same nbCarriedTravelLine() guard as cwSubmitBooking() above, a written
       // estimate must not show the fee twice either.
       const estTravel=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
-      if(estTravel!==0) sels.push({ label:estTravel>0?'Travel Fee':'Travel discount', price:estTravel, quantity:1 });
+      if(estTravel!==0) sels.push({ label:estTravel>0?'Travel':'Travel discount', price:estTravel, quantity:1 });
       const estDisc=cwDiscountApplied();
       if(estDisc>0) sels.push({ label:callWiz.discountLabel||'Discount', price:-estDisc, quantity:1 });
       try{
@@ -12990,16 +12990,17 @@ async function openNewBooking(prefill){
 // for a normal manual booking. Included in nbCollectSelections so they flow into
 // the total + the created job's line items.
 let nbConvertLines=null;
-// True when those carried lines already include a travel fee (or a travel
-// discount) — the zip handler must then never auto-fill the Travel Fee field,
-// or the fee gets charged twice. Estimate lines are free text, so this covers
-// the machine-written labels ('Travel Fee' / 'Travel discount') AND the
+// True when those carried lines already include a travel line (fee or
+// discount), so the zip handler must then never auto-fill the Travel field, or
+// the fee gets charged twice. Estimate lines are free text, so this covers
+// the machine-written labels ('Travel' / 'Travel discount', or 'Travel Fee' on
+// anything converted before the "fee" was dropped from the label) AND the
 // office's hand-typed synonyms — the same vocabulary payroll's matcher treats
 // as one thing ('Service Area Fee', 'Service area surcharge', trip fee, …).
-// Every alternative is anchored to a travel-specific two-word phrase, so an
-// ordinary service description can't match by accident.
+// The bare 'travel' alternative is still whole-word anchored, so an ordinary
+// service description can't match by accident.
 function nbCarriedTravelLine(){
-  return (nbConvertLines||[]).some(l=>/travel\s*(fee|discount|surcharge|charge)|service\s*area\s*(fee|surcharge)|trip\s*(fee|charge)/i.test(l.label||''));
+  return (nbConvertLines||[]).some(l=>/\btravel\b(\s*(fee|discount|surcharge|charge))?|service\s*area\s*(fee|surcharge)|trip\s*(fee|charge)/i.test(l.label||''));
 }
 // Show the customer's requested dates/times (from the approve page) above the
 // availability calendar when converting an estimate. Hidden for a normal booking.
@@ -14805,7 +14806,7 @@ async function sendEstimateFromBooking(upsells){
   // nbConvertLines (see nbCarriedTravelLine()), same bug class as the booking
   // submit handler below, just on the estimate-send path instead.
   const estTravel=nbCarriedTravelLine()?0:(parseFloat(document.getElementById('nbTravelFee').value)||0);
-  if(estTravel!==0) selections.push({option_id:null,label:estTravel>0?'Travel Fee':'Travel discount',price:estTravel,quantity:1});
+  if(estTravel!==0) selections.push({option_id:null,label:estTravel>0?'Travel':'Travel discount',price:estTravel,quantity:1});
 
   const withBtn=document.getElementById('nbUpsSendWith');
   const baseBtn=document.getElementById('nbUpsSendBase');
@@ -15086,7 +15087,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // A NEGATIVE travel fee (an office-entered discount) must ride onto the
   // booking too — it was shown in the displayed total but silently excluded
   // here (only >0 was pushed), so the booking saved HIGHER than the screen.
-  if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel Fee':'Travel discount',price:travelFee,quantity:1});
+  if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel':'Travel discount',price:travelFee,quantity:1});
   // After-hours fee (8 PM slot): same helper the displayed total uses, so the
   // booked price always equals what the secretary saw. Skip if a matching fee
   // line already rode in via a converted estimate's carried lines.

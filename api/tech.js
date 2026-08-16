@@ -1562,8 +1562,10 @@ function isTaxLi(li) {
 // Non-labor fees the tech must NOT edit or set a quantity on — surcharge / after-
 // hours / travel. They arrive as kind 'service' via the Zenbooker path, so match
 // by name too. Shown read-only in the Payment section, not the editable list.
+// \btravel\b (not "travel fee") so this still catches both the current bare
+// "Travel" label and "Travel Fee" on any job booked before the 2026-08 rename.
 function isFeeLi(li) {
-  return /service area surcharge|after[\s-]?hours|travel fee|service\s*minimum/i.test(((li && li.name) || '').trim());
+  return /service area surcharge|after[\s-]?hours|\btravel\b|service\s*minimum/i.test(((li && li.name) || '').trim());
 }
 // The Guaranteed Dismount up-sell — a payment/warranty concern, not a task the
 // tech edits. Match by pattern (not an exact name) so a category prefix
@@ -1803,11 +1805,12 @@ function shapeJob(b, full = false, forTech = false) {
     // Non-labor fees (surcharge / after-hours / travel), shown read-only in the
     // Payment section — the tech can't edit them or change a quantity.
     const isAnyFee = li => isFeeLi(li) || isDismountLi(li) || (((li && li.kind) === 'fee') && !isTaxLi(li) && !isCouponLi(li) && !/\btip\b/i.test((li && li.name) || ''));
-    // The travel fee / service-area surcharge is HIDDEN from the tech's Payment
+    // The travel line / service-area surcharge is HIDDEN from the tech's Payment
     // view: the owner keeps part of it, so the tech shouldn't see the
     // customer-facing amount. It still rides in the total (price) — just not
-    // itemized here. (After-hours and other fees stay visible.)
-    const isTravelFee = li => /service area surcharge|travel\s*fee/i.test((li && li.name) || '');
+    // itemized here. (After-hours and other fees stay visible.) \btravel\b
+    // matches both "Travel" (current label) and "Travel Fee" (pre-rename jobs).
+    const isTravelFee = li => /service area surcharge|\btravel\b/i.test((li && li.name) || '');
     out.fees = (b.line_items || []).filter(li => isAnyFee(li) && !(forTech && isTravelFee(li)) && (Number(li.line_total) || 0) !== 0)
       .map(li => ({ name: li.name || 'Fee', amount: Number(li.line_total) || 0 }));
     // Sum of the lines the tech CAN'T see (fees/tips/coupons/dismount). Sent so the

@@ -3294,7 +3294,7 @@ async function bookingCreate(req, res, db, auth, body) {
     const rows = selections.map(s => {
       const qty = Number(s.quantity) || 1;
       const unit = Number(s.price) || 0;
-      const kind = s.label === 'Travel Fee' ? 'addon' : 'option';
+      const kind = s.label === 'Travel' ? 'addon' : 'option';
       return {
         booking_id: bRow.id, business_id: biz.id,
         kind, name: s.label || 'Option',
