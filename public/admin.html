@@ -4351,6 +4351,12 @@ document.getElementById('custDetailModal').addEventListener('click',e=>{ if(e.ta
 // each one. New uploads default to 'new'; legacy 'private' photos fold into New.
 let galleryPhotos=[];
 let galleryGroup='new';
+// Joey (Dom's) also posts for Handy Andy, so her Gallery screen can switch to
+// a Handy Andy view -- but ONLY the To Post bucket, nothing else of theirs
+// (server enforces this too; see resolveBusinessForPhotos in api/admin.js).
+// Everyone else's gallery is always their own business.
+let galleryBizSlug=null; // null = own business (current.slug)
+function galleryIsCrossBusiness(){ return galleryBizSlug==='handy-andy'; }
 // Multi-select for bulk move/delete. Cleared on tab switch (selections don't
 // carry across categories — a photo picked in New has nothing to do with To Post).
 let gallerySelected=new Set();
@@ -4368,8 +4374,10 @@ function photoCatLabel(k){ const c=PHOTO_CATS.find(x=>x.key===k); return c?c.lab
 async function renderGallery(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  if(galleryIsCrossBusiness()) galleryGroup='to_post';   // the only bucket she's allowed to see there
   try{
-    const d=await api('photo_gallery',{ params:{ business:current.slug, limit:200 }});
+    const biz=galleryBizSlug||current.slug;
+    const d=await api('photo_gallery',{ params:{ business:biz, limit:200 }});
     galleryPhotos=d.photos||[];
     drawGallery();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
@@ -4377,7 +4385,18 @@ async function renderGallery(){
 
 function drawGallery(){
   const view=document.getElementById('view');
-  if(!galleryPhotos.length){ view.innerHTML='<div class="wrap"><div class="empty">No job photos yet. Technicians add photos to each job from their app.</div></div>'; return; }
+  const crossBiz=galleryIsCrossBusiness();
+  // Only Joey (Dom's secretary) ever sees this switch -- it's what opens the
+  // Handy Andy: To Post view in the first place.
+  const switcher=(role==='secretary'&&scope==='doms') ? `<div class="gal-tabs" style="margin-bottom:8px;">
+      <button class="gal-tab ${!crossBiz?'on':''}" data-galbiz="own">Dom's photos</button>
+      <button class="gal-tab ${crossBiz?'on':''}" data-galbiz="ha">Handy Andy: To Post</button>
+    </div>` : '';
+  if(!galleryPhotos.length){
+    view.innerHTML=`<div class="wrap">${switcher}<div class="empty">${crossBiz?'Nothing in Handy Andy’s To Post right now.':'No job photos yet. Technicians add photos to each job from their app.'}</div></div>`;
+    view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; renderGallery(); }));
+    return;
+  }
   const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=0);
   galleryPhotos.forEach(p=>{ counts[photoCat(p)]++; });
   const shown=galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
@@ -4385,12 +4404,15 @@ function drawGallery(){
   // Drop any selected id that scrolled out of the current tab (e.g. it got
   // moved by someone else / a stale selection from before a tab switch).
   [...gallerySelected].forEach(id=>{ if(!shownIds.has(id)) gallerySelected.delete(id); });
+  // Cross-business: the only move allowed is To Post -> Posted (server enforces
+  // this regardless), and deleting another company's photo isn't offered at all.
+  const moveTargets=crossBiz ? PHOTO_CATS.filter(c=>c.key==='to_post'||c.key==='posted') : PHOTO_CATS;
   const card=p=>{
     const cur=photoCat(p);
-    const opts=PHOTO_CATS.map(c=>`<option value="${c.key}" ${c.key===cur?'selected':''}>${c.label}</option>`).join('');
+    const opts=moveTargets.map(c=>`<option value="${c.key}" ${c.key===cur?'selected':''}>${c.label}</option>`).join('');
     const checked=gallerySelected.has(String(p.id));
     return `<figure class="gal-item${checked?' gal-selected':''}" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
-        <button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>
+        ${crossBiz?'':`<button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>`}
         <input type="checkbox" class="gal-check" data-pid="${esc(p.id)}" title="Select photo" ${checked?'checked':''}>
         <img src="${esc(p.url)}" loading="lazy" alt="job photo">
         <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
@@ -4402,21 +4424,23 @@ function drawGallery(){
   const selCount=gallerySelected.size;
   const bulkBar=selCount ? `<div class="gal-bulkbar">
       <span>${selCount} selected</span>
-      <select id="galBulkMove">${PHOTO_CATS.map(c=>`<option value="${c.key}">Move to ${c.label}</option>`).join('')}</select>
+      <select id="galBulkMove">${moveTargets.map(c=>`<option value="${c.key}">Move to ${c.label}</option>`).join('')}</select>
       <button type="button" class="gal-bulk-apply" id="galBulkApply">Apply</button>
-      <button type="button" class="gal-bulk-del" id="galBulkDelete">Delete selected</button>
+      ${crossBiz?'':`<button type="button" class="gal-bulk-del" id="galBulkDelete">Delete selected</button>`}
       <button type="button" class="gal-bulk-clear" id="galBulkClear">Clear</button>
     </div>` : '';
   view.innerHTML=`<div class="wrap">
+    ${switcher}
     <div class="gal-tabs">
-      ${PHOTO_CATS.map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
+      ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
     </div>
     ${bulkBar}
     ${shown.length
       ? `<div class="gallery">${shown.map(card).join('')}</div>`
       : `<div class="empty">No photos in ${esc(photoCatLabel(galleryGroup))}.</div>`}
   </div>`;
-  view.querySelectorAll('.gal-tab').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery(); }));
+  view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; gallerySelected.clear(); renderGallery(); }));
+  view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery(); }));
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
   view.querySelectorAll('.gal-check').forEach(chk=>chk.addEventListener('click',e=>{
     e.stopPropagation();
@@ -4442,7 +4466,7 @@ function drawGallery(){
     const before=prev?prev.status:'new';
     sel.disabled=true;
     try{
-      await api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:sel.dataset.bid, photo_id:sel.dataset.pid, status:to }});
+      await api('booking_photo_set_status',{ method:'POST', body:{ business:galleryBizSlug||current.slug, id:sel.dataset.bid, photo_id:sel.dataset.pid, status:to }});
       if(prev) prev.status=to;
       toast('Moved to '+photoCatLabel(to));
       drawGallery();   // photo leaves the current tab and appears under the target
@@ -4455,8 +4479,9 @@ function drawGallery(){
     const ids=[...gallerySelected];
     const targets=ids.map(id=>galleryPhotos.find(p=>String(p.id)===id)).filter(Boolean);
     const btn=document.getElementById('galBulkApply'); btn.disabled=true; btn.textContent='Moving…';
+    const bizSlug=galleryBizSlug||current.slug;
     const results=await Promise.allSettled(targets.map(p=>
-      api('booking_photo_set_status',{ method:'POST', body:{ business:current.slug, id:p.booking_id, photo_id:p.id, status:to }})
+      api('booking_photo_set_status',{ method:'POST', body:{ business:bizSlug, id:p.booking_id, photo_id:p.id, status:to }})
     ));
     const failed=results.filter(r=>r.status==='rejected').length;
     targets.forEach((p,i)=>{ if(results[i].status==='fulfilled') p.status=to; });

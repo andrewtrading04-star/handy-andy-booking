@@ -4849,17 +4849,45 @@ async function bookingNoteDelete(req, res, db, auth, body) {
   return res.status(200).json({ ok: true });
 }
 
+// Joey (Dom's secretary) also handles Handy Andy's social posting, so she
+// needs the Handy Andy "To Post" bucket specifically -- nothing else of
+// Handy Andy's. resolveBusiness() would 403 her for any slug but her own
+// scope, which is correct for everything else; this is the one deliberate,
+// narrow hole in that rule. Returns { biz, crossBusinessToPostOnly } so
+// callers can clamp what a cross-business caller is allowed to see/do.
+async function resolveBusinessForPhotos(db, auth, slug) {
+  try {
+    return { biz: await resolveBusiness(db, auth, slug), crossBusinessToPostOnly: false };
+  } catch (e) {
+    if (auth.role === 'secretary' && auth.scope === 'doms' && slug === 'handy-andy') {
+      const { data, error } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', slug).single();
+      if (error || !data) throw e;
+      return { biz: data, crossBusinessToPostOnly: true };
+    }
+    throw e;
+  }
+}
+
 // ── Photo gallery (every job photo for the business, newest first) ───────────
 async function photoGallery(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz, crossBusinessToPostOnly;
+  try { ({ biz, crossBusinessToPostOnly } = await resolveBusinessForPhotos(db, auth, req.query.business)); } catch (e) { return bail(res, e); }
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   const offset = Number(req.query.offset) || 0;
-  const sel = (withStatus) => db.from('booking_photos')
-    .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''},
+  const sel = (withStatus) => {
+    let q = db.from('booking_photos')
+      .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''},
              booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians!technician_id ( name ) )`)
-    .eq('business_id', biz.id)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+      .eq('business_id', biz.id);
+    // The cross-business hole above only ever opens the To Post bucket -- New,
+    // Posted, Records, and anything private-to-New-Booking stays invisible to
+    // her from the other company, enforced here rather than trusted from the
+    // client. Only reachable when withStatus is true (status column exists);
+    // the no-status fallback below already treats everything as 'new', which
+    // this caller must never see, so it's short-circuited to empty instead.
+    if (crossBusinessToPostOnly) q = withStatus ? q.eq('status', 'to_post') : q.eq('id', '00000000-0000-0000-0000-000000000000');
+    return q.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+  };
   // Try selecting the photo category (status). If the migration hasn't been
   // applied yet the column is missing — fall back and treat everything as
   // 'new' (the inbox) so the gallery still loads.
@@ -4888,15 +4916,23 @@ async function photoGallery(req, res, db, auth) {
 const PHOTO_CATEGORIES = ['new', 'to_post', 'posted', 'records', 'private'];
 async function bookingPhotoSetStatus(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  let biz, crossBusinessToPostOnly;
+  try { ({ biz, crossBusinessToPostOnly } = await resolveBusinessForPhotos(db, auth, body.business)); } catch (e) { return bail(res, e); }
   if (!body.photo_id) return res.status(400).json({ error: 'photo_id required' });
   const status = (body.status || '').toString();
   if (!PHOTO_CATEGORIES.includes(status)) {
     return res.status(400).json({ error: `status must be one of: ${PHOTO_CATEGORIES.join(', ')}` });
   }
-  const { data, error } = await db.from('booking_photos')
-    .update({ status })
-    .eq('id', body.photo_id).eq('business_id', biz.id)
+  // Cross-business (Joey on Handy Andy): the only move she's allowed is
+  // marking a To Post photo as Posted once she's actually posted it -- never
+  // New/Records/private, and never a photo that wasn't already in To Post
+  // (both directions checked: the target here, the current status below).
+  if (crossBusinessToPostOnly && status !== 'posted') {
+    return res.status(403).json({ error: 'Only marking a photo Posted is allowed here.' });
+  }
+  let q = db.from('booking_photos').update({ status }).eq('id', body.photo_id).eq('business_id', biz.id);
+  if (crossBusinessToPostOnly) q = q.eq('status', 'to_post');
+  const { data, error } = await q
     .select('id, status').maybeSingle();   // 0 rows -> data:null (clean 404), not a PGRST116 throw
   if (error) {
     // CHECK violation (status_check) or missing column → the category migration
