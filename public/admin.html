@@ -1385,6 +1385,7 @@
       <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="finances" id="navFinances"><span class="ic" data-ico="finances">🏦</span> Finances</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
       <button data-nav="other" id="navOther"><span class="ic" data-ico="other">⋯</span> Other <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
@@ -1798,6 +1799,38 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   if (!res.ok) { const e=new Error(data.error || 'Request failed'); if(data.code) e.code=data.code; if(data.tech_id) e.tech_id=data.tech_id; throw e; }
   return data;
 }
+// Finances hits its own serverless function (api/finance.js), not /api/admin
+// -- deliberately a separate file server-side so a bug in one of admin.js's
+// ~65 actions can never touch personal financial data (see the comment at
+// the top of api/finance.js). Same bearer token though: it's the same owner
+// login, just gated by role==='owner' at the top of that file instead of
+// per-action. Mirrors api() above almost exactly; kept as its own function
+// rather than parameterizing api()'s URL so the two can never be confused at
+// a call site.
+async function financeApi(action, { method='GET', params={}, body=null, timeoutMs=45000 } = {}) {
+  const url = new URL('/api/finance', location.origin);
+  url.searchParams.set('action', action);
+  for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw e.name === 'AbortError' ? new Error('Request timed out, check your connection and try again.') : e;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401 || res.status === 403) throw new Error('Owner only.');
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2600); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 // (xxx) xxx-xxxx for display only — never touches what's stored or dialed. A
@@ -2131,6 +2164,10 @@ function enterApp(){
   // be looking at during a shift — owner only, same as the other analytics.
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  // Finances: Andrew's own personal + business bank accounts. Owner only, no
+  // exceptions, ever -- see api/finance.js for the server-side half of this.
+  const navFin=document.getElementById('navFinances');
+  if(navFin) navFin.style.display = role==='owner' ? '' : 'none';
   // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
   // his on Dom's — same per-business login scoping the whole feature rides
   // on). Secretaries: owner only, read-only view of both.
@@ -2285,7 +2322,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2300,6 +2337,7 @@ function navTo(s){
     else if(s==='gallery') renderGallery();
     else if(s==='analyticshub') renderAnalyticsHub();
     else if(s==='payroll') renderPayroll();
+    else if(s==='finances') renderFinances();
     else if(s==='myavailability') renderMyAvailability();
     else if(s==='secretaries') renderSecretaries();
     else if(s==='other') renderOther();
@@ -5374,6 +5412,326 @@ let payrollWeek = null;
 let payrollTechFilter = null;   // null = all techs; set to a tech name to show just them
 let payrollRawData = null;      // last fetched payroll response, cached so the tech filter can re-render without a refetch
 let payrollCombinedMode = false; // true = one merged view across Handy Andy + Dom's (cross-hired techs summed into one line)
+// ── Finances (owner only) ───────────────────────────────────────────────────
+// Andrew's own personal + business bank/card accounts -- entirely separate
+// from every customer/job screen in this app. Talks to api/finance.js, a
+// different serverless function than every other screen here (see
+// financeApi() above and the comment at the top of api/finance.js for why).
+// Nav visibility is gated at enterApp() (role==='owner'), and every request
+// this screen makes is independently rejected server-side for anyone but the
+// owner even if that client-side gate were somehow bypassed.
+const FINANCE_TABS=[
+  { id:'overview',       label:'Overview',       screen:'financeoverview',       show:()=>role==='owner', render:()=>renderFinanceOverview() },
+  { id:'transactions',   label:'Transactions',   screen:'financetransactions',   show:()=>role==='owner', render:()=>renderFinanceTransactions() },
+  { id:'reconciliation', label:'Reconciliation', screen:'financereconciliation', show:()=>role==='owner', render:()=>renderFinanceReconciliation() },
+  { id:'accounts',       label:'Accounts',       screen:'financeaccounts',       show:()=>role==='owner', render:()=>renderFinanceAccounts() },
+];
+let financeHubTab='overview';
+async function renderFinances(){
+  financeHubTab = await renderHub(FINANCE_TABS, financeHubTab, id=>{ financeHubTab=id; renderFinances(); }) || financeHubTab;
+}
+const FIN_CATEGORY_LABEL={
+  income:'Income', tech_payroll:'Tech Payroll', materials:'Materials', marketing:'Marketing',
+  software:'Software', insurance:'Insurance', fuel_vehicle:'Fuel/Vehicle', tax_set_aside:'Tax Set-Aside',
+  personal_draw:'Personal Draw', fees_interest:'Fees/Interest', internal_transfer:'Internal Transfer',
+  other:'Other', uncategorized:'Uncategorized',
+};
+const FIN_CATEGORY_ORDER=Object.keys(FIN_CATEGORY_LABEL);
+let financeAccountsCache=[];
+async function financeEnsureAccounts(){
+  if(financeAccountsCache.length) return financeAccountsCache;
+  const d=await financeApi('accounts');
+  financeAccountsCache=d.accounts||[];
+  return financeAccountsCache;
+}
+
+// ---- Overview: cash on hand, monthly trend, spend by category -------------
+let _finOverviewMonths=6;
+async function renderFinanceOverview(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await financeApi('overview',{ params:{ months:_finOverviewMonths }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const accountTiles=(d.accounts||[]).map(a=>`
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;flex:1;min-width:180px;">
+      <div style="font-size:12px;color:var(--mute);font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${esc(a.name)}${a.last4?' ···'+esc(a.last4):''}</div>
+      <div style="font-size:22px;font-weight:800;margin-top:4px;${a.balance<0?'color:#b91c1c;':''}">${esc(money(a.balance))}</div>
+    </div>`).join('');
+
+  const rangeBtns=[[3,'3 months'],[6,'6 months'],[12,'12 months']].map(([n,l])=>
+    `<button type="button" class="seg-btn ${_finOverviewMonths===n?'on':''}" data-finmonths="${n}">${l}</button>`).join('');
+
+  const maxAbs=Math.max(1,...(d.monthly_trend||[]).flatMap(m=>[m.income,m.expense]));
+  const trendRows=(d.monthly_trend||[]).map(m=>{
+    let lbl=m.month; try{ lbl=new Date(m.month+'-01T12:00:00').toLocaleDateString('en-US',{month:'short',year:'2-digit'}); }catch(_){}
+    const incW=Math.round((m.income/maxAbs)*100), expW=Math.round((m.expense/maxAbs)*100);
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--line);">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--mute);margin-bottom:4px;">
+        <span style="font-weight:700;color:var(--ink);">${esc(lbl)}</span>
+        <span>Profit <b style="color:${m.profit>=0?'#15803d':'#b91c1c'};">${esc(money(m.profit))}</b></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+        <span style="width:52px;font-size:11px;color:var(--mute);">In</span>
+        <div style="flex:1;background:var(--line2);border-radius:5px;height:12px;overflow:hidden;"><div style="height:100%;width:${incW}%;background:#15803d;"></div></div>
+        <span style="width:80px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;">${esc(money(m.income))}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="width:52px;font-size:11px;color:var(--mute);">Out</span>
+        <div style="flex:1;background:var(--line2);border-radius:5px;height:12px;overflow:hidden;"><div style="height:100%;width:${expW}%;background:#b45309;"></div></div>
+        <span style="width:80px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;">${esc(money(m.expense))}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">No transactions yet in this range.</div>';
+
+  const maxCat=Math.max(1,...(d.category_breakdown||[]).map(c=>c.total));
+  const catRows=(d.category_breakdown||[]).map(c=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+      <div style="width:130px;flex-shrink:0;color:var(--ink-2);">${esc(FIN_CATEGORY_LABEL[c.category]||c.category)}</div>
+      <div style="flex:1;background:var(--line2);border-radius:5px;height:14px;overflow:hidden;"><div style="height:100%;width:${Math.round((c.total/maxCat)*100)}%;background:var(--accent);"></div></div>
+      <div style="width:90px;text-align:right;font-variant-numeric:tabular-nums;">${esc(money(c.total))}</div>
+    </div>`).join('') || '<div class="empty">Nothing spent yet.</div>';
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">🏦 Finances</h2>
+      <div class="rc-sub">Personal + business accounts. Visible to you only.</div>
+    </div></div>
+
+    <div class="rc-count">Cash on hand</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;">
+      ${accountTiles}
+      <div style="background:var(--accent);border-radius:12px;padding:14px 16px;flex:1;min-width:180px;">
+        <div style="font-size:12px;color:rgba(255,255,255,.82);font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Total cash</div>
+        <div style="font-size:22px;font-weight:800;margin-top:4px;color:#fff;">${esc(money(d.total_cash||0))}</div>
+      </div>
+    </div>
+
+    <div class="rc-count">Monthly trend <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(transfers between your own accounts excluded)</span></div>
+    <div class="est-filters" style="margin-bottom:10px;">${rangeBtns}</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${trendRows}</div>
+
+    <div class="rc-count">Where it's going</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${catRows}</div>
+  </div>`;
+  view.querySelectorAll('[data-finmonths]').forEach(b=>b.addEventListener('click',()=>{ _finOverviewMonths=+b.dataset.finmonths; renderFinanceOverview(); }));
+}
+
+// ---- Transactions: filterable ledger, editable category -------------------
+let _finTxAccount='', _finTxCategory='', _finTxQuery='';
+async function renderFinanceTransactions(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let accounts, d;
+  try{
+    accounts=await financeEnsureAccounts();
+    d=await financeApi('transactions',{ params:{ account_id:_finTxAccount, category:_finTxCategory, q:_finTxQuery }});
+  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const acctById={}; accounts.forEach(a=>acctById[a.id]=a);
+  const acctOpts=`<option value="">All accounts</option>`+accounts.map(a=>`<option value="${a.id}" ${_finTxAccount===a.id?'selected':''}>${esc(a.name)}</option>`).join('');
+  const catOpts=`<option value="">All categories</option>`+FIN_CATEGORY_ORDER.map(c=>`<option value="${c}" ${_finTxCategory===c?'selected':''}>${esc(FIN_CATEGORY_LABEL[c])}</option>`).join('');
+
+  const rows=(d.transactions||[]).map(t=>{
+    const acct=acctById[t.account_id];
+    const catOptsRow=FIN_CATEGORY_ORDER.map(c=>`<option value="${c}" ${t.category===c?'selected':''}>${esc(FIN_CATEGORY_LABEL[c])}</option>`).join('');
+    return `<tr data-txid="${esc(t.id)}">
+      <td style="padding:8px;white-space:nowrap;">${esc(t.posted_date)}</td>
+      <td style="padding:8px;color:var(--mute);">${esc(acct?acct.name:'')}</td>
+      <td style="padding:8px;max-width:320px;">${esc(t.description)}</td>
+      <td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:${t.amount<0?'#b91c1c':'#15803d'};">${esc(money(t.amount))}</td>
+      <td style="padding:8px;">
+        <select class="search fin-cat-select" data-txid="${esc(t.id)}" style="margin:0;font-size:12.5px;padding:5px 6px;${t.category_locked?'border-color:var(--accent);':''}">${catOptsRow}</select>
+      </td>
+      <td style="padding:8px;text-align:center;"><button type="button" class="btn ghost sm fin-tx-del" data-txid="${esc(t.id)}" title="Delete row" style="width:auto;padding:4px 9px;">×</button></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--mute);">No transactions match this filter.</td></tr>`;
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div><h2 class="rc-title">Transactions</h2></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+      <select class="search" id="finTxAcctFilter" style="margin:0;width:auto;min-width:170px;">${acctOpts}</select>
+      <select class="search" id="finTxCatFilter" style="margin:0;width:auto;min-width:170px;">${catOpts}</select>
+      <input class="search" id="finTxSearch" placeholder="Search description…" value="${esc(_finTxQuery)}" style="margin:0;flex:1;min-width:180px;">
+    </div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:760px;">
+        <thead><tr style="background:var(--line2);text-align:left;">
+          <th style="padding:9px 8px;">Date</th><th style="padding:9px 8px;">Account</th><th style="padding:9px 8px;">Description</th>
+          <th style="padding:9px 8px;text-align:right;">Amount</th><th style="padding:9px 8px;">Category</th><th style="padding:9px 8px;"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+
+  document.getElementById('finTxAcctFilter').addEventListener('change',e=>{ _finTxAccount=e.target.value; renderFinanceTransactions(); });
+  document.getElementById('finTxCatFilter').addEventListener('change',e=>{ _finTxCategory=e.target.value; renderFinanceTransactions(); });
+  let searchDebounce=null;
+  document.getElementById('finTxSearch').addEventListener('input',e=>{
+    clearTimeout(searchDebounce);
+    searchDebounce=setTimeout(()=>{ _finTxQuery=e.target.value; renderFinanceTransactions(); },350);
+  });
+  view.querySelectorAll('.fin-cat-select').forEach(sel=>sel.addEventListener('change',async e=>{
+    const id=sel.dataset.txid, category=sel.value;
+    sel.disabled=true;
+    try{ await financeApi('transaction_update',{ method:'POST', body:{ id, category }}); toast('Updated'); sel.style.borderColor='var(--accent)'; }
+    catch(err){ toast(err.message||'Could not update'); }
+    finally{ sel.disabled=false; }
+  }));
+  view.querySelectorAll('.fin-tx-del').forEach(btn=>btn.addEventListener('click',async()=>{
+    if(!confirm('Delete this transaction? This cannot be undone.')) return;
+    btn.disabled=true;
+    try{ await financeApi('transactions_delete',{ method:'POST', body:{ ids:[btn.dataset.txid] }}); renderFinanceTransactions(); }
+    catch(err){ btn.disabled=false; toast(err.message||'Could not delete'); }
+  }));
+}
+
+// ---- Reconciliation: bank reality vs. what payroll/Stripe say it should be -
+async function renderFinanceReconciliation(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await financeApi('reconciliation',{ params:{ weeks:8 }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const payrollRows=(d.payroll||[]).map(r=>`
+    <tr style="${r.flagged?'background:#fef2f2;':''}">
+      <td style="padding:8px;">Week of ${esc(r.week_start)}</td>
+      <td style="padding:8px;">Paid ${esc(r.pay_date)}</td>
+      <td style="padding:8px;text-align:right;">${esc(money(r.expected))}</td>
+      <td style="padding:8px;text-align:right;">${esc(money(r.actual))}</td>
+      <td style="padding:8px;text-align:right;font-weight:700;color:${r.flagged?'#b91c1c':'#15803d'};">${r.diff>0?'+':''}${esc(money(r.diff))}</td>
+    </tr>`).join('') || `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--mute);">No payroll weeks in range yet.</td></tr>`;
+
+  const incomeRows=(d.income||[]).map(r=>`
+    <tr style="${r.flagged?'background:#fef2f2;':''}">
+      <td style="padding:8px;">${esc(r.arrival_date)}</td>
+      <td style="padding:8px;text-align:right;">${esc(money(r.expected))}</td>
+      <td style="padding:8px;text-align:right;">${r.matched?esc(money(r.actual)):'None'}</td>
+      <td style="padding:8px;">${r.matched?'<span style="color:#15803d;font-weight:700;">Matched</span>':'<span style="color:#b91c1c;font-weight:700;">No matching deposit found</span>'}</td>
+    </tr>`).join('') || `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--mute);">No Stripe payouts in range (or Stripe not configured for these businesses).</td></tr>`;
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">Reconciliation</h2>
+      <div class="rc-sub">Checks the bank against what the CRM's own payroll and Stripe data say should be there. A flagged row is worth a look, not necessarily a mistake: timing near a holiday or a manual adjustment can cause a real, harmless gap.</div>
+    </div></div>
+
+    <div class="rc-count">Payroll: computed vs. actually paid out</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:600px;">
+        <thead><tr style="background:var(--line2);text-align:left;">
+          <th style="padding:9px 8px;">Week</th><th style="padding:9px 8px;">Pay date</th>
+          <th style="padding:9px 8px;text-align:right;">Expected</th><th style="padding:9px 8px;text-align:right;">Actually paid</th><th style="padding:9px 8px;text-align:right;">Difference</th>
+        </tr></thead>
+        <tbody>${payrollRows}</tbody>
+      </table>
+    </div>
+
+    <div class="rc-count">Income: Stripe payouts vs. bank deposits</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px;">
+        <thead><tr style="background:var(--line2);text-align:left;">
+          <th style="padding:9px 8px;">Stripe payout date</th><th style="padding:9px 8px;text-align:right;">Expected</th>
+          <th style="padding:9px 8px;text-align:right;">Actual deposit</th><th style="padding:9px 8px;">Status</th>
+        </tr></thead>
+        <tbody>${incomeRows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ---- Accounts: the 4 accounts + statement upload (preview, then commit) ---
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>resolve(String(r.result).split(',')[1]||'');
+    r.onerror=()=>reject(new Error('Could not read that file'));
+    r.readAsDataURL(file);
+  });
+}
+async function renderFinanceAccounts(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let accounts;
+  try{ financeAccountsCache=[]; accounts=await financeEnsureAccounts(); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const cards=accounts.map(a=>`
+    <div class="card" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div><div style="font-weight:700;">${esc(a.name)}</div><div style="font-size:12px;color:var(--mute);">${esc(a.account_type)}${a.last4?' · ···'+esc(a.last4):''}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="text" class="search fin-upload-label" data-acct="${a.id}" placeholder="Label, e.g. JUL_2026" style="margin:0;width:160px;">
+        <label class="btn ghost sm" style="width:auto;cursor:pointer;">
+          Choose statement PDF
+          <input type="file" accept="application/pdf" class="fin-upload-input" data-acct="${a.id}" style="display:none;">
+        </label>
+        <span class="fin-upload-filename" data-acct="${a.id}" style="font-size:12.5px;color:var(--mute);"></span>
+      </div>
+      <div class="fin-upload-preview" data-acct="${a.id}" style="margin-top:12px;"></div>
+    </div>`).join('');
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">Accounts</h2>
+      <div class="rc-sub">Upload a statement PDF for any account. You'll see exactly what it parsed before anything is saved.</div>
+    </div></div>
+    ${cards}
+  </div>`;
+
+  view.querySelectorAll('.fin-upload-input').forEach(inp=>inp.addEventListener('change',async e=>{
+    const acctId=inp.dataset.acct;
+    const file=inp.files && inp.files[0];
+    if(!file) return;
+    view.querySelector(`.fin-upload-filename[data-acct="${acctId}"]`).textContent=file.name;
+    const previewEl=view.querySelector(`.fin-upload-preview[data-acct="${acctId}"]`);
+    previewEl.innerHTML='<div class="empty">Reading statement…</div>';
+    try{
+      const base64=await fileToBase64(file);
+      const labelInput=view.querySelector(`.fin-upload-label[data-acct="${acctId}"]`);
+      const source_label=labelInput.value.trim();
+      const d=await financeApi('statement_preview',{ method:'POST', body:{ account_id:acctId, file_base64:base64 }});
+      renderFinanceUploadPreview(previewEl, acctId, source_label, d);
+    }catch(err){ previewEl.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+  }));
+}
+function renderFinanceUploadPreview(el, acctId, sourceLabel, d){
+  if(d.warning){ el.innerHTML=`<div class="empty">${esc(d.warning)}</div>`; return; }
+  const rows=(d.rows||[]).map((r,i)=>`
+    <tr style="${r.already_imported?'opacity:.45;':''}">
+      <td style="padding:6px 8px;white-space:nowrap;">${esc(r.date)}</td>
+      <td style="padding:6px 8px;">${esc(r.description)}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:${r.amount<0?'#b91c1c':'#15803d'};">${esc(money(r.amount))}</td>
+      <td style="padding:6px 8px;color:var(--mute);">${esc(FIN_CATEGORY_LABEL[r.category]||r.category)}</td>
+      <td style="padding:6px 8px;font-size:11.5px;color:var(--mute);">${r.already_imported?'Already imported':''}</td>
+    </tr>`).join('');
+  el.innerHTML=`
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:6px;">${d.new_count} new, ${d.duplicate_count} already imported (will be skipped).</div>
+    <div style="overflow-x:auto;max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:10px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:480px;">
+        <thead><tr style="background:var(--line2);text-align:left;position:sticky;top:0;">
+          <th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Description</th>
+          <th style="padding:6px 8px;text-align:right;">Amount</th><th style="padding:6px 8px;">Category</th><th style="padding:6px 8px;"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <button type="button" class="btn sm fin-upload-commit" style="width:auto;" ${d.new_count?'':'disabled'}>Import ${d.new_count} transaction${d.new_count===1?'':'s'}</button>`;
+  const commitBtn=el.querySelector('.fin-upload-commit');
+  commitBtn?.addEventListener('click',async()=>{
+    commitBtn.disabled=true; commitBtn.textContent='Importing…';
+    try{
+      const r=await financeApi('statement_commit',{ method:'POST', body:{ account_id:acctId, source_label:sourceLabel, rows:d.rows }});
+      toast(`Imported ${r.inserted} transaction${r.inserted===1?'':'s'}`);
+      el.innerHTML=`<div style="color:#15803d;font-size:13px;">✓ Imported ${r.inserted} transaction${r.inserted===1?'':'s'}.</div>`;
+    }catch(err){ commitBtn.disabled=false; commitBtn.textContent=`Import ${d.new_count} transaction${d.new_count===1?'':'s'}`; toast(err.message||'Could not import'); }
+  });
+}
+
 async function renderPayroll(){
   const view=document.getElementById('view');
   if(!payrollWeek) payrollWeek = sundayOf(todayStr());

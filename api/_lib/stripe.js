@@ -235,6 +235,44 @@ export async function upcomingPayoutBySlug(slugs) {
   return out;
 }
 
+// Actual historical payouts (real amount + arrival date, not a projection) for
+// one business's Stripe account, in a date range. Used by the Finances
+// reconciliation to compare against what actually deposited into Business
+// Savings -- unlike upcomingPayoutBySlug() above (a forward-looking estimate
+// off the current balance), this reads Stripe's own payout OBJECTS, which
+// only exist once Stripe has actually initiated the transfer. Amounts are
+// cents in Stripe; returned in whole dollars. Best-effort: a missing key or a
+// Stripe error yields an empty list rather than throwing, same convention as
+// upcomingPayoutBySlug.
+export async function listPayouts(slug, { sinceUnix, untilUnix } = {}) {
+  const key = businessSecretKey({ slug });
+  if (!key) return [];
+  const out = [];
+  let startingAfter = null;
+  try {
+    for (let page = 0; page < 20; page++) {   // hard cap: never loop forever on a Stripe paging bug
+      const params = new URLSearchParams({ limit: '100' });
+      if (sinceUnix) params.set('arrival_date[gte]', String(sinceUnix));
+      if (untilUnix) params.set('arrival_date[lte]', String(untilUnix));
+      if (startingAfter) params.set('starting_after', startingAfter);
+      const res = await stripe(`/payouts?${params.toString()}`, { method: 'GET', slug });
+      for (const p of (res.data || [])) {
+        out.push({
+          id: p.id,
+          amount: Math.round(Number(p.amount)) / 100,
+          arrival_date: new Date(p.arrival_date * 1000).toISOString().slice(0, 10),
+          status: p.status,
+        });
+      }
+      if (!res.has_more || !res.data || !res.data.length) break;
+      startingAfter = res.data[res.data.length - 1].id;
+    }
+  } catch (e) {
+    console.warn('[stripe payouts] listPayouts failed:', slug, e.message);
+  }
+  return out;
+}
+
 // Reconciliation guard — find a charge for this booking that ALREADY LANDED on
 // Stripe but was never recorded in the CRM. The one way that happens: a charge
 // request times out CLIENT-side (the 15s abort above) while Stripe completes
