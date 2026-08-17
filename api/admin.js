@@ -7758,7 +7758,7 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   // Confirm the estimate belongs to this business before touching it.
   const { data: existing } = await db.from('estimates')
-    .select('id, photo_path, customer_email').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+    .select('id, photo_path, customer_email, approved_at').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Estimate not found' });
 
   if (body.op === 'delete') {
@@ -7780,6 +7780,13 @@ async function estimateUpdate(req, res, db, auth, body) {
     if (body.status === 'contacted') {
       patch.contacted_at = new Date().toISOString();
       patch.contacted_by = auth.name || adminAuthorName(auth);
+    }
+    // Same real-world event as estimate_approve's own approved_at stamp (a
+    // phone approval converted via "Convert to job" or a secretary manually
+    // picking "Estimate approved" from the dropdown) -- don't overwrite an
+    // approval that already happened through the customer's own approve link.
+    if (body.status === 'scheduled' && !existing.approved_at) {
+      patch.approved_at = new Date().toISOString();
     }
   }
   if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
@@ -10243,7 +10250,7 @@ async function estimateApprove(req, res, body) {
     customer_name: custName || est.customer_name, customer_phone: custPhone || est.customer_phone,
     customer_address: line1, customer_city: city, customer_state: stateAbbr, customer_zip: zip,
     stripe_customer_id: card.customerId, card_brand: card.brand, card_last4: card.last4,
-    preferred_slots: [chosenSlot], status: 'archived',
+    preferred_slots: [chosenSlot], status: 'scheduled',
   };
   // Strip columns the schema doesn't have yet (0048 not applied) and retry, so an
   // approval is always recorded even if only approved_at exists.

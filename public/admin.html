@@ -15606,11 +15606,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
     try{
       const resp=await apiConfirmUnavailable('booking_create', nbBody);
       nbKeyCache.delete(fp);
-      // Converted from an estimate? Archive it now that the job exists, so it leaves
-      // the estimates list. Best-effort — the booking is already created either way.
+      // Converted from an estimate? Mark it approved now that the job exists, so
+      // it shows under the Estimate approved tab instead of just disappearing.
+      // Best-effort: the booking is already created either way.
       if(nbSourceEstimateId){
         const _eid=nbSourceEstimateId; nbSourceEstimateId=null;
-        api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'archived' }}).catch(()=>{});
+        api('estimate_update',{ method:'POST', body:{ business:current.slug, id:_eid, status:'scheduled' }}).catch(()=>{});
       }
       // Opened via "Something else" on the phone script: that call was already
       // marked resolved:'other' the moment it handed off here (so the next
