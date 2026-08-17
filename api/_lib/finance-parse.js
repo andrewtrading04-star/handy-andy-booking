@@ -27,7 +27,31 @@ import { createHash } from 'crypto';
 // ---------------------------------------------------------------------------
 export function financeImportHash(row) {
   const key = `${row.date}|${row.amount.toFixed(2)}|${(row.description || '').trim().toLowerCase()}`;
-  return createHash('sha256').update(key).digest('hex');
+  return createHash('sha256').update(row.dupIndex ? `${key}|dup${row.dupIndex}` : key).digest('hex');
+}
+
+// Two genuinely different transactions can share the exact same date, amount,
+// and description -- real example: two separate same-day $200 transfers with
+// an identical bank-generated description. Hashing them identically makes the
+// second one collide with, and get silently dropped by the DB as a
+// "duplicate" of, the first -- a real transaction vanishing with no error and
+// no trace, indistinguishable in the UI from a genuine repeat upload being
+// correctly skipped. This tags every row after the first occurrence of a
+// repeated key with its occurrence number so each gets its own hash. The
+// first occurrence's hash is left untouched (dupIndex is only added past 1),
+// so this doesn't invalidate any hash already stored before this fix existed.
+// Row order from parseBankStatementText/parseCreditCardStatementText is
+// deterministic, so re-parsing the identical statement reproduces the same
+// occurrence sequence and re-uploading it still correctly recognizes and
+// skips every one of these rows, not just the first.
+export function withDupIndex(rows) {
+  const seen = new Map();
+  return rows.map(r => {
+    const key = `${r.date}|${Number(r.amount).toFixed(2)}|${(r.description || '').trim().toLowerCase()}`;
+    const count = (seen.get(key) || 0) + 1;
+    seen.set(key, count);
+    return count > 1 ? { ...r, dupIndex: count } : r;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +159,13 @@ const CATEGORY_RULES = [
   // Income: anything landing as a deposit that names Stripe (the only inbound
   // revenue channel both businesses use) or an explicit payout/deposit label.
   { category: 'income', test: (d, amt) => amt > 0 && /stripe|payout|deposit.*(handy|doms|dom's)|merchant.*deposit/i.test(d) },
-  { category: 'tech_payroll', test: (d) => /payroll|direct dep.*(tech|kregg|steve|zach|juan|heather|joey)|zelle.*(tech|kregg|steve|zach|juan)/i.test(d) },
+  // Gusto (the payroll processor) never names the tech in its ACH batch
+  // description -- "GUSTO CND 079763 ... HANDY ANDY TV MOUNTING 6semk77b68s"
+  // is a real wage payment with nothing else to match on. Its own processing
+  // fee line ("GUSTO FEE ...") is a software cost, not a wage, so it's split
+  // out first.
+  { category: 'software', test: (d) => /gusto\s*fee/i.test(d) },
+  { category: 'tech_payroll', test: (d) => /payroll|gusto|direct dep.*(tech|kregg|steve|zach|juan|heather|joey)|zelle.*(tech|kregg|steve|zach|juan)/i.test(d) },
   { category: 'materials', test: (d) => /home depot|lowe'?s|ace hardware|menards|bracket|hardware store/i.test(d) },
   { category: 'fuel_vehicle', test: (d) => /shell|chevron|exxon|mobil|conoco|texaco|circle k|fuel|gas station|auto ?zone|discount tire|jiffy lube|valvoline/i.test(d) },
   { category: 'marketing', test: (d) => /google ads|facebook ads|meta ads|adwords|yelp ads|angi|thumbtack|nextdoor ads|landingsite/i.test(d) },

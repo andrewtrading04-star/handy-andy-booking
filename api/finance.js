@@ -25,7 +25,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { listPayouts } from './_lib/stripe.js';
 import {
-  financeImportHash, parseBankStatementText, parseCreditCardStatementText,
+  financeImportHash, withDupIndex, parseBankStatementText, parseCreditCardStatementText,
   categorizeRow, detectTransfers,
 } from './_lib/finance-parse.js';
 
@@ -159,8 +159,11 @@ async function statementPreview(req, res, db, body) {
   }
 
   // Flag which rows already exist (would be skipped on commit) so the
-  // preview honestly shows what will actually change.
-  const hashes = rows.map(r => financeImportHash(r));
+  // preview honestly shows what will actually change. withDupIndex must be
+  // applied here as well as in statementCommit, in the same row order --
+  // otherwise a same-day/same-amount/same-description repeat would show as
+  // "new" for both rows in the preview, then commit would silently drop one.
+  const hashes = withDupIndex(rows).map(r => financeImportHash(r));
   const { data: existing } = await db.from('finance_transactions')
     .select('import_hash').eq('account_id', body.account_id).in('import_hash', hashes);
   const existingSet = new Set((existing || []).map(r => r.import_hash));
@@ -179,7 +182,7 @@ async function statementCommit(req, res, db, body) {
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (!rows.length) return res.status(400).json({ error: 'rows required' });
 
-  const inserts = rows.map(r => {
+  const inserts = withDupIndex(rows).map(r => {
     const amount = Number(r.amount);
     return {
       account_id: body.account_id,
@@ -188,7 +191,7 @@ async function statementCommit(req, res, db, body) {
       amount,
       category: CATEGORIES.includes(r.category) ? r.category : categorizeRow({ description: r.description, amount }),
       source_label: (body.source_label || '').toString().slice(0, 40) || null,
-      import_hash: financeImportHash({ date: r.date, description: r.description, amount }),
+      import_hash: financeImportHash({ date: r.date, description: r.description, amount, dupIndex: r.dupIndex }),
     };
   });
 
