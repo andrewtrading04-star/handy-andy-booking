@@ -291,7 +291,7 @@
         <input type="text" id="fCallerName" placeholder="Caller's name, if the recording gives one" style="flex:1;min-width:170px;">
         <input type="text" id="fCallerZip" placeholder="Zip" style="width:90px;" maxlength="10">
       </div>
-      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it. Zip is whatever the caller gives for the job address, leave it blank if it never comes up.</p>
+      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it. Zip fills in by itself when the linked call became a booking; otherwise leave it blank unless the caller says one.</p>
 
       <div id="score"></div>
 
@@ -799,6 +799,10 @@ $('fCall').onchange=()=>{
     if(c.occurred_at) $('fTime').value=new Date(c.occurred_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/Chicago'});
     if(c.service) $('fSvc').value = c.service==='Handyman' ? 'Handyman' : 'TV Mounting';
     if(c.caller_phone && !$('fCallerPhone').value) $('fCallerPhone').value=c.caller_phone;
+    // The job's zip, from the booking this call turned into. She can't hear a
+    // zip the caller never states, but a booked call always collected the
+    // address, so the system fills it in for her.
+    if(c.zip && !$('fCallerZip').value) $('fCallerZip').value=c.zip;
   }
   renderCtx();
 };

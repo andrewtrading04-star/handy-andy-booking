@@ -126,11 +126,23 @@ async function day(req, res, db, auth) {
   const end = localDateStartUTC(tz, addDaysStr(date, 1));
 
   const { data: callRows } = await db.from('calls')
-    .select('id, business_id, occurred_at, handled_by, service, market, resolution, quoted_total, discount_amount, discount_detail, tv_count, reached_step, ended_at, caller_phone')
+    .select('id, business_id, booking_id, occurred_at, handled_by, service, market, resolution, quoted_total, discount_amount, discount_detail, tv_count, reached_step, ended_at, caller_phone')
     .eq('kind', 'live')
     .gte('occurred_at', start.toISOString())
     .lt('occurred_at', end.toISOString())
     .order('occurred_at', { ascending: true });
+
+  // The job's zip, when the call became a booking. Jiyah can't type a zip the
+  // recording never states, but the secretary DID collect the address on any
+  // call that booked, so the system knows it. Only postal_code is read from
+  // bookings, nothing else: the zip is something the customer said out loud
+  // on the very recording she is grading, same trust level as caller_phone.
+  const zipByBooking = {};
+  const bookingIds = [...new Set((callRows || []).map(c => c.booking_id).filter(Boolean))];
+  if (bookingIds.length) {
+    const { data: bk } = await db.from('bookings').select('id, postal_code').in('id', bookingIds);
+    for (const b of (bk || [])) if (b.postal_code) zipByBooking[b.id] = String(b.postal_code).slice(0, 5);
+  }
 
   const slugById = {};
   for (const b of (bizRows || [])) slugById[b.id] = b.slug;
@@ -139,6 +151,7 @@ async function day(req, res, db, auth) {
     business: slugById[c.business_id] || null,
     occurred_at: c.occurred_at,
     caller_phone: c.caller_phone || null,
+    zip: zipByBooking[c.booking_id] || null,
     handled_by: c.handled_by,
     service: c.service,
     market: c.market,
@@ -196,6 +209,24 @@ async function week(req, res, db, auth) {
   for (const a of (auditRows || [])) {
     const b = byDay[a.audit_date];
     if (b) { b.graded += 1; if (a.flagged) b.flagged += 1; }
+  }
+
+  // Zip fallback for the log table: an audit with no typed zip but a linked
+  // scripted call that became a booking gets the booking's zip, display-only,
+  // never written back to the row. Same postal_code-only read as day().
+  const needZip = (auditRows || []).filter(a => !a.caller_zip && a.call_id);
+  if (needZip.length) {
+    const callIds = [...new Set(needZip.map(a => a.call_id))];
+    const { data: cr } = await db.from('calls').select('id, booking_id').in('id', callIds);
+    const bookingIds = [...new Set((cr || []).map(c => c.booking_id).filter(Boolean))];
+    if (bookingIds.length) {
+      const { data: bk } = await db.from('bookings').select('id, postal_code').in('id', bookingIds);
+      const zipByBooking = {};
+      for (const b of (bk || [])) if (b.postal_code) zipByBooking[b.id] = String(b.postal_code).slice(0, 5);
+      const zipByCall = {};
+      for (const c of (cr || [])) if (zipByBooking[c.booking_id]) zipByCall[c.id] = zipByBooking[c.booking_id];
+      for (const a of needZip) if (zipByCall[a.call_id]) a.caller_zip = zipByCall[a.call_id];
+    }
   }
 
   return res.status(200).json({
