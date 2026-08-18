@@ -3,6 +3,7 @@
 //
 //   POST login      { password }                   -> { token, name }
 //   GET  day        ?date=YYYY-MM-DD               -> lines, counts, scripted calls, saved audits
+//   GET  week       ?date=YYYY-MM-DD               -> Mon-Sun dashboard data for the week containing that date
 //   POST day_save   { date, counts:{number:n} }    -> per-line call counts for the day
 //   POST audit_save { ...one call audit... }       -> upsert one graded call
 //
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
     const db = serviceClient();
     switch (action) {
       case 'day':          return await day(req, res, db, auth);
+      case 'week':         return await week(req, res, db, auth);
       case 'day_save':     return await daySave(req, res, db, auth, body);
       case 'audit_save':   return await auditSave(req, res, db, auth, body);
       case 'audit_delete': return await auditDelete(req, res, db, auth, body);
@@ -149,7 +151,7 @@ async function day(req, res, db, auth) {
   }));
 
   const { data: audits } = await db.from('call_audits')
-    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, answers, flagged, notes')
+    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes')
     .eq('audit_date', date)
     .order('occurred_at', { ascending: true });
 
@@ -160,6 +162,46 @@ async function day(req, res, db, auth) {
     calls,
     audits: audits || [],
     auditor: auth.name || 'Auditor',
+  });
+}
+
+// Dashboard data for the Monday-Sunday week containing the given date: per-day
+// counted/graded/flagged tallies for the volume chart and stat tiles, plus
+// every graded call in the week for the log table, the secretary split, and
+// client-side search. Same read-only scope as day(): nothing here reaches
+// revenue, customers, or bookings.
+async function week(req, res, db, auth) {
+  const date = (req.query.date || '').toString();
+  if (!isDate(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+
+  // Monday of the week the date falls in. Parsed at noon UTC so the weekday
+  // math cannot be nudged across midnight by any server timezone.
+  const d = new Date(date + 'T12:00:00Z');
+  const monday = addDaysStr(date, -((d.getUTCDay() + 6) % 7));
+  const days = Array.from({ length: 7 }, (_, i) => addDaysStr(monday, i));
+  const sunday = days[6];
+
+  const { data: dayRows } = await db.from('call_audit_days')
+    .select('audit_date, calls_counted')
+    .gte('audit_date', monday).lte('audit_date', sunday);
+
+  const { data: auditRows } = await db.from('call_audits')
+    .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes')
+    .gte('audit_date', monday).lte('audit_date', sunday)
+    .order('occurred_at', { ascending: false });
+
+  const byDay = {};
+  for (const day of days) byDay[day] = { date: day, counted: 0, graded: 0, flagged: 0 };
+  for (const r of (dayRows || [])) { if (byDay[r.audit_date]) byDay[r.audit_date].counted += r.calls_counted || 0; }
+  for (const a of (auditRows || [])) {
+    const b = byDay[a.audit_date];
+    if (b) { b.graded += 1; if (a.flagged) b.flagged += 1; }
+  }
+
+  return res.status(200).json({
+    week_start: monday,
+    days: days.map(day => byDay[day]),
+    audits: auditRows || [],
   });
 }
 
@@ -273,6 +315,7 @@ async function auditSave(req, res, db, auth, body) {
     handled_by: (body.handled_by || '').toString().trim() || null,
     caller_phone: callerPhone,
     caller_name: (body.caller_name || '').toString().trim() || null,
+    caller_zip: (body.caller_zip || '').toString().trim().slice(0, 10) || null,
     answers,
     flagged,
     notes: (body.notes || '').toString().trim() || null,

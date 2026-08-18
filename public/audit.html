@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Call Audit</title>
+<title>Call Audit Portal</title>
 <style>
   :root{
     --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
     --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
-    --accent:#FF6B35; --good:#15803d; --good-bg:#eaf7ee;
+    --accent:#2563eb; --accent-soft:#eaf1ff;
+    --good:#15803d; --good-bg:#eaf7ee;
     --bad:#b91c1c; --bad-bg:#fdecec; --warn:#7a5a12; --warn-bg:#fff4d6; --warn-line:#e8c469;
   }
   *{box-sizing:border-box;}
@@ -31,6 +32,63 @@
   .btn.wide{width:100%;}
   .err{color:var(--bad);font-size:13px;margin-top:8px;min-height:1em;}
   .ok{color:var(--good);font-size:13px;margin-top:8px;min-height:1em;}
+
+  /* ── Dashboard ─────────────────────────────────────────────────────────── */
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 14px;text-align:center;}
+  .t-l{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);}
+  .t-v{font-size:26px;font-weight:800;line-height:1.15;margin-top:3px;}
+  .t-s{font-size:11.5px;color:var(--mute);}
+  .tile.alert{border-color:#f3c2c2;background:#fff7f7;}
+  .tile.alert .t-v{color:var(--bad);}
+  .seg{display:flex;gap:5px;flex-wrap:wrap;}
+  .seg button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:6px 13px;
+    font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-2);}
+  .seg button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;margin-bottom:12px;}
+  .grid2 .card{margin-bottom:0;}
+  @media (max-width:720px){ .grid2{grid-template-columns:1fr;} }
+
+  /* Weekly volume bars */
+  .vol{display:flex;align-items:flex-end;gap:8px;height:130px;margin-top:14px;}
+  .vcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;min-width:0;}
+  .vnum{font-size:11px;font-weight:700;color:var(--ink-2);}
+  .vbar{width:100%;max-width:34px;background:var(--accent-soft);border:1px solid #cfdefc;border-radius:6px 6px 2px 2px;min-height:3px;}
+  .vcol.today .vbar{background:var(--accent);border-color:var(--accent);}
+  .vcol.today .vday{color:var(--accent);font-weight:800;}
+  .vday{font-size:11px;color:var(--mute);}
+  .vflag{font-size:10px;color:var(--bad);font-weight:800;min-height:13px;}
+
+  /* Secretary split */
+  .srow{margin-top:12px;}
+  .srow .spread{margin-bottom:4px;}
+  .sname{font-weight:700;font-size:13.5px;}
+  .spct{font-size:12.5px;color:var(--mute);}
+  .sbar{background:var(--line2);border-radius:5px;height:12px;overflow:hidden;}
+  .sbar i{display:block;height:100%;background:var(--accent);border-radius:5px;}
+
+  /* Log table */
+  .tblwrap{overflow-x:auto;margin-top:10px;}
+  table.logs{width:100%;border-collapse:collapse;font-size:13px;min-width:640px;}
+  .logs th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);
+    text-align:left;padding:7px 8px;background:var(--line2);}
+  .logs td{padding:8px;border-top:1px solid var(--line2);vertical-align:middle;}
+  .logs td.num{font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;white-space:nowrap;}
+  .actbtn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px;
+    font-size:12px;font-weight:700;cursor:pointer;color:var(--ink-2);}
+  .actbtn:hover{border-color:var(--mute);background:var(--line2);}
+
+  /* View modal */
+  #viewOverlay{position:fixed;inset:0;background:rgba(20,26,34,.5);display:flex;
+    align-items:flex-start;justify-content:center;padding:24px 14px;z-index:50;overflow-y:auto;}
+  #viewCard{background:#fff;border-radius:14px;max-width:560px;width:100%;padding:18px 20px;}
+  .va{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line2);font-size:13.5px;}
+  .va:first-of-type{border-top:none;}
+  .va b.ans{flex:none;min-width:38px;text-align:center;font-size:11.5px;border-radius:6px;padding:2px 6px;}
+  .va b.yes{background:var(--good-bg);color:var(--good);}
+  .va b.no{background:var(--bad-bg);color:var(--bad);}
+  .va b.na{background:var(--line2);color:var(--mute);}
 
   /* The line worksheet */
   .line{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;
@@ -76,6 +134,8 @@
   @media (max-width:720px){
     #score{grid-template-columns:1fr;}
     .sr-qs{padding-top:4px;margin-bottom:4px;}
+    .tiles{gap:6px;}
+    .t-v{font-size:21px;}
   }
   .q .qt{font-size:13.5px;line-height:1.4;}
   .q .qt b{background:#fff3cd;padding:0 3px;border-radius:3px;}
@@ -89,7 +149,6 @@
   .audited{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;
     padding:8px 11px;margin-bottom:6px;font-size:13px;flex-wrap:wrap;cursor:pointer;}
   .score{font-weight:800;font-size:13px;}
-  .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;}
   .edit-audit{flex:none;padding:4px 10px;font-size:12px;font-weight:700;
     color:var(--ink-2);background:transparent;border:1px solid var(--line);border-radius:7px;}
   .edit-audit:hover{border-color:var(--mute);background:var(--line2);}
@@ -104,7 +163,7 @@
 
   <!-- Login -->
   <div id="login" class="card" style="max-width:380px;margin:60px auto;">
-    <h1>Call audit</h1>
+    <h1>Call Audit Portal</h1>
     <p class="sub" style="margin:6px 0 14px;">Sign in to log today's calls.</p>
     <input id="pw" type="password" placeholder="Password" style="width:100%;" autocomplete="current-password">
     <button class="btn wide" id="loginBtn" style="margin-top:10px;">Sign in</button>
@@ -115,16 +174,80 @@
   <div id="app" class="hidden">
     <div class="spread" style="margin-bottom:14px;">
       <div>
-        <h1>Call audit</h1>
+        <h1>Call Audit Portal</h1>
         <div class="sub" id="who"></div>
       </div>
-      <button class="btn ghost" id="outBtn">Sign out</button>
+      <div class="row">
+        <input type="date" id="date">
+        <button class="btn ghost" id="outBtn">Sign out</button>
+      </div>
+    </div>
+
+    <!-- Stat tiles -->
+    <div class="tiles">
+      <div class="tile">
+        <div class="t-l">Audits today</div>
+        <div class="t-v" id="tToday">0/0</div>
+        <div class="t-s">graded / counted</div>
+      </div>
+      <div class="tile">
+        <div class="t-l">Total this week</div>
+        <div class="t-v" id="tWeek">0</div>
+        <div class="t-s">calls counted</div>
+      </div>
+      <div class="tile" id="tFlagTile">
+        <div class="t-l">Flagged calls</div>
+        <div class="t-v" id="tFlag">0</div>
+        <div class="t-s" id="tFlagSub">this week</div>
+      </div>
+    </div>
+
+    <!-- Search + filter -->
+    <div class="card">
+      <div class="row">
+        <input id="q" type="search" placeholder="Search name, phone, or zip" style="flex:1;min-width:180px;">
+        <div class="seg" id="filterSeg">
+          <button type="button" data-f="all" class="on">All</button>
+          <button type="button" data-f="flagged">Flagged</button>
+          <button type="button" data-f="Heather">Heather</button>
+          <button type="button" data-f="Joey">Joey</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid2">
+      <div class="card">
+        <h2>Daily audit volume</h2>
+        <div class="sub">Calls counted per day, Monday to Sunday</div>
+        <div class="vol" id="volChart"></div>
+      </div>
+      <div class="card">
+        <h2>Audits per secretary</h2>
+        <div class="sub">Graded calls this week</div>
+        <div id="secSplit"></div>
+      </div>
+    </div>
+
+    <!-- Recent audit logs -->
+    <div class="card">
+      <div class="spread">
+        <h2>Recent audit logs</h2>
+        <span class="sub" id="logCount"></span>
+      </div>
+      <div class="tblwrap">
+        <table class="logs">
+          <thead><tr>
+            <th>Time</th><th>Secretary</th><th>Caller</th><th>Zip</th><th>Category</th><th>Flagged</th><th></th>
+          </tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card">
       <div class="spread" style="margin-bottom:4px;">
         <h2>Step 1. Count the calls</h2>
-        <input type="date" id="date">
       </div>
       <p class="sub" style="margin:0 0 12px;">Open each number in Grasshopper and enter how many calls came in. Zero is an answer, so save it either way.</p>
       <div id="lines"></div>
@@ -164,10 +287,11 @@
       <div id="ctx"></div>
 
       <div class="row" style="margin:10px 0;">
-        <input type="tel" id="fCallerPhone" placeholder="Caller's phone number" style="flex:1;min-width:180px;">
-        <input type="text" id="fCallerName" placeholder="Caller's name, if the recording gives one" style="flex:1;min-width:180px;">
+        <input type="tel" id="fCallerPhone" placeholder="Caller's phone number" style="flex:1;min-width:170px;">
+        <input type="text" id="fCallerName" placeholder="Caller's name, if the recording gives one" style="flex:1;min-width:170px;">
+        <input type="text" id="fCallerZip" placeholder="Zip" style="width:90px;" maxlength="10">
       </div>
-      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it.</p>
+      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it. Zip is whatever the caller gives for the job address, leave it blank if it never comes up.</p>
 
       <div id="score"></div>
 
@@ -190,7 +314,8 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 let token=localStorage.getItem('ha_audit_token')||'';
-let data=null, editing=null, answers={};
+let data=null, weekData=null, editing=null, answers={};
+let logFilter='all', logQuery='';
 
 async function api(action, opts){
   const o=opts||{};
@@ -281,6 +406,11 @@ const SECTIONS=[
          ()=>`Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.`],
     qs:[{k:'contact_and_card_correct', t:'Are the name, phone and address correct, and (on a TV job) did she explain the card only holds the appointment?'}] },
 ];
+// Question text by key, for the read-only View panel: it shows saved answers
+// for ANY audit, including ones whose sections would be hidden by the current
+// form state, so it needs a flat lookup independent of `when` visibility.
+const KEY_TEXT={};
+SECTIONS.forEach(s=>s.qs.forEach(q=>{ KEY_TEXT[q.k]=q.t; }));
 
 function linkedCall(){
   const id=$('fCall').value;
@@ -426,6 +556,144 @@ function centralTime(a){
   const h12=((hh+11)%12)+1;
   return h12+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM')+' CT';
 }
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+const DAY_ABBR=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+function renderDashboard(){
+  if(!weekData) return;
+  const days=weekData.days||[], audits=weekData.audits||[];
+  const selDate=$('date').value;
+
+  // Tiles. "Audits today" reads graded/counted for the SELECTED day (today by
+  // default), the other two cover the whole Monday-Sunday week.
+  const sel=days.find(x=>x.date===selDate);
+  const gradedToday=sel?sel.graded:(data&&data.audits?data.audits.length:0);
+  const countedToday=sel?sel.counted:0;
+  $('tToday').textContent=gradedToday+'/'+countedToday;
+  const weekCounted=days.reduce((n,x)=>n+x.counted,0);
+  $('tWeek').textContent=weekCounted;
+  const weekFlagged=audits.filter(a=>a.flagged).length;
+  $('tFlag').textContent=weekFlagged;
+  $('tFlagTile').classList.toggle('alert', weekFlagged>0);
+  $('tFlagSub').textContent=weekFlagged>0?'needs a listen':'this week';
+
+  // Volume chart: one bar per day, Monday to Sunday, scaled to the busiest
+  // day. The selected day's bar is solid so "where am I" is visible.
+  const maxN=Math.max(1,...days.map(x=>x.counted));
+  $('volChart').innerHTML=days.map((x,i)=>
+    '<div class="vcol'+(x.date===selDate?' today':'')+'" title="'+esc(x.date)+': '+x.counted+' counted, '+x.graded+' graded'+(x.flagged?', '+x.flagged+' flagged':'')+'">'+
+      '<span class="vnum">'+(x.counted||'')+'</span>'+
+      '<div class="vbar" style="height:'+Math.max(3,Math.round(100*x.counted/maxN))+'%;"></div>'+
+      '<span class="vday">'+DAY_ABBR[i]+'</span>'+
+      '<span class="vflag">'+(x.flagged?'&#9873; '+x.flagged:'')+'</span>'+
+    '</div>').join('');
+
+  // Secretary split over the week's graded calls. Names come from the data
+  // itself so a future hire shows up without a code change; "Nobody" rows
+  // (missed calls) are included when present since they are real calls too.
+  const byWho={};
+  audits.forEach(a=>{ const w=a.handled_by||'Unknown'; byWho[w]=(byWho[w]||0)+1; });
+  const total=audits.length;
+  const names=Object.keys(byWho).sort((a,b)=>byWho[b]-byWho[a]);
+  $('secSplit').innerHTML=names.length?names.map(n=>{
+    const c=byWho[n], pct=total?Math.round(100*c/total):0;
+    return '<div class="srow">'+
+      '<div class="spread"><span class="sname">'+esc(n)+'</span>'+
+      '<span class="spct">'+c+' '+(c===1?'call':'calls')+' ('+pct+'%)</span></div>'+
+      '<div class="sbar"><i style="width:'+pct+'%;"></i></div></div>';
+  }).join(''):'<p class="sub" style="margin:12px 0 0;">No graded calls yet this week.</p>';
+
+  renderLogTable();
+}
+
+function logMatches(a){
+  if(logFilter==='flagged' && !a.flagged) return false;
+  if(logFilter!=='all' && logFilter!=='flagged' && (a.handled_by||'')!==logFilter) return false;
+  if(logQuery){
+    const q=logQuery.toLowerCase();
+    const hay=[(a.caller_name||''),(a.caller_phone||''),(a.caller_zip||'')].join(' ').toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function renderLogTable(){
+  const audits=(weekData&&weekData.audits)||[];
+  const rows=audits.filter(logMatches);
+  $('logCount').textContent=rows.length===audits.length
+    ? rows.length+' this week'
+    : rows.length+' of '+audits.length;
+  const body=$('logBody');
+  if(!rows.length){
+    body.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--mute);padding:18px;">Nothing matches.</td></tr>';
+    return;
+  }
+  body.innerHTML=rows.map(a=>{
+    const d=new Date(a.audit_date+'T12:00:00Z');
+    const wd=DAY_ABBR[(d.getUTCDay()+6)%7];
+    const t=centralTime(a);
+    const caller=[a.caller_name,a.caller_phone].filter(Boolean).map(esc).join('<br>')||'<span class="sub">unknown</span>';
+    const svc=a.service==='unknown'?'Not reached':(a.service||'');
+    return '<tr>'+
+      '<td class="num">'+wd+(t?' '+esc(t):'')+'</td>'+
+      '<td>'+esc(a.handled_by||'')+'</td>'+
+      '<td>'+caller+'</td>'+
+      '<td class="num">'+esc(a.caller_zip||'')+'</td>'+
+      '<td>'+esc(svc)+'</td>'+
+      '<td>'+(a.flagged?'<span class="flagpill">&#9888; YES</span>':'<span class="sub">no</span>')+'</td>'+
+      '<td style="white-space:nowrap;">'+
+        '<button type="button" class="actbtn" data-view="'+a.id+'">View</button> '+
+        '<button type="button" class="actbtn" data-edit="'+a.id+'">Edit</button>'+
+      '</td></tr>';
+  }).join('');
+  body.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>openView(b.dataset.view));
+  body.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editFromWeek(b.dataset.edit));
+}
+
+function openView(id){
+  const a=((weekData&&weekData.audits)||[]).find(x=>x.id===id);
+  if(!a) return;
+  const s=scoreOf(a);
+  const ansRows=Object.entries(a.answers||{}).map(([k,v])=>
+    '<div class="va"><b class="ans '+esc(v)+'">'+(v==='na'?'N/A':v.toUpperCase())+'</b>'+
+    '<span>'+esc(KEY_TEXT[k]||k)+'</span></div>').join('')
+    ||'<p class="sub">No questions answered.</p>';
+  const ov=document.createElement('div'); ov.id='viewOverlay';
+  ov.innerHTML='<div id="viewCard">'+
+    '<div class="spread" style="margin-bottom:8px;">'+
+      '<h2>'+esc(a.caller_name||a.caller_phone||'Graded call')+'</h2>'+
+      '<button type="button" class="btn ghost" id="viewClose">Close</button></div>'+
+    '<div class="sub" style="margin-bottom:10px;">'+
+      esc(new Date(a.audit_date+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',timeZone:'UTC'}))+
+      (a.time_local?' &middot; '+esc(centralTime(a)):'')+
+      (a.handled_by?' &middot; '+esc(a.handled_by):'')+
+      (a.caller_zip?' &middot; zip '+esc(a.caller_zip):'')+
+      (s!=null?' &middot; score <b style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</b>':'')+
+    '</div>'+
+    (a.flagged?'<div class="recon gap" style="margin-bottom:10px;">&#9888; Flagged for Andrew to listen to.</div>':'')+
+    ansRows+
+    (a.notes?'<div class="recon clear" style="margin-top:10px;"><b>Notes:</b> '+esc(a.notes)+'</div>':'')+
+    '</div>';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
+  document.getElementById('viewClose').onclick=()=>ov.remove();
+}
+
+// Editing from the week table can land on an audit from a different day than
+// the one the form's scripted-call dropdown is loaded for, so switch the
+// selected day first and reuse the normal single-day path end to end.
+async function editFromWeek(id){
+  const a=((weekData&&weekData.audits)||[]).find(x=>x.id===id);
+  if(!a) return;
+  if($('date').value!==a.audit_date){
+    $('date').value=a.audit_date;
+    await load();
+  }
+  const fresh=(data.audits||[]).find(x=>x.id===id);
+  if(fresh) openForm(fresh);
+}
+
 function renderAudits(){
   const w=$('auditList'), list=data.audits||[];
   if(!list.length){ w.innerHTML='<p class="sub" style="margin:0;">No calls graded yet for this day.</p>'; return; }
@@ -505,10 +773,11 @@ function openForm(a){
     $('fTime').value=a.time_local||'';
     $('fCallerPhone').value=a.caller_phone||'';
     $('fCallerName').value=a.caller_name||'';
+    $('fCallerZip').value=a.caller_zip||'';
   }else{
     $('fCall').value=''; $('fDir').value='incoming'; $('fWho').value=''; $('fSvc').value='TV Mounting';
     $('fFlag').checked=false; $('fNotes').value=''; $('fTime').value='';
-    $('fCallerPhone').value=''; $('fCallerName').value='';
+    $('fCallerPhone').value=''; $('fCallerName').value=''; $('fCallerZip').value='';
   }
   $('formErr').textContent='';
   $('formCard').classList.remove('hidden');
@@ -540,9 +809,16 @@ async function load(){
   const date=$('date').value;
   if(!date) return;
   try{
-    data=await api('day',{params:{date}});
+    // The single-day payload and the week dashboard in parallel; neither
+    // depends on the other, and every save path re-enters here so both stay
+    // in step with whatever just changed.
+    const [d,w]=await Promise.all([
+      api('day',{params:{date}}),
+      api('week',{params:{date}}),
+    ]);
+    data=d; weekData=w;
     $('who').textContent=data.auditor+' · '+new Date(date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
-    renderLines(); renderAudits();
+    renderLines(); renderAudits(); renderDashboard();
     $('formCard').classList.add('hidden');
   }catch(e){ $('dayErr').textContent=e.message; }
 }
@@ -553,6 +829,9 @@ $('saveDay').onclick=async()=>{
     await api('day_save',{method:'POST',body:{date:$('date').value,counts:countsNow()}});
     $('dayOk').textContent='Saved.';
     setTimeout(()=>{$('dayOk').textContent='';},2500);
+    // Refresh the dashboard so the tiles and chart pick the new counts up
+    // without re-rendering (and losing) the worksheet she is typing in.
+    try{ weekData=await api('week',{params:{date:$('date').value}}); renderDashboard(); }catch(_){}
   }catch(e){ $('dayErr').textContent=e.message; }
 };
 
@@ -584,6 +863,7 @@ $('saveAudit').onclick=async()=>{
     service:$('fSvc').value,
     caller_phone:$('fCallerPhone').value.trim(),
     caller_name:$('fCallerName').value.trim(),
+    caller_zip:$('fCallerZip').value.trim(),
     answers, flagged:$('fFlag').checked, notes:$('fNotes').value,
   };
   const btn=$('saveAudit'), prevText=btn.textContent;
@@ -598,6 +878,14 @@ $('saveAudit').onclick=async()=>{
 $('newAudit').onclick=()=>openForm(null);
 $('cancelBtn').onclick=()=>$('formCard').classList.add('hidden');
 $('date').onchange=load;
+
+// Search and filter drive the log table only; nothing else re-fetches.
+$('q').oninput=()=>{ logQuery=$('q').value.trim(); renderLogTable(); };
+$('filterSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  logFilter=b.dataset.f;
+  $('filterSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  renderLogTable();
+});
 
 $('loginBtn').onclick=async()=>{
   $('loginErr').textContent='';
