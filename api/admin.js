@@ -8771,26 +8771,43 @@ async function auditReport(req, res, db, auth) {
   }
   const totalScripted = (liveCalls || []).length;
 
-  // Per-day series so a bad week is visible rather than averaged away.
-  const daily = [];
-  for (let i = 0; i < days; i++) {
-    const d = dayStr(offset - (days - 1) + i);
-    const counted = countedByDay[d];
-    daily.push({
-      date: d,
-      // null, not 0, when the auditor never saved that day. A day she skipped
-      // and a day with genuinely no calls must not look the same on the chart.
-      counted: counted == null ? null : counted,
-      scripted: scriptedByDay[d] || 0,
-    });
-  }
-
   const scoreOf = (a) => {
     const v = Object.values(a.answers || {});
     const yes = v.filter(x => x === 'yes').length;
     const no = v.filter(x => x === 'no').length;
     return { yes, no, pct: (yes + no) ? Math.round(100 * yes / (yes + no)) : null };
   };
+
+  // Per-day grading activity and script score, for the owner's trend chart:
+  // "are they getting better" needs the score over time, not one pooled
+  // number, and "is the auditor keeping up" needs graded-per-day next to
+  // counted-per-day.
+  const gradedByDay = {}, scoreAggByDay = {};
+  for (const a of (audits || [])) {
+    gradedByDay[a.audit_date] = (gradedByDay[a.audit_date] || 0) + 1;
+    const s = scoreOf(a);
+    if (s.yes + s.no > 0) {
+      const g = scoreAggByDay[a.audit_date] || (scoreAggByDay[a.audit_date] = { yes: 0, no: 0 });
+      g.yes += s.yes; g.no += s.no;
+    }
+  }
+
+  // Per-day series so a bad week is visible rather than averaged away.
+  const daily = [];
+  for (let i = 0; i < days; i++) {
+    const d = dayStr(offset - (days - 1) + i);
+    const counted = countedByDay[d];
+    const agg = scoreAggByDay[d];
+    daily.push({
+      date: d,
+      // null, not 0, when the auditor never saved that day. A day she skipped
+      // and a day with genuinely no calls must not look the same on the chart.
+      counted: counted == null ? null : counted,
+      scripted: scriptedByDay[d] || 0,
+      graded: gradedByDay[d] || 0,
+      avg_pct: agg ? Math.round(100 * agg.yes / (agg.yes + agg.no)) : null,
+    });
+  }
 
   const people = {};
   const questions = {};
