@@ -64,6 +64,13 @@
   // zip they just entered.
   const PREFILL_ZIP = ((SELF_SCRIPT && SELF_SCRIPT.dataset && SELF_SCRIPT.dataset.zip)
     || new URLSearchParams(location.search).get('zip') || '').replace(/\D/g, '').slice(0, 5);
+  // Austin's site is light/white, so its widget embed needs to match instead of
+  // the dark card Handy Andy and Mile High have always shipped. Handy Andy and
+  // Mile High keep the exact original dark hex values (byte-for-byte) so their
+  // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
+  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80' };
+  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a' };
+  const T = BUSINESS === 'austin' ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
@@ -821,33 +828,33 @@
 
   // ─── Styles ───────────────────────────────────────────────────────────────
   const S={
-    host:'display:block!important;visibility:visible!important;position:relative!important;z-index:999999!important;background:#18181c!important;border:1px solid #2d2d34!important;border-radius:12px!important;padding:28px!important;box-shadow:0 10px 30px rgba(0,0,0,0.5)!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;box-sizing:border-box!important;color:#fff!important;',
-    bar:'background:#2d2d34!important;height:6px!important;border-radius:3px!important;margin-bottom:16px!important;overflow:hidden!important;display:block!important;',
+    host:`display:block!important;visibility:visible!important;position:relative!important;z-index:999999!important;max-width:580px!important;margin:0 auto!important;background:${T.bg}!important;border:1px solid ${T.panel2}!important;border-radius:12px!important;padding:28px!important;box-shadow:0 10px 30px ${T.shadow}!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;box-sizing:border-box!important;color:${T.text}!important;`,
+    bar:`background:${T.panel2}!important;height:6px!important;border-radius:3px!important;margin-bottom:16px!important;overflow:hidden!important;display:block!important;`,
     fill:p=>`background:${ACCENT}!important;height:100%!important;width:${p}%!important;display:block!important;transition:width .3s!important;`,
-    step:'color:#71717a!important;font-size:12px!important;text-transform:uppercase!important;letter-spacing:1px!important;display:block!important;margin-bottom:18px!important;',
-    h1:'margin:0 0 8px 0!important;font-size:22px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.3!important;',
-    sub:'color:#a0a0ab!important;font-size:13px!important;display:block!important;margin-bottom:16px!important;line-height:1.5!important;',
-    input:'width:100%!important;padding:14px 16px!important;background:#27272a!important;border:1px solid #3f3f46!important;color:#fff!important;border-radius:8px!important;font-size:17px!important;box-sizing:border-box!important;margin-bottom:20px!important;display:block!important;text-align:center!important;',
-    inputL:'width:100%!important;padding:11px 14px!important;background:#27272a!important;border:1px solid #3f3f46!important;color:#fff!important;border-radius:6px!important;font-size:15px!important;box-sizing:border-box!important;margin-bottom:12px!important;display:block!important;',
+    step:`color:${T.muted}!important;font-size:12px!important;text-transform:uppercase!important;letter-spacing:1px!important;display:block!important;margin-bottom:18px!important;`,
+    h1:`margin:0 0 8px 0!important;font-size:22px!important;font-weight:800!important;color:${T.text}!important;display:block!important;line-height:1.3!important;`,
+    sub:`color:${T.muted2}!important;font-size:13px!important;display:block!important;margin-bottom:16px!important;line-height:1.5!important;`,
+    input:`width:100%!important;padding:14px 16px!important;background:${T.panel}!important;border:1px solid ${T.border}!important;color:${T.text}!important;border-radius:8px!important;font-size:17px!important;box-sizing:border-box!important;margin-bottom:20px!important;display:block!important;text-align:center!important;`,
+    inputL:`width:100%!important;padding:11px 14px!important;background:${T.panel}!important;border:1px solid ${T.border}!important;color:${T.text}!important;border-radius:6px!important;font-size:15px!important;box-sizing:border-box!important;margin-bottom:12px!important;display:block!important;`,
     btnPri:`background:${ACCENT}!important;color:#fff!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:pointer!important;display:inline-block!important;`,
-    btnSec:'background:transparent!important;color:#a0a0ab!important;border:1px solid #3f3f46!important;padding:10px 20px!important;font-size:14px!important;border-radius:6px!important;cursor:pointer!important;display:inline-block!important;',
-    btnDis:'background:#2d2d34!important;color:#52525b!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:not-allowed!important;display:inline-block!important;',
+    btnSec:`background:transparent!important;color:${T.muted2}!important;border:1px solid ${T.border}!important;padding:10px 20px!important;font-size:14px!important;border-radius:6px!important;cursor:pointer!important;display:inline-block!important;`,
+    btnDis:`background:${T.panel2}!important;color:${T.muted3}!important;border:none!important;padding:13px 26px!important;font-size:15px!important;font-weight:700!important;border-radius:8px!important;cursor:not-allowed!important;display:inline-block!important;`,
     actions:'display:flex!important;justify-content:space-between!important;align-items:center!important;margin-top:20px!important;',
-    card:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:'#27272a'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:13px 15px!important;color:#fff!important;display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:8px!important;font-size:14px!important;cursor:pointer!important;`,
-    qRow:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:'#27272a'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:11px 14px!important;color:#fff!important;display:flex!important;align-items:center!important;margin-bottom:8px!important;font-size:14px!important;`,
-    qBtn:'background:#3f3f46!important;color:#fff!important;border:none!important;width:30px!important;height:30px!important;border-radius:6px!important;font-size:18px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0!important;',
+    card:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:T.panel}!important;border:1.5px solid ${on?ACCENT:T.border}!important;border-radius:8px!important;padding:13px 15px!important;color:${T.text}!important;display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:8px!important;font-size:14px!important;cursor:pointer!important;`,
+    qRow:on=>`background:${on?`rgba(${ACCENT_RGB},0.1)`:T.panel}!important;border:1.5px solid ${on?ACCENT:T.border}!important;border-radius:8px!important;padding:11px 14px!important;color:${T.text}!important;display:flex!important;align-items:center!important;margin-bottom:8px!important;font-size:14px!important;`,
+    qBtn:`background:${T.border}!important;color:${T.text}!important;border:none!important;width:30px!important;height:30px!important;border-radius:6px!important;font-size:18px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0!important;`,
     qNum:`color:${ACCENT}!important;font-weight:700!important;font-size:17px!important;min-width:22px!important;text-align:center!important;display:inline-block!important;`,
     info:`background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:${ACCENT_LIGHT}!important;display:block!important;`,
-    ok:'background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:#4ade80!important;display:block!important;',
-    price:p=>p>0?` <span style="color:#a0a0ab!important;font-size:12px!important;">(+$${p})</span>`:'',
+    ok:`background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.35)!important;border-radius:7px!important;padding:10px 14px!important;margin-bottom:14px!important;font-size:13px!important;color:${T.ok}!important;display:block!important;`,
+    price:p=>p>0?` <span style="color:${T.muted2}!important;font-size:12px!important;">(+$${p})</span>`:'',
     // Bracket-comparison help link, shown above the bracket step's options only.
     helpLink:`color:${ACCENT_LIGHT}!important;font-size:12.5px!important;text-decoration:underline!important;cursor:pointer!important;display:inline-block!important;margin-bottom:14px!important;background:none!important;border:none!important;padding:0!important;font-family:inherit!important;`,
     // Sticky running-total footer — bleeds to the host's own edges (host padding
     // is 28px, so -28px margins here reach the card's border) and sits as the
     // last thing on every step so the price a customer is building stays visible
     // the whole time, instead of arriving as one number at the very end.
-    footerBar:t=>`<div style="margin:18px -28px -28px!important;padding:12px 28px!important;background:#0e0e10!important;border-top:1px solid #2d2d34!important;display:flex!important;justify-content:space-between!important;align-items:center!important;font-size:13px!important;">
-      <span style="color:#a0a0ab!important;">Estimated total</span>
+    footerBar:t=>`<div style="margin:18px -28px -28px!important;padding:12px 28px!important;background:${T.footerbg}!important;border-top:1px solid ${T.panel2}!important;display:flex!important;justify-content:space-between!important;align-items:center!important;font-size:13px!important;">
+      <span style="color:${T.muted2}!important;">Estimated total</span>
       <span style="font-weight:800!important;font-size:17px!important;color:${ACCENT_LIGHT}!important;">$${t}</span>
     </div>`,
   };
@@ -928,10 +935,10 @@
     ov.id='ha-exit-ov';
     ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.75)!important;';
     ov.innerHTML=`
-      <div style="position:relative!important;width:100%!important;max-width:360px!important;background:#18181c!important;border:1px solid #2d2d34!important;border-radius:12px!important;padding:26px 22px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif!important;color:#fff!important;text-align:center!important;">
-        <button id="ha-exit-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:12px!important;background:none!important;border:none!important;color:#a0a0ab!important;font-size:18px!important;cursor:pointer!important;padding:4px!important;">✕</button>
+      <div style="position:relative!important;width:100%!important;max-width:360px!important;background:${T.bg}!important;border:1px solid ${T.panel2}!important;border-radius:12px!important;padding:26px 22px!important;box-shadow:0 14px 30px ${T.shadow}!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif!important;color:${T.text}!important;text-align:center!important;">
+        <button id="ha-exit-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:12px!important;background:none!important;border:none!important;color:${T.muted2}!important;font-size:18px!important;cursor:pointer!important;padding:4px!important;">✕</button>
         <div style="font-size:17px!important;font-weight:800!important;margin:0 0 6px!important;">Wait, don't lose your spot</div>
-        <div style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 16px!important;line-height:1.5!important;">Here's $10 off to lock in today's price.</div>
+        <div style="font-size:13px!important;color:${T.muted2}!important;margin:0 0 16px!important;line-height:1.5!important;">Here's $10 off to lock in today's price.</div>
         <div style="font-family:ui-monospace,Menlo,Consolas,monospace!important;font-weight:800!important;letter-spacing:0.05em!important;background:rgba(${ACCENT_RGB},0.14)!important;border:1px solid rgba(${ACCENT_RGB},0.4)!important;color:${ACCENT_LIGHT}!important;padding:7px 15px!important;border-radius:8px!important;display:inline-block!important;margin-bottom:16px!important;font-size:13.5px!important;">${EXIT_COUPON}</div>
         <div>
           <button id="ha-exit-apply" style="${S.btnPri};width:100%!important;">Apply $10 off &amp; continue</button>
@@ -2038,7 +2045,7 @@
     const input=root.querySelector('#c-ad'); if(!input||input._acWired)return; input._acWired=true;
     const box=document.createElement('div'); box.style.cssText='position:relative!important;width:100%!important;';
     const list=document.createElement('div');
-    list.style.cssText='display:none;position:absolute!important;left:0;right:0;top:2px;z-index:1000000!important;background:#18181c!important;border:1px solid #3f3f46!important;border-radius:8px!important;overflow:hidden!important;box-shadow:0 8px 24px rgba(0,0,0,0.5)!important;';
+    list.style.cssText=`display:none;position:absolute!important;left:0;right:0;top:2px;z-index:1000000!important;background:${T.bg}!important;border:1px solid ${T.border}!important;border-radius:8px!important;overflow:hidden!important;box-shadow:0 8px 24px ${T.shadow}!important;`;
     input.parentNode.insertBefore(box,input.nextSibling); box.appendChild(list);
     let session=Math.random().toString(36).slice(2)+Date.now().toString(36), timer=null;
     const hide=()=>{ list.style.display='none'; list.innerHTML=''; };
@@ -2057,7 +2064,7 @@
         const j=await (await fetch(API_BASE+'/book?action=places_autocomplete&input='+encodeURIComponent(q)+'&session='+session)).json();
         const preds=(j&&j.predictions)||[];
         if(!preds.length){ hide(); return; }
-        list.innerHTML=preds.map((p,i)=>'<div data-i="'+i+'" style="padding:11px 12px!important;font-size:14px!important;color:#e4e4e7!important;cursor:pointer!important;border-bottom:1px solid #27272a!important;">'+String(p.description).replace(/</g,'&lt;')+'</div>').join('');
+        list.innerHTML=preds.map((p,i)=>'<div data-i="'+i+'" style="padding:11px 12px!important;font-size:14px!important;color:'+T.dropText+'!important;cursor:pointer!important;border-bottom:1px solid '+T.panel+'!important;">'+String(p.description).replace(/</g,'&lt;')+'</div>').join('');
         list.style.display='block';
         list.querySelectorAll('[data-i]').forEach(el=>el.addEventListener('mousedown',e=>{ e.preventDefault(); pick(preds[+el.dataset.i]); }));
       }catch(_){ hide(); }
