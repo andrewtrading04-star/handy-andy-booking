@@ -160,7 +160,7 @@ export async function sendOwnerBookingAlert(d = {}) {
       recipients.add(process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com');
     }
     const slug = String(d.slug || '').toLowerCase();
-    if (slug === 'handy-andy' || slug === 'mile-high') {
+    if (slug === 'handy-andy' || slug === 'mile-high' || slug === 'austin') {
       // Heather runs both -- same Denver market, same techs (see PARTNER_SLUG
       // in availability.js). MILE_HIGH_SECRETARY_EMAIL overrides independently
       // if that ever needs to change without touching Handy Andy's routing.
@@ -238,7 +238,7 @@ export async function sendCardSaveFailedAlert(d = {}) {
 
     const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
     const slug = String(d.slug || '').toLowerCase();
-    if (slug === 'handy-andy' || slug === 'mile-high') {
+    if (slug === 'handy-andy' || slug === 'mile-high' || slug === 'austin') {
       // Heather runs both -- same Denver market, same techs (see PARTNER_SLUG
       // in availability.js). MILE_HIGH_SECRETARY_EMAIL overrides independently
       // if that ever needs to change without touching Handy Andy's routing.
@@ -297,7 +297,7 @@ export async function sendUnassignedBookingAlert(d = {}) {
 
     const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
     const slug = String(d.slug || '').toLowerCase();
-    if (slug === 'handy-andy' || slug === 'mile-high') {
+    if (slug === 'handy-andy' || slug === 'mile-high' || slug === 'austin') {
       recipients.add(process.env.MILE_HIGH_SECRETARY_EMAIL || process.env.HANDY_ANDY_SECRETARY_EMAIL || 'heather.handyandy@gmail.com');
     } else if (slug === 'doms') {
       recipients.add(process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com');   // Joey
@@ -399,7 +399,7 @@ export async function sendPriceMismatchAlert(d = {}) {
 
     const recipients = new Set([process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com']);
     const slug = String(d.slug || '').toLowerCase();
-    if (slug === 'handy-andy' || slug === 'mile-high') {
+    if (slug === 'handy-andy' || slug === 'mile-high' || slug === 'austin') {
       // Heather runs both -- same Denver market, same techs (see PARTNER_SLUG
       // in availability.js). MILE_HIGH_SECRETARY_EMAIL overrides independently
       // if that ever needs to change without touching Handy Andy's routing.
@@ -453,7 +453,7 @@ export async function sendOwnerEstimateAlert(d = {}) {
       recipients.add(process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com');
     }
     const slug = String(d.slug || '').toLowerCase();
-    if (slug === 'handy-andy' || slug === 'mile-high') {
+    if (slug === 'handy-andy' || slug === 'mile-high' || slug === 'austin') {
       // Heather runs both -- same Denver market, same techs (see PARTNER_SLUG
       // in availability.js). MILE_HIGH_SECRETARY_EMAIL overrides independently
       // if that ever needs to change without touching Handy Andy's routing.

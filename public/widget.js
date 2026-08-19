@@ -21,7 +21,12 @@
   // The legal trading name shown in the SMS-consent disclosure below -- must
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
-  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting' }[BUSINESS] || 'Handy Andy TV Mounting';
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin' }[BUSINESS] || 'Handy Andy TV Mounting';
+  // The phone number shown in customer-facing fallback messages ("call us to
+  // confirm/verify"). Used to be hardcoded to Handy Andy's Houston line for
+  // every business, which told a Mile High or Austin customer to call a
+  // company they have never heard of.
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'713-876-9032', 'austin':'(737) 381-3800' }[BUSINESS] || '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
@@ -31,9 +36,9 @@
   // visually unchanged. Mile High gets the same green used in its email
   // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
   // across the booking widget and the confirmation email.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117' }[BUSINESS] || '255,102,0';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -50,7 +55,15 @@
   const THANKYOU_URL = {
     'handy-andy': 'https://www.ihandyandy.com/thankyou/',
     'mile-high':  'https://www.milehightvmounting.com/thankyou/',
+    'austin':     'https://www.austinmounting.com/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
+  // Zip handed in by the host page (its own hero "check availability" box):
+  // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
+  // valid 5-digit zip is present the widget runs the area check itself on
+  // load, so the customer lands on the service step instead of retyping the
+  // zip they just entered.
+  const PREFILL_ZIP = ((SELF_SCRIPT && SELF_SCRIPT.dataset && SELF_SCRIPT.dataset.zip)
+    || new URLSearchParams(location.search).get('zip') || '').replace(/\D/g, '').slice(0, 5);
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
@@ -2163,7 +2176,7 @@
     try{
       const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(NATIVE?{zip,business:BUSINESS}:{zip})});
       const d=await r.json();
-      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. 713-876-9032');}
+      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. '+CONTACT_PHONE);}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
       // Two DIFFERENT keys, deliberately:
@@ -2482,7 +2495,7 @@
       // the button locked and tell the customer not to click again.
       if(submitBtn){submitBtn.textContent='Confirming your booking…';submitBtn.disabled=true;}
       logEvent('booking_failed','customer',null,'connection error (locked to avoid duplicate booking)');
-      alert('Your booking is being confirmed and may already be received. Please do NOT submit again. Check your email for a confirmation, or call us at 713-876-9032 to verify.');
+      alert('Your booking is being confirmed and may already be received. Please do NOT submit again. Check your email for a confirmation, or call us at '+CONTACT_PHONE+' to verify.');
     }
   }
 
@@ -2507,8 +2520,16 @@
       document.head.appendChild(s);
     }
     if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);return;}
-    ensureContainer();
+    const el=ensureContainer();
     render();
+    // Host page handed us a zip (see PREFILL_ZIP): run the same check the
+    // Check Area button runs, so the customer skips straight past the step
+    // they already answered on the host page's own hero box. Falls through
+    // to the normal zip step untouched if the zip turns out unserved.
+    if(PREFILL_ZIP.length===5){
+      const z=el.querySelector('#ha-zip');
+      if(z){ z.value=PREFILL_ZIP; doZip(el); }
+    }
   }
   boot();
 })();

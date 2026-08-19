@@ -117,22 +117,30 @@ const SLOT_BY_KEY = Object.fromEntries(SLOTS.map(s => [s.key, s]));
 // stays off automatically if either business has no Denver service area row.
 //
 // This map is a per-slug LOOKUP, not a symmetric pairing — each key names the
-// ONE business its overflow falls back to. Handy Andy <-> Doms happens to be
-// mutual (each is the other's key), which is the original two-business case.
-// Mile High is deliberately ONE-DIRECTIONAL: it has no technicians of its own,
-// so it always borrows Handy Andy's Denver roster, but Handy Andy's own
-// overflow must never fall to Mile High's perpetually-empty pool — so there is
-// no 'mile-high' entry on Handy Andy's or Doms's side.
-const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy' };
+// ONE business its overflow falls back to, and the ONE metro that borrowing is
+// allowed in. Handy Andy <-> Doms happens to be mutual (each is the other's
+// key), which is the original two-business Denver case. Mile High and Austin
+// are deliberately ONE-DIRECTIONAL: neither has technicians of its own, so
+// each always borrows Handy Andy's roster in its own metro -- but Handy Andy's
+// own overflow must never fall to their perpetually-empty pools, so neither
+// appears as anyone's partner value.
+const PARTNER_SLUG = {
+  'handy-andy': { slug: 'doms',       metro: /denver/i },
+  'doms':       { slug: 'handy-andy', metro: /denver/i },
+  'mile-high':  { slug: 'handy-andy', metro: /denver/i },
+  'austin':     { slug: 'handy-andy', metro: /austin/i },
+};
 
-// Resolve the partner business's Denver tech pool for a cross-hire lookup, or
-// null if not eligible (this request isn't for Denver, or the partner has no
-// Denver presence). `serviceAreaId` is the REQUESTING business's area (Handy
-// Andy always passes one; Doms is single-metro and passes none, so we confirm
-// Doms itself only serves Denver before treating it as eligible).
+// Resolve the partner business's tech pool in the pairing's own metro for a
+// cross-hire lookup, or null if not eligible (this request isn't for that
+// metro, or the partner has no presence there). `serviceAreaId` is the
+// REQUESTING business's area (Handy Andy always passes one; a single-metro
+// business passes none, so we confirm its one area IS the pairing's metro
+// before treating it as eligible).
 async function crossHirePartner(db, businessSlug, serviceAreaId) {
-  const partnerSlug = PARTNER_SLUG[businessSlug];
-  if (!partnerSlug) return null;
+  const pairing = PARTNER_SLUG[businessSlug];
+  if (!pairing) return null;
+  const { slug: partnerSlug, metro } = pairing;
   let areaName = null;
   if (serviceAreaId) {
     const { data: area } = await db.from('service_areas').select('name').eq('id', serviceAreaId).maybeSingle();
@@ -141,13 +149,16 @@ async function crossHirePartner(db, businessSlug, serviceAreaId) {
     const { data: biz } = await db.from('businesses').select('id').eq('slug', businessSlug).single();
     if (!biz) return null;
     const { data: areas } = await db.from('service_areas').select('name').eq('business_id', biz.id);
-    if ((areas || []).length === 1 && /denver/i.test(areas[0].name || '')) areaName = areas[0].name;
+    if ((areas || []).length === 1 && metro.test(areas[0].name || '')) areaName = areas[0].name;
   }
-  if (!areaName || !/denver/i.test(areaName)) return null;
+  if (!areaName || !metro.test(areaName)) return null;
   const { data: partnerBiz } = await db.from('businesses').select('id').eq('slug', partnerSlug).single();
   if (!partnerBiz) return null;
-  const { data: partnerArea } = await db.from('service_areas').select('id')
-    .eq('business_id', partnerBiz.id).ilike('name', 'Denver').maybeSingle();
+  // The partner's area for THIS metro. Handy Andy names its areas by metro
+  // ('Denver', 'Austin', ...), matched by the pairing's own regex rather than
+  // a hardcoded 'Denver' so an Austin-metro pairing finds the Austin roster.
+  const { data: partnerAreas } = await db.from('service_areas').select('id, name').eq('business_id', partnerBiz.id);
+  const partnerArea = (partnerAreas || []).find(a => metro.test(a.name || ''));
   if (!partnerArea) return null;
   return { partnerSlug, partnerBizId: partnerBiz.id, partnerServiceAreaId: partnerArea.id };
 }

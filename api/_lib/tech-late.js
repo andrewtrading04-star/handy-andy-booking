@@ -71,6 +71,7 @@ const NOT_EN_ROUTE_STATUSES = ['pending', 'confirmed', 'assigned'];
 const STAFF_PHONE_ENV = {
   'handy-andy': 'HEATHER_PHONE_NUMBER',
   'mile-high': 'HEATHER_PHONE_NUMBER',
+  'austin': 'HEATHER_PHONE_NUMBER',   // Heather covers the Austin brand too
   'doms': 'JOEY_PHONE_NUMBER',
 };
 

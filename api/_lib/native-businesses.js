@@ -13,8 +13,12 @@
 //   name      what a technician sees on the job card / assignment text
 //   legalName the full trading name, used in owner alerts and email subjects
 export const NATIVE_BUSINESS = {
-  'handy-andy': { name: 'Handy Andy',            legalName: 'Handy Andy TV Mounting' },
-  'mile-high':  { name: 'Mile High TV Mounting', legalName: 'Mile High TV Mounting' },
+  'handy-andy': { name: 'Handy Andy',                    legalName: 'Handy Andy TV Mounting' },
+  'mile-high':  { name: 'Mile High TV Mounting',         legalName: 'Mile High TV Mounting' },
+  // Austin-only micro-brand (austinmounting.com), same shape as Mile High: no
+  // techs of its own, borrows Handy Andy's Austin roster (see PARTNER_SLUG in
+  // availability.js), fully separate customer-facing identity.
+  'austin':     { name: 'TV Mounting & Handyman Austin', legalName: 'TV Mounting & Handyman Austin' },
 };
 
 export const NATIVE_SLUGS = Object.keys(NATIVE_BUSINESS);
