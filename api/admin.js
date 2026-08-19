@@ -6547,6 +6547,7 @@ async function calls(req, res, db, auth) {
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
+             source, tracking_label, answered, duration_sec, recording_url,
              customer_id, booking_id,
              customer:customers ( id, name, phone, business:businesses ( slug ) ),
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),

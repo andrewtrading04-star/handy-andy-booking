@@ -1,5 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken } from './_lib/auth.js';
+import { sendSMS } from './_lib/sms.js';
 import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 import crypto from 'crypto';
 
@@ -256,10 +257,201 @@ async function handleResendWebhook(req, res) {
   return res.status(200).send('ok');
 }
 
+// ── Twilio Voice: tracking numbers ──────────────────────────────────────────
+// A real local number we own on Twilio, forwarded to a person's phone. Unlike
+// Grasshopper (migration 0080 / api/_lib/grasshopper.js — email-only, and only
+// for voicemails), Twilio posts a webhook the moment the phone rings, so
+// app.calls gets a row whether or not anybody picked up, with a duration and an
+// answered flag. Because each number is its own line, putting a distinct one on
+// an ad or a location page turns the Calls tab into campaign attribution.
+//
+// Three POST actions, all from Twilio, all signature-verified:
+//   voice_inbound    the call arrives     -> log it, return TwiML that forwards
+//   voice_status     the forward finished -> answered? how long? else voicemail
+//   voice_recording  the voicemail is in  -> attach recording + transcript
+//
+// Each one answers 200 with TwiML even on an internal error: a non-2xx makes
+// Twilio play its own "application error" recording to a live customer, which
+// is a far worse outcome than a missing analytics row.
+function xml(res, twiml) {
+  res.setHeader('Content-Type', 'text/xml');
+  return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>${twiml}`);
+}
+function xmlEsc(s) {
+  return String(s == null ? '' : s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
+}
+function publicBase() {
+  return process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+}
+// Twilio signs against the EXACT callback URL string it was given, so every
+// callback URL is built here and verified against the same builder — a
+// mismatch in parameter order or escaping is the classic cause of a webhook
+// that silently fails verification.
+function voiceUrl(action, params = {}) {
+  const qs = new URLSearchParams({ action, ...params }).toString();
+  return `${publicBase()}/api/analytics?${qs}`;
+}
+function tenDigits(raw) {
+  const d = String(raw || '').replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+}
+
+// Reads and verifies a Twilio POST. On a bad signature it has already
+// responded, and returns null, so callers can `if (!params) return;`.
+async function twilioVoiceParams(req, res, action, extraQuery = {}) {
+  const rawBody = await readRawBody(req);
+  const params = Object.fromEntries(new URLSearchParams(rawBody));
+  if (!verifyTwilioSignature(voiceUrl(action, extraQuery), params, req.headers['x-twilio-signature'])) {
+    console.warn(`[${action}] signature verification failed`);
+    xml(res, '<Response><Reject/></Response>');
+    return null;
+  }
+  return params;
+}
+
+// The voicemail leg, used whenever nobody picks up.
+function voicemailTwiml(sid) {
+  const done = voiceUrl('voice_recording', { sid });
+  return '<Response>'
+    + '<Say voice="Polly.Joanna">Sorry we missed you. Please leave your name, number and what you need after the tone, and we will call you right back.</Say>'
+    + `<Record maxLength="120" playBeep="true" timeout="4" transcribe="true" transcribeCallback="${xmlEsc(done)}" action="${xmlEsc(done)}" method="POST"/>`
+    + '<Say voice="Polly.Joanna">We did not get a message. Goodbye.</Say>'
+    + '</Response>';
+}
+
+// POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
+async function handleVoiceInbound(req, res) {
+  const params = await twilioVoiceParams(req, res, 'voice_inbound');
+  if (!params) return;
+  const sid = params.CallSid || '';
+  const from = tenDigits(params.From);
+  const to = tenDigits(params.To);
+  let line = null;
+  try {
+    const db = serviceClient();
+    const { data } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active')
+      .eq('phone', to).maybeSingle();
+    line = data && data.active ? data : null;
+
+    // Log first, forward second — but the whole block is wrapped, because if
+    // logging throws the call must still connect. A customer reaching a human
+    // matters more than the analytics row.
+    let business_id = null;
+    if (line && line.business_slug) {
+      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
+      business_id = biz?.id || null;
+    }
+    let customer_id = null;
+    if (from) {
+      const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
+      customer_id = (c || [])[0]?.id || null;
+    }
+    await db.from('calls').insert({
+      business_id,
+      source: 'twilio',
+      kind: 'inbound',
+      caller_phone: from || 'unknown',
+      grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
+      tracking_label: line?.label || null,
+      market: line?.market || null,
+      forwarded_to: line?.forward_to || null,
+      twilio_call_sid: sid,
+      occurred_at: new Date().toISOString(),
+      customer_id,
+      status: 'new',
+      // An unmapped number is a config gap, never a reason to drop a caller —
+      // same rule as GRASSHOPPER_LINES. The office sees the warning on the card.
+      warnings: line ? null : ['Number is not in tracking_numbers - call still connected'],
+    });
+  } catch (e) {
+    console.error('[voice_inbound] log failed:', e.message);
+  }
+
+  // No forwarding destination configured (or an unknown number): take a
+  // message rather than hanging up on a real customer.
+  if (!line || !line.forward_to) return xml(res, voicemailTwiml(sid));
+
+  // callerId is the CALLER's own number, not ours, so whoever picks up sees who
+  // is really calling and can just hit redial. Twilio permits this for straight
+  // call forwarding. The tradeoff is that the handset cannot show WHICH line
+  // was dialed — that lives in the Calls tab, which is the point of logging it.
+  const action = voiceUrl('voice_status', { sid });
+  const rec = line.record_calls ? ' record="record-from-answer-dual"' : '';
+  return xml(res, `<Response><Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}><Number>${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
+}
+
+// POST /api/analytics?action=voice_status&sid=... — the <Dial> finished.
+// DialCallStatus says whether a human picked up; anything else means the call
+// was missed, and the caller is still on the line, so we take a message.
+async function handleVoiceStatus(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_status', { sid });
+  if (!params) return;
+  const status = (params.DialCallStatus || '').toLowerCase();
+  const answered = status === 'completed';
+  const dur = parseInt(params.DialCallDuration, 10);
+  try {
+    const db = serviceClient();
+    await db.from('calls').update({
+      answered,
+      duration_sec: Number.isFinite(dur) ? dur : null,
+      ...(params.RecordingUrl ? { recording_url: params.RecordingUrl, has_recording: true } : {}),
+      // An answered call needs no callback-queue entry — somebody already spoke
+      // to them. A missed one stays 'new' until the office clears it.
+      ...(answered ? { status: 'resolved', handled_by: 'Answered', handled_at: new Date().toISOString() } : {}),
+    }).eq('twilio_call_sid', sid);
+  } catch (e) {
+    console.error('[voice_status] update failed:', e.message);
+  }
+  if (answered) return xml(res, '<Response><Hangup/></Response>');
+  return xml(res, voicemailTwiml(sid));
+}
+
+// POST /api/analytics?action=voice_recording&sid=... — fires twice: once when
+// the recording is stored (RecordingUrl) and again when transcription finishes
+// (TranscriptionText). Both patch the same row, so arrival order does not
+// matter and a missing transcription never loses the recording.
+async function handleVoiceRecording(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_recording', { sid });
+  if (!params) return;
+  const patch = {};
+  if (params.RecordingUrl) { patch.recording_url = params.RecordingUrl; patch.has_recording = true; }
+  if (params.TranscriptionText) patch.transcript = params.TranscriptionText;
+  if (params.RecordingDuration) patch.duration_sec = parseInt(params.RecordingDuration, 10) || null;
+  try {
+    const db = serviceClient();
+    let row = null;
+    if (Object.keys(patch).length) {
+      const { data } = await db.from('calls').update(patch).eq('twilio_call_sid', sid)
+        .select('id, caller_phone, tracking_label, forwarded_to, notified_at').maybeSingle();
+      row = data || null;
+    }
+    // Text whoever the line forwards to, once, and only on the recording
+    // callback — the transcription callback lands minutes later and would
+    // otherwise double-alert. Awaited, never fire-and-forget: an un-awaited
+    // send is killed the moment this function responds.
+    if (row && params.RecordingUrl && row.forwarded_to && !row.notified_at) {
+      const p = row.caller_phone || '';
+      const pretty = p.length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p;
+      const sent = await sendSMS(row.forwarded_to,
+        `Missed call${row.tracking_label ? ` on ${row.tracking_label}` : ''} from ${pretty}. They left a voicemail - it is in the Calls tab.`);
+      if (sent) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', row.id);
+    }
+  } catch (e) {
+    console.error('[voice_recording] update failed:', e.message);
+  }
+  return xml(res, '<Response><Say voice="Polly.Joanna">Thanks. We will call you right back.</Say><Hangup/></Response>');
+}
+
 export default async function handler(req, res) {
   const action = (req.query.action || '').toString();
   if (req.method === 'POST' && action === 'sms_status') return handleTwilioStatus(req, res);
   if (req.method === 'POST' && action === 'email_webhook') return handleResendWebhook(req, res);
+  if (req.method === 'POST' && action === 'voice_inbound') return handleVoiceInbound(req, res);
+  if (req.method === 'POST' && action === 'voice_status') return handleVoiceStatus(req, res);
+  if (req.method === 'POST' && action === 'voice_recording') return handleVoiceRecording(req, res);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');

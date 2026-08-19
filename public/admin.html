@@ -7929,14 +7929,27 @@ function callWhen(r){
   }catch(_){ return new Date(r.occurred_at).toLocaleString(); }
 }
 const CALL_RESOLUTION_LABEL={booked:'📅 Booked',estimate_sent:'🧾 Estimate sent',refused:'Customer declined',other:'Other outcome'};
+// "3:07" / "45s" — Twilio reports call length in whole seconds.
+function callDuration(sec){
+  const s=parseInt(sec,10); if(!Number.isFinite(s)||s<0) return '';
+  return s<60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
 function callCard(r,handled){
   const isLive=r.kind==='live';
   const badges=[];
+  // A tracking-number call (Twilio). Unlike a Grasshopper voicemail these rows
+  // exist even when someone answered, so the card has to say which it was —
+  // otherwise an answered call reads like an unhandled voicemail.
+  const isTracked=r.source==='twilio';
   if(isLive) badges.push('<span class="rc-badge blue">📞 Live call</span>');
+  if(isTracked) badges.push(r.answered
+    ? `<span class="rc-badge green">✅ Answered${r.duration_sec?' · '+callDuration(r.duration_sec):''}</span>`
+    : '<span class="rc-badge red">📵 Missed</span>');
+  if(r.tracking_label) badges.push(`<span class="rc-badge blue">${esc(r.tracking_label)}</span>`);
   if(r.is_new_caller) badges.push('<span class="rc-badge amber">New caller</span>');
   if(r.service)  badges.push(`<span class="rc-badge blue">${esc(r.service)}</span>`);
   if(r.market)   badges.push(`<span class="rc-badge gray">${esc(r.market)}</span>`);
-  else if(!isLive) badges.push('<span class="rc-badge red">Unrouted number</span>');
+  else if(!isLive && !isTracked) badges.push('<span class="rc-badge red">Unrouted number</span>');
   if(r.resolution) badges.push(`<span class="rc-badge green">${esc(CALL_RESOLUTION_LABEL[r.resolution]||r.resolution)}</span>`);
   if(r.status==='called_back') badges.push('<span class="rc-badge blue">Called back</span>');
   // Live claim, shown to everyone. This badge is the double-call guard: it is
@@ -7956,7 +7969,11 @@ function callCard(r,handled){
 
   const tx=r.transcript
     ? `<div style="margin-top:8px;background:var(--line2);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink-2);line-height:1.55;">${esc(r.transcript)}</div>`
-    : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
+    : (isTracked&&r.answered)
+      // An answered tracking call left no message by definition. Saying "no
+      // transcript" here would read as something missing rather than normal.
+      ? '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">Call was answered — no message left.</div>'
+      : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
 
   const hasPhone=!!r.caller_phone;
   const tel=`tel:+1${esc(r.caller_phone)}`;
