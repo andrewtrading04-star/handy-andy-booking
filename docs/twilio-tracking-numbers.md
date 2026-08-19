@@ -25,7 +25,12 @@ somebody else's dashboard.
    `kind='inbound'`), and answer with TwiML that dials `forward_to`.
    - `callerId` is the **caller's own number**, so whoever picks up sees who is
      really calling and can hit redial. The handset therefore cannot show which
-     line was dialed — that lives in the Calls tab, which is the point.
+     line was dialed, which is what the whisper is for.
+   - **Whisper**: the `url` on `<Number>` is fetched the moment the person picks
+     up and plays the line's `label` to THEM only — the caller hears ringing
+     throughout. With a dozen numbers across several cities this is the only way
+     to know what you answered before you say hello, so keep labels short and
+     speakable ("Austin", "Denver Google Ads"): it is dead air on a live call.
    - An unmapped number still connects; the row gets a warning badge instead.
 3. When the `<Dial>` ends, Twilio POSTs `voice_status`. Answered calls get
    `answered=true`, a duration, and are closed out (`handled_by='Answered'`) so

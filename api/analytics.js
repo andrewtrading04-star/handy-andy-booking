@@ -334,6 +334,23 @@ function voicemailTwiml(sid) {
     + '</Response>';
 }
 
+// POST /api/analytics?action=voice_whisper&label=... — fetched when the person
+// being forwarded to picks up, and played only to them. The caller is still
+// hearing ringing while this plays, so keep it to a couple of words: it is the
+// delay between "hello?" and being connected.
+//
+// The label is carried in the query rather than looked up by CallSid on
+// purpose. It is inside the signed URL, so it cannot be tampered with, and a
+// database round-trip here would be dead air on a live call.
+async function handleVoiceWhisper(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const label = (req.query.label || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_whisper', { label, sid });
+  if (!params) return;
+  if (!label) return xml(res, '<Response/>');
+  return xml(res, `<Response><Say voice="Polly.Joanna">${xmlEsc(label)}</Say></Response>`);
+}
+
 // POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
 async function handleVoiceInbound(req, res) {
   const params = await twilioVoiceParams(req, res, 'voice_inbound');
@@ -393,7 +410,13 @@ async function handleVoiceInbound(req, res) {
   // was dialed — that lives in the Calls tab, which is the point of logging it.
   const action = voiceUrl('voice_status', { sid });
   const rec = line.record_calls ? ' record="record-from-answer-dual"' : '';
-  return xml(res, `<Response><Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}><Number>${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
+  // The whisper: because callerId is the customer's number, the handset cannot
+  // say WHICH line rang, and with a dozen numbers across several cities that
+  // matters more than it does with one. The url on <Number> is fetched the
+  // moment the person picks up and plays only to THEM — the caller hears
+  // ringing throughout — so you answer already knowing what you picked up.
+  const whisper = voiceUrl('voice_whisper', { label: line.label || '', sid });
+  return xml(res, `<Response><Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
 }
 
 // POST /api/analytics?action=voice_status&sid=... — the <Dial> finished.
@@ -465,6 +488,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && action === 'sms_status') return handleTwilioStatus(req, res);
   if (req.method === 'POST' && action === 'email_webhook') return handleResendWebhook(req, res);
   if (req.method === 'POST' && action === 'voice_inbound') return handleVoiceInbound(req, res);
+  if (req.method === 'POST' && action === 'voice_whisper') return handleVoiceWhisper(req, res);
   if (req.method === 'POST' && action === 'voice_status') return handleVoiceStatus(req, res);
   if (req.method === 'POST' && action === 'voice_recording') return handleVoiceRecording(req, res);
 
