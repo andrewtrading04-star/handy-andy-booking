@@ -298,11 +298,26 @@ function tenDigits(raw) {
 
 // Reads and verifies a Twilio POST. On a bad signature it has already
 // responded, and returns null, so callers can `if (!params) return;`.
+//
+// Two candidate URLs, because the one Twilio signed is not always the one we
+// would build. The status and recording callbacks come from TwiML we wrote, so
+// PUBLIC_URL matches by construction — but the FIRST hit (voice_inbound) uses
+// whatever URL is typed into the number's config in the Twilio console, which
+// may be a different host than PUBLIC_URL (a custom domain, or a bare
+// *.vercel.app). Accepting either keeps a host mismatch from silently sending
+// every caller to voicemail. The signature itself is still required and still
+// checked against the auth token, so this widens which URL is accepted, not
+// who is allowed to call.
 async function twilioVoiceParams(req, res, action, extraQuery = {}) {
   const rawBody = await readRawBody(req);
   const params = Object.fromEntries(new URLSearchParams(rawBody));
-  if (!verifyTwilioSignature(voiceUrl(action, extraQuery), params, req.headers['x-twilio-signature'])) {
-    console.warn(`[${action}] signature verification failed`);
+  const sig = req.headers['x-twilio-signature'];
+  const proto = (req.headers['x-forwarded-proto'] || 'https').toString().split(',')[0];
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0];
+  const candidates = [voiceUrl(action, extraQuery)];
+  if (host) candidates.push(`${proto}://${host}${req.url}`);
+  if (!candidates.some(u => verifyTwilioSignature(u, params, sig))) {
+    console.warn(`[${action}] signature verification failed; tried ${candidates.join(' , ')}`);
     xml(res, '<Response><Reject/></Response>');
     return null;
   }
