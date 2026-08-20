@@ -69,11 +69,10 @@
   // the dark card Handy Andy and Mile High have always shipped. Handy Andy and
   // Mile High keep the exact original dark hex values (byte-for-byte) so their
   // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
-  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80' };
-  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a' };
+  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23' };
+  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6' };
   // Precision's site (precisiontvinstallation.com) is white too, so it takes
   // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
@@ -677,7 +676,7 @@
         _stripeElements=_stripe.elements();
         _stripeCard=_stripeElements.create('card',{
           style:{
-            base:{color:'#fff',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:'16px','::placeholder':{color:'#71717a'}},
+            base:{color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:'16px','::placeholder':{color:T.muted}},
             invalid:{color:'#ef4444'},
           },
           hidePostalCode:true,
@@ -978,8 +977,8 @@
     couponCode=(code in COUPONS)?code:'';
     const disc=COUPONS[couponCode]||0;
     if(disc>0){
-      row.style.cssText='display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;font-size:13px!important;color:#a0a0ab!important;';
-      row.innerHTML=`<span>Coupon ${couponCode}</span><span style="color:#4ade80!important;">-$${disc}</span>`;
+      row.style.cssText=`display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;font-size:13px!important;color:${T.muted2}!important;`;
+      row.innerHTML=`<span>Coupon ${couponCode}</span><span style="color:${T.ok}!important;">-$${disc}</span>`;
     }else{
       row.style.cssText='display:none!important;';
       row.innerHTML='';
@@ -1012,11 +1011,11 @@
       <p style="${S.sub}">Select all that apply. Samsung Frame and LG Gallery TVs use the bracket that comes in the box.</p>
       <div class="ha-tv-type" data-type="regular" style="${S.card(regOn)}">
         <span>I have a regular TV</span>
-        <span style="color:${regOn?ACCENT:'#52525b'}!important;font-size:18px!important;">${regOn?'✓':'☐'}</span>
+        <span style="color:${regOn?ACCENT:T.muted3}!important;font-size:18px!important;">${regOn?'✓':'☐'}</span>
       </div>
       <div class="ha-tv-type" data-type="frame" style="${S.card(frameOn)}">
         <span>I have a Samsung Frame TV or LG Gallery TV</span>
-        <span style="color:${frameOn?ACCENT:'#52525b'}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
+        <span style="color:${frameOn?ACCENT:T.muted3}!important;font-size:18px!important;">${frameOn?'✓':'☐'}</span>
       </div>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
@@ -1102,7 +1101,7 @@
   function bracketHelpPanel(numLabel,numBg,title,tagBg,tagColor,tagText,barBg,diagramBg,diagramSvg,desc,pros,cons,optId,sectionId,btnLabel){
     const prosHtml=pros.map(p=>`<li>${p}</li>`).join('');
     const consHtml=cons.map(c=>`<li>${c}</li>`).join('');
-    const addBtn=optId?`<button class="ha-bracket-add" data-s="${sectionId}" data-o="${optId}" style="margin-top:12px!important;width:100%!important;background:#f07422!important;color:#fff!important;border:none!important;padding:10px!important;border-radius:8px!important;font-weight:700!important;font-size:13px!important;cursor:pointer!important;">${btnLabel}</button>`:'';
+    const addBtn=optId?`<button class="ha-bracket-add" data-s="${sectionId}" data-o="${optId}" style="margin-top:12px!important;width:100%!important;background:${ACCENT}!important;color:#fff!important;border:none!important;padding:10px!important;border-radius:8px!important;font-weight:700!important;font-size:13px!important;cursor:pointer!important;">${btnLabel}</button>`:'';
     return `<div style="padding:20px 20px 24px;border-bottom:1px solid #e7eaf3;">
       <div style="height:5px;border-radius:3px;margin-bottom:14px;background:${barBg};"></div>
       <div style="border-radius:12px;height:150px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;background:${diagramBg};">${diagramSvg}</div>
@@ -1141,11 +1140,11 @@
       <line x1="24" y1="65" x2="32" y2="57" stroke="#d99a68" stroke-width="2"/>
       <line x1="24" y1="105" x2="32" y2="97" stroke="#d99a68" stroke-width="2"/>
       <line x1="24" y1="145" x2="32" y2="137" stroke="#d99a68" stroke-width="2"/>
-      <rect x="36" y="70" width="14" height="50" rx="3" fill="#f07422"/>
+      <rect x="36" y="70" width="14" height="50" rx="3" fill="${ACCENT}"/>
       <circle cx="56" cy="95" r="7" fill="#c05a10"/>
-      <g transform="rotate(-14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/></g>
-      <g transform="rotate(14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/></g>
-      <rect x="56" y="35" width="13" height="120" rx="3" fill="#f07422"/>
+      <g transform="rotate(-14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="${ACCENT}"/></g>
+      <g transform="rotate(14 56 95)" opacity="0.28"><rect x="56" y="35" width="13" height="120" rx="3" fill="${ACCENT}"/></g>
+      <rect x="56" y="35" width="13" height="120" rx="3" fill="${ACCENT}"/>
       <rect x="69" y="39" width="4" height="112" rx="2" fill="#f5a06a"/>
       <path d="M 110 55 A 55 55 0 0 1 122 95" fill="none" stroke="#c05a10" stroke-width="4" stroke-linecap="round"/>
       <polygon points="112,49 100,58 116,64" fill="#c05a10"/>
@@ -1162,16 +1161,16 @@
       <line x1="18" y1="145" x2="26" y2="137" stroke="#748ac0" stroke-width="2"/>
       <rect x="30" y="86" width="10" height="20" rx="2" fill="#1a2f6b"/>
       <line x1="40" y1="96" x2="80" y2="82" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
-      <circle cx="80" cy="82" r="6" fill="#f07422"/>
+      <circle cx="80" cy="82" r="6" fill="${ACCENT}"/>
       <line x1="80" y1="82" x2="122" y2="96" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
-      <circle cx="122" cy="96" r="6" fill="#f07422"/>
+      <circle cx="122" cy="96" r="6" fill="${ACCENT}"/>
       <g transform="rotate(-8 130 96)">
         <rect x="126" y="42" width="14" height="108" rx="3" fill="#22304f"/>
         <rect x="140" y="46" width="4" height="100" rx="2" fill="#3d4f78"/>
       </g>
-      <line x1="34" y1="170" x2="130" y2="170" stroke="#f07422" stroke-width="2"/>
-      <line x1="34" y1="164" x2="34" y2="176" stroke="#f07422" stroke-width="2"/>
-      <line x1="130" y1="164" x2="130" y2="176" stroke="#f07422" stroke-width="2"/>
+      <line x1="34" y1="170" x2="130" y2="170" stroke="${ACCENT}" stroke-width="2"/>
+      <line x1="34" y1="164" x2="34" y2="176" stroke="${ACCENT}" stroke-width="2"/>
+      <line x1="130" y1="164" x2="130" y2="176" stroke="${ACCENT}" stroke-width="2"/>
       <text x="52" y="164" font-size="13" font-weight="700" fill="#c05a10" font-family="Arial">16 INCH EXTENSION</text>
       <path d="M 190 60 A 45 45 0 0 1 200 96" fill="none" stroke="#1a2f6b" stroke-width="3.5" stroke-linecap="round"/>
       <polygon points="192,54 181,62 195,68" fill="#1a2f6b"/>
@@ -1179,10 +1178,10 @@
       <polygon points="192,138 181,130 195,124" fill="#1a2f6b"/>
       <text x="210" y="66" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT UP</text>
       <text x="210" y="132" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT DOWN</text>
-      <path d="M 218 90 L 238 90" stroke="#f07422" stroke-width="3.5" stroke-linecap="round"/>
-      <polygon points="244,90 234,84 234,96" fill="#f07422"/>
-      <path d="M 218 104 L 238 104" stroke="#f07422" stroke-width="3.5" stroke-linecap="round" transform="rotate(180 228 104)"/>
-      <polygon points="212,104 222,98 222,110" fill="#f07422"/>
+      <path d="M 218 90 L 238 90" stroke="${ACCENT}" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="244,90 234,84 234,96" fill="${ACCENT}"/>
+      <path d="M 218 104 L 238 104" stroke="${ACCENT}" stroke-width="3.5" stroke-linecap="round" transform="rotate(180 228 104)"/>
+      <polygon points="212,104 222,98 222,110" fill="${ACCENT}"/>
       <text x="248" y="88" font-size="11" font-weight="700" fill="#c05a10" font-family="Arial">SWIVEL</text>
       <text x="248" y="102" font-size="11" font-weight="700" fill="#c05a10" font-family="Arial">L / R</text>
     </svg>`,
@@ -1198,12 +1197,12 @@
         ['Ultra slim profile, sits tight against the wall','Great for tile installations','Cleanest look of all brackets'],
         ['Minimal space behind TV for cables','No movement at all'],
         flatId,sectionId,'Add a Flat Bracket to my order')
-      +bracketHelpPanel('2','#f07422','Tilting Brackets','#fdeadd','#c05a10','Most Popular','#f07422','#fdeadd',BRACKET_SVGS.tilt,
+      +bracketHelpPanel('2',ACCENT,'Tilting Brackets','#fdeadd','#c05a10','Most Popular',ACCENT,'#fdeadd',BRACKET_SVGS.tilt,
         'The TV angles up or down on a pivot, perfect for mounting above eye level or killing window glare. It stays put side to side.',
         ['Most common bracket on the market','Tilts up and down for the perfect angle','Easy cable hiding behind the TV'],
         ["Doesn't move left or right"],
         tiltId,sectionId,'Add a Tilting Bracket to my order')
-      +bracketHelpPanel('3','#f07422','Full Motion Brackets','#f07422','#fff','Maximum Flexibility','linear-gradient(90deg,#1a2f6b,#f07422)','#e8edf9',BRACKET_SVGS.full,
+      +bracketHelpPanel('3',ACCENT,'Full Motion Brackets',ACCENT,'#fff','Maximum Flexibility',`linear-gradient(90deg,#1a2f6b,${ACCENT})`,'#e8edf9',BRACKET_SVGS.full,
         'An articulating arm does it all: tilts up and down, swivels left and right, and pulls the TV a full 16 inches off the wall so every seat gets the perfect angle.',
         ['Tilts up and down, swivels left and right','Pulls out 16 inches from the wall','Total viewing flexibility from any seat'],
         ["Sticks off the wall, doesn't sit flush"],
@@ -1212,12 +1211,12 @@
       <div style="position:relative!important;width:100%!important;max-width:480px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;background:#fff!important;font-family:'Segoe UI',Arial,Helvetica,sans-serif!important;">
         <button id="ha-bracket-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.35)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
         <div style="background:linear-gradient(135deg,#1a2f6b 0%,#12224f 100%);padding:26px 24px 22px;position:relative;overflow:hidden;">
-          <h1 style="color:#fff;font-size:22px;line-height:1.15;font-weight:800;position:relative;margin:0;">The Difference Between<br><span style="color:#f07422;">TV Brackets</span></h1>
+          <h1 style="color:#fff;font-size:22px;line-height:1.15;font-weight:800;position:relative;margin:0;">The Difference Between<br><span style="color:${ACCENT};">TV Brackets</span></h1>
           <p style="color:#c3cdea;margin-top:6px;font-size:13px;position:relative;">Everything you need to know before choosing your mount</p>
         </div>
         ${panels}
         <div style="padding:16px 20px;background:#f2f4f9;">
-          <button id="ha-bracket-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:12px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:14px!important;cursor:pointer!important;">Got it, back to my order</button>
+          <button id="ha-bracket-help-close" style="background:${ACCENT}!important;color:#fff!important;border:none!important;padding:12px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:14px!important;cursor:pointer!important;">Got it, back to my order</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
@@ -1268,7 +1267,7 @@
         const on=getQty(sec.id,o.id)>0;
         return `<div class="ha-tog" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
           <span>${o.label}</span>
-          <span style="color:${on?ACCENT:'#52525b'}!important;font-size:18px!important;">${on?'✓':'○'}</span>
+          <span style="color:${on?ACCENT:T.muted3}!important;font-size:18px!important;">${on?'✓':'○'}</span>
         </div>`;
       }).join('');
     }
@@ -1304,14 +1303,14 @@
       <div style="padding:13px 20px 16px;">
         <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}</div>
         <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
-        ${optId?`<button class="ha-surface-pick" data-s="${sectionId}" data-o="${optId}" style="background:#f07422;color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's my wall</button>`:''}
+        ${optId?`<button class="ha-surface-pick" data-s="${sectionId}" data-o="${optId}" style="background:${ACCENT};color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's my wall</button>`:''}
       </div>
     </div>`;
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
         <button id="ha-surface-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
         <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
-          <div style="color:#fff;font-size:19px;font-weight:800;">What kind of wall <span style="color:#f07422;">do you have?</span></div>
+          <div style="color:#fff;font-size:19px;font-weight:800;">What kind of wall <span style="color:${ACCENT};">do you have?</span></div>
           <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Match your wall to a picture below</div>
         </div>
         ${panel('surface-drywall.jpg','Drywall',0,'Smooth painted walls, what most homes have inside. If your wall looks like this (flat paint, maybe an outlet or baseboard), it is drywall.',ids.drywall)}
@@ -1319,7 +1318,7 @@
         ${panel('surface-stone.jpg','Uneven Stone or Tile',50,'Tile or polished marble panels like this, or bumpy natural rock. Common on fireplace walls. This surface takes extra care to mount safely.',ids.stone)}
         ${panel('surface-stucco.jpg','Outdoor/Stucco',45,'Rough, sandy-textured plaster, usually outside: patios, balconies, and the exterior of many Texas homes.',ids.stucco)}
         <div style="padding:14px 20px;background:#f2f4f9;">
-          <button id="ha-surface-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
+          <button id="ha-surface-help-close" style="background:${ACCENT}!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
@@ -1351,16 +1350,16 @@
       <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:calc(100% - 40px);margin:0 20px;border-radius:8px;height:160px;object-fit:cover;">
       <div style="padding:13px 20px 16px;">
         <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}
-        ${badge?`<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:12px;background:#f07422;color:#fff;vertical-align:1px;">${badge}</span>`:''}</div>
+        ${badge?`<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:12px;background:${ACCENT};color:#fff;vertical-align:1px;">${badge}</span>`:''}</div>
         <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
-        <button class="ha-wire-pick" data-s="${sectionId}" data-o="${optId}" style="background:#f07422;color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's what I want</button>
+        <button class="ha-wire-pick" data-s="${sectionId}" data-o="${optId}" style="background:${ACCENT};color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's what I want</button>
       </div>
     </div>`:'';
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
         <button id="ha-wire-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
         <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
-          <div style="color:#fff;font-size:19px;font-weight:800;">Where do the wires <span style="color:#f07422;">end up?</span></div>
+          <div style="color:#fff;font-size:19px;font-weight:800;">Where do the wires <span style="color:${ACCENT};">end up?</span></div>
           <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Real photos from our own installs</div>
         </div>
         ${panel('wire-behind.jpg','Hide them BEHIND the wall',75,'Cleanest look','We route the cords through the inside of the wall so nothing shows at all, like this fireplace install we did. The most popular choice for a showcase wall. Works on drywall only.',ids.behind)}
@@ -1368,7 +1367,7 @@
         ${panel('wire-plug.jpg','My wall already has a plug behind the TV',0,'','If there is already an outlet right behind where the TV goes, the cords plug in back there and nothing shows, like this install.',ids.plug)}
         ${panel('wire-hang.jpg','Let the wires hang under the TV',0,'','No hiding at all. The cords run straight down from the TV in plain sight, like this. Totally fine over a media console that covers them.',ids.hang)}
         <div style="padding:14px 20px;background:#f2f4f9;">
-          <button id="ha-wire-help-close" style="background:#f07422!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
+          <button id="ha-wire-help-close" style="background:${ACCENT}!important;color:#fff!important;border:none!important;padding:11px!important;width:100%!important;border-radius:8px!important;font-weight:700!important;font-size:13.5px!important;cursor:pointer!important;">Got it, back to my order</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
@@ -1450,7 +1449,7 @@
           <p style="font-size:15px!important;color:#fff!important;margin:0!important;line-height:1.6!important;">
             Because your TV is <strong>86 inches or larger</strong>, two technicians are required for proper and safe installation.
           </p>
-          <p style="font-size:13px!important;color:#a0a0ab!important;margin-top:8px!important;margin-bottom:0!important;">
+          <p style="font-size:13px!important;color:${T.muted2}!important;margin-top:8px!important;margin-bottom:0!important;">
             A second technician fee of +$70 has been added.
           </p>
         </div>
@@ -1473,7 +1472,7 @@
       const displayLabel=LIFT_LABELS[o.id]||o.label;
       return `<div class="ha-sel" data-s="${sec.id}" data-o="${o.id}" style="${S.card(on)}">
         <span>${displayLabel}</span>
-        <span style="color:${on?ACCENT:'#52525b'}!important;font-size:18px!important;">${on?'●':'○'}</span>
+        <span style="color:${on?ACCENT:T.muted3}!important;font-size:18px!important;">${on?'●':'○'}</span>
       </div>`;
     }).join('');
     const ok=!!cur;
@@ -1511,7 +1510,7 @@
         <button id="btn-gds-review" type="button" aria-expanded="false" style="background:transparent!important;border:none!important;padding:9px 4px!important;width:100%!important;display:block!important;cursor:pointer!important;font-size:12.5px!important;font-weight:700!important;color:#d4d4d8!important;text-align:center!important;font-family:inherit!important;">
           <span style="color:#fbbf24!important;letter-spacing:1px!important;">★★★★★</span>
           <span style="text-decoration:underline!important;text-underline-offset:2px!important;margin-left:6px!important;">See what our customers say</span>
-          <span id="gds-review-caret" style="display:inline-block!important;margin-left:5px!important;font-size:10px!important;color:#71717a!important;">▼</span>
+          <span id="gds-review-caret" style="display:inline-block!important;margin-left:5px!important;font-size:10px!important;color:${T.muted}!important;">▼</span>
         </button>
         <div id="gds-review-panel" style="display:none!important;background:#fff!important;border-radius:10px!important;padding:8px!important;margin-top:2px!important;">
           <a id="gds-review-full" href="${GDS_REVIEW_IMG}" target="_blank" rel="noopener" style="display:block!important;text-decoration:none!important;">
@@ -1531,8 +1530,8 @@
     // time, even years later, and the TV comes down at no charge), sold like
     // insurance. The FREE promise is the hero of the card.
     return `
-      <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:#fff!important;display:block!important;line-height:1.2!important;text-align:center!important;">Guaranteed Dismount Coverage</h1>
-      <p style="font-size:13px!important;color:#d4d4d8!important;margin:0 0 14px 0!important;line-height:1.6!important;text-align:center!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
+      <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:${T.text}!important;display:block!important;line-height:1.2!important;text-align:center!important;">Guaranteed Dismount Coverage</h1>
+      <p style="font-size:13px!important;color:${T.subtle}!important;margin:0 0 14px 0!important;line-height:1.6!important;text-align:center!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
 
       <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid ${ACCENT}!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
         <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
@@ -1557,13 +1556,13 @@
       </div>
       ${gdsReviewHtml()}
 
-      <div style="font-size:12.5px!important;color:#a0a0ab!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
+      <div style="font-size:12.5px!important;color:${T.muted2}!important;line-height:1.5!important;margin-bottom:14px!important;text-align:center!important;">Hiring someone to remove a mounted TV later can cost several hundred dollars. Coverage means you never pay it.</div>
 
-      <button id="btn-dis-yes" style="background:${yesOn?ACCENT:`rgba(${ACCENT_RGB},0.85)`}!important;color:#fff!important;border:${yesOn?'2px solid #fff':'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
+      <button id="btn-dis-yes" style="background:${yesOn?ACCENT:`rgba(${ACCENT_RGB},0.85)`}!important;color:#fff!important;border:${yesOn?`2px solid ${T.text}`:'none'}!important;padding:15px!important;border-radius:10px!important;font-size:15px!important;font-weight:700!important;cursor:pointer!important;width:100%!important;display:block!important;text-align:center!important;box-sizing:border-box!important;margin-bottom:10px!important;">
         ${yesOn?'✓ ':''}🛡️ Add coverage to my ticket, $35
       </button>
       <div style="text-align:center!important;margin-bottom:8px!important;">
-        <button id="btn-dis-no" style="background:${cur===noId?'rgba(255,255,255,0.06)':'transparent'}!important;color:${cur===noId?'#fff':'#71717a'}!important;border:none!important;font-size:13px!important;cursor:pointer!important;text-decoration:underline!important;padding:8px 16px!important;">
+        <button id="btn-dis-no" style="background:${cur===noId?T.selBg:'transparent'}!important;color:${cur===noId?T.text:T.muted}!important;border:none!important;font-size:13px!important;cursor:pointer!important;text-decoration:underline!important;padding:8px 16px!important;">
           ${cur===noId?'✓ ':''}No thanks, I'll handle TV removal when the time comes
         </button>
       </div>
@@ -1591,10 +1590,10 @@
       const ph=o.label==='Other'?'e.g. I need some curtains hung...':'e.g. hang a curtain rod above the window';
       const empty=o.requireText&&!(optionComments[o.id]||'').trim();
       const errId=`err-${o.id}`;
-      const labelText=o.requireText?`Briefly describe the task <span style="color:#a0a0ab!important;font-weight:400!important;">(required)</span>`:'';
+      const labelText=o.requireText?`Briefly describe the task <span style="color:${T.muted2}!important;font-weight:400!important;">(required)</span>`:'';
       const textBox=showText?`<div style="margin:-2px 0 10px 0!important;">
         ${labelText?`<p style="color:#fff!important;font-size:12.5px!important;font-weight:600!important;margin:0 0 6px!important;">${labelText}</p>`:''}
-        <textarea class="ha-comment" data-o="${o.id}" data-required="${o.requireText?1:0}" rows="2" style="width:100%!important;padding:10px 12px!important;background:#27272a!important;border:1px solid ${empty?'#ef4444':ACCENT}!important;color:#fff!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
+        <textarea class="ha-comment" data-o="${o.id}" data-required="${o.requireText?1:0}" rows="2" style="width:100%!important;padding:10px 12px!important;background:${T.panel}!important;border:1px solid ${empty?'#ef4444':ACCENT}!important;color:${T.text}!important;border-radius:6px!important;font-size:14px!important;box-sizing:border-box!important;resize:vertical!important;font-family:inherit!important;" placeholder="${ph}">${optionComments[o.id]||''}</textarea>
         <p id="${errId}" style="color:#ef4444!important;font-size:12px!important;margin:4px 0 0!important;display:none!important;">Let us know what needs doing so the tech shows up ready.</p>
       </div>`:'';
       return row+textBox;
@@ -1611,12 +1610,12 @@
     const agreed=(selections[sec.id]||[])[0]?.option_id===sec.options[0].id;
     return `
       <h1 style="${S.h1}">${sec.title}</h1>
-      <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:16px!important;margin-bottom:20px!important;font-size:13px!important;color:#a0a0ab!important;line-height:1.7!important;max-height:130px!important;overflow-y:auto!important;">
+      <div style="background:${T.panel}!important;border:1px solid ${T.border}!important;border-radius:8px!important;padding:16px!important;margin-bottom:20px!important;font-size:13px!important;color:${T.muted2}!important;line-height:1.7!important;max-height:130px!important;overflow-y:auto!important;">
         ${sec.subtitle}
       </div>
       <div style="display:flex!important;justify-content:center!important;margin-bottom:20px!important;">
         <div class="ha-sel" data-s="${sec.id}" data-o="${sec.options[0].id}"
-          style="background:${agreed?'rgba(34,197,94,0.1)':'#27272a'}!important;border:1.5px solid ${agreed?'#22c55e':'#3f3f46'}!important;border-radius:8px!important;padding:12px 24px!important;color:#fff!important;display:inline-flex!important;align-items:center!important;gap:10px!important;font-size:14px!important;cursor:pointer!important;">
+          style="background:${agreed?'rgba(34,197,94,0.1)':T.panel}!important;border:1.5px solid ${agreed?'#22c55e':T.border}!important;border-radius:8px!important;padding:12px 24px!important;color:${T.text}!important;display:inline-flex!important;align-items:center!important;gap:10px!important;font-size:14px!important;cursor:pointer!important;">
           <span style="font-size:20px!important;">${agreed?'☑':'☐'}</span>
           <span>${sec.options[0].label}</span>
         </div>
@@ -1671,7 +1670,7 @@
     const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const windowsByDate=requestWindowOptions();
     const allDates=Object.keys(windowsByDate).sort();
-    if(!allDates.length)return `<h1 style="${S.h1}">When works for you?</h1><p style="color:#a0a0ab!important;font-size:14px!important;">No dates available right now — please call us.</p>`;
+    if(!allDates.length)return `<h1 style="${S.h1}">When works for you?</h1><p style="color:${T.muted2}!important;font-size:14px!important;">No dates available right now — please call us.</p>`;
     if(calYear===null){
       const f=new Date(allDates[0]+'T12:00:00');
       calYear=f.getFullYear(); calMonth=f.getMonth();
@@ -1685,7 +1684,7 @@
     const canPrev=calYear>firstAvail.getFullYear()||(calYear===firstAvail.getFullYear()&&calMonth>firstAvail.getMonth());
     const canNext=calYear<lastAvail.getFullYear()||(calYear===lastAvail.getFullYear()&&calMonth<lastAvail.getMonth());
 
-    const dayHdr=DAYS.map(d=>`<div style="text-align:center!important;font-size:11px!important;font-weight:600!important;color:#71717a!important;padding:4px 0 8px 0!important;">${d}</div>`).join('');
+    const dayHdr=DAYS.map(d=>`<div style="text-align:center!important;font-size:11px!important;font-weight:600!important;color:${T.muted}!important;padding:4px 0 8px 0!important;">${d}</div>`).join('');
     let cells='';
     for(let i=0;i<firstDay;i++)cells+=`<div></div>`;
     for(let d=1;d<=daysInMonth;d++){
@@ -1694,11 +1693,11 @@
       const pickedHere=selectedRequestWindows.some(w=>w.date===ds);
       if(has){
         cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?`rgba(${ACCENT_RGB},0.12)`:'transparent'}!important;">
-          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:'#fff'}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:pickedHere?'1.5px solid #4ade80':'none'}!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?T.panel:'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:T.text}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:pickedHere?'1.5px solid ${T.ok}':'none'}!important;">${d}</div>
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
-          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:#3f3f46!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.border}!important;">${d}</div>
         </div>`;
       }
     }
@@ -1711,10 +1710,10 @@
       const winBtns=windows.map(sl=>{
         const on=selectedRequestWindows.some(w=>w.date===selectedDate&&w.slot_key===sl.key);
         const disabled=!on&&atCap;
-        return `<div class="${disabled?'':'ha-reqwin'}" data-date="${selectedDate}" data-key="${sl.key}" data-label="${sl.label}" style="background:${on?`rgba(${ACCENT_RGB},0.15)`:disabled?'#18181c':'#1f1f23'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:6px!important;padding:7px 11px!important;cursor:${disabled?'default':'pointer'}!important;text-align:center!important;font-size:12.5px!important;color:${on?'#fff':disabled?'#52525b':'#a0a0ab'}!important;">${on?'✓ ':''}${sl.label}</div>`;
+        return `<div class="${disabled?'':'ha-reqwin'}" data-date="${selectedDate}" data-key="${sl.key}" data-label="${sl.label}" style="background:${on?`rgba(${ACCENT_RGB},0.15)`:disabled?T.bg:T.slot}!important;border:1.5px solid ${on?ACCENT:T.border}!important;border-radius:6px!important;padding:7px 11px!important;cursor:${disabled?'default':'pointer'}!important;text-align:center!important;font-size:12.5px!important;color:${on?T.text:disabled?T.muted3:T.muted2}!important;">${on?'✓ ':''}${sl.label}</div>`;
       }).join('');
-      timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
-        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}:</p>
+      timeHtml=`<div style="border-top:1px solid ${T.panel2}!important;margin-top:12px!important;padding-top:12px!important;">
+        <p style="font-size:13px!important;color:${T.muted2}!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}:</p>
         <div style="display:flex!important;gap:6px!important;flex-wrap:wrap!important;">${winBtns}</div>
       </div>`;
     }
@@ -1722,14 +1721,14 @@
     const count=selectedRequestWindows.length;
     const canContinue=count>=3;
     return `<h1 style="${S.h1}">When works for you?</h1>
-      <p style="color:#a0a0ab!important;font-size:13px!important;margin-bottom:16px!important;line-height:1.5!important;">Select 3 to 4 times you'd be available and we'll confirm one that works.</p>
+      <p style="color:${T.muted2}!important;font-size:13px!important;margin-bottom:16px!important;line-height:1.5!important;">Select 3 to 4 times you'd be available and we'll confirm one that works.</p>
       <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:10px!important;">
         <div style="display:flex!important;align-items:center!important;gap:10px!important;">
-          <button id="cal-prev" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canPrev?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;" ${!canPrev?'disabled':''}>‹</button>
-          <span style="font-size:15px!important;font-weight:700!important;color:#fff!important;">${MONTHS[calMonth]} ${calYear}</span>
-          <button id="cal-next" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canNext?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;" ${!canNext?'disabled':''}>›</button>
+          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;" ${!canPrev?'disabled':''}>‹</button>
+          <span style="font-size:15px!important;font-weight:700!important;color:${T.text}!important;">${MONTHS[calMonth]} ${calYear}</span>
+          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;" ${!canNext?'disabled':''}>›</button>
         </div>
-        <span style="color:#52525b!important;font-size:12px!important;">${count} of ${REQUEST_MAX_WINDOWS} selected</span>
+        <span style="color:${T.muted3}!important;font-size:12px!important;">${count} of ${REQUEST_MAX_WINDOWS} selected</span>
       </div>
       <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${dayHdr}</div>
       <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${cells}</div>
@@ -1746,7 +1745,7 @@
     const allDates=Object.keys(slotsByDate).sort();
     if(!allDates.length){
       return `<h1 style="${S.h1}">What day works best for you?</h1>
-        <p style="color:#a0a0ab!important;font-size:14px!important;margin-bottom:16px!important;">Loading available dates…</p>
+        <p style="color:${T.muted2}!important;font-size:14px!important;margin-bottom:16px!important;">Loading available dates…</p>
         <div style="${S.actions}"><button id="btn-prev" style="${S.btnSec}">← Back</button></div>`;
     }
     // Initialise calendar to first available month
@@ -1764,7 +1763,7 @@
     const canNext=calYear<lastAvail.getFullYear()||(calYear===lastAvail.getFullYear()&&calMonth<lastAvail.getMonth());
 
     // Day headers
-    const dayHdr=DAYS.map(d=>`<div style="text-align:center!important;font-size:11px!important;font-weight:600!important;color:#71717a!important;padding:4px 0 8px 0!important;">${d}</div>`).join('');
+    const dayHdr=DAYS.map(d=>`<div style="text-align:center!important;font-size:11px!important;font-weight:600!important;color:${T.muted}!important;padding:4px 0 8px 0!important;">${d}</div>`).join('');
 
     // Date cells
     let cells='';
@@ -1775,11 +1774,11 @@
       // disc intentionally removed — no discount display on calendar
       if(has){
         cells+=`<div class="ha-date" data-date="${ds}" style="text-align:center!important;cursor:pointer!important;padding:4px 2px!important;border-radius:8px!important;background:${isSel?`rgba(${ACCENT_RGB},0.12)`:'transparent'}!important;">
-          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?'#27272a':'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:'#fff'}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:'none'}!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;border-radius:50%!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;background:${isSel?ACCENT:isToday?T.panel:'transparent'}!important;font-size:14px!important;font-weight:${isSel||isToday?700:400}!important;color:${isSel?'#fff':isToday?ACCENT:T.text}!important;border:${isToday&&!isSel?`1.5px solid ${ACCENT}`:'none'}!important;">${d}</div>
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
-          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:#3f3f46!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.border}!important;">${d}</div>
         </div>`;
       }
     }
@@ -1791,23 +1790,23 @@
       const df=fmtDate(selectedDate);
       const slotBtns=slots.map(sl=>{
         const on=selectedSlot===sl.id, sur=slotSurcharge(sl,selectedDate);
-        return `<div class="ha-slot" data-id="${sl.id}" style="background:${on?`rgba(${ACCENT_RGB},0.12)`:'#1f1f23'}!important;border:1.5px solid ${on?ACCENT:'#3f3f46'}!important;border-radius:8px!important;padding:14px 10px!important;cursor:pointer!important;text-align:center!important;">
-          <div style="font-size:13px!important;font-weight:600!important;color:#fff!important;">${sl.arrival_window}${sur>0?` <span style="color:${ACCENT_LIGHT}!important;font-size:11px!important;">+$${sur}</span>`:''}</div>
+        return `<div class="ha-slot" data-id="${sl.id}" style="background:${on?`rgba(${ACCENT_RGB},0.12)`:T.slot}!important;border:1.5px solid ${on?ACCENT:T.border}!important;border-radius:8px!important;padding:14px 10px!important;cursor:pointer!important;text-align:center!important;">
+          <div style="font-size:13px!important;font-weight:600!important;color:${T.text}!important;">${sl.arrival_window}${sur>0?` <span style="color:${ACCENT_LIGHT}!important;font-size:11px!important;">+$${sur}</span>`:''}</div>
         </div>`;
       }).join('');
-      timeHtml=`<div style="border-top:1px solid #2d2d34!important;margin-top:12px!important;padding-top:12px!important;">
-        <p style="font-size:13px!important;color:#a0a0ab!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}, select a time:</p>
+      timeHtml=`<div style="border-top:1px solid ${T.panel2}!important;margin-top:12px!important;padding-top:12px!important;">
+        <p style="font-size:13px!important;color:${T.muted2}!important;margin:0 0 10px 0!important;">${df.long}, ${df.date}, select a time:</p>
         <div style="display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;">${slotBtns}</div>
       </div>`;
     }
 
     return `
       <h1 style="${S.h1}">What day works best for you?</h1>
-      <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:10px!important;padding:14px!important;margin-bottom:14px!important;">
+      <div style="background:${T.panel}!important;border:1px solid ${T.border}!important;border-radius:10px!important;padding:14px!important;margin-bottom:14px!important;">
         <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:10px!important;">
-          <button id="cal-prev" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canPrev?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canPrev?'disabled':''}>‹</button>
-          <span style="font-size:15px!important;font-weight:700!important;color:#fff!important;">${MONTHS[calMonth]} ${calYear}</span>
-          <button id="cal-next" style="background:transparent!important;border:1px solid #3f3f46!important;color:${canNext?'#fff':'#3f3f46'}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canNext?'disabled':''}>›</button>
+          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canPrev?'disabled':''}>‹</button>
+          <span style="font-size:15px!important;font-weight:700!important;color:${T.text}!important;">${MONTHS[calMonth]} ${calYear}</span>
+          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canNext?'disabled':''}>›</button>
         </div>
         <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${dayHdr}</div>
         <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${cells}</div>
@@ -1842,21 +1841,21 @@
     // up to lock in a time — an explicit, later instruction from the owner
     // that supersedes the earlier "never reveal" rule for this one point only.
     const cardBlock=nativeUnstaffed?`
-      <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
+      <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:${T.muted2}!important;line-height:1.6!important;">
         📋 <strong style="color:#fff!important;">This is an appointment request, not a confirmed appointment.</strong>
         <div>Someone will reach out to you shortly to lock in your preferred time slot.</div>
       </div>`:`
-      <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:#a0a0ab!important;line-height:1.6!important;">
+      <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:${T.muted2}!important;line-height:1.6!important;">
         💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
         <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service. Your card only holds the appointment.</div>
         We will only charge you after your services have been completed.
       </div>`;
     const cardEl=nativeUnstaffed?'':`
-      <div style="background:#27272a!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
-        <div style="font-size:11px!important;color:#a0a0ab!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
-        <div id="stripe-card-element" style="background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
+      <div style="background:${T.panel}!important;border:1px solid ${T.border}!important;border-radius:8px!important;padding:14px!important;margin-bottom:14px!important;">
+        <div style="font-size:11px!important;color:${T.muted2}!important;margin-bottom:12px!important;font-weight:600!important;text-transform:uppercase!important;letter-spacing:0.5px!important;">💳 Card to Hold Appointment</div>
+        <div id="stripe-card-element" style="background:${T.inset}!important;border:1px solid ${T.border}!important;border-radius:6px!important;padding:14px!important;min-height:44px!important;"></div>
         <div id="stripe-card-errors" role="alert" aria-live="polite" style="color:#ef4444!important;font-size:12px!important;line-height:1.4!important;margin:8px 0 0 0!important;"></div>
-        <p style="font-size:11px!important;color:#52525b!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
+        <p style="font-size:11px!important;color:${T.muted3}!important;margin:8px 0 0 0!important;">🔒 Secured by Stripe. Payment collected by technician at time of service.</p>
       </div>`;
     // A staffed booking (never the unstaffed-area REQUEST flow, which has no
     // single confirmed slot — see selectedRequestWindows instead) had NO
@@ -1872,12 +1871,12 @@
       const sl=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot);
       if(!sl)return '';
       return `
-      <div style="background:#27272a!important;border:1.5px solid ${ACCENT}!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:16px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;">
+      <div style="background:${T.panel}!important;border:1.5px solid ${ACCENT}!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:16px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;">
         <div style="display:flex!important;align-items:center!important;gap:10px!important;">
           <span style="font-size:20px!important;color:${ACCENT_LIGHT}!important;">📅</span>
           <div>
-            <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">${df.long}, ${df.date}</div>
-            <div style="font-size:12px!important;color:#a0a0ab!important;">${sl.arrival_window}</div>
+            <div style="font-size:14px!important;font-weight:700!important;color:${T.text}!important;">${df.long}, ${df.date}</div>
+            <div style="font-size:12px!important;color:${T.muted2}!important;">${sl.arrival_window}</div>
           </div>
         </div>
         <div id="ha-edit-dt" style="font-size:12px!important;font-weight:700!important;color:${ACCENT_LIGHT}!important;cursor:pointer!important;white-space:nowrap!important;">Edit ›</div>
@@ -1898,7 +1897,7 @@
         <input type="text" id="c-coupon" style="${S.inputL};margin-bottom:0!important;" placeholder="Coupon code (optional)" value="${couponCode}">
       </div>
       <div style="background:rgba(34,197,94,0.08)!important;border:1.5px solid rgba(34,197,94,0.25)!important;border-radius:10px!important;padding:16px 18px!important;margin-bottom:18px!important;">
-        <div style="font-size:13px!important;color:#a0a0ab!important;margin-bottom:8px!important;">
+        <div style="font-size:13px!important;color:${T.muted2}!important;margin-bottom:8px!important;">
           ${itemsHtml}
           <div style="border-top:1px solid rgba(255,255,255,0.08)!important;margin:8px 0!important;"></div>
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
@@ -1915,19 +1914,19 @@
           </div>`:''}
           ${zipDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Location</span>
-            <span style="color:#4ade80!important;">-$${zipDisc}</span>
+            <span style="color:${T.ok}!important;">-$${zipDisc}</span>
           </div>`:''}
           ${mtvFee>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Multi-TV discount</span>
-            <span style="color:#4ade80!important;">-$${mtvFee}</span>
+            <span style="color:${T.ok}!important;">-$${mtvFee}</span>
           </div>`:''}
           ${mtvPerTv>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Multi-TV discount (${totalTVs()} TVs)</span>
-            <span style="color:#4ade80!important;">-$${mtvPerTv}</span>
+            <span style="color:${T.ok}!important;">-$${mtvPerTv}</span>
           </div>`:''}
           ${mtvPriceDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Multi-TV price discount (${totalTVs()} TVs)</span>
-            <span style="color:#4ade80!important;">-$${mtvPriceDisc}</span>
+            <span style="color:${T.ok}!important;">-$${mtvPriceDisc}</span>
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax</span>
@@ -1939,16 +1938,16 @@
           </div>`:`<div id="ha-tip-row" style="display:none!important;"></div>`}
           ${(COUPONS[couponCode]||0)>0?`<div id="ha-coupon-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Coupon ${couponCode}</span>
-            <span style="color:#4ade80!important;">-$${COUPONS[couponCode]}</span>
+            <span style="color:${T.ok}!important;">-$${COUPONS[couponCode]}</span>
           </div>`:`<div id="ha-coupon-row" style="display:none!important;"></div>`}
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
-          <div style="font-size:14px!important;font-weight:700!important;color:#fff!important;">${nativeUnstaffed?'Estimated total':'Total'}</div>
-          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount-(COUPONS[couponCode]||0))*100)/100}</div>
+          <div style="font-size:14px!important;font-weight:700!important;color:${T.text}!important;">${nativeUnstaffed?'Estimated total':'Total'}</div>
+          <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:${T.ok}!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount-(COUPONS[couponCode]||0))*100)/100}</div>
         </div>
-        ${nativeUnstaffed?`<p style="font-size:11px!important;color:#71717a!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
+        ${nativeUnstaffed?`<p style="font-size:11px!important;color:${T.muted}!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
       </div>
-      <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:#1a1a1e!important;border:1px solid #3f3f46!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
+      <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:${T.inset}!important;border:1px solid ${T.border}!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:${ACCENT}!important;cursor:pointer!important;">
         <span style="font-size:10.5px!important;color:#8b8b93!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from ${BUSINESS_NAME}. Reply STOP to unsubscribe.</span>
       </label>
@@ -2258,10 +2257,10 @@
   function showRequestConfirmation(root){
     root.innerHTML=`<div style="text-align:center!important;padding:40px 10px!important;">
       <div style="width:64px!important;height:64px!important;border-radius:50%!important;background:rgba(74,222,128,0.15)!important;display:flex!important;align-items:center!important;justify-content:center!important;margin:0 auto 20px auto!important;">
-        <span style="font-size:32px!important;color:#4ade80!important;">✓</span>
+        <span style="font-size:32px!important;color:${T.ok}!important;">✓</span>
       </div>
       <h1 style="${S.h1};margin-bottom:10px!important;">Request received</h1>
-      <p style="color:#a0a0ab!important;font-size:14px!important;line-height:1.6!important;max-width:340px!important;margin:0 auto!important;">We'll text or call you shortly to confirm your appointment time.</p>
+      <p style="color:${T.muted2}!important;font-size:14px!important;line-height:1.6!important;max-width:340px!important;margin:0 auto!important;">We'll text or call you shortly to confirm your appointment time.</p>
     </div>`;
   }
 
