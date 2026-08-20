@@ -5796,23 +5796,73 @@ function renderFinanceUploadPreview(el, acctId, sourceLabel, d){
 }
 
 // ── Launch checklist ─────────────────────────────────────────────────────────
-// One card per business, newest first (the ones most likely to be mid-setup).
-// Live checks render as a green/red dot; the manual items are checkboxes that
-// persist immediately on click, no save button — a running log you tick as
-// you go, not a form you fill out once.
-function launchDot(ok){ return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ok?'#16a34a':'#dc2626'};margin-right:6px;flex:none;"></span>`; }
-function launchCardHtml(b, items){
+// Kanban by readiness: Blocked / In progress / Ready to compete. A business is
+// Blocked whenever a HARD requirement fails — Stripe, email, or the site
+// itself being down — regardless of how high its score is otherwise; that
+// distinction matters (Mile High scores 7/8 but is still Blocked, because the
+// one thing it's missing is "can a customer book"). Each card names the ONE
+// next thing to fix instead of making you read a status grid — click a card
+// to expand the full breakdown and the checklist itself.
+//
+// Score = 4 hard-blocking checks (stripe ready, email ready, site up, widget
+// confirmed) + however many of the REMAINING manual LAUNCH_CHECKLIST_ITEMS the
+// server sends — never hardcode the denominator, the item list grows over
+// time. "Widget confirmed" rides with the hard checks, not the soft manual
+// ones below it: a business with no booking widget can't take a booking at
+// all, same as no Stripe key, so it has to outrank the score exactly like
+// stripe/email/site do (this is the actual Mile High case — 7/8 done, but
+// still Blocked, because the one missing item is "can a customer book").
+function launchScoreOf(b, items){
+  const hard = [!!b.stripe.ready, !!b.email.ready, !!b.site.ok, !!b.checklist.widget_embedded];
+  const soft = items.filter(it => it.key !== 'widget_embedded').map(it => !!b.checklist[it.key]);
+  const passed = hard.filter(Boolean).length + soft.filter(Boolean).length;
+  return { passed, total: hard.length + soft.length, blocked: hard.some(v => !v) };
+}
+// Priority order for "the one next thing": money and reach first (can't take
+// a booking without these), then the site itself, then everything the owner
+// tracks by hand, in the order a new business would actually knock them out.
+function launchNextAction(b, items){
+  if(!b.stripe.wired) return `Wire "${b.slug}" into ACCOUNT_KEY_ENV (api/_lib/stripe.js)`;
+  if(!b.stripe.ready) return 'Add Stripe keys';
+  if(!b.email.wired) return `Wire "${b.slug}" into EMAIL_BRANDS (api/_lib/email.js)`;
+  if(!b.email.ready) return 'Add a Resend key';
+  if(!b.url) return 'Set the website URL on the business record';
+  if(!b.site.ok) return `Website is down (${b.site.error || b.site.status || 'unreachable'})`;
+  if(!b.checklist.widget_embedded) return 'Confirm the booking widget is actually on the page';
+  for(const it of items) if(it.key !== 'widget_embedded' && !b.checklist[it.key]) return `Next: ${it.label}`;
+  return 'Nothing outstanding.';
+}
+function launchRingHtml(passed, total, blocked){
+  const pct = total ? Math.round((passed/total)*360) : 0;
+  const color = passed===total ? 'var(--green)' : (blocked ? 'var(--red)' : 'var(--amber)');
+  const track = passed===total ? 'var(--green)' : (blocked ? '#fde3e3' : '#fdecc8');
+  if(passed===total){
+    return `<div style="width:38px;height:38px;border-radius:50%;flex:none;background:var(--green);display:flex;align-items:center;justify-content:center;">
+      <span style="color:#fff;font-size:18px;line-height:1;">✓</span>
+    </div>`;
+  }
+  return `<div style="width:38px;height:38px;border-radius:50%;flex:none;background:conic-gradient(${color} 0deg ${pct}deg, ${track} ${pct}deg 360deg);display:flex;align-items:center;justify-content:center;">
+    <div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:${color};">${passed}/${total}</div>
+  </div>`;
+}
+// The expanded detail shown when a card is clicked — full breakdown + the
+// persistable checklist. site.hasWidget is shown ONLY as a positive bonus
+// ("confirmed via scan") and never as a red flag when absent: it's a plain-
+// text search of the fetched HTML, which is blind to anything a site inserts
+// with client-side JS (Handy Andy's and Dom's own sites both do exactly
+// that), so a miss there means "couldn't confirm automatically", not "missing".
+function launchDetailHtml(b, items){
   const stripeLine = !b.stripe.wired
-    ? `${launchDot(false)}Stripe — <b style="color:#dc2626;">not wired in code</b> (add "${esc(b.slug)}" to ACCOUNT_KEY_ENV in api/_lib/stripe.js)`
-    : `${launchDot(b.stripe.ready)}Stripe ${b.stripe.ready?'live keys set':'<b style="color:#dc2626;">no live keys — bookings take no card</b>'}`;
+    ? `<span style="color:var(--red);">✕ Stripe — not wired in code</span> (add "${esc(b.slug)}" to ACCOUNT_KEY_ENV in api/_lib/stripe.js)`
+    : `<span style="color:${b.stripe.ready?'var(--green)':'var(--red)'};">${b.stripe.ready?'✓':'✕'} Stripe</span> ${b.stripe.ready?'live keys set':'no live keys — bookings take no card'}`;
   const emailLine = !b.email.wired
-    ? `${launchDot(false)}Email — <b style="color:#dc2626;">not wired in code — will silently send as Handy Andy</b> (add "${esc(b.slug)}" to EMAIL_BRANDS + emailConfig() in api/_lib/email.js)`
-    : `${launchDot(b.email.ready)}Email ${b.email.ready?'live keys set':'<b style="color:#dc2626;">no Resend key — confirmation emails skip silently</b>'}`;
+    ? `<span style="color:var(--red);">✕ Email — not wired in code, will silently send as Handy Andy</span> (add "${esc(b.slug)}" to EMAIL_BRANDS + emailConfig() in api/_lib/email.js)`
+    : `<span style="color:${b.email.ready?'var(--green)':'var(--red)'};">${b.email.ready?'✓':'✕'} Email</span> ${b.email.ready?'live keys set':'no Resend key — confirmation emails skip silently'}`;
   let siteLine;
-  if(!b.url) siteLine=`${launchDot(false)}Site — <b style="color:#dc2626;">no URL on file</b> (set businesses.url)`;
-  else if(b.site.error) siteLine=`${launchDot(false)}Site — could not reach ${esc(b.url)} (${esc(b.site.error)})`;
-  else siteLine=`${launchDot(b.site.ok)}Site ${b.site.ok?`live (${b.site.status})`:`<b style="color:#dc2626;">returned ${b.site.status}</b>`}
-    &nbsp;·&nbsp; ${launchDot(!!b.site.hasWidget)}Booking widget ${b.site.hasWidget?'found on the page':'<b style="color:#dc2626;">NOT found — this site cannot take a booking</b>'}`;
+  if(!b.url) siteLine=`<span style="color:var(--red);">✕ Website — no URL on file</span>`;
+  else if(b.site.error) siteLine=`<span style="color:var(--red);">✕ Website</span> — could not reach ${esc(b.url)} (${esc(b.site.error)})`;
+  else siteLine=`<span style="color:${b.site.ok?'var(--green)':'var(--red)'};">${b.site.ok?'✓':'✕'} Website</span> ${b.site.ok?`live (${b.site.status})`:`returned ${b.site.status}`}`
+    + (b.site.hasWidget ? `<br><span style="color:var(--green);">✓ Widget confirmed via automated scan</span> — a bonus check, not required` : '');
   const checklist=items.map(it=>{
     const checked=!!b.checklist[it.key];
     return `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:${checked?'#111':'var(--mute)'};cursor:pointer;padding:3px 0;">
@@ -5820,17 +5870,25 @@ function launchCardHtml(b, items){
       ${esc(it.label)}
     </label>`;
   }).join('');
-  return `<div class="card" style="padding:16px 18px;margin-bottom:12px;">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-      <div style="font-weight:800;font-size:15px;">${esc(b.name)} <span style="font-weight:500;color:var(--mute);font-size:12px;">${esc(b.slug)}</span></div>
-      <a href="${esc(b.url||'#')}" target="_blank" style="font-size:12px;color:var(--accent);">${esc(b.url||'no site on file')}</a>
-    </div>
-    <div style="margin-top:10px;font-size:13px;line-height:2;">
-      ${stripeLine}<br>${emailLine}<br>${siteLine}
-    </div>
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;">
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;line-height:1.9;">
+    ${stripeLine}<br>${emailLine}<br>${siteLine}
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
+  </div>`;
+}
+function launchCardHtml(b, items){
+  const { passed, total, blocked } = launchScoreOf(b, items);
+  return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
+      <div style="min-width:0;">
+        <div style="font-weight:800;font-size:14px;">${esc(b.name)}</div>
+        <div style="font-size:11px;color:var(--mute);">${esc(b.slug)}</div>
+      </div>
+    </div>
+    <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchNextAction(b, items))}</p>
+    <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
 async function renderLaunch(){
@@ -5841,21 +5899,55 @@ async function renderLaunch(){
   catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
 
   const items=data.items||[];
+  const businesses=data.businesses||[];
+  const scored=businesses.map(b=>({ b, s:launchScoreOf(b, items) }));
+  const blocked=scored.filter(x=>x.s.blocked);
+  const ready=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
+  const progress=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total);
+  const col=(title,color,rows)=>`<div>
+    <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
+    ${rows.map(x=>launchCardHtml(x.b, items)).join('') || '<p style="font-size:12px;color:var(--mute);">None.</p>'}
+  </div>`;
   view.innerHTML=`<div class="wrap">
     <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
-      Every business in the CRM, newest first. The three status lines are checked live against Stripe, Resend and the site itself just now.
-      The checklist below them is manual — click to tick, it saves immediately.
+      Sorted by readiness, not alphabetical. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
+      Click a card for the full breakdown and to tick the checklist.
     </p>
-    ${(data.businesses||[]).slice().reverse().map(b=>launchCardHtml(b, items)).join('')}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+      ${col('Blocked','#dc2626',blocked)}
+      ${col('In progress','#b45309',progress)}
+      ${col('Ready to compete','#15803d',ready)}
+    </div>
   </div>`;
 
-  view.querySelectorAll('[data-launch-key]').forEach(cb=>{
-    cb.addEventListener('change', async ()=>{
-      const business_id=cb.dataset.launchBiz, key=cb.dataset.launchKey, value=cb.checked;
-      cb.disabled=true;
-      try{ await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}}); }
-      catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
-      finally{ cb.disabled=false; }
+  view.querySelectorAll('[data-launch-card]').forEach(card=>{
+    card.addEventListener('click', (e)=>{
+      if(e.target.closest('[data-launch-key]')) return;
+      const id=card.dataset.launchCard;
+      const b=businesses.find(x=>x.id===id);
+      const detail=card.querySelector('.launch-detail');
+      const open=detail.style.display!=='none';
+      view.querySelectorAll('.launch-detail').forEach(d=>{ d.style.display='none'; d.innerHTML=''; });
+      if(!open){
+        detail.innerHTML=launchDetailHtml(b, items);
+        detail.style.display='block';
+        detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
+          cb.addEventListener('click', ev=>ev.stopPropagation());
+          cb.addEventListener('change', async ()=>{
+            const business_id=cb.dataset.launchBiz, key=cb.dataset.launchKey, value=cb.checked;
+            cb.disabled=true;
+            try{
+              await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}});
+              b.checklist[key]=value;
+              card.querySelector('.launch-next').textContent=launchNextAction(b, items);
+              const s=launchScoreOf(b, items);
+              card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
+            }
+            catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
+            finally{ cb.disabled=false; }
+          });
+        });
+      }
     });
   });
 }

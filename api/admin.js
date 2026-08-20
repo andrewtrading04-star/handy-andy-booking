@@ -1922,7 +1922,7 @@ async function multiTvDiscountSave(req, res, db, auth, body) {
 // up automatically with no code change; the manual items (GBP, GSC, etc.) are
 // exactly the things no API can check, so they're a checklist, not a report.
 //
-// Everything real-checkable is checked live on every load, not cached:
+// Real-checkable stuff is checked live on every load, not cached:
 //   - stripeWired / stripeReady: is the slug in ACCOUNT_KEY_ENV at all, and if
 //     so, is the secret key env var actually set. stripeConfigured() throws for
 //     an unmapped slug (by design, see stripe.js) — that throw IS the "not
@@ -1932,16 +1932,36 @@ async function multiTvDiscountSave(req, res, db, auth, body) {
 //     falls back to Handy Andy's own account for any unrecognized slug, so a
 //     new business's confirmation emails would go out looking like Handy
 //     Andy's until someone notices. Flagged as a hard warning, not just unchecked.
-//   - site: a live fetch of the business's own `url` (2s timeout, never throws
-//     into the page) checking HTTP status and whether the fetched HTML embeds
-//     this widget with the right data-business attribute — the exact way Mile
-//     High's gap was found (site live, zero mentions of widget.js anywhere).
+//   - site.ok: a live fetch of the business's own `url`, checking HTTP status.
+//     Reliable regardless of how the site is built, since it's just the status
+//     code, so this one counts toward the score/blocked logic below.
+//
+// site.hasWidget is INFORMATIONAL ONLY, never a blocker — it does a best-effort
+// text search for widget.js in the fetched HTML, which only works when the
+// widget tag is present in the server-rendered markup (Austin's Next.js
+// build, Precision's LandingSite embed). ihandyandy.com and domstvmounting.com
+// insert the widget with client-side JavaScript after the page loads, so a
+// plain server-side fetch — which never runs JS — can't see it at all, even
+// though both have booked real jobs daily for months. Real incident: this
+// used to feed the same red "NOT FOUND" line as everything else and told the
+// owner his two oldest, most active businesses had no booking widget. The
+// authoritative signal is the "widget_embedded" manual item below, which the
+// owner ticks once he's actually looked at the page himself; the live check
+// only ever shows a soft "confirmed via scan" bonus when it finds something,
+// never an accusation when it doesn't.
+// Deliberately NO "website is live" item here — the automated site.ok check
+// (below) already covers that reliably (it's just an HTTP status, unaffected
+// by the client-JS-rendering problem above), so a redundant manual copy would
+// default to false for every already-working business and bury the real gap
+// under a stale checkbox nobody remembered to tick.
 const LAUNCH_CHECKLIST_ITEMS = [
-  { key: 'gbp_created',   label: 'Google Business Profile created' },
-  { key: 'gbp_verified',  label: 'GBP verified (postcard/video)' },
-  { key: 'gsc_verified',  label: 'Search Console verified + sitemap submitted' },
-  { key: 'phone_live',    label: 'Dedicated phone number receiving calls/texts' },
-  { key: 'techs_staffed', label: 'At least one tech can actually be booked' },
+  { key: 'widget_embedded',label: 'Booking widget confirmed on the page' },
+  { key: 'phone_live',     label: 'Dedicated phone number receiving calls/texts' },
+  { key: 'gbp_created',    label: 'Google Business Profile created' },
+  { key: 'gbp_verified',   label: 'GBP verified (postcard/video)' },
+  { key: 'gsc_verified',   label: 'Search Console verified + sitemap submitted' },
+  { key: 'yelp_page',      label: 'Yelp page created' },
+  { key: 'techs_staffed',  label: 'At least one tech can actually be booked' },
 ];
 
 async function launchStatus(req, res, db, auth) {
