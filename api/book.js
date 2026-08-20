@@ -10,6 +10,7 @@ import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
+import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -777,6 +778,7 @@ async function bookDoms(req, res) {
       duration_minutes: 120,
       service_name: "Dom's TV Mounting",
       idempotency_key: b.idempotency_key || null,
+      sms_consent: b.sms_consent,
       stripe_account: 'doms',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -907,6 +909,17 @@ async function bookDoms(req, res) {
       await persistConfirmationEmailStatus(db, bookingId, 'failed');
     }
   }
+
+  // ── "You're booked" text. Awaited on purpose (see _lib/booking-confirm-sms.js).
+  await sendBookingConfirmSms({
+    customerPhone: customer.phone,
+    smsConsent: b.sms_consent,
+    bizName: "Dom's TV Mounting",
+    techName: technicianName,
+    startUTC, tz,
+    timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',
+    tag: 'book-doms',
+  });
 
   return res.status(200).json({
     success: true,
@@ -1133,6 +1146,7 @@ async function bookNative(req, res, slug) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
+      sms_consent: b.sms_consent,
       stripe_account: slug,
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -1258,6 +1272,19 @@ async function bookNative(req, res, slug) {
       await persistConfirmationEmailStatus(db, bookingId, 'failed');
     }
   }
+
+  // ── "You're booked" text. Awaited on purpose (see _lib/booking-confirm-sms.js).
+  // DISPLAY.name is the JOB's business (Mile High / Precision / Austin), never
+  // the cross-hired tech's home company.
+  await sendBookingConfirmSms({
+    customerPhone: customer.phone,
+    smsConsent: b.sms_consent,
+    bizName: DISPLAY.name,
+    techName: technicianName,
+    startUTC, tz,
+    timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',
+    tag: 'book-ha',
+  });
 
   return res.status(200).json({
     success: true,

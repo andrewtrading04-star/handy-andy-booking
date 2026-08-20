@@ -123,6 +123,12 @@ export async function mirrorBooking(ctx = {}) {
       ...(ctx.duration_minutes ? { duration_minutes: Number(ctx.duration_minutes) } : {}),
       ...(ctx.subtotal != null ? { subtotal: Number(ctx.subtotal) || 0 } : {}),
       ...(ctx.payment_status ? { payment_status: ctx.payment_status } : {}),
+      // The widget's SMS opt-in checkbox was reaching api/book.js and then being
+      // dropped here, so every widget booking fell back to the column default
+      // (true) — meaning a customer who deliberately left the box UNCHECKED was
+      // still texted. Only set when the caller actually states it, so Zenbooker
+      // mirrors keep the default.
+      ...(ctx.sms_consent != null ? { sms_consent: !!ctx.sms_consent } : {}),
       ...(ctx.stripe_customer_id ? { stripe_customer_id: ctx.stripe_customer_id } : {}),
       ...(ctx.stripe_payment_method_id ? { stripe_payment_method_id: ctx.stripe_payment_method_id } : {}),
       // Which Stripe account the card was saved in, so charges later pick the
