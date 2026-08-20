@@ -69,8 +69,8 @@
   // the dark card Handy Andy and Mile High have always shipped. Handy Andy and
   // Mile High keep the exact original dark hex values (byte-for-byte) so their
   // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
-  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23' };
-  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6' };
+  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23', gdsBg:'linear-gradient(135deg,#1f2937,#111827)', gdsLine:'#c7ccd4' };
+  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6', gdsBg:'linear-gradient(135deg,#f7f9fc,#eef2f8)', gdsLine:'#52525b' };
   // Precision's site (precisiontvinstallation.com) is white too, so it takes
   // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
   const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
@@ -1534,26 +1534,26 @@
       <h1 style="margin:0 0 8px 0!important;font-size:26px!important;font-weight:800!important;color:${T.text}!important;display:block!important;line-height:1.2!important;text-align:center!important;">Guaranteed Dismount Coverage</h1>
       <p style="font-size:13px!important;color:${T.subtle}!important;margin:0 0 14px 0!important;line-height:1.6!important;text-align:center!important;">Like insurance for your mounted TV. Add it to your ticket today, use it whenever the day comes.</p>
 
-      <div style="background:linear-gradient(135deg,#1f2937,#111827)!important;border:1.5px solid ${ACCENT}!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
+      <div style="background:${T.gdsBg}!important;border:1.5px solid ${ACCENT}!important;border-radius:12px!important;padding:18px!important;margin-bottom:12px!important;position:relative!important;overflow:hidden!important;text-align:center!important;">
         <div style="position:absolute!important;top:-20px!important;right:-20px!important;font-size:90px!important;opacity:0.06!important;">🛡️</div>
         <div style="background:rgba(34,197,94,0.12)!important;border:1.5px solid rgba(34,197,94,0.5)!important;border-radius:10px!important;padding:13px 15px!important;margin-bottom:12px!important;position:relative!important;">
-          <div style="font-size:15px!important;font-weight:800!important;color:#fff!important;line-height:1.45!important;">We come back to your home <span style="color:#4ade80!important;">ANYTIME</span>, even years from now, and take your TV down</div>
-          <div style="font-size:26px!important;font-weight:800!important;color:#4ade80!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
+          <div style="font-size:15px!important;font-weight:800!important;color:${T.text}!important;line-height:1.45!important;">We come back to your home <span style="color:${T.ok}!important;">ANYTIME</span>, even years from now, and take your TV down</div>
+          <div style="font-size:26px!important;font-weight:800!important;color:${T.ok}!important;letter-spacing:.02em!important;margin-top:4px!important;">100% FREE</div>
         </div>
         <div style="display:grid!important;grid-template-columns:1fr auto 1fr!important;gap:8px!important;align-items:center!important;margin-bottom:12px!important;position:relative!important;">
           <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
             <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:${ACCENT_LIGHT}!important;">Pay today</div>
-            <div style="font-size:22px!important;font-weight:800!important;color:#fff!important;margin-top:2px!important;">$35</div>
-            <div style="font-size:10.5px!important;color:#a0a0ab!important;margin-top:2px!important;">one time, that's it</div>
+            <div style="font-size:22px!important;font-weight:800!important;color:${T.text}!important;margin-top:2px!important;">$35</div>
+            <div style="font-size:10.5px!important;color:${T.muted2}!important;margin-top:2px!important;">one time, that's it</div>
           </div>
-          <div style="font-size:18px!important;color:#71717a!important;">→</div>
+          <div style="font-size:18px!important;color:${T.muted}!important;">→</div>
           <div style="background:rgba(34,197,94,0.1)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:9px!important;padding:11px 8px!important;">
-            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:#4ade80!important;">Pay later</div>
-            <div style="font-size:22px!important;font-weight:800!important;color:#4ade80!important;margin-top:2px!important;">$0</div>
-            <div style="font-size:10.5px!important;color:#a0a0ab!important;margin-top:2px!important;">instead of <span style="text-decoration:line-through!important;">several hundred</span></div>
+            <div style="font-size:11px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;color:${T.ok}!important;">Pay later</div>
+            <div style="font-size:22px!important;font-weight:800!important;color:${T.ok}!important;margin-top:2px!important;">$0</div>
+            <div style="font-size:10.5px!important;color:${T.muted2}!important;margin-top:2px!important;">instead of <span style="text-decoration:line-through!important;">several hundred</span></div>
           </div>
         </div>
-        <div style="font-size:12.5px!important;color:#c7ccd4!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
+        <div style="font-size:12.5px!important;color:${T.gdsLine}!important;line-height:1.9!important;position:relative!important;">✓ Just call when you're ready: moving, upgrading, redecorating<br>✓ Safe professional removal, $0 charged at the door<br>✓ Bolt holes patched, wall left clean</div>
       </div>
       ${gdsReviewHtml()}
 
