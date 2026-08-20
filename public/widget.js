@@ -1834,7 +1834,7 @@
     const items=buildLineItems();
     const itemsHtml=items.map(it=>`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>${it.label}${it.qty>1?` ×${it.qty}`:''}</span>
-            <span style="color:#fff!important;">$${it.amount}</span>
+            <span style="color:${T.text}!important;">$${it.amount}</span>
           </div>`).join('');
     // Unstaffed-area requests skip Stripe entirely — there is no confirmed
     // appointment yet to hold a card against. This step explicitly tells the
@@ -1843,11 +1843,11 @@
     // that supersedes the earlier "never reveal" rule for this one point only.
     const cardBlock=nativeUnstaffed?`
       <div style="background:rgba(${ACCENT_RGB},0.1)!important;border:1px solid rgba(${ACCENT_RGB},0.35)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:${T.muted2}!important;line-height:1.6!important;">
-        📋 <strong style="color:#fff!important;">This is an appointment request, not a confirmed appointment.</strong>
+        📋 <strong style="color:${T.text}!important;">This is an appointment request, not a confirmed appointment.</strong>
         <div>Someone will reach out to you shortly to lock in your preferred time slot.</div>
       </div>`:`
       <div style="background:rgba(34,197,94,0.13)!important;border:1px solid rgba(34,197,94,0.4)!important;border-radius:8px!important;padding:14px!important;margin-bottom:18px!important;font-size:12px!important;color:${T.muted2}!important;line-height:1.6!important;">
-        💳 <strong style="color:#fff!important;">Your card will not be charged until after the job is complete.</strong>
+        💳 <strong style="color:${T.text}!important;">Your card will not be charged until after the job is complete.</strong>
         <div style="background:#e9fbef!important;border:1px solid rgba(22,163,74,0.55)!important;border-radius:7px!important;padding:10px 12px!important;margin:10px 0 8px!important;color:#0f5132!important;font-weight:800!important;font-size:15.5px!important;line-height:1.4!important;">Payment is taken at time of service. Your card only holds the appointment.</div>
         We will only charge you after your services have been completed.
       </div>`;
@@ -1903,15 +1903,15 @@
           <div style="border-top:1px solid rgba(255,255,255,0.08)!important;margin:8px 0!important;"></div>
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Subtotal</span>
-            <span id="ha-subtotal" style="color:#fff!important;">$${Math.round(calcTotal()*100)/100}</span>
+            <span id="ha-subtotal" style="color:${T.text}!important;">$${Math.round(calcTotal()*100)/100}</span>
           </div>
           ${adj>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Service area surcharge</span>
-            <span style="color:#fff!important;">+$${adj}</span>
+            <span style="color:${T.text}!important;">+$${adj}</span>
           </div>`:''}
           ${ah>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>After-hours fee (8 PM)</span>
-            <span style="color:#fff!important;">+$${ah}</span>
+            <span style="color:${T.text}!important;">+$${ah}</span>
           </div>`:''}
           ${zipDisc>0?`<div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Location</span>
@@ -1931,11 +1931,11 @@
           </div>`:''}
           <div style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tax</span>
-            <span id="ha-tax" style="color:#fff!important;">$${Math.round(base*TAX_RATE*100)/100}</span>
+            <span id="ha-tax" style="color:${T.text}!important;">$${Math.round(base*TAX_RATE*100)/100}</span>
           </div>
           ${tipAmount>0?`<div id="ha-tip-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Tip</span>
-            <span id="ha-tip-amt" style="color:#fff!important;">$${tipAmount}</span>
+            <span id="ha-tip-amt" style="color:${T.text}!important;">$${tipAmount}</span>
           </div>`:`<div id="ha-tip-row" style="display:none!important;"></div>`}
           ${(COUPONS[couponCode]||0)>0?`<div id="ha-coupon-row" style="display:flex!important;justify-content:space-between!important;margin-bottom:4px!important;">
             <span>Coupon ${couponCode}</span>
