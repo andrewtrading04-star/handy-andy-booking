@@ -299,16 +299,6 @@ function matchItem(name, lt) {
       ? { key: 'outside wall wires', juan: 15, other: 15 }
       : { key: 'behind wall wires', juan: 45, other: 35 };
   }
-  // Dom's own booking flow prices this as one line named "Inwall Concealment"
-  // ($135 to the customer) — no "cord"/"wire" word, and "wall" is glued to
-  // "In" with no word boundary, so it missed the regex above entirely and fell
-  // through to the $85/hr custom-job guess (Max Segal job, Aug 2026: paid
-  // $130 for it instead of the correct flat $60). Owner rate: $60, all techs —
-  // distinct from HA's own "In-Wall Wire Concealment" catalog rate ($35/$45
-  // above), which is a different line-item wording at a different price.
-  if (/\binwall\b/i.test(name) && /conceal/i.test(name)) {
-    return { key: 'inwall concealment (doms)', juan: 60, other: 60 };
-  }
   // Bracket type mentioned anywhere in the name, worded outside the exact
   // catalog keys above (e.g. a hand-typed "Full Motion Mount" instead of the
   // catalog's "Full Motion Bracket"). Same substring test detectBracketQtys()
@@ -1490,19 +1480,21 @@ function runSelfTests() {
   eq(computeJobPay(job(dis(true)), 'Gregory').pay, 160, 'dismount qty 2 @ $120 pays 2 x $50 = $100 (+$60 base) when quantity is selected');
   eq(computeJobPay(job(dis(false)), 'Gregory').pay, 120, 'the same line WITHOUT quantity pays only $60 -- this is the regression to guard against');
 
-  // ── Max Segal job, Dom's, Aug 2026: bare "Travel" line double-paid, and
-  // "Inwall Concealment" fell through to the $85/hr custom guess ──────────────
+  // ── Max Segal job, Dom's, Aug 2026: bare "Travel" line was double-paid ──────
+  // "Inwall Concealment" pricing as $85/hr custom labor is CORRECT here and
+  // deliberately untouched — the secretary opened this ticket as concealment
+  // ONLY, no TV mount, so it is genuine custom hourly work, not an add-on
+  // riding alongside a mount. Do not add a flat-rate match for this wording;
+  // that was tried and reverted (owner correction, Aug 2026).
   const segal = { line_items: [
     { name: 'Inwall Concealment', line_total: 135, quantity: 1, unit_price: 135, kind: 'option' },
     { name: 'Travel', line_total: 100, quantity: 1, unit_price: 100, kind: 'addon' },
     { name: 'Military Discount', line_total: -30, quantity: 1, unit_price: -30, kind: 'coupon' },
     { name: 'Tax (8.25%)', line_total: 16.91, quantity: 1, unit_price: 16.91, kind: 'fee' },
   ] };
-  eq(computeJobPay(job(segal), 'Gregory').pay, 140, 'Inwall Concealment ($60) + travel payout ($80) = $140, nothing else');
-  eq(computeJobPay(job(segal), 'Gregory').flags.length, 0, 'Inwall Concealment raises no review flag');
-  eq(computeJobPay(job(segal), 'Juan').pay, 140, 'Inwall Concealment pays $60 for Juan too -- flat rate, not the behind-wall-wires tier');
-  // The travel-line skip on its own, isolated from the concealment fix above:
-  // a job with ONLY a "Travel" line must not pay it twice.
+  eq(computeJobPay(job(segal), 'Gregory').pay, 210, 'Inwall Concealment as custom hours ($130) + travel payout ($80) = $210');
+  // The travel-line skip in isolation: a job with ONLY a "Travel" line must
+  // not price that same line again as custom hours.
   eq(computeJobPay(job({ line_items: [
     { name: '33"-59"', line_total: 109 },
     { name: 'Travel', line_total: 65, quantity: 1, unit_price: 65, kind: 'addon' },
