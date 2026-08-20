@@ -375,8 +375,11 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
   // simply never shows this block, so nothing looks broken or half-filled.
   // Bio text: a custom blurb wins; otherwise a sentence built from bio_years;
   // otherwise a generic line that still reads as intentional.
+  // Handy Andy ONLY: tech photos are shot with Handy Andy branding in frame,
+  // so any other brand's email must never render the photo card. The tech's
+  // NAME still appears in the details rows above for every brand.
   let meetTechBlock = '';
-  if (details.technicianName && details.technicianPhotoUrl) {
+  if (b.slug === 'handy-andy' && details.technicianName && details.technicianPhotoUrl) {
     const techName = esc(details.technicianName);
     let bioText;
     if (details.technicianBioBlurb) {
@@ -564,8 +567,10 @@ export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['han
     row('Technician', details.technicianName ? esc(details.technicianName) : '') +
     row('Address', addressLine ? (mapsUrl ? `<a href="${esc(mapsUrl)}" style="color:#ffffff;text-decoration:underline;">${esc(addressLine)}</a>` : esc(addressLine)) : '');
 
+  // Handy Andy ONLY (same rule as the confirmation email): photos carry
+  // Handy Andy branding, so other brands get the name in the rows, no photo.
   let meetTechBlock = '';
-  if (details.technicianName && details.technicianPhotoUrl) {
+  if (b.slug === 'handy-andy' && details.technicianName && details.technicianPhotoUrl) {
     const techName = esc(details.technicianName);
     let bioText;
     if (details.technicianBioBlurb) bioText = esc(details.technicianBioBlurb);
