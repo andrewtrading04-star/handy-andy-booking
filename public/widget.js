@@ -78,8 +78,9 @@
     'austin':     'https://www.austinmounting.com/thank-you',
     'precision':  'https://handy-andy-booking.vercel.app/thank-you.html?b=precision',
     // Real /thank-you page confirmed in the Next.js site (Austin template).
-    // Points at the .vercel.app URL until tvmountingdenver.com DNS moves.
-    'tvmountingdenver': 'https://tvmountingdenver.vercel.app/thank-you',
+    // tvmountingdenver.com DNS has moved to Vercel (confirmed live 2026-08-20),
+    // so this points at the real domain now, not the .vercel.app fallback.
+    'tvmountingdenver': 'https://tvmountingdenver.com/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
