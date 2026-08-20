@@ -1073,10 +1073,18 @@ async function showDetail(id){
 
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
-      ${j.cross_company?`<div class="xco-banner">
-        <div class="xco-banner-h">⚠ THIS JOB IS FOR ${esc((j.company_name||'THE OTHER COMPANY').toUpperCase())}</div>
-        <div class="xco-banner-s">You're covering this appointment for ${esc(j.company_name||'the other company')}.</div>
-      </div>`:''}
+      ${j.cross_company?(()=>{
+        // Name BOTH companies. "THIS JOB IS FOR TVM AUSTIN" left the tech to
+        // work out that it wasn't their own company; spelling out ", NOT
+        // HANDY ANDY" is the whole point of the banner. Both names come from
+        // EMAIL_BRANDS server-side, so they read the same way the customer's
+        // confirmation email does.
+        const forCo = j.company_name || 'the other company';
+        const ownCo = (tech && tech.company_name) || '';
+        return `<div class="xco-banner">
+        <div class="xco-banner-h">⚠ THIS JOB IS FOR ${esc(forCo.toUpperCase())}${ownCo?`, NOT ${esc(ownCo.toUpperCase())}`:''}</div>
+        <div class="xco-banner-s">You're covering this appointment for ${esc(forCo)}${ownCo?`, not ${esc(ownCo)}`:''}.</div>
+      </div>`;})():''}
       <div class="card">
         <h3>${esc(j.slot_time||fmtTime(j.scheduled_at))} · ${statusBadge(j.status)}</h3>
         <div class="big-name">${esc(j.customer_name)}</div>
@@ -1134,7 +1142,7 @@ async function showDetail(id){
 
       <div class="card">
         <h3>Photos <span class="phreq ${photoOK?'ok':''}">${curPhotos.length}/${MIN_PHOTOS} required</span></h3>
-        ${photoGuideHtml()}
+        ${photoGuideHtml(j.company_slug)}
         <div class="photogrid" id="photoGrid">${photoThumbs(curPhotos)}</div>
         <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
         <button class="btn ghost" id="addPhoto" style="margin-top:10px;">${ic('camera')} Add Photo</button>
@@ -1399,10 +1407,20 @@ function mountTechLineItems(j, id){
 // Handy Andy only: every example shows the Handy Andy logo on the TV screen,
 // so showing these to Dom's techs would be showing them the wrong brand.
 const GOOD_PHOTO_EXAMPLES = ['good-1.jpg','good-2.jpg','good-3.jpg','good-4.jpg','good-5.jpg'];
+// Which businesses actually HAVE a logo video + brand photo guidance. Only
+// these two do. Everything brand-specific below is gated on the JOB's slug,
+// not on the logged-in tech's company: Juan is a Handy Andy tech, but on a
+// TVm Austin or Precision job there is no logo to put on the screen and no
+// example photo that shows the right brand, so he must be shown neither.
+const LOGO_BRANDS = ['handy-andy','doms'];
+// The slug whose brand assets apply. Job screens pass the job's own business;
+// the Help tab has no job in hand, so it falls back to the tech's company.
+function brandSlug(slug){ return slug || (tech && tech.slug) || 'handy-andy'; }
+function hasLogoAssets(slug){ return LOGO_BRANDS.includes(brandSlug(slug)); }
 // The logo video, per company. Shared by the photo card's button and the
 // "Get the logo on the TV" how-to modal so they can never drift apart.
-function logoVideoUrl(){
-  return isDoms()
+function logoVideoUrl(slug){
+  return brandSlug(slug)==='doms'
     ? 'https://youtu.be/FPZ_sz59Vkg?si=qqtxMzUlWuzPKzU7'
     : 'https://youtu.be/GvTppkdlEr8?si=bq6x8xzJB-q79hsv';
 }
@@ -1412,25 +1430,30 @@ function logoVideoUrl(){
 // video is titled "...TV Mounting LOGO" so "logo" narrows it, but Dom's video
 // is titled just "Dom's TV Mounting", so adding "logo" would search for a word
 // that isn't in the title.
-function logoSearchTerm(){
-  return isDoms() ? "Dom's TV Mounting" : 'Handy Andy TV Mounting logo';
+function logoSearchTerm(slug){
+  return brandSlug(slug)==='doms' ? "Dom's TV Mounting" : 'Handy Andy TV Mounting logo';
 }
-function photoGuideHtml(){
-  const url = logoVideoUrl();
+function photoGuideHtml(slug){
+  const bs = brandSlug(slug);
+  const logo = hasLogoAssets(bs);
+  const url = logoVideoUrl(bs);
   // Tap a thumbnail to open it full-size — reuses the same #lightbox already
   // wired up for the tech's own uploaded job photos (see openLightbox() /
   // photoThumbs() below), so there's nothing new to bind here.
-  const examplesHtml = (!isDoms() && GOOD_PHOTO_EXAMPLES.length) ? `
+  // Every example photo has the Handy Andy logo on the TV screen, so they are
+  // shown for Handy Andy jobs ONLY -- to a Dom's tech, or on a job for any of
+  // the micro-brands, they would be advertising the wrong company.
+  const examplesHtml = (bs==='handy-andy' && GOOD_PHOTO_EXAMPLES.length) ? `
     <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:4px;-webkit-overflow-scrolling:touch;">
       ${GOOD_PHOTO_EXAMPLES.map(f=>`<img src="/photo-guide/${f}" loading="lazy" onclick="openLightbox('/photo-guide/${f}')" style="flex:0 0 92px;height:92px;object-fit:cover;border-radius:10px;cursor:pointer;">`).join('')}
     </div>
     <div style="font-size:10px;color:var(--mute);text-align:center;margin-bottom:11px;">← tap to enlarge, swipe for more →</div>` : '';
   return `<div style="margin:2px 0 12px;padding:12px 14px;border:1px solid var(--orange);border-radius:12px;background:rgba(255,255,255,.04);">
     <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📸 Take a photo of your work</div>
-    <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">${isDoms() ? 'Sometimes these photos go on our social media. Before you shoot please:' : "Sometimes these go on our social media — here's what a great one looks like:"}</div>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:10px;">${(bs==='handy-andy') ? "Sometimes these go on our social media — here's what a great one looks like:" : 'Sometimes these photos go on our social media. Before you shoot please:'}</div>
     ${examplesHtml}
-    <div style="font-size:13px;line-height:1.95;margin-bottom:11px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ TV <b>on</b>, with our logo up &mdash; <span class="js-logo-help" style="color:var(--orange);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;">how?</span></div>
-    ${(tech&&tech.demo)
+    <div style="font-size:13px;line-height:1.95;margin-bottom:${logo?'11':'0'}px;">✅ Peel <b>all</b> plastic off the TV<br>✅ Clear tools &amp; clutter out of the frame<br>✅ TV <b>on</b>${logo?`, with our logo up &mdash; <span class="js-logo-help" data-logo-slug="${esc(bs)}" style="color:var(--orange);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;">how?</span>`:''}</div>
+    ${!logo ? '' : (tech&&tech.demo)
       ? `<span class="btn" style="display:block;text-align:center;cursor:default;" aria-disabled="true">▶ Open logo on YouTube</span>`
       : `<a href="${url}" target="_blank" rel="noopener" class="btn" style="display:block;text-align:center;text-decoration:none;">▶ Open logo on YouTube</a>`}
   </div>`;
@@ -2632,7 +2655,7 @@ document.getElementById('lhCastToggle').addEventListener('click',()=>{
 // is one); the execCommand path is the fallback for older in-app webviews,
 // which some techs' phones still open links in.
 document.getElementById('lhCopy').addEventListener('click',async()=>{
-  const term=logoSearchTerm();
+  const term=logoSearchTerm(logoHelpSlug);
   let ok=false;
   try{ await navigator.clipboard.writeText(term); ok=true; }
   catch(_){
@@ -2650,11 +2673,17 @@ document.getElementById('lhCopy').addEventListener('click',async()=>{
   lbl.style.color = ok ? '#15803d' : '#9a3412';
   setTimeout(()=>{ lbl.textContent='COPY'; lbl.style.color='#FF6B35'; },1600);
 });
+// Which brand the currently-open how-to sheet is for, captured from the link
+// that opened it — the sheet's own Copy and Open buttons must not fall back to
+// the tech's company when the job belongs to the other one.
+let logoHelpSlug = null;
 document.addEventListener('click',e=>{
-  if(!e.target.closest('.js-logo-help')) return;
+  const trigger=e.target.closest('.js-logo-help');
+  if(!trigger) return;
+  logoHelpSlug = trigger.dataset.logoSlug || null;
   document.getElementById('lhCastBody').style.display='none';
   // Per-company search term — Dom's techs must not be told to search "Handy Andy".
-  document.getElementById('lhTerm').textContent=logoSearchTerm();
+  document.getElementById('lhTerm').textContent=logoSearchTerm(logoHelpSlug);
   const body=document.querySelector('#logoHelpModal [data-lh-body]');
   if(body) body.scrollTop=0;
   document.getElementById('logoHelpModal').classList.remove('hidden');
@@ -2663,7 +2692,7 @@ document.getElementById('logoHelpOpen').addEventListener('click',()=>{
   // Open the video AND get out of the way: the tech's next move is taking the
   // photo, so close the how-to and put the Add Photo button back in front of
   // them rather than leaving them to dismiss a sheet when they come back.
-  window.open(logoVideoUrl(),'_blank','noopener');
+  window.open(logoVideoUrl(logoHelpSlug),'_blank','noopener');
   closeLogoHelp();
   const add=document.getElementById('addPhoto');
   if(add) add.scrollIntoView({behavior:'smooth',block:'center'});

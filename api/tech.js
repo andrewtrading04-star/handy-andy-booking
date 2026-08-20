@@ -16,7 +16,7 @@ import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
-import { emailConfig, sendEmail, brandFor, reviewEmail } from './_lib/email.js';
+import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
@@ -201,8 +201,23 @@ async function login(req, res, body) {
   } catch { /* slug/tz are cosmetic — ignore lookup failures */ }
   return res.status(200).json({
     token,
-    technician: { id: tech.id, name: tech.name, status: tech.status, slug, tz, demo: demoMode() },
+    // company_name is the tech's OWN company, trading name -- the cross-company
+    // banner reads "THIS JOB IS FOR <job's company>, NOT <this>", so it has to be
+    // the same style of name as the job's, not the internal shorthand.
+    technician: { id: tech.id, name: tech.name, status: tech.status, slug, tz, demo: demoMode(),
+                  company_name: brandName(slug, null) },
   });
+}
+
+// The customer-facing trading name for a business slug, e.g. 'austin' ->
+// "TV Mounting & Handyman Austin". EMAIL_BRANDS is the single source of truth
+// for these (it already drives confirmation-email branding), so the tech app
+// can never show a different name than the customer just received. Falls back
+// to the raw businesses.name only for a slug not in the map -- that column
+// holds internal shorthand like "TVm Austin", which is not what a tech should
+// be shown when they need to know whose job they are standing in.
+function brandName(slug, fallback) {
+  return (EMAIL_BRANDS[slug] && EMAIL_BRANDS[slug].name) || fallback || null;
 }
 
 // Diagnostic: show login readiness for all technicians (phone + PIN setup).
@@ -268,7 +283,7 @@ async function jobs(req, res, db, auth) {
              address_line1, address_line2, city, state, postal_code, lat, lng, business_id, service_area_id,
              customer:customers ( name, phone ),
              service:services ( name ),
-             business:businesses ( name, timezone ),
+             business:businesses ( name, slug, timezone ),
              line_items:booking_line_items ( name, kind )`), auth)
     .neq('status', 'cancelled')
     .gte('scheduled_at', lo.toISOString())
@@ -288,7 +303,12 @@ async function jobs(req, res, db, auth) {
     j.local_date = localDateInTz(jtz, j.scheduled_at);
     j.slot_time = slotTimeLabel(jtz, j.scheduled_at);
     j.cross_company = !!(b.business_id && b.business_id !== auth.business_id);
-    j.company_name = b.business?.name || null;
+    j.company_name = brandName(b.business?.slug, b.business?.name);
+    // The JOB's business slug. The tech app gates brand-specific help (the
+    // logo video, the example photos) on this rather than on the tech's own
+    // company -- a Handy Andy tech covering an Austin job must not be shown
+    // Handy Andy's logo video for it.
+    j.company_slug = b.business?.slug || null;
     return j;
   });
   return res.status(200).json({ jobs, tz });
@@ -433,7 +453,8 @@ async function job(req, res, db, auth) {
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
-  shaped.company_name = data.business?.name || null;
+  shaped.company_name = brandName(data.business?.slug, data.business?.name);
+  shaped.company_slug = data.business?.slug || null;
   // Slot time in the job's OWN metro timezone (service area), so a Central job
   // reads its true slot (e.g. 8:00 AM) instead of the business's Mountain clock.
   {
