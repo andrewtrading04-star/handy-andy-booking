@@ -21,7 +21,9 @@
 export const PAY_DATE_OFFSET_DAYS = 9;    // days after the period-end Saturday
 
 // ── Tech classification ──────────────────────────────────────────────────────
-// Juan earns enhanced rates on base + brackets + wires + fireplace. Everyone
+// Juan earns enhanced rates on base + wires + fireplace. He USED to also get a
+// bracket reimbursement ($25/$35/$60); that ended 2026-08-16 by owner rule --
+// see JUAN_BRACKET_ZERO_FROM. Everyone
 // else ("Other Techs") earns the standard column — TK included for rates.
 // Evan is retired — never paid (callers should exclude; we also guard here).
 export function isJuan(techName) {
@@ -50,8 +52,10 @@ const TV_SIZE_RATES = [
 // Brackets, add-ons, wires, fireplace, surface, lifting — keyed by normalized name.
 // `null` rate-pair means "known item that pays nothing" (no flag).
 const ITEM_RATES = {
-  // Brackets (Other techs paid $0 — bracket cost is a customer add-on, not labor;
-  // Juan is the documented exception).
+  // Brackets (Other techs paid $0 — bracket cost is a customer add-on, not labor).
+  // Juan's 25/35/60 below are HISTORICAL ONLY: they still apply to jobs
+  // scheduled before 2026-08-16 so re-running an old week reproduces what was
+  // actually paid. From 2026-08-16 on, JUAN_BRACKET_ZERO_FROM zeroes them.
   'flat bracket':            { juan: 25, other: 0 },
   'flat':                    { juan: 25, other: 0 },
   'tilting bracket':         { juan: 35, other: 0 },
@@ -426,6 +430,31 @@ function gdsRedeemedRate(scheduledAt) {
   return (t && !isNaN(t) && t < GDS_REDEEMED_RATE_CHANGE.at) ? GDS_REDEEMED_RATE_CHANGE.before : GDS_REDEEMED_RATE_CHANGE.after;
 }
 
+// Juan's bracket reimbursement ends 2026-08-16 (hard owner rule): he is paid
+// $0 for ALL brackets from that date on, matching every other tech. Gated on
+// job.scheduled_at using the same reasoning as the GDS change above -- a week
+// before the cutoff must still re-compute to what was actually paid, so the
+// historical 25/35/60 stay in ITEM_RATES rather than being deleted.
+//
+// Only the three purchased bracket types (and their 85"-100" wordings) are
+// listed. Deliberately NOT included: the Samsung Frame / LG Gallery "bracket
+// that comes in the box" keys, which pay $15 to EVERY tech -- that is install
+// labor, not a bracket Juan bought, and zeroing it would underpay him relative
+// to the other techs for identical work.
+const JUAN_BRACKET_ZERO_FROM = new Date('2026-08-16T00:00:00Z');
+const JUAN_BRACKET_KEYS = new Set([
+  'flat bracket', 'flat',
+  'tilting bracket', 'tilting',
+  'full motion bracket', 'full motion',
+  '85 100 flat bracket', '85 100 tilting bracket', '85 100 full motion bracket',
+]);
+function juanBracketZeroed(pair, scheduledAt) {
+  if (!pair || !JUAN_BRACKET_KEYS.has(pair.key)) return false;
+  const t = scheduledAt ? new Date(scheduledAt) : null;
+  // No scheduled_at (synthetic/estimate jobs) is treated as "now" -> new rule.
+  return !t || isNaN(t) || t >= JUAN_BRACKET_ZERO_FROM;
+}
+
 // ── Multi-tech detection (when a two-person "lift help" line item exists) ──
 // Returns { hasSecondTech: boolean, secondTechBonus: number }.
 // Bonus is $30 per tech if the customer paid for it (line_total >= 70), else $0.
@@ -467,7 +496,13 @@ export function computeJobPay(job, techName) {
   const flags = [];
   const breakdown = [];
   const juan = isJuan(techName);
-  const rate = (pair) => (juan ? pair.juan : pair.other);
+  const rate = (pair) => {
+    if (!juan) return pair.other;
+    // Brackets pay Juan $0 from 2026-08-16 on (owner rule); before that his
+    // historical reimbursement still applies so old weeks re-compute correctly.
+    if (juanBracketZeroed(pair, job.scheduled_at)) return 0;
+    return pair.juan;
+  };
 
   // Hard exclusions.
   if (isRetired(techName)) return { pay: 0, breakdown, flags: ['Retired tech — never paid'], state: 'excluded' };
@@ -962,7 +997,10 @@ function runSelfTests() {
   // Mixed job: TV mounting + a handyman ADD-ON line must NOT be reclassified as a
   // pure handyman job (the Cecil Cofie bug — it paid $650 as "10h handyman" and
   // wiped the whole mounting breakdown). Juan: 80+60+35+45+35+35 base + 75
-  // after-hours + 65 (1h handyman add-on) + 12 travel (80% of $15 surcharge) = 442.
+  // after-hours + 65 (1h handyman add-on) + 12 travel (80% of $15 surcharge).
+  // Was 442; the tilting bracket's $35 dropped to $0 for Juan on 2026-08-16, so
+  // it is now 407. The point of this test is the mixed-job classification, not
+  // the bracket rate.
   eq(computeJobPay(job({ price: 891, subtotal: 823, line_items: [
     { name: '60"-69"', line_total: 119 },
     { name: '33"-59"', line_total: 109 },
@@ -974,7 +1012,7 @@ function runSelfTests() {
     { name: 'Service area surcharge', line_total: 15, kind: 'fee' },
     { name: 'After-hours fee (8 PM)', line_total: 75, kind: 'fee' },
     { name: 'Tax (8.25%)', line_total: 67.9, kind: 'fee' },
-  ] }), 'Juan').pay, 442, 'mixed TV+handyman add-on (Juan) = 442 (430 + $12 travel)');
+  ] }), 'Juan').pay, 407, 'mixed TV+handyman add-on (Juan) = 407 (bracket now $0 for Juan)');
 
   // REGRESSION (Mark Boohaker, Jul 28 2026): on a MIXED job the handyman hours
   // must come from the line's QUANTITY, not from the hours written in the label.
@@ -1143,16 +1181,21 @@ function runSelfTests() {
     { name: 'Tax (8.25%)', line_total: 78.79, kind: 'fee' },
   ] }), 'TK').pay, 275, 'Joseph job with ×3-baked names still = 275, not 650 (no travel w/o surcharge line)');
   // The bracket rate resolves through a baked-in "×3" suffix (Juan paid $60/bracket).
+  eq(computeJobPay(job({ scheduled_at: '2026-08-10T18:00:00Z', line_items: [
+    { name: '60"-69"', line_total: 119 },
+    { name: 'Bracket: Full Motion ×3', quantity: 3, unit_price: 115, line_total: 345 },
+  ] }), 'Juan').pay, 260, 'PRE-2026-08-16 Juan 60-69 (80) + full motion ×3 ($60×3=180) via baked ×3 = 260');
+  // Same job on/after the cutoff: the ×3 still resolves, it just pays $0 each.
   eq(computeJobPay(job({ line_items: [
     { name: '60"-69"', line_total: 119 },
     { name: 'Bracket: Full Motion ×3', quantity: 3, unit_price: 115, line_total: 345 },
-  ] }), 'Juan').pay, 260, 'Juan 60-69 (80) + full motion ×3 ($60×3=180) via baked ×3 = 260');
+  ] }), 'Juan').pay, 80, 'post-cutoff Juan gets base only, brackets ×3 pay $0');
 
   // Per-unit pay: 3 tilting brackets pay Juan 3 × $35 on top of the base.
-  eq(computeJobPay(job({ line_items: [
+  eq(computeJobPay(job({ scheduled_at: '2026-08-10T18:00:00Z', line_items: [
     { name: '60"-69"', line_total: 119 },
     { name: 'Tilting (recommended)', line_total: 180, quantity: 3, unit_price: 60 },
-  ] }), 'Juan').pay, 185, 'Juan 60-69 + 3× tilting = 80 + 105 = 185');
+  ] }), 'Juan').pay, 185, 'PRE-2026-08-16 Juan 60-69 + 3× tilting = 80 + 105 = 185');
   // Count inferred when the quantity is folded into the price (qty unset, 2× unit).
   eq(computeJobPay(job({ line_items: [
     { name: '33"–59"', line_total: 109 },
@@ -1161,7 +1204,8 @@ function runSelfTests() {
 
   // Brackets: Other $0, Juan paid.
   eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Zach').pay, 50, 'tilting Other adds 0');
-  eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Juan').pay, 85, 'tilting Juan adds 35');
+  eq(computeJobPay(job({ scheduled_at: '2026-08-10T18:00:00Z', line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Juan').pay, 85, 'PRE-2026-08-16 tilting Juan adds 35');
+  eq(computeJobPay(job({ line_items: [{ name: '32" or Less', line_total: 99 }, { name: 'Tilting (recommended)', line_total: 0 }] }), 'Juan').pay, 50, 'post-cutoff tilting adds $0 for Juan, same as every other tech');
 
   // Wires (Juan vs other).
   eq(computeJobPay(job({ line_items: [{ name: '33"–59"', line_total: 109 }, { name: 'Hide wires BEHIND the wall', line_total: 60 }] }), 'Steve').pay, 95, 'behind-wall other = 60+35');
@@ -1383,7 +1427,11 @@ function runSelfTests() {
     { kind: 'option', name: nm, line_total: lt },
   ] });
   eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Gregory').pay, 60, 'hand-typed "Full Motion Mount" pays $0 like any bracket (not a $65 custom hour)');
-  eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Juan').pay, 120, 'Juan still gets his $60 full-motion bracket reimbursement on the variant wording');
+  eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Juan').pay, 60, 'Juan gets $0 for the full-motion bracket from 2026-08-16 on (no scheduled_at = now = new rule)');
+  eq(computeJobPay(job({ ...wall('Full Motion Mount', 115), scheduled_at: '2026-08-10T18:00:00Z' }), 'Juan').pay, 120, 'Juan keeps his $60 bracket reimbursement on a job scheduled BEFORE 2026-08-16');
+  eq(computeJobPay(job({ ...wall('Full Motion Mount', 115), scheduled_at: '2026-08-16T18:00:00Z' }), 'Juan').pay, 60, 'Juan bracket pay is $0 exactly on the 2026-08-16 cutoff');
+  eq(computeJobPay(job({ line_items: [{ kind: 'option', name: '33\"-59\"', line_total: 109 }, { kind: 'option', name: 'Flat Bracket', line_total: 60 }] }), 'Juan').pay, 60, 'catalog "Flat Bracket" also pays Juan $0 now');
+  eq(computeJobPay(job({ line_items: [{ kind: 'option', name: '33\"-59\"', line_total: 109 }, { kind: 'option', name: 'Samsung Frame TV in box bracket', line_total: 15 }] }), 'Juan').pay, 75, 'Samsung Frame in-box bracket still pays Juan $15 (install labor, all techs)');
   eq(computeJobPay(job(wall('Full Motion Mount', 115)), 'Gregory').flags.length, 0, '"Full Motion Mount" raises no review flag');
   eq(computeJobPay(job(wall('Bracket: Tilting Mount', 65)), 'Gregory').pay, 60, 'hand-typed "Tilting Mount" pays $0');
   eq(computeJobPay(job(wall('Customer supplied bracket', 0)), 'Gregory').pay, 60, 'customer-supplied bracket still $0 (never reaches the new fallback)');
