@@ -1087,31 +1087,43 @@ async function calendar(req, res, db, auth) {
 
   // Ghost bookings: a cross-hired tech keeps ONE technician row, referenced
   // directly by technician_id/secondary_technician_id on bookings that belong
-  // to the OTHER business (e.g. Kregg — a Handy Andy tech — picking up a Dom's
-  // job). So the match is by id, not name: this business's own tech ids,
-  // looked up against the partner's bookings. Surface it as a separate
-  // read-only list, never merged into `bookings`, so it can never be
+  // to an OTHER business (e.g. Kregg — a Handy Andy tech — picking up a Dom's
+  // or Mile High job). So the match is by id, not name: this business's own
+  // tech ids, looked up against every OTHER active business's bookings — not
+  // just the single PARTNER_SLUG pairing, since Handy Andy's techs get
+  // borrowed by Doms, Mile High, Austin, AND Precision all at once, and every
+  // one of those needs to show up faded on Handy Andy's own schedule so the
+  // office can see where its techs are actually busy. Surface it as a
+  // separate read-only list, never merged into `bookings`, so it can never be
   // double-counted in payroll or job counts.
   let ghostBookings = [];
   try {
-    const partner = await partnerBusiness(db, biz.slug);
     const ownTechIds = (techs || []).map(t => t.id);
-    if (partner && ownTechIds.length) {
-      const { data: pbk, error: pbkErr } = await db.from('bookings')
-        .select('id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status')
-        .eq('business_id', partner.id)
-        .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
-        .not('status', 'in', '(cancelled,no_show)')
-        .gte('scheduled_at', from).lt('scheduled_at', to)
-        .limit(2000);
-      if (pbkErr) throw pbkErr;
-      const ownTechIdSet = new Set(ownTechIds);
-      for (const b of (pbk || [])) {
-        if (ownTechIdSet.has(b.technician_id)) {
-          ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: partner.name });
-        }
-        if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
-          ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: partner.name });
+    if (ownTechIds.length) {
+      const { data: otherBiz } = await db.from('businesses')
+        .select('id, name').eq('active', true).neq('id', biz.id);
+      const otherBizNameById = {};
+      for (const ob of (otherBiz || [])) otherBizNameById[ob.id] = ob.name;
+      const otherBizIds = Object.keys(otherBizNameById);
+      if (otherBizIds.length) {
+        const { data: pbk, error: pbkErr } = await db.from('bookings')
+          .select('id, business_id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
+          .in('business_id', otherBizIds)
+          .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
+          .not('status', 'in', '(cancelled,no_show)')
+          .gte('scheduled_at', from).lt('scheduled_at', to)
+          .limit(2000);
+        if (pbkErr) throw pbkErr;
+        const ownTechIdSet = new Set(ownTechIds);
+        for (const b of (pbk || [])) {
+          const companyName = otherBizNameById[b.business_id] || 'Partner';
+          const customerName = b.customer?.name || null;
+          if (ownTechIdSet.has(b.technician_id)) {
+            ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          }
+          if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
+            ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          }
         }
       }
     }

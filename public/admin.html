@@ -2651,9 +2651,10 @@ function ghostEvtCard(g){
   const t=techCache.find(x=>x.id===g.technician_id);
   const start=fmtClock(g.scheduled_at);
   const end=fmtClock(new Date(new Date(g.scheduled_at).getTime()+(g.duration_minutes||60)*60000).toISOString());
-  return `<div class="evt evt-ghost" title="${esc(t?.name||'Tech')} is booked on a ${esc(g.partner_company||'partner')} job during this time — informational only, not a job on your schedule.">
+  const who=g.customer_name?` for ${esc(g.customer_name)}`:'';
+  return `<div class="evt evt-ghost" title="${esc(t?.name||'Tech')} is booked on a ${esc(g.partner_company||'partner')} job${who} during this time — informational only, not a job on your schedule.">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
-    <div class="ghost-n">${esc(t?.name||'Tech')} busy <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
+    <div class="ghost-n">${esc(t?.name||'Tech')} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
   </div>`;
 }
 function dayColumn(ds){
