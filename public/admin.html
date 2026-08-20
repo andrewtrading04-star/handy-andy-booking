@@ -3137,15 +3137,16 @@ function openBooking(b){
   // only on jobs that originally requested a two-person lift.
   const showSecond=canAssign;
   const _bktz=bookingTz(b);
-  const _svcName=b.service?.category||b.service?.name||'Service';
   const _fmtTz=(opts,fallback)=>{ try{ return new Date(b.scheduled_at).toLocaleString('en-US',{ timeZone:_bktz.tz, ...opts }); }catch(_){ return fallback; } };
   const _startTime=_fmtTz({hour:'numeric',minute:'2-digit'},'');
   const _startDate=_fmtTz({weekday:'long',month:'long',day:'numeric',year:'numeric'},fmtDateTimeTz(b.scheduled_at,_bktz.tz));
   const _payTxt=(b.payment_status||'unpaid').replace(/_/g,' ');
   const _dirUrl=b.address?`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(b.address)}`:'';
-  // Service first, customer second: this is a work order, not a contact card.
+  // Just the customer's name — owner call, Aug 2026 (was "Service for Customer",
+  // e.g. "Dom's TV Mounting for David Cardenas"; the service/business context is
+  // already visible below in the body, so the header no longer repeats it).
   document.getElementById('bkTitle').innerHTML=`
-    <div class="bk-svc">${esc(_svcName)} <span class="for">for ${esc(b.customer?.name||'Customer')}</span></div>
+    <div class="bk-svc">${esc(b.customer?.name||'Customer')}</div>
     ${b.zenbooker_job_number?`<div class="bk-jobno">JOB #${esc(b.zenbooker_job_number)}</div>`:''}
     ${bkStatusRail(b)}`;
   document.getElementById('bkBody').innerHTML=`
