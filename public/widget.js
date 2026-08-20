@@ -29,7 +29,7 @@
   // tvmountingdenver is a booking-only brand with NO published phone number:
   // its entry is deliberately '' (empty, not missing) so the fallback alerts
   // below render their no-phone wording instead of the Handy Andy default.
-  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'713-876-9032', 'tvmountingdenver':'' }[BUSINESS] ?? '713-876-9032';
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'(346) 394-8137', 'tvmountingdenver':'' }[BUSINESS] ?? '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
