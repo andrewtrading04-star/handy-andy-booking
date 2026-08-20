@@ -299,6 +299,16 @@ function matchItem(name, lt) {
       ? { key: 'outside wall wires', juan: 15, other: 15 }
       : { key: 'behind wall wires', juan: 45, other: 35 };
   }
+  // Dom's own booking flow prices this as one line named "Inwall Concealment"
+  // ($135 to the customer) — no "cord"/"wire" word, and "wall" is glued to
+  // "In" with no word boundary, so it missed the regex above entirely and fell
+  // through to the $85/hr custom-job guess (Max Segal job, Aug 2026: paid
+  // $130 for it instead of the correct flat $60). Owner rate: $60, all techs —
+  // distinct from HA's own "In-Wall Wire Concealment" catalog rate ($35/$45
+  // above), which is a different line-item wording at a different price.
+  if (/\binwall\b/i.test(name) && /conceal/i.test(name)) {
+    return { key: 'inwall concealment (doms)', juan: 60, other: 60 };
+  }
   // Bracket type mentioned anywhere in the name, worded outside the exact
   // catalog keys above (e.g. a hand-typed "Full Motion Mount" instead of the
   // catalog's "Full Motion Bracket"). Same substring test detectBracketQtys()
@@ -672,9 +682,16 @@ export function computeJobPay(job, techName) {
     // ANY line whose name ends in "…Fee" (Processing/Setup/Rush/Trip/…) is a
     // charge, never tech labor — so the custom-job hourly fallthrough below can't
     // mistake it for a custom service and pay $65/hr against it.
+    // Bare "Travel" (the office dropped "Fee" from the label in 2026-08, see the
+    // travelPayout comment above) was NOT in this skip list, so it fell through
+    // to the custom-hourly fallback below and got paid a SECOND time on top of
+    // the correct travelPayout — a real job (Max Segal, Dom's, Aug 2026) paid
+    // $80 travel via travelPayout AND another $65 "1h @ $65" for the same
+    // "Travel" line. \btravel\b here, matching the travelPayout regex above, so
+    // the two can never disagree about which lines are travel.
     if (li.kind === 'fee' || /^tax\b/i.test(name) || /\btip\b/i.test(name) || /\bfee\b/i.test(name)
         || /service area surcharge/i.test(name) || /after.?hours/i.test(name)
-        || /service\s*minimum/i.test(name)) continue;   // a minimum-charge floor, not tech labor
+        || /service\s*minimum/i.test(name) || /\btravel\b/i.test(name)) continue;   // a minimum-charge floor, not tech labor
 
     // Skip the two-person "lift help" marker — it's not a labor line to price.
     // The $60 ($30/tech) bonus is added separately when the split runs.
@@ -1472,6 +1489,24 @@ function runSelfTests() {
   ] });
   eq(computeJobPay(job(dis(true)), 'Gregory').pay, 160, 'dismount qty 2 @ $120 pays 2 x $50 = $100 (+$60 base) when quantity is selected');
   eq(computeJobPay(job(dis(false)), 'Gregory').pay, 120, 'the same line WITHOUT quantity pays only $60 -- this is the regression to guard against');
+
+  // ── Max Segal job, Dom's, Aug 2026: bare "Travel" line double-paid, and
+  // "Inwall Concealment" fell through to the $85/hr custom guess ──────────────
+  const segal = { line_items: [
+    { name: 'Inwall Concealment', line_total: 135, quantity: 1, unit_price: 135, kind: 'option' },
+    { name: 'Travel', line_total: 100, quantity: 1, unit_price: 100, kind: 'addon' },
+    { name: 'Military Discount', line_total: -30, quantity: 1, unit_price: -30, kind: 'coupon' },
+    { name: 'Tax (8.25%)', line_total: 16.91, quantity: 1, unit_price: 16.91, kind: 'fee' },
+  ] };
+  eq(computeJobPay(job(segal), 'Gregory').pay, 140, 'Inwall Concealment ($60) + travel payout ($80) = $140, nothing else');
+  eq(computeJobPay(job(segal), 'Gregory').flags.length, 0, 'Inwall Concealment raises no review flag');
+  eq(computeJobPay(job(segal), 'Juan').pay, 140, 'Inwall Concealment pays $60 for Juan too -- flat rate, not the behind-wall-wires tier');
+  // The travel-line skip on its own, isolated from the concealment fix above:
+  // a job with ONLY a "Travel" line must not pay it twice.
+  eq(computeJobPay(job({ line_items: [
+    { name: '33"-59"', line_total: 109 },
+    { name: 'Travel', line_total: 65, quantity: 1, unit_price: 65, kind: 'addon' },
+  ] }), 'Gregory').pay, 60 + 52, 'base (60) + travel payout only (80% of 65 = 52) -- Travel line itself must not ALSO price as custom hours');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
