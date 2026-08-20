@@ -130,6 +130,7 @@ const PARTNER_SLUG = {
   'mile-high':  { slug: 'handy-andy', metro: /denver/i },
   'austin':     { slug: 'handy-andy', metro: /austin/i },
   'precision':  { slug: 'handy-andy', metro: /houston/i },
+  'tvmountingdenver': { slug: 'handy-andy', metro: /denver/i },
 };
 
 // Resolve the partner business's tech pool in the pairing's own metro for a

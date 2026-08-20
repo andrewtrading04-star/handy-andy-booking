@@ -22,6 +22,7 @@ const ACCOUNT_KEY_ENV = {
   'mile-high':  'MILE_HIGH_STRIPE_SECRET_KEY',
   austin:       'AUSTIN_STRIPE_SECRET_KEY',
   precision:    'PRECISION_STRIPE_SECRET_KEY',
+  tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_SECRET_KEY',
 };
 
 // Legacy slug -> account for bookings made BEFORE per-booking stamping: Handy
@@ -33,6 +34,7 @@ const LEGACY_SLUG_ACCOUNT = {
   'mile-high':  'mile-high',
   austin:       'austin',   // always its own account, never global -- born after the split
   precision:    'precision',// same
+  tvmountingdenver: 'tvmountingdenver', // same
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)

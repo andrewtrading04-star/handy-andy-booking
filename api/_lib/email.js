@@ -59,6 +59,7 @@ export const EMAIL_BRANDS = {
   'mile-high':  { slug: 'mile-high',  name: 'Mile High TV Mounting', accent: '#1D9E75', website: 'milehightvmounting.com' },
   'austin':     { slug: 'austin',     name: 'TV Mounting & Handyman Austin', accent: '#1E56E0', website: 'austinmounting.com' },
   'precision':  { slug: 'precision',  name: 'Precision TV Installation',     accent: '#0288D1', website: 'precisiontvinstallation.com' },
+  'tvmountingdenver': { slug: 'tvmountingdenver', name: 'TV Mounting Denver', accent: '#2F6BFF', website: 'tvmountingdenver.com' },
 };
 // An unknown slug used to fall back to Handy Andy, which meant a new business
 // would send Handy-Andy-branded email to its own customers and look, to the

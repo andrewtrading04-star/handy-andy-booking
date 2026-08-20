@@ -22,6 +22,10 @@ export const NATIVE_BUSINESS = {
   // Houston-only micro-brand (precisiontvinstallation.com), same shape again:
   // no techs of its own, borrows Handy Andy's Houston roster (Juan).
   'precision':  { name: 'Precision TV Installation',     legalName: 'Precision TV Installation' },
+  // Denver-only micro-brand (tvmountingdenver.com), same shape as Mile High:
+  // no techs of its own, borrows Handy Andy's Denver roster. Booking-only
+  // brand: it publishes NO phone number anywhere.
+  'tvmountingdenver': { name: 'TV Mounting Denver',      legalName: 'TV Mounting Denver' },
 };
 
 export const NATIVE_SLUGS = Object.keys(NATIVE_BUSINESS);

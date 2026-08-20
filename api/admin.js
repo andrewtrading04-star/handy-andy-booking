@@ -469,7 +469,7 @@ function displayNameFor(scope) {
 // number, since the two businesses are staffed by different people.
 function secretaryPhoneFor(scope) {
   // Heather covers Handy Andy and both of its micro-brands (Mile High, Austin).
-  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision' || scope === 'tvmountingdenver') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_PHONE || '';
   return '';
 }

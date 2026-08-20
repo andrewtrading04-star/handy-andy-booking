@@ -21,12 +21,15 @@
   // The legal trading name shown in the SMS-consent disclosure below -- must
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
-  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation' }[BUSINESS] || 'Handy Andy TV Mounting';
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation', 'tvmountingdenver':'TV Mounting Denver' }[BUSINESS] || 'Handy Andy TV Mounting';
   // The phone number shown in customer-facing fallback messages ("call us to
   // confirm/verify"). Used to be hardcoded to Handy Andy's Houston line for
   // every business, which told a Mile High or Austin customer to call a
   // company they have never heard of.
-  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'713-876-9032', 'austin':'(737) 381-3800', 'precision':'713-876-9032' }[BUSINESS] || '713-876-9032';
+  // tvmountingdenver is a booking-only brand with NO published phone number:
+  // its entry is deliberately '' (empty, not missing) so the fallback alerts
+  // below render their no-phone wording instead of the Handy Andy default.
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'713-876-9032', 'austin':'(737) 381-3800', 'precision':'713-876-9032', 'tvmountingdenver':'' }[BUSINESS] ?? '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
@@ -36,9 +39,9 @@
   // visually unchanged. Mile High gets the same green used in its email
   // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
   // across the booking widget and the confirmation email.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209' }[BUSINESS] || '255,102,0';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#2f6bff' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#6b93ff' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'47,107,255' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -72,6 +75,9 @@
     'mile-high':  'https://www.milehightvmounting.com/',
     'austin':     'https://www.austinmounting.com/thank-you',
     'precision':  'https://www.precisiontvinstallation.com/',
+    // Real /thank-you page confirmed in the Next.js site (Austin template).
+    // Points at the .vercel.app URL until tvmountingdenver.com DNS moves.
+    'tvmountingdenver': 'https://tvmountingdenver.vercel.app/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
@@ -2201,7 +2207,7 @@
     try{
       const r=await fetch(`${API_BASE}/service-area`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(NATIVE?{zip,business:BUSINESS}:{zip})});
       const d=await r.json();
-      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert('It appears this area is a little far for us. But you should call to confirm. '+CONTACT_PHONE);}
+      if(!d.territory_id){btn.textContent='Check Area →';btn.disabled=false;logEvent('zip_check','unserved',null,zip);return alert(CONTACT_PHONE?('It appears this area is a little far for us. But you should call to confirm. '+CONTACT_PHONE):'It appears this area is a little far for us right now. Check back soon as our coverage grows.');}
       territoryId=d.territory_id; enteredZip=zip;
       areaCity=d.city||''; areaState=d.state||'';
       // Two DIFFERENT keys, deliberately:
@@ -2520,7 +2526,7 @@
       // the button locked and tell the customer not to click again.
       if(submitBtn){submitBtn.textContent='Confirming your booking…';submitBtn.disabled=true;}
       logEvent('booking_failed','customer',null,'connection error (locked to avoid duplicate booking)');
-      alert('Your booking is being confirmed and may already be received. Please do NOT submit again. Check your email for a confirmation, or call us at '+CONTACT_PHONE+' to verify.');
+      alert('Your booking is being confirmed and may already be received. Please do NOT submit again. Check your email for a confirmation'+(CONTACT_PHONE?(', or call us at '+CONTACT_PHONE+' to verify.'):' to verify.'));
     }
   }
 
