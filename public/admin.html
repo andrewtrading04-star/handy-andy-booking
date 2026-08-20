@@ -5833,6 +5833,25 @@ function launchNextAction(b, items){
   for(const it of items) if(it.key !== 'widget_embedded' && !b.checklist[it.key]) return `Next: ${it.label}`;
   return 'Nothing outstanding.';
 }
+// Where "the next thing" actually gets fixed, so the action line is a real
+// link instead of dead text. Env-var gaps (Stripe/Resend keys) live on the CRM's
+// own Vercel project regardless of which business needs them; code-wiring gaps
+// (a slug missing from ACCOUNT_KEY_ENV/EMAIL_BRANDS) point at the source file
+// on GitHub; a down site points at the site itself. Checklist items have no
+// single external destination — clicking the card body already opens the
+// detail panel to tick them, so this returns null for those and the "Next:"
+// line stays plain text but still sits inside the click-to-expand card.
+const VERCEL_ENV_URL = 'https://vercel.com/andrew-c-projects/handy-andy-booking/settings/environment-variables';
+const GITHUB_EDIT_BASE = 'https://github.com/andrewtrading04-star/handy-andy-booking/edit/main/';
+function launchActionHref(b){
+  if(!b.stripe.wired) return GITHUB_EDIT_BASE + 'api/_lib/stripe.js';
+  if(!b.stripe.ready) return VERCEL_ENV_URL;
+  if(!b.email.wired) return GITHUB_EDIT_BASE + 'api/_lib/email.js';
+  if(!b.email.ready) return VERCEL_ENV_URL;
+  if(!b.url) return null;
+  if(!b.site.ok) return b.url;
+  return null;
+}
 function launchRingHtml(passed, total, blocked){
   const pct = total ? Math.round((passed/total)*360) : 0;
   const color = passed===total ? 'var(--green)' : (blocked ? 'var(--red)' : 'var(--amber)');
@@ -5853,16 +5872,17 @@ function launchRingHtml(passed, total, blocked){
 // with client-side JS (Handy Andy's and Dom's own sites both do exactly
 // that), so a miss there means "couldn't confirm automatically", not "missing".
 function launchDetailHtml(b, items){
+  const link = (href, label) => `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${esc(label)}</a>`;
   const stripeLine = !b.stripe.wired
-    ? `<span style="color:var(--red);">✕ Stripe — not wired in code</span> (add "${esc(b.slug)}" to ACCOUNT_KEY_ENV in api/_lib/stripe.js)`
-    : `<span style="color:${b.stripe.ready?'var(--green)':'var(--red)'};">${b.stripe.ready?'✓':'✕'} Stripe</span> ${b.stripe.ready?'live keys set':'no live keys — bookings take no card'}`;
+    ? `<span style="color:var(--red);">✕ Stripe — not wired in code</span> (${link(GITHUB_EDIT_BASE + 'api/_lib/stripe.js', `add "${b.slug}" to ACCOUNT_KEY_ENV`)})`
+    : `<span style="color:${b.stripe.ready?'var(--green)':'var(--red)'};">${b.stripe.ready?'✓':'✕'} Stripe</span> ${b.stripe.ready?'live keys set':link(VERCEL_ENV_URL,'no live keys — add them on Vercel')}`;
   const emailLine = !b.email.wired
-    ? `<span style="color:var(--red);">✕ Email — not wired in code, will silently send as Handy Andy</span> (add "${esc(b.slug)}" to EMAIL_BRANDS + emailConfig() in api/_lib/email.js)`
-    : `<span style="color:${b.email.ready?'var(--green)':'var(--red)'};">${b.email.ready?'✓':'✕'} Email</span> ${b.email.ready?'live keys set':'no Resend key — confirmation emails skip silently'}`;
+    ? `<span style="color:var(--red);">✕ Email — not wired in code, will silently send as Handy Andy</span> (${link(GITHUB_EDIT_BASE + 'api/_lib/email.js', `add "${b.slug}" to EMAIL_BRANDS + emailConfig()`)})`
+    : `<span style="color:${b.email.ready?'var(--green)':'var(--red)'};">${b.email.ready?'✓':'✕'} Email</span> ${b.email.ready?'live keys set':link(VERCEL_ENV_URL,'no Resend key — add it on Vercel')}`;
   let siteLine;
   if(!b.url) siteLine=`<span style="color:var(--red);">✕ Website — no URL on file</span>`;
-  else if(b.site.error) siteLine=`<span style="color:var(--red);">✕ Website</span> — could not reach ${esc(b.url)} (${esc(b.site.error)})`;
-  else siteLine=`<span style="color:${b.site.ok?'var(--green)':'var(--red)'};">${b.site.ok?'✓':'✕'} Website</span> ${b.site.ok?`live (${b.site.status})`:`returned ${b.site.status}`}`
+  else if(b.site.error) siteLine=`<span style="color:var(--red);">✕ Website</span> — could not reach ${link(b.url, b.url)} (${esc(b.site.error)})`;
+  else siteLine=`<span style="color:${b.site.ok?'var(--green)':'var(--red)'};">${b.site.ok?'✓':'✕'} Website</span> ${b.site.ok?link(b.url, `live (${b.site.status})`):`returned ${b.site.status}`}`
     + (b.site.hasWidget ? `<br><span style="color:var(--green);">✓ Widget confirmed via automated scan</span> — a bonus check, not required` : '');
   const checklist=items.map(it=>{
     const checked=!!b.checklist[it.key];
@@ -5880,6 +5900,11 @@ function launchDetailHtml(b, items){
 }
 function launchCardHtml(b, items){
   const { passed, total, blocked } = launchScoreOf(b, items);
+  const nextText = esc(launchNextAction(b, items));
+  const href = launchActionHref(b);
+  const nextInner = href
+    ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
+    : nextText;
   return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
@@ -5888,7 +5913,7 @@ function launchCardHtml(b, items){
         <div style="font-size:11px;color:var(--mute);">${esc(b.slug)}</div>
       </div>
     </div>
-    <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchNextAction(b, items))}</p>
+    <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${nextInner}</p>
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
@@ -6017,7 +6042,10 @@ async function renderLaunch(){
             try{
               await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}});
               b.checklist[key]=value;
-              card.querySelector('.launch-next').textContent=launchNextAction(b, items);
+              const nextText=esc(launchNextAction(b, items)), href=launchActionHref(b);
+              card.querySelector('.launch-next').innerHTML = href
+                ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
+                : nextText;
               const s=launchScoreOf(b, items);
               card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
             }

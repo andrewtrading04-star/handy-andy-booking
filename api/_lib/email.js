@@ -45,6 +45,17 @@ export function emailConfig(slug) {
       from:   process.env.PRECISION_EMAIL_FROM || 'contact@precisiontvinstallation.com',
     };
   }
+  if (slug === 'tvmountingdenver') {
+    // Same rule again: no fallback to Handy Andy's account, ever. Before this
+    // branch existed, an unmapped slug fell through to the default below and
+    // the Launch tab reported email as "wired + ready" from EMAIL_BRANDS
+    // metadata alone, while every real send would have gone out as
+    // contact@ihandyandy.com — a false positive the owner caught.
+    return {
+      apiKey: process.env.TVMOUNTINGDENVER_RESEND_API_KEY,
+      from:   process.env.TVMOUNTINGDENVER_EMAIL_FROM || 'contact@tvmountingdenver.com',
+    };
+  }
   return {
     apiKey: process.env.RESEND_API_KEY,
     from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
