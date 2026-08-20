@@ -1967,7 +1967,22 @@ async function multiTvDiscountSave(req, res, db, auth, body) {
 // by the client-JS-rendering problem above), so a redundant manual copy would
 // default to false for every already-working business and bury the real gap
 // under a stale checkbox nobody remembered to tick.
+// `auto` marks the three items that ALSO have a live automated check behind
+// them (stripe / email / site). They are still ordinary, clickable checklist
+// items: the owner can tick or untick them like anything else, and his answer
+// wins for scoring. The automated result is shown underneath as a cross-check,
+// and loudly when the two disagree, so a stale tick can't quietly hide "this
+// business takes no card" the way Precision's missing Stripe keys did.
+//
+// An item the owner has NEVER touched has no stored value at all, and falls
+// back to the automated answer rather than to false — otherwise adding these
+// three rows would have instantly knocked 3 points off every business that has
+// been working fine for months, which is exactly the regression the
+// widget_embedded scan caused when it was first added.
 const LAUNCH_CHECKLIST_ITEMS = [
+  { key: 'stripe_keys',  label: 'Stripe live keys set',   auto: 'stripe' },
+  { key: 'email_keys',   label: 'Resend live keys set',   auto: 'email' },
+  { key: 'website_live', label: 'Website is live',        auto: 'site' },
   { key: 'widget_embedded',    label: 'Booking widget confirmed on the page' },
   // The five below verify the funnel actually fires end to end, not just that
   // the booking itself saves — added after finding Mile High's and Precision's

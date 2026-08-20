@@ -5813,9 +5813,38 @@ function renderFinanceUploadPreview(el, acctId, sourceLabel, d){
 // all, same as no Stripe key, so it has to outrank the score exactly like
 // stripe/email/site do (this is the actual Mile High case — 7/8 done, but
 // still Blocked, because the one missing item is "can a customer book").
+//
+// Stripe / email / website are clickable checklist items like everything else,
+// not read-only readouts. The owner's tick wins; the live automated check is
+// shown next to it as a cross-check (and flagged when the two disagree). An
+// item he has never touched has no stored value and falls back to the
+// automated answer, so adding these rows didn't retroactively mark every
+// long-working business as 3 points worse off.
+const LAUNCH_AUTO_OF = {
+  stripe_keys:  b => !!b.stripe.ready,
+  email_keys:   b => !!b.email.ready,
+  website_live: b => !!b.site.ok,
+};
+function launchAutoValue(b, key){
+  const fn = LAUNCH_AUTO_OF[key];
+  return fn ? fn(b) : null;
+}
+// Stored answer if the owner has ever set one, otherwise the automated result.
+function launchEffective(b, key){
+  const v = b.checklist ? b.checklist[key] : undefined;
+  if(v === true || v === false) return v;
+  const auto = launchAutoValue(b, key);
+  return auto === null ? false : auto;
+}
 function launchScoreOf(b, items){
-  const hard = [!!b.stripe.ready, !!b.email.ready, !!b.site.ok, !!b.checklist.widget_embedded];
-  const soft = items.filter(it => it.key !== 'widget_embedded').map(it => !!b.checklist[it.key]);
+  const hard = [
+    launchEffective(b,'stripe_keys'),
+    launchEffective(b,'email_keys'),
+    launchEffective(b,'website_live'),
+    !!b.checklist.widget_embedded,
+  ];
+  const softItems = items.filter(it => it.key !== 'widget_embedded' && !LAUNCH_AUTO_OF[it.key]);
+  const soft = softItems.map(it => !!b.checklist[it.key]);
   const passed = hard.filter(Boolean).length + soft.filter(Boolean).length;
   return { passed, total: hard.length + soft.length, blocked: hard.some(v => !v) };
 }
@@ -5824,13 +5853,17 @@ function launchScoreOf(b, items){
 // tracks by hand, in the order a new business would actually knock them out.
 function launchNextAction(b, items){
   if(!b.stripe.wired) return `Wire "${b.slug}" into ACCOUNT_KEY_ENV (api/_lib/stripe.js)`;
-  if(!b.stripe.ready) return 'Add Stripe keys';
+  if(!launchEffective(b,'stripe_keys')) return 'Add Stripe keys';
   if(!b.email.wired) return `Wire "${b.slug}" into EMAIL_BRANDS (api/_lib/email.js)`;
-  if(!b.email.ready) return 'Add a Resend key';
+  if(!launchEffective(b,'email_keys')) return 'Add a Resend key';
   if(!b.url) return 'Set the website URL on the business record';
-  if(!b.site.ok) return `Website is down (${b.site.error || b.site.status || 'unreachable'})`;
+  if(!launchEffective(b,'website_live')) return `Website is down (${b.site.error || b.site.status || 'unreachable'})`;
   if(!b.checklist.widget_embedded) return 'Confirm the booking widget is actually on the page';
-  for(const it of items) if(it.key !== 'widget_embedded' && !b.checklist[it.key]) return `Next: ${it.label}`;
+  // The three `auto` keys are already handled above, on their effective value.
+  // Skipping them here matters: one that passes automatically has no stored
+  // value at all, so a plain !b.checklist[key] test would report an item that
+  // is already satisfied as the next thing to go and do.
+  for(const it of items) if(it.key !== 'widget_embedded' && !LAUNCH_AUTO_OF[it.key] && !b.checklist[it.key]) return `Next: ${it.label}`;
   return 'Nothing outstanding.';
 }
 // Where "the next thing" actually gets fixed, so the action line is a real
@@ -5843,13 +5876,15 @@ function launchNextAction(b, items){
 // line stays plain text but still sits inside the click-to-expand card.
 const VERCEL_ENV_URL = 'https://vercel.com/andrew-c-projects/handy-andy-booking/settings/environment-variables';
 const GITHUB_EDIT_BASE = 'https://github.com/andrewtrading04-star/handy-andy-booking/edit/main/';
+// Must branch on exactly the same conditions as launchNextAction above, or the
+// link ends up pointing somewhere the text isn't talking about.
 function launchActionHref(b){
   if(!b.stripe.wired) return GITHUB_EDIT_BASE + 'api/_lib/stripe.js';
-  if(!b.stripe.ready) return VERCEL_ENV_URL;
+  if(!launchEffective(b,'stripe_keys')) return VERCEL_ENV_URL;
   if(!b.email.wired) return GITHUB_EDIT_BASE + 'api/_lib/email.js';
-  if(!b.email.ready) return VERCEL_ENV_URL;
+  if(!launchEffective(b,'email_keys')) return VERCEL_ENV_URL;
   if(!b.url) return null;
-  if(!b.site.ok) return b.url;
+  if(!launchEffective(b,'website_live')) return b.url;
   return null;
 }
 function launchRingHtml(passed, total, blocked){
@@ -5871,29 +5906,61 @@ function launchRingHtml(passed, total, blocked){
 // text search of the fetched HTML, which is blind to anything a site inserts
 // with client-side JS (Handy Andy's and Dom's own sites both do exactly
 // that), so a miss there means "couldn't confirm automatically", not "missing".
+// stopPropagation on the anchor so following a fix-it link doesn't also toggle
+// the card open/closed underneath it.
+function launchLink(href, label){
+  return `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${esc(label)}</a>`;
+}
+// What the live automated check currently says about one of the three `auto`
+// items, in plain words. Returned separately from the checkbox so the owner's
+// tick and the machine's opinion are visibly two different things. Where there
+// is a concrete place to go and fix it, the note carries the link: Vercel for a
+// missing env var, the source file on GitHub for something not wired in code,
+// the site itself when it's down.
+function launchAutoNote(b, key){
+  if(key === 'stripe_keys'){
+    if(!b.stripe.wired) return { ok:false, text:`not wired in code (${launchLink(GITHUB_EDIT_BASE + 'api/_lib/stripe.js', `add "${b.slug}" to ACCOUNT_KEY_ENV`)})` };
+    return b.stripe.ready ? { ok:true, text:'live keys found' }
+                          : { ok:false, text:`no live keys found, so bookings would take no card (${launchLink(VERCEL_ENV_URL, 'add them on Vercel')})` };
+  }
+  if(key === 'email_keys'){
+    if(!b.email.wired) return { ok:false, text:`not wired in code, so it would silently send as Handy Andy (${launchLink(GITHUB_EDIT_BASE + 'api/_lib/email.js', `add "${b.slug}" to EMAIL_BRANDS + emailConfig()`)})` };
+    return b.email.ready ? { ok:true, text:'live Resend key found' }
+                         : { ok:false, text:`no Resend key found, so confirmation emails would skip silently (${launchLink(VERCEL_ENV_URL, 'add it on Vercel')})` };
+  }
+  if(key === 'website_live'){
+    if(!b.url) return { ok:false, text:'no URL on file for this business' };
+    if(b.site.error) return { ok:false, text:`could not reach ${launchLink(b.url, b.url)} (${esc(b.site.error)})` };
+    return b.site.ok ? { ok:true, text:`responded ${b.site.status} (${launchLink(b.url, 'open the site')})` }
+                     : { ok:false, text:`returned ${b.site.status} (${launchLink(b.url, 'open the site')})` };
+  }
+  return null;
+}
 function launchDetailHtml(b, items){
-  const link = (href, label) => `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${esc(label)}</a>`;
-  const stripeLine = !b.stripe.wired
-    ? `<span style="color:var(--red);">✕ Stripe — not wired in code</span> (${link(GITHUB_EDIT_BASE + 'api/_lib/stripe.js', `add "${b.slug}" to ACCOUNT_KEY_ENV`)})`
-    : `<span style="color:${b.stripe.ready?'var(--green)':'var(--red)'};">${b.stripe.ready?'✓':'✕'} Stripe</span> ${b.stripe.ready?'live keys set':link(VERCEL_ENV_URL,'no live keys — add them on Vercel')}`;
-  const emailLine = !b.email.wired
-    ? `<span style="color:var(--red);">✕ Email — not wired in code, will silently send as Handy Andy</span> (${link(GITHUB_EDIT_BASE + 'api/_lib/email.js', `add "${b.slug}" to EMAIL_BRANDS + emailConfig()`)})`
-    : `<span style="color:${b.email.ready?'var(--green)':'var(--red)'};">${b.email.ready?'✓':'✕'} Email</span> ${b.email.ready?'live keys set':link(VERCEL_ENV_URL,'no Resend key — add it on Vercel')}`;
-  let siteLine;
-  if(!b.url) siteLine=`<span style="color:var(--red);">✕ Website — no URL on file</span>`;
-  else if(b.site.error) siteLine=`<span style="color:var(--red);">✕ Website</span> — could not reach ${link(b.url, b.url)} (${esc(b.site.error)})`;
-  else siteLine=`<span style="color:${b.site.ok?'var(--green)':'var(--red)'};">${b.site.ok?'✓':'✕'} Website</span> ${b.site.ok?link(b.url, `live (${b.site.status})`):`returned ${b.site.status}`}`
-    + (b.site.hasWidget ? `<br><span style="color:var(--green);">✓ Widget confirmed via automated scan</span> — a bonus check, not required` : '');
   const checklist=items.map(it=>{
-    const checked=!!b.checklist[it.key];
+    const isAuto = !!LAUNCH_AUTO_OF[it.key];
+    const checked = isAuto ? launchEffective(b, it.key) : !!b.checklist[it.key];
+    const note = isAuto ? launchAutoNote(b, it.key) : null;
+    // Only shout when the owner's tick and the live check actually disagree.
+    // Agreement is the normal case and doesn't need a second sentence.
+    const disagrees = note && checked !== note.ok;
+    const noteHtml = note ? `<div style="margin:0 0 4px 22px;font-size:11.5px;color:${disagrees?'var(--red)':'var(--mute)'};line-height:1.5;">
+        ${disagrees ? '<strong>Live check disagrees:</strong> ' : 'Live check: '}${note.text}
+      </div>` : '';
     return `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:${checked?'#111':'var(--mute)'};cursor:pointer;padding:3px 0;">
       <input type="checkbox" data-launch-biz="${b.id}" data-launch-key="${it.key}" ${checked?'checked':''} style="width:15px;height:15px;flex:none;">
       ${esc(it.label)}
-    </label>`;
+    </label>${noteHtml}`;
   }).join('');
+  // hasWidget stays a bonus line, never a red flag: it's a plain text search of
+  // the fetched HTML and is blind to any site that inserts the widget with
+  // client-side JS, which is how ihandyandy.com and domstvmounting.com do it.
+  const widgetBonus = b.site.hasWidget
+    ? `<p style="margin:0 0 8px;font-size:12px;color:var(--green);">✓ Widget also confirmed via automated page scan. A bonus check, not required</p>`
+    : '';
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;line-height:1.9;">
-    ${stripeLine}<br>${emailLine}<br>${siteLine}
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
+    ${widgetBonus}
+    <div style="display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
   </div>`;
@@ -6032,27 +6099,33 @@ async function renderLaunch(){
       const open=detail.style.display!=='none';
       view.querySelectorAll('.launch-detail').forEach(d=>{ d.style.display='none'; d.innerHTML=''; });
       if(!open){
-        detail.innerHTML=launchDetailHtml(b, items);
-        detail.style.display='block';
-        detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
-          cb.addEventListener('click', ev=>ev.stopPropagation());
-          cb.addEventListener('change', async ()=>{
-            const business_id=cb.dataset.launchBiz, key=cb.dataset.launchKey, value=cb.checked;
-            cb.disabled=true;
-            try{
-              await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}});
-              b.checklist[key]=value;
-              const nextText=esc(launchNextAction(b, items)), href=launchActionHref(b);
-              card.querySelector('.launch-next').innerHTML = href
-                ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
-                : nextText;
-              const s=launchScoreOf(b, items);
-              card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
-            }
-            catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
-            finally{ cb.disabled=false; }
+        // Re-rendered after every save, not patched in place: ticking one of
+        // the stripe/email/website rows changes the "live check disagrees"
+        // line underneath it, so the panel has to be rebuilt to stay honest.
+        const paint=()=>{
+          detail.innerHTML=launchDetailHtml(b, items);
+          detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
+            cb.addEventListener('click', ev=>ev.stopPropagation());
+            cb.addEventListener('change', async ()=>{
+              const business_id=cb.dataset.launchBiz, key=cb.dataset.launchKey, value=cb.checked;
+              cb.disabled=true;
+              try{
+                await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}});
+                b.checklist[key]=value;
+                const nextText=esc(launchNextAction(b, items)), href=launchActionHref(b);
+                card.querySelector('.launch-next').innerHTML = href
+                  ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
+                  : nextText;
+                const s=launchScoreOf(b, items);
+                card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
+                paint();
+              }
+              catch(e){ cb.checked=!value; toast(e.message||'Could not save'); cb.disabled=false; }
+            });
           });
-        });
+        };
+        paint();
+        detail.style.display='block';
       }
     });
   });
