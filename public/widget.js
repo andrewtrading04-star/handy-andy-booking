@@ -69,8 +69,8 @@
   // the dark card Handy Andy and Mile High have always shipped. Handy Andy and
   // Mile High keep the exact original dark hex values (byte-for-byte) so their
   // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
-  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23', gdsBg:'linear-gradient(135deg,#1f2937,#111827)', gdsLine:'#c7ccd4' };
-  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6', gdsBg:'linear-gradient(135deg,#f7f9fc,#eef2f8)', gdsLine:'#52525b' };
+  const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23', gdsBg:'linear-gradient(135deg,#1f2937,#111827)', gdsLine:'#c7ccd4', dayOff:'#3f3f46' };
+  const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6', gdsBg:'linear-gradient(135deg,#f7f9fc,#eef2f8)', gdsLine:'#52525b', dayOff:'#9a9aa2' };
   // Precision's site (precisiontvinstallation.com) is white too, so it takes
   // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
   const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
@@ -1698,7 +1698,7 @@
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
-          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.border}!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.dayOff}!important;">${d}</div>
         </div>`;
       }
     }
@@ -1725,9 +1725,9 @@
       <p style="color:${T.muted2}!important;font-size:13px!important;margin-bottom:16px!important;line-height:1.5!important;">Select 3 to 4 times you'd be available and we'll confirm one that works.</p>
       <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:10px!important;">
         <div style="display:flex!important;align-items:center!important;gap:10px!important;">
-          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;" ${!canPrev?'disabled':''}>‹</button>
+          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.dayOff}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;" ${!canPrev?'disabled':''}>‹</button>
           <span style="font-size:15px!important;font-weight:700!important;color:${T.text}!important;">${MONTHS[calMonth]} ${calYear}</span>
-          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;" ${!canNext?'disabled':''}>›</button>
+          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.dayOff}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;" ${!canNext?'disabled':''}>›</button>
         </div>
         <span style="color:${T.muted3}!important;font-size:12px!important;">${count} of ${REQUEST_MAX_WINDOWS} selected</span>
       </div>
@@ -1779,7 +1779,7 @@
         </div>`;
       }else{
         cells+=`<div style="text-align:center!important;padding:4px 2px!important;">
-          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.border}!important;">${d}</div>
+          <div style="width:32px!important;height:32px!important;margin:0 auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:14px!important;color:${T.dayOff}!important;">${d}</div>
         </div>`;
       }
     }
@@ -1805,9 +1805,9 @@
       <h1 style="${S.h1}">What day works best for you?</h1>
       <div style="background:${T.panel}!important;border:1px solid ${T.border}!important;border-radius:10px!important;padding:14px!important;margin-bottom:14px!important;">
         <div style="display:flex!important;align-items:center!important;justify-content:space-between!important;margin-bottom:10px!important;">
-          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canPrev?'disabled':''}>‹</button>
+          <button id="cal-prev" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canPrev?T.text:T.dayOff}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canPrev?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canPrev?'disabled':''}>‹</button>
           <span style="font-size:15px!important;font-weight:700!important;color:${T.text}!important;">${MONTHS[calMonth]} ${calYear}</span>
-          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.border}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canNext?'disabled':''}>›</button>
+          <button id="cal-next" style="background:transparent!important;border:1px solid ${T.border}!important;color:${canNext?T.text:T.dayOff}!important;width:30px!important;height:30px!important;border-radius:50%!important;cursor:${canNext?'pointer':'default'}!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important;" ${!canNext?'disabled':''}>›</button>
         </div>
         <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${dayHdr}</div>
         <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${cells}</div>
