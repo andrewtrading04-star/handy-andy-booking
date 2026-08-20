@@ -1,0 +1,43 @@
+name: Estimate escalation check
+
+# Reminds/escalates on an estimate (Handy Andy or Dom's) that's sat at
+# status='new' too long: a 1hr secretary-only reminder, then a 2.5hr
+# secretary+owner escalation. Runs every 15 minutes. See
+# api/_lib/estimate-escalation.js for the full design note.
+#
+# No Vercel Cron entry for this one — the project's plan only allows Vercel
+# Cron to fire once/day, so (like tech-late-check.yml) GitHub Actions is the
+# real trigger here, not a backup. The endpoint is idempotent
+# (estimates.escalated_1h_at / escalated_2_5h_at), so a missed or doubled-up
+# run can never double-text anyone — it just catches up next pass.
+#
+# `concurrency` makes overlapping runs QUEUE instead of running side by side,
+# same reasoning as tech-late-check.yml: the send-then-mark isn't atomic, so
+# two genuinely concurrent runs could both see an estimate as unhandled and
+# each send their own copy of a text before either marks it done.
+concurrency:
+  group: estimate-escalation-check
+  cancel-in-progress: false
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes (UTC) — always the real thing, texts go out
+  workflow_dispatch:          # manual "Run workflow" from the Actions tab — defaults to a
+    inputs:                   # safe report-only test; uncheck the box to send real texts.
+      dry:
+        description: 'Dry run (report only — no texts sent)'
+        type: boolean
+        default: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger estimate escalation check
+        run: |
+          DRY_PARAM=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry }}" != "false" ]; then
+            DRY_PARAM="&dry=1"
+          fi
+          curl -fsS --retry 3 --retry-delay 5 -X GET \
+            "https://handy-andy-booking.vercel.app/api/migrate?action=estimate_escalation_check${DRY_PARAM}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

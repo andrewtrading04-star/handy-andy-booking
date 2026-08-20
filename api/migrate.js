@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
+import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import fs from 'fs';
 import path from 'path';
@@ -766,6 +767,33 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[tech_late_check]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Estimate response escalation ladder (handy-andy + doms only). Stage 0 (the
+  // immediate secretary text on submit) already lives in api/estimate.js and
+  // isn't touched here. This adds stage 1 (1hr secretary-only reminder) and
+  // stage 2 (2.5hr secretary+owner escalation) for any estimate still sitting
+  // at status='new'. See api/_lib/estimate-escalation.js for the full design
+  // note, including why "responded to" needs no extra stop-condition logic.
+  // Secured by CRON_SECRET, same as the other cron actions. No Vercel Cron
+  // entry (Hobby plan only allows once/day) — GitHub Actions
+  // (estimate-escalation-check.yml) runs this every 15 min instead, same
+  // pattern as tech-late-check.yml's backup role.
+  //   &dry=1   find + report eligible estimates without sending anything
+  if (action === 'estimate_escalation_check') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await checkEstimateEscalations({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[estimate_escalation_check]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
