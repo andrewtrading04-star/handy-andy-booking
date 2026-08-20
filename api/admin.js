@@ -18,7 +18,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
-import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail } from './_lib/email.js';
+import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
@@ -328,6 +328,8 @@ export default async function handler(req, res) {
         const out = await sendDailyBookingDigest({ force: true, dryRun, offset });
         return res.status(200).json({ ok: true, ...out });
       }
+      case 'launch_status':        return await launchStatus(req, res, db, auth);
+      case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
@@ -1909,6 +1911,106 @@ async function multiTvDiscountSave(req, res, db, auth, body) {
   if (error) throw error;
   multiTvDiscountConfigCacheClear();
   return res.status(200).json({ ok: true });
+}
+
+// ── Launch checklist (Other -> Launch) ───────────────────────────────────────
+// One page answering "what did I forget" across every business in the CRM,
+// built after Precision TV shipped with no Stripe/Resend keys and Mile High's
+// live site turned out to have no booking widget on it at all (its nav "Book"
+// link 404s) — both went unnoticed for weeks because nothing surfaced them.
+// Reads the `businesses` table directly, so the next business added here shows
+// up automatically with no code change; the manual items (GBP, GSC, etc.) are
+// exactly the things no API can check, so they're a checklist, not a report.
+//
+// Everything real-checkable is checked live on every load, not cached:
+//   - stripeWired / stripeReady: is the slug in ACCOUNT_KEY_ENV at all, and if
+//     so, is the secret key env var actually set. stripeConfigured() throws for
+//     an unmapped slug (by design, see stripe.js) — that throw IS the "not
+//     wired in code yet" signal.
+//   - emailWired / emailReady: same shape for Resend. A slug missing from
+//     EMAIL_BRANDS is dangerous, not just incomplete: emailConfig() silently
+//     falls back to Handy Andy's own account for any unrecognized slug, so a
+//     new business's confirmation emails would go out looking like Handy
+//     Andy's until someone notices. Flagged as a hard warning, not just unchecked.
+//   - site: a live fetch of the business's own `url` (2s timeout, never throws
+//     into the page) checking HTTP status and whether the fetched HTML embeds
+//     this widget with the right data-business attribute — the exact way Mile
+//     High's gap was found (site live, zero mentions of widget.js anywhere).
+const LAUNCH_CHECKLIST_ITEMS = [
+  { key: 'gbp_created',   label: 'Google Business Profile created' },
+  { key: 'gbp_verified',  label: 'GBP verified (postcard/video)' },
+  { key: 'gsc_verified',  label: 'Search Console verified + sitemap submitted' },
+  { key: 'phone_live',    label: 'Dedicated phone number receiving calls/texts' },
+  { key: 'techs_staffed', label: 'At least one tech can actually be booked' },
+];
+
+async function launchStatus(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data: businesses, error } = await db.from('businesses')
+    .select('id, slug, name, url, active, settings, created_at')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  const results = await Promise.all((businesses || []).map(async (biz) => {
+    let stripeWired = true, stripeReady = false;
+    try { stripeReady = stripeConfigured(biz.slug); }
+    catch (_) { stripeWired = false; }
+
+    const emailWired = !!EMAIL_BRANDS[biz.slug];
+    const emailReady = emailWired && !!emailConfig(biz.slug).apiKey;
+
+    let site = { checked: false, ok: null, status: null, hasWidget: null, error: null };
+    if (biz.url) {
+      site.checked = true;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+        const r = await fetch(biz.url, { signal: ctrl.signal, redirect: 'follow' });
+        clearTimeout(t);
+        site.status = r.status;
+        site.ok = r.ok;
+        const html = await r.text();
+        site.hasWidget = html.includes('handy-andy-booking.vercel.app/widget.js')
+          && html.includes(`data-business="${biz.slug}"`);
+      } catch (e) {
+        site.error = String((e && e.message) || e).slice(0, 120);
+      }
+    }
+
+    const checklist = (biz.settings && biz.settings.launch_checklist) || {};
+
+    return {
+      id: biz.id, slug: biz.slug, name: biz.name, url: biz.url, active: biz.active,
+      created_at: biz.created_at,
+      stripe: { wired: stripeWired, ready: stripeReady },
+      email: { wired: emailWired, ready: emailReady },
+      site,
+      checklist,
+    };
+  }));
+
+  return res.status(200).json({ items: LAUNCH_CHECKLIST_ITEMS, businesses: results });
+}
+
+async function launchChecklistSet(req, res, db, auth, body) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const bizId = String(body.business_id || '').trim();
+  const key = String(body.key || '').trim();
+  if (!bizId || !LAUNCH_CHECKLIST_ITEMS.some(i => i.key === key)) {
+    return res.status(400).json({ error: 'business_id and a known checklist key are required' });
+  }
+  const { data: biz, error: readErr } = await db.from('businesses').select('id, settings').eq('id', bizId).maybeSingle();
+  if (readErr) throw readErr;
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+  const settings = biz.settings || {};
+  const checklist = { ...(settings.launch_checklist || {}), [key]: !!body.value };
+  const { error: writeErr } = await db.from('businesses')
+    .update({ settings: { ...settings, launch_checklist: checklist }, updated_at: new Date().toISOString() })
+    .eq('id', bizId);
+  if (writeErr) throw writeErr;
+
+  return res.status(200).json({ ok: true, checklist });
 }
 
 // ── Coupons (Other -> Coupons) ───────────────────────────────────────────────

@@ -1398,6 +1398,7 @@
       <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="finances" id="navFinances"><span class="ic" data-ico="finances">🏦</span> Finances</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
@@ -2177,6 +2178,11 @@ function enterApp(){
   // be looking at during a shift — owner only, same as the other analytics.
   const navPay=document.getElementById('navPayroll');
   if(navPay) navPay.style.display = role==='owner' ? '' : 'none';
+  // Launch checklist: which businesses are missing Stripe/Resend keys or a
+  // working booking widget on their live site. Owner only — this is a build
+  // status view, not something a secretary needs mid-shift.
+  const navLaunch=document.getElementById('navLaunch');
+  if(navLaunch) navLaunch.style.display = role==='owner' ? '' : 'none';
   // Finances: Andrew's own personal + business bank accounts. Owner only, no
   // exceptions, ever -- see api/finance.js for the server-side half of this.
   const navFin=document.getElementById('navFinances');
@@ -2377,7 +2383,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2396,6 +2402,7 @@ function navTo(s){
     else if(s==='myavailability') renderMyAvailability();
     else if(s==='secretaries') renderSecretaries();
     else if(s==='other') renderOther();
+    else if(s==='launch') renderLaunch();
   }
 }
 function refreshCurrent(){
@@ -5785,6 +5792,71 @@ function renderFinanceUploadPreview(el, acctId, sourceLabel, d){
       toast(`Imported ${r.inserted} transaction${r.inserted===1?'':'s'}`);
       el.innerHTML=`<div style="color:#15803d;font-size:13px;">✓ Imported ${r.inserted} transaction${r.inserted===1?'':'s'}.</div>`;
     }catch(err){ commitBtn.disabled=false; commitBtn.textContent=`Import ${d.new_count} transaction${d.new_count===1?'':'s'}`; toast(err.message||'Could not import'); }
+  });
+}
+
+// ── Launch checklist ─────────────────────────────────────────────────────────
+// One card per business, newest first (the ones most likely to be mid-setup).
+// Live checks render as a green/red dot; the manual items are checkboxes that
+// persist immediately on click, no save button — a running log you tick as
+// you go, not a form you fill out once.
+function launchDot(ok){ return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ok?'#16a34a':'#dc2626'};margin-right:6px;flex:none;"></span>`; }
+function launchCardHtml(b, items){
+  const stripeLine = !b.stripe.wired
+    ? `${launchDot(false)}Stripe — <b style="color:#dc2626;">not wired in code</b> (add "${esc(b.slug)}" to ACCOUNT_KEY_ENV in api/_lib/stripe.js)`
+    : `${launchDot(b.stripe.ready)}Stripe ${b.stripe.ready?'live keys set':'<b style="color:#dc2626;">no live keys — bookings take no card</b>'}`;
+  const emailLine = !b.email.wired
+    ? `${launchDot(false)}Email — <b style="color:#dc2626;">not wired in code — will silently send as Handy Andy</b> (add "${esc(b.slug)}" to EMAIL_BRANDS + emailConfig() in api/_lib/email.js)`
+    : `${launchDot(b.email.ready)}Email ${b.email.ready?'live keys set':'<b style="color:#dc2626;">no Resend key — confirmation emails skip silently</b>'}`;
+  let siteLine;
+  if(!b.url) siteLine=`${launchDot(false)}Site — <b style="color:#dc2626;">no URL on file</b> (set businesses.url)`;
+  else if(b.site.error) siteLine=`${launchDot(false)}Site — could not reach ${esc(b.url)} (${esc(b.site.error)})`;
+  else siteLine=`${launchDot(b.site.ok)}Site ${b.site.ok?`live (${b.site.status})`:`<b style="color:#dc2626;">returned ${b.site.status}</b>`}
+    &nbsp;·&nbsp; ${launchDot(!!b.site.hasWidget)}Booking widget ${b.site.hasWidget?'found on the page':'<b style="color:#dc2626;">NOT found — this site cannot take a booking</b>'}`;
+  const checklist=items.map(it=>{
+    const checked=!!b.checklist[it.key];
+    return `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:${checked?'#111':'var(--mute)'};cursor:pointer;padding:3px 0;">
+      <input type="checkbox" data-launch-biz="${b.id}" data-launch-key="${it.key}" ${checked?'checked':''} style="width:15px;height:15px;flex:none;">
+      ${esc(it.label)}
+    </label>`;
+  }).join('');
+  return `<div class="card" style="padding:16px 18px;margin-bottom:12px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div style="font-weight:800;font-size:15px;">${esc(b.name)} <span style="font-weight:500;color:var(--mute);font-size:12px;">${esc(b.slug)}</span></div>
+      <a href="${esc(b.url||'#')}" target="_blank" style="font-size:12px;color:var(--accent);">${esc(b.url||'no site on file')}</a>
+    </div>
+    <div style="margin-top:10px;font-size:13px;line-height:2;">
+      ${stripeLine}<br>${emailLine}<br>${siteLine}
+    </div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;">
+      ${checklist}
+    </div>
+  </div>`;
+}
+async function renderLaunch(){
+  const view=document.getElementById('view');
+  view.innerHTML=`<div class="wrap"><div class="empty">Checking every business — this hits each live site, give it a few seconds…</div></div>`;
+  let data;
+  try{ data=await api('launch_status',{timeoutMs:30000}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const items=data.items||[];
+  view.innerHTML=`<div class="wrap">
+    <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
+      Every business in the CRM, newest first. The three status lines are checked live against Stripe, Resend and the site itself just now.
+      The checklist below them is manual — click to tick, it saves immediately.
+    </p>
+    ${(data.businesses||[]).slice().reverse().map(b=>launchCardHtml(b, items)).join('')}
+  </div>`;
+
+  view.querySelectorAll('[data-launch-key]').forEach(cb=>{
+    cb.addEventListener('change', async ()=>{
+      const business_id=cb.dataset.launchBiz, key=cb.dataset.launchKey, value=cb.checked;
+      cb.disabled=true;
+      try{ await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}}); }
+      catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
+      finally{ cb.disabled=false; }
+    });
   });
 }
 
