@@ -26,7 +26,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
@@ -4538,8 +4538,28 @@ async function bookingCard(req, res, db, auth) {
   } catch (_) { /* no card on file is a normal, common case */ }
   if (!pmId) return res.status(200).json({ has_card: false });
 
-  let card = { brand: null, last4: null };
-  try { card = await retrieveCard(pmId, acct); } catch (_) { /* Stripe hiccup — just show nothing */ }
+  let card = { brand: null, last4: null, customer: null };
+  let lookupOk = false;
+  try { card = await retrieveCard(pmId, acct); lookupOk = true; } catch (_) { /* Stripe hiccup — just show nothing */ }
+  // A PaymentMethod object exists in Stripe the instant the widget tokenizes
+  // the card — even when the attach was DECLINED and nothing was saved (the
+  // booking row still carries the dead pm id; see the Caplan booking,
+  // 2026-08-20). An unattached pm is not chargeable and must not render the
+  // "Card on file" chip. If the customer has a real attached default (e.g.
+  // added later via "Change card" against the customer record), show that —
+  // resolveChargeablePm below applies the SAME swap at charge time, so the
+  // chip and the Charge button stay on the same card. Only a CONFIRMED
+  // unattached pm falls back; a lookup that merely errored keeps the old
+  // "show nothing" behavior rather than asserting a card the charge path
+  // might not use.
+  if (lookupOk && !card.customer) {
+    let fallbackPm = null;
+    try { if (custId) fallbackPm = await defaultPaymentMethod(custId, acct); } catch (_) { /* no card */ }
+    if (!fallbackPm || fallbackPm === pmId) return res.status(200).json({ has_card: false });
+    card = { brand: null, last4: null, customer: null };
+    try { card = await retrieveCard(fallbackPm, acct); } catch (_) { /* Stripe hiccup */ }
+    if (!card.customer) return res.status(200).json({ has_card: false });
+  }
   if (!card.brand && !card.last4) return res.status(200).json({ has_card: false });
   return res.status(200).json({ has_card: true, brand: card.brand, last4: card.last4 });
 }
@@ -4771,9 +4791,14 @@ async function bookingPayment(req, res, db, auth, body) {
     } catch (e) { e.status = e.status || 400; throw e; }
     if (!custId || !pmId) { const e = new Error('No card on file for this customer. Use “Mark paid (cash)” instead.'); e.status = 400; throw e; }
 
-    // Card brand/last4 for the receipt + dispute evidence (best-effort).
-    let card = { brand: null, last4: null };
-    try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+    // Verify the pm is actually attached before charging — a dead
+    // tokenized-but-declined pm can linger on old rows, and Stripe would
+    // reject it with a raw error instead of the friendly no-card message.
+    // Also yields brand/last4 for the receipt + dispute evidence.
+    const resolved = await resolveChargeablePm({ customerId: custId, paymentMethodId: pmId, ...acct });
+    if (!resolved.pmId) { const e = new Error('No card on file for this customer. Use “Mark paid (cash)” instead.'); e.status = 400; throw e; }
+    pmId = resolved.pmId;
+    const card = resolved.card;
 
     // Keyed on booking id + exact amount + the CARD being charged, with the
     // SAME 'charge-' prefix the tech path uses (api/tech.js): a true retry —

@@ -28,8 +28,10 @@ export function demoStripeResponse(path, method = 'POST', body = null) {
   if (p.startsWith('/refunds'))         return { id: 're_demo', status: 'succeeded', amount: (body && body.amount) || 0 };
   if (p.startsWith('/disputes'))        return { data: [] };
   if (p.startsWith('/payment_methods')) {
-    if (/\/payment_methods\/[^/]+$/.test(p)) return { id: 'pm_demo', card };
-    return { data: [{ id: 'pm_demo', card }] };
+    // `customer` marks the pm as attached — retrieveCard callers treat an
+    // unattached pm as "no card on file", so the demo pm must look attached.
+    if (/\/payment_methods\/[^/]+$/.test(p)) return { id: 'pm_demo', card, customer: 'cus_demo' };
+    return { data: [{ id: 'pm_demo', card, customer: 'cus_demo' }] };
   }
   if (p.startsWith('/customers')) {
     if (method === 'GET' && /\/customers\?/.test(p)) return { data: [{ id: 'cus_demo', invoice_settings: { default_payment_method: 'pm_demo' } }] };

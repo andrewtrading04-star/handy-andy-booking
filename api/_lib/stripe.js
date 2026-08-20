@@ -159,7 +159,39 @@ export async function retrieveCard(paymentMethodId, sel = null) {
   const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
   const pm = await stripe(`/payment_methods/${paymentMethodId}`, { method: 'GET', slug, account });
   const c = pm && pm.card ? pm.card : {};
-  return { brand: c.brand || null, last4: c.last4 || null };
+  // `customer` is null on a PaymentMethod that was tokenized but never
+  // attached (e.g. the attach was declined) — only an attached pm is
+  // actually chargeable, so callers deciding "is a card on file" must
+  // check it, not just that the pm object exists.
+  return { brand: c.brand || null, last4: c.last4 || null, customer: (typeof pm?.customer === 'string' ? pm.customer : pm?.customer?.id) || null };
+}
+
+// Verify a resolved payment method is actually chargeable before creating a
+// PaymentIntent with it. A pm id can linger on a booking even though it was
+// never attached (tokenized but the attach was declined — the Caplan booking,
+// 2026-08-20) or was later detached in the Stripe dashboard; Stripe rejects a
+// charge on an unattached pm with a raw error the office/tech UIs don't
+// recognize as "no card". Returns { pmId, card }: the original pm when it's
+// attached (or when the lookup merely errored — transient Stripe trouble must
+// not block a charge on a good card), the customer's attached default as a
+// swap when the stored pm is CONFIRMED unattached, or pmId:null when the
+// customer genuinely has no attached card. This is the same swap the office
+// UI's card chip (bookingCard in api/admin.js) applies, so the card shown is
+// the card charged.
+export async function resolveChargeablePm({ customerId, paymentMethodId, account = null, slug = null }) {
+  const acct = { account, slug };
+  let card = { brand: null, last4: null, customer: null };
+  let lookupOk = false;
+  try { card = await retrieveCard(paymentMethodId, acct); lookupOk = true; } catch (_) { /* transient — pass through */ }
+  if (!lookupOk || card.customer) return { pmId: paymentMethodId, card };
+  let fallback = null;
+  try { if (customerId) fallback = await defaultPaymentMethod(customerId, acct); } catch (_) { /* none */ }
+  if (!fallback || fallback === paymentMethodId) return { pmId: null, card: { brand: null, last4: null, customer: null } };
+  card = { brand: null, last4: null, customer: null };
+  lookupOk = false;
+  try { card = await retrieveCard(fallback, acct); lookupOk = true; } catch (_) { /* transient */ }
+  if (lookupOk && !card.customer) return { pmId: null, card: { brand: null, last4: null, customer: null } };
+  return { pmId: fallback, card };
 }
 
 // Upload a file to Stripe (files.stripe.com, multipart) for dispute evidence.
@@ -338,10 +370,19 @@ export async function saveCardOnFile({ email, name, phone, paymentMethodId, slug
     }});
     customerId = c.id;
   }
-  // 2) Attach the payment method and make it the default.
+  // 2) Attach the payment method and make it the default. Only the ATTACH is
+  // load-bearing: once it succeeds the card is saved and chargeable, so a
+  // failure setting invoice_settings must not make the whole save read as
+  // failed (callers would then discard a working pm id and alert the office
+  // that no card was saved). defaultPaymentMethod() already falls back to
+  // listing the customer's attached cards when no default is set.
   await stripe(`/payment_methods/${paymentMethodId}/attach`, { method: 'POST', slug, account, body: { customer: customerId } });
-  await stripe(`/customers/${customerId}`, { method: 'POST', slug, account, body: {
-    invoice_settings: { default_payment_method: paymentMethodId },
-  }});
+  try {
+    await stripe(`/customers/${customerId}`, { method: 'POST', slug, account, body: {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    }});
+  } catch (e) {
+    console.warn('[stripe saveCardOnFile] card attached but set-default failed (card IS on file):', e.message);
+  }
   return { customerId };
 }

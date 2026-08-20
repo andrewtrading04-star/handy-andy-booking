@@ -748,7 +748,7 @@ async function bookDoms(req, res) {
         paymentStatus = 'card_on_file';
         cardNote = 'Card is on file (Doms Stripe).';
       } catch (e) {
-        cardNote = `Card capture failed: ${e.message}`;
+        cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
       }
     }
   }
@@ -789,7 +789,10 @@ async function bookDoms(req, res) {
       line_items: lines, subtotal, price, tip,
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
-      stripe_payment_method_id: b.payment_method_id || null,
+      // Never persist a pm that failed to attach: it reads back as a saved
+      // card everywhere downstream, but it is not chargeable. The pm id is
+      // still preserved in `notes` via cardNote for the no-secret-key case.
+      stripe_payment_method_id: cardSaveFailed ? null : (b.payment_method_id || null),
       notes: cardSaveFailed ? `⚠ ${cardNote}` : null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};
@@ -1121,7 +1124,7 @@ async function bookNative(req, res, slug) {
         paymentStatus = 'card_on_file';
         cardNote = `Card is on file (${DISPLAY.name} Stripe).`;
       } catch (e) {
-        cardNote = `Card capture failed: ${e.message}`;
+        cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
       }
     }
   }
@@ -1157,7 +1160,8 @@ async function bookNative(req, res, slug) {
       line_items: lines, subtotal, price, tip,
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
-      stripe_payment_method_id: b.payment_method_id || null,
+      // Same as bookDoms: a pm that failed to attach is not a saved card.
+      stripe_payment_method_id: cardSaveFailed ? null : (b.payment_method_id || null),
       notes: cardSaveFailed ? `⚠ ${cardNote}` : null,
       customer_notes: b.customer_notes || sum.notes || null,
     })) || {};

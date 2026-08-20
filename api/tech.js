@@ -20,7 +20,7 @@ import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_
 import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, retrieveCard, findLandedCharge } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
 
 // Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
@@ -1317,9 +1317,18 @@ async function jobPayment(req, res, db, auth, body) {
         const e = new Error('No card on file for this customer. Take cash and tap "Mark paid (cash)".'); e.status = 400; throw e;
       }
 
-      // Card brand/last4 for the receipt + dispute evidence (best-effort).
-      let card = { brand: null, last4: null };
-      try { card = await retrieveCard(pmId, acct); } catch (_) { /* unknown card is fine */ }
+      // Verify the pm is actually attached before charging — a dead
+      // tokenized-but-declined pm can linger on old rows, and Stripe would
+      // reject it with a raw error the tech app's no-card banner regex does
+      // not match (so the "Take cash" button would never appear). Also
+      // yields brand/last4 for the receipt + dispute evidence.
+      const resolved = await resolveChargeablePm({ customerId: custId, paymentMethodId: pmId, ...acct });
+      if (!resolved.pmId) {
+        console.warn(`[tech charge] job=${id} slug=${slug} account=${acct.account || '(legacy)'} -> stored pm is not attached and customer has no attached default`);
+        const e = new Error('No card on file for this customer. Take cash and tap "Mark paid (cash)".'); e.status = 400; throw e;
+      }
+      pmId = resolved.pmId;
+      const card = resolved.card;
 
       let pi;
       try {
