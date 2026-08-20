@@ -11463,12 +11463,16 @@ async function bracketUpdate(req, res, db, auth, body) {
 
 // Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
 // the wall" service. Mirrors the same detection used in the tech app so admin-
-// completed jobs deduct identically.
+// completed jobs deduct identically. Also matches Dom's own "Inwall Concealment"
+// wording (no "behind" word, "wall" glued to "In") — see the fuller comment on
+// the tech.js copy of this function.
 function detectWirePlateQty(lineItems) {
   let n = 0;
   for (const li of lineItems || []) {
     const name = (li.name || '').toLowerCase();
-    if (/behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name)) {
+    const behindWall = /behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name);
+    const inwall = /inwall/.test(name) && /conceal/.test(name);
+    if (behindWall || inwall) {
       n += Number(li.quantity) || 1;
     }
   }

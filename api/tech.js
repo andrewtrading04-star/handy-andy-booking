@@ -1659,11 +1659,20 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
 // the wall" service. Match on behind + wall + a wire/conceal word so small label
 // variations still count, while a surface ("on the wall") cord-cover line — which
 // uses no plate — does not.
+//
+// Dom's own booking flow prices the same physical job as "Inwall Concealment" —
+// no "behind" word at all, and "wall" is glued to "In" with no space — so it
+// missed the check above entirely and the plate was never deducted (Max Segal
+// job, Aug 2026: Gregory used a plate and his stock never moved). A plate is
+// consumed the same way regardless of which company's wording is on the ticket,
+// so "inwall" + "conceal" triggers the same deduction.
 function detectWirePlateQty(lineItems) {
   let n = 0;
   for (const li of lineItems || []) {
     const name = (li.name || '').toLowerCase();
-    if (/behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name)) {
+    const behindWall = /behind/.test(name) && /wall/.test(name) && /(wire|cord|conceal)/.test(name);
+    const inwall = /inwall/.test(name) && /conceal/.test(name);
+    if (behindWall || inwall) {
       n += Number(li.quantity) || 1;
     }
   }
