@@ -63,6 +63,7 @@ function bookingStripePk(slug) {
   if (slug === 'doms') return process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'mile-high') return process.env.MILE_HIGH_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'austin') return process.env.AUSTIN_STRIPE_PUBLISHABLE_KEY || null;
+  if (slug === 'precision') return process.env.PRECISION_STRIPE_PUBLISHABLE_KEY || null;
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
@@ -103,7 +104,7 @@ const bringsOwnSecondTech = isSecondaryIneligibleName;
 // Per-slug lookup, not a symmetric pairing — see the matching comment in
 // api/_lib/availability.js. Mile High borrows Handy Andy's Denver techs
 // one-directionally; Handy Andy's own overflow still only ever falls to Doms.
-const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy', 'austin': 'handy-andy' };
+const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy', 'austin': 'handy-andy', 'precision': 'handy-andy' };
 
 // The partner business row for a host slug, or null when there isn't one.
 async function partnerBusiness(db, hostSlug) {
@@ -465,7 +466,7 @@ function displayNameFor(scope) {
 // number, since the two businesses are staffed by different people.
 function secretaryPhoneFor(scope) {
   // Heather covers Handy Andy and both of its micro-brands (Mile High, Austin).
-  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_PHONE || '';
   return '';
 }
@@ -4659,6 +4660,7 @@ function candidateAccounts(slug) {
   if (slug === 'handy-andy') return ['global', 'handy-andy'];   // HA transitioned off the global account, so old charges may live in either
   if (slug === 'mile-high') return ['mile-high'];               // always its own account, never global -- it never existed pre-split
   if (slug === 'austin') return ['austin'];                     // same: born after the split
+  if (slug === 'precision') return ['precision'];               // same
   return ['global'];
 }
 
@@ -9694,7 +9696,7 @@ function reviewTesterSample(bizSlug) {
 
 async function reviewEmailPreview(req, res) {
   const slug = (req.query.business || 'handy-andy').toString();
-  const bizSlug = ['doms', 'mile-high', 'austin'].includes(slug) ? slug : 'handy-andy';
+  const bizSlug = ['doms', 'mile-high', 'austin', 'precision'].includes(slug) ? slug : 'handy-andy';
   const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brandFor(bizSlug));
   return res.status(200).json({ subject, html });
 }
@@ -9706,7 +9708,7 @@ const TEST_EMAIL_RECIPIENT = 'andrewtrading04@gmail.com';
 async function sendTestReviewEmail(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const slug = ((body && body.business) || 'handy-andy').toString();
-  const bizSlug = ['doms', 'mile-high', 'austin'].includes(slug) ? slug : 'handy-andy';
+  const bizSlug = ['doms', 'mile-high', 'austin', 'precision'].includes(slug) ? slug : 'handy-andy';
   const brand = brandFor(bizSlug);
   const { subject, html } = reviewEmail(reviewTesterSample(bizSlug), brand);
   const { from } = emailConfig(bizSlug);

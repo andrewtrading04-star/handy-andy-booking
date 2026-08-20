@@ -106,6 +106,7 @@ const STRIPE_PK_ENV = {
   doms:         'DOMS_STRIPE_PUBLISHABLE_KEY',
   'mile-high':  'MILE_HIGH_STRIPE_PUBLISHABLE_KEY',
   austin:       'AUSTIN_STRIPE_PUBLISHABLE_KEY',
+  precision:    'PRECISION_STRIPE_PUBLISHABLE_KEY',
 };
 function stripePublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
@@ -125,7 +126,7 @@ function stripePublicConfig(req, res) {
 // from-address and a boolean 'configured' -- NEVER the Resend API key itself.
 // Same purpose as stripe_config above: surface a missing key before a real
 // customer's confirmation email silently fails to send.
-const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high', 'austin']);
+const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high', 'austin', 'precision']);
 function emailPublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
   if (!EMAIL_BUSINESSES.has(business)) return res.status(400).json({ error: `Unknown business "${business}"` });
@@ -280,6 +281,7 @@ const NATIVE_COUPONS = {
   'handy-andy': HA_COUPONS,
   'mile-high':  HA_COUPONS,
   'austin':     HA_COUPONS,   // same playbook as Handy Andy's Austin market
+  'precision':  HA_COUPONS,   // same playbook as Handy Andy's Houston market
 };
 
 // The hardcoded maps above are now only a FALLBACK. app.coupons is the live

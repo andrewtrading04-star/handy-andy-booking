@@ -21,12 +21,12 @@
   // The legal trading name shown in the SMS-consent disclosure below -- must
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
-  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin' }[BUSINESS] || 'Handy Andy TV Mounting';
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation' }[BUSINESS] || 'Handy Andy TV Mounting';
   // The phone number shown in customer-facing fallback messages ("call us to
   // confirm/verify"). Used to be hardcoded to Handy Andy's Houston line for
   // every business, which told a Mile High or Austin customer to call a
   // company they have never heard of.
-  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'713-876-9032', 'austin':'(737) 381-3800' }[BUSINESS] || '713-876-9032';
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'713-876-9032', 'austin':'(737) 381-3800', 'precision':'713-876-9032' }[BUSINESS] || '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
@@ -36,9 +36,9 @@
   // visually unchanged. Mile High gets the same green used in its email
   // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
   // across the booking widget and the confirmation email.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224' }[BUSINESS] || '255,102,0';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -56,6 +56,7 @@
     'handy-andy': 'https://www.ihandyandy.com/thankyou/',
     'mile-high':  'https://www.milehightvmounting.com/thankyou/',
     'austin':     'https://www.austinmounting.com/thank-you',
+    'precision':  'https://www.precisiontvinstallation.com/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
@@ -70,7 +71,9 @@
   // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
   const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80' };
   const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a' };
-  const T = BUSINESS === 'austin' ? T_LIGHT : T_DARK;
+  // Precision's site (precisiontvinstallation.com) is white too, so it takes
+  // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book

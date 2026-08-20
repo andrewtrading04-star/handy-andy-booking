@@ -129,6 +129,7 @@ const PARTNER_SLUG = {
   'doms':       { slug: 'handy-andy', metro: /denver/i },
   'mile-high':  { slug: 'handy-andy', metro: /denver/i },
   'austin':     { slug: 'handy-andy', metro: /austin/i },
+  'precision':  { slug: 'handy-andy', metro: /houston/i },
 };
 
 // Resolve the partner business's tech pool in the pairing's own metro for a

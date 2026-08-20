@@ -38,6 +38,13 @@ export function emailConfig(slug) {
       from:   process.env.AUSTIN_EMAIL_FROM || 'contact@austinmounting.com',
     };
   }
+  if (slug === 'precision') {
+    // Same rule again: no fallback to Handy Andy's account, ever.
+    return {
+      apiKey: process.env.PRECISION_RESEND_API_KEY,
+      from:   process.env.PRECISION_EMAIL_FROM || 'contact@precisiontvinstallation.com',
+    };
+  }
   return {
     apiKey: process.env.RESEND_API_KEY,
     from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
@@ -51,6 +58,7 @@ export const EMAIL_BRANDS = {
   'doms':       { slug: 'doms',       name: "Dom's TV Mounting",     accent: '#2563EB', website: 'domstvmounting.com' },
   'mile-high':  { slug: 'mile-high',  name: 'Mile High TV Mounting', accent: '#1D9E75', website: 'milehightvmounting.com' },
   'austin':     { slug: 'austin',     name: 'TV Mounting & Handyman Austin', accent: '#1E56E0', website: 'austinmounting.com' },
+  'precision':  { slug: 'precision',  name: 'Precision TV Installation',     accent: '#0288D1', website: 'precisiontvinstallation.com' },
 };
 // An unknown slug used to fall back to Handy Andy, which meant a new business
 // would send Handy-Andy-branded email to its own customers and look, to the

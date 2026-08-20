@@ -301,7 +301,7 @@ async function submit(req, res, db) {
   // always get texted even if estimate_notify_phones was never configured or
   // doesn't include their number. Deduped so a number set both ways only texts once.
   const phones = new Set(Array.isArray(biz.settings?.estimate_notify_phones) ? biz.settings.estimate_notify_phones : []);
-  if ((biz.slug === 'handy-andy' || biz.slug === 'mile-high' || biz.slug === 'austin') && process.env.HANDY_ANDY_SECRETARY_PHONE) phones.add(process.env.HANDY_ANDY_SECRETARY_PHONE);
+  if ((biz.slug === 'handy-andy' || biz.slug === 'mile-high' || biz.slug === 'austin' || biz.slug === 'precision') && process.env.HANDY_ANDY_SECRETARY_PHONE) phones.add(process.env.HANDY_ANDY_SECRETARY_PHONE);
   if (biz.slug === 'doms' && process.env.DOMS_SECRETARY_PHONE) phones.add(process.env.DOMS_SECRETARY_PHONE);
 
   // On an unstaffed-area request the owner gets their own, richer text below
