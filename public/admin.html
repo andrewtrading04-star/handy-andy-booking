@@ -5891,6 +5891,60 @@ function launchCardHtml(b, items){
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
+
+// ── Markets: a location page inside an existing business (LA today, DFW/
+// Phoenix/San Antonio work the same way) — NOT a new company, so no Stripe or
+// Resend section here at all. It deliberately shares its parent business's
+// backend; that's not a gap to report, it's the design (owner confirmed).
+// Blocked = can't book, same principle as widget_embedded for a business: a
+// page that can't take a booking or an estimate can't do its job regardless
+// of how many of the other boxes are ticked.
+function launchMarketScoreOf(m, items){
+  const passed = items.filter(it => !!m.checklist[it.key]).length;
+  return { passed, total: items.length, blocked: !m.checklist.can_book };
+}
+function launchMarketNextAction(m, items){
+  if(!m.url) return 'Choose a URL for this page';
+  if(m.site.error) return `Page could not be reached (${m.site.error})`;
+  if(m.site.checked && !m.site.ok) return `Page returned ${m.site.status}`;
+  for(const it of items) if(!m.checklist[it.key]) return `Next: ${it.label}`;
+  return 'Nothing outstanding.';
+}
+function launchMarketDetailHtml(m, items){
+  let siteLine = '';
+  if(m.url){
+    if(m.site.error) siteLine = `<span style="color:var(--red);">✕ Page</span> — could not reach ${esc(m.url)} (${esc(m.site.error)})<br>`;
+    else siteLine = `<span style="color:${m.site.ok?'var(--green)':'var(--red)'};">${m.site.ok?'✓':'✕'} Page</span> ${m.site.ok?`live (${m.site.status})`:`returned ${m.site.status}`}<br>`;
+  }
+  const checklist=items.map(it=>{
+    const checked=!!m.checklist[it.key];
+    return `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:${checked?'#111':'var(--mute)'};cursor:pointer;padding:3px 0;">
+      <input type="checkbox" data-launch-market="${m.id}" data-launch-key="${it.key}" ${checked?'checked':''} style="width:15px;height:15px;flex:none;">
+      ${esc(it.label)}
+    </label>`;
+  }).join('');
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;line-height:1.9;">
+    <p style="margin:0 0 6px;font-size:12px;color:var(--mute);">Shares ${esc(m.parentSlug)}'s Stripe, Resend, and website — that's by design, not tracked here.</p>
+    ${siteLine}
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
+      ${checklist}
+    </div>
+  </div>`;
+}
+function launchMarketCardHtml(m, items){
+  const { passed, total, blocked } = launchMarketScoreOf(m, items);
+  return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
+      <div style="min-width:0;">
+        <div style="font-weight:800;font-size:14px;">${esc(m.name)}</div>
+        <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
+      </div>
+    </div>
+    <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchMarketNextAction(m, items))}</p>
+    <div class="launch-detail" style="display:none;"></div>
+  </div>`;
+}
 async function renderLaunch(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="wrap"><div class="empty">Checking every business — this hits each live site, give it a few seconds…</div></div>`;
@@ -5900,6 +5954,9 @@ async function renderLaunch(){
 
   const items=data.items||[];
   const businesses=data.businesses||[];
+  const marketItems=data.marketItems||[];
+  const markets=data.markets||[];
+
   const scored=businesses.map(b=>({ b, s:launchScoreOf(b, items) }));
   const blocked=scored.filter(x=>x.s.blocked);
   const ready=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
@@ -5908,6 +5965,16 @@ async function renderLaunch(){
     <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
     ${rows.map(x=>launchCardHtml(x.b, items)).join('') || '<p style="font-size:12px;color:var(--mute);">None.</p>'}
   </div>`;
+
+  const mScored=markets.map(m=>({ m, s:launchMarketScoreOf(m, marketItems) }));
+  const mBlocked=mScored.filter(x=>x.s.blocked);
+  const mReady=mScored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
+  const mProgress=mScored.filter(x=>!x.s.blocked && x.s.passed<x.s.total);
+  const mCol=(title,color,rows)=>`<div>
+    <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
+    ${rows.map(x=>launchMarketCardHtml(x.m, marketItems)).join('') || '<p style="font-size:12px;color:var(--mute);">None.</p>'}
+  </div>`;
+
   view.innerHTML=`<div class="wrap">
     <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
       Sorted by readiness, not alphabetical. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
@@ -5918,6 +5985,16 @@ async function renderLaunch(){
       ${col('In progress','#b45309',progress)}
       ${col('Ready to compete','#15803d',ready)}
     </div>
+    ${markets.length ? `
+    <h3 style="font-size:15px;margin:28px 0 4px;">Markets</h3>
+    <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
+      A location page inside an existing business — not a new company, so no Stripe/Resend of its own. Blocked means it can't take a booking or an estimate yet.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+      ${mCol('Blocked','#dc2626',mBlocked)}
+      ${mCol('In progress','#b45309',mProgress)}
+      ${mCol('Ready to compete','#15803d',mReady)}
+    </div>` : ''}
   </div>`;
 
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
@@ -5941,6 +6018,37 @@ async function renderLaunch(){
               b.checklist[key]=value;
               card.querySelector('.launch-next').textContent=launchNextAction(b, items);
               const s=launchScoreOf(b, items);
+              card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
+            }
+            catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
+            finally{ cb.disabled=false; }
+          });
+        });
+      }
+    });
+  });
+
+  view.querySelectorAll('[data-launch-market-card]').forEach(card=>{
+    card.addEventListener('click', (e)=>{
+      if(e.target.closest('[data-launch-key]')) return;
+      const id=card.dataset.launchMarketCard;
+      const m=markets.find(x=>x.id===id);
+      const detail=card.querySelector('.launch-detail');
+      const open=detail.style.display!=='none';
+      view.querySelectorAll('.launch-detail').forEach(d=>{ d.style.display='none'; d.innerHTML=''; });
+      if(!open){
+        detail.innerHTML=launchMarketDetailHtml(m, marketItems);
+        detail.style.display='block';
+        detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
+          cb.addEventListener('click', ev=>ev.stopPropagation());
+          cb.addEventListener('change', async ()=>{
+            const market_id=cb.dataset.launchMarket, key=cb.dataset.launchKey, value=cb.checked;
+            cb.disabled=true;
+            try{
+              await api('launch_market_checklist_set',{method:'POST',body:{market_id,key,value}});
+              m.checklist[key]=value;
+              card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
+              const s=launchMarketScoreOf(m, marketItems);
               card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
             }
             catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }

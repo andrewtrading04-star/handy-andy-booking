@@ -330,6 +330,7 @@ export default async function handler(req, res) {
       }
       case 'launch_status':        return await launchStatus(req, res, db, auth);
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
+      case 'launch_market_checklist_set': return await launchMarketChecklistSet(req, res, db, auth, body);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
@@ -1955,7 +1956,17 @@ async function multiTvDiscountSave(req, res, db, auth, body) {
 // default to false for every already-working business and bury the real gap
 // under a stale checkbox nobody remembered to tick.
 const LAUNCH_CHECKLIST_ITEMS = [
-  { key: 'widget_embedded',label: 'Booking widget confirmed on the page' },
+  { key: 'widget_embedded',    label: 'Booking widget confirmed on the page' },
+  // The five below verify the funnel actually fires end to end, not just that
+  // the booking itself saves — added after finding Mile High's and Precision's
+  // post-booking thank-you links both pointed at a real 404 (a customer who
+  // just paid landed on "page not found"), and Dom's had no thank-you URL
+  // wired in code AT ALL, silently sending its customers to Handy Andy's page.
+  { key: 'thank_you_popup',    label: 'Thank-you page shows after booking' },
+  { key: 'confirmation_email', label: 'Confirmation email sends' },
+  { key: 'on_the_way_text',    label: 'On-the-way text sends' },
+  { key: 'review_text',        label: 'Review request text sends' },
+  { key: 'tech_alert_correct_business', label: 'Technician alert names the correct business' },
   { key: 'phone_live',     label: 'Dedicated phone number receiving calls/texts' },
   { key: 'gbp_created',    label: 'Google Business Profile created' },
   { key: 'gbp_verified',   label: 'GBP verified (postcard/video)' },
@@ -1964,12 +1975,62 @@ const LAUNCH_CHECKLIST_ITEMS = [
   { key: 'techs_staffed',  label: 'At least one tech can actually be booked' },
 ];
 
+// ── Markets: a location page inside an EXISTING business, not a new company.
+// LA is the first one (a page cluster on ihandyandy.com, unstaffed, no Stripe
+// or Resend of its own — it deliberately shares Handy Andy's) and DFW/Phoenix/
+// San Antonio work the same way (see [[estimate-brokering-project]]), so this
+// lives in its own `app.markets` table rather than being forced into
+// `businesses`. Every OTHER part of the app reads `businesses` and assumes
+// each row is a fully independent company (its own Stripe account, EMAIL_
+// BRANDS entry, cross-hire mapping, review emails, ...) — inserting a market
+// there would make it eligible for all of that by accident, when the whole
+// point is that it deliberately has none of it. Same jsonb-checklist pattern
+// as businesses.settings.launch_checklist, just a separate table + item set.
+const MARKET_CHECKLIST_ITEMS = [
+  { key: 'llc_formed',              label: 'LLC formed' },
+  { key: 'gbp_done',                label: 'Google Business Profile done' },
+  { key: 'url_chosen_and_directed', label: 'URL chosen and live' },
+  { key: 'has_address',             label: 'Page shows a real address' },
+  { key: 'can_book',                label: 'Can book a real appointment or an estimate' },
+];
+
+async function launchMarketRows(db) {
+  const { data: markets, error } = await db.from('markets')
+    .select('id, slug, name, parent_business_slug, url, active, settings, created_at')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  return Promise.all((markets || []).map(async (m) => {
+    let site = { checked: false, ok: null, status: null, error: null };
+    if (m.url) {
+      site.checked = true;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+        const r = await fetch(m.url, { signal: ctrl.signal, redirect: 'follow' });
+        clearTimeout(t);
+        site.status = r.status;
+        site.ok = r.ok;
+      } catch (e) {
+        site.error = String((e && e.message) || e).slice(0, 120);
+      }
+    }
+    const checklist = (m.settings && m.settings.launch_checklist) || {};
+    return {
+      id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
+      url: m.url, active: m.active, created_at: m.created_at, site, checklist,
+    };
+  }));
+}
+
 async function launchStatus(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const { data: businesses, error } = await db.from('businesses')
     .select('id, slug, name, url, active, settings, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
+
+  const markets = await launchMarketRows(db);
 
   const results = await Promise.all((businesses || []).map(async (biz) => {
     let stripeWired = true, stripeReady = false;
@@ -2009,7 +2070,31 @@ async function launchStatus(req, res, db, auth) {
     };
   }));
 
-  return res.status(200).json({ items: LAUNCH_CHECKLIST_ITEMS, businesses: results });
+  return res.status(200).json({
+    items: LAUNCH_CHECKLIST_ITEMS, businesses: results,
+    marketItems: MARKET_CHECKLIST_ITEMS, markets,
+  });
+}
+
+async function launchMarketChecklistSet(req, res, db, auth, body) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const marketId = String(body.market_id || '').trim();
+  const key = String(body.key || '').trim();
+  if (!marketId || !MARKET_CHECKLIST_ITEMS.some(i => i.key === key)) {
+    return res.status(400).json({ error: 'market_id and a known checklist key are required' });
+  }
+  const { data: m, error: readErr } = await db.from('markets').select('id, settings').eq('id', marketId).maybeSingle();
+  if (readErr) throw readErr;
+  if (!m) return res.status(404).json({ error: 'Market not found' });
+
+  const settings = m.settings || {};
+  const checklist = { ...(settings.launch_checklist || {}), [key]: !!body.value };
+  const { error: writeErr } = await db.from('markets')
+    .update({ settings: { ...settings, launch_checklist: checklist }, updated_at: new Date().toISOString() })
+    .eq('id', marketId);
+  if (writeErr) throw writeErr;
+
+  return res.status(200).json({ ok: true, checklist });
 }
 
 async function launchChecklistSet(req, res, db, auth, body) {

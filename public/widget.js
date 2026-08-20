@@ -52,11 +52,26 @@
   // Andy's URL regardless of BUSINESS, so a real Mile High customer who just
   // booked and paid was redirected to ihandyandy.com instead of Mile High's
   // own site (real incident, 2026-07-30).
+  // mile-high and precision both point at a real 404 right now (confirmed live,
+  // 2026-08-20 — /thankyou/ and /thank-you both return a genuine styled 404,
+  // not a caching artifact). Stopgapped to each site's own homepage — a real
+  // page, not the "thanks for your money, page not found" a customer was
+  // hitting right after paying — until a proper confirmation page exists on
+  // each site (LandingSite editor, same pattern as Precision's #book section;
+  // see [[mile-high-business]]) and this map points back at it.
   const THANKYOU_URL = {
     'handy-andy': 'https://www.ihandyandy.com/thankyou/',
-    'mile-high':  'https://www.milehightvmounting.com/thankyou/',
+    // 'doms' was MISSING from this map entirely (not even a stale URL — no
+    // key at all), so every Dom's customer who completed a booking silently
+    // fell through to the `||` default below and landed on Handy Andy's own
+    // thank-you page — the exact bug the comment above already describes as
+    // a "real incident" for Mile High, still live here, just never noticed
+    // because nothing checks this map against what each site actually has.
+    // Dom's own page at /thank-you/ is real and live (confirmed 200).
+    'doms':       'https://www.domstvmounting.com/thank-you/',
+    'mile-high':  'https://www.milehightvmounting.com/',
     'austin':     'https://www.austinmounting.com/thank-you',
-    'precision':  'https://www.precisiontvinstallation.com/thank-you',
+    'precision':  'https://www.precisiontvinstallation.com/',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
