@@ -69,9 +69,23 @@
   .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--logo,var(--orange));display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
   .logo .ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .plus{width:30px;height:30px;border-radius:50%;background:transparent;color:#000;border:1px solid var(--line);font-size:20px;line-height:1;flex-shrink:0;}
-  .switcher{display:flex;gap:5px;padding:0 14px 8px;flex-wrap:wrap;}
+  .switcher{display:flex;gap:5px;padding:0 14px 8px;flex-wrap:wrap;align-items:center;}
   .switcher button{background:#fff;border:1px solid var(--line);color:var(--mute);padding:5px 11px;border-radius:16px;font-size:12px;font-weight:600;}
   .switcher button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  /* Lead Gen grouping: Handy Andy and Dom's are the real operating companies
+     and keep their own chips; every other brand is a lead-gen microsite and
+     lives behind one dropdown so the row stays short as more are added. */
+  .lg{position:relative;}
+  .lg>button{display:inline-flex;align-items:center;gap:5px;}
+  .lg>button .cx{font-size:9px;opacity:.75;}
+  .lg-menu{display:none;position:absolute;z-index:60;top:calc(100% + 4px);left:0;min-width:150px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px;
+    box-shadow:0 8px 22px rgba(20,30,50,.14);}
+  .lg.open .lg-menu{display:block;}
+  .lg-menu button{display:block;width:100%;text-align:left;border:none;border-radius:7px;
+    padding:7px 10px;font-size:12.5px;font-weight:600;background:transparent;color:var(--ink);}
+  .lg-menu button:hover{background:var(--line2);}
+  .lg-menu button.on{background:var(--accent-soft);color:var(--accent);}
 
   .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
   .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
@@ -2283,18 +2297,60 @@ async function openAlertJob(slug, id){
   }catch(e){ toast(e.message); }
 }
 
+// The two businesses that actually employ crews and hold their own books get a
+// top-level chip. Everything else is a lead-gen microsite (Mile High, Precision,
+// TVm Austin ...) and is collapsed into one "Lead Gen" dropdown, so adding the
+// next microsite does not push the row onto another line. Slug-based, not
+// name-based, so renaming a business in the DB cannot silently regroup it.
+const OWN_CHIP_SLUGS = ['handy-andy', 'doms'];
+
+function switchToBusiness(slug){
+  const next = businesses.find(b => b.slug === slug);
+  if(!next) return;
+  current = next;
+  nbWarmDataCache(current.slug);
+  // See the matching comment in openAlertJob — navTo(section) already covers
+  // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
+  availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+}
+
 function renderSwitcher(){
   const el = document.getElementById('switcher');
   if(businesses.length<2){ el.innerHTML=''; return; }
-  el.innerHTML = businesses.map(b =>
-    `<button data-slug="${b.slug}" class="${current&&b.slug===current.slug?'on':''}">${esc(b.name)}</button>`).join('');
-  el.querySelectorAll('button').forEach(btn=>btn.addEventListener('click',()=>{
-    current = businesses.find(b=>b.slug===btn.dataset.slug);
-    if(current) nbWarmDataCache(current.slug);
-    // See the matching comment in openAlertJob — navTo(section) already covers
-    // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
-    availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
-  }));
+  const own     = OWN_CHIP_SLUGS.map(sl => businesses.find(b => b.slug === sl)).filter(Boolean);
+  const leadGen = businesses.filter(b => !OWN_CHIP_SLUGS.includes(b.slug));
+  const isOn    = b => current && b.slug === current.slug;
+
+  let html = own.map(b =>
+    `<button data-slug="${b.slug}" class="${isOn(b)?'on':''}">${esc(b.name)}</button>`).join('');
+
+  if(leadGen.length){
+    // Label shows the selected microsite so you can always see where you are
+    // without opening the menu.
+    const sel = leadGen.find(isOn);
+    html += `<span class="lg" id="lgWrap">
+      <button type="button" id="lgToggle" class="${sel?'on':''}">
+        ${esc(sel ? sel.name : 'Lead Gen')}<span class="cx">▾</span>
+      </button>
+      <span class="lg-menu" id="lgMenu">${leadGen.map(b =>
+        `<button data-slug="${b.slug}" class="${isOn(b)?'on':''}">${esc(b.name)}</button>`).join('')}</span>
+    </span>`;
+  }
+  el.innerHTML = html;
+
+  el.querySelectorAll('button[data-slug]').forEach(btn =>
+    btn.addEventListener('click', () => switchToBusiness(btn.dataset.slug)));
+
+  const wrap = el.querySelector('#lgWrap'), toggle = el.querySelector('#lgToggle');
+  if(wrap && toggle){
+    toggle.addEventListener('click', e => { e.stopPropagation(); wrap.classList.toggle('open'); });
+    // Close on any outside click. Registered once per render and removed on the
+    // first fire, so repeated renders cannot stack listeners.
+    document.addEventListener('click', function away(ev){
+      if(!wrap.contains(ev.target)) wrap.classList.remove('open');
+      document.removeEventListener('click', away);
+    });
+  }
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
