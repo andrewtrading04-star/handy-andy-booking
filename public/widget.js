@@ -73,6 +73,7 @@
   const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6' };
   // Precision's site (precisiontvinstallation.com) is white too, so it takes
   // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
