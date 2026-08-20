@@ -89,6 +89,18 @@
   // zip they just entered.
   const PREFILL_ZIP = ((SELF_SCRIPT && SELF_SCRIPT.dataset && SELF_SCRIPT.dataset.zip)
     || new URLSearchParams(location.search).get('zip') || '').replace(/\D/g, '').slice(0, 5);
+  // Same idea, one step further: a marketing-page price calculator (e.g.
+  // tvmountingdenver.com's hero) can hand off its own TV size / quantity /
+  // bracket picks via ?tvsize=&tvqty=&bracket= so the customer never re-picks
+  // what they already chose. Read once here; APPLIED later (after the zip
+  // check resolves serviceConfig, see "Prefill from marketing page" below)
+  // because the option ids are only valid for whichever config the metro
+  // actually uses — an id that doesn't match the resolved config's size/
+  // bracket section is silently ignored, never forced in.
+  const qp = new URLSearchParams(location.search);
+  const PREFILL_TVSIZE = qp.get('tvsize') || '';
+  const PREFILL_TVQTY = Math.min(5, Math.max(1, parseInt(qp.get('tvqty'), 10) || 0));
+  const PREFILL_BRACKET = qp.get('bracket') || '';
   // Austin's site is light/white, so its widget embed needs to match instead of
   // the dark card Handy Andy and Mile High have always shipped. Handy Andy and
   // Mile High keep the exact original dark hex values (byte-for-byte) so their
@@ -562,6 +574,9 @@
   // ─── State ────────────────────────────────────────────────────────────────
   let stepIdx=0, isFrameTV=false, territoryId='', enteredZip='', areaCity='', areaState='';
   let serviceConfig=null, selections={}, selectedSlot=null;
+  // One-shot guard for the marketing-page prefill applied in doZip() below —
+  // see the comment there for why a re-run must never happen.
+  let prefillApplied=false;
   let slotsByDate={}, selectedDate=null, calYear=null, calMonth=null;
   let customer={first_name:'',last_name:'',email:'',phone:'',address:'',address_line2:''};
   let tipAmount=0, couponCode='';
@@ -2247,6 +2262,44 @@
       await loadCoupons();
       await loadMultiTvDiscountConfig();
       await ensureStripeKey();
+      // Prefill from marketing page: only applies if the ids actually belong
+      // to THIS resolved config's size/bracket sections (Austin's config uses
+      // different option ids than default's — see SERVICE_CONFIGS above), so
+      // a stale or mismatched param is a silent no-op, never a forced/wrong
+      // selection. The customer still sees and can change both steps.
+      //
+      // Guarded by prefillApplied so this can never re-fire: doZip() reruns
+      // every time the customer re-submits the zip step (e.g. they back up to
+      // fix a typo after already editing their TV size on the next step), and
+      // setQty() has no memory of a since-removed selection — an unguarded
+      // rerun would silently resurrect the ORIGINAL prefilled size/bracket
+      // alongside whatever the customer actually picked, inflating totalTVs()
+      // and the checkout total. One-shot, same as PREFILL_ZIP's own doZip()
+      // call is expected to run once per page load in the normal flow.
+      //
+      // Also requires the bracket's forSize to actually match the size's
+      // sizecat (standard vs xl — same split bBracket() itself uses below) —
+      // an id pair that is individually valid but crossed (e.g. an XL bracket
+      // id with a small-TV size id) would otherwise get selected but stay
+      // hidden from the bracket step's visible options (which ARE filtered by
+      // category), so it would silently count toward the qty_match total and
+      // the checkout price without the customer ever seeing it selected.
+      if(!prefillApplied && PREFILL_TVSIZE && PREFILL_TVQTY>0){
+        prefillApplied=true;
+        const sizeSec=getSec('size');
+        const sizeOpt=sizeSec&&sizeSec.options.find(o=>o.id===PREFILL_TVSIZE);
+        if(sizeOpt){
+          setQty(sizeSec.id, PREFILL_TVSIZE, PREFILL_TVQTY);
+          if(PREFILL_BRACKET){
+            const bracketSec=getSec('bracket');
+            const bracketOpt=bracketSec&&bracketSec.options.find(o=>o.id===PREFILL_BRACKET);
+            const wantsXL=sizeOpt.sizecat==='large'||sizeOpt.sizecat==='xlarge';
+            const bracketFits=bracketOpt&&(bracketOpt.forSize==='any'
+              || (wantsXL ? bracketOpt.forSize==='xl' : bracketOpt.forSize==='standard'));
+            if(bracketFits) setQty(bracketSec.id, PREFILL_BRACKET, PREFILL_TVQTY);
+          }
+        }
+      }
       logEvent('zip_check','served',null,zip);
       stepIdx=1; render();
     }catch{btn.textContent='Check Area →';btn.disabled=false;logEvent('error','zip',null,'zip network error');alert('Network error. Please try again.');}
