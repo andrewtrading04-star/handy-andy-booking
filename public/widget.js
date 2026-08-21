@@ -21,7 +21,7 @@
   // The legal trading name shown in the SMS-consent disclosure below -- must
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
-  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation', 'tvmountingdenver':'TV Mounting Denver' }[BUSINESS] || 'Handy Andy TV Mounting';
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation', 'tvmountingdenver':'TV Mounting Denver', 'houstonmounting':'Houston Mounting', 'houstontvinstallation':'Houston TV Installation', 'tvhanginghouston':'TV Hanging Houston', 'htvmounting':'HTV Mounting' }[BUSINESS] || 'Handy Andy TV Mounting';
   // The phone number shown in customer-facing fallback messages ("call us to
   // confirm/verify"). Used to be hardcoded to Handy Andy's Houston line for
   // every business, which told a Mile High or Austin customer to call a
@@ -29,7 +29,9 @@
   // tvmountingdenver is a booking-only brand with NO published phone number:
   // its entry is deliberately '' (empty, not missing) so the fallback alerts
   // below render their no-phone wording instead of the Handy Andy default.
-  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'(346) 394-8137', 'tvmountingdenver':'' }[BUSINESS] ?? '713-876-9032';
+  // The four Houston lead-gen brands are booking-only like tvmountingdenver:
+  // deliberately '' (empty, not missing) until each gets its own number.
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'(346) 394-8137', 'tvmountingdenver':'', 'houstonmounting':'', 'houstontvinstallation':'', 'tvhanginghouston':'', 'htvmounting':'' }[BUSINESS] ?? '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
@@ -39,9 +41,9 @@
   // visually unchanged. Mile High gets the same green used in its email
   // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
   // across the booking widget and the confirmation email.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#2f6bff' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#6b93ff' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'47,107,255' }[BUSINESS] || '255,102,0';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#2f6bff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#6b93ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'47,107,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -81,6 +83,12 @@
     // tvmountingdenver.com DNS has moved to Vercel (confirmed live 2026-08-20),
     // so this points at the real domain now, not the .vercel.app fallback.
     'tvmountingdenver': 'https://tvmountingdenver.com/thank-you',
+    // Houston lead-gen quad: hosted brand-aware fallback until each domain is
+    // connected to its Vercel project — flip to https://<domain>/thank-you then.
+    'houstonmounting':       'https://handy-andy-booking.vercel.app/thank-you.html?b=houstonmounting',
+    'houstontvinstallation': 'https://handy-andy-booking.vercel.app/thank-you.html?b=houstontvinstallation',
+    'tvhanginghouston':      'https://handy-andy-booking.vercel.app/thank-you.html?b=tvhanginghouston',
+    'htvmounting':           'https://handy-andy-booking.vercel.app/thank-you.html?b=htvmounting',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
@@ -109,7 +117,9 @@
   const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6', gdsBg:'linear-gradient(135deg,#f7f9fc,#eef2f8)', gdsLine:'#52525b', dayOff:'#9a9aa2' };
   // Precision's site (precisiontvinstallation.com) is white too, so it takes
   // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision') ? T_LIGHT : T_DARK;
+  // The Houston lead-gen quad's sites are light/white builds like Austin's and
+  // Precision's, so they take the light card too.
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book

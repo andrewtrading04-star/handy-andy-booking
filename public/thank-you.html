@@ -77,7 +77,11 @@
   // an entry; anything else falls back to generic copy rather than guessing.
   var BRANDS = {
     'mile-high': { name:'Mile High TV Mounting',     site:'https://www.milehightvmounting.com/',        accent:'#2f7fd0' },
-    'precision': { name:'Precision TV Installation', site:'https://www.precisiontvinstallation.com/',   accent:'#0288d1' }
+    'precision': { name:'Precision TV Installation', site:'https://www.precisiontvinstallation.com/',   accent:'#0288d1' },
+    'houstonmounting':       { name:'Houston Mounting',         site:'https://houstonmounting.com/',       accent:'#0f766e' },
+    'houstontvinstallation': { name:'Houston TV Installation',  site:'https://houstontvinstallation.com/', accent:'#b91c1c' },
+    'tvhanginghouston':      { name:'TV Hanging Houston',       site:'https://tvhanginghouston.com/',      accent:'#6d28d9' },
+    'htvmounting':           { name:'HTV Mounting',             site:'https://htvmounting.com/',           accent:'#166534' }
   };
   var slug  = new URLSearchParams(location.search).get('b') || '';
   var brand = BRANDS[slug] || null;
