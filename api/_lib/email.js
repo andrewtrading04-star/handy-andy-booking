@@ -38,16 +38,26 @@ export function emailConfig(slug) {
       from:   process.env.AUSTIN_EMAIL_FROM || 'contact@austinmounting.com',
     };
   }
+  // Shared fallback account (owner's 2026-08-20 decision): rather than
+  // paying/verifying a separate Resend account per new business, one account
+  // — set up under houstonmounting.com — holds every OTHER brand's domain too
+  // as an additional verified sender. The apiKey is the same across all of
+  // them; only `from` differs, so each business's mail still arrives branded
+  // correctly. A business's own dedicated key (if it has a real, separate
+  // account already, e.g. one set up before this decision) always wins —
+  // this is a fallback, not a replacement. Still never falls back to Handy
+  // Andy's own account/address: that mistake (a Mile High customer greeted
+  // by Handy Andy) is exactly what this whole per-business system exists to
+  // prevent, and consolidating onto ANOTHER real business's account doesn't
+  // reopen it as long as `from` stays that business's own address.
   if (slug === 'precision') {
-    // Same rule again: no fallback to Handy Andy's account, ever.
     return {
-      apiKey: process.env.PRECISION_RESEND_API_KEY,
+      apiKey: process.env.PRECISION_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.PRECISION_EMAIL_FROM || 'contact@precisiontvinstallation.com',
     };
   }
   if (slug === 'houstonmounting') {
-    // Houston lead-gen quad, each its own verified domain/Resend key even
-    // though they share one Stripe account — no fallback, ever.
+    // The shared account itself.
     return {
       apiKey: process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.HOUSTONMOUNTING_EMAIL_FROM || 'contact@houstonmounting.com',
@@ -55,30 +65,25 @@ export function emailConfig(slug) {
   }
   if (slug === 'houstontvinstallation') {
     return {
-      apiKey: process.env.HOUSTONTVINSTALLATION_RESEND_API_KEY,
+      apiKey: process.env.HOUSTONTVINSTALLATION_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.HOUSTONTVINSTALLATION_EMAIL_FROM || 'contact@houstontvinstallation.com',
     };
   }
   if (slug === 'tvhanginghouston') {
     return {
-      apiKey: process.env.TVHANGINGHOUSTON_RESEND_API_KEY,
+      apiKey: process.env.TVHANGINGHOUSTON_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.TVHANGINGHOUSTON_EMAIL_FROM || 'contact@tvhanginghouston.com',
     };
   }
   if (slug === 'htvmounting') {
     return {
-      apiKey: process.env.HTVMOUNTING_RESEND_API_KEY,
+      apiKey: process.env.HTVMOUNTING_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.HTVMOUNTING_EMAIL_FROM || 'contact@htvmounting.com',
     };
   }
   if (slug === 'tvmountingdenver') {
-    // Same rule again: no fallback to Handy Andy's account, ever. Before this
-    // branch existed, an unmapped slug fell through to the default below and
-    // the Launch tab reported email as "wired + ready" from EMAIL_BRANDS
-    // metadata alone, while every real send would have gone out as
-    // contact@ihandyandy.com — a false positive the owner caught.
     return {
-      apiKey: process.env.TVMOUNTINGDENVER_RESEND_API_KEY,
+      apiKey: process.env.TVMOUNTINGDENVER_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
       from:   process.env.TVMOUNTINGDENVER_EMAIL_FROM || 'contact@tvmountingdenver.com',
     };
   }
