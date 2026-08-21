@@ -41,9 +41,13 @@
   // visually unchanged. Mile High gets the same green used in its email
   // branding (see EMAIL_BRANDS in api/_lib/email.js) for one consistent color
   // across the booking widget and the confirmation email.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#2f6bff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#6b93ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'47,107,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52' }[BUSINESS] || '255,102,0';
+  // tvmountingdenver's accent matches the site's own --color-vial (#017aff)
+  // from tvmountingdenver-site/app/globals.css, not the older CRM email-brand
+  // blue (#2f6bff) it shipped with -- the site's "Concierge" redesign moved
+  // to a brighter blue after the widget's brand color was first set.
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e' }[BUSINESS] || '#ff9944';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -115,11 +119,12 @@
   // live embeds are visually unchanged; only 'austin' resolves to T_LIGHT.
   const T_DARK  = { bg:'#18181c', panel:'#27272a', panel2:'#2d2d34', border:'#3f3f46', text:'#fff', muted:'#71717a', muted2:'#a0a0ab', muted3:'#52525b', footerbg:'#0e0e10', shadow:'rgba(0,0,0,0.5)', dropText:'#e4e4e7', ok:'#4ade80', subtle:'#d4d4d8', selBg:'rgba(255,255,255,0.06)', inset:'#1a1a1e', slot:'#1f1f23', gdsBg:'linear-gradient(135deg,#1f2937,#111827)', gdsLine:'#c7ccd4', dayOff:'#3f3f46' };
   const T_LIGHT = { bg:'#ffffff', panel:'#f4f4f6', panel2:'#e4e4e8', border:'#d8d8dd', text:'#18181c', muted:'#6b6b74', muted2:'#52525b', muted3:'#a4a4ab', footerbg:'#f7f7f9', shadow:'rgba(0,0,0,0.1)', dropText:'#18181c', ok:'#16a34a', subtle:'#52525b', selBg:'rgba(0,0,0,0.05)', inset:'#f4f4f6', slot:'#f4f4f6', gdsBg:'linear-gradient(135deg,#f7f9fc,#eef2f8)', gdsLine:'#52525b', dayOff:'#9a9aa2' };
-  // Precision's site (precisiontvinstallation.com) is white too, so it takes
-  // the same light card. Handy Andy / Mile High / Doms stay dark, unchanged.
-  // The Houston lead-gen quad's sites are light/white builds like Austin's and
-  // Precision's, so they take the light card too.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting') ? T_LIGHT : T_DARK;
+  // Precision's site (precisiontvinstallation.com) and TV Mounting Denver
+  // (tvmountingdenver.com, white "Concierge" design) are white too, so they
+  // take the same light card. The Houston lead-gen quad's sites are
+  // light/white builds like Austin's and Precision's, so they take the light
+  // card too. Handy Andy / Mile High / Doms stay dark, unchanged.
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
