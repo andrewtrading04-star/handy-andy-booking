@@ -45,6 +45,32 @@ export function emailConfig(slug) {
       from:   process.env.PRECISION_EMAIL_FROM || 'contact@precisiontvinstallation.com',
     };
   }
+  if (slug === 'houstonmounting') {
+    // Houston lead-gen quad, each its own verified domain/Resend key even
+    // though they share one Stripe account — no fallback, ever.
+    return {
+      apiKey: process.env.HOUSTONMOUNTING_RESEND_API_KEY,
+      from:   process.env.HOUSTONMOUNTING_EMAIL_FROM || 'contact@houstonmounting.com',
+    };
+  }
+  if (slug === 'houstontvinstallation') {
+    return {
+      apiKey: process.env.HOUSTONTVINSTALLATION_RESEND_API_KEY,
+      from:   process.env.HOUSTONTVINSTALLATION_EMAIL_FROM || 'contact@houstontvisntallation.com',
+    };
+  }
+  if (slug === 'tvhanginghouston') {
+    return {
+      apiKey: process.env.TVHANGINGHOUSTON_RESEND_API_KEY,
+      from:   process.env.TVHANGINGHOUSTON_EMAIL_FROM || 'contact@tvhanginghouston.com',
+    };
+  }
+  if (slug === 'htvmounting') {
+    return {
+      apiKey: process.env.HTVMOUNTING_RESEND_API_KEY,
+      from:   process.env.HTVMOUNTING_EMAIL_FROM || 'contact@htvmounting.com',
+    };
+  }
   if (slug === 'tvmountingdenver') {
     // Same rule again: no fallback to Handy Andy's account, ever. Before this
     // branch existed, an unmapped slug fell through to the default below and
@@ -71,6 +97,10 @@ export const EMAIL_BRANDS = {
   'austin':     { slug: 'austin',     name: 'TV Mounting & Handyman Austin', accent: '#1E56E0', website: 'austinmounting.com' },
   'precision':  { slug: 'precision',  name: 'Precision TV Installation',     accent: '#0288D1', website: 'precisiontvinstallation.com' },
   'tvmountingdenver': { slug: 'tvmountingdenver', name: 'TV Mounting Denver', accent: '#2F6BFF', website: 'tvmountingdenver.com' },
+  'houstonmounting':       { slug: 'houstonmounting',       name: 'Houston Mounting',         accent: '#0288D1', website: 'houstonmounting.com' },
+  'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvisntallation.com' },
+  'tvhanginghouston':      { slug: 'tvhanginghouston',      name: 'TV Hanging Houston',       accent: '#0288D1', website: 'tvhanginghouston.com' },
+  'htvmounting':           { slug: 'htvmounting',           name: 'HTV Mounting',             accent: '#0288D1', website: 'htvmounting.com' },
 };
 // An unknown slug used to fall back to Handy Andy, which meant a new business
 // would send Handy-Andy-branded email to its own customers and look, to the

@@ -26,6 +26,13 @@ export const NATIVE_BUSINESS = {
   // no techs of its own, borrows Handy Andy's Denver roster. Booking-only
   // brand: it publishes NO phone number anywhere.
   'tvmountingdenver': { name: 'TV Mounting Denver',      legalName: 'TV Mounting Denver' },
+  // Houston lead-gen micro-brands, same shape as Precision: no techs of their
+  // own, all borrow Handy Andy's Houston roster (Juan). Share one Stripe
+  // account (houstonmounting.com's) — see LEGACY_SLUG_ACCOUNT in stripe.js.
+  'houstonmounting':      { name: 'Houston Mounting',           legalName: 'Houston Mounting' },
+  'houstontvinstallation': { name: 'Houston TV Installation',   legalName: 'Houston TV Installation' },
+  'tvhanginghouston':     { name: 'TV Hanging Houston',         legalName: 'TV Hanging Houston' },
+  'htvmounting':          { name: 'HTV Mounting',                legalName: 'HTV Mounting' },
 };
 
 export const NATIVE_SLUGS = Object.keys(NATIVE_BUSINESS);

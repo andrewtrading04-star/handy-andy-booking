@@ -23,6 +23,11 @@ const ACCOUNT_KEY_ENV = {
   austin:       'AUSTIN_STRIPE_SECRET_KEY',
   precision:    'PRECISION_STRIPE_SECRET_KEY',
   tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_SECRET_KEY',
+  // Houston lead-gen quad (houstonmounting, houstontvinstallation,
+  // tvhanginghouston, htvmounting) deliberately share ONE Stripe account —
+  // houstonmounting.com's — instead of each getting its own. Only one account
+  // entry exists; all four slugs resolve to it via LEGACY_SLUG_ACCOUNT below.
+  houstonmounting: 'HOUSTONMOUNTING_STRIPE_SECRET_KEY',
 };
 
 // Legacy slug -> account for bookings made BEFORE per-booking stamping: Handy
@@ -35,6 +40,12 @@ const LEGACY_SLUG_ACCOUNT = {
   austin:       'austin',   // always its own account, never global -- born after the split
   precision:    'precision',// same
   tvmountingdenver: 'tvmountingdenver', // same
+  // All four Houston lead-gen brands charge on the shared houstonmounting
+  // account, never their own — there is no per-slug account for them.
+  houstonmounting:         'houstonmounting',
+  houstontvinstallation:   'houstonmounting',
+  tvhanginghouston:        'houstonmounting',
+  htvmounting:             'houstonmounting',
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)
