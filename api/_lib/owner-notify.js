@@ -493,6 +493,28 @@ export async function sendOwnerEstimateAlert(d = {}) {
   }
 }
 
+// ── "Lead-gen business booked" SMS ──────────────────────────────────────────
+// The dashboard's "Lead Gen" dropdown (public/admin.html OWN_CHIP_SLUGS) is
+// every business except Handy Andy and Dom's — the two real operating crews.
+// Andrew wants a text the moment any of those OTHER (lead-gen-only) brands
+// books a real appointment, since he doesn't have a secretary watching their
+// inboxes the way Heather/Joey watch Handy Andy/Dom's. Mirrors OWN_CHIP_SLUGS
+// exactly (not name-based) so a renamed business can't silently drop out.
+const LEAD_GEN_OWN_CHIP_SLUGS = ['handy-andy', 'doms'];
+export function isLeadGenSlug(slug) {
+  return !LEAD_GEN_OWN_CHIP_SLUGS.includes(String(slug || '').toLowerCase());
+}
+export function maybeSendLeadGenBookingAlert({ slug, businessName, customerName, whenStr }) {
+  try {
+    if (!isLeadGenSlug(slug)) return;
+    const phone = process.env.OWNER_PHONE_NUMBER;
+    if (!phone) return;
+    const msg = `${businessName || 'A lead-gen business'} just booked an appointment`
+      + `${customerName ? ` — ${customerName}` : ''}${whenStr ? `, ${whenStr}` : ''}.`;
+    sendSMS(phone, msg).catch(e => console.warn('[lead-gen-booking] alert SMS failed:', e.message));
+  } catch (e) { console.warn('[lead-gen-booking] alert error:', e.message); }
+}
+
 // ── "<Tech> finished the $100 review program" SMS ───────────────────────────
 // Fires the moment a technician checks off the fifth and final Google listing
 // (see awardReviewBonusIfComplete in api/tech.js). Sent ONLY alongside the
