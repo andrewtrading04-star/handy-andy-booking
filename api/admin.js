@@ -64,6 +64,9 @@ function bookingStripePk(slug) {
   if (slug === 'mile-high') return process.env.MILE_HIGH_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'austin') return process.env.AUSTIN_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'precision') return process.env.PRECISION_STRIPE_PUBLISHABLE_KEY || null;
+  if (slug === 'houstonmounting' || slug === 'houstontvinstallation' || slug === 'tvhanginghouston' || slug === 'htvmounting') {
+    return process.env.Publishable_key_houston_mounting || null;
+  }
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';

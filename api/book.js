@@ -109,6 +109,15 @@ const STRIPE_PK_ENV = {
   austin:       'AUSTIN_STRIPE_PUBLISHABLE_KEY',
   precision:    'PRECISION_STRIPE_PUBLISHABLE_KEY',
   tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_PUBLISHABLE_KEY',
+  // Houston lead-gen quad — all four share one Stripe account (houstonmounting's,
+  // see ACCOUNT_KEY_ENV in stripe.js), so all four also share this one
+  // publishable key. Var name is `Publishable_key_houston_mounting`, not the
+  // usual `HOUSTONMOUNTING_STRIPE_PUBLISHABLE_KEY` pattern — it's exactly what
+  // was typed into Vercel, so match it verbatim rather than rename in Vercel.
+  houstonmounting:        'Publishable_key_houston_mounting',
+  houstontvinstallation:  'Publishable_key_houston_mounting',
+  tvhanginghouston:       'Publishable_key_houston_mounting',
+  htvmounting:            'Publishable_key_houston_mounting',
 };
 function stripePublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
