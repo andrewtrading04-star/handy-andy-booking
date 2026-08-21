@@ -5842,7 +5842,7 @@ function launchEffective(b, key){
 // existing tech's roster). Hard-excluded from the checklist and the score
 // denominator rather than left as an unticked box, or they'd sit permanently
 // "In progress" for an item that will never legitimately get done.
-const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting']);
+const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver']);
 function launchItemsFor(b, items){
   return LAUNCH_NO_GBP_SLUGS.has(b.slug) ? items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified') : items;
 }
