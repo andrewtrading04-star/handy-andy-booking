@@ -351,13 +351,10 @@ export async function findLandedCharge(bookingId, sel = null) {
   return null;
 }
 
-// Save a card on file in a business's Stripe account: find/create the customer
-// by email, attach the payment method, and make it the default. Returns the
-// Stripe customer id. Used by the public Doms booking flow (and reusable by any
-// per-business flow). Throws with .status/.message on failure.
-export async function saveCardOnFile({ email, name, phone, paymentMethodId, slug = null, account = null }) {
-  if (!paymentMethodId) return { customerId: null };
-  // 1) Reuse an existing customer for this email, else create one.
+// Find a business's Stripe customer by email, else create one. Shared by
+// saveCardOnFile (tokenize-then-attach fallback) and createCardSetupIntent
+// (verified in-checkout save).
+export async function findOrCreateCustomer({ email, name, phone, slug = null, account = null }) {
   let customerId = null;
   try {
     const found = await stripe(`/customers?email=${encodeURIComponent(email || '')}&limit=1`, { method: 'GET', slug, account });
@@ -370,7 +367,47 @@ export async function saveCardOnFile({ email, name, phone, paymentMethodId, slug
     }});
     customerId = c.id;
   }
-  // 2) Attach the payment method and make it the default. Only the ATTACH is
+  return customerId;
+}
+
+// Best-effort: make a pm the customer's default for future off-session charges.
+// Never load-bearing — defaultPaymentMethod() falls back to the first attached
+// card when no default is set — so callers may fire-and-await without failing
+// their flow on an error here.
+export async function setDefaultPaymentMethod(customerId, paymentMethodId, sel = null) {
+  const { account = null, slug = null } = typeof sel === 'string' ? { slug: sel } : (sel || {});
+  try {
+    await stripe(`/customers/${customerId}`, { method: 'POST', slug, account, body: {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    }});
+    return true;
+  } catch (e) {
+    console.warn('[stripe setDefaultPaymentMethod] failed (non-fatal):', e.message);
+    return false;
+  }
+}
+
+// Create a SetupIntent tied to the (found-or-created) customer so the WIDGET
+// can confirm the card in-page: the bank actually validates the card while
+// the customer is still at checkout and can fix a typo'd CVC on the spot —
+// instead of the attach failing server-side after the booking already went
+// through (the Caplan/Alleman incidents). Returns what the client needs.
+export async function createCardSetupIntent({ email, name, phone, slug = null, account = null }) {
+  const customerId = await findOrCreateCustomer({ email, name, phone, slug, account });
+  const si = await stripe('/setup_intents', { method: 'POST', slug, account, body: {
+    customer: customerId, usage: 'off_session', 'payment_method_types[0]': 'card',
+  }});
+  return { clientSecret: si.client_secret, customerId };
+}
+
+// Save a card on file in a business's Stripe account: find/create the customer
+// by email, attach the payment method, and make it the default. Returns the
+// Stripe customer id. Used by the public Doms booking flow (and reusable by any
+// per-business flow). Throws with .status/.message on failure.
+export async function saveCardOnFile({ email, name, phone, paymentMethodId, slug = null, account = null }) {
+  if (!paymentMethodId) return { customerId: null };
+  const customerId = await findOrCreateCustomer({ email, name, phone, slug, account });
+  // Attach the payment method and make it the default. Only the ATTACH is
   // load-bearing: once it succeeds the card is saved and chargeable, so a
   // failure setting invoice_settings must not make the whole save read as
   // failed (callers would then discard a working pm id and alert the office

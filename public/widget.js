@@ -600,6 +600,11 @@
   // was "card number is incomplete" — people tapping Complete with a half-filled
   // card, especially on mobile) and show the error inline instead of an alert.
   let _cardComplete=false;
+  // Verified card save (confirmCardSetup): count bank rejections so we can
+  // offer a "book without a card" escape hatch after 2 — a blocked customer
+  // must always still be able to book (office gets alerted + collects at
+  // service), because losing the booking is worse than losing the card.
+  let _cardVerifyFails=0, _cardSkipped=false;
 
   // ─── State helpers ────────────────────────────────────────────────────────
   function getSec(k){ return serviceConfig?.sections.find(s=>s.stepKey===k); }
@@ -2425,7 +2430,7 @@
     // biggest checkout leak: people tap Complete with a half-filled card and hit
     // "card number is incomplete". Show the error inline, scroll to + focus the
     // field, and stop — no alert, no wasted Stripe round-trip, no double-book lock.
-    if(_stripe&&_stripeCard&&!_cardComplete){
+    if(_stripe&&_stripeCard&&!_cardComplete&&!_cardSkipped){
       const errEl=document.getElementById('stripe-card-errors');
       if(errEl&&!errEl.textContent) errEl.textContent='Please finish entering your card number, expiry date, and CVC.';
       const cardBox=document.getElementById('stripe-card-element');
@@ -2438,33 +2443,74 @@
     // Lock now — all validation passed, we're committing to a single booking attempt.
     isSubmitting=true;
 
-    // Tokenize card with Stripe
-    let stripePaymentMethodId=null;
-    if(_stripe&&_stripeCard){
+    // Save the card with Stripe. Preferred path: a server-issued SetupIntent
+    // confirmed right here, so the BANK checks the card while the customer can
+    // still fix a typo'd CVC or use a different card — instead of the save
+    // silently failing server-side after the booking already went through and
+    // the office finding out from an alert email (Caplan/Alleman, 2026-08-20).
+    // If the setup endpoint is unreachable or disabled, fall back to the old
+    // tokenize-only flow: card verification must never break checkout.
+    let stripePaymentMethodId=null, stripeCustomerId=null;
+    if(_stripe&&_stripeCard&&!_cardSkipped){
       const submitBtn=root.querySelector('#btn-submit');
       if(submitBtn){submitBtn.textContent='Processing…';submitBtn.disabled=true;}
-      const{paymentMethod,error}=await _stripe.createPaymentMethod({
-        type:'card',
-        card:_stripeCard,
-        billing_details:{
-          name:`${customer.first_name} ${customer.last_name}`.trim(),
-          email:customer.email,
-          phone:customer.phone,
-          address:{line1:customer.address,line2:customer.address_line2||undefined},
-        },
-      });
-      if(error){
-        isSubmitting=false; // no job created yet — let them fix the card and retry
-        if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
-        logEvent('booking_failed','customer',null,'card: '+error.message);
-        const errEl=document.getElementById('stripe-card-errors');
-        if(errEl) errEl.textContent=error.message;
-        const cardBox=document.getElementById('stripe-card-element');
-        if(cardBox&&cardBox.scrollIntoView) cardBox.scrollIntoView({behavior:'smooth',block:'center'});
-        try{_stripeCard.focus();}catch(e){}
-        return;
+      const billing={
+        name:`${customer.first_name} ${customer.last_name}`.trim(),
+        email:customer.email,
+        phone:customer.phone,
+        address:{line1:customer.address,line2:customer.address_line2||undefined},
+      };
+      let setup=null;
+      try{
+        const sr=await fetch(`${API_BASE}/book?action=card_setup`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({business:BUSINESS,email:customer.email,name:billing.name,phone:customer.phone})});
+        if(sr.ok){const sd=await sr.json();if(sd&&sd.client_secret)setup=sd;}
+      }catch(e){/* infra hiccup — tokenize-only fallback below */}
+      if(setup){
+        const r=await _stripe.confirmCardSetup(setup.client_secret,{payment_method:{card:_stripeCard,billing_details:billing}});
+        if(r.error){
+          isSubmitting=false; // no job created yet — let them fix the card and retry
+          if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
+          _cardVerifyFails++;
+          logEvent('booking_failed','customer',null,'card verify: '+r.error.message);
+          const errEl=document.getElementById('stripe-card-errors');
+          if(errEl) errEl.textContent=r.error.message;
+          const cardBox=document.getElementById('stripe-card-element');
+          if(cardBox&&cardBox.scrollIntoView) cardBox.scrollIntoView({behavior:'smooth',block:'center'});
+          try{_stripeCard.focus();}catch(e){}
+          // Second rejection: offer to book anyway (pay at service) so a
+          // customer whose card keeps failing never abandons the booking.
+          if(_cardVerifyFails>=2&&errEl&&!document.getElementById('ha-card-skip')){
+            const skip=document.createElement('button');
+            skip.id='ha-card-skip'; skip.type='button';
+            skip.textContent='Having card trouble? Book without a card — pay at time of service';
+            skip.style.cssText=`background:transparent;border:none;color:${T.text};font-size:13px;text-decoration:underline;cursor:pointer;padding:8px 0 0 0;font-family:inherit;display:block;`;
+            skip.addEventListener('click',()=>{
+              _cardSkipped=true;
+              logEvent('answer','card_verify:skipped_after_failures');
+              doSubmit(root);
+            });
+            errEl.parentNode.insertBefore(skip,errEl.nextSibling);
+          }
+          return;
+        }
+        stripePaymentMethodId=(r.setupIntent&&r.setupIntent.payment_method)||null;
+        stripeCustomerId=setup.customer_id||null;
+      }else{
+        const{paymentMethod,error}=await _stripe.createPaymentMethod({type:'card',card:_stripeCard,billing_details:billing});
+        if(error){
+          isSubmitting=false; // no job created yet — let them fix the card and retry
+          if(submitBtn){submitBtn.textContent='Complete My Booking ✓';submitBtn.disabled=false;}
+          logEvent('booking_failed','customer',null,'card: '+error.message);
+          const errEl=document.getElementById('stripe-card-errors');
+          if(errEl) errEl.textContent=error.message;
+          const cardBox=document.getElementById('stripe-card-element');
+          if(cardBox&&cardBox.scrollIntoView) cardBox.scrollIntoView({behavior:'smooth',block:'center'});
+          try{_stripeCard.focus();}catch(e){}
+          return;
+        }
+        stripePaymentMethodId=paymentMethod.id;
       }
-      stripePaymentMethodId=paymentMethod.id;
     }
 
     const multiTypes=new Set(['qty_multi','qty_match','multi_select']);
@@ -2520,6 +2566,8 @@
       selectedSlot, customer:{...customer,zip:enteredZip},
       city:loc.city, state:loc.state, postal_code:enteredZip,
       zbk_selections, tip:tipAmount, coupon:couponCode,payment_method_id:stripePaymentMethodId,
+      ...(stripeCustomerId&&{stripe_customer_id:stripeCustomerId}),
+      ...(_cardSkipped&&{card_skipped:true}),
       sms_consent:smsConsent,
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,

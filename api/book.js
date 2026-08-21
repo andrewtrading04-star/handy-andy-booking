@@ -4,7 +4,7 @@ import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { serviceClient } from './_lib/supabase.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
-import { saveCardOnFile, stripeConfigured } from './_lib/stripe.js';
+import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
@@ -108,6 +108,7 @@ const STRIPE_PK_ENV = {
   'mile-high':  'MILE_HIGH_STRIPE_PUBLISHABLE_KEY',
   austin:       'AUSTIN_STRIPE_PUBLISHABLE_KEY',
   precision:    'PRECISION_STRIPE_PUBLISHABLE_KEY',
+  tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_PUBLISHABLE_KEY',
 };
 function stripePublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
@@ -121,6 +122,38 @@ function stripePublicConfig(req, res) {
     publishable_key: process.env[envName] || null,
     configured,
   });
+}
+
+// Public: create a SetupIntent so the widget can VERIFY the card in-page
+// before booking — the bank actually checks the card while the customer is
+// still at checkout and can fix a typo'd CVC on the spot, instead of the
+// attach silently failing server-side after the booking already went through
+// (the Caplan/Alleman incidents, 2026-08-20). Returns only the client secret
+// and customer id — never any key material. Any failure returns
+// { disabled: true } so the widget falls back to the old tokenize-only flow:
+// verification must never be able to break checkout.
+async function cardSetupPublic(req, res) {
+  const b = req.body || {};
+  const business = (b.business || (req.query || {}).business || 'handy-andy').toString().trim();
+  if (!STRIPE_PK_ENV[business]) return res.status(400).json({ error: `Unknown business "${business}"` });
+  let configured = false;
+  try { configured = stripeConfigured({ account: business }); }
+  catch (e) { configured = false; }
+  if (!configured) return res.status(200).json({ disabled: true });
+  const email = (b.email || '').toString().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
+  try {
+    const r = await createCardSetupIntent({
+      email,
+      name: (b.name || '').toString().slice(0, 200),
+      phone: (b.phone || '').toString().slice(0, 40),
+      account: business,
+    });
+    return res.status(200).json({ client_secret: r.clientSecret, customer_id: r.customerId });
+  } catch (e) {
+    console.warn('[card-setup] failed, widget will fall back to tokenize-only:', e.message);
+    return res.status(200).json({ disabled: true });
+  }
 }
 
 // Public: whether a business's transactional email is wired up. Reports the
@@ -738,19 +771,41 @@ async function bookDoms(req, res) {
     if (!stripeConfigured('doms')) {
       cardNote = `Card captured (${b.payment_method_id}) but DOMS_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
     } else {
-      try {
-        const r = await saveCardOnFile({
-          email: customer.email,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone, paymentMethodId: b.payment_method_id, slug: 'doms',
-        });
-        stripeCustomerId = r.customerId;
-        paymentStatus = 'card_on_file';
-        cardNote = 'Card is on file (Doms Stripe).';
-      } catch (e) {
-        cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
+      // Widget-verified flow: the card was already bank-checked + attached via
+      // a SetupIntent during checkout (action=card_setup). Never take the
+      // client's word for it — confirm with Stripe that the pm really is
+      // attached to that customer before treating the card as on file.
+      if (b.stripe_customer_id) {
+        try {
+          const pm = await retrieveCard(b.payment_method_id, 'doms');
+          if (pm.customer && pm.customer === b.stripe_customer_id) {
+            stripeCustomerId = b.stripe_customer_id;
+            paymentStatus = 'card_on_file';
+            cardNote = 'Card verified & saved at checkout (Doms Stripe).';
+            await setDefaultPaymentMethod(stripeCustomerId, b.payment_method_id, 'doms');
+          }
+        } catch (e) { /* fall through to the attach below */ }
+      }
+      if (paymentStatus !== 'card_on_file') {
+        try {
+          const r = await saveCardOnFile({
+            email: customer.email,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone, paymentMethodId: b.payment_method_id, slug: 'doms',
+          });
+          stripeCustomerId = r.customerId;
+          paymentStatus = 'card_on_file';
+          cardNote = 'Card is on file (Doms Stripe).';
+        } catch (e) {
+          cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
+        }
       }
     }
+  } else if (b.card_skipped) {
+    // The widget's verified card step rejected their card twice and they took
+    // the "book without a card" escape hatch — the booking is real, but the
+    // office must know to collect payment at service.
+    cardNote = 'Customer booked WITHOUT a card after their card failed verification at checkout — collect payment at service.';
   }
 
   if (cardNote) console.log('[book-doms] card:', cardNote);
@@ -761,7 +816,8 @@ async function bookDoms(req, res) {
   // written into the booking's own internal notes so the office sees it the
   // moment they open the job, and a direct alert email so nobody has to
   // stumble onto it days later at time of service.
-  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file');
+  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file')
+    || !!(!b.payment_method_id && b.card_skipped);
 
   // ── Write the booking (creates customer, booking, line items, status event,
   // review token) and get the new id back.
@@ -1112,28 +1168,49 @@ async function bookNative(req, res, slug) {
   let stripeCustomerId = null, paymentStatus = 'unpaid', cardNote = '';
   if (b.payment_method_id) {
     if (!stripeConfigured({ account: slug })) {
-      cardNote = `Card captured (${b.payment_method_id}) but HANDY_ANDY_STRIPE_SECRET_KEY is not set — card was NOT saved on file.`;
+      cardNote = `Card captured (${b.payment_method_id}) but this business's Stripe secret key is not set — card was NOT saved on file.`;
     } else {
-      try {
-        const r = await saveCardOnFile({
-          email: customer.email,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone, paymentMethodId: b.payment_method_id, account: slug,
-        });
-        stripeCustomerId = r.customerId;
-        paymentStatus = 'card_on_file';
-        cardNote = `Card is on file (${DISPLAY.name} Stripe).`;
-      } catch (e) {
-        cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
+      // Widget-verified flow — same as bookDoms above: confirm with Stripe
+      // that the pm is really attached to the claimed customer before
+      // trusting the client-supplied stripe_customer_id.
+      if (b.stripe_customer_id) {
+        try {
+          const pm = await retrieveCard(b.payment_method_id, { account: slug });
+          if (pm.customer && pm.customer === b.stripe_customer_id) {
+            stripeCustomerId = b.stripe_customer_id;
+            paymentStatus = 'card_on_file';
+            cardNote = `Card verified & saved at checkout (${DISPLAY.name} Stripe).`;
+            await setDefaultPaymentMethod(stripeCustomerId, b.payment_method_id, { account: slug });
+          }
+        } catch (e) { /* fall through to the attach below */ }
+      }
+      if (paymentStatus !== 'card_on_file') {
+        try {
+          const r = await saveCardOnFile({
+            email: customer.email,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone, paymentMethodId: b.payment_method_id, account: slug,
+          });
+          stripeCustomerId = r.customerId;
+          paymentStatus = 'card_on_file';
+          cardNote = `Card is on file (${DISPLAY.name} Stripe).`;
+        } catch (e) {
+          cardNote = `Card capture failed: ${e.message} (pm ${b.payment_method_id} was never attached)`;
+        }
       }
     }
+  } else if (b.card_skipped) {
+    // Same escape hatch as bookDoms: booked without a card after verification
+    // rejected it — office must collect at service.
+    cardNote = 'Customer booked WITHOUT a card after their card failed verification at checkout — collect payment at service.';
   }
 
   const city = b.city || area.name || null;
   const state = b.state || area.state || null;
   if (cardNote) console.log('[book-ha] card:', cardNote);
   // Same silent-failure class as bookDoms above — see the comment there.
-  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file');
+  const cardSaveFailed = !!(b.payment_method_id && paymentStatus !== 'card_on_file')
+    || !!(!b.payment_method_id && b.card_skipped);
 
   // ── Write the booking (customer, booking, line items, status event, review token).
   let result = {};
@@ -1446,6 +1523,7 @@ export default async function handler(req, res) {
   // Live multi-TV discount numbers for the widget, see multiTvDiscountPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'multi_tv_discount') return multiTvDiscountPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
+  if (req.method === 'POST' && ((req.query || {}).action === 'card_setup' || (req.body || {}).action === 'card_setup')) return cardSetupPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.
   if (req.method === 'GET' && (req.query || {}).action === 'otw_info') return otwInfo(req, res);
