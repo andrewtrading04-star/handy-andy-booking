@@ -483,9 +483,68 @@ async function handleVoiceRecording(req, res) {
   return xml(res, '<Response><Say voice="Polly.Joanna">Thanks. We will call you right back.</Say><Hangup/></Response>');
 }
 
+// POST /api/analytics?action=sms_inbound — someone texted a tracking number.
+// Same shape as handleVoiceInbound: look the number up, log it, then relay the
+// text content to whoever the line forwards to (as a plain SMS, not a call) so
+// a customer text doesn't just vanish into a number nobody reads. Replies to
+// the customer with a short auto-ack so they know a human is coming.
+async function handleSmsInbound(req, res) {
+  const params = await twilioVoiceParams(req, res, 'sms_inbound');
+  if (!params) return;
+  const from = tenDigits(params.From);
+  const to = tenDigits(params.To);
+  const body = (params.Body || '').toString().trim();
+  let line = null;
+  try {
+    const db = serviceClient();
+    const { data } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug, forward_to, active')
+      .eq('phone', to).maybeSingle();
+    line = data && data.active ? data : null;
+
+    let business_id = null;
+    if (line && line.business_slug) {
+      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
+      business_id = biz?.id || null;
+    }
+    let customer_id = null;
+    if (from) {
+      const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
+      customer_id = (c || [])[0]?.id || null;
+    }
+    await db.from('calls').insert({
+      business_id,
+      source: 'twilio',
+      kind: 'sms',
+      caller_phone: from || 'unknown',
+      grasshopper_number: to || null,
+      tracking_label: line?.label || null,
+      transcript: body || null,
+      occurred_at: new Date().toISOString(),
+      customer_id,
+      status: 'new',
+      warnings: line ? null : ['Number is not in tracking_numbers - text still relayed if possible'],
+    });
+  } catch (e) {
+    console.error('[sms_inbound] log failed:', e.message);
+  }
+
+  if (line && line.forward_to && body) {
+    try {
+      const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
+      await sendSMS(line.forward_to, `Text${line.label ? ` on ${line.label}` : ''} from ${pretty}: ${body}`);
+    } catch (e) {
+      console.error('[sms_inbound] relay failed:', e.message);
+    }
+  }
+
+  return xml(res, '<Response><Message>Thanks for reaching out! We got your text and will call you back shortly.</Message></Response>');
+}
+
 export default async function handler(req, res) {
   const action = (req.query.action || '').toString();
   if (req.method === 'POST' && action === 'sms_status') return handleTwilioStatus(req, res);
+  if (req.method === 'POST' && action === 'sms_inbound') return handleSmsInbound(req, res);
   if (req.method === 'POST' && action === 'email_webhook') return handleResendWebhook(req, res);
   if (req.method === 'POST' && action === 'voice_inbound') return handleVoiceInbound(req, res);
   if (req.method === 'POST' && action === 'voice_whisper') return handleVoiceWhisper(req, res);
