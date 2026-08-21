@@ -4186,7 +4186,7 @@ async function bookingUpdate(req, res, db, auth, body) {
             supplier = sup?.bracket_supplied_by || sup?.technician_id || existing.technician_id || null;
           } catch (_) { /* pre-0035: fall back to assigned tech */ }
           if (supplier) {
-            await adjustBracketInventory(db, biz.id, supplier, need, -1);
+            await adjustBracketInventory(db, biz.id, supplier, need, -1, id, 'job completion (office)');
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             await db.from('bookings').update({
               metadata: { ...(cur?.metadata || existing.metadata || {}), bracket_deducted_at: now },
@@ -11676,6 +11676,29 @@ async function bracketUpdate(req, res, db, auth, body) {
     .eq('technician_id', techId).eq('business_id', bizId);
   if (e1) throw e1;
 
+  // Log manual corrections too — a 'set' or 'adjust' changes the documented
+  // count with no bracket physically moving, and without a record here those
+  // edits are the unexplainable gaps the next time a tech's real count doesn't
+  // match (TK, 2026-08-21). used-columns stay 0: it's a correction, not usage;
+  // the notes carry the before→after. Best-effort, never blocks the update.
+  if (action === 'set' || action === 'adjust') {
+    try {
+      const changes = [];
+      if ((inv.flat_qty || 0) !== flat) changes.push(`flat ${inv.flat_qty || 0}→${flat}`);
+      if ((inv.tilting_qty || 0) !== tilting) changes.push(`tilting ${inv.tilting_qty || 0}→${tilting}`);
+      if ((inv.full_motion_qty || 0) !== fullMotion) changes.push(`full_motion ${inv.full_motion_qty || 0}→${fullMotion}`);
+      if (wantsWirePlate && hasWirePlateCol && (inv.wire_plate_qty || 0) !== wirePlate) changes.push(`wire_plate ${inv.wire_plate_qty || 0}→${wirePlate}`);
+      if (wantsAppleTv && hasAppleTvCol && (inv.appletv_bracket_qty || 0) !== appleTv) changes.push(`appletv ${inv.appletv_bracket_qty || 0}→${appleTv}`);
+      if (changes.length) {
+        await db.from('bracket_usage_logs').insert({
+          business_id: bizId, booking_id: body.booking_id || null, technician_id: techId,
+          logged_by_kind: 'admin',
+          notes: `manual ${action} by office: ${changes.join(', ')}${body.notes ? ` — ${body.notes}` : ''}`,
+        });
+      }
+    } catch (e) { console.error('[bracket] manual-change log failed:', e.message); }
+  }
+
   // Log usage if applicable
   if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta || wantsWirePlate || wantsAppleTv)) {
     const log = {
@@ -11766,7 +11789,7 @@ function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_mot
 // home business_id, so a cross-hire job deducts from the tech's actual stock
 // instead of creating a phantom always-zero row under the other company (the
 // bug that made TK show a false "reorder" alert under Handy Andy's table).
-async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
+async function adjustBracketInventory(db, businessId, techId, qtys, sign, bookingId = null, reason = '') {
   if (!techId || bracketTotal(qtys) <= 0) return;
   const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
   const homeBizId = techRow?.business_id || businessId;
@@ -11781,6 +11804,26 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
   };
   if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
   else await db.from('bracket_inventory').insert({ business_id: homeBizId, technician_id: techId, ...next });
+  // Ledger — same as api/tech.js's copy (keep in sync): every automatic move
+  // writes a usage-log row so drift is reconstructable (TK's counts,
+  // 2026-08-21: no history existed, so WHY the number drifted was unprovable),
+  // and a clamped decrement (count already too low) is recorded instead of
+  // silently vanishing. Best-effort; never blocks the inventory write.
+  try {
+    const clamped = [];
+    if (sign < 0) {
+      if ((qtys.flat || 0) > 0        && (Number(cur.flat_qty) || 0)        < (qtys.flat || 0))        clamped.push('flat');
+      if ((qtys.tilting || 0) > 0     && (Number(cur.tilting_qty) || 0)     < (qtys.tilting || 0))     clamped.push('tilting');
+      if ((qtys.full_motion || 0) > 0 && (Number(cur.full_motion_qty) || 0) < (qtys.full_motion || 0)) clamped.push('full_motion');
+    }
+    await db.from('bracket_usage_logs').insert({
+      business_id: homeBizId, booking_id: bookingId, technician_id: techId,
+      flat_used: qtys.flat || 0, tilting_used: qtys.tilting || 0, full_motion_used: qtys.full_motion || 0,
+      logged_by_kind: 'system',
+      notes: (sign < 0 ? 'auto-deduct' : 'restore') + (reason ? ` (${reason})` : '')
+        + (clamped.length ? ` — WARNING: ${clamped.join('/')} already below the deducted qty, decrement clamped at 0 (documented count was too low before this job)` : ''),
+    });
+  } catch (e) { console.error('[bracket] usage-log write failed:', e.message); }
 }
 
 // Subtract wire concealment plates from a tech's inventory (floor 0) and log it.

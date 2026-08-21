@@ -860,7 +860,7 @@ async function status(req, res, db, auth, body) {
             .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
           supplier = sup?.bracket_supplied_by || sup?.technician_id || auth.tech_id;
         } catch (_) { /* pre-0035: fall back to the completing tech */ }
-        await adjustBracketInventory(db, jobBizId, supplier, need, -1);
+        await adjustBracketInventory(db, jobBizId, supplier, need, -1, id, 'job completion');
         // Re-read metadata so we preserve the wire-plate stamp set just above.
         const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
         await db.from('bookings').update({
@@ -1106,8 +1106,8 @@ async function jobBracketSetSupplier(req, res, db, auth, body) {
   // old supplier to the new one (give it back, take from the new).
   const { data: metaRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
   if (metaRow?.metadata?.bracket_deducted_at) {
-    if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1);
-    await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1);
+    if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1, id, 'supplier change: returned to previous supplier');
+    await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1, id, 'supplier change: new supplier charged');
   }
 
   const { error: upErr } = await db.from('bookings')
@@ -1648,7 +1648,7 @@ function bracketLabel(q) {
 // deducts from their actual stock instead of creating a phantom always-zero
 // row under the other company (the bug that made TK show a false "reorder"
 // alert under Handy Andy's inventory table).
-async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
+async function adjustBracketInventory(db, businessId, techId, qtys, sign, bookingId = null, reason = '') {
   const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
   const homeBizId = techRow?.business_id || businessId;
   const { data: inv } = await db.from('bracket_inventory')
@@ -1662,6 +1662,30 @@ async function adjustBracketInventory(db, businessId, techId, qtys, sign) {
   };
   if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
   else await db.from('bracket_inventory').insert({ business_id: homeBizId, technician_id: techId, ...next });
+  // Ledger: every automatic move writes a usage-log row so a count that looks
+  // wrong later can be reconstructed (TK's counts, 2026-08-21: deductions and
+  // manual sets left no history, so WHY the number drifted was unprovable).
+  // The clamp warning matters most: Math.max(0,...) above silently swallows a
+  // decrement when the documented count is already too low — that's drift
+  // compounding invisibly unless it's recorded here. Best-effort; never blocks
+  // the inventory write, which already happened.
+  try {
+    if ((qtys.flat || 0) + (qtys.tilting || 0) + (qtys.full_motion || 0) > 0) {
+      const clamped = [];
+      if (sign < 0) {
+        if ((qtys.flat || 0) > 0        && (Number(cur.flat_qty) || 0)        < (qtys.flat || 0))        clamped.push('flat');
+        if ((qtys.tilting || 0) > 0     && (Number(cur.tilting_qty) || 0)     < (qtys.tilting || 0))     clamped.push('tilting');
+        if ((qtys.full_motion || 0) > 0 && (Number(cur.full_motion_qty) || 0) < (qtys.full_motion || 0)) clamped.push('full_motion');
+      }
+      await db.from('bracket_usage_logs').insert({
+        business_id: homeBizId, booking_id: bookingId, technician_id: techId,
+        flat_used: qtys.flat || 0, tilting_used: qtys.tilting || 0, full_motion_used: qtys.full_motion || 0,
+        logged_by_kind: 'system',
+        notes: (sign < 0 ? 'auto-deduct' : 'restore') + (reason ? ` (${reason})` : '')
+          + (clamped.length ? ` — WARNING: ${clamped.join('/')} already below the deducted qty, decrement clamped at 0 (documented count was too low before this job)` : ''),
+      });
+    }
+  } catch (e) { console.error('[bracket] usage-log write failed:', e.message); }
 }
 
 // Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
