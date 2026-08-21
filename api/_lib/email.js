@@ -56,7 +56,7 @@ export function emailConfig(slug) {
   if (slug === 'houstontvinstallation') {
     return {
       apiKey: process.env.HOUSTONTVINSTALLATION_RESEND_API_KEY,
-      from:   process.env.HOUSTONTVINSTALLATION_EMAIL_FROM || 'contact@houstontvisntallation.com',
+      from:   process.env.HOUSTONTVINSTALLATION_EMAIL_FROM || 'contact@houstontvinstallation.com',
     };
   }
   if (slug === 'tvhanginghouston') {
@@ -98,7 +98,7 @@ export const EMAIL_BRANDS = {
   'precision':  { slug: 'precision',  name: 'Precision TV Installation',     accent: '#0288D1', website: 'precisiontvinstallation.com' },
   'tvmountingdenver': { slug: 'tvmountingdenver', name: 'TV Mounting Denver', accent: '#2F6BFF', website: 'tvmountingdenver.com' },
   'houstonmounting':       { slug: 'houstonmounting',       name: 'Houston Mounting',         accent: '#0288D1', website: 'houstonmounting.com' },
-  'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvisntallation.com' },
+  'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvinstallation.com' },
   'tvhanginghouston':      { slug: 'tvhanginghouston',      name: 'TV Hanging Houston',       accent: '#0288D1', website: 'tvhanginghouston.com' },
   'htvmounting':           { slug: 'htvmounting',           name: 'HTV Mounting',             accent: '#0288D1', website: 'htvmounting.com' },
 };

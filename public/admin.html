@@ -5836,7 +5836,18 @@ function launchEffective(b, key){
   const auto = launchAutoValue(b, key);
   return auto === null ? false : auto;
 }
+// Lead-gen-only businesses with no physical presence get no Google Business
+// Profile — GBP requires a real service address/phone Google will verify, and
+// these brands deliberately have neither (booking-only funnels that borrow an
+// existing tech's roster). Hard-excluded from the checklist and the score
+// denominator rather than left as an unticked box, or they'd sit permanently
+// "In progress" for an item that will never legitimately get done.
+const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting']);
+function launchItemsFor(b, items){
+  return LAUNCH_NO_GBP_SLUGS.has(b.slug) ? items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified') : items;
+}
 function launchScoreOf(b, items){
+  items = launchItemsFor(b, items);
   const hard = [
     launchEffective(b,'stripe_keys'),
     launchEffective(b,'email_keys'),
@@ -5852,6 +5863,7 @@ function launchScoreOf(b, items){
 // a booking without these), then the site itself, then everything the owner
 // tracks by hand, in the order a new business would actually knock them out.
 function launchNextAction(b, items){
+  items = launchItemsFor(b, items);
   if(!b.stripe.wired) return `Wire "${b.slug}" into ACCOUNT_KEY_ENV (api/_lib/stripe.js)`;
   if(!launchEffective(b,'stripe_keys')) return 'Add Stripe keys';
   if(!b.email.wired) return `Wire "${b.slug}" into EMAIL_BRANDS (api/_lib/email.js)`;
@@ -5937,6 +5949,7 @@ function launchAutoNote(b, key){
   return null;
 }
 function launchDetailHtml(b, items){
+  items = launchItemsFor(b, items);
   const checklist=items.map(it=>{
     const isAuto = !!LAUNCH_AUTO_OF[it.key];
     const checked = isAuto ? launchEffective(b, it.key) : !!b.checklist[it.key];
