@@ -5849,16 +5849,24 @@ function launchEffective(b, key){
 }
 // No-GBP businesses, for two different reasons that land on the same
 // exclusion: houstonmounting/houstontvinstallation/tvhanginghouston/
-// htvmounting/tvmountingdenver are lead-gen-only funnels with no physical
-// presence (GBP requires a real service address/phone Google will verify,
-// and these brands deliberately have neither). mile-high/austin DO have a
+// htvmounting/tvmountingdenver and the Austin quad (austinmountingpros/
+// atxtvmount/atxmountpros/austintvinstall) are lead-gen-only funnels with no
+// physical presence (GBP requires a real service address/phone Google will
+// verify, and these brands deliberately have neither). mile-high/austin DO have a
 // real GBP, it's just tracked outside this tool. Either way the item is
 // hard-excluded from the checklist and the score denominator rather than
 // left as an unticked box, or they'd sit permanently "In progress" for an
 // item that will never legitimately get done through here.
-const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','mile-high','austin']);
+const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','mile-high','austin','austinmountingpros','atxtvmount','atxmountpros','austintvinstall']);
+// Same idea for Yelp: the Austin lead-gen quad is not getting Yelp pages, so
+// the item would sit permanently unticked and hold them below "Ready to
+// compete" for something nobody intends to do. Excluded from the score
+// denominator too, exactly like GBP above.
+const LAUNCH_NO_YELP_SLUGS = new Set(['austinmountingpros','atxtvmount','atxmountpros','austintvinstall']);
 function launchItemsFor(b, items){
-  return LAUNCH_NO_GBP_SLUGS.has(b.slug) ? items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified') : items;
+  if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
+  if(LAUNCH_NO_YELP_SLUGS.has(b.slug)) items = items.filter(it => it.key!=='yelp_page');
+  return items;
 }
 function launchScoreOf(b, items){
   items = launchItemsFor(b, items);
