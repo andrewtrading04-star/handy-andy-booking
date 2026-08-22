@@ -5057,8 +5057,19 @@ function anaDrawCharts(d){
 // dashboard reads. We fetch those endpoints live per current business — no
 // import — and render with the business's brand color (orange HA / blue Doms).
 const WEB_ANA_ORIGIN = {
+  // The two original brands each have their own backend + Supabase table,
+  // because both sites are LandingSite-hosted and predate the shared stack.
   'handy-andy': 'https://backend-beryl-seven-95.vercel.app',
   'doms':       'https://doms-backend.vercel.app',
+  // The six Next.js marketing sites all share ONE backend (one Vercel project,
+  // one `web_events_sites` table) and are separated by a /s/<slug> path prefix,
+  // rather than standing up a project + table per brand.
+  'htvmounting':           'https://sites-backend-tau.vercel.app/s/htvmounting',
+  'houstonmounting':       'https://sites-backend-tau.vercel.app/s/houstonmounting',
+  'tvhanginghouston':      'https://sites-backend-tau.vercel.app/s/tvhanginghouston',
+  'houstontvinstallation': 'https://sites-backend-tau.vercel.app/s/houstontvinstallation',
+  'austin':                'https://sites-backend-tau.vercel.app/s/austin',
+  'tvmountingdenver':      'https://sites-backend-tau.vercel.app/s/tvmountingdenver',
 };
 let webDays='today', webLoading=false, webCharts={}, webTab='overview', webLastData=null;
 const WEB_TABS=[['overview','Overview'],['pages','Pages'],['sources','Sources'],['seo','SEO']];
