@@ -7805,9 +7805,19 @@ const CALL_TABS=[
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
 ];
+// Handyman Analytics only makes sense for businesses that actually book
+// handyman work. Handy Andy and Dom's both run a `<slug>-handyman` widget
+// (see WIDGETS in api/log-event.js) and Austin is literally named "TV
+// Mounting & Handyman Austin" (see NATIVE_BUSINESS in
+// api/_lib/native-businesses.js). The other native slugs (mile-high,
+// precision, tvmountingdenver, houstonmounting, houstontvinstallation,
+// tvhanginghouston, htvmounting) are TV-mounting-only lead-gen micro-brands
+// with no handyman offering at all, so the tab is just an empty/zero screen
+// for them -- hidden rather than shown-but-empty.
+const HANDYMAN_SLUGS = new Set(['handy-andy', 'doms', 'austin']);
 const ANALYTICS_TABS=[
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
-  { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner', render:()=>renderHandymanAnalytics() },
+  { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
 ];
 let callHubTab='reviewcalls', analyticsHubTab='bookings';
