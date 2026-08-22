@@ -54,12 +54,23 @@ const LEGACY_SLUG_ACCOUNT = {
 function selToAccount(sel) {
   const s = typeof sel === 'string' ? { slug: sel } : (sel || {});
   if (s.account && ACCOUNT_KEY_ENV[s.account]) return s.account;
+  // Many callers pass a business SLUG as `account` (e.g. cardSetupPublic's
+  // `{ account: business }`, and bookings stamped stripe_account=<slug>). A
+  // slug that shares another business's account (the Houston lead-gen quad)
+  // only exists in LEGACY_SLUG_ACCOUNT, so map it here too — before this,
+  // `{ account: 'houstontvinstallation' }` fell through to 'global' (Handy
+  // Andy's live account) and checkout card-verify died with "No such
+  // setupintent": the SetupIntent landed on HA's account while the widget
+  // held houstonmounting's publishable key.
+  if (s.account && LEGACY_SLUG_ACCOUNT[s.account]) return LEGACY_SLUG_ACCOUNT[s.account];
+  // A slug or account we don't recognize must NEVER silently fall through to
+  // 'global' — that is Handy Andy's live Stripe account, so a new business
+  // added without a mapping here would quietly save and charge real cards in
+  // the wrong company's account. Fail loudly instead. (No selector at all
+  // still means the legacy Zenbooker path, which has always used the global
+  // account.)
+  if (s.account) throw new Error(`No Stripe account mapped for "${s.account}" — add it to ACCOUNT_KEY_ENV/LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js`);
   if (s.slug && LEGACY_SLUG_ACCOUNT[s.slug]) return LEGACY_SLUG_ACCOUNT[s.slug];
-  // A slug we don't recognize must NEVER silently fall through to 'global' —
-  // that is Handy Andy's live Stripe account, so a new business added without a
-  // mapping here would quietly save and charge real cards in the wrong
-  // company's account. Fail loudly instead. (No slug at all still means the
-  // legacy Zenbooker path, which has always used the global account.)
   if (s.slug) throw new Error(`No Stripe account mapped for business "${s.slug}" — add it to ACCOUNT_KEY_ENV/LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js`);
   return 'global';
 }
