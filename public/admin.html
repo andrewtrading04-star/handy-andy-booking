@@ -7790,7 +7790,7 @@ const AUDIT_LABELS={
 // navMyCallPerf below), so Review Calls is the only thing left in her Calls
 // hub, and she gets it with no tab row (a row with one tab is noise).
 const CALL_TABS=[
-  { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>renderReviewCalls() },
+  { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
 ];
@@ -8610,6 +8610,130 @@ setInterval(()=>{
   else refreshCallsBadge();
 }, 20000);
 
+// ── Review Call Log (owner) ──────────────────────────────────────────────────
+// The owner is not the one dialing, so the queue is the wrong screen for him.
+// This answers the only questions he has: were the calls made, by whom, how
+// did they go, and what did customers say. Pulled from the same review_call_*
+// columns the queue writes, so nothing here can drift from what Joey logged.
+let _rcrDays=7, _rcOwnerQueue=false, _rcrFilter='all';
+const RCR_STATUS={
+  promised_review:{ label:'Went great',     cls:'green' },
+  called:         { label:'Spoke',          cls:'green' },
+  reviewed:       { label:'Left a review',  cls:'green' },
+  declined:       { label:'No thanks',      cls:'gray'  },
+  complaint:      { label:'Complaint',      cls:'red'   },
+  voicemail:      { label:'No answer',      cls:'amber' },
+  callback:       { label:'Call back',      cls:'amber' },
+  do_not_contact: { label:'Do not contact', cls:'gray'  },
+};
+function rcrWhen(iso){
+  if(!iso) return '';
+  try{ return new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; }
+}
+async function renderReviewCallReport(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading call log…</div></div>';
+  let d;
+  try{ d=await api('review_call_report',{ params:{ days:_rcrDays }}); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  const sm=d.summary||{}, calls=d.calls||[], people=d.by_person||[], daily=d.daily||[], tags=d.tags||[];
+  const pct=(a,b)=>b?Math.round((a/b)*100)+'%':'n/a';
+  const tile=(label,value,sub,color,alert)=>`
+    <div style="background:${alert?'#fff7f7':'#fff'};border:1px solid ${alert?'#f3c2c2':'var(--line)'};border-radius:12px;padding:13px 14px;text-align:center;">
+      <div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);">${esc(label)}</div>
+      <div style="font-size:26px;font-weight:800;line-height:1.15;margin-top:2px;${color?`color:${color};`:''}">${esc(value)}</div>
+      <div style="font-size:11.5px;color:var(--mute);">${esc(sub||'')}</div>
+    </div>`;
+  const seg=(v,l)=>`<button class="rc-seg-btn${_rcrDays===v?' on':''}" data-rcrdays="${v}">${l}</button>`;
+
+  // Headline: the second tile is the one that says whether the job is being done.
+  const backlog=d.backlog||0;
+  const tiles=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px;">
+    ${tile('Calls logged', String(sm.logged||0), `last ${d.days} days`)}
+    ${tile('Still not called', String(backlog), 'jobs from the last 7 days', backlog>0?'#b91c1c':'#15803d', backlog>0)}
+    ${tile('Reached', String(sm.reached||0), `${sm.voicemail||0} no answer`)}
+    ${tile('Went well', pct(sm.good,sm.reached), `${sm.good||0} of ${sm.reached||0} reached`, '#15803d')}
+    ${tile('Complaints', String(sm.complaints||0), 'need follow-up', sm.complaints?'#b91c1c':undefined, !!sm.complaints)}
+    ${tile('Review asked', String(sm.promised||0), 'link sent after the call')}
+  </div>`;
+
+  // Who made the calls.
+  const peopleRows=people.map(p=>`<tr>
+      <td style="padding:9px 8px;font-weight:700;">${esc(p.name)}</td>
+      <td style="padding:9px 8px;text-align:center;">${p.logged}</td>
+      <td style="padding:9px 8px;text-align:center;">${p.reached}</td>
+      <td style="padding:9px 8px;text-align:center;color:#15803d;font-weight:700;">${pct(p.good,p.reached)}</td>
+      <td style="padding:9px 8px;text-align:center;color:${p.complaints?'#b91c1c':'var(--mute)'};">${p.complaints}</td>
+      <td style="padding:9px 8px;color:var(--mute);white-space:nowrap;">${esc(rcrWhen(p.last_at))}</td>
+    </tr>`).join('') || `<tr><td colspan="6" style="padding:18px;text-align:center;color:var(--mute);">Nobody has logged a review call in this range.</td></tr>`;
+  const peopleTable=`<div class="rc-count">Who made the calls</div>
+    <div style="overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:18px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="color:var(--mute);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);">
+        <th style="padding:9px 8px;text-align:left;">Person</th><th style="padding:9px 8px;">Logged</th><th style="padding:9px 8px;">Reached</th><th style="padding:9px 8px;">Went well</th><th style="padding:9px 8px;">Complaints</th><th style="padding:9px 8px;text-align:left;">Last call</th>
+      </tr></thead><tbody>${peopleRows}</tbody></table></div>`;
+
+  // Day by day, so a skipped day is visible as an empty bar.
+  const top=Math.max(1,...daily.map(x=>x.logged||0));
+  const dayRows=daily.map(x=>{
+    const w=Math.round(((x.logged||0)/top)*100), rw=x.logged?Math.round((x.reached/x.logged)*100):0;
+    return `<div style="display:flex;align-items:center;gap:10px;margin:5px 0;font-size:12.5px;">
+      <div style="width:96px;color:var(--mute);white-space:nowrap;">${esc(x.label)}</div>
+      <div style="flex:1;height:14px;background:var(--line2);border-radius:7px;overflow:hidden;"><div style="width:${w}%;height:100%;background:#cbd5e1;"><div style="width:${rw}%;height:100%;background:#60a5fa;"></div></div></div>
+      <div style="width:140px;text-align:right;white-space:nowrap;">${x.logged?`<b>${x.reached}</b> reached / ${x.logged}${x.complaints?` · <span style="color:#b91c1c;">${x.complaints} ⚠</span>`:''}`:'<span style="color:var(--mute);">no calls</span>'}</div>
+    </div>`;
+  }).join('');
+  const dayBlock=`<div class="rc-count">Day by day</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;">${dayRows}
+      <div style="font-size:11.5px;color:var(--mute);margin-top:8px;"><span style="display:inline-block;width:10px;height:10px;background:#60a5fa;border-radius:2px;"></span> reached &nbsp;<span style="display:inline-block;width:10px;height:10px;background:#cbd5e1;border-radius:2px;"></span> logged</div>
+    </div>`;
+
+  // What customers complained about, counted.
+  const tagBlock=tags.length?`<div class="rc-count">What went wrong, by count</div>
+    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px;">${tags.map(t=>`<span class="rc-badge red" style="font-size:12.5px;padding:6px 11px;">${esc(t.tag)} <b>${t.count}</b></span>`).join('')}</div>`:'';
+
+  // Every call, with the note. Filterable so complaints can be read on their own.
+  const filt=(v,l)=>`<button class="rc-seg-btn${_rcrFilter===v?' on':''}" data-rcrfilter="${v}">${l}</button>`;
+  const shown=calls.filter(c=>_rcrFilter==='all'||(_rcrFilter==='complaint'?c.status==='complaint':_rcrFilter==='reached'?(c.status!=='voicemail'&&c.status!=='callback'):c.status===_rcrFilter));
+  const callRows=shown.map(c=>{
+    const st=RCR_STATUS[c.status]||{label:c.status,cls:'gray'};
+    return `<div class="rc-card" style="align-items:flex-start;">
+      <div class="rc-main">
+        <div class="rc-name">${esc(c.customer_name)} <span class="rc-biz ${c.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(c.business_slug))}</span> <span class="rc-badge ${st.cls}">${esc(st.label)}</span>${c.reviewed?' <span class="rc-badge green">✅ review in</span>':''}</div>
+        <div class="rc-meta">${esc(c.service_name)} · ${esc(c.technician_name)} · job ${esc(rcRel(c.job_at))}${c.phone?` · ${esc(c.phone)}`:''}</div>
+        ${c.tags.length?`<div class="rc-badges">${c.tags.map(t=>`<span class="rc-badge red">${esc(t)}</span>`).join('')}</div>`:''}
+        ${c.notes?`<div class="rc-note">“${esc(c.notes)}”</div>`:''}
+      </div>
+      <div style="text-align:right;font-size:12.5px;color:var(--mute);min-width:150px;">
+        <div style="font-weight:700;color:var(--ink-2);">${esc(c.by)}</div>
+        <div>${esc(rcrWhen(c.at))}</div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">No calls match this filter.</div>';
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head">
+      <div><h2 class="rc-title">📞 Review Call Log</h2>
+        <div class="rc-sub">Every review call Joey logged, what the customer said, and whether anyone is being missed. Pulled straight from what she records on each card.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <div class="rc-seg">${seg(7,'7 days')}${seg(14,'14 days')}${seg(30,'30 days')}</div>
+        <button class="rc-btn ghost" data-rcr-queue="1">Open Joey's queue</button>
+      </div>
+    </div>
+    ${tiles}
+    ${peopleTable}
+    ${dayBlock}
+    ${tagBlock}
+    <div class="rc-head" style="margin-bottom:10px;"><div class="rc-count" style="margin:0;">All calls <span style="font-weight:400;color:var(--mute);">(${shown.length})</span></div>
+      <div class="rc-seg">${filt('all','All')}${filt('reached','Reached')}${filt('complaint','Complaints')}${filt('voicemail','No answer')}</div></div>
+    ${callRows}
+  </div>`;
+  view.querySelectorAll('[data-rcrdays]').forEach(b=>b.addEventListener('click',()=>{ _rcrDays=+b.dataset.rcrdays; renderCallHub(); }));
+  view.querySelectorAll('[data-rcrfilter]').forEach(b=>b.addEventListener('click',()=>{ _rcrFilter=b.dataset.rcrfilter; renderCallHub(); }));
+  view.querySelectorAll('[data-rcr-queue]').forEach(b=>b.addEventListener('click',()=>{ _rcOwnerQueue=true; renderCallHub(); }));
+}
+
 async function renderReviewCalls(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
@@ -8656,7 +8780,7 @@ function paintReviewCalls(){
       <div><h2 class="rc-title">📞 Review Calls</h2>
         <div class="rc-sub">Customers from <b>both companies</b> who finished a job and haven't left us a review yet (Google <i>or</i> a CRM star rating). Call, thank them, invite a review — anyone who rates us drops off automatically.</div>
       </div>
-      ${rangeControl}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${role==='owner'?`<button class="rc-btn ghost" data-rc-backlog="1">Back to call log</button>`:''}${rangeControl}</div>
     </div>
     <div class="rc-seg" style="margin-bottom:14px;">
       ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('declined','No thanks')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
@@ -8678,6 +8802,7 @@ function paintReviewCalls(){
     <div id="rcList">${cards}</div>
   </div>`;
   view.querySelectorAll('[data-rcdays]').forEach(b=>b.addEventListener('click',()=>{ _rcDays=+b.dataset.rcdays; renderReviewCalls(); }));
+  view.querySelectorAll('[data-rc-backlog]').forEach(b=>b.addEventListener('click',()=>{ _rcOwnerQueue=false; renderCallHub(); }));
   view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));
   view.querySelectorAll('[data-rcweek]').forEach(b=>b.addEventListener('click',()=>{ _rcWeekOffset=Math.max(-520,Math.min(0,_rcWeekOffset+parseInt(b.dataset.rcweek))); renderReviewCalls(); }));
   view.querySelectorAll('[data-rc-act]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId, b.dataset.rcAct, b.dataset.rcBiz, b.dataset.rcChannel)));

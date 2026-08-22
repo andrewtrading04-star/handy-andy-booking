@@ -400,6 +400,7 @@ export default async function handler(req, res) {
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
+      case 'review_call_report': return await reviewCallReport(req, res, db, auth);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
       case 'google_reviews':       return await googleReviews(req, res, db, auth);
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
@@ -7398,6 +7399,103 @@ async function reviewCalls(req, res, db, auth) {
       called: out.filter(x => x.call_status).length,
     },
     today_stats: await rcTodayStats(db, (bizs || []).map(b => b.id)),
+  });
+}
+
+// Owner's view of the review-call program: what Joey actually logged, not the
+// queue she works from. Reads the same review_call_* columns the queue writes,
+// rolled up by day, by person, by outcome and by complaint tag, plus the full
+// list of calls so the owner can read every note. 'Backlog' is how many
+// customers from the last 7 days still have no outcome at all, which is the
+// one number that says whether the calls are being made.
+async function reviewCallReport(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const days = Math.max(1, Math.min(Number(req.query.days) || 7, 90));
+  const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+  const bizIds = (bizs || []).map(b => b.id);
+  const bizById = new Map((bizs || []).map(b => [b.id, b]));
+  const winStart = localDayStartUTC(RC_TZ, -(days - 1));   // today counts as day 1
+  const winEnd = localDayStartUTC(RC_TZ, 1);
+  const sel = `id, business_id, scheduled_at, review_call_status, review_call_at, review_call_by, review_call_notes, review_rating, reviewed_at,
+    customer:customers ( name, phone ),
+    technician:technicians!technician_id ( name ),
+    service:services ( name )`;
+  const run = (extra) => db.from('bookings').select(sel + extra)
+    .in('business_id', bizIds)
+    .gte('review_call_at', winStart.toISOString()).lt('review_call_at', winEnd.toISOString())
+    .not('review_call_status', 'is', null)
+    .order('review_call_at', { ascending: false }).limit(2000);
+  let { data, error } = await run(', review_call_tags');
+  if (error && /review_call_tags/.test(error.message || '')) ({ data, error } = await run(''));
+  if (error) return res.status(500).json({ error: error.message });
+
+  const dayKey = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: RC_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  const isReached = (s) => s !== 'voicemail' && s !== 'callback';
+  const isGood = (s) => s === 'promised_review' || s === 'declined' || s === 'reviewed' || s === 'called';
+  const summary = { logged: 0, reached: 0, good: 0, complaints: 0, promised: 0, voicemail: 0, declined: 0, dnc: 0 };
+  const byPerson = new Map(), byDay = new Map(), tagCount = new Map();
+  const calls = [];
+  for (const row of (data || [])) {
+    const s = row.review_call_status;
+    const who = row.review_call_by || 'Unknown';
+    summary.logged++;
+    if (isReached(s)) summary.reached++;
+    if (isGood(s)) summary.good++;
+    if (s === 'complaint') summary.complaints++;
+    if (s === 'promised_review') summary.promised++;
+    if (s === 'voicemail' || s === 'callback') summary.voicemail++;
+    if (s === 'declined') summary.declined++;
+    if (s === 'do_not_contact') summary.dnc++;
+    const p = byPerson.get(who) || { name: who, logged: 0, reached: 0, good: 0, complaints: 0, last_at: null };
+    p.logged++; if (isReached(s)) p.reached++; if (isGood(s)) p.good++; if (s === 'complaint') p.complaints++;
+    if (!p.last_at || row.review_call_at > p.last_at) p.last_at = row.review_call_at;
+    byPerson.set(who, p);
+    const dk = dayKey(row.review_call_at);
+    const d = byDay.get(dk) || { day: dk, logged: 0, reached: 0, complaints: 0 };
+    d.logged++; if (isReached(s)) d.reached++; if (s === 'complaint') d.complaints++;
+    byDay.set(dk, d);
+    for (const t of (Array.isArray(row.review_call_tags) ? row.review_call_tags : [])) tagCount.set(t, (tagCount.get(t) || 0) + 1);
+    const b = bizById.get(row.business_id) || {};
+    calls.push({
+      id: row.id, business_slug: b.slug || null, business_name: b.name || null,
+      customer_name: row.customer?.name || '—', phone: row.customer?.phone || null,
+      technician_name: row.technician?.name || '—', service_name: row.service?.name || 'Service',
+      job_at: row.scheduled_at, status: s, at: row.review_call_at, by: who,
+      notes: row.review_call_notes || null, tags: Array.isArray(row.review_call_tags) ? row.review_call_tags : [],
+      rating: row.review_rating || null, reviewed: row.reviewed_at != null || Number(row.review_rating) >= 4,
+    });
+  }
+  // Every day in the window, zero-filled, oldest first, so a day Joey made no
+  // calls shows as an empty bar instead of silently vanishing.
+  const daily = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const dk = dayKey(localDayStartUTC(RC_TZ, -i).getTime() + 12 * 3600000);
+    const d = byDay.get(dk) || { day: dk, logged: 0, reached: 0, complaints: 0 };
+    d.label = new Intl.DateTimeFormat('en-US', { timeZone: RC_TZ, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(dk + 'T12:00:00Z'));
+    daily.push(d);
+  }
+
+  // Backlog: finished jobs from the last 7 days with no outcome logged at all.
+  // Same filter as the queue so the number matches what Joey sees.
+  let backlog = 0;
+  for (const b of (bizs || [])) {
+    const tz = b.timezone || RC_TZ;
+    const { data: q } = await db.from('bookings').select('id, review_call_status, reviewed_at, review_rating')
+      .eq('business_id', b.id)
+      .in('status', ['confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'])
+      .gte('scheduled_at', localDayStartUTC(tz, -7).toISOString()).lt('scheduled_at', localDayStartUTC(tz, 0).toISOString())
+      .limit(1000);
+    for (const r of (q || [])) {
+      if (r.reviewed_at != null || Number(r.review_rating) >= 4) continue;
+      if (r.review_call_status) continue;
+      backlog++;
+    }
+  }
+  return res.status(200).json({
+    days, summary, backlog, calls,
+    by_person: [...byPerson.values()].sort((a, c) => c.logged - a.logged),
+    daily,
+    tags: [...tagCount.entries()].map(([tag, count]) => ({ tag, count })).sort((a, c) => c.count - a.count),
   });
 }
 
