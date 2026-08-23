@@ -141,6 +141,39 @@ const PARTNER_SLUG = {
   'austintvinstall':       { slug: 'handy-andy', metro: /austin/i },
 };
 
+// ── Sole-technician lock ─────────────────────────────────────────────────────
+// A business slug listed here may be served by EXACTLY ONE technician, by id.
+// Every other tech is filtered out of its pool — in the displayed slots AND at
+// booking-time assignment — no matter which business they belong to, which
+// metro they are in, or whether cross-hire would otherwise reach them.
+//
+// WHY THIS EXISTS: the four Austin lead-gen brands borrow Handy Andy's Austin
+// roster (see PARTNER_SLUG above), and that roster happens to contain only
+// Zach today. "Happens to" is the problem: the moment a second Austin tech is
+// added and activated for Handy Andy, all four brands would silently start
+// handing them jobs. The owner's requirement is that these four are Zach's
+// alone, so it is written down here as a rule rather than left as a
+// coincidence of the current data.
+//
+// Locked by ID, not name: names are editable free text in the office UI, and a
+// rename must not quietly unlock a brand. If this id is ever wrong the pool
+// comes back EMPTY and slots stop appearing — a visible, safe failure, rather
+// than jobs leaking to the wrong technician.
+const SOLE_TECH = {
+  'atxmountpros':       '5a443792-2868-46ef-a45e-4b26b7de3006', // Zach
+  'atxtvmount':         '5a443792-2868-46ef-a45e-4b26b7de3006', // Zach
+  'austinmountingpros': '5a443792-2868-46ef-a45e-4b26b7de3006', // Zach
+  'austintvinstall':    '5a443792-2868-46ef-a45e-4b26b7de3006', // Zach
+};
+
+// Apply the lock to a technician list. Returns the list unchanged for any
+// business without a lock, so the other nine brands are entirely unaffected.
+function applySoleTech(businessSlug, techs) {
+  const only = SOLE_TECH[businessSlug];
+  if (!only) return techs || [];
+  return (techs || []).filter(t => t.id === only);
+}
+
 // Resolve the partner business's tech pool in the pairing's own metro for a
 // cross-hire lookup, or null if not eligible (this request isn't for that
 // metro, or the partner has no presence there). `serviceAreaId` is the
@@ -277,6 +310,10 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
       }
     }
   }
+
+  // Sole-technician lock, applied AFTER the cross-hire fold so it also strips
+  // any partner-roster tech that borrowing would otherwise have added.
+  techs = applySoleTech(businessSlug, techs);
 
   const techIds = (techs || []).map(t => t.id);
   if (!techIds.length) return { days: [], timezone: tz };
@@ -545,7 +582,10 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   const baseQ = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q.order('created_at', { ascending: true }); };
   let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day');
   if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await baseQ('id'));
-  const list = techs || [];
+  // Sole-technician lock: for a locked brand this leaves at most one tech, and
+  // the cross-hire fallback below is likewise filtered, so no path can assign
+  // anyone else.
+  const list = applySoleTech(businessSlug, techs);
   // A tech at their daily job cap is not eligible for this date. Counts JOBS
   // (bookedSlotsOneTech's jobCount), not slots — see that function's comment.
   // Previously this compared against `booked.size` (a slot-KEY count), which
@@ -587,7 +627,7 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
         .order('created_at', { ascending: true });
       let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day');
       if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
-      const partnerEligible = await eligibleFrom(pTechs || []);
+      const partnerEligible = await eligibleFrom(applySoleTech(businessSlug, pTechs || []));
       const partnerPick = await pickFairest(db, partnerEligible, dateStr, tz);
       if (partnerPick) return partnerPick;
     }
