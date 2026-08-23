@@ -53,6 +53,12 @@ const SECRETARY_PHONE_ENV = {
   'mile-high': 'HANDY_ANDY_SECRETARY_PHONE',
   'austin': 'HANDY_ANDY_SECRETARY_PHONE',
   'precision': 'HANDY_ANDY_SECRETARY_PHONE',
+  // Austin lead-gen quad — Heather covers these like every other Handy Andy
+  // micro-brand.
+  'atxmountpros': 'HANDY_ANDY_SECRETARY_PHONE',
+  'atxtvmount': 'HANDY_ANDY_SECRETARY_PHONE',
+  'austinmountingpros': 'HANDY_ANDY_SECRETARY_PHONE',
+  'austintvinstall': 'HANDY_ANDY_SECRETARY_PHONE',
   'doms': 'DOMS_SECRETARY_PHONE',
 };
 

@@ -62,7 +62,12 @@ function bookingStripePk(slug) {
   if (demoMode()) return STRIPE_PK_GLOBAL;
   if (slug === 'doms') return process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'mile-high') return process.env.MILE_HIGH_STRIPE_PUBLISHABLE_KEY || null;
-  if (slug === 'austin') return process.env.AUSTIN_STRIPE_PUBLISHABLE_KEY || null;
+  // The four Austin lead-gen brands charge on the shared 'austin' Stripe
+  // account (see LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js), so they tokenize
+  // with austin's publishable key too.
+  if (slug === 'austin' || slug === 'atxmountpros' || slug === 'atxtvmount' || slug === 'austinmountingpros' || slug === 'austintvinstall') {
+    return process.env.AUSTIN_STRIPE_PUBLISHABLE_KEY || null;
+  }
   if (slug === 'precision') return process.env.PRECISION_STRIPE_PUBLISHABLE_KEY || null;
   if (slug === 'houstonmounting' || slug === 'houstontvinstallation' || slug === 'tvhanginghouston' || slug === 'htvmounting') {
     return process.env.Publishable_key_houston_mounting || null;
@@ -107,7 +112,12 @@ const bringsOwnSecondTech = isSecondaryIneligibleName;
 // Per-slug lookup, not a symmetric pairing — see the matching comment in
 // api/_lib/availability.js. Mile High borrows Handy Andy's Denver techs
 // one-directionally; Handy Andy's own overflow still only ever falls to Doms.
-const PARTNER_SLUG = { 'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy', 'austin': 'handy-andy', 'precision': 'handy-andy' };
+const PARTNER_SLUG = {
+  'handy-andy': 'doms', 'doms': 'handy-andy', 'mile-high': 'handy-andy', 'austin': 'handy-andy', 'precision': 'handy-andy',
+  // Austin lead-gen quad — one-directional like the other micro-brands: each
+  // books Handy Andy's (Austin) techs, never the reverse.
+  'atxmountpros': 'handy-andy', 'atxtvmount': 'handy-andy', 'austinmountingpros': 'handy-andy', 'austintvinstall': 'handy-andy',
+};
 
 // The partner business row for a host slug, or null when there isn't one.
 async function partnerBusiness(db, hostSlug) {
@@ -473,7 +483,8 @@ function displayNameFor(scope) {
 // number, since the two businesses are staffed by different people.
 function secretaryPhoneFor(scope) {
   // Heather covers Handy Andy and both of its micro-brands (Mile High, Austin).
-  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision' || scope === 'tvmountingdenver') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision' || scope === 'tvmountingdenver'
+    || scope === 'atxmountpros' || scope === 'atxtvmount' || scope === 'austinmountingpros' || scope === 'austintvinstall') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_PHONE || '';
   return '';
 }
@@ -4924,6 +4935,10 @@ function candidateAccounts(slug) {
   if (slug === 'mile-high') return ['mile-high'];               // always its own account, never global -- it never existed pre-split
   if (slug === 'austin') return ['austin'];                     // same: born after the split
   if (slug === 'precision') return ['precision'];               // same
+  // Austin lead-gen quad — all four charge on the shared 'austin' account
+  // (see LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js), so that is the one
+  // account their disputes can live in.
+  if (slug === 'atxmountpros' || slug === 'atxtvmount' || slug === 'austinmountingpros' || slug === 'austintvinstall') return ['austin'];
   return ['global'];
 }
 

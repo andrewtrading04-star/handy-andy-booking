@@ -46,6 +46,13 @@ const LEGACY_SLUG_ACCOUNT = {
   houstontvinstallation:   'houstonmounting',
   tvhanginghouston:        'houstonmounting',
   htvmounting:             'houstonmounting',
+  // Austin lead-gen quad, same arrangement as Houston's: all five Austin
+  // brands (austin + these four) charge on austinmounting.com's existing
+  // 'austin' Stripe account — no per-slug account exists or should be added.
+  atxmountpros:            'austin',
+  atxtvmount:              'austin',
+  austinmountingpros:      'austin',
+  austintvinstall:         'austin',
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)

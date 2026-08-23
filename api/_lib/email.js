@@ -87,6 +87,39 @@ export function emailConfig(slug) {
       from:   process.env.TVMOUNTINGDENVER_EMAIL_FROM || 'contact@tvmountingdenver.com',
     };
   }
+  // Austin lead-gen quad — same per-brand-key-wins/shared-fallback pattern as
+  // the Houston quad above, but on its OWN dedicated Resend account
+  // (AUSTIN_LEADGEN_RESEND_API_KEY), NOT the houstonmounting shared account and
+  // NOT the austin brand's AUSTIN_RESEND_API_KEY. And as everywhere else here:
+  // never a fallback to Handy Andy's RESEND_API_KEY — a customer of one of
+  // these brands greeted by Handy Andy is exactly the mistake this whole
+  // per-business system exists to prevent. Until the shared key is set, these
+  // brands' emails skip with a logged reason instead of arriving from the
+  // wrong company.
+  if (slug === 'atxmountpros') {
+    return {
+      apiKey: process.env.ATXMOUNTPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      from:   process.env.ATXMOUNTPROS_EMAIL_FROM || 'contact@atxmountpros.com',
+    };
+  }
+  if (slug === 'atxtvmount') {
+    return {
+      apiKey: process.env.ATXTVMOUNT_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      from:   process.env.ATXTVMOUNT_EMAIL_FROM || 'contact@atxtvmount.com',
+    };
+  }
+  if (slug === 'austinmountingpros') {
+    return {
+      apiKey: process.env.AUSTINMOUNTINGPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      from:   process.env.AUSTINMOUNTINGPROS_EMAIL_FROM || 'contact@austinmountingpros.com',
+    };
+  }
+  if (slug === 'austintvinstall') {
+    return {
+      apiKey: process.env.AUSTINTVINSTALL_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      from:   process.env.AUSTINTVINSTALL_EMAIL_FROM || 'contact@austintvinstall.com',
+    };
+  }
   return {
     apiKey: process.env.RESEND_API_KEY,
     from:   process.env.HANDY_ANDY_EMAIL_FROM || 'contact@ihandyandy.com',
@@ -106,6 +139,14 @@ export const EMAIL_BRANDS = {
   'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvinstallation.com' },
   'tvhanginghouston':      { slug: 'tvhanginghouston',      name: 'TV Hanging Houston',       accent: '#0288D1', website: 'tvhanginghouston.com' },
   'htvmounting':           { slug: 'htvmounting',           name: 'HTV Mounting',             accent: '#0288D1', website: 'htvmounting.com' },
+  // Austin lead-gen quad: accents match each site's own --accent token
+  // (app/globals.css in each <slug>-site repo) so the email, widget and site
+  // all read as one brand. atxtvmount deliberately shares austin's #1E56E0 —
+  // that indigo is the color its site actually shipped with.
+  'atxmountpros':       { slug: 'atxmountpros',       name: 'ATX Mount Pros',         accent: '#E8570A', website: 'atxmountpros.com' },
+  'atxtvmount':         { slug: 'atxtvmount',         name: 'ATX TV Mounting',        accent: '#1E56E0', website: 'atxtvmount.com' },
+  'austinmountingpros': { slug: 'austinmountingpros', name: 'Austin Mounting Pros',   accent: '#8A6A2C', website: 'austinmountingpros.com' },
+  'austintvinstall':    { slug: 'austintvinstall',    name: 'Austin TV Installation', accent: '#0D7A68', website: 'austintvinstall.com' },
 };
 // An unknown slug used to fall back to Handy Andy, which meant a new business
 // would send Handy-Andy-branded email to its own customers and look, to the

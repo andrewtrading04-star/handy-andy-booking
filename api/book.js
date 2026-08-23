@@ -118,6 +118,13 @@ const STRIPE_PK_ENV = {
   houstontvinstallation:  'Publishable_key_houston_mounting',
   tvhanginghouston:       'Publishable_key_houston_mounting',
   htvmounting:            'Publishable_key_houston_mounting',
+  // Austin lead-gen quad — all four charge on the existing 'austin' Stripe
+  // account (austinmounting.com's, see LEGACY_SLUG_ACCOUNT in stripe.js), so
+  // all four share austin's publishable key too.
+  atxmountpros:           'AUSTIN_STRIPE_PUBLISHABLE_KEY',
+  atxtvmount:             'AUSTIN_STRIPE_PUBLISHABLE_KEY',
+  austinmountingpros:     'AUSTIN_STRIPE_PUBLISHABLE_KEY',
+  austintvinstall:        'AUSTIN_STRIPE_PUBLISHABLE_KEY',
 };
 function stripePublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
@@ -169,7 +176,8 @@ async function cardSetupPublic(req, res) {
 // from-address and a boolean 'configured' -- NEVER the Resend API key itself.
 // Same purpose as stripe_config above: surface a missing key before a real
 // customer's confirmation email silently fails to send.
-const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high', 'austin', 'precision']);
+const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high', 'austin', 'precision',
+  'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall']);
 function emailPublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
   if (!EMAIL_BUSINESSES.has(business)) return res.status(400).json({ error: `Unknown business "${business}"` });
@@ -325,6 +333,11 @@ const NATIVE_COUPONS = {
   'mile-high':  HA_COUPONS,
   'austin':     HA_COUPONS,   // same playbook as Handy Andy's Austin market
   'precision':  HA_COUPONS,   // same playbook as Handy Andy's Houston market
+  // Austin lead-gen quad — same Austin-market playbook as 'austin' above.
+  'atxmountpros':       HA_COUPONS,
+  'atxtvmount':         HA_COUPONS,
+  'austinmountingpros': HA_COUPONS,
+  'austintvinstall':    HA_COUPONS,
 };
 
 // The hardcoded maps above are now only a FALLBACK. app.coupons is the live

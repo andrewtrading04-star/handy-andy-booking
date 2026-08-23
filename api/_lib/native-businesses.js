@@ -33,6 +33,14 @@ export const NATIVE_BUSINESS = {
   'houstontvinstallation': { name: 'Houston TV Installation',   legalName: 'Houston TV Installation' },
   'tvhanginghouston':     { name: 'TV Hanging Houston',         legalName: 'TV Hanging Houston' },
   'htvmounting':          { name: 'HTV Mounting',                legalName: 'HTV Mounting' },
+  // Austin lead-gen micro-brands, same shape as the Houston quad above: no
+  // techs of their own, all borrow Handy Andy's Austin roster (Zach) — see
+  // PARTNER_SLUG in availability.js. All four share the existing 'austin'
+  // Stripe account (austinmounting.com's) — see LEGACY_SLUG_ACCOUNT in stripe.js.
+  'atxmountpros':       { name: 'ATX Mount Pros',          legalName: 'ATX Mount Pros' },
+  'atxtvmount':         { name: 'ATX TV Mounting',         legalName: 'ATX TV Mounting' },
+  'austinmountingpros': { name: 'Austin Mounting Pros',    legalName: 'Austin Mounting Pros' },
+  'austintvinstall':    { name: 'Austin TV Installation',  legalName: 'Austin TV Installation' },
 };
 
 export const NATIVE_SLUGS = Object.keys(NATIVE_BUSINESS);
