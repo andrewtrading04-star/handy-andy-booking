@@ -5997,25 +5997,13 @@ function launchDetailHtml(b, items){
 // Phone + site, shown under the business name. Both are optional on the
 // record, so each half is dropped rather than rendered empty.
 //
-// The slug is folded into this line rather than printed above it, because for
-// most of these brands the slug and the domain are the same word twice
-// ("houstonmounting" over "houstonmounting.com"). slugEchoesHost decides that
-// per card instead of dropping the slug everywhere: the slug is still the
-// thing wired into ACCOUNT_KEY_ENV and named in the fix-it links, so where it
-// genuinely differs from the domain (mile-high, doms, handy-andy, austin,
-// precision) it has to stay visible.
+// The domain goes on this line instead of the slug: for most of these brands
+// the slug is just the business name again ("tvmountingdenver" under "TV
+// Mounting Denver"), while the domain is the thing worth reading. The slug
+// still shows when there's no URL on the record, since it's what's wired into
+// ACCOUNT_KEY_ENV and named in the fix-it links.
 function launchHost(url){
   return String(url||'').replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/.*$/,'');
-}
-// Compared on letters and digits only, and against the host with its public
-// suffix removed, so "houstonmounting" matches "houstonmounting.com" and
-// "tvmountingdenver" matches "tvmountingdenver.vercel.app", while "mile-high"
-// does NOT match "milehightvmounting.com" — different words, both worth showing.
-function slugEchoesHost(slug, url){
-  const host = launchHost(url);
-  if(!host) return false;
-  const bare = host.split('.')[0].replace(/[^a-z0-9]/gi,'').toLowerCase();
-  return bare === String(slug||'').replace(/[^a-z0-9]/gi,'').toLowerCase();
 }
 // A plain 10-digit string is what the business record actually stores; shown
 // raw it reads as one long number ("7207990036"). Anything already formatted,
@@ -6029,9 +6017,11 @@ function launchPhoneText(phone){
 }
 function launchContactHtml(b){
   const bits = [];
-  if(!slugEchoesHost(b.slug, b.url)) bits.push(esc(b.slug));
+  // The URL is the useful identifier under the name; the slug is a near-repeat
+  // of the business name, so it only shows when there's no URL to show instead.
+  if(b.url) bits.push(esc(launchHost(b.url)));
+  else if(b.slug) bits.push(esc(b.slug));
   if(b.phone) bits.push(esc(launchPhoneText(b.phone)));
-  if(b.url)   bits.push(esc(launchHost(b.url)));
   if(!bits.length) return '';
   return `<div style="font-size:11px;color:var(--mute);margin-top:2px;">${bits.join(' &middot; ')}</div>`;
 }
