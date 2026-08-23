@@ -5858,14 +5858,8 @@ function launchEffective(b, key){
 // left as an unticked box, or they'd sit permanently "In progress" for an
 // item that will never legitimately get done through here.
 const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','mile-high','austin','austinmountingpros','atxtvmount','atxmountpros','austintvinstall']);
-// Same idea for Yelp: the Austin lead-gen quad is not getting Yelp pages, so
-// the item would sit permanently unticked and hold them below "Ready to
-// compete" for something nobody intends to do. Excluded from the score
-// denominator too, exactly like GBP above.
-const LAUNCH_NO_YELP_SLUGS = new Set(['austinmountingpros','atxtvmount','atxmountpros','austintvinstall']);
 function launchItemsFor(b, items){
   if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
-  if(LAUNCH_NO_YELP_SLUGS.has(b.slug)) items = items.filter(it => it.key!=='yelp_page');
   return items;
 }
 function launchScoreOf(b, items){
@@ -6000,15 +5994,44 @@ function launchDetailHtml(b, items){
     </div>
   </div>`;
 }
-// Phone + site shown as plain text under the slug, on one line. Both are
-// optional on the business record, so each half is dropped rather than
-// rendered empty, and the whole line disappears when neither is on file.
-// The URL is stripped to its bare host — the full https:// form is long
-// enough to wrap the card on a phone, and the host is the part he reads.
+// Phone + site, shown under the business name. Both are optional on the
+// record, so each half is dropped rather than rendered empty.
+//
+// The slug is folded into this line rather than printed above it, because for
+// most of these brands the slug and the domain are the same word twice
+// ("houstonmounting" over "houstonmounting.com"). slugEchoesHost decides that
+// per card instead of dropping the slug everywhere: the slug is still the
+// thing wired into ACCOUNT_KEY_ENV and named in the fix-it links, so where it
+// genuinely differs from the domain (mile-high, doms, handy-andy, austin,
+// precision) it has to stay visible.
+function launchHost(url){
+  return String(url||'').replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/.*$/,'');
+}
+// Compared on letters and digits only, and against the host with its public
+// suffix removed, so "houstonmounting" matches "houstonmounting.com" and
+// "tvmountingdenver" matches "tvmountingdenver.vercel.app", while "mile-high"
+// does NOT match "milehightvmounting.com" — different words, both worth showing.
+function slugEchoesHost(slug, url){
+  const host = launchHost(url);
+  if(!host) return false;
+  const bare = host.split('.')[0].replace(/[^a-z0-9]/gi,'').toLowerCase();
+  return bare === String(slug||'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+}
+// A plain 10-digit string is what the business record actually stores; shown
+// raw it reads as one long number ("7207990036"). Anything already formatted,
+// or not 10 digits, is left exactly as entered rather than guessed at.
+function launchPhoneText(phone){
+  const raw = String(phone||'').trim();
+  const d = raw.replace(/\D/g,'');
+  if(d.length === 10)                    return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  if(d.length === 11 && d[0] === '1')    return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  return raw;
+}
 function launchContactHtml(b){
   const bits = [];
-  if(b.phone) bits.push(esc(b.phone));
-  if(b.url)   bits.push(esc(b.url.replace(/^https?:\/\//,'').replace(/\/$/,'')));
+  if(!slugEchoesHost(b.slug, b.url)) bits.push(esc(b.slug));
+  if(b.phone) bits.push(esc(launchPhoneText(b.phone)));
+  if(b.url)   bits.push(esc(launchHost(b.url)));
   if(!bits.length) return '';
   return `<div style="font-size:11px;color:var(--mute);margin-top:2px;">${bits.join(' &middot; ')}</div>`;
 }
@@ -6024,7 +6047,6 @@ function launchCardHtml(b, items){
       <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
       <div style="min-width:0;">
         <div style="font-weight:800;font-size:14px;">${esc(b.name)}</div>
-        <div style="font-size:11px;color:var(--mute);">${esc(b.slug)}</div>
         ${launchContactHtml(b)}
       </div>
     </div>

@@ -2002,7 +2002,6 @@ const LAUNCH_CHECKLIST_ITEMS = [
   { key: 'gbp_created',    label: 'Google Business Profile created' },
   { key: 'gbp_verified',   label: 'GBP verified (postcard/video)' },
   { key: 'gsc_verified',   label: 'Search Console verified + sitemap submitted' },
-  { key: 'yelp_page',      label: 'Yelp page created' },
   { key: 'techs_staffed',  label: 'At least one tech can actually be booked' },
 ];
 
