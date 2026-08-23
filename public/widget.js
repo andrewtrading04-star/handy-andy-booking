@@ -49,12 +49,22 @@
   // to a brighter blue after the widget's brand color was first set.
   // The Austin lead-gen quad's accents come from each site's own --accent
   // token (app/globals.css in each <slug>-site repo): atxmountpros is signal
-  // orange #e8570a, atxtvmount ships the same indigo as austin (#1e56e0),
+  // orange #e8570a, atxtvmount is copper #c9803d (on the dark charcoal card
+  // below — its own identity, no longer austin's indigo),
   // austinmountingpros is antique brass #8a6a2c, austintvinstall is deep teal
   // #0d7a68 — so widget and site read as one brand.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#1e56e0', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#4d7ef0', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97' }[BUSINESS] || '#ff9944';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'30,86,224', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104' }[BUSINESS] || '255,102,0';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#c9803d', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#e0a165', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97' }[BUSINESS] || '#ff9944';
+  // Deep "ink" tones, driven by BUSINESS -- every ${INK}/${INK_DEEP}
+  // reference throughout the widget's inline styles (modal header gradients,
+  // panel titles, the bracket-diagram SVGs) reads from these two instead of a
+  // hardcoded navy, so each brand's deep tone matches its accent. Every brand
+  // not listed keeps the exact original navy (#1a2f6b/#12224f) byte-for-byte
+  // via the || default, so their live embeds are visually unchanged. Only the
+  // four Austin lead-gen quad brands get their own deep tones.
+  const INK      = { 'atxmountpros':'#7c2d12', 'atxtvmount':'#2b2b30', 'austinmountingpros':'#4a3a18', 'austintvinstall':'#0b3d36' }[BUSINESS] || '#1a2f6b';
+  const INK_DEEP = { 'atxmountpros':'#5a1f0c', 'atxtvmount':'#18181c', 'austinmountingpros':'#2f2410', 'austintvinstall':'#07271f' }[BUSINESS] || '#12224f';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'201,128,63', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -139,8 +149,11 @@
   // light/white builds like Austin's and Precision's, so they take the light
   // card too. Handy Andy / Mile High / Doms stay dark, unchanged.
   // The Austin lead-gen quad's sites are the same light/white Next.js build
-  // family, so they take the light card too.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'atxtvmount' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall') ? T_LIGHT : T_DARK;
+  // family, so three of them take the light card too — but atxtvmount is
+  // deliberately the one dark Austin widget: it's the specialist/hard-installs
+  // brand, and the dark charcoal surface (T_DARK) is what separates it from
+  // its three light-card siblings at a glance.
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
@@ -1183,7 +1196,7 @@
       <div style="border-radius:12px;height:150px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;background:${diagramBg};">${diagramSvg}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <span style="width:22px;height:22px;border-radius:50%;background:${numBg};color:#fff;font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;">${numLabel}</span>
-        <span style="font-size:18px;font-weight:800;color:#1a2f6b;">${title}</span>
+        <span style="font-size:18px;font-weight:800;color:${INK};">${title}</span>
       </div>
       <span style="display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:4px 11px;border-radius:20px;margin-bottom:12px;text-transform:uppercase;background:${tagBg};color:${tagColor};">${tagText}</span>
       <div style="font-size:13.5px;line-height:1.4;color:#33415f;margin-bottom:10px;">${desc}</div>
@@ -1202,12 +1215,12 @@
       <line x1="24" y1="65" x2="32" y2="57" stroke="#748ac0" stroke-width="2"/>
       <line x1="24" y1="105" x2="32" y2="97" stroke="#748ac0" stroke-width="2"/>
       <line x1="24" y1="145" x2="32" y2="137" stroke="#748ac0" stroke-width="2"/>
-      <rect x="36" y="55" width="7" height="80" rx="2" fill="#1a2f6b"/>
+      <rect x="36" y="55" width="7" height="80" rx="2" fill="${INK}"/>
       <rect x="43" y="30" width="14" height="130" rx="3" fill="#22304f"/>
       <rect x="57" y="34" width="4" height="122" rx="2" fill="#3d4f78"/>
-      <line x1="70" y1="95" x2="150" y2="95" stroke="#1a2f6b" stroke-width="2" stroke-dasharray="5 4"/>
-      <polygon points="70,95 80,90 80,100" fill="#1a2f6b"/>
-      <text x="158" y="100" font-size="16" font-weight="700" fill="#1a2f6b" font-family="Arial">FLUSH</text>
+      <line x1="70" y1="95" x2="150" y2="95" stroke="${INK}" stroke-width="2" stroke-dasharray="5 4"/>
+      <polygon points="70,95 80,90 80,100" fill="${INK}"/>
+      <text x="158" y="100" font-size="16" font-weight="700" fill="${INK}" font-family="Arial">FLUSH</text>
       <text x="158" y="118" font-size="11" fill="#5b6a8c" font-family="Arial">sits about 1 inch from wall</text>
     </svg>`,
     tilt:`<svg viewBox="0 0 300 190" width="100%" height="100%">
@@ -1235,10 +1248,10 @@
       <line x1="18" y1="65" x2="26" y2="57" stroke="#748ac0" stroke-width="2"/>
       <line x1="18" y1="105" x2="26" y2="97" stroke="#748ac0" stroke-width="2"/>
       <line x1="18" y1="145" x2="26" y2="137" stroke="#748ac0" stroke-width="2"/>
-      <rect x="30" y="86" width="10" height="20" rx="2" fill="#1a2f6b"/>
-      <line x1="40" y1="96" x2="80" y2="82" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
+      <rect x="30" y="86" width="10" height="20" rx="2" fill="${INK}"/>
+      <line x1="40" y1="96" x2="80" y2="82" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
       <circle cx="80" cy="82" r="6" fill="${ACCENT}"/>
-      <line x1="80" y1="82" x2="122" y2="96" stroke="#1a2f6b" stroke-width="8" stroke-linecap="round"/>
+      <line x1="80" y1="82" x2="122" y2="96" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
       <circle cx="122" cy="96" r="6" fill="${ACCENT}"/>
       <g transform="rotate(-8 130 96)">
         <rect x="126" y="42" width="14" height="108" rx="3" fill="#22304f"/>
@@ -1248,12 +1261,12 @@
       <line x1="34" y1="164" x2="34" y2="176" stroke="${ACCENT}" stroke-width="2"/>
       <line x1="130" y1="164" x2="130" y2="176" stroke="${ACCENT}" stroke-width="2"/>
       <text x="52" y="164" font-size="13" font-weight="700" fill="#c05a10" font-family="Arial">16 INCH EXTENSION</text>
-      <path d="M 190 60 A 45 45 0 0 1 200 96" fill="none" stroke="#1a2f6b" stroke-width="3.5" stroke-linecap="round"/>
-      <polygon points="192,54 181,62 195,68" fill="#1a2f6b"/>
-      <path d="M 200 96 A 45 45 0 0 1 190 132" fill="none" stroke="#1a2f6b" stroke-width="3.5" stroke-linecap="round"/>
-      <polygon points="192,138 181,130 195,124" fill="#1a2f6b"/>
-      <text x="210" y="66" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT UP</text>
-      <text x="210" y="132" font-size="11" font-weight="700" fill="#1a2f6b" font-family="Arial">TILT DOWN</text>
+      <path d="M 190 60 A 45 45 0 0 1 200 96" fill="none" stroke="${INK}" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="192,54 181,62 195,68" fill="${INK}"/>
+      <path d="M 200 96 A 45 45 0 0 1 190 132" fill="none" stroke="${INK}" stroke-width="3.5" stroke-linecap="round"/>
+      <polygon points="192,138 181,130 195,124" fill="${INK}"/>
+      <text x="210" y="66" font-size="11" font-weight="700" fill="${INK}" font-family="Arial">TILT UP</text>
+      <text x="210" y="132" font-size="11" font-weight="700" fill="${INK}" font-family="Arial">TILT DOWN</text>
       <path d="M 218 90 L 238 90" stroke="${ACCENT}" stroke-width="3.5" stroke-linecap="round"/>
       <polygon points="244,90 234,84 234,96" fill="${ACCENT}"/>
       <path d="M 218 104 L 238 104" stroke="${ACCENT}" stroke-width="3.5" stroke-linecap="round" transform="rotate(180 228 104)"/>
@@ -1268,7 +1281,7 @@
     ov.id='ha-bracket-help-ov';
     ov.style.cssText='position:fixed!important;inset:0!important;z-index:9999999!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:20px!important;background:rgba(10,9,8,0.75)!important;';
     const panels=
-      bracketHelpPanel('1','#1a2f6b','Flat Brackets','#e8edf9','#1a2f6b','Sleek and Flush','#1a2f6b','#e8edf9',BRACKET_SVGS.flat,
+      bracketHelpPanel('1',INK,'Flat Brackets','#e8edf9',INK,'Sleek and Flush',INK,'#e8edf9',BRACKET_SVGS.flat,
         'The TV hugs the wall like a picture frame. No movement, just the cleanest, slimmest look you can get. A favorite over fireplaces and on tile.',
         ['Ultra slim profile, sits tight against the wall','Great for tile installations','Cleanest look of all brackets'],
         ['Minimal space behind TV for cables','No movement at all'],
@@ -1278,7 +1291,7 @@
         ['Most common bracket on the market','Tilts up and down for the perfect angle','Easy cable hiding behind the TV'],
         ["Doesn't move left or right"],
         tiltId,sectionId,'Add a Tilting Bracket to my order')
-      +bracketHelpPanel('3',ACCENT,'Full Motion Brackets',ACCENT,'#fff','Maximum Flexibility',`linear-gradient(90deg,#1a2f6b,${ACCENT})`,'#e8edf9',BRACKET_SVGS.full,
+      +bracketHelpPanel('3',ACCENT,'Full Motion Brackets',ACCENT,'#fff','Maximum Flexibility',`linear-gradient(90deg,${INK},${ACCENT})`,'#e8edf9',BRACKET_SVGS.full,
         'An articulating arm does it all: tilts up and down, swivels left and right, and pulls the TV a full 16 inches off the wall so every seat gets the perfect angle.',
         ['Tilts up and down, swivels left and right','Pulls out 16 inches from the wall','Total viewing flexibility from any seat'],
         ["Sticks off the wall, doesn't sit flush"],
@@ -1286,7 +1299,7 @@
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:480px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;background:#fff!important;font-family:'Segoe UI',Arial,Helvetica,sans-serif!important;">
         <button id="ha-bracket-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.35)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
-        <div style="background:linear-gradient(135deg,#1a2f6b 0%,#12224f 100%);padding:26px 24px 22px;position:relative;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,${INK} 0%,${INK_DEEP} 100%);padding:26px 24px 22px;position:relative;overflow:hidden;">
           <h1 style="color:#fff;font-size:22px;line-height:1.15;font-weight:800;position:relative;margin:0;">The Difference Between<br><span style="color:${ACCENT};">TV Brackets</span></h1>
           <p style="color:#c3cdea;margin-top:6px;font-size:13px;position:relative;">Everything you need to know before choosing your mount</p>
         </div>
@@ -1377,7 +1390,7 @@
     const panel=(img,name,price,desc,optId)=>`<div style="border-bottom:1px solid #e7eaf3;padding-top:14px;">
       <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:calc(100% - 40px);margin:0 20px;border-radius:8px;height:140px;object-fit:cover;">
       <div style="padding:13px 20px 16px;">
-        <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}</div>
+        <div style="font-weight:800;font-size:15px;color:${INK};">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}</div>
         <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
         ${optId?`<button class="ha-surface-pick" data-s="${sectionId}" data-o="${optId}" style="background:${ACCENT};color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's my wall</button>`:''}
       </div>
@@ -1385,7 +1398,7 @@
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
         <button id="ha-surface-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
-        <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
+        <div style="background:linear-gradient(135deg,${INK},${INK_DEEP});padding:22px 22px 18px;">
           <div style="color:#fff;font-size:19px;font-weight:800;">What kind of wall <span style="color:${ACCENT};">do you have?</span></div>
           <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Match your wall to a picture below</div>
         </div>
@@ -1425,7 +1438,7 @@
     const panel=(img,name,price,badge,desc,optId)=>optId?`<div style="border-bottom:1px solid #e7eaf3;padding-top:14px;">
       <img src="${SURFACE_IMG_BASE}${img}" alt="${name}" style="display:block;width:calc(100% - 40px);margin:0 20px;border-radius:8px;height:160px;object-fit:cover;">
       <div style="padding:13px 20px 16px;">
-        <div style="font-weight:800;font-size:15px;color:#1a2f6b;">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}
+        <div style="font-weight:800;font-size:15px;color:${INK};">${name} ${price?`<span style="color:#5b6a8c;font-weight:600;font-size:12px;">+$${price}</span>`:'<span style="color:#1e9e5a;font-weight:700;font-size:12px;">no extra charge</span>'}
         ${badge?`<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:12px;background:${ACCENT};color:#fff;vertical-align:1px;">${badge}</span>`:''}</div>
         <div style="font-size:13px;color:#33415f;line-height:1.45;margin:4px 0 9px;">${desc}</div>
         <button class="ha-wire-pick" data-s="${sectionId}" data-o="${optId}" style="background:${ACCENT};color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:700;font-size:12.5px;cursor:pointer;">That's what I want</button>
@@ -1434,7 +1447,7 @@
     ov.innerHTML=`
       <div style="position:relative!important;width:100%!important;max-width:440px!important;max-height:88vh!important;overflow-y:auto!important;border-radius:14px!important;background:#fff!important;font-family:'Segoe UI',Arial,sans-serif!important;box-shadow:0 14px 30px rgba(0,0,0,0.5)!important;">
         <button id="ha-wire-help-x" aria-label="Close" style="position:absolute!important;top:10px!important;right:10px!important;z-index:2!important;background:rgba(0,0,0,0.4)!important;border:none!important;color:#fff!important;font-size:16px!important;width:28px!important;height:28px!important;border-radius:50%!important;cursor:pointer!important;">&#10005;</button>
-        <div style="background:linear-gradient(135deg,#1a2f6b,#12224f);padding:22px 22px 18px;">
+        <div style="background:linear-gradient(135deg,${INK},${INK_DEEP});padding:22px 22px 18px;">
           <div style="color:#fff;font-size:19px;font-weight:800;">Where do the wires <span style="color:${ACCENT};">end up?</span></div>
           <div style="color:#c3cdea;font-size:12.5px;margin-top:4px;">Real photos from our own installs</div>
         </div>
