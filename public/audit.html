@@ -243,6 +243,9 @@
           <tbody id="logBody"></tbody>
         </table>
       </div>
+      <div id="logMoreWrap" class="hidden" style="margin-top:10px;text-align:center;">
+        <button type="button" class="btn ghost" id="logMore"></button>
+      </div>
     </div>
 
     <div class="card">
@@ -316,6 +319,9 @@ const money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,
 let token=localStorage.getItem('ha_audit_token')||'';
 let data=null, weekData=null, editing=null, answers={};
 let logFilter='all', logQuery='';
+// The week table opens showing only the newest handful; "See more" opens the rest.
+const LOG_PAGE=10;
+let logsExpanded=false;
 
 async function api(action, opts){
   const o=opts||{};
@@ -604,6 +610,7 @@ function renderDashboard(){
       '<div class="sbar"><i style="width:'+pct+'%;"></i></div></div>';
   }).join(''):'<p class="sub" style="margin:12px 0 0;">No graded calls yet this week.</p>';
 
+  logsExpanded=false;
   renderLogTable();
 }
 
@@ -625,11 +632,22 @@ function renderLogTable(){
     ? rows.length+' this week'
     : rows.length+' of '+audits.length;
   const body=$('logBody');
+  const more=$('logMoreWrap'), moreBtn=$('logMore');
   if(!rows.length){
     body.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--mute);padding:18px;">Nothing matches.</td></tr>';
+    more.classList.add('hidden');
     return;
   }
-  body.innerHTML=rows.map(a=>{
+  // rows arrive newest-first from the week endpoint, so the first slice IS the
+  // recent ones. Collapsed is the default on every load and filter change.
+  const shown=logsExpanded?rows:rows.slice(0,LOG_PAGE);
+  if(rows.length>LOG_PAGE){
+    more.classList.remove('hidden');
+    moreBtn.textContent=logsExpanded?'Show less':'See more ('+(rows.length-LOG_PAGE)+' older)';
+  } else {
+    more.classList.add('hidden');
+  }
+  body.innerHTML=shown.map(a=>{
     const d=new Date(a.audit_date+'T12:00:00Z');
     const wd=DAY_ABBR[(d.getUTCDay()+6)%7];
     const t=centralTime(a);
@@ -884,9 +902,11 @@ $('cancelBtn').onclick=()=>$('formCard').classList.add('hidden');
 $('date').onchange=load;
 
 // Search and filter drive the log table only; nothing else re-fetches.
-$('q').oninput=()=>{ logQuery=$('q').value.trim(); renderLogTable(); };
+$('logMore').onclick=()=>{ logsExpanded=!logsExpanded; renderLogTable(); };
+$('q').oninput=()=>{ logQuery=$('q').value.trim(); logsExpanded=false; renderLogTable(); };
 $('filterSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   logFilter=b.dataset.f;
+  logsExpanded=false;
   $('filterSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
   renderLogTable();
 });
