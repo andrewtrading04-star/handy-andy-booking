@@ -2057,7 +2057,7 @@ async function launchMarketRows(db) {
 async function launchStatus(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const { data: businesses, error } = await db.from('businesses')
-    .select('id, slug, name, url, active, settings, created_at')
+    .select('id, slug, name, url, support_phone, active, settings, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
 
@@ -2092,7 +2092,8 @@ async function launchStatus(req, res, db, auth) {
     const checklist = (biz.settings && biz.settings.launch_checklist) || {};
 
     return {
-      id: biz.id, slug: biz.slug, name: biz.name, url: biz.url, active: biz.active,
+      id: biz.id, slug: biz.slug, name: biz.name, url: biz.url,
+      phone: biz.support_phone || null, active: biz.active,
       created_at: biz.created_at,
       stripe: { wired: stripeWired, ready: stripeReady },
       email: { wired: emailWired, ready: emailReady },

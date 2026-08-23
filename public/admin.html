@@ -6000,6 +6000,18 @@ function launchDetailHtml(b, items){
     </div>
   </div>`;
 }
+// Phone + site shown as plain text under the slug, on one line. Both are
+// optional on the business record, so each half is dropped rather than
+// rendered empty, and the whole line disappears when neither is on file.
+// The URL is stripped to its bare host — the full https:// form is long
+// enough to wrap the card on a phone, and the host is the part he reads.
+function launchContactHtml(b){
+  const bits = [];
+  if(b.phone) bits.push(esc(b.phone));
+  if(b.url)   bits.push(esc(b.url.replace(/^https?:\/\//,'').replace(/\/$/,'')));
+  if(!bits.length) return '';
+  return `<div style="font-size:11px;color:var(--mute);margin-top:2px;">${bits.join(' &middot; ')}</div>`;
+}
 function launchCardHtml(b, items){
   const { passed, total, blocked } = launchScoreOf(b, items);
   const nextText = esc(launchNextAction(b, items));
@@ -6013,6 +6025,7 @@ function launchCardHtml(b, items){
       <div style="min-width:0;">
         <div style="font-weight:800;font-size:14px;">${esc(b.name)}</div>
         <div style="font-size:11px;color:var(--mute);">${esc(b.slug)}</div>
+        ${launchContactHtml(b)}
       </div>
     </div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${nextInner}</p>
@@ -8986,8 +8999,12 @@ function rcCard(r){
         placeholder="What happened? The more detail the better.">${esc(w.note)}</textarea>`;
   }
 
-  // 5. the review ask — only on a call that actually went well
-  if(w.outcome==='great'){
+  // 5. the review ask — after a call that went well, and also on a no answer,
+  // where the link is the whole point of the outreach and the customer was
+  // never there to be asked. A no-answer send does NOT resolve the card: she
+  // still gets another try tomorrow (see RC_OUT_RESOLVES).
+  if(w.outcome==='great' || w.outcome==='noanswer'){
+    const na = w.outcome==='noanswer';
     const canSms=!!(r.has_sms && r.has_review_link);
     const canEmail=!!(r.has_email && r.has_review_link);
     const canBoth=canSms&&canEmail;
@@ -8998,10 +9015,35 @@ function rcCard(r){
     // The "only when..." note is guidance for Joey, not part of the ask, so it
     // sits OUTSIDE the say-panel. Everything inside .rc-say is read word for
     // word app-wide; a caption living inside it risks getting read aloud too.
-    h+=`<div class="rc-step">3 · Ask for the review</div>
-      <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">This step only appears after a call that went well.</div>
-      <div class="rc-say"><i></i><p>Would you mind if I send you something to leave us a review?</p></div>`;
-    if(!r.has_review_link){
+    if(na){
+      h+=`<div class="rc-step">3 · Send the link anyway</div>
+        <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">Nothing is said out loud on this one — the review link just goes out by text or email. The call still stays on the list for another try.</div>`;
+      // Already sent on an earlier no-answer pass: say so, so a second trip
+      // through the queue doesn't quietly text the same customer again.
+      if(r.rc_sent&&r.rc_sent.length) h+=`<div class="rc-banner">Link already sent by ${esc(r.rc_sent.join(' and '))} on the last no answer.</div>`;
+    }else{
+      h+=`<div class="rc-step">3 · Ask for the review</div>
+        <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">This step only appears after a call that went well.</div>
+        <div class="rc-say"><i></i><p>Would you mind if I send you something to leave us a review?</p></div>`;
+    }
+    if(na && (!r.has_review_link || (!canSms&&!canEmail))){
+      // Nothing to send to, so this collapses back to exactly what the plain
+      // "No answer" outcome used to be: one button, stays on the queue.
+      h+=`<div class="rc-banner warn">${r.has_review_link
+          ? 'No mobile with consent and no email on file, so there is nothing to send to.'
+          : 'This job has no review link yet, so nothing can be sent right now.'}</div>
+        <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="noanswer" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Saving…':'Log the call'}</button></div>`;
+    }else if(na){
+      h+=`${chan('both','Both',canBoth,canBoth?'text and email · default':'needs a mobile and an email','main')}
+        <div class="rc-chans">
+          ${chan('sms','💬 Text',canSms,canSms?'':'no mobile on file')}
+          ${chan('email','✉️ Email',canEmail,canEmail?'':'no email on file')}
+        </div>
+        <div class="rc-gorow">
+          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send link and log no answer'}</button>
+          <button type="button" class="rc-go ghost" data-rc-done="noanswer" data-rc-id="${r.id}"${w.busy?' disabled':''}>Just log no answer</button>
+        </div>`;
+    }else if(!r.has_review_link){
       // MUST commit as 'great' (-> promised_review), never 'declined': declined
       // resolves the customer off the queue permanently with no folder to find
       // them in, mislabels a happy customer as "Not interested", and makes the
@@ -9096,10 +9138,10 @@ async function rcAction(id, act, biz, channel){
   // completion concurrently, double-counted the header stats, and left the
   // final saved status decided by whichever network call happened to land last.
   if(w.busy) return;
-  const outcome = act==='send' ? 'great' : channel;
-  const status = act==='send' ? 'promised_review'
-               : outcome==='declined' ? 'declined'
-               : RC_OUT_STATUS[outcome];
+  // A send now carries whichever outcome is selected: 'great' files the usual
+  // promised_review, 'noanswer' files a plain voicemail that still sent a link.
+  const outcome = act==='send' ? (w.outcome||'great') : channel;
+  const status = outcome==='declined' ? 'declined' : RC_OUT_STATUS[outcome];
   if(!status) return;
   if(outcome==='issue' && !w.note.trim()) return;   // the alert is worthless without detail
 
@@ -9140,16 +9182,24 @@ async function rcAction(id, act, biz, channel){
     _rcStats.today++;
     if(status!=='voicemail'){ _rcStats.reached++; if(status==='promised_review'||status==='declined') _rcStats.good++; }
     if(status==='complaint') _rcStats.issues++;
-    const resolves = act==='send' ? true : (outcome==='declined' ? true : RC_OUT_RESOLVES[outcome]);
+    // Driven by the outcome, not by whether a link went out: a no-answer that
+    // sent the link is still a no answer and still owed another call.
+    const resolves = outcome==='declined' ? true : RC_OUT_RESOLVES[outcome];
     const item=_rcData.find(x=>x.id===id);
     if(resolves) _rcData=_rcData.filter(x=>x.id!==id);
-    else if(item){ item.call_status=status; item.call_at=new Date().toISOString(); item.call_by=(typeof userName!=='undefined'?userName:null)||null; }
+    else if(item){
+      item.call_status=status; item.call_at=new Date().toISOString(); item.call_by=(typeof userName!=='undefined'?userName:null)||null;
+      // Remembered on the row (not in _rcWork, which is wiped just below) so
+      // the card can warn her before sending the same link twice.
+      if(sent&&sent.okd.length) item.rc_sent=Array.from(new Set([...(item.rc_sent||[]), ...sent.okd]));
+    }
     delete _rcWork[id];
     paintReviewCalls();
     if(sent){
+      const tail = status==='voicemail' ? ' · no answer logged, stays on the list' : '';
       toast(sent.failed.length
-        ? `Review sent by ${sent.okd.join(' and ')} · ${sent.failed.length} failed`
-        : `Review sent by ${sent.okd.join(' and ')} ✓`);
+        ? `Review sent by ${sent.okd.join(' and ')} · ${sent.failed.length} failed${tail}`
+        : `Review sent by ${sent.okd.join(' and ')} ✓${tail}`);
     }else{
       toast(({ promised_review:'Logged. They are happy 🎉', declined:'Logged. No review this time',
                complaint:'Saved with the job ✓', voicemail:'No answer logged, stays on the list',
