@@ -321,8 +321,12 @@ export default async function handler(req, res) {
     // authenticates with GRASSHOPPER_INGEST_SECRET instead of a login token.
     if (action === 'call_ingest') return await callIngest(req, res, body);
 
-    // Everything below requires a valid admin token.
-    const auth = verifyToken(getBearer(req));
+    // Everything below requires a valid admin token. call_recording is the one
+    // exception to "Bearer header only": it's loaded by a plain <audio src>,
+    // which can't attach a custom header, so it also accepts the exact same
+    // signed token via ?token= — same verifyToken() check, just carried the
+    // way a browser media request actually can.
+    const auth = verifyToken(action === 'call_recording' ? (getBearer(req) || req.query.token) : getBearer(req));
     if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
 
     const db = serviceClient();
@@ -406,6 +410,8 @@ export default async function handler(req, res) {
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
+      case 'call_volume_by_number': return await callVolumeByNumber(req, res, db, auth);
+      case 'call_recording':    return await callRecording(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
@@ -6889,16 +6895,34 @@ function claimIsHot(row) {
 }
 async function calls(req, res, db, auth) {
   const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
-  const { data: rows, error } = await db.from('calls')
+  // Folder filters for the Calls tab: a specific tracking number, or an
+  // entire market, or the legacy Grasshopper rows that never got matched to
+  // one (tracking_number_id is null) — "unattributed" is a real filter value,
+  // not just the absence of one, hence the separate check below rather than
+  // treating an empty tracking_number_id param the same as "no filter".
+  const trackingNumberId = (req.query.tracking_number_id || '').toString().trim();
+  const market = (req.query.market || '').toString().trim();
+  const unattributedOnly = req.query.unattributed === '1';
+  // Cursor pagination: "everything strictly older than this timestamp",
+  // rather than an offset, so a new call landing while a page is open never
+  // shifts already-fetched rows into the next page or duplicates one across
+  // pages.
+  const before = (req.query.before || '').toString().trim();
+  let q = db.from('calls')
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
-             source, tracking_label, answered, duration_sec, recording_url,
+             source, tracking_label, answered, duration_sec, recording_url, tracking_number_id,
              customer_id, booking_id,
              customer:customers ( id, name, phone, business:businesses ( slug ) ),
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
              business:businesses ( slug, name )`)
     .order('occurred_at', { ascending: false }).limit(limit);
+  if (trackingNumberId) q = q.eq('tracking_number_id', trackingNumberId);
+  else if (unattributedOnly) q = q.is('tracking_number_id', null);
+  else if (market) q = q.eq('market', market);
+  if (before) q = q.lt('occurred_at', before);
+  const { data: rows, error } = await q;
   if (error) throw error;
 
   // Self-healing "did this call become a job?": a booking made AFTER ingest
@@ -6977,8 +7001,90 @@ async function calls(req, res, db, auth) {
     // The newest thing worth interrupting someone about, for the banner.
     banner: openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r))
       .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
+    // Oldest occurred_at in this page, for "load older" cursor pagination —
+    // null once a page comes back short, meaning there is nothing older left.
+    next_cursor: (rows && rows.length === limit) ? rows[rows.length - 1].occurred_at : null,
     me,
   });
+}
+
+// Per-number call volume for the Calls tab's "folders" rail. Aggregated in JS
+// rather than a SQL group-by: at fleet scale (tens of numbers, hundreds of
+// calls a month) two flat queries plus a Map is simpler than a view/RPC to
+// maintain, and stays fast well past 30-34 numbers. Revisit as a real
+// aggregate query only if call volume grows an order of magnitude.
+async function callVolumeByNumber(req, res, db, auth) {
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const from = new Date(Date.now() - days * 86400000).toISOString();
+
+  const { data: numbers, error: e1 } = await db.from('tracking_numbers')
+    .select('id, phone, label, business_slug, market, active')
+    .eq('active', true).order('market').order('label');
+  if (e1) throw e1;
+
+  const { data: rows, error: e2 } = await db.from('calls')
+    .select('tracking_number_id, answered, occurred_at')
+    .not('tracking_number_id', 'is', null)
+    .gte('occurred_at', from);
+  if (e2) throw e2;
+
+  const counts = new Map();
+  for (const r of (rows || [])) {
+    const c = counts.get(r.tracking_number_id) || { call_count: 0, answered_count: 0, missed_count: 0, last_call_at: null };
+    c.call_count++;
+    if (r.answered) c.answered_count++; else c.missed_count++;
+    if (!c.last_call_at || r.occurred_at > c.last_call_at) c.last_call_at = r.occurred_at;
+    counts.set(r.tracking_number_id, c);
+  }
+
+  const byMarket = new Map();
+  for (const n of (numbers || [])) {
+    const c = counts.get(n.id) || { call_count: 0, answered_count: 0, missed_count: 0, last_call_at: null };
+    const key = n.market || 'Other';
+    if (!byMarket.has(key)) byMarket.set(key, { market: key, total: 0, numbers: [] });
+    const m = byMarket.get(key);
+    m.total += c.call_count;
+    m.numbers.push({ id: n.id, phone: n.phone, label: n.label, business_slug: n.business_slug, ...c });
+  }
+  for (const m of byMarket.values()) m.numbers.sort((a, b) => b.call_count - a.call_count);
+
+  // Legacy Grasshopper rows (91% of history today) have no tracking_number_id
+  // at all — a real bucket, not zero, so the total on screen still adds up.
+  const { count: unattributedCount } = await db.from('calls')
+    .select('id', { count: 'exact', head: true })
+    .is('tracking_number_id', null)
+    .gte('occurred_at', from);
+
+  return res.status(200).json({
+    from, to: new Date().toISOString(),
+    markets: [...byMarket.values()].sort((a, b) => a.market.localeCompare(b.market)),
+    unattributed: { call_count: unattributedCount || 0 },
+  });
+}
+
+// Proxies one Twilio call recording so it can be played from the browser.
+// Twilio's Recording media URLs require HTTP Basic Auth (Account SID +
+// Auth Token) — dropping recording_url straight into <audio src> 401s, so
+// this fetches server-side with the same credentials analytics.js already
+// uses for signature verification and streams the bytes back.
+async function callRecording(req, res, db, auth) {
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  const { data: row, error } = await db.from('calls').select('recording_url').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!row || !row.recording_url) return res.status(404).json({ error: 'No recording for this call' });
+
+  const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !tok) return res.status(500).json({ error: 'Twilio credentials not configured' });
+  const mediaUrl = row.recording_url.endsWith('.mp3') ? row.recording_url : `${row.recording_url}.mp3`;
+  const upstream = await fetch(mediaUrl, {
+    headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${tok}`).toString('base64') },
+  });
+  if (!upstream.ok || !upstream.body) return res.status(upstream.status || 502).json({ error: 'Could not fetch recording from Twilio' });
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.status(200).send(buf);
 }
 
 // Claim a voicemail ("I am ringing this person now") so nobody else rings them

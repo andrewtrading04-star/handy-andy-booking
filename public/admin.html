@@ -7877,6 +7877,13 @@ const AUDIT_LABELS={
 // navMyCallPerf below), so Review Calls is the only thing left in her Calls
 // hub, and she gets it with no tab row (a row with one tab is noise).
 const CALL_TABS=[
+  // The actual inbound call/voicemail log — every tracking-number call and
+  // Grasshopper voicemail, filterable by number, with recordings where they
+  // exist. Pre-existing code (callCard/paintCalls/renderCalls); it was never
+  // reachable because navTo() had no route for the standalone 'calls' screen
+  // this used to live at. Visible to everyone, not just the owner: claiming
+  // and dialing a voicemail back is exactly what Joey/Heather already do here.
+  { id:'log',         label:'Log',          screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
   { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
@@ -8451,14 +8458,50 @@ async function renderCallAnalytics(){
 // Gmail forwards each voicemail to api/admin.js?action=call_ingest. Cross-
 // business on purpose — the phone system is shared between both companies.
 let _callsData={open:[],handled:[]};
+// Which "folder" is selected in the rail: a specific tracking number, an
+// entire market, or the legacy Grasshopper rows that never matched one
+// (unattributed is a real filter value, not just the absence of a filter).
+let _callsFilter={ tracking_number_id:'', market:'', unattributed:false };
+let _callVolume=null;      // cached call_volume_by_number response
+let _callsRailSearch='';
+function callsFilterParams(extra){
+  const p={ limit:100, ...extra };
+  if(_callsFilter.tracking_number_id) p.tracking_number_id=_callsFilter.tracking_number_id;
+  else if(_callsFilter.unattributed) p.unattributed='1';
+  else if(_callsFilter.market) p.market=_callsFilter.market;
+  return p;
+}
 async function renderCalls(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading voicemails…</div></div>';
+  view.innerHTML='<div class="wrap"><div class="empty">Loading calls…</div></div>';
   try{
-    _callsData=await api('calls');
+    const [callsRes, volRes]=await Promise.all([
+      api('calls',{ params:callsFilterParams() }),
+      // Volume-by-number only needs a refetch when the rail itself is stale,
+      // not on every filter click -- it drives the rail, the rail doesn't
+      // change what it counts based on which folder is currently selected.
+      _callVolume ? Promise.resolve(_callVolume) : api('call_volume_by_number',{ params:{ days:30 }}).catch(()=>null),
+    ]);
+    _callsData=callsRes;
+    if(volRes) _callVolume=volRes;
     paintCalls();
     refreshCallsBadge();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+async function loadOlderCalls(btn){
+  if(!_callsData.next_cursor) return;
+  if(btn){ btn.disabled=true; btn.textContent='Loading…'; }
+  try{
+    const more=await api('calls',{ params:callsFilterParams({ before:_callsData.next_cursor }) });
+    const seen=new Set([..._callsData.open,..._callsData.handled].map(r=>r.id));
+    _callsData={
+      ..._callsData,
+      open:[..._callsData.open, ...more.open.filter(r=>!seen.has(r.id))],
+      handled:[..._callsData.handled, ...more.handled.filter(r=>!seen.has(r.id))],
+      next_cursor: more.next_cursor,
+    };
+    paintCalls();
+  }catch(e){ toast(e.message||'Could not load older calls'); if(btn){ btn.disabled=false; btn.textContent='Load older calls'; } }
 }
 // Times are shown in the market's own zone, NOT the raw value Grasshopper sent:
 // it stamps every notification in Central regardless of where the call came in,
@@ -8477,6 +8520,55 @@ const CALL_RESOLUTION_LABEL={booked:'📅 Booked',estimate_sent:'🧾 Estimate s
 function callDuration(sec){
   const s=parseInt(sec,10); if(!Number.isFinite(s)||s<0) return '';
   return s<60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
+// The "folders" rail: search + per-market lists of tracking numbers with a
+// 30-day call count each, so the Calls tab scales to the 10-20 more numbers
+// planned without turning into 30+ hardcoded tabs -- it's all driven off
+// call_volume_by_number, so a new number just appears here once it exists in
+// tracking_numbers. Body is a separate function/container from the search
+// input so typing re-renders just the list, not the input itself (which
+// would steal focus on every keystroke).
+function callRailBodyHtml(){
+  if(!_callVolume) return '<div class="rc-meta">Loading…</div>';
+  const q=_callsRailSearch.trim().toLowerCase();
+  const digits=q.replace(/\D/g,'');
+  const matches=(label,phone)=> !q || (label||'').toLowerCase().includes(q) || (digits && String(phone||'').includes(digits));
+  const grandTotal=_callVolume.markets.reduce((s,m)=>s+m.total,0)+(_callVolume.unattributed.call_count||0);
+  const marketsHtml=_callVolume.markets.map(m=>{
+    const nums=m.numbers.filter(n=>matches(n.label,n.phone));
+    if(!nums.length) return '';
+    return `<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:10px 0 5px;">${esc(m.market)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${nums.map(n=>
+        `<button type="button" class="rc-tag ${_callsFilter.tracking_number_id===n.id?'on':''}" data-callrail-num="${esc(n.id)}" title="${esc(fmtPhone(n.phone))}">${esc(n.label||fmtPhone(n.phone))} · ${n.call_count}</button>`
+      ).join('')}</div>`;
+  }).join('');
+  const showUnattr = !q && (_callVolume.unattributed.call_count>0);
+  return `<button type="button" class="rc-tag ${!_callsFilter.tracking_number_id&&!_callsFilter.unattributed?'on':''}" data-callrail-all="1">All calls · ${grandTotal}</button>
+    ${marketsHtml}
+    ${(q&&!marketsHtml)?'<div class="rc-meta" style="margin-top:8px;">No numbers match.</div>':''}
+    ${showUnattr?`<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:10px 0 5px;">Unrouted</div>
+      <button type="button" class="rc-tag ${_callsFilter.unattributed?'on':''}" data-callrail-unattr="1">Unattributed (legacy) · ${_callVolume.unattributed.call_count}</button>`:''}`;
+}
+function wireCallRail(){
+  const body=document.getElementById('callRailBody'); if(!body) return;
+  body.innerHTML=callRailBodyHtml();
+  body.querySelectorAll('[data-callrail-num]').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.callrailNum;
+    _callsFilter = _callsFilter.tracking_number_id===id ? { tracking_number_id:'', market:'', unattributed:false } : { tracking_number_id:id, market:'', unattributed:false };
+    renderCalls();
+  }));
+  const allBtn=body.querySelector('[data-callrail-all]');
+  if(allBtn) allBtn.addEventListener('click',()=>{ _callsFilter={ tracking_number_id:'', market:'', unattributed:false }; renderCalls(); });
+  const unBtn=body.querySelector('[data-callrail-unattr]');
+  if(unBtn) unBtn.addEventListener('click',()=>{ _callsFilter={ tracking_number_id:'', market:'', unattributed:!_callsFilter.unattributed }; renderCalls(); });
+}
+function callStatStripHtml(){
+  if(!_callVolume) return '';
+  const attributed=_callVolume.markets.reduce((s,m)=>s+m.total,0);
+  const answeredN=_callVolume.markets.reduce((s,m)=>s+m.numbers.reduce((s2,n)=>s2+n.answered_count,0),0);
+  const pct = attributed ? Math.round(100*answeredN/attributed) : null;
+  const un=_callVolume.unattributed.call_count||0;
+  return `<div class="rc-meta" style="margin-bottom:12px;">${attributed} tracking-number call${attributed===1?'':'s'} in the last 30 days${pct!=null?` · ${pct}% answered`:''}${un?` · +${un} more from the legacy phone line (see "Unattributed")`:''}</div>`;
 }
 function callCard(r,handled){
   const isLive=r.kind==='live';
@@ -8518,6 +8610,15 @@ function callCard(r,handled){
       // transcript" here would read as something missing rather than normal.
       ? '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">Call was answered — no message left.</div>'
       : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
+  // Proxied through call_recording (Twilio's own recording URLs need Basic
+  // Auth the browser can't supply) — only present at all once a tracking
+  // number has record_calls on and a call has actually completed.
+  // <audio src> can't carry an Authorization header, so the token rides in
+  // the query string here — accepted server-side ONLY for this one action
+  // (see api/admin.js), same signed/expiring token as everywhere else.
+  const audio=r.recording_url
+    ? `<audio controls preload="none" style="width:100%;max-width:360px;margin-top:8px;height:34px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`
+    : '';
 
   const hasPhone=!!r.caller_phone;
   const tel=`tel:+1${esc(r.caller_phone)}`;
@@ -8567,9 +8668,9 @@ function callCard(r,handled){
   return `<div class="rc-card" style="align-items:flex-start;">
     <div class="rc-main">
       <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
-      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
+      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}${r.grasshopper_number?' · dialed '+esc(fmtPhone(r.grasshopper_number)):''}</div>
       <div class="rc-badges">${badges.join('')}</div>
-      ${tx}${job}${handledLine}
+      ${tx}${audio}${job}${handledLine}
     </div>
     <div class="rc-actions">${actions}</div>
   </div>`;
@@ -8577,18 +8678,35 @@ function callCard(r,handled){
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
   const open=_callsData.open||[], handled=_callsData.handled||[];
+  const filtered = !!(_callsFilter.tracking_number_id || _callsFilter.market || _callsFilter.unattributed);
   const body = (!open.length && !handled.length)
-    ? `<div class="empty" style="padding:34px 12px;">No calls yet. Voicemails appear automatically, and calls taken through "Take a Call" (📞 next to New Booking) log here too.</div>`
+    ? `<div class="empty" style="padding:34px 12px;">${filtered?'No calls on this number in the last 30 days.':'No calls yet. Voicemails appear automatically, and calls taken through "Take a Call" (📞 next to New Booking) log here too.'}</div>`
     : `${open.length?`<div class="rc-count">Needs callback (${open.length})</div>${open.map(r=>callCard(r,false)).join('')}`
         :`<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`}
-       ${handled.length?`<div class="rc-count" style="margin-top:22px;">Handled</div>${handled.map(r=>callCard(r,true)).join('')}`:''}`;
+       ${handled.length?`<div class="rc-count" style="margin-top:22px;">Handled</div>${handled.map(r=>callCard(r,true)).join('')}`:''}
+       ${_callsData.next_cursor?`<button type="button" class="rc-btn ghost" id="callsLoadOlder" style="margin-top:14px;width:100%;">Load older calls</button>`:''}`;
   view.innerHTML=`<div class="wrap">
     <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
       <h2 class="rc-title">📨 Calls</h2>
-      <div class="rc-sub">Voicemails from the office phone, with the transcript so you can read it instead of listening. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
+      <div class="rc-sub">Voicemails and tracking-number calls from the office phone. Filter by number below to see volume and recordings for one line at a time. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
     </div></div>
+    ${callStatStripHtml()}
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <input id="callRailSearch" type="text" placeholder="Search number or label…" value="${esc(_callsRailSearch)}"
+          style="flex:1;min-width:140px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;">
+        <span style="font-size:11px;color:var(--mute);white-space:nowrap;">last 30 days</span>
+      </div>
+      <div id="callRailBody" style="max-height:230px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;"></div>
+    </div>
     ${body}</div>`;
+
+  wireCallRail();
+  const railSearch=view.querySelector('#callRailSearch');
+  if(railSearch) railSearch.addEventListener('input', e=>{ _callsRailSearch=e.target.value; wireCallRail(); });
+  const loadOlder=view.querySelector('#callsLoadOlder');
+  if(loadOlder) loadOlder.addEventListener('click', ()=>loadOlderCalls(loadOlder));
 
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
@@ -8681,7 +8799,10 @@ function paintCallBanner(call){
   document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
   document.getElementById('callBannerGo').onclick=()=>{
     dismissBanner(call.id);
-    navTo('calls');
+    // The Calls tab is a hub now (see CALL_TABS) -- navTo('calls') hasn't
+    // resolved to anything since the hub replaced the standalone screen.
+    callHubTab='log';
+    navTo('callhub');
   };
 }
 
@@ -8689,7 +8810,11 @@ function paintCallBanner(call){
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
   try{
-    const d=(onScreen('calls')&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
+    // Always fetches its own unfiltered summary now that the tab supports
+    // per-number folders — reusing _callsData here would make the badge/
+    // banner go quiet while someone is looking at a filtered folder that
+    // happens to have nothing open, even though other numbers do.
+    const d=await api('calls',{ params:{ limit:100 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
@@ -8703,7 +8828,7 @@ async function refreshCallsBadge(){
 // in the background so it costs nothing.
 setInterval(()=>{
   if(document.hidden||!current) return;
-  if(onScreen('calls')) renderCalls();
+  if(onScreen('calllog')) renderCalls();
   else refreshCallsBadge();
 }, 20000);
 
@@ -12629,7 +12754,7 @@ function cwWireLadderCommon(scope){
       cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
       await cwCallUpdate({ resolution:'refused' });
       closeCallWiz({resolved:true}); toast('Call logged.');
-      if(onScreen('calls')) renderCalls();
+      if(onScreen('calllog')) renderCalls();
     }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
   });
 }
@@ -13919,7 +14044,7 @@ async function renderCallWiz(){
         cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
         await cwCallUpdate({ resolution:res });
         closeCallWiz({resolved:true}); toast('Call logged.');
-        if(onScreen('calls')) renderCalls();
+        if(onScreen('calllog')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
     cwWireBack(()=>{
