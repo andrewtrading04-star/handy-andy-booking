@@ -428,6 +428,16 @@
   .rc-week-arrow{border:0;background:#fff;width:28px;height:28px;border-radius:8px;font-size:15px;font-weight:800;color:var(--ink-2);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);}
   .rc-week-arrow:disabled{opacity:.35;cursor:default;box-shadow:none;}
   .rc-week-label{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;}
+  /* ── Calls, by number: one collapsed row per number ── */
+  .cn-row{display:flex;align-items:center;gap:10px;width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px;font:inherit;cursor:pointer;text-align:left;}
+  .cn-row:hover{border-color:var(--mute);}
+  .cn-caret{font-size:11px;color:var(--mute);flex:none;transition:transform .15s;}
+  .cn-row.open .cn-caret{transform:rotate(90deg);}
+  .cn-name{font-weight:800;font-size:14px;}
+  .cn-phone{font-size:12.5px;color:var(--mute);}
+  .cn-count{margin-left:auto;flex:none;font-size:12.5px;font-weight:700;color:var(--ink-2);background:var(--line2);border-radius:999px;padding:3px 10px;}
+  .cn-body{display:none;padding:2px 0 6px 14px;}
+  .cn-body.open{display:block;}
   @media(max-width:640px){ .rc-card{flex-direction:column;align-items:stretch;} .rc-actions{min-width:0;} }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
@@ -8544,15 +8554,26 @@ function groupCallsByNumber(rows){
   const marketKeys=[...byMarket.keys()].sort((a,b)=> a==='Unrouted'?1 : b==='Unrouted'?-1 : a.localeCompare(b));
   return marketKeys.map(m=>({ market:m, numbers:byMarket.get(m) }));
 }
+// Which number rows are expanded. Survives repaints (the 20s poll repaints
+// this screen) so an open folder doesn't snap shut while someone is reading.
+let _callsOpenNumbers=new Set();
 function callsByNumberHtml(rows){
   if(!rows.length) return '<div class="empty" style="padding:22px 12px;">No calls in this period.</div>';
   const groups=groupCallsByNumber(rows);
   return groups.map(({market,numbers})=>`
     <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:16px 0 6px;">${esc(market)}</div>
-    ${numbers.map(g=>`
-      <div style="font-size:13.5px;font-weight:800;margin:10px 0 6px;">${esc(shortTrackingLabel(g.label)||fmtPhone(g.phone)||'Unknown number')} <span style="font-weight:600;color:var(--mute);">· ${g.calls.length} call${g.calls.length===1?'':'s'}</span></div>
-      ${g.calls.map(r=>callCard(r, r._handled)).join('')}
-    `).join('')}
+    ${numbers.map(g=>{
+      const key=g.phone||'__unattributed__';
+      const open=_callsOpenNumbers.has(key);
+      const name=shortTrackingLabel(g.label)||fmtPhone(g.phone)||'Unknown number';
+      return `<button type="button" class="cn-row ${open?'open':''}" data-cnnum="${esc(key)}">
+        <span class="cn-caret">▶</span>
+        <span class="cn-name">${esc(name)}</span>
+        ${g.phone&&shortTrackingLabel(g.label)?`<span class="cn-phone">${esc(fmtPhone(g.phone))}</span>`:''}
+        <span class="cn-count">${g.calls.length}</span>
+      </button>
+      <div class="cn-body ${open?'open':''}" data-cnbody="${esc(key)}">${g.calls.map(r=>callCard(r, r._handled)).join('')}</div>`;
+    }).join('')}
   `).join('');
 }
 function callCard(r,handled){
@@ -8685,13 +8706,22 @@ function paintCalls(){
     </div></div>
     <div class="rc-count">Needs callback (${open.length})</div>
     ${needsBody}
-    <div class="rc-count" style="margin-top:24px;">${esc(CALL_PERIOD_LABEL[_callsPeriod])}, by number</div>
-    <div class="rc-seg" style="margin-bottom:14px;">${periodSeg}</div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:24px;margin-bottom:12px;flex-wrap:wrap;">
+      <div class="rc-count" style="margin:0;">By number</div>
+      <div class="rc-seg">${periodSeg}</div>
+    </div>
     ${callsByNumberHtml(periodRows)}
   </div>`;
 
   view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
     _callsPeriod=b.dataset.callperiod; renderCalls();
+  }));
+  view.querySelectorAll('[data-cnnum]').forEach(b=>b.addEventListener('click',()=>{
+    const key=b.dataset.cnnum;
+    const body=view.querySelector(`[data-cnbody="${CSS.escape(key)}"]`);
+    if(_callsOpenNumbers.has(key)) _callsOpenNumbers.delete(key); else _callsOpenNumbers.add(key);
+    b.classList.toggle('open');
+    if(body) body.classList.toggle('open');
   }));
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
