@@ -33,6 +33,7 @@ import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-res
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
 import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines } from './_lib/broker-spec.js';
 import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
+import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
 // Search Console domain per business — the free "what did people search to
 // find us" data source (see api/_lib/gsc.js).
@@ -3600,8 +3601,11 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
   const selections = Array.isArray(body.selections) ? body.selections : [];
+  const selectionCount = selections.length;
   if (selections.length) {
-    const rows = selections.map(s => {
+    // Canonical ticket order from birth (TVs smallest-first, then work, then
+    // travel fee / discounts; tax is appended after, so it lands last).
+    const rows = canonicalizeLineItems(selections.map(s => {
       const qty = Number(s.quantity) || 1;
       const unit = Number(s.price) || 0;
       const kind = s.label === 'Travel' ? 'addon' : 'option';
@@ -3611,8 +3615,11 @@ async function bookingCreate(req, res, db, auth, body) {
         quantity: qty, unit_price: unit, line_total: unit * qty,
         service_id: body.service_id || null, option_id: s.option_id || null,
       };
-    });
-    const { error: liErr } = await db.from('booking_line_items').insert(rows);
+    })).map((r, i) => ({ ...r, sort_order: i }));
+    let { error: liErr } = await db.from('booking_line_items').insert(rows);
+    if (liErr && isSortOrderErr(liErr)) {
+      ({ error: liErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
+    }
     if (liErr) {
       console.error('[admin] line-items insert failed (booking exists):', liErr.message);
       // `||`, never a plain assignment — a prior card-save warning (money-
@@ -3623,14 +3630,20 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
 
-  // Add tax as a line item
+  // Add tax as a line item — sort_order after every selection, so tax is the
+  // very last line on the ticket (owner rule: tax always at the bottom).
   if (Number(body.tax) > 0) {
-    const { error: taxErr } = await db.from('booking_line_items').insert({
+    const taxRow = {
       booking_id: bRow.id, business_id: biz.id,
       kind: 'fee', name: 'Tax (8.25%)',
       quantity: 1, unit_price: Number(body.tax), line_total: Number(body.tax),
-      service_id: null, option_id: null, taxable: false,
-    });
+      service_id: null, option_id: null, taxable: false, sort_order: selectionCount,
+    };
+    let { error: taxErr } = await db.from('booking_line_items').insert(taxRow);
+    if (taxErr && isSortOrderErr(taxErr)) {
+      const { sort_order, ...bare } = taxRow;
+      ({ error: taxErr } = await db.from('booking_line_items').insert(bare));
+    }
     if (taxErr) {
       console.error('[admin] tax line-item insert failed (booking exists):', taxErr.message);
       postInsertWarning = postInsertWarning || 'Booking was created, but the tax line could not be saved — open the job and re-add it.';
@@ -4324,35 +4337,9 @@ function sanitizeBookingLineItems(arr) {
   }).filter(it => it.name || it.unit_price);
 }
 
-// The office bills 8.25% sales tax. One constant so a tax line's AMOUNT and its
-// "Tax (8.25%)" label can never drift apart.
-const BOOKING_TAX_RATE = 0.0825;
-const isTaxLine = (it) => /^\s*tax\b/i.test(String((it && it.name) || ''));
-
-// Recompute a ticket's tax line from the lines it is actually made of.
-//
-// Editing a line's QUANTITY used to leave the tax line frozen at whatever it was
-// when the booking was created, so the customer kept being taxed on the original
-// amount. Mark Boohaker's ticket (Jul 28 2026) still carried tax on a $269 base
-// after its handyman line had grown to $354 — $7.02 undercharged; Samantha
-// Bland's was $14.02 short the same way. The booking's `price` is summed from
-// these lines, so a stale tax line quietly corrupts the ticket total too, and
-// nothing anywhere flagged it.
-//
-// Only an EXISTING tax line is recalculated. A ticket that legitimately has no
-// tax line (tax-exempt work) must never have one invented here.
-function recalcTaxLine(items) {
-  if (!items.some(isTaxLine)) return items;
-  const body = items.filter(it => !isTaxLine(it));
-  const base = body.reduce((t, it) => t + (it.taxable === false ? 0 : it.line_total), 0);
-  const tax = Math.round(base * BOOKING_TAX_RATE * 100) / 100;
-  // Rebuilt as ONE tax line at the end: a hand-edited set can arrive carrying
-  // several, and collapsing them is part of what keeps `price` correct.
-  return [...body, {
-    name: `Tax (${(BOOKING_TAX_RATE * 100).toFixed(2).replace(/\.?0+$/, '')}%)`,
-    quantity: 1, unit_price: tax, line_total: tax, kind: 'fee', taxable: false,
-  }];
-}
+// Tax constants + recalcTaxLine + isTaxLine now live in api/_lib/line-items.js
+// (shared with api/tech.js so the tech-side save applies the same tax rule —
+// see the Boohaker/Bland stale-tax notes there).
 
 // ── Edit a booking's line items (text + price) ───────────────────────────────
 // Owner + secretary. The office sees every line on a job, so the posted set is
@@ -4360,31 +4347,6 @@ function recalcTaxLine(items) {
 // booking's price to the sum of the lines so the total can never drift from the
 // items it's made of. Works on any job, including imported (Zenbooker) jobs that
 // arrived with no line items at all — the editor seeds one line from the price.
-// Snapshot a booking's current line items into its metadata (ring buffer of the
-// last 5 saves) BEFORE any rewrite touches them. This is the permanent undo
-// trail for the Lucinda Simpson incident (Jul 2026): a ticket's entire item set
-// was replaced with a near-empty list and there was NOTHING anywhere recording
-// what had been on it. Best-effort — a snapshot failure never blocks the save,
-// but it's loudly logged because it means the safety net is down.
-async function snapshotLineItems(db, bookingId, meta, oldRows, actor) {
-  try {
-    const backups = Array.isArray(meta?.li_backups) ? meta.li_backups : [];
-    backups.push({
-      at: new Date().toISOString(), by: actor || 'unknown',
-      items: (oldRows || []).map(r => ({
-        kind: r.kind, name: r.name, quantity: r.quantity,
-        unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable,
-      })),
-    });
-    const newMeta = { ...(meta || {}), li_backups: backups.slice(-5) };
-    await db.from('bookings').update({ metadata: newMeta }).eq('id', bookingId);
-    return newMeta;
-  } catch (e) {
-    console.error(`[line_items] SNAPSHOT FAILED for booking ${bookingId} — saving without a safety net:`, e.message);
-    return meta;
-  }
-}
-
 async function bookingLineItemsSave(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -4395,9 +4357,31 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
     .select('id, metadata').eq('id', id).eq('business_id', biz.id).single();
   if (e0 || !existing) return res.status(404).json({ error: 'Booking not found' });
 
+  // ── Optimistic lock (the Throckmorton incident, 2026-08-21) ───────────────
+  // The office and the tech edited this same ticket from two stale copies and
+  // silently clobbered each other five times in four minutes — the customer
+  // ended up charged for the same brackets twice. Every editor now loads
+  // li_rev with the ticket and must hand it back; a save whose li_rev no
+  // longer matches is refused instead of applied.
+  const curRev = Number(existing.metadata?.li_rev) || 0;
+  if (body.li_rev == null) {
+    return res.status(409).json({
+      error: 'This dashboard tab is out of date and could overwrite someone else\'s edit — refresh the page (Ctrl+R), reopen the job, and redo the change.',
+      code: LI_CONFLICT_CODE,
+    });
+  }
+  if (Number(body.li_rev) !== curRev) {
+    return res.status(409).json({
+      error: 'This ticket was changed by someone else (another office member or the tech) after you opened it. Close the job, reopen it to see the latest items, then redo your edit.',
+      code: LI_CONFLICT_CODE,
+    });
+  }
+
   // Tax is re-derived from the submitted lines on every save, so changing a
-  // quantity can no longer leave the ticket taxed on a stale amount.
-  const items = recalcTaxLine(sanitizeBookingLineItems(body.items));
+  // quantity can no longer leave the ticket taxed on a stale amount — and the
+  // whole set is rewritten into the canonical ticket order (TVs smallest-first,
+  // then work, then travel fee, discounts, tax last — owner rule, 2026-08-24).
+  const items = canonicalizeLineItems(recalcTaxLine(sanitizeBookingLineItems(body.items)));
 
   // Same sanity ceiling as booking_create — an edit can introduce an absurd
   // line item just as easily as the original create (see priceSanityIssue).
@@ -4425,7 +4409,37 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   }
 
   console.log(`[line_items] save booking=${id} by=${auth.name || auth.role || 'office'} before=${(oldRows || []).length} after=${items.length}`);
-  await snapshotLineItems(db, id, existing.metadata, oldRows, `office:${auth.name || auth.role || '?'}`);
+
+  // Claim the ticket with a compare-and-swap on li_rev, folding the snapshot
+  // (ring buffer of the last 5 item sets — the Lucinda Simpson undo trail)
+  // into the SAME metadata write. If another save slipped in between our rev
+  // check above and this write, the CAS matches zero rows and we refuse —
+  // that's the whole point: two blind full-replaces can never both land.
+  const backups = Array.isArray(existing.metadata?.li_backups) ? existing.metadata.li_backups.slice() : [];
+  backups.push({
+    at: new Date().toISOString(), by: `office:${auth.name || auth.role || '?'}`,
+    items: (oldRows || []).map(r => ({
+      kind: r.kind, name: r.name, quantity: r.quantity,
+      unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable,
+    })),
+  });
+  let newRev;
+  try {
+    const cas = await casBumpLiRev(db, id, existing.metadata, { li_backups: backups.slice(-5) });
+    if (!cas.ok) {
+      return res.status(409).json({
+        error: 'Someone else saved this ticket at the same moment. Close the job, reopen it to see the latest items, then redo your edit.',
+        code: LI_CONFLICT_CODE,
+      });
+    }
+    newRev = cas.rev;
+  } catch (e) {
+    // The lock write itself failed (transient DB error) — do NOT proceed to a
+    // blind replace without it; that's the unguarded path this lock exists to
+    // close. Surface the error so the office just retries.
+    console.error(`[line_items] li_rev CAS failed for booking ${id}:`, e.message);
+    return res.status(500).json({ error: 'Could not lock the ticket for saving — try again in a moment.' });
+  }
 
   // INSERT the new rows FIRST, then delete the old ones BY ID. The two steps
   // are separate transactions (PostgREST), so this order is what makes failure
@@ -4469,7 +4483,52 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
     .update({ price, subtotal }).eq('id', id).eq('business_id', biz.id);
   if (upErr) throw upErr;
 
-  return res.status(200).json({ ok: true, price, subtotal, count: items.length });
+  // SEAL the rewrite with a second CAS bump. The claim above happens BEFORE
+  // the insert/delete land (separate PostgREST transactions), so a fetch in
+  // that window can capture the claimed rev alongside stale or duplicated
+  // rows — and a save built minutes later from that poisoned snapshot would
+  // pass the lock. Bumping again once the rows are final invalidates every
+  // snapshot taken mid-rewrite. The still-open modal gets THIS rev back; if
+  // the seal fails we return no li_rev at all, so that modal's next save
+  // fails closed (409) instead of trusting a rev the DB may not hold.
+  let sealedRev = null;
+  try {
+    // FRESH read, never the claim-time copy: the claim-to-seal window spans
+    // the whole rewrite, and completion stamps (bracket_deducted_at etc.)
+    // written in it don't touch li_rev — sealing with the stale object would
+    // silently revert them (and re-completing would double-deduct inventory).
+    // If li_rev moved off our claim, someone else already invalidated the
+    // ticket — skip the seal and fail closed (no li_rev in the response).
+    const { data: freshRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+    if (Number(freshRow?.metadata?.li_rev) === newRev) {
+      const seal = await casBumpLiRev(db, id, freshRow.metadata);
+      if (seal.ok) sealedRev = seal.rev;
+    }
+  } catch (e) { console.warn(`[line_items] seal bump failed for booking ${id}:`, e.message); }
+
+  return res.status(200).json({ ok: true, price, subtotal, count: items.length,
+    ...(sealedRev != null && { li_rev: sealedRev }) });
+}
+
+// Rewrite a booking's stored line items into the canonical ticket order (TVs
+// smallest-first, work, travel fee, discounts, tax last) without touching
+// their content — for paths that APPEND a row outside the full editors (GDS
+// upsell, Zenbooker GDS backfill) and would otherwise leave it stranded at
+// sort_order 0/99. Best-effort: an ordering failure never blocks the caller.
+async function recanonicalizeBookingRows(db, bookingId) {
+  try {
+    const { data: rows, error } = await db.from('booking_line_items')
+      .select('id, kind, name, quantity, line_total, taxable, sort_order')
+      .eq('booking_id', bookingId).order('sort_order', { ascending: true });
+    if (error) { if (!isSortOrderErr(error)) throw error; return; }   // no column yet — nothing to order
+    const ordered = canonicalizeLineItems(rows || []);
+    for (let i = 0; i < ordered.length; i++) {
+      if (Number(ordered[i].sort_order) === i) continue;
+      const { error: soErr } = await db.from('booking_line_items')
+        .update({ sort_order: i }).eq('id', ordered[i].id);
+      if (soErr) { console.warn(`[line_items] recanonicalize write failed for booking ${bookingId}:`, soErr.message); break; }
+    }
+  } catch (e) { console.warn(`[line_items] recanonicalize failed for booking ${bookingId}:`, e.message); }
 }
 
 // ── Add / change the card on file (customer wants to pay with a different card) ──
@@ -6166,6 +6225,10 @@ function shapeBooking(b) {
     // Who booked it: 'Admin' / 'Heather' / 'Joey' (stored at create), or null on
     // older/widget bookings (the client falls back to source for "Booking widget").
     booked_by: b.metadata?.booked_by || null,
+    // Optimistic-lock revision for the line-items editor — the editor sends it
+    // back on save so two people can never blindly overwrite each other's
+    // ticket edits (see bookingLineItemsSave).
+    li_rev: Number(b.metadata?.li_rev) || 0,
     // Set when a reschedule (office or customer self-service) actually moved
     // the time. Shown as a small note under Date & time on the job card.
     rescheduled_from: b.metadata?.rescheduled_from || null,
@@ -9843,6 +9906,14 @@ async function gdsUpsellAdd(req, res, body) {
   });
   if (insErr) return res.status(500).json({ error: 'Could not add this to your ticket. Please try again.' });
 
+  // Invalidate any open office/tech editor IMMEDIATELY — the line is on the
+  // ticket from this point, so every later exit path (even the price-update
+  // 500 below) must leave open editors unable to silently replace it. Then
+  // slot the new line into the canonical order (it would otherwise default to
+  // sort_order 0 and render at the top of the ticket).
+  await bumpLiRev(db, id);
+  await recanonicalizeBookingRows(db, id);
+
   // Bump the existing tax line (if any) by the same rate rather than
   // re-deriving a rate from scratch — matches how tax is stored everywhere
   // else in this codebase (a flat 'fee' line item, not a stored rate column).
@@ -10248,6 +10319,23 @@ async function zbImport(req, res, db, body) {
       const { error } = await db.from('booking_line_items').insert(payload);
       if (error) return res.status(500).json({ error: 'line item insert: ' + error.message });
       gdsWritten = payload.length;
+      // These rows landed on EXISTING bookings outside any editor — invalidate
+      // any open editor on each (so its save can't silently drop the GDS line)
+      // and slot the line into the canonical order (the raw sort_order 99
+      // above would otherwise sit below the tax line). Best-effort per
+      // booking, capped so a huge first-run backfill can't push this already
+      // heavy import handler into the platform timeout (the inserts above are
+      // committed, and re-running would skip them via the `have` dedupe) —
+      // anything past the cap is LOGGED, not silently dropped.
+      const affected = [...new Set(payload.map(p => p.booking_id))];
+      const CANON_CAP = 50;
+      for (const bid of affected.slice(0, CANON_CAP)) {
+        await bumpLiRev(db, bid);
+        await recanonicalizeBookingRows(db, bid);
+      }
+      if (affected.length > CANON_CAP) {
+        console.warn(`[zbimport] GDS backfill touched ${affected.length} bookings; only the first ${CANON_CAP} were re-ordered/rev-bumped this run — the rest keep sort_order 99 until next edited.`);
+      }
     }
   }
 
@@ -10470,17 +10558,31 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   }
   if (bErr) throw bErr;
 
-  const rows = combinedItems.map(it => ({
+  // Canonical ticket order from birth (TVs smallest-first, then work, then
+  // travel/discounts); tax gets the next sort_order so it's always the last line.
+  const rows = canonicalizeLineItems(combinedItems.map(it => ({
     booking_id: bRow.id, business_id: biz.id, kind: 'option', name: it.description || 'Item',
     quantity: Number(it.qty) || 1, unit_price: Number(it.unit_price) || 0,
     line_total: (Number(it.qty) || 1) * (Number(it.unit_price) || 0),
-  }));
-  if (rows.length) await db.from('booking_line_items').insert(rows).then(({ error }) => { if (error) console.error('[estimate_approve] line items insert failed:', error.message); });
+  }))).map((r, i) => ({ ...r, sort_order: i }));
+  if (rows.length) {
+    let { error: liErr } = await db.from('booking_line_items').insert(rows);
+    if (liErr && isSortOrderErr(liErr)) {
+      ({ error: liErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
+    }
+    if (liErr) console.error('[estimate_approve] line items insert failed:', liErr.message);
+  }
   if (totals.tax > 0) {
-    await db.from('booking_line_items').insert({
+    const taxRow = {
       booking_id: bRow.id, business_id: biz.id, kind: 'fee', name: 'Tax',
-      quantity: 1, unit_price: totals.tax, line_total: totals.tax, taxable: false,
-    }).then(({ error }) => { if (error) console.error('[estimate_approve] tax line item insert failed:', error.message); });
+      quantity: 1, unit_price: totals.tax, line_total: totals.tax, taxable: false, sort_order: rows.length,
+    };
+    let { error: taxErr } = await db.from('booking_line_items').insert(taxRow);
+    if (taxErr && isSortOrderErr(taxErr)) {
+      const { sort_order, ...bare } = taxRow;
+      ({ error: taxErr } = await db.from('booking_line_items').insert(bare));
+    }
+    if (taxErr) console.error('[estimate_approve] tax line item insert failed:', taxErr.message);
   }
 
   await db.from('booking_status_events').insert({
@@ -11890,6 +11992,11 @@ function detectBracketQtys(lineItems) {
     else if (/tilt/.test(name)) out.tilting += qty;
     else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
   }
+  // A job can't use more brackets than it has TVs. A ticket carrying BOTH a
+  // bracket option line and a hand-typed hardware line ("Tilting Mounts")
+  // otherwise double-counts (Throckmorton, 2026-08-21: 6 tilting deducted from
+  // a 4-TV / 3-bracket job). Keep in sync with api/tech.js's copy.
+  clampBracketQtysToTvCount(out, lineItems);
   return out;
 }
 function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }

@@ -523,7 +523,7 @@ async function api(action,{method='GET',params={},body=null,timeoutMs=45000}={})
   // the real error ("Incorrect phone or PIN") surface instead of the misleading
   // "Session expired".
   if(res.status===401 && action!=='login'){ logout(); throw new Error('Session expired'); }
-  if(!res.ok) throw new Error(data.error||'Request failed');
+  if(!res.ok){ const e=new Error(data.error||'Request failed'); if(data.code) e.code=data.code; throw e; }
   return data;
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -1391,8 +1391,15 @@ function mountTechLineItems(j, id){
   const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
     const items=rows.map(r=>({ name:(r.name||'').trim(), quantity:Math.max(1,Math.round(Number(r.qty)||1)), unit_price:Number(r.unit)||0 })).filter(r=>r.name||r.unit_price);
     save.disabled=true;
-    try{ await api('job_line_items_save',{method:'POST',body:{id,items}}); toast('Line items saved'); showDetail(id); }
-    catch(e){ toast(e.message); save.disabled=false; }
+    try{ await api('job_line_items_save',{method:'POST',body:{id,items,li_rev:(Number(j.li_rev)||0)}}); toast('Line items saved'); showDetail(id); }
+    catch(e){
+      toast(e.message);
+      // The office changed this ticket after the app loaded it — reload the
+      // job so the tech redoes the edit on the REAL current items instead of
+      // silently overwriting the office's save (Throckmorton, 2026-08-21).
+      if(e.code==='li_conflict'){ showDetail(id); return; }
+      save.disabled=false;
+    }
   };
 }
 

@@ -1,4 +1,5 @@
 import { mirrorBooking } from './_lib/mirror.js';
+import { canonicalizeLineItems } from './_lib/line-items.js';
 import { NATIVE_BUSINESS } from './_lib/native-businesses.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
@@ -722,6 +723,10 @@ async function bookDoms(req, res) {
     const tax = Math.round(taxable * 0.0825 * 100) / 100;
     if (tax > 0) lines.push({ kind: 'fee', name: 'Tax (8.25%)', quantity: 1, unit_price: tax, line_total: tax });
   }
+  // Canonical ticket order (owner rule 2026-08-24): TVs smallest-first, then
+  // work, then travel fee, discounts, tax last — so the stored ticket, the
+  // office dashboard, and the confirmation email all read the same way.
+  lines = canonicalizeLineItems(lines);
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
@@ -1147,6 +1152,10 @@ async function bookNative(req, res, slug) {
     const tax = Math.round(taxable * 0.0825 * 100) / 100;
     if (tax > 0) lines.push({ kind: 'fee', name: 'Tax (8.25%)', quantity: 1, unit_price: tax, line_total: tax });
   }
+  // Canonical ticket order (owner rule 2026-08-24): TVs smallest-first, then
+  // work, then travel fee, discounts, tax last — so the stored ticket, the
+  // office dashboard, and the confirmation email all read the same way.
+  lines = canonicalizeLineItems(lines);
   const tip = Number(b.tip) || 0;
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;

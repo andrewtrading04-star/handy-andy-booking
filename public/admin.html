@@ -2966,7 +2966,7 @@ function hasTwoPersonFee(b){
 // customer is charged for the second tech and BOTH techs are paid correctly (the
 // "Second Technician" line is what triggers the payroll bonus). Tax is only
 // re-added if the booking already had a tax line (e.g. not a $0 Assurion job).
-async function addTwoPersonFee(b){
+async function addTwoPersonFee(b,_retried){
   const src=Array.isArray(b.line_items)?b.line_items:[];
   const isTax=li=>/^tax\b/i.test(String((li&&(li.label||li.name))||'').trim());
   const hadTax=src.some(isTax);
@@ -2981,8 +2981,30 @@ async function addTwoPersonFee(b){
     const base=items.reduce((s,it)=>s+(Number(it.unit_price)||0)*it.quantity,0);
     items.push({ name:'Tax (8.25%)', quantity:1, unit_price:Math.round(base*TAX_RATE*100)/100, kind:'fee' });
   }
-  const resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items }});
+  let resp;
+  try{
+    resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, li_rev:(Number(b.li_rev)||0) }});
+  }catch(err){
+    // The ticket changed since this modal loaded (someone else saved). The fee
+    // still MUST land — silently dropping it undercharges the customer $70 for
+    // the second tech who was just assigned. Re-fetch the live ticket once and
+    // rebuild the fee on top of it; a second conflict surfaces to the caller.
+    if(err.code==='li_conflict' && !_retried){
+      const d=await api('bookings',{ params:{ business:current.slug, id:b.id }});
+      const fresh=(d.bookings||[])[0];
+      if(fresh){
+        b.line_items=fresh.line_items; b.li_rev=fresh.li_rev; b.price=fresh.price;
+        // The save that beat us may have been another tab running THIS exact
+        // flow — if the live ticket already carries the fee, adding it again
+        // would double-charge $70 (+tax). Done is done: just keep the fresh copy.
+        if(hasTwoPersonFee(b)) return;
+        return addTwoPersonFee(b,true);
+      }
+    }
+    throw err;
+  }
   if(resp&&resp.price!=null) b.price=resp.price;
+  if(resp&&resp.li_rev!=null) b.li_rev=resp.li_rev;
   b.line_items=items.map(it=>({ label:it.name, kind:it.kind, quantity:it.quantity, price:it.unit_price, line_total:Math.round(it.unit_price*it.quantity*100)/100 }));
 }
 // ── Booking detail modal ───────────────────────────────────────────────────
@@ -3656,7 +3678,7 @@ function mountLineItemsEditor(b){
       let resp;
       for(;;){
         try{
-          resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, ...(confirmEmpty&&{confirm_empty:true}), ...(confirmHighPrice&&{confirm_high_price:true}) }});
+          resp=await api('booking_line_items_save',{ method:'POST', body:{ business:current.slug, id:b.id, items, li_rev:(Number(b.li_rev)||0), ...(confirmEmpty&&{confirm_empty:true}), ...(confirmHighPrice&&{confirm_high_price:true}) }});
           break;
         }catch(err){
           // Same implausible-amount guard as New Booking (see
@@ -3666,6 +3688,11 @@ function mountLineItemsEditor(b){
             if(!confirm(`${err.message}\n\nSave it anyway as entered?`)) return;
             confirmHighPrice=true; continue;
           }
+          // Someone else (office or tech) saved this ticket after this modal
+          // loaded it — the Throckmorton double-charge scenario. Never retry:
+          // surface it, refresh the schedule, and make them reopen the job so
+          // they edit the REAL current ticket.
+          if(err.code==='li_conflict'){ alert(err.message); refreshCurrent(); return; }
           throw err;
         }
       }
@@ -3677,6 +3704,7 @@ function mountLineItemsEditor(b){
         return { label:it.name, price:unit, line_total:Math.round(unit*qty*100)/100, quantity:qty, kind:it.kind };
       });
       b.price=resp&&resp.price!=null?resp.price:b.price;
+      if(resp&&resp.li_rev!=null) b.li_rev=resp.li_rev;   // stay saveable without a reload
       hiddenItems=[];
       rows=b.line_items.reduce((acc,li)=>{
         const name=li.label||'';

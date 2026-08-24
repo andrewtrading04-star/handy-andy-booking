@@ -22,6 +22,7 @@ import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from 
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
+import { canonicalizeLineItems, isTaxLine, BOOKING_TAX_RATE, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
 // Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
 // Handy Andy's account is the main account; Doms has its own. Publishable keys
@@ -435,8 +436,8 @@ async function job(req, res, db, auth) {
   // The two technician embeds use explicit FK hints (technician_id /
   // secondary_technician_id) so PostgREST knows which relationship to follow.
   // The secondary embed is dropped on deployments predating migration 0019.
-  const build = () => scopeMine(db.from('bookings')
-    .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price,
+  const build = (withSortCol) => () => scopeMine(db.from('bookings')
+    .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price, metadata,
              review_rating, review_text, reviewed_at, business_id, technician_id, service_area_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, tip, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
@@ -446,10 +447,14 @@ async function job(req, res, db, auth) {
              technician:technicians!technician_id ( name ),${techHasSecondCol ? `
              secondary_technician_id,
              secondary_technician:technicians!secondary_technician_id ( name ),` : ''}
-             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind )`), auth)
+             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind${withSortCol ? ', sort_order' : ''} )`), auth)
     .eq('id', id)
     .maybeSingle();
-  const { data, error } = await fetchMine(build);
+  let { data, error } = await fetchMine(build(true));
+  // Degrade to the pre-0071 shape if sort_order is missing, same as every
+  // other sort_order read — a lagging database must not turn every job
+  // detail into a 404.
+  if (error && /sort_order/.test(error.message || '')) ({ data, error } = await fetchMine(build(false)));
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
   const shaped = shapeJob(data, true, true);
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
@@ -701,17 +706,50 @@ async function jobLineItemsSave(req, res, db, auth, body) {
     return res.status(400).json({ error: 'This would remove every work item from the job. Pull down to refresh and try again, or ask the office to edit the ticket.' });
   }
 
-  // Snapshot the CURRENT full item set into booking metadata (ring buffer of 5)
-  // before anything is rewritten, so any future bad save is recoverable.
-  try {
-    const backups = Array.isArray(bk.metadata?.li_backups) ? bk.metadata.li_backups : [];
-    backups.push({
-      at: new Date().toISOString(), by: `tech:${auth.tech_id || auth.name || '?'}`,
-      items: existing.map(r => ({ kind: r.kind, name: r.name, quantity: r.quantity, unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable })),
+  // ── Optimistic lock (the Throckmorton incident, 2026-08-21) ───────────────
+  // This tech app and the office dashboard edited the same ticket from two
+  // stale screens and silently overwrote each other five times — the customer
+  // was double-charged for brackets and a $75 line vanished. The app now loads
+  // li_rev with the job and must hand it back; a stale save is refused.
+  const curRev = Number(bk.metadata?.li_rev) || 0;
+  if (body.li_rev == null) {
+    return res.status(409).json({
+      error: 'The app is out of date on this job — refresh it (pull down, or close and reopen the app), then redo the change.',
+      code: LI_CONFLICT_CODE,
     });
-    await db.from('bookings').update({ metadata: { ...(bk.metadata || {}), li_backups: backups.slice(-5) } }).eq('id', id);
+  }
+  if (Number(body.li_rev) !== curRev) {
+    return res.status(409).json({
+      error: 'The office changed this ticket after you opened it. The job will reload — check the items, then redo your change.',
+      code: LI_CONFLICT_CODE,
+    });
+  }
+
+  // Claim the ticket with a compare-and-swap on li_rev, folding the snapshot
+  // (ring buffer of 5 — the recover-a-bad-save trail) into the same metadata
+  // write. If another save slipped in since the check above, zero rows match
+  // and this save is refused instead of blindly replacing rows it never saw.
+  const backups = Array.isArray(bk.metadata?.li_backups) ? bk.metadata.li_backups.slice() : [];
+  backups.push({
+    at: new Date().toISOString(), by: `tech:${auth.tech_id || auth.name || '?'}`,
+    items: existing.map(r => ({ kind: r.kind, name: r.name, quantity: r.quantity, unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable })),
+  });
+  let newRev;
+  try {
+    const cas = await casBumpLiRev(db, id, bk.metadata, { li_backups: backups.slice(-5) });
+    if (!cas.ok) {
+      return res.status(409).json({
+        error: 'The office saved this ticket at the same moment. The job will reload — check the items, then redo your change.',
+        code: LI_CONFLICT_CODE,
+      });
+    }
+    newRev = cas.rev;
   } catch (e) {
-    console.error(`[tech line_items] SNAPSHOT FAILED for booking ${id} — saving without a safety net:`, e.message);
+    // The lock write failed (transient DB error) — never fall through to an
+    // unguarded replace; that's the exact path this lock closes. Let the tech
+    // simply retry.
+    console.error(`[tech line_items] li_rev CAS failed for booking ${id}:`, e.message);
+    return res.status(500).json({ error: 'Could not save right now — try again in a moment.' });
   }
   console.log(`[tech line_items] save booking=${id} by=tech:${auth.tech_id || '?'} visibleBefore=${visibleIds.length} after=${items.length}`);
 
@@ -721,13 +759,20 @@ async function jobLineItemsSave(req, res, db, auth, body) {
   // visible duplicates — annoying but recoverable, unlike the old delete-first
   // order where an insert failure had already destroyed the work lines.
   if (items.length) {
-    const rows = items.map(it => ({
+    // sort_order = 1000+i: keeps the tech's entered order deterministic (the
+    // re-read below orders by sort_order, and Postgres tie order at the column
+    // default 0 is unspecified) and lands the new rows AFTER every existing
+    // row, so the canonical rewrite that follows sees a stable input.
+    const rows = items.map((it, i) => ({
       booking_id: id, business_id: bizId,
       kind: 'service', name: it.name,
       quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
-      taxable: true,
+      taxable: true, sort_order: 1000 + i,
     }));
-    const { error: insErr } = await db.from('booking_line_items').insert(rows);
+    let { error: insErr } = await db.from('booking_line_items').insert(rows);
+    if (insErr && /sort_order/.test(insErr.message || '')) {
+      ({ error: insErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
+    }
     if (insErr) throw insErr;
   }
 
@@ -739,16 +784,94 @@ async function jobLineItemsSave(req, res, db, auth, body) {
     }
   }
 
-  // Recompute the booking total from every remaining line (preserved hidden + new
-  // work) so it can never drift from the items it's made of.
-  const { data: all, error: sumErr } = await db.from('booking_line_items')
-    .select('line_total').eq('booking_id', id);
+  // Re-read the FULL remaining set (preserved hidden rows + the new work rows)
+  // — everything from here works off what's actually stored now.
+  // Ordered read: canonicalizeLineItems is only stable relative to its INPUT
+  // order, so without .order() the within-band order would be whatever the DB
+  // happened to return — and the sort_order rewrite below would persist that
+  // scramble as the ticket's new order.
+  let sortOrderOk = true;
+  let { data: all, error: sumErr } = await db.from('booking_line_items')
+    .select('id, kind, name, quantity, unit_price, line_total, taxable, sort_order')
+    .eq('booking_id', id).order('sort_order', { ascending: true });
+  if (sumErr && /sort_order/.test(sumErr.message || '')) {
+    sortOrderOk = false;
+    ({ data: all, error: sumErr } = await db.from('booking_line_items')
+      .select('id, kind, name, quantity, unit_price, line_total, taxable')
+      .eq('booking_id', id).order('created_at', { ascending: true }));
+  }
   if (sumErr) throw sumErr;
-  const price = Math.round((all || []).reduce((t, r) => t + (Number(r.line_total) || 0), 0) * 100) / 100;
-  const { error: upErr } = await db.from('bookings').update({ price }).eq('id', id);
+  let rowsNow = all || [];
+
+  // Recompute the tax line (when one exists) from the lines it now sits on.
+  // The office save has done this since the Boohaker/Bland stale-tax bugs; the
+  // tech save leaving tax frozen was the third leg of Throckmorton — the
+  // stored tax matched NEITHER of the two item sets that fought over the
+  // ticket. Same rule as the office: an existing tax line is recomputed,
+  // strays are collapsed, and a ticket with no tax line never grows one.
+  const taxRows = rowsNow.filter(isTaxLine);
+  if (taxRows.length) {
+    const base = rowsNow.filter(r => !isTaxLine(r))
+      .reduce((t, r) => t + (r.taxable === false ? 0 : (Number(r.line_total) || 0)), 0);
+    const tax = Math.round(base * BOOKING_TAX_RATE * 100) / 100;
+    // Prefer the rate-carrying row ("Tax (8.25%)") as the survivor so a
+    // stray hand-typed tax note is what gets collapsed, not the real line.
+    const keep = taxRows.find(r => /\(/.test(String(r.name || ''))) || taxRows[0];
+    if (Math.abs((Number(keep.line_total) || 0) - tax) >= 0.005) {
+      const { error: taxErr } = await db.from('booking_line_items')
+        .update({ unit_price: tax, line_total: tax }).eq('id', keep.id);
+      if (taxErr) console.error(`[tech line_items] tax recalc failed for booking ${id}:`, taxErr.message);
+      else { keep.unit_price = tax; keep.line_total = tax; }
+    }
+    if (taxRows.length > 1) {
+      const extra = taxRows.filter(r => r.id !== keep.id).map(r => r.id);
+      const { error: delTaxErr } = await db.from('booking_line_items').delete().in('id', extra);
+      if (!delTaxErr) rowsNow = rowsNow.filter(r => !extra.includes(r.id));
+    }
+  }
+
+  // Rewrite sort_order into the canonical ticket order (owner rule 2026-08-24:
+  // TVs smallest-first, then work, then travel fee, discounts, tax last) —
+  // this is also what puts the tech's replacement rows back in their place
+  // instead of jumping above the office's fee/discount rows (their default
+  // sort_order 0 used to shuffle the whole ticket on every tech edit).
+  const ordered = canonicalizeLineItems(rowsNow);
+  if (sortOrderOk) {
+    for (let i = 0; i < ordered.length; i++) {
+      if (Number(ordered[i].sort_order) === i) continue;   // already in place
+      const { error: soErr } = await db.from('booking_line_items')
+        .update({ sort_order: i }).eq('id', ordered[i].id);
+      if (soErr) { console.error(`[tech line_items] sort_order write failed for booking ${id}:`, soErr.message); break; }
+    }
+  }
+
+  // Recompute the booking total from every remaining line so it can never
+  // drift from the items it's made of; subtotal is the pre-tax total, same
+  // meaning it carries everywhere else that writes it.
+  const price = Math.round(ordered.reduce((t, r) => t + (Number(r.line_total) || 0), 0) * 100) / 100;
+  const subtotal = Math.round(ordered.reduce((t, r) => t + (isTaxLine(r) ? 0 : (Number(r.line_total) || 0)), 0) * 100) / 100;
+  const { error: upErr } = await db.from('bookings').update({ price, subtotal }).eq('id', id);
   if (upErr) throw upErr;
 
-  return res.status(200).json({ ok: true, price });
+  // SEAL the rewrite with a second CAS bump (same reason as the office save:
+  // the claim above lands before the row rewrite does, so a fetch in that
+  // window could capture the claimed rev over stale/duplicated rows — this
+  // bump invalidates any such snapshot). If the seal fails we return no
+  // li_rev, so a client that kept editing would fail closed on its next save.
+  let sealedRev = null;
+  try {
+    // FRESH read, never the claim-time copy — the claim-to-seal window here
+    // spans the re-read, tax fix, sort_order writes and price update, and any
+    // completion stamp landing in it would be silently reverted by a stale
+    // whole-object write (see the office save's identical seal for details).
+    const { data: freshRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+    if (Number(freshRow?.metadata?.li_rev) === newRev) {
+      const seal = await casBumpLiRev(db, id, freshRow.metadata);
+      if (seal.ok) sealedRev = seal.rev;
+    }
+  } catch (e) { console.warn(`[tech line_items] seal bump failed for booking ${id}:`, e.message); }
+
+  return res.status(200).json({ ok: true, price, ...(sealedRev != null && { li_rev: sealedRev }) });
 }
 
 async function status(req, res, db, auth, body) {
@@ -833,7 +956,13 @@ async function status(req, res, db, auth, body) {
           if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
         } catch (_) { /* column may not exist; fall back to completing tech */ }
         await adjustWirePlateInventory(db, jobBizId, chargeTech, plateQty, id);
-        const newMeta = { ...(existing.metadata || {}), wire_plate_deducted_at: new Date().toISOString() };
+        // Re-read metadata RIGHT before writing: `existing.metadata` was read
+        // at handler start, several round trips ago — writing that stale copy
+        // back would revert any li_rev bump / li_backups snapshot a concurrent
+        // line-items save landed in the window (same fix the bracket and
+        // Apple-TV stamps below already carry).
+        const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
+        const newMeta = { ...(fresh?.metadata || existing.metadata || {}), wire_plate_deducted_at: new Date().toISOString() };
         await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
       }
     } catch (e) {
@@ -1197,6 +1326,9 @@ async function jobPayment(req, res, db, auth, body) {
         const removed = taxRows.reduce((s, r) => s + (Number(r.line_total) || 0), 0);
         cashPrice = Math.round((cashPrice - removed) * 100) / 100;
         await db.from('bookings').update({ price: cashPrice }).eq('id', id);
+        // The ticket just changed outside any editor — invalidate any open
+        // line-items editor so its save 409s instead of resurrecting the tax.
+        await bumpLiRev(db, id);
       }
     }
 
@@ -1625,6 +1757,11 @@ function detectBracketQtys(lineItems) {
     else if (/tilt/.test(name)) out.tilting += qty;
     else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
   }
+  // A job can't use more brackets than it has TVs. A ticket carrying BOTH a
+  // bracket option line and a hand-typed hardware line ("Tilting Mounts")
+  // otherwise double-counts (Throckmorton, 2026-08-21: 6 tilting deducted from
+  // a 4-TV / 3-bracket job). Keep in sync with api/admin.js's copy.
+  clampBracketQtysToTvCount(out, lineItems);
   return out;
 }
 function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }
@@ -1851,6 +1988,17 @@ function shapeJob(b, full = false, forTech = false) {
     out.customer_email = b.customer?.email || null;
     out.notes = b.notes || null;
     out.price = b.price;
+    // Optimistic-lock revision for the line-items editor (see jobLineItemsSave)
+    // — the app sends it back on save so a stale screen can't overwrite an
+    // office edit it never saw.
+    out.li_rev = Number(b.metadata?.li_rev) || 0;
+    // Canonical ticket order (sort_order) — jobs list embeds don't select
+    // sort_order, so this sort is a stable no-op there.
+    if (Array.isArray(b.line_items)) {
+      b.line_items = b.line_items.slice()
+        .sort((x, y) => (Number.isFinite(Number(x?.sort_order)) ? Number(x.sort_order) : 1e9)
+                      - (Number.isFinite(Number(y?.sort_order)) ? Number(y.sort_order) : 1e9));
+    }
     // Google Maps Street View Static API key (client-side, referrer-restricted).
     // Sent so the tech portal can render a Street View of the job location even
     // when lat/lng aren't stored (it can geocode the address string instead).

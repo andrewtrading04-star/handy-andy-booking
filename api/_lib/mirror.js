@@ -8,6 +8,7 @@
 // via scripts/import-zenbooker.mjs.
 import { serviceClient } from './supabase.js';
 import { signToken } from './auth.js';
+import { canonicalizeLineItems, bumpLiRev } from './line-items.js';
 
 function first(...vals) { for (const v of vals) if (v != null && v !== '') return v; return null; }
 
@@ -266,17 +267,29 @@ export async function mirrorBooking(ctx = {}) {
       await db.from('bookings').update({ review_token: reviewToken }).eq('id', booking_id);
     }
 
-    // Line items (replace any prior mirror for this booking).
+    // Line items (replace any prior mirror for this booking), written in the
+    // canonical ticket order — TVs smallest-first, then work, then travel fee,
+    // discounts, tax last (owner rule, 2026-08-24) — with sort_order stamped so
+    // every reader shows the same order the widget booked.
     const lines = Array.isArray(ctx.line_items) ? ctx.line_items.filter(Boolean) : [];
     if (lines.length) {
       await db.from('booking_line_items').delete().eq('booking_id', booking_id);
-      await db.from('booking_line_items').insert(lines.map(li => ({
+      const rows = canonicalizeLineItems(lines.map(li => ({
         booking_id, business_id: biz.id,
         kind: li.kind || 'service', name: String(li.name || 'Item').slice(0, 200),
         quantity: Number(li.quantity) || 1,
         unit_price: Number(li.unit_price) || 0,
         line_total: Number(li.line_total != null ? li.line_total : li.unit_price) || 0,
-      })));
+      }))).map((r, i) => ({ ...r, sort_order: i }));
+      let { error: liErr } = await db.from('booking_line_items').insert(rows);
+      if (liErr && /sort_order/.test(liErr.message || '')) {
+        ({ error: liErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
+      }
+      if (liErr) console.warn('[mirror] line items insert failed:', liErr.message);
+      // A RE-mirror replaced the rows outside any editor — invalidate any open
+      // office/tech line-items editor so its save collides instead of silently
+      // rewriting the ticket it no longer matches.
+      await bumpLiRev(db, booking_id);
     }
 
     await db.from('booking_status_events').insert({
