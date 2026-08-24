@@ -321,8 +321,12 @@ export default async function handler(req, res) {
     // authenticates with GRASSHOPPER_INGEST_SECRET instead of a login token.
     if (action === 'call_ingest') return await callIngest(req, res, body);
 
-    // Everything below requires a valid admin token.
-    const auth = verifyToken(getBearer(req));
+    // Everything below requires a valid admin token. call_recording is the one
+    // exception to "Bearer header only": it's loaded by a plain <audio src>,
+    // which can't attach a custom header, so it also accepts the exact same
+    // signed token via ?token= — same verifyToken() check, just carried the
+    // way a browser media request actually can.
+    const auth = verifyToken(action === 'call_recording' ? (getBearer(req) || req.query.token) : getBearer(req));
     if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
 
     const db = serviceClient();
@@ -406,6 +410,7 @@ export default async function handler(req, res) {
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
+      case 'call_recording':    return await callRecording(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
@@ -6889,7 +6894,12 @@ function claimIsHot(row) {
 }
 async function calls(req, res, db, auth) {
   const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
-  const { data: rows, error } = await db.from('calls')
+  // Optional date window for the "organized by number" view on the Calls
+  // tab (Today/Yesterday/Last 7 days) — the plain "Needs callback" queue
+  // still calls this with neither set, unchanged from before.
+  const from = (req.query.from || '').toString().trim();
+  const to = (req.query.to || '').toString().trim();
+  let q = db.from('calls')
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
@@ -6899,6 +6909,9 @@ async function calls(req, res, db, auth) {
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
              business:businesses ( slug, name )`)
     .order('occurred_at', { ascending: false }).limit(limit);
+  if (from) q = q.gte('occurred_at', from);
+  if (to) q = q.lt('occurred_at', to);
+  const { data: rows, error } = await q;
   if (error) throw error;
 
   // Self-healing "did this call become a job?": a booking made AFTER ingest
@@ -6979,6 +6992,31 @@ async function calls(req, res, db, auth) {
       .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
     me,
   });
+}
+
+// Proxies one Twilio call recording so it can be played from the browser.
+// Twilio's Recording media URLs require HTTP Basic Auth (Account SID +
+// Auth Token) — dropping recording_url straight into <audio src> 401s, so
+// this fetches server-side with the same credentials analytics.js already
+// uses for signature verification and streams the bytes back.
+async function callRecording(req, res, db, auth) {
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  const { data: row, error } = await db.from('calls').select('recording_url').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!row || !row.recording_url) return res.status(404).json({ error: 'No recording for this call' });
+
+  const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !tok) return res.status(500).json({ error: 'Twilio credentials not configured' });
+  const mediaUrl = row.recording_url.endsWith('.mp3') ? row.recording_url : `${row.recording_url}.mp3`;
+  const upstream = await fetch(mediaUrl, {
+    headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${tok}`).toString('base64') },
+  });
+  if (!upstream.ok || !upstream.body) return res.status(upstream.status || 502).json({ error: 'Could not fetch recording from Twilio' });
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.status(200).send(buf);
 }
 
 // Claim a voicemail ("I am ringing this person now") so nobody else rings them

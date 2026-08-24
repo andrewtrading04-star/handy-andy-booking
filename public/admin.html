@@ -7877,6 +7877,14 @@ const AUDIT_LABELS={
 // navMyCallPerf below), so Review Calls is the only thing left in her Calls
 // hub, and she gets it with no tab row (a row with one tab is noise).
 const CALL_TABS=[
+  // The actual inbound call/voicemail log — every tracking-number call and
+  // Grasshopper voicemail, organized by number within Today/Yesterday/Last 7
+  // days, with recordings where they exist. Pre-existing code (callCard/
+  // paintCalls/renderCalls); it was never reachable because navTo() had no
+  // route for the standalone 'calls' screen this used to live at. Visible to
+  // everyone, not just the owner: claiming and dialing a voicemail back is
+  // exactly what Joey/Heather already do here.
+  { id:'log',         label:'Log',          screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
   { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
@@ -8451,11 +8459,33 @@ async function renderCallAnalytics(){
 // Gmail forwards each voicemail to api/admin.js?action=call_ingest. Cross-
 // business on purpose — the phone system is shared between both companies.
 let _callsData={open:[],handled:[]};
+// The Today/Yesterday/Last 7 days segment for the "organized by number"
+// section below the callback queue. Its own fetch, its own state — the queue
+// above is deliberately NOT date-scoped (an overdue voicemail from 10 days
+// ago must not disappear just because "Today" is selected).
+let _callsPeriod='today';
+let _callsPeriodData={open:[],handled:[]};
+function callPeriodRange(period){
+  const now=new Date();
+  const startOfDay=d=>{ const x=new Date(d); x.setHours(0,0,0,0); return x; };
+  if(period==='yesterday'){
+    const to=startOfDay(now);
+    return { from:new Date(to.getTime()-86400000).toISOString(), to:to.toISOString() };
+  }
+  if(period==='7d') return { from:new Date(now.getTime()-7*86400000).toISOString(), to:now.toISOString() };
+  return { from:startOfDay(now).toISOString(), to:now.toISOString() };   // today
+}
 async function renderCalls(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading voicemails…</div></div>';
+  view.innerHTML='<div class="wrap"><div class="empty">Loading calls…</div></div>';
   try{
-    _callsData=await api('calls');
+    const {from,to}=callPeriodRange(_callsPeriod);
+    const [base, period]=await Promise.all([
+      api('calls',{ params:{ limit:100 }}),
+      api('calls',{ params:{ limit:200, from, to }}),
+    ]);
+    _callsData=base;
+    _callsPeriodData=period;
     paintCalls();
     refreshCallsBadge();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
@@ -8477,6 +8507,53 @@ const CALL_RESOLUTION_LABEL={booked:'📅 Booked',estimate_sent:'🧾 Estimate s
 function callDuration(sec){
   const s=parseInt(sec,10); if(!Number.isFinite(s)||s<0) return '';
   return s<60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
+// tracking_label is the WHISPER sentence played into the phone ("Please be
+// aware. This call is from Houston Mounting.") -- exactly right for that,
+// unreadable as a section heading. Strips the boilerplate for display only;
+// the raw label (used by the whisper itself) is untouched. Falls back to the
+// full label if it doesn't match the convention, so a custom label never
+// disappears.
+function shortTrackingLabel(label){
+  if(!label) return '';
+  const stripped=label.replace(/^please be aware\.?\s*this call is from\s*/i,'').replace(/\.\s*$/,'').trim();
+  return stripped || label;
+}
+// Groups a flat list of call rows into market -> number -> calls, for the
+// "organized by number" section of the Calls tab. Keys off grasshopper_number
+// (the raw dialed number, already on every row) rather than a DB join, so it
+// works the same for Twilio tracking numbers and old Grasshopper extensions
+// alike, and needs no schema change to keep working as more numbers are added.
+function groupCallsByNumber(rows){
+  const byKey=new Map();
+  for(const r of rows){
+    const key=r.grasshopper_number||'__unattributed__';
+    if(!byKey.has(key)) byKey.set(key, { phone:r.grasshopper_number||'', label:'', market:'', calls:[] });
+    const g=byKey.get(key);
+    if(!g.label && r.tracking_label) g.label=r.tracking_label;
+    if(!g.market && r.market) g.market=r.market;
+    g.calls.push(r);
+  }
+  const byMarket=new Map();
+  for(const g of byKey.values()){
+    const mkey = g.phone ? (g.market||'Other') : 'Unrouted';
+    if(!byMarket.has(mkey)) byMarket.set(mkey, []);
+    byMarket.get(mkey).push(g);
+  }
+  for(const arr of byMarket.values()) arr.sort((a,b)=>b.calls.length-a.calls.length);
+  const marketKeys=[...byMarket.keys()].sort((a,b)=> a==='Unrouted'?1 : b==='Unrouted'?-1 : a.localeCompare(b));
+  return marketKeys.map(m=>({ market:m, numbers:byMarket.get(m) }));
+}
+function callsByNumberHtml(rows){
+  if(!rows.length) return '<div class="empty" style="padding:22px 12px;">No calls in this period.</div>';
+  const groups=groupCallsByNumber(rows);
+  return groups.map(({market,numbers})=>`
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:16px 0 6px;">${esc(market)}</div>
+    ${numbers.map(g=>`
+      <div style="font-size:13.5px;font-weight:800;margin:10px 0 6px;">${esc(shortTrackingLabel(g.label)||fmtPhone(g.phone)||'Unknown number')} <span style="font-weight:600;color:var(--mute);">· ${g.calls.length} call${g.calls.length===1?'':'s'}</span></div>
+      ${g.calls.map(r=>callCard(r, r._handled)).join('')}
+    `).join('')}
+  `).join('');
 }
 function callCard(r,handled){
   const isLive=r.kind==='live';
@@ -8518,6 +8595,15 @@ function callCard(r,handled){
       // transcript" here would read as something missing rather than normal.
       ? '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">Call was answered — no message left.</div>'
       : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
+  // Proxied through call_recording (Twilio's own recording URLs need Basic
+  // Auth the browser can't supply) — only present at all once a tracking
+  // number has record_calls on and a call has actually completed.
+  // <audio src> can't carry an Authorization header, so the token rides in
+  // the query string here — accepted server-side ONLY for this one action
+  // (see api/admin.js), same signed/expiring token as everywhere else.
+  const audio=r.recording_url
+    ? `<audio controls preload="none" style="width:100%;max-width:360px;margin-top:8px;height:34px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`
+    : '';
 
   const hasPhone=!!r.caller_phone;
   const tel=`tel:+1${esc(r.caller_phone)}`;
@@ -8567,29 +8653,46 @@ function callCard(r,handled){
   return `<div class="rc-card" style="align-items:flex-start;">
     <div class="rc-main">
       <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
-      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
+      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}${r.grasshopper_number?' · dialed '+esc(fmtPhone(r.grasshopper_number)):''}</div>
       <div class="rc-badges">${badges.join('')}</div>
-      ${tx}${job}${handledLine}
+      ${tx}${audio}${job}${handledLine}
     </div>
     <div class="rc-actions">${actions}</div>
   </div>`;
 }
+const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'};
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
-  const open=_callsData.open||[], handled=_callsData.handled||[];
-  const body = (!open.length && !handled.length)
-    ? `<div class="empty" style="padding:34px 12px;">No calls yet. Voicemails appear automatically, and calls taken through "Take a Call" (📞 next to New Booking) log here too.</div>`
-    : `${open.length?`<div class="rc-count">Needs callback (${open.length})</div>${open.map(r=>callCard(r,false)).join('')}`
-        :`<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`}
-       ${handled.length?`<div class="rc-count" style="margin-top:22px;">Handled</div>${handled.map(r=>callCard(r,true)).join('')}`:''}`;
+  const open=_callsData.open||[];
+  const needsBody = open.length
+    ? open.map(r=>callCard(r,false)).join('')
+    : `<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`;
+  // Same rows, tagged with which bucket they actually came back in so the
+  // by-number cards below show real action buttons (Done/Called back/etc)
+  // for anything still open — this list and the queue above are two views of
+  // the same data, not a separate read-only history.
+  const periodRows=[
+    ...(_callsPeriodData.open||[]).map(r=>({ ...r, _handled:false })),
+    ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
+  ].sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
+  const periodSeg=['today','yesterday','7d'].map(p=>
+    `<button type="button" class="rc-seg-btn ${_callsPeriod===p?'on':''}" data-callperiod="${p}">${esc(CALL_PERIOD_LABEL[p])}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
       <h2 class="rc-title">📨 Calls</h2>
-      <div class="rc-sub">Voicemails from the office phone, with the transcript so you can read it instead of listening. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
+      <div class="rc-sub">Voicemails and tracking-number calls from the office phone. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
     </div></div>
-    ${body}</div>`;
+    <div class="rc-count">Needs callback (${open.length})</div>
+    ${needsBody}
+    <div class="rc-count" style="margin-top:24px;">${esc(CALL_PERIOD_LABEL[_callsPeriod])}, by number</div>
+    <div class="rc-seg" style="margin-bottom:14px;">${periodSeg}</div>
+    ${callsByNumberHtml(periodRows)}
+  </div>`;
 
+  view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
+    _callsPeriod=b.dataset.callperiod; renderCalls();
+  }));
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
     try{
@@ -8681,7 +8784,10 @@ function paintCallBanner(call){
   document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
   document.getElementById('callBannerGo').onclick=()=>{
     dismissBanner(call.id);
-    navTo('calls');
+    // The Calls tab is a hub now (see CALL_TABS) -- navTo('calls') hasn't
+    // resolved to anything since the hub replaced the standalone screen.
+    callHubTab='log';
+    navTo('callhub');
   };
 }
 
@@ -8689,7 +8795,7 @@ function paintCallBanner(call){
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
   try{
-    const d=(onScreen('calls')&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
+    const d=(onScreen('calllog')&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
@@ -8703,7 +8809,7 @@ async function refreshCallsBadge(){
 // in the background so it costs nothing.
 setInterval(()=>{
   if(document.hidden||!current) return;
-  if(onScreen('calls')) renderCalls();
+  if(onScreen('calllog')) renderCalls();
   else refreshCallsBadge();
 }, 20000);
 
@@ -12629,7 +12735,7 @@ function cwWireLadderCommon(scope){
       cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
       await cwCallUpdate({ resolution:'refused' });
       closeCallWiz({resolved:true}); toast('Call logged.');
-      if(onScreen('calls')) renderCalls();
+      if(onScreen('calllog')) renderCalls();
     }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
   });
 }
@@ -13919,7 +14025,7 @@ async function renderCallWiz(){
         cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
         await cwCallUpdate({ resolution:res });
         closeCallWiz({resolved:true}); toast('Call logged.');
-        if(onScreen('calls')) renderCalls();
+        if(onScreen('calllog')) renderCalls();
       }catch(e){ err.textContent=e.message||'Could not log this call'; }
     }));
     cwWireBack(()=>{
