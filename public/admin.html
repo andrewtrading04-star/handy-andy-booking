@@ -7914,7 +7914,10 @@ const ANALYTICS_TABS=[
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
 ];
-let callHubTab='reviewcalls', analyticsHubTab='bookings';
+// callHubTab starts null and resolves on first render: the owner lands on
+// the Log (the by-number call view they asked for), while secretaries land
+// on Review Calls -- their queue, the thing they open this tab to work.
+let callHubTab=null, analyticsHubTab='bookings';
 // `section` is now the hub, so a bare section==='calls' silently stops matching
 // and anything hanging off it (auto-refresh polls, "am I looking at this list
 // right now" checks) quietly dies. onScreen() asks the question that is actually
@@ -7941,6 +7944,7 @@ async function renderHub(tabs, activeId, onPick){
   return cur.id;
 }
 async function renderCallHub(){
+  if(!callHubTab) callHubTab = role==='owner' ? 'log' : 'reviewcalls';
   callHubTab = await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); }) || callHubTab;
 }
 async function renderAnalyticsHub(){
@@ -8704,13 +8708,13 @@ function paintCalls(){
       <h2 class="rc-title">📨 Calls</h2>
       <div class="rc-sub">Voicemails and tracking-number calls from the office phone. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
     </div></div>
-    <div class="rc-count">Needs callback (${open.length})</div>
-    ${needsBody}
-    <div style="display:flex;align-items:center;gap:12px;margin-top:24px;margin-bottom:12px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
       <div class="rc-count" style="margin:0;">By number</div>
       <div class="rc-seg">${periodSeg}</div>
     </div>
     ${callsByNumberHtml(periodRows)}
+    <div class="rc-count" style="margin-top:28px;">Needs callback (${open.length})</div>
+    ${needsBody}
   </div>`;
 
   view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
