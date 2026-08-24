@@ -410,33 +410,13 @@ async function handleVoiceInbound(req, res) {
   // was dialed — that lives in the Calls tab, which is the point of logging it.
   const action = voiceUrl('voice_status', { sid });
   const rec = line.record_calls ? ' record="record-from-answer-dual"' : '';
-  // recordingStatusCallback is the RELIABLE recording signal — the action
-  // callback above also carries RecordingUrl, but Twilio's own docs warn the
-  // file "may not yet be accessible" when that fires. Reuses the existing
-  // voice_recording handler (same one the voicemail <Record> already posts
-  // to) keyed by the same sid, so this is one code path, not two.
-  const recStatusCb = line.record_calls
-    ? ` recordingStatusCallback="${xmlEsc(voiceUrl('voice_recording', { sid }))}" recordingStatusCallbackEvent="completed"`
-    : '';
-  // Spoken consent notice, gated on record_calls ALONE — not on this line's
-  // own market/area code. A caller's true location can't be known from which
-  // tracking number they dialed (an out-of-state cell keeps its old area
-  // code), and a cross-state call is generally held to the strictest law in
-  // play — so area-code-based gating would not actually guarantee compliance
-  // in a two-party-consent state (California, since the LA line, and
-  // whichever states the next 10-20 numbers land in). Announcing whenever
-  // recording is on costs nothing in one-party states and is correct
-  // everywhere, with no state lookup table to maintain as the fleet grows.
-  const disclosure = line.record_calls
-    ? '<Say voice="Polly.Joanna">This call may be recorded for quality and training purposes.</Say>'
-    : '';
   // The whisper: because callerId is the customer's number, the handset cannot
   // say WHICH line rang, and with a dozen numbers across several cities that
   // matters more than it does with one. The url on <Number> is fetched the
   // moment the person picks up and plays only to THEM — the caller hears
   // ringing throughout — so you answer already knowing what you picked up.
   const whisper = voiceUrl('voice_whisper', { label: line.label || '', sid });
-  return xml(res, `<Response>${disclosure}<Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}${recStatusCb}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
+  return xml(res, `<Response><Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
 }
 
 // POST /api/analytics?action=voice_status&sid=... — the <Dial> finished.
@@ -476,7 +456,6 @@ async function handleVoiceRecording(req, res) {
   if (!params) return;
   const patch = {};
   if (params.RecordingUrl) { patch.recording_url = params.RecordingUrl; patch.has_recording = true; }
-  if (params.RecordingSid) patch.recording_sid = params.RecordingSid;
   if (params.TranscriptionText) patch.transcript = params.TranscriptionText;
   if (params.RecordingDuration) patch.duration_sec = parseInt(params.RecordingDuration, 10) || null;
   try {
