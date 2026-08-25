@@ -488,10 +488,20 @@ function displayNameFor(scope) {
 // go to WHICHEVER company the job belongs to, never a single shared owner
 // number, since the two businesses are staffed by different people.
 function secretaryPhoneFor(scope) {
-  // Heather covers Handy Andy and both of its micro-brands (Mile High, Austin).
-  if (scope === 'handy-andy' || scope === 'mile-high' || scope === 'austin' || scope === 'precision' || scope === 'tvmountingdenver'
-    || scope === 'atxmountpros' || scope === 'atxtvmount' || scope === 'austinmountingpros' || scope === 'austintvinstall') return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
-  if (scope === 'doms')       return process.env.DOMS_SECRETARY_PHONE || '';
+  // Joey answers Dom's AND the eight Austin/Houston lead-gen lines, so a
+  // voicemail on one of those has to reach her. Before this, the Austin four
+  // texted Heather and the Houston four matched nothing at all and texted
+  // NOBODY — both predate Joey taking those lines, and the Houston gap meant
+  // a lead-gen voicemail could sit unheard with no alert to anyone.
+  // Driven off the same list that grants her the access, so the two can't
+  // drift: add a brand there and its alerts follow automatically.
+  if (scope === 'doms' || (SECRETARY_EXTRA_BUSINESSES.doms || []).includes(scope)) {
+    return process.env.DOMS_SECRETARY_PHONE || '';
+  }
+  // Heather covers Handy Andy and its remaining micro-brands.
+  if (['handy-andy', 'mile-high', 'austin', 'precision', 'tvmountingdenver'].includes(scope)) {
+    return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  }
   return '';
 }
 

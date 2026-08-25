@@ -2164,7 +2164,13 @@ function enterApp(){
   document.getElementById('who').textContent = userName || (role==='owner' ? 'Owner' : 'Secretary');
   updateWhoAvatar();
   businesses = businesses.slice().sort((a,b)=>(a.slug==='handy-andy'?-1:b.slug==='handy-andy'?1:0));
-  current = businesses[0] || null;
+  // Open on the person's OWN company, not whatever happens to sort first. The
+  // list comes back alphabetical, so a secretary whose login also covers
+  // lead-gen brands (Joey: Dom's plus eight Austin/Houston microsites) would
+  // otherwise land on "ATX TV Mounting" every morning — and essentially all of
+  // her work is her own company. Owner (scope 'all') keeps the old behaviour:
+  // no match, so it falls through to the handy-andy-first sort above.
+  current = (scope && scope!=='all' && businesses.find(b=>b.slug===scope)) || businesses[0] || null;
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
   applyIconTheme();
@@ -12222,6 +12228,15 @@ function openTakeCall(){
     document.getElementById('callWizModal').classList.remove('hidden');
     renderCallWiz();
     return;
+  }
+  // Every FRESH call starts on her own company. Nearly all of her calls are
+  // Dom's, and a brand she switched to earlier — to look something up, or for
+  // the previous caller — must not silently become the greeting she reads to
+  // the next one. If this call is a lead-gen brand, the picker on the greet
+  // card is one tap. The resume branch above deliberately skips this: a call
+  // already in progress keeps the business it was logged against.
+  if(scope && scope!=='all' && current && current.slug!==scope && businesses.some(b=>b.slug===scope)){
+    switchToBusiness(scope);
   }
   callWizReset();
   // The script shares New Booking's option state, so a previous call's (or a
