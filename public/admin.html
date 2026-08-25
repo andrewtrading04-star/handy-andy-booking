@@ -7921,8 +7921,8 @@ const CALL_TABS=[
   // route for the standalone 'calls' screen this used to live at. Visible to
   // everyone, not just the owner: claiming and dialing a voicemail back is
   // exactly what Joey/Heather already do here.
-  { id:'log',         label:'Log',          screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
-  { id:'reviewcalls', label:'Review Calls', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
+  { id:'log',         label:'Incoming Calls',      screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
+  { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
 ];
