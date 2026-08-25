@@ -495,6 +495,41 @@ function secretaryPhoneFor(scope) {
   return '';
 }
 
+// ── Extra businesses a secretary may act on, beyond their own ───────────────
+// A secretary's token carries ONE primary `scope` — their own company — and
+// every company-specific tool keys off it: Review Calls, Call Performance, My
+// Availability, the payroll view, the greeting name, the "which company am I"
+// checks. That stays exactly as it was. What this adds is a SECOND, wider
+// list: other brands the same person also answers the phone for.
+//
+// Joey now takes the calls for the eight Austin/Houston lead-gen brands, so
+// her Dom's login also unlocks those for taking a call, quoting and booking.
+// Handy Andy is deliberately NOT in this list: that is Heather's company, and
+// nothing about answering a lead-gen line requires reaching it.
+//
+// Data rather than code would be nicer, but a secretary's identity IS an env
+// password today (staff_users has no login path yet), so there is no row to
+// hang this off. Move it into the database if/when logins do.
+const SECRETARY_EXTRA_BUSINESSES = {
+  doms: [
+    'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall',
+    'houstonmounting', 'houstontvinstallation', 'htvmounting', 'tvhanginghouston',
+  ],
+};
+
+// Every business slug a token may act on: its primary scope plus any extras.
+// Owner ('all') is unrestricted, and returns null meaning "apply no filter".
+function allowedSlugsFor(auth) {
+  if (!auth || auth.scope === 'all') return null;
+  const extra = Array.isArray(auth.allowed) ? auth.allowed : [];
+  return [auth.scope, ...extra].filter(Boolean);
+}
+// The gate every business-scoped action goes through.
+function mayUseBusiness(auth, slug) {
+  const allowed = allowedSlugsFor(auth);
+  return allowed === null || allowed.includes(slug);
+}
+
 async function login(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const password = (body.password || '').toString();
@@ -522,8 +557,11 @@ async function login(req, res, body) {
   if (!role) return res.status(401).json({ error: 'Incorrect password' });
 
   const db = serviceClient();
+  // The switcher is driven entirely by this list, so a secretary with extra
+  // brands gets them here (they land in its "Lead Gen" dropdown automatically).
+  const loginExtra = scope === 'all' ? [] : (SECRETARY_EXTRA_BUSINESSES[scope] || []);
   let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
-  if (scope !== 'all') q = q.eq('slug', scope);
+  if (scope !== 'all') q = q.in('slug', [scope, ...loginExtra]);
   const { data: businesses, error } = await q;
   if (error) throw error;
   // Each business's OWN Stripe publishable key (Doms has a separate Stripe
@@ -539,7 +577,9 @@ async function login(req, res, body) {
   if (scope === 'all' && demoMode()) {
     try { const { data: o } = await db.from('staff_users').select('name').eq('role', 'owner').limit(1).maybeSingle(); if (o && o.name) name = o.name; } catch { /* fall back to env */ }
   }
-  const token = signToken({ kind: 'admin', role, scope, name });
+  // `scope` stays the ONE primary business (every company-specific tool keys
+  // off it); `allowed` is the extra brands this person also answers for.
+  const token = signToken({ kind: 'admin', role, scope, name, ...(loginExtra.length ? { allowed: loginExtra } : {}) });
   // Tell the dashboard which outbound channels are wired up so it can show or
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
   const config = {
@@ -576,13 +616,18 @@ async function viewAs(req, res, db, auth) {
   const slug = (req.body?.business || '').toString();
   if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy or doms' });
 
+  // Mirror the real login exactly, extra brands included — the whole point of
+  // View As is showing the owner what that secretary actually sees, and Joey's
+  // login now carries the Austin/Houston lead-gen brands.
+  const viewAsExtra = SECRETARY_EXTRA_BUSINESSES[slug] || [];
   const { data: businesses, error } = await db.from('businesses')
-    .select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).eq('slug', slug);
+    .select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true)
+    .in('slug', [slug, ...viewAsExtra]).order('name');
   if (error) throw error;
   for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
   const name = displayNameFor(slug);
-  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name });
+  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}) });
   const config = {
     email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
@@ -602,7 +647,8 @@ async function sessionStatus(req, res) {
 
   const db = serviceClient();
   let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
-  if (auth.scope !== 'all') q = q.eq('slug', auth.scope);
+  const sessionAllowed = allowedSlugsFor(auth);
+  if (sessionAllowed) q = q.in('slug', sessionAllowed);
   const { data: businesses, error } = await q;
   if (error) throw error;
   // Same per-business Stripe publishable key login() sends — session_status is
@@ -640,7 +686,7 @@ const _bizCache = new Map(); // slug -> { biz, at }
 const BIZ_CACHE_TTL_MS = 60_000;
 async function resolveBusiness(db, auth, slug) {
   if (!slug) { const e = new Error('business is required'); e.status = 400; throw e; }
-  if (auth.scope !== 'all' && auth.scope !== slug) { const e = new Error('Forbidden for this business'); e.status = 403; throw e; }
+  if (!mayUseBusiness(auth, slug)) { const e = new Error('Forbidden for this business'); e.status = 403; throw e; }
   const cached = _bizCache.get(slug);
   if (cached && (Date.now() - cached.at) < BIZ_CACHE_TTL_MS) return cached.biz;
   const { data, error } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', slug).single();
@@ -5717,7 +5763,7 @@ async function partnerTechnicians(req, res, db, auth) {
   // an unauthorized caller can't trigger the partner lookup by racing it
   // alongside resolveBusiness in Promise.all below.
   if (!slug) return bail(res, Object.assign(new Error('business is required'), { status: 400 }));
-  if (auth.scope !== 'all' && auth.scope !== slug) return bail(res, Object.assign(new Error('Forbidden for this business'), { status: 403 }));
+  if (!mayUseBusiness(auth, slug)) return bail(res, Object.assign(new Error('Forbidden for this business'), { status: 403 }));
   let partner;
   try {
     // resolveBusiness still runs (confirms the business actually exists) but
@@ -6903,7 +6949,7 @@ async function calls(req, res, db, auth) {
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
-             source, tracking_label, answered, duration_sec, recording_url,
+             source, tracking_label, answered, duration_sec, recording_url, forwarded_to,
              customer_id, booking_id,
              customer:customers ( id, name, phone, business:businesses ( slug ) ),
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
@@ -7921,7 +7967,8 @@ async function googleReviewUpdate(req, res, db, auth, body) {
 async function badReviews(req, res, db, auth) {
   // Businesses this token may see. The list itself enforces the scoping.
   let bizQ = db.from('businesses').select('id, slug, name').eq('active', true);
-  if (auth.scope !== 'all') bizQ = bizQ.eq('slug', auth.scope);
+  const badReviewAllowed = allowedSlugsFor(auth);
+  if (badReviewAllowed) bizQ = bizQ.in('slug', badReviewAllowed);
   const { data: bizRows, error: bizErr } = await bizQ;
   if (bizErr) throw bizErr;
   const bizById = new Map((bizRows || []).map(b => [b.id, b]));

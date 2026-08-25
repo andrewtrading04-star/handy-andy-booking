@@ -8696,8 +8696,18 @@ function callCard(r,handled){
   // at the line (tracking label / service / market) but never spell out which
   // company answers this number, and the raw dialed digits weren't shown at
   // all before now.
-  const bizLine = [r.business?.name, r.grasshopper_number ? 'dialed '+fmtPhone(r.grasshopper_number) : null]
-    .filter(Boolean).map(esc).join(' · ');
+  // forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone only prettifies bare
+  // 10-digit numbers, so drop the +1 first or it renders as raw digits.
+  const routedTo = r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null;
+  const bizLine = [
+    r.business?.name,
+    r.grasshopper_number ? 'dialed ' + fmtPhone(r.grasshopper_number) : null,
+    // Where the call was actually sent. Every tracking number forwards to a
+    // real handset, and which one is not otherwise visible anywhere in the
+    // dashboard — so "nobody answered" and "it rang the wrong phone" looked
+    // identical. Only Twilio rows carry this; Grasshopper rows leave it blank.
+    routedTo ? 'routed to ' + routedTo : null,
+  ].filter(Boolean).map(esc).join(' · ');
   // A row with no caller number can never be returned, and the card used to
   // just render a blank where the number goes — indistinguishable from a bug.
   // In practice this is only ever a live-call row: the wizard creates it the
@@ -13171,9 +13181,33 @@ async function renderCallWiz(){
     // One card: greeting + the service question together — the secretary
     // reads both lines in one breath, and picking an answer both starts the
     // call log and records the service in a single tap.
-    body.innerHTML=`${callWizScript(`Hello, thank you for calling ${bizName}, how may I help you?`)}
+    // Which line rang. One person now answers several brands, and the greeting
+    // has to name the RIGHT one before she speaks — so the business is picked
+    // here, on the first card, rather than by remembering to change the
+    // switcher behind the modal first. Only shown when there's a real choice.
+    // Confined to the greet step on purpose: the call row is written the moment
+    // a service is picked (call_live_start carries the business), so after that
+    // point the business is fixed and switching would leave the logged row and
+    // the quote disagreeing about who the customer called.
+    const cwCanPickBiz = Array.isArray(businesses) && businesses.length>1;
+    const cwBizPicker = cwCanPickBiz ? `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:5px;">Which line rang</div>
+        <select class="search" id="cwBiz" style="margin-bottom:0;">${businesses.map(b=>
+          `<option value="${esc(b.slug)}"${current&&b.slug===current.slug?' selected':''}>${esc(b.name)}</option>`).join('')}</select>
+      </div>` : '';
+    body.innerHTML=`${cwBizPicker}
+      ${callWizScript(`Hello, thank you for calling ${bizName}, how may I help you?`)}
       ${callWizChoiceRow([{value:'TV Mounting',label:'TV mounting'},{value:'Handyman',label:'Handyman'}])}
       <button type="button" class="btn ghost" style="width:100%;margin-top:8px;" id="cwSomethingElse">Something else</button>`;
+    // Switch the whole dashboard, not just a label: the quote, availability and
+    // the New Booking hand-off downstream all read `current`, so a wizard-local
+    // business would price the call against the wrong brand.
+    const cwBizSel=document.getElementById('cwBiz');
+    if(cwBizSel) cwBizSel.addEventListener('change', ()=>{
+      switchToBusiness(cwBizSel.value);
+      renderCallWiz();
+    });
     body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', async()=>{
       body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
       document.getElementById('cwSomethingElse').disabled=true;
