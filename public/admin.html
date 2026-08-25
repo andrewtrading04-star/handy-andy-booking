@@ -448,6 +448,12 @@
   .cn-count{margin-left:auto;flex:none;font-size:12.5px;font-weight:700;color:var(--ink-2);background:var(--line2);border-radius:999px;padding:3px 10px;}
   .cn-body{display:none;padding:2px 0 6px 14px;}
   .cn-body.open{display:block;}
+  /* Where the "Open" button on the new-voicemail banner lands you. The Calls
+     tab opens on the by-number folders, all collapsed, with the callback queue
+     below them — so jumping to the tab alone showed no voicemail at all. This
+     marks the one she was sent to look at while the page settles. */
+  .rc-card.rc-focus{outline:2px solid var(--accent);outline-offset:2px;animation:rcFocusFade 2.4s ease-out 1;}
+  @keyframes rcFocusFade{0%,60%{background:#fff7ed;}100%{background:inherit;}}
   @media(max-width:640px){ .rc-card{flex-direction:column;align-items:stretch;} .rc-actions{min-width:0;} }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
@@ -8702,9 +8708,14 @@ function callCard(r,handled){
   // at the line (tracking label / service / market) but never spell out which
   // company answers this number, and the raw dialed digits weren't shown at
   // all before now.
+  // Prefer the PERSON who answers that line — "routed to Joey" is what the
+  // office actually needs to know; the digits are noise once you know whose
+  // they are. Falls back to the formatted number for any handset we can't put
+  // a name to (server sets routed_to_name from staff_users).
   // forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone only prettifies bare
   // 10-digit numbers, so drop the +1 first or it renders as raw digits.
-  const routedTo = r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null;
+  const routedTo = r.routed_to_name
+    || (r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null);
   const bizLine = [
     r.business?.name,
     r.grasshopper_number ? 'dialed ' + fmtPhone(r.grasshopper_number) : null,
@@ -8724,7 +8735,7 @@ function callCard(r,handled){
   const noNumber = !r.caller_phone && !r.customer
     ? '<div class="rc-meta">No caller number recorded</div>' : '';
 
-  return `<div class="rc-card ${srcClass}" style="align-items:flex-start;">
+  return `<div class="rc-card ${srcClass}" data-call="${esc(r.id)}" style="align-items:flex-start;">
     <div class="rc-main">
       <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
       <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
@@ -8796,6 +8807,47 @@ function paintCalls(){
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
+  focusPendingCall(view);
+}
+
+// Scroll to (and briefly ring) the one call the banner's "Open" button sent
+// this person to deal with. Without it, "Open" only switched tabs: the Calls
+// tab leads with collapsed by-number folders and puts the callback queue
+// underneath them, so the voicemail she was told to return was off-screen and
+// the page looked empty of voicemails.
+//
+// A call can be on the page TWICE — once inside a (collapsed) number folder,
+// once in the queue — so prefer whichever copy is actually visible, and if
+// only the collapsed one exists, open its folder first.
+let _callFocusId=null;
+function focusPendingCall(view){
+  if(!_callFocusId) return;
+  const id=_callFocusId; _callFocusId=null;
+  let cards;
+  try{ cards=[...view.querySelectorAll(`[data-call="${CSS.escape(id)}"]`)]; }
+  catch(_){ return; }
+  if(!cards.length) return;
+  let target=cards.find(el=>el.offsetParent!==null);
+  if(!target){
+    // Only the collapsed copy exists (the call is already handled, so it is not
+    // in the queue). Expand the folder holding it, keeping _callsOpenNumbers in
+    // step so the next repaint does not snap it shut again.
+    target=cards[0];
+    const body=target.closest('.cn-body');
+    const key=body&&body.dataset?body.dataset.cnbody:null;
+    if(body){
+      body.classList.add('open');
+      if(key){
+        _callsOpenNumbers.add(key);
+        const row=view.querySelector(`[data-cnnum="${CSS.escape(key)}"]`);
+        if(row) row.classList.add('open');
+      }
+    }
+  }
+  target.classList.add('rc-focus');
+  try{ target.scrollIntoView({behavior:'smooth',block:'center'}); }
+  catch(_){ target.scrollIntoView(); }
+  setTimeout(()=>target.classList.remove('rc-focus'), 2600);
 }
 // Claim the voicemail, THEN dial. Claiming first is what stops two people
 // ringing the same customer: the moment Heather taps Call, Joey's screen shows
@@ -8868,6 +8920,10 @@ function paintCallBanner(call){
   document.getElementById('callBannerX').onclick=()=>dismissBanner(call.id);
   document.getElementById('callBannerGo').onclick=()=>{
     dismissBanner(call.id);
+    // Remember WHICH voicemail she was sent to deal with. Switching tabs alone
+    // dropped her at the top of the by-number folders with the callback queue
+    // below the fold, so "Open" appeared to show no voicemail at all.
+    _callFocusId=call.id;
     // The Calls tab is a hub now (see CALL_TABS) -- navTo('calls') hasn't
     // resolved to anything since the hub replaced the standalone screen.
     callHubTab='log';

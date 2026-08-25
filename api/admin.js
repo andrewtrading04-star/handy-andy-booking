@@ -7011,11 +7011,30 @@ async function calls(req, res, db, auth) {
   }
 
   const me = auth.name || auth.role || 'office';
+
+  // Who answers each forwarding number, so a card can say "routed to Joey"
+  // instead of ten digits nobody memorises. Matched on digits alone: the
+  // tracking rows store E.164 (+1XXXXXXXXXX) while staff_users stores bare
+  // 10-digit numbers, and neither is worth normalising in the database for
+  // this. One small read per request; an unknown number simply keeps showing
+  // as a number rather than guessing at a name.
+  const staffByPhone = new Map();
+  try {
+    const { data: staffRows } = await db.from('staff_users').select('name, phone').eq('active', true);
+    for (const s of staffRows || []) {
+      const d = String(s.phone || '').replace(/\D/g, '').slice(-10);
+      if (d.length === 10 && s.name) staffByPhone.set(d, s.name);
+    }
+  } catch (e) { /* names are a nicety — never fail the call list over them */ }
+
   const mapped = (rows || []).map(r => ({
     ...r,
     caller_display: r.customer?.name || prettyPhone(r.caller_phone),
     caller_pretty: prettyPhone(r.caller_phone),
     is_new_caller: !r.customer_id,
+    // The person behind forwarded_to, when we know them. null keeps the client
+    // on the formatted number.
+    routed_to_name: staffByPhone.get(String(r.forwarded_to || '').replace(/\D/g, '').slice(-10)) || null,
     // Someone is on this call right now. `claimed_by_me` lets the UI show "you
     // are on this" rather than warning a person about their own claim.
     claim_active: claimIsHot(r),
