@@ -2188,12 +2188,13 @@ function enterApp(){
   if(navAnaHub) navAnaHub.style.display = ANALYTICS_TABS.some(t=>t.show()) ? '' : 'none';
   const navCallHub=document.getElementById('navCallHub');
   if(navCallHub) navCallHub.style.display = CALL_TABS.some(t=>t.show()) ? '' : 'none';
-  // Joey's Calls hub only ever holds Review Calls (Performance/Audit are
-  // owner-only, My Performance moved to its own top-level screen above), so
-  // the button should say what it actually opens for her instead of the
-  // generic "Calls" the owner sees over Performance/Audit/Review Calls.
+  // Was "Review Calls" for Joey specifically, back when her hub held nothing
+  // else (Performance/Audit are owner-only, My Performance moved to its own
+  // top-level screen). That's no longer true — she also has Log, the actual
+  // phone call history — so the old label undersold the hub and read as if
+  // the phone calls lived somewhere else. Same "Calls" as everyone else now.
   const navCallHubLabel=document.getElementById('navCallHubLabel');
-  if(navCallHubLabel) navCallHubLabel.textContent = (role==='secretary'&&scope==='doms') ? 'Review Calls' : 'Calls';
+  if(navCallHubLabel) navCallHubLabel.textContent = 'Calls';
   // Photos: hidden from both secretaries 2026-08-14, restored for Joey (Dom's)
   // per Andrew's ask -- Heather (Handy Andy) stays hidden, unchanged.
   const navGallery=document.getElementById('navGallery');
