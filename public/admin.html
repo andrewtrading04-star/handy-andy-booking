@@ -329,16 +329,6 @@
   .rc-script-b{font-size:14px;color:#7c2d12;line-height:1.55;}
   .rc-count{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:10px;}
   .rc-card{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;flex-wrap:wrap;}
-  /* Source tint — which phone system logged this call. Grasshopper (the office
-     line, incl. calls the secretary logs live) reads green; a Twilio tracking
-     number reads blue. The 3px inset left bar is what actually carries the
-     signal at a glance; the background wash is deliberately mild so it stays a
-     "where did this come from" cue rather than competing with the badges, which
-     carry the real status (answered / missed / who is calling it now).
-     Using an inset box-shadow rather than border-left keeps every card's text
-     on the same left edge — a real border would shift these rows 3px. */
-  .rc-card.src-grasshopper{background:#f1f8f3;border-color:#cfe6d8;box-shadow:inset 3px 0 0 #34a853;}
-  .rc-card.src-twilio{background:#eff4fc;border-color:#d3e0f2;box-shadow:inset 3px 0 0 #1a73e8;}
   .rc-main{flex:1;min-width:220px;}
   .rc-name{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .rc-biz{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:2px 8px;border-radius:999px;}
@@ -8598,30 +8588,50 @@ function shortTrackingLabel(label){
 // call behind a click and answered a question nobody was asking. The list is
 // now flat and newest-first, CallRail-style, split only by what the office
 // actually triages on: All / Missed / Needs callback.
+// One status pill for the 4-box row. `on` picks the colored/active style vs
+// the muted/inactive one; Location is always "on" (it's a label, not a
+// yes/no) and uses its own neutral color regardless of `on`.
+function cwStatusBox(icon,label,on,neutral){
+  const style = neutral
+    ? 'background:#eef2f7;color:var(--ink-2);border:1px solid var(--line);'
+    : on
+      ? 'background:#dcfce7;color:#15803d;border:1px solid #86efac;font-weight:700;'
+      : 'background:#f3f4f6;color:var(--mute);border:1px solid var(--line);';
+  return `<span style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;font-size:12.5px;${style}">${icon} ${esc(label)}</span>`;
+}
 function callCard(r,handled){
   const isLive=r.kind==='live';
-  const badges=[];
-  // A tracking-number call (Twilio). Unlike a Grasshopper voicemail these rows
-  // exist even when someone answered, so the card has to say which it was —
-  // otherwise an answered call reads like an unhandled voicemail.
   const isTracked=r.source==='twilio';
-  if(isLive) badges.push('<span class="rc-badge blue">📞 Live call</span>');
-  if(isTracked) badges.push(r.answered
-    ? `<span class="rc-badge green">✅ Answered${r.duration_sec?' · '+callDuration(r.duration_sec):''}</span>`
-    : '<span class="rc-badge red">📵 Missed</span>');
-  if(r.tracking_label) badges.push(`<span class="rc-badge blue">${esc(r.tracking_label)}</span>`);
-  if(r.is_new_caller) badges.push('<span class="rc-badge amber">New caller</span>');
-  if(r.service)  badges.push(`<span class="rc-badge blue">${esc(r.service)}</span>`);
-  if(r.market)   badges.push(`<span class="rc-badge gray">${esc(r.market)}</span>`);
-  else if(!isLive && !isTracked) badges.push('<span class="rc-badge red">Unrouted number</span>');
-  if(r.resolution) badges.push(`<span class="rc-badge green">${esc(CALL_RESOLUTION_LABEL[r.resolution]||r.resolution)}</span>`);
-  if(r.status==='called_back') badges.push('<span class="rc-badge blue">Called back</span>');
-  // Live claim, shown to everyone. This badge is the double-call guard: it is
-  // how Joey learns that Heather is already on it.
-  if(r.claim_active) badges.push(r.claimed_by_me
-    ? '<span class="rc-badge green" style="background:#dcfce7;color:#15803d;">You are calling this</span>'
-    : `<span class="rc-badge red">${esc(r.claimed_by)} is calling this now</span>`);
-  for(const w of (r.warnings||[])) badges.push(`<span class="rc-badge red">${esc(w)}</span>`);
+
+  // The 4 boxes (owner spec, 2026-08-26): Left a voicemail / Contacted /
+  // Location / Recorded a message. contacted/left_voicemail/recorded_message
+  // are computed server-side (api/admin.js calls()) so every reader agrees on
+  // the same definition; Location is just the market, always shown as a
+  // label rather than a toggle since there's no "off" state for a place.
+  const statusBoxes = isLive ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+    ${cwStatusBox('📨','Left a voicemail',r.left_voicemail)}
+    ${cwStatusBox('✅','Contacted',r.contacted)}
+    ${cwStatusBox('📍', r.market || 'Unrouted', true, true)}
+    ${cwStatusBox('🎙️','Recorded a message',r.recorded_message)}
+  </div>`;
+
+  // Live-wizard outcome and a not-yet-booked callback marker don't fit the 4
+  // boxes (they're not properties of an inbound tracking call), but dropping
+  // them loses real information the office relies on — shown as plain text
+  // instead of competing chips.
+  const extraLines=[];
+  if(isLive && r.resolution) extraLines.push(`Outcome: ${esc(CALL_RESOLUTION_LABEL[r.resolution]||r.resolution)}`);
+  if(!isLive && !r.booking && r.called_back_at) extraLines.push(`Called back ${esc(fmtDateTime(r.called_back_at))}`);
+  for(const w of (r.warnings||[])) extraLines.push(w);
+  const extra = extraLines.length
+    ? `<div class="rc-meta" style="margin-top:6px;">${extraLines.map(esc).join(' · ')}</div>` : '';
+
+  // Live claim, shown to everyone — the double-call guard: it's how Joey
+  // learns Heather is already on this one. Kept OUT of the 4 boxes (it's a
+  // right-now collision warning, not a property of the call itself).
+  const claimLine = r.claim_active
+    ? `<div style="margin-top:6px;font-size:12.5px;font-weight:700;${r.claimed_by_me?'color:#15803d;':'color:#b91c1c;'}">${r.claimed_by_me?'You are calling this':esc(r.claimed_by)+' is calling this now'}</div>`
+    : '';
 
   // The job this call produced, if any. This is the whole point of matching on
   // the phone number: it shows the phone actually earning money.
@@ -8637,25 +8647,23 @@ function callCard(r,handled){
       // An answered tracking call left no message by definition. Saying "no
       // transcript" here would read as something missing rather than normal.
       ? '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">Call was answered — no message left.</div>'
-      : '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">No transcript for this message.</div>';
+      : '';
   // Proxied through call_recording (Twilio's own recording URLs need Basic
   // Auth the browser can't supply) — only present at all once a tracking
   // number has record_calls on and a call has actually completed.
   // <audio src> can't carry an Authorization header, so the token rides in
   // the query string here — accepted server-side ONLY for this one action
   // (see api/admin.js), same signed/expiring token as everywhere else.
-  // Labeled, boxed, and named — a bare <audio> strip reads as page furniture,
-  // and the office couldn't tell the recording was even there.
+  // Labeled, boxed, and named (not a bare <audio> strip that reads as page
+  // furniture) and doubles as the obvious place to act on the "Recorded a
+  // message" box above it. Grasshopper's own "flag with no audio" case is
+  // gone along with Grasshopper — every recording here is real and playable.
   const audio=r.recording_url
     ? `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;max-width:420px;">
-         <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Call recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
+         <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
          <audio controls preload="none" style="width:100%;height:34px;display:block;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>
        </div>`
-    // Grasshopper has no API — the "has a recording" flag only ever comes from
-    // the forwarded email having an attachment; the audio itself was never
-    // pulled anywhere this dashboard can reach it. Say so rather than silently
-    // showing nothing, so this doesn't read as a bug.
-    : (r.has_recording ? '<div style="margin-top:6px;font-size:12px;color:var(--mute);">🎙 Has a recording — listen in the Grasshopper app (not pulled into this dashboard).</div>' : '');
+    : '';
 
   const hasPhone=!!r.caller_phone;
   const tel=`tel:+1${esc(r.caller_phone)}`;
@@ -8689,9 +8697,9 @@ function callCard(r,handled){
          <button class="rc-btn red" data-callact="ignored" data-callid="${esc(r.id)}">Ignore</button>
        </div>`;
 
-  // The list spans BOTH companies but customer_detail is scoped to the business
-  // currently being viewed, so only linkify a customer that lookup can actually
-  // resolve — a link that reliably 404s is worse than plain text.
+  // The list spans multiple businesses but customer_detail is scoped to the
+  // business currently being viewed, so only linkify a customer that lookup
+  // can actually resolve — a link that reliably 404s is worse than plain text.
   const sameBiz = r.customer && current && r.customer.business && r.customer.business.slug===current.slug;
   const who = !r.customer ? esc(r.caller_pretty || (isLive ? 'Live call' : ''))
     : sameBiz ? `<a href="#" data-callcust="${esc(r.customer.id)}" style="color:inherit;text-decoration:underline;">${esc(r.customer.name)}</a>`
@@ -8702,46 +8710,34 @@ function callCard(r,handled){
         : `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`)
     : '';
 
-  // Source tint (subtle — see .rc-card.src-* in <style>): source defaults to
-  // 'grasshopper' at the DB column level, Twilio rows set it explicitly.
-  const srcClass = r.source==='twilio' ? 'src-twilio' : 'src-grasshopper';
-  // Business name + the actual number dialed, together — badges already hint
-  // at the line (tracking label / service / market) but never spell out which
-  // company answers this number, and the raw dialed digits weren't shown at
-  // all before now.
-  // Prefer the PERSON who answers that line — "routed to Joey" is what the
-  // office actually needs to know; the digits are noise once you know whose
-  // they are. Falls back to the formatted number for any handset we can't put
-  // a name to (server sets routed_to_name from staff_users).
-  // forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone only prettifies bare
-  // 10-digit numbers, so drop the +1 first or it renders as raw digits.
+  // Header line, streamlined per spec: Time (most recent first — the list is
+  // already sorted that way) · Business name · Routed to. Prefers the PERSON
+  // who answers a line ("routed to Joey") over ten digits nobody memorises;
+  // falls back to the formatted number for any handset with no matching
+  // staff_users row. forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone
+  // only prettifies bare 10-digit numbers, so the +1 is dropped first or it
+  // renders as raw digits.
   const routedTo = r.routed_to_name
     || (r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null);
-  const bizLine = [
+  const headLine = [
+    callWhen(r),
     r.business?.name,
-    r.grasshopper_number ? 'dialed ' + fmtPhone(r.grasshopper_number) : null,
-    // Where the call was actually sent. Every tracking number forwards to a
-    // real handset, and which one is not otherwise visible anywhere in the
-    // dashboard — so "nobody answered" and "it rang the wrong phone" looked
-    // identical. Only Twilio rows carry this; Grasshopper rows leave it blank.
-    routedTo ? 'routed to ' + routedTo : null,
+    routedTo ? 'routed to ' + routedTo : (isTracked ? 'not routed' : null),
   ].filter(Boolean).map(esc).join(' · ');
-  // A row with no caller number can never be returned, and the card used to
-  // just render a blank where the number goes — indistinguishable from a bug.
-  // In practice this is only ever a live-call row: the wizard creates it the
-  // instant "Take a Call" opens and the number is filled in later (or not at
-  // all), whereas a Grasshopper voicemail is rejected at ingest without a
-  // 10-digit caller. Say it plainly so the gap reads as "nobody typed it",
-  // which is something the office can actually fix.
+  // A row with no caller number can never be returned. In practice this is
+  // only ever a live-call row: the wizard creates it the instant "Take a
+  // Call" opens and the number is filled in later, or not at all. Say it
+  // plainly so the gap reads as "nobody typed it", which the office can fix,
+  // rather than a blank that looks like a bug.
   const noNumber = !r.caller_phone && !r.customer
     ? '<div class="rc-meta">No caller number recorded</div>' : '';
 
-  return `<div class="rc-card ${srcClass}" data-call="${esc(r.id)}" style="align-items:flex-start;">
+  return `<div class="rc-card" data-call="${esc(r.id)}" style="align-items:flex-start;">
     <div class="rc-main">
-      <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
-      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
-      ${bizLine?`<div class="rc-meta">${bizLine}</div>`:''}${noNumber}
-      <div class="rc-badges">${badges.join('')}</div>
+      <div class="rc-meta" style="font-weight:700;color:var(--ink);font-size:13px;">${headLine}</div>
+      <div class="rc-name" style="margin-top:2px;">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
+      ${noNumber}
+      ${statusBoxes}${extra}${claimLine}
       ${tx}${audio}${job}${handledLine}
     </div>
     <div class="rc-actions">${actions}</div>
@@ -8758,10 +8754,11 @@ function paintCalls(){
     ...(_callsPeriodData.open||[]).map(r=>({ ...r, _handled:false })),
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
   ].sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
-  // Missed = no human picked up: a tracking-number call that went unanswered,
-  // or a Grasshopper voicemail (which only exists because the call was
-  // missed). Live rows are the secretary's own worked calls, not misses.
-  const missedRows=periodRows.filter(r=> r.kind==='voicemail' || (r.source==='twilio' && r.answered===false));
+  // Missed = not Contacted: same definition as the box on the card, so the
+  // tab and the badge can never disagree about the same call. Live rows are
+  // always contacted (the secretary is/was on the phone by definition), so
+  // this naturally excludes them without a separate kind check.
+  const missedRows=periodRows.filter(r=> !r.contacted);
   const VIEWS=[
     { id:'all',      label:`All (${periodRows.length})` },
     { id:'missed',   label:`📵 Missed (${missedRows.length})` },

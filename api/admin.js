@@ -32,7 +32,7 @@ import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
 import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines } from './_lib/broker-spec.js';
-import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
+import { digitsOf, prettyPhone } from './_lib/grasshopper.js';
 import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
@@ -6977,7 +6977,7 @@ async function calls(req, res, db, auth) {
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
              occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
-             source, tracking_label, answered, duration_sec, recording_url, forwarded_to,
+             source, tracking_label, answered, duration_sec, recording_url, forwarded_to, called_back_at,
              customer_id, booking_id,
              customer:customers ( id, name, phone, business:businesses ( slug ) ),
              booking:bookings ( id, scheduled_at, status, price, technician:technicians!technician_id ( name ) ),
@@ -6985,13 +6985,18 @@ async function calls(req, res, db, auth) {
     .order('occurred_at', { ascending: false }).limit(limit);
   if (from) q = q.gte('occurred_at', from);
   if (to) q = q.lt('occurred_at', to);
+  // Grasshopper tracking was retired (owner call, 2026-08-26) — its rows
+  // (kind 'voicemail'/'missed', from the now-disabled call_ingest) stay in the
+  // table as history but never surface anywhere again. Twilio rows are kind
+  // 'inbound'; the Take a Call wizard's own rows are kind 'live'.
+  q = q.not('kind', 'in', '(voicemail,missed)');
   // Owner rule (2026-08-26): the WHOLE list — business names, missed calls,
   // history — is scoped to the businesses this person actually runs, not just
   // the interruption banner (which was fixed first, separately, below). Joey
-  // sees only Dom's + her eight lead-gen brands; Heather sees only Handy Andy
-  // until she's given more. Review Calls is untouched — it lives in a
-  // different action (reviewCalls/renderReviewCalls) with its own
-  // cross-company-by-design query, never this one.
+  // and Heather each see their own home business plus their six assigned
+  // lead-gen brands (api/_lib/staff-access.js). Review Calls is untouched —
+  // it lives in a different action (reviewCalls/renderReviewCalls) with its
+  // own cross-company-by-design query, never this one.
   const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
   if (viewerSlugs) {
     const { data: viewerBiz } = await db.from('businesses').select('id').in('slug', viewerSlugs);
@@ -7074,6 +7079,26 @@ async function calls(req, res, db, auth) {
     // are on this" rather than warning a person about their own claim.
     claim_active: claimIsHot(r),
     claimed_by_me: claimIsHot(r) && r.claimed_by === me,
+    // The four streamlined-card indicators (owner spec, 2026-08-26). Computed
+    // once here so the client stays dumb and every reader (card, Missed tab,
+    // any future report) agrees on the same definition.
+    //   contacted: we answered the call live, or we called back (durable —
+    //     see called_back_at / migration 0100, NOT the live `status` field,
+    //     which gets overwritten the moment the row is later marked Done).
+    //     A Take a Call wizard row (kind 'live') is always contacted by
+    //     definition — it exists because a secretary is on the phone with the
+    //     customer right now, or was.
+    //   left_voicemail: the caller reached voicemail AND actually said
+    //     something — an unanswered call where they hung up with no message
+    //     did not "leave a voicemail" in any useful sense.
+    //   recorded_message: there is audio to play, full stop — this is
+    //     broader than left_voicemail on purpose: with record_calls on, an
+    //     ANSWERED conversation is recorded too (record-from-answer-dual in
+    //     api/analytics.js handleVoiceInbound), and that recording is exactly
+    //     as real as a voicemail's.
+    contacted: r.kind === 'live' || r.answered === true || r.called_back_at != null,
+    left_voicemail: r.answered === false && !!(r.recording_url || r.transcript),
+    recorded_message: !!r.recording_url,
   }));
   const open = mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
@@ -7208,6 +7233,15 @@ async function callUpdate(req, res, db, auth, body) {
     } else {
       patch.handled_by = null; patch.handled_at = null;
     }
+    // Durable "we called back" marker (migration 0100) — stamped once and
+    // never overwritten by a LATER status change. `status` itself gets
+    // overwritten the moment this row is next marked "Done" (-> 'resolved'),
+    // so deriving Contacted from "status is currently 'called_back'" would
+    // flip the badge back off the instant the call is closed out. Reopening
+    // (status -> 'new') clears it, matching handled_at's own reset — a
+    // reopened call is meant to be dealt with fresh.
+    if (body.status === 'called_back') patch.called_back_at = new Date().toISOString();
+    else if (body.status === 'new') patch.called_back_at = null;
   }
   if (body.notes !== undefined) patch.notes = String(body.notes || '').slice(0, 2000) || null;
   if (body.service !== undefined) patch.service = String(body.service || '').slice(0, 60) || null;
@@ -7263,189 +7297,16 @@ async function callLiveStart(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, id: data.id });
 }
 
-// ── Inbound calls: ingest a Grasshopper voicemail email ─────────────────────
-// Grasshopper has no API/webhooks/Zapier (verified Jul 2026), so its
-// notification EMAIL is the integration. A Google Apps Script on the owner's
-// own Gmail posts each one here (see docs/grasshopper-gmail-script.md).
-//
-// PRE-AUTH by design: the script runs on Google's servers with no dashboard
-// session, so it authenticates with a shared secret instead of a login token.
-// The secret is compared with safeEqual (constant time) and, with no secret
-// configured, the endpoint stays CLOSED rather than open — an unset env var
-// must never mean "let anyone write call records".
-async function callIngest(req, res, body) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const secret = process.env.GRASSHOPPER_INGEST_SECRET || '';
-  if (!secret) return res.status(503).json({ error: 'Call ingest is not configured' });
-  if (!safeEqual((body.secret || '').toString(), secret)) return res.status(401).json({ error: 'Unauthorized' });
-
-  const parsed = parseGrasshopperEmail({
-    subject: body.subject, body: body.body,
-    receivedAt: body.receivedAt, messageId: body.messageId,
-    hasAttachment: !!body.hasAttachment,
-  });
-  // A parse failure is reported back so the forwarder can log it and the office
-  // can see that something arrived it could not read — silently swallowing it
-  // would mean a customer's voicemail vanished with no trace anywhere.
-  if (!parsed.ok) return res.status(422).json({ error: parsed.error });
-
-  const db = serviceClient();
-
-  // Business + market. The Grasshopper line dialed is what identifies the
-  // market (every email is stamped Central regardless of where it came in).
-  const { data: bizRow } = await db.from('businesses').select('id, slug, name')
-    .eq('slug', parsed.business_slug).maybeSingle();
-  let service_area_id = null;
-  if (bizRow && parsed.market) {
-    const { data: area } = await db.from('service_areas').select('id')
-      .eq('business_id', bizRow.id).ilike('name', parsed.market).maybeSingle();
-    service_area_id = area?.id || null;
-  }
-
-  // Match the caller to an existing customer. 99.9% of stored numbers are bare
-  // 10 digits, so that is the primary lookup; the handful with punctuation get
-  // a second pass on the common written formats. An unmatched caller is a
-  // perfectly normal new lead, not an error.
-  const digits = parsed.caller_phone;
-  let customer = null;
-  {
-    const { data } = await db.from('customers')
-      .select('id, name, phone, business_id').eq('phone', digits).limit(1);
-    customer = (data || [])[0] || null;
-    if (!customer) {
-      const alt = [prettyPhone(digits), `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`, `+1${digits}`, `1${digits}`];
-      const { data: d2 } = await db.from('customers')
-        .select('id, name, phone, business_id')
-        .in('phone', alt).limit(1);
-      customer = (d2 || [])[0] || null;
-    }
-  }
-
-  // Did this call turn into a job? The earliest booking for that customer
-  // created AFTER the call. Bounded to 14 days so a voicemail is never
-  // credited with a booking made weeks later for unrelated reasons.
-  let booking_id = null;
-  if (customer) {
-    const until = new Date(new Date(parsed.occurred_at).getTime() + 14 * 86400000).toISOString();
-    const { data: bk } = await db.from('bookings')
-      .select('id, created_at').eq('customer_id', customer.id)
-      .gte('created_at', parsed.occurred_at).lte('created_at', until)
-      .order('created_at', { ascending: true }).limit(1);
-    booking_id = (bk || [])[0]?.id || null;
-  }
-
-  const row = {
-    business_id: bizRow?.id || null,
-    service_area_id,
-    kind: parsed.kind,
-    caller_phone: digits,
-    grasshopper_number: parsed.grasshopper_number,
-    extension: parsed.extension,
-    extension_no: parsed.extension_no,
-    service: parsed.service,
-    market: parsed.market,
-    occurred_at: parsed.occurred_at,
-    transcript: parsed.transcript,
-    has_recording: parsed.has_recording,
-    customer_id: customer?.id || null,
-    booking_id,
-    warnings: parsed.warnings.length ? parsed.warnings : null,
-    email_message_id: parsed.message_id || null,
-    // A voicemail that already produced a booking needs no follow-up: it lands
-    // closed. This matters most on a backfill, which would otherwise drop
-    // months of long-settled voicemails into the callback queue.
-    ...(booking_id ? { status: 'resolved', handled_by: 'Booked', handled_at: new Date().toISOString() } : {}),
-  };
-
-  const { data: ins, error: insErr } = await db.from('calls').insert(row).select('id').single();
-  if (insErr) {
-    // 23505 = the unique index on email_message_id. The forwarder is allowed to
-    // re-post anything (a retry, or a backfill overlapping live traffic) and
-    // must get a success back, or it will keep retrying the same message.
-    if (/duplicate key|23505/i.test(insErr.message || '')) {
-      return res.status(200).json({ ok: true, duplicate: true });
-    }
-    throw insErr;
-  }
-
-  // Alert the person whose extension it came in on. Skipped for a backfill —
-  // texting staff about months-old voicemails would be pure noise.
-  // No alert for a caller who has already booked, and none on a backfill.
-  let notified = false;
-  if (!body.backfill && !booking_id) {
-    notified = await notifyCallRecipient(db, { ...parsed, id: ins.id, customer, booking_id, business_name: bizRow?.name || null });
-    if (notified) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', ins.id);
-  }
-
-  return res.status(200).json({
-    ok: true, id: ins.id,
-    matched_customer: customer?.name || null,
-    linked_booking: !!booking_id,
-    market: parsed.market,
-    notified,
-    warnings: parsed.warnings,
-  });
-}
-
-// Text the staff member whose extension the voicemail landed on. Extensions map
-// to people, not services: the owner confirmed (Jul 2026) that Heather answers
-// 1 and 2 while Joey is 6, even though the menu labels those "TV Mounting" and
-// "Handyman". That mapping lives in staff_users.grasshopper_extensions so it can
-// be corrected without a deploy; the number itself still comes from the existing
-// HANDY_ANDY_SECRETARY_PHONE / DOMS_SECRETARY_PHONE env vars that every other
-// office alert already uses, so there is no second place to keep phones in sync.
-// Extensions whose alert gets the named, urgent wording plus a one-tap link to
-// the transcript (public/voicemail.html). Scoped to Dom's for now at the
-// owner's request; adding 'handy-andy' here is all Heather needs to get the
-// same treatment on extensions 1 and 2.
-const VM_LINK_SCOPES = ['doms'];
-const VM_LINK_TTL_S = 14 * 24 * 60 * 60;   // a voicemail text can sit unread a while
-
-async function notifyCallRecipient(db, call) {
-  try {
-    if (!smsNotificationsOn()) return false;
-    let scope = call.business_slug;
-    let staffName = null;
-    if (call.extension_no != null) {
-      const { data: staff } = await db.from('staff_users')
-        .select('name, active, business:businesses ( slug )')
-        .contains('grasshopper_extensions', [call.extension_no]).eq('active', true).limit(1);
-      const found = (staff || [])[0];
-      if (found?.business?.slug) scope = found.business.slug;
-      if (found?.name) staffName = found.name;
-    }
-    const to = secretaryPhoneFor(scope);
-    if (!to) return false;
-
-    const who = call.customer?.name ? call.customer.name : `${prettyPhone(call.caller_phone)} (new caller)`;
-    // One short line of the transcript: enough to triage from a lock screen
-    // without turning the alert into a wall of text.
-    const gist = call.transcript ? `\n"${call.transcript.slice(0, 140)}${call.transcript.length > 140 ? '…' : ''}"` : '';
-    const already = call.booking_id ? '\nAlready booked.' : '';
-
-    let msg;
-    if (VM_LINK_SCOPES.includes(scope)) {
-      // Named, urgent, and actionable: the link opens the full transcript with
-      // a Call back button, so they never have to log into the dashboard on a
-      // phone just to find out what the caller wanted.
-      const base = process.env.PUBLIC_URL
-        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-      const token = signToken({ kind: 'voicemail', call_id: call.id }, VM_LINK_TTL_S);
-      const link = `${base}/voicemail.html?token=${encodeURIComponent(token)}`;
-      const hi = staffName ? `${staffName}, you` : 'You';
-      const bizName = call.business_name || (scope === 'doms' ? "Dom's" : 'the business line');
-      msg = `${hi} just received a voicemail for ${bizName} from ${who}. Reply back immediately.${gist}${already}\n${link}`;
-    } else {
-      msg = `New voicemail from ${who}${call.service ? ` (${call.service})` : ''}.${gist}${already}\nOpen the Calls tab to respond.`;
-    }
-    const r = await sendSMSResult(to, msg);
-    return !!r.ok;
-  } catch (e) {
-    // An alert failing must never fail the ingest — the voicemail is already
-    // safely recorded and visible in the dashboard by this point.
-    console.error('[calls] notify failed:', e.message);
-    return false;
-  }
+// ── Inbound calls: Grasshopper ingestion — RETIRED 2026-08-26 ───────────────
+// Owner call: stop tracking Grasshopper calls entirely. The Gmail Apps Script
+// (docs/grasshopper-gmail-script.md) still POSTs here once a minute from the
+// owner's own Google account — turning THAT off requires deleting its
+// time-driven trigger in Google Apps Script directly; nothing server-side can
+// reach it. Until it's turned off there, every run now gets a fast, clear 410
+// instead of writing a row, which is strictly better than a 404/500 for
+// whoever eventually reads that script's execution log.
+async function callIngest(req, res) {
+  return res.status(410).json({ error: 'Grasshopper call tracking has been retired. Delete the syncNow trigger in the Apps Script project to stop these requests.' });
 }
 
 // ── Review-call queue (Joey's daily outreach) ────────────────────────────────

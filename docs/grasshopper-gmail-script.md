@@ -1,4 +1,19 @@
-# Grasshopper voicemail tracking: setup
+# Grasshopper voicemail tracking: setup (RETIRED 2026-08-26)
+
+**This integration has been turned off.** The owner asked to stop tracking
+Grasshopper calls entirely — the dashboard endpoint this script posts to
+(`api/admin.js` `call_ingest`) now returns 410 for every request instead of
+writing a row. **Go to script.google.com, open "Grasshopper Voicemails," and
+delete the `syncNow` time-driven trigger** (Triggers, the clock icon in the
+left sidebar) — nothing on the server side can reach or disable that trigger
+remotely, so it will otherwise keep firing once a minute forever, each run
+just logging a 410 in the script's own execution history instead of doing
+anything.
+
+The rest of this doc is kept for reference only, in case tracking is ever
+turned back on.
+
+---
 
 Grasshopper has no API, no webhooks and no Zapier integration (checked Jul 2026).
 The only thing it emits that a computer can read is the notification email it
