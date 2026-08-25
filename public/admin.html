@@ -8505,6 +8505,9 @@ let _callsData={open:[],handled:[]};
 // above is deliberately NOT date-scoped (an overdue voicemail from 10 days
 // ago must not disappear just because "Today" is selected).
 let _callsPeriod='today';
+// Which list is showing: 'all' (everything in the period, newest first),
+// 'missed' (calls no human picked up), or 'callback' (the open queue).
+let _callsView='all';
 let _callsPeriodData={open:[],handled:[]};
 function callPeriodRange(period){
   const now=new Date();
@@ -8528,8 +8531,13 @@ async function renderCalls(){
   if(firstLoad) view.innerHTML='<div class="wrap"><div class="empty">Loading calls…</div></div>';
   // Coming BACK to the tab (cached data, but another screen's HTML in #view):
   // paint the cache immediately so the tab lands on calls, not on a leftover
-  // schedule, then refresh underneath.
-  else if(!view.querySelector('[data-callperiod]')) paintCalls();
+  // schedule, then refresh underneath. Detected by the All/Missed/Needs
+  // callback tabs, which every calls view renders — the period buttons are
+  // hidden on the Needs-callback tab, so keying off those would misread a
+  // painted callback view as "some other screen" and repaint it on every
+  // poll, tearing down any playing recording before the audio guard below
+  // could run.
+  else if(!view.querySelector('[data-callview]')) paintCalls();
   // A repaint tears down every <audio> element, so refreshing mid-listen
   // silently kills the recording someone is reviewing. Skip this cycle; the
   // next poll lands after they're done.
@@ -8585,48 +8593,11 @@ function shortTrackingLabel(label){
 // (the raw dialed number, already on every row) rather than a DB join, so it
 // works the same for Twilio tracking numbers and old Grasshopper extensions
 // alike, and needs no schema change to keep working as more numbers are added.
-function groupCallsByNumber(rows){
-  const byKey=new Map();
-  for(const r of rows){
-    const key=r.grasshopper_number||'__unattributed__';
-    if(!byKey.has(key)) byKey.set(key, { phone:r.grasshopper_number||'', label:'', market:'', calls:[] });
-    const g=byKey.get(key);
-    if(!g.label && r.tracking_label) g.label=r.tracking_label;
-    if(!g.market && r.market) g.market=r.market;
-    g.calls.push(r);
-  }
-  const byMarket=new Map();
-  for(const g of byKey.values()){
-    const mkey = g.phone ? (g.market||'Other') : 'Unrouted';
-    if(!byMarket.has(mkey)) byMarket.set(mkey, []);
-    byMarket.get(mkey).push(g);
-  }
-  for(const arr of byMarket.values()) arr.sort((a,b)=>b.calls.length-a.calls.length);
-  const marketKeys=[...byMarket.keys()].sort((a,b)=> a==='Unrouted'?1 : b==='Unrouted'?-1 : a.localeCompare(b));
-  return marketKeys.map(m=>({ market:m, numbers:byMarket.get(m) }));
-}
-// Which number rows are expanded. Survives repaints (the 20s poll repaints
-// this screen) so an open folder doesn't snap shut while someone is reading.
-let _callsOpenNumbers=new Set();
-function callsByNumberHtml(rows){
-  if(!rows.length) return '<div class="empty" style="padding:22px 12px;">No calls in this period.</div>';
-  const groups=groupCallsByNumber(rows);
-  return groups.map(({market,numbers})=>`
-    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:16px 0 6px;">${esc(market)}</div>
-    ${numbers.map(g=>{
-      const key=g.phone||'__unattributed__';
-      const open=_callsOpenNumbers.has(key);
-      const name=shortTrackingLabel(g.label)||fmtPhone(g.phone)||'Unknown number';
-      return `<button type="button" class="cn-row ${open?'open':''}" data-cnnum="${esc(key)}">
-        <span class="cn-caret">▶</span>
-        <span class="cn-name">${esc(name)}</span>
-        ${g.phone&&shortTrackingLabel(g.label)?`<span class="cn-phone">${esc(fmtPhone(g.phone))}</span>`:''}
-        <span class="cn-count">${g.calls.length}</span>
-      </button>
-      <div class="cn-body ${open?'open':''}" data-cnbody="${esc(key)}">${g.calls.map(r=>callCard(r, r._handled)).join('')}</div>`;
-    }).join('')}
-  `).join('');
-}
+// The by-number/per-business folder view that used to live here is gone
+// (owner call, 2026-08-25): a collapsed dropdown per tracking number hid every
+// call behind a click and answered a question nobody was asking. The list is
+// now flat and newest-first, CallRail-style, split only by what the office
+// actually triages on: All / Missed / Needs callback.
 function callCard(r,handled){
   const isLive=r.kind==='live';
   const badges=[];
@@ -8673,8 +8644,13 @@ function callCard(r,handled){
   // <audio src> can't carry an Authorization header, so the token rides in
   // the query string here — accepted server-side ONLY for this one action
   // (see api/admin.js), same signed/expiring token as everywhere else.
+  // Labeled, boxed, and named — a bare <audio> strip reads as page furniture,
+  // and the office couldn't tell the recording was even there.
   const audio=r.recording_url
-    ? `<audio controls preload="none" style="width:100%;max-width:360px;margin-top:8px;height:34px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`
+    ? `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;max-width:420px;">
+         <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Call recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
+         <audio controls preload="none" style="width:100%;height:34px;display:block;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>
+       </div>`
     // Grasshopper has no API — the "has a recording" flag only ever comes from
     // the forwarded email having an attachment; the audio itself was never
     // pulled anywhere this dashboard can reach it. Say so rather than silently
@@ -8774,44 +8750,49 @@ function callCard(r,handled){
 const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'};
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
-  const open=_callsData.open||[];
-  const needsBody = open.length
-    ? open.map(r=>callCard(r,false)).join('')
-    : `<div class="empty" style="padding:22px 12px;">🎉 Every voicemail has been handled.</div>`;
-  // Same rows, tagged with which bucket they actually came back in so the
-  // by-number cards below show real action buttons (Done/Called back/etc)
-  // for anything still open — this list and the queue above are two views of
-  // the same data, not a separate read-only history.
+  const open=(_callsData.open||[]).map(r=>({ ...r, _handled:false }));
+  // One flat list, newest first. Rows are tagged with the bucket they came
+  // back in so open calls keep their real action buttons (Done/Called back/
+  // Ignore) while handled ones show Reopen — same data, one timeline.
   const periodRows=[
     ...(_callsPeriodData.open||[]).map(r=>({ ...r, _handled:false })),
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
   ].sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
+  // Missed = no human picked up: a tracking-number call that went unanswered,
+  // or a Grasshopper voicemail (which only exists because the call was
+  // missed). Live rows are the secretary's own worked calls, not misses.
+  const missedRows=periodRows.filter(r=> r.kind==='voicemail' || (r.source==='twilio' && r.answered===false));
+  const VIEWS=[
+    { id:'all',      label:`All (${periodRows.length})` },
+    { id:'missed',   label:`📵 Missed (${missedRows.length})` },
+    { id:'callback', label:`Needs callback (${open.length})` },
+  ];
+  const shown = _callsView==='missed' ? missedRows : _callsView==='callback' ? open : periodRows;
+  const emptyMsg = _callsView==='callback' ? '🎉 Every call has been handled.'
+    : _callsView==='missed' ? 'No missed calls in this period.' : 'No calls in this period.';
+  const viewSeg=VIEWS.map(v=>
+    `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" data-callview="${v.id}">${v.label}</button>`).join('');
   const periodSeg=['today','yesterday','7d'].map(p=>
     `<button type="button" class="rc-seg-btn ${_callsPeriod===p?'on':''}" data-callperiod="${p}">${esc(CALL_PERIOD_LABEL[p])}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
-      <h2 class="rc-title">📨 Calls</h2>
+      <h2 class="rc-title">📨 Incoming Calls</h2>
       <div class="rc-sub">Voicemails and tracking-number calls from the office phone. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
     </div></div>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-      <div class="rc-count" style="margin:0;">By number</div>
-      <div class="rc-seg">${periodSeg}</div>
+      <div class="rc-seg">${viewSeg}</div>
+      ${_callsView==='callback'?'':`<div class="rc-seg">${periodSeg}</div>`}
     </div>
-    ${callsByNumberHtml(periodRows)}
-    <div class="rc-count" style="margin-top:28px;">Needs callback (${open.length})</div>
-    ${needsBody}
+    ${shown.length ? shown.map(r=>callCard(r, r._handled)).join('') : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
   </div>`;
 
+  // Tab switch is a repaint of data already in hand — no refetch, no flash.
+  view.querySelectorAll('[data-callview]').forEach(b=>b.addEventListener('click',()=>{
+    _callsView=b.dataset.callview; paintCalls();
+  }));
   view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
     _callsPeriod=b.dataset.callperiod; renderCalls();
-  }));
-  view.querySelectorAll('[data-cnnum]').forEach(b=>b.addEventListener('click',()=>{
-    const key=b.dataset.cnnum;
-    const body=view.querySelector(`[data-cnbody="${CSS.escape(key)}"]`);
-    if(_callsOpenNumbers.has(key)) _callsOpenNumbers.delete(key); else _callsOpenNumbers.add(key);
-    b.classList.toggle('open');
-    if(body) body.classList.toggle('open');
   }));
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
@@ -8848,27 +8829,10 @@ let _callFocusId=null;
 function focusPendingCall(view){
   if(!_callFocusId) return;
   const id=_callFocusId; _callFocusId=null;
-  let cards;
-  try{ cards=[...view.querySelectorAll(`[data-call="${CSS.escape(id)}"]`)]; }
+  let target;
+  try{ target=view.querySelector(`[data-call="${CSS.escape(id)}"]`); }
   catch(_){ return; }
-  if(!cards.length) return;
-  let target=cards.find(el=>el.offsetParent!==null);
-  if(!target){
-    // Only the collapsed copy exists (the call is already handled, so it is not
-    // in the queue). Expand the folder holding it, keeping _callsOpenNumbers in
-    // step so the next repaint does not snap it shut again.
-    target=cards[0];
-    const body=target.closest('.cn-body');
-    const key=body&&body.dataset?body.dataset.cnbody:null;
-    if(body){
-      body.classList.add('open');
-      if(key){
-        _callsOpenNumbers.add(key);
-        const row=view.querySelector(`[data-cnnum="${CSS.escape(key)}"]`);
-        if(row) row.classList.add('open');
-      }
-    }
-  }
+  if(!target) return;
   target.classList.add('rc-focus');
   try{ target.scrollIntoView({behavior:'smooth',block:'center'}); }
   catch(_){ target.scrollIntoView(); }
@@ -8949,6 +8913,9 @@ function paintCallBanner(call){
     // dropped her at the top of the by-number folders with the callback queue
     // below the fold, so "Open" appeared to show no voicemail at all.
     _callFocusId=call.id;
+    // Land on the queue that actually holds it: an open voicemail from before
+    // today isn't in the period-bound All list, but is always in callback.
+    _callsView='callback';
     // The Calls tab is a hub now (see CALL_TABS) -- navTo('calls') hasn't
     // resolved to anything since the hub replaced the standalone screen.
     callHubTab='log';
