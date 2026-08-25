@@ -487,6 +487,14 @@ function displayNameFor(scope) {
 // Andy, Joey/Dom's) — office alerts (e.g. a failed estimate-approval booking)
 // go to WHICHEVER company the job belongs to, never a single shared owner
 // number, since the two businesses are staffed by different people.
+// Joey's mobile, confirmed by the owner 2026-08-25. It is also on
+// staff_users.phone (which is what puts her NAME on a call card instead of ten
+// digits) and on the eight lead-gen tracking rows (which is what actually
+// rings her). Written here too so a missing DOMS_SECRETARY_PHONE cannot
+// silently stop her voicemail alerts — an unset env var used to mean "text
+// nobody", which is the quietest possible failure for a waiting customer.
+const JOEY_MOBILE = '3032190118';
+
 function secretaryPhoneFor(scope) {
   // Joey answers Dom's AND the eight Austin/Houston lead-gen lines, so a
   // voicemail on one of those has to reach her. Before this, the Austin four
@@ -496,7 +504,10 @@ function secretaryPhoneFor(scope) {
   // Driven off the same list that grants her the access, so the two can't
   // drift: add a brand there and its alerts follow automatically.
   if (scope === 'doms' || (SECRETARY_EXTRA_BUSINESSES.doms || []).includes(scope)) {
-    return process.env.DOMS_SECRETARY_PHONE || '';
+    // The env var still wins when set, so her number can be changed without a
+    // deploy — but it is no longer the only thing standing between a voicemail
+    // and an alert.
+    return process.env.DOMS_SECRETARY_PHONE || JOEY_MOBILE;
   }
   // Heather covers Handy Andy and its remaining micro-brands.
   if (['handy-andy', 'mile-high', 'austin', 'precision', 'tvmountingdenver'].includes(scope)) {

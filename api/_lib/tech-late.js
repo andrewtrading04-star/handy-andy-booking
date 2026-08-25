@@ -74,7 +74,28 @@ const STAFF_PHONE_ENV = {
   'austin': 'HEATHER_PHONE_NUMBER',   // Heather covers the Austin brand too
   'precision': 'HEATHER_PHONE_NUMBER',// and the Houston Precision brand
   'doms': 'JOEY_PHONE_NUMBER',
+  // Joey took the eight Austin/Houston lead-gen lines (2026-08-25). They were
+  // absent here entirely, so a late job on one escalated to NOBODY: the loop
+  // records "no office number configured for business" and moves on, which is
+  // the quietest way for a customer to sit waiting on a tech who never came.
+  // These brands have no techs of their own — the work is done by cross-hired
+  // Handy Andy techs (Zach in Austin, Juan in Houston) — but the CUSTOMER is
+  // Joey's to answer for, so the escalation is hers.
+  'atxmountpros': 'JOEY_PHONE_NUMBER',
+  'atxtvmount': 'JOEY_PHONE_NUMBER',
+  'austinmountingpros': 'JOEY_PHONE_NUMBER',
+  'austintvinstall': 'JOEY_PHONE_NUMBER',
+  'houstonmounting': 'JOEY_PHONE_NUMBER',
+  'houstontvinstallation': 'JOEY_PHONE_NUMBER',
+  'htvmounting': 'JOEY_PHONE_NUMBER',
+  'tvhanginghouston': 'JOEY_PHONE_NUMBER',
 };
+
+// Fallbacks for the vars above, so an UNSET one cannot silently turn a late-job
+// escalation into nothing. Joey's is owner-confirmed (2026-08-25) and matches
+// both staff_users.phone and her tracking-number routing. Heather's has no
+// confirmed value here, so hers stays env-only rather than being guessed at.
+const STAFF_PHONE_FALLBACK = { JOEY_PHONE_NUMBER: '3032190118' };
 
 function firstName(name) {
   return (name || '').trim().split(/\s+/)[0] || 'Tech';
@@ -197,7 +218,9 @@ export async function checkLateTechs(opts = {}) {
     }
 
     const staffPhoneEnv = slug ? STAFF_PHONE_ENV[slug] : null;
-    const staffPhone = staffPhoneEnv ? process.env[staffPhoneEnv] : null;
+    const staffPhone = staffPhoneEnv
+      ? (process.env[staffPhoneEnv] || STAFF_PHONE_FALLBACK[staffPhoneEnv] || null)
+      : null;
     if (!escalateBlockedBy && !staffPhoneEnv) escalateBlockedBy = `no office number configured for business (${slug || b.business_id})`;
     if (!escalateBlockedBy && !staffPhone) escalateBlockedBy = `${staffPhoneEnv} env var not set`;
 
