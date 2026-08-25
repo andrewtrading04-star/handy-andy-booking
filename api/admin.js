@@ -540,10 +540,18 @@ const SECRETARY_EXTRA_BUSINESSES = {
 
 // Every business slug a token may act on: its primary scope plus any extras.
 // Owner ('all') is unrestricted, and returns null meaning "apply no filter".
+//
+// The extras are derived from the LIVE map above, not only from the token:
+// admin tokens are long-lived, and Joey's session predated the map — reading
+// the token alone meant her already-open dashboard kept exactly its old access
+// until she logged out and back in, which read as "none of the changes are
+// showing". The token's own `allowed` list is still honoured (union), so a
+// View As session behaves identically either way.
 function allowedSlugsFor(auth) {
   if (!auth || auth.scope === 'all') return null;
-  const extra = Array.isArray(auth.allowed) ? auth.allowed : [];
-  return [auth.scope, ...extra].filter(Boolean);
+  const fromScope = SECRETARY_EXTRA_BUSINESSES[auth.scope] || [];
+  const fromToken = Array.isArray(auth.allowed) ? auth.allowed : [];
+  return [auth.scope, ...new Set([...fromScope, ...fromToken])].filter(Boolean);
 }
 // The gate every business-scoped action goes through.
 function mayUseBusiness(auth, slug) {
@@ -1187,31 +1195,75 @@ async function calendar(req, res, db, auth) {
   let ghostBookings = [];
   try {
     const ownTechIds = (techs || []).map(t => t.id);
-    if (ownTechIds.length) {
-      const { data: otherBiz } = await db.from('businesses')
-        .select('id, name').eq('active', true).neq('id', biz.id);
-      const otherBizNameById = {};
-      for (const ob of (otherBiz || [])) otherBizNameById[ob.id] = ob.name;
-      const otherBizIds = Object.keys(otherBizNameById);
-      if (otherBizIds.length) {
-        const { data: pbk, error: pbkErr } = await db.from('bookings')
-          .select('id, business_id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
-          .in('business_id', otherBizIds)
-          .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
+    const { data: otherBiz } = await db.from('businesses')
+      .select('id, name, slug').eq('active', true).neq('id', biz.id);
+    const otherBizById = {};
+    for (const ob of (otherBiz || [])) otherBizById[ob.id] = ob;
+    const otherBizIds = Object.keys(otherBizById);
+    // Ghosts already added for a booking, so the lead-gen sweep below can't
+    // repeat one that source 1 surfaced through a shared tech.
+    const ghostedBookingIds = new Set();
+    if (ownTechIds.length && otherBizIds.length) {
+      const { data: pbk, error: pbkErr } = await db.from('bookings')
+        .select('id, business_id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
+        .in('business_id', otherBizIds)
+        .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
+        .not('status', 'in', '(cancelled,no_show)')
+        .gte('scheduled_at', from).lt('scheduled_at', to)
+        .limit(2000);
+      if (pbkErr) throw pbkErr;
+      const ownTechIdSet = new Set(ownTechIds);
+      for (const b of (pbk || [])) {
+        const companyName = otherBizById[b.business_id]?.name || 'Partner';
+        const customerName = b.customer?.name || null;
+        if (ownTechIdSet.has(b.technician_id)) {
+          ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          ghostedBookingIds.add(b.id);
+        }
+        if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
+          ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          ghostedBookingIds.add(b.id);
+        }
+      }
+    }
+
+    // Source 2 (owner rule, 2026-08-25): EVERY lead-gen booking shows as a
+    // ghost on BOTH staffed dashboards, no matter whose tech works it. Heather
+    // and Joey each answer phones for brands the other one books for, so a
+    // Mile High job booked by Heather has to be visible to Joey (and vice
+    // versa) or the two of them are working blind to half the calendar.
+    // Only on the handy-andy/doms views — a lead-gen brand's own view is that
+    // brand's real schedule and needs no ghosts of itself. Still read-only and
+    // still a separate list, so it can never leak into payroll or job counts.
+    if (['handy-andy', 'doms'].includes(biz.slug)) {
+      const leadGenIds = otherBizIds.filter(id => !['handy-andy', 'doms'].includes(otherBizById[id].slug));
+      if (leadGenIds.length) {
+        const { data: lgbk, error: lgErr } = await db.from('bookings')
+          .select('id, business_id, technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
+          .in('business_id', leadGenIds)
           .not('status', 'in', '(cancelled,no_show)')
           .gte('scheduled_at', from).lt('scheduled_at', to)
           .limit(2000);
-        if (pbkErr) throw pbkErr;
-        const ownTechIdSet = new Set(ownTechIds);
-        for (const b of (pbk || [])) {
-          const companyName = otherBizNameById[b.business_id] || 'Partner';
-          const customerName = b.customer?.name || null;
-          if (ownTechIdSet.has(b.technician_id)) {
-            ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
-          }
-          if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
-            ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
-          }
+        if (lgErr) throw lgErr;
+        const fresh = (lgbk || []).filter(b => !ghostedBookingIds.has(b.id));
+        // The assigned tech usually isn't on THIS dashboard's roster (Zach and
+        // Juan are Handy Andy techs viewed from Dom's, say), so carry the name
+        // along rather than leaving the card to shrug "Tech busy".
+        const techIds = [...new Set(fresh.map(b => b.technician_id).filter(Boolean))];
+        const techNameById = {};
+        if (techIds.length) {
+          const { data: ts } = await db.from('technicians').select('id, name').in('id', techIds);
+          for (const t of (ts || [])) techNameById[t.id] = t.name;
+        }
+        for (const b of fresh) {
+          ghostBookings.push({
+            technician_id: b.technician_id || null,
+            tech_name: techNameById[b.technician_id] || null,
+            scheduled_at: b.scheduled_at,
+            duration_minutes: b.duration_minutes || 60,
+            partner_company: otherBizById[b.business_id]?.name || 'Lead gen',
+            customer_name: b.customer?.name || null,
+          });
         }
       }
     }
@@ -9498,13 +9550,18 @@ async function myCallPerformance(req, res, db, auth) {
   const since = localDayStartUTC(tz, offset - (days - 1));
   const until = localDayStartUTC(tz, offset + 1);
   const { data: calls, error } = await db.from('calls')
-    .select('handled_by, resolution, booking_id, quoted_total, occurred_at')
+    .select('handled_by, resolution, booking_id, quoted_total, occurred_at, reached_step')
     .eq('business_id', bizId).eq('kind', 'live')
     .eq('handled_by', name)
     .gte('occurred_at', since.toISOString())
     .lt('occurred_at', until.toISOString());
   if (error) throw error;
-  const rows = calls || [];
+  // Same worked-the-script gate as callAnalytics (owner rule, 2026-08-25): an
+  // opened-and-abandoned greet screen is a misclick, not a call, and must not
+  // drag this person's own conversion number down. Keep the two definitions
+  // identical or her report and the owner's ranking disagree about the same week.
+  const rows = (calls || []).filter(r =>
+    !!r.booking_id || !!r.resolution || (r.reached_step && r.reached_step !== 'greet'));
 
   const isBooked = r => !!r.booking_id || r.resolution === 'booked';
   const dayKeyOf = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
@@ -9621,7 +9678,15 @@ async function callAnalytics(req, res, db, auth) {
   if (until) callsQuery = callsQuery.lt('occurred_at', until.toISOString());
   const { data: calls, error } = await callsQuery.order('occurred_at', { ascending: false });
   if (error) throw error;
-  const rows = calls || [];
+  // Only calls where the script was actually WORKED count (owner rule,
+  // 2026-08-25). Opening "Take a Call", tapping a service, and abandoning it
+  // leaves a row stuck at the greet step with no resolution — a misclick or a
+  // wrong number, not a conversation — and every one of those was scored as a
+  // 0% call against whoever opened it. A call counts once it moved past the
+  // greeting (any later step stamped) or actually ended somewhere (resolution
+  // or a booking).
+  const rows = (calls || []).filter(r =>
+    !!r.booking_id || !!r.resolution || (r.reached_step && r.reached_step !== 'greet'));
 
   let eventsQuery = db.from('call_events')
     .select('call_id, actor, event, step, meta, created_at')

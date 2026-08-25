@@ -2681,12 +2681,16 @@ function evtCard(b){
 function dollarSignSvg(){ return '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'; }
 function ghostEvtCard(g){
   const t=techCache.find(x=>x.id===g.technician_id);
+  // A lead-gen ghost's tech is usually from ANOTHER company (Zach/Juan viewed
+  // from Dom's), so the roster lookup misses — the server sends tech_name along
+  // for exactly that case.
+  const techName=t?.name||g.tech_name||'Tech';
   const start=fmtClock(g.scheduled_at);
   const end=fmtClock(new Date(new Date(g.scheduled_at).getTime()+(g.duration_minutes||60)*60000).toISOString());
   const who=g.customer_name?` for ${esc(g.customer_name)}`:'';
-  return `<div class="evt evt-ghost" title="${esc(t?.name||'Tech')} is booked on a ${esc(g.partner_company||'partner')} job${who} during this time — informational only, not a job on your schedule.">
+  return `<div class="evt evt-ghost" title="${esc(techName)} is booked on a ${esc(g.partner_company||'partner')} job${who} during this time — informational only, not a job on your schedule.">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
-    <div class="ghost-n">${esc(t?.name||'Tech')} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
+    <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
   </div>`;
 }
 function dayColumn(ds){
