@@ -8517,18 +8517,38 @@ function callPeriodRange(period){
 }
 async function renderCalls(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading calls…</div></div>';
+  // Only the FIRST load blanks the screen. This runs again every 20s from the
+  // poll below, and blanking-then-fetching meant the whole view went white for
+  // as long as the two requests took — a visible 2-3 second flash whenever a
+  // cold lambda answered slowly. With data already painted, fetch first and
+  // swap the finished HTML in one go; a failed refresh just keeps showing the
+  // slightly-stale list instead of replacing it with an error screen.
+  const firstLoad=!_callsData;
+  if(firstLoad) view.innerHTML='<div class="wrap"><div class="empty">Loading calls…</div></div>';
+  // Coming BACK to the tab (cached data, but another screen's HTML in #view):
+  // paint the cache immediately so the tab lands on calls, not on a leftover
+  // schedule, then refresh underneath.
+  else if(!view.querySelector('[data-callperiod]')) paintCalls();
+  // A repaint tears down every <audio> element, so refreshing mid-listen
+  // silently kills the recording someone is reviewing. Skip this cycle; the
+  // next poll lands after they're done.
+  if(!firstLoad && [...view.querySelectorAll('audio')].some(a=>!a.paused&&!a.ended)) return;
   try{
     const {from,to}=callPeriodRange(_callsPeriod);
     const [base, period]=await Promise.all([
       api('calls',{ params:{ limit:100 }}),
       api('calls',{ params:{ limit:200, from, to }}),
     ]);
+    // Re-check: playback could have started while the fetch was in flight.
+    if(!firstLoad && [...view.querySelectorAll('audio')].some(a=>!a.paused&&!a.ended)) return;
+    // The user may have navigated away mid-fetch — repainting #view now would
+    // stomp whatever screen they moved to.
+    if(!firstLoad && !onScreen('calllog')) return;
     _callsData=base;
     _callsPeriodData=period;
     paintCalls();
     refreshCallsBadge();
-  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+  }catch(e){ if(firstLoad) view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 // Times are shown in the market's own zone, NOT the raw value Grasshopper sent:
 // it stamps every notification in Central regardless of where the call came in,
