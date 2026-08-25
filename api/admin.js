@@ -7030,6 +7030,23 @@ async function calls(req, res, db, auth) {
     .order('occurred_at', { ascending: false }).limit(limit);
   if (from) q = q.gte('occurred_at', from);
   if (to) q = q.lt('occurred_at', to);
+  // Owner rule (2026-08-26): the WHOLE list — business names, missed calls,
+  // history — is scoped to the businesses this person actually runs, not just
+  // the interruption banner (which was fixed first, separately, below). Joey
+  // sees only Dom's + her eight lead-gen brands; Heather sees only Handy Andy
+  // until she's given more. Review Calls is untouched — it lives in a
+  // different action (reviewCalls/renderReviewCalls) with its own
+  // cross-company-by-design query, never this one.
+  const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
+  if (viewerSlugs) {
+    const { data: viewerBiz } = await db.from('businesses').select('id').in('slug', viewerSlugs);
+    const viewerBizIds = (viewerBiz || []).map(b => b.id);
+    // No matching business rows would mean an unfiltered query (Supabase
+    // treats an empty .in() array as "no restriction"), which is exactly
+    // backwards for an access boundary — an empty allow-list must return
+    // nothing, never everything.
+    q = q.in('business_id', viewerBizIds.length ? viewerBizIds : ['00000000-0000-0000-0000-000000000000']);
+  }
   const { data: rows, error } = await q;
   if (error) throw error;
 
@@ -7117,28 +7134,27 @@ async function calls(req, res, db, auth) {
   // out) — only the banner and badge, which exist to interrupt someone about a
   // WAITING CUSTOMER, exclude it.
   const openVoicemails = open.filter(r => r.kind !== 'live');
-  // Whether THIS viewer should be interrupted (banner/red badge) about a call.
-  // The list itself stays visible to everyone — the two companies working one
-  // screen is the point — but the banner exists to make someone drop what
-  // they're doing, and it was firing on BOTH secretaries for every missed
-  // call. Heather started getting "you missed a call" nags for tracking lines
-  // that ring Joey's phone and were never hers to answer.
-  //   - Tracking-number calls interrupt only the person whose handset the call
-  //     was actually routed to (forwarded_to matched to staff_users.phone). A
-  //     line pointing at a phone no staff row owns interrupts nobody — nobody
-  //     was supposed to answer it, so nobody should be yanked to it.
-  //   - Grasshopper voicemails interrupt whoever covers that business (the
-  //     same allowed-brands list that gates access), unchanged behaviour for
-  //     Heather's own Handy Andy lines and Joey's Dom's line.
+  // Whether THIS viewer should be interrupted (banner/red badge) about a call,
+  // layered on top of the business scoping above. Every row already belongs to
+  // a business this person is allowed to see, but for a TRACKING-NUMBER call
+  // that isn't enough: several people can share access to the same lead-gen
+  // brand's calls while only one of them holds the ringing phone, and only
+  // that person should be interrupted about it. Heather started getting "you
+  // missed a call" nags for tracking lines that ring Joey's phone before this.
+  //   - Tracking-number calls interrupt only whoever's handset the call was
+  //     actually routed to (forwarded_to matched to staff_users.phone). A line
+  //     pointing at a phone no staff row owns interrupts nobody — nobody was
+  //     supposed to answer it, so nobody should be yanked to it.
+  //   - Grasshopper voicemails interrupt anyone who can see them — the query
+  //     above already means that's only people covering that business.
   //   - The owner is never filtered: 'all' scope sees every interruption.
-  const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
   const interruptsMe = (r) => {
     if (viewerSlugs === null) return true;
     if (r.source === 'twilio') {
       const routedName = staffByPhone.get(String(r.forwarded_to || '').replace(/\D/g, '').slice(-10)) || null;
       return routedName != null && routedName === me;
     }
-    return !!(r.business?.slug && viewerSlugs.includes(r.business.slug));
+    return true;
   };
   const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r));
   return res.status(200).json({
