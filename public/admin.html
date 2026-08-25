@@ -329,6 +329,12 @@
   .rc-script-b{font-size:14px;color:#7c2d12;line-height:1.55;}
   .rc-count{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:10px;}
   .rc-card{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;flex-wrap:wrap;}
+  /* Subtle source tint — Grasshopper voicemails read faintly green, Twilio
+     tracking-number calls read faintly blue. Deliberately close to white:
+     this is a "which system logged this" hint at a glance, not a status color
+     (badges/borders already carry the real signal — answered/missed/claimed). */
+  .rc-card.src-grasshopper{background:#f6faf7;border-color:#e1ede3;}
+  .rc-card.src-twilio{background:#f6f8fc;border-color:#e0e6f3;}
   .rc-main{flex:1;min-width:220px;}
   .rc-name{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .rc-biz{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:2px 8px;border-radius:999px;}
@@ -8628,7 +8634,11 @@ function callCard(r,handled){
   // (see api/admin.js), same signed/expiring token as everywhere else.
   const audio=r.recording_url
     ? `<audio controls preload="none" style="width:100%;max-width:360px;margin-top:8px;height:34px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`
-    : '';
+    // Grasshopper has no API — the "has a recording" flag only ever comes from
+    // the forwarded email having an attachment; the audio itself was never
+    // pulled anywhere this dashboard can reach it. Say so rather than silently
+    // showing nothing, so this doesn't read as a bug.
+    : (r.has_recording ? '<div style="margin-top:6px;font-size:12px;color:var(--mute);">🎙 Has a recording — listen in the Grasshopper app (not pulled into this dashboard).</div>' : '');
 
   const hasPhone=!!r.caller_phone;
   const tel=`tel:+1${esc(r.caller_phone)}`;
@@ -8675,10 +8685,21 @@ function callCard(r,handled){
         : `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`)
     : '';
 
-  return `<div class="rc-card" style="align-items:flex-start;">
+  // Source tint (subtle — see .rc-card.src-* in <style>): source defaults to
+  // 'grasshopper' at the DB column level, Twilio rows set it explicitly.
+  const srcClass = r.source==='twilio' ? 'src-twilio' : 'src-grasshopper';
+  // Business name + the actual number dialed, together — badges already hint
+  // at the line (tracking label / service / market) but never spell out which
+  // company answers this number, and the raw dialed digits weren't shown at
+  // all before now.
+  const bizLine = [r.business?.name, r.grasshopper_number ? 'dialed '+fmtPhone(r.grasshopper_number) : null]
+    .filter(Boolean).map(esc).join(' · ');
+
+  return `<div class="rc-card ${srcClass}" style="align-items:flex-start;">
     <div class="rc-main">
       <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
-      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}${r.grasshopper_number?' · dialed '+esc(fmtPhone(r.grasshopper_number)):''}</div>
+      <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
+      ${bizLine?`<div class="rc-meta">${bizLine}</div>`:''}
       <div class="rc-badges">${badges.join('')}</div>
       ${tx}${audio}${job}${handledLine}
     </div>
