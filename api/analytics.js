@@ -351,6 +351,43 @@ async function handleVoiceWhisper(req, res) {
   return xml(res, `<Response><Say voice="Polly.Joanna">${xmlEsc(label)}</Say></Response>`);
 }
 
+// Which handset a line rings RIGHT NOW.
+//
+// A line with an after-hours number splits the day at [hours_start, hours_end)
+// read in that line's OWN market timezone (migration 0099) — so a Houston
+// customer dialing at 7pm their time reaches the daytime handset regardless of
+// where the server, or the office, happens to be. Austin and Houston are both
+// Central, which is why the eight lead-gen lines share one window.
+//
+// A line with no window configured (the default, and every line before this)
+// returns forward_to unchanged, so nothing that was working changes.
+function destinationFor(line) {
+  if (!line) return null;
+  const primary = line.forward_to || null;
+  if (!line.after_hours_forward_to || !line.hours_timezone) return primary;
+
+  let hour;
+  try {
+    // hourCycle 'h23' rather than hour12:false — the latter reports midnight as
+    // "24" on some ICU builds, which would read as outside every window.
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: line.hours_timezone, hourCycle: 'h23', hour: '2-digit',
+    }).formatToParts(new Date());
+    hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
+  } catch (e) {
+    // A bad timezone must never drop a customer's call: fall back to the
+    // primary handset, which is exactly what this line did before it had a
+    // window at all. Loud, because it means the row needs fixing.
+    console.error(`[voice_inbound] bad hours_timezone "${line.hours_timezone}" on ${line.phone}:`, e.message);
+    return primary;
+  }
+  if (!Number.isInteger(hour)) return primary;
+
+  const open = Number(line.hours_start), close = Number(line.hours_end);
+  if (!Number.isFinite(open) || !Number.isFinite(close)) return primary;
+  return (hour >= open && hour < close) ? primary : line.after_hours_forward_to;
+}
+
 // POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
 async function handleVoiceInbound(req, res) {
   const params = await twilioVoiceParams(req, res, 'voice_inbound');
@@ -362,7 +399,7 @@ async function handleVoiceInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
       .eq('phone', to).maybeSingle();
     line = data && data.active ? data : null;
 
@@ -387,7 +424,11 @@ async function handleVoiceInbound(req, res) {
       grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
       tracking_label: line?.label || null,
       market: line?.market || null,
-      forwarded_to: line?.forward_to || null,
+      // The handset actually dialed for THIS call, not the line's daytime
+      // default — on an after-hours line those differ, and the Calls tab's
+      // "routed to" (plus the missed-call text, which is sent to this number)
+      // must name whoever really rang.
+      forwarded_to: destinationFor(line),
       twilio_call_sid: sid,
       occurred_at: new Date().toISOString(),
       customer_id,
@@ -401,8 +442,10 @@ async function handleVoiceInbound(req, res) {
   }
 
   // No forwarding destination configured (or an unknown number): take a
-  // message rather than hanging up on a real customer.
-  if (!line || !line.forward_to) return xml(res, voicemailTwiml(sid));
+  // message rather than hanging up on a real customer. Resolved through the
+  // business-hours split, so an after-hours line rings its night handset.
+  const dialTo = destinationFor(line);
+  if (!line || !dialTo) return xml(res, voicemailTwiml(sid));
 
   // callerId is the CALLER's own number, not ours, so whoever picks up sees who
   // is really calling and can just hit redial. Twilio permits this for straight
@@ -436,7 +479,7 @@ async function handleVoiceInbound(req, res) {
   // moment the person picks up and plays only to THEM — the caller hears
   // ringing throughout — so you answer already knowing what you picked up.
   const whisper = voiceUrl('voice_whisper', { label: line.label || '', sid });
-  return xml(res, `<Response>${disclosure}<Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}${recStatusCb}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(line.forward_to)}</Number></Dial></Response>`);
+  return xml(res, `<Response>${disclosure}<Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}${recStatusCb}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(dialTo)}</Number></Dial></Response>`);
 }
 
 // POST /api/analytics?action=voice_status&sid=... — the <Dial> finished.
@@ -519,7 +562,7 @@ async function handleSmsInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, forward_to, active')
+      .select('phone, label, business_slug, forward_to, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
       .eq('phone', to).maybeSingle();
     line = data && data.active ? data : null;
 
@@ -550,10 +593,13 @@ async function handleSmsInbound(req, res) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
-  if (line && line.forward_to && body) {
+  // Same day/night split the call path uses: a text landing at 3am must not
+  // wake whoever answers that line during the day.
+  const smsTo = destinationFor(line);
+  if (line && smsTo && body) {
     try {
       const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
-      await sendSMS(line.forward_to, `Text${line.label ? ` on ${line.label}` : ''} from ${pretty}: ${body}`);
+      await sendSMS(smsTo, `Text${line.label ? ` on ${line.label}` : ''} from ${pretty}: ${body}`);
     } catch (e) {
       console.error('[sms_inbound] relay failed:', e.message);
     }
