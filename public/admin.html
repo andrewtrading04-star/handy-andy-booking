@@ -8759,14 +8759,20 @@ function paintCalls(){
   // always contacted (the secretary is/was on the phone by definition), so
   // this naturally excludes them without a separate kind check.
   const missedRows=periodRows.filter(r=> !r.contacted);
+  // Same recorded_message boolean the card's own box uses (recording_url on
+  // the row), so the tab and the badge can never disagree about a call.
+  const recordedRows=periodRows.filter(r=> r.recorded_message);
   const VIEWS=[
+    { id:'recorded', label:`🎙️ Has a recording (${recordedRows.length})` },
     { id:'all',      label:`All (${periodRows.length})` },
     { id:'missed',   label:`📵 Missed (${missedRows.length})` },
     { id:'callback', label:`Needs callback (${open.length})` },
   ];
-  const shown = _callsView==='missed' ? missedRows : _callsView==='callback' ? open : periodRows;
+  const shown = _callsView==='missed' ? missedRows : _callsView==='callback' ? open
+    : _callsView==='recorded' ? recordedRows : periodRows;
   const emptyMsg = _callsView==='callback' ? '🎉 Every call has been handled.'
-    : _callsView==='missed' ? 'No missed calls in this period.' : 'No calls in this period.';
+    : _callsView==='missed' ? 'No missed calls in this period.'
+    : _callsView==='recorded' ? 'No recorded calls in this period.' : 'No calls in this period.';
   const viewSeg=VIEWS.map(v=>
     `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" data-callview="${v.id}">${v.label}</button>`).join('');
   const periodSeg=['today','yesterday','7d'].map(p=>
