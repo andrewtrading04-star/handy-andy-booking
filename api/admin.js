@@ -7117,17 +7117,40 @@ async function calls(req, res, db, auth) {
   // out) — only the banner and badge, which exist to interrupt someone about a
   // WAITING CUSTOMER, exclude it.
   const openVoicemails = open.filter(r => r.kind !== 'live');
+  // Whether THIS viewer should be interrupted (banner/red badge) about a call.
+  // The list itself stays visible to everyone — the two companies working one
+  // screen is the point — but the banner exists to make someone drop what
+  // they're doing, and it was firing on BOTH secretaries for every missed
+  // call. Heather started getting "you missed a call" nags for tracking lines
+  // that ring Joey's phone and were never hers to answer.
+  //   - Tracking-number calls interrupt only the person whose handset the call
+  //     was actually routed to (forwarded_to matched to staff_users.phone). A
+  //     line pointing at a phone no staff row owns interrupts nobody — nobody
+  //     was supposed to answer it, so nobody should be yanked to it.
+  //   - Grasshopper voicemails interrupt whoever covers that business (the
+  //     same allowed-brands list that gates access), unchanged behaviour for
+  //     Heather's own Handy Andy lines and Joey's Dom's line.
+  //   - The owner is never filtered: 'all' scope sees every interruption.
+  const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
+  const interruptsMe = (r) => {
+    if (viewerSlugs === null) return true;
+    if (r.source === 'twilio') {
+      const routedName = staffByPhone.get(String(r.forwarded_to || '').replace(/\D/g, '').slice(-10)) || null;
+      return routedName != null && routedName === me;
+    }
+    return !!(r.business?.slug && viewerSlugs.includes(r.business.slug));
+  };
+  const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r));
   return res.status(200).json({
     open,
     handled: mapped.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
     // The sidebar badge and the banner both count only what is genuinely
-    // waiting on a human: not the ones someone is already ringing, not the
-    // ones that already turned into a booking, and not an abandoned live-call
-    // session with no customer to call back.
-    open_count: openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r)).length,
+    // waiting on THIS person: not the ones someone is already ringing, not the
+    // ones that already turned into a booking, not an abandoned live-call
+    // session with no customer to call back, and not another secretary's lines.
+    open_count: interrupting.length,
     // The newest thing worth interrupting someone about, for the banner.
-    banner: openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r))
-      .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
+    banner: interrupting.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))[0] || null,
     me,
   });
 }
