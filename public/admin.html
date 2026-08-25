@@ -329,12 +329,16 @@
   .rc-script-b{font-size:14px;color:#7c2d12;line-height:1.55;}
   .rc-count{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:10px;}
   .rc-card{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;flex-wrap:wrap;}
-  /* Subtle source tint — Grasshopper voicemails read faintly green, Twilio
-     tracking-number calls read faintly blue. Deliberately close to white:
-     this is a "which system logged this" hint at a glance, not a status color
-     (badges/borders already carry the real signal — answered/missed/claimed). */
-  .rc-card.src-grasshopper{background:#f6faf7;border-color:#e1ede3;}
-  .rc-card.src-twilio{background:#f6f8fc;border-color:#e0e6f3;}
+  /* Source tint — which phone system logged this call. Grasshopper (the office
+     line, incl. calls the secretary logs live) reads green; a Twilio tracking
+     number reads blue. The 3px inset left bar is what actually carries the
+     signal at a glance; the background wash is deliberately mild so it stays a
+     "where did this come from" cue rather than competing with the badges, which
+     carry the real status (answered / missed / who is calling it now).
+     Using an inset box-shadow rather than border-left keeps every card's text
+     on the same left edge — a real border would shift these rows 3px. */
+  .rc-card.src-grasshopper{background:#f1f8f3;border-color:#cfe6d8;box-shadow:inset 3px 0 0 #34a853;}
+  .rc-card.src-twilio{background:#eff4fc;border-color:#d3e0f2;box-shadow:inset 3px 0 0 #1a73e8;}
   .rc-main{flex:1;min-width:220px;}
   .rc-name{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .rc-biz{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:2px 8px;border-radius:999px;}
@@ -8694,12 +8698,21 @@ function callCard(r,handled){
   // all before now.
   const bizLine = [r.business?.name, r.grasshopper_number ? 'dialed '+fmtPhone(r.grasshopper_number) : null]
     .filter(Boolean).map(esc).join(' · ');
+  // A row with no caller number can never be returned, and the card used to
+  // just render a blank where the number goes — indistinguishable from a bug.
+  // In practice this is only ever a live-call row: the wizard creates it the
+  // instant "Take a Call" opens and the number is filled in later (or not at
+  // all), whereas a Grasshopper voicemail is rejected at ingest without a
+  // 10-digit caller. Say it plainly so the gap reads as "nobody typed it",
+  // which is something the office can actually fix.
+  const noNumber = !r.caller_phone && !r.customer
+    ? '<div class="rc-meta">No caller number recorded</div>' : '';
 
   return `<div class="rc-card ${srcClass}" style="align-items:flex-start;">
     <div class="rc-main">
       <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
       <div class="rc-meta">${esc(callWhen(r))}${r.extension?' · Ext '+esc(r.extension):''}</div>
-      ${bizLine?`<div class="rc-meta">${bizLine}</div>`:''}
+      ${bizLine?`<div class="rc-meta">${bizLine}</div>`:''}${noNumber}
       <div class="rc-badges">${badges.join('')}</div>
       ${tx}${audio}${job}${handledLine}
     </div>
