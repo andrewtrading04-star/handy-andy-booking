@@ -48,6 +48,7 @@
 import { serviceClient } from './supabase.js';
 import { sendSMSResult, toE164 } from './sms.js';
 import { signToken } from './auth.js';
+import { SECRETARY_EXTRA_BUSINESSES } from './staff-access.js';
 
 const MIN = 60 * 1000;
 
@@ -65,37 +66,28 @@ const REASSIGN_GRACE_MS = 30 * MIN;   // a freshly (re)assigned tech can't be ES
 // on_the_way_at, not just this list).
 const NOT_EN_ROUTE_STATUSES = ['pending', 'confirmed', 'assigned'];
 
-// business slug -> office escalation phone env var. Mile High jobs are always
-// worked by a cross-hired Handy Andy tech (it has no techs of its own), so a
-// late Mile High job escalates to Heather exactly like a Handy Andy one.
+// business slug -> office escalation phone env var. Built from the SAME map
+// that grants dashboard/call access (api/_lib/staff-access.js) rather than
+// hand-duplicated here, after that duplication already drifted once: the
+// eight brands Joey took over on 2026-08-25 were absent from this file
+// entirely for a while, so a late job on one escalated to NOBODY — the loop
+// logged "no office number configured for business" and moved on, the
+// quietest possible way to leave a customer waiting on a tech who never
+// showed. These brands (lead-gen, Austin/Houston, no techs of their own —
+// the work is done by cross-hired Handy Andy techs) have no dispatcher but
+// the CUSTOMER is still whoever answers that brand's phone to account for.
 const STAFF_PHONE_ENV = {
   'handy-andy': 'HEATHER_PHONE_NUMBER',
-  'mile-high': 'HEATHER_PHONE_NUMBER',
-  'austin': 'HEATHER_PHONE_NUMBER',   // Heather covers the Austin brand too
-  'precision': 'HEATHER_PHONE_NUMBER',// and the Houston Precision brand
   'doms': 'JOEY_PHONE_NUMBER',
-  // Joey took the eight Austin/Houston lead-gen lines (2026-08-25). They were
-  // absent here entirely, so a late job on one escalated to NOBODY: the loop
-  // records "no office number configured for business" and moves on, which is
-  // the quietest way for a customer to sit waiting on a tech who never came.
-  // These brands have no techs of their own — the work is done by cross-hired
-  // Handy Andy techs (Zach in Austin, Juan in Houston) — but the CUSTOMER is
-  // Joey's to answer for, so the escalation is hers.
-  'atxmountpros': 'JOEY_PHONE_NUMBER',
-  'atxtvmount': 'JOEY_PHONE_NUMBER',
-  'austinmountingpros': 'JOEY_PHONE_NUMBER',
-  'austintvinstall': 'JOEY_PHONE_NUMBER',
-  'houstonmounting': 'JOEY_PHONE_NUMBER',
-  'houstontvinstallation': 'JOEY_PHONE_NUMBER',
-  'htvmounting': 'JOEY_PHONE_NUMBER',
-  'tvhanginghouston': 'JOEY_PHONE_NUMBER',
+  ...Object.fromEntries((SECRETARY_EXTRA_BUSINESSES['handy-andy'] || []).map(slug => [slug, 'HEATHER_PHONE_NUMBER'])),
+  ...Object.fromEntries((SECRETARY_EXTRA_BUSINESSES.doms || []).map(slug => [slug, 'JOEY_PHONE_NUMBER'])),
 };
 
 // Fallbacks for the vars above, so an UNSET one cannot silently turn a late-job
-// escalation into nothing. Joey's is owner-confirmed (2026-08-25) and matches
-// both staff_users.phone and her tracking-number routing. Heather's has no
-// confirmed value here, so hers stays env-only rather than being guessed at.
-const STAFF_PHONE_FALLBACK = { JOEY_PHONE_NUMBER: '3032190118' };
+// escalation into nothing. Both owner-confirmed (Joey 2026-08-25, Heather
+// 2026-08-26) and matching both staff_users.phone and each person's
+// tracking-number routing.
+const STAFF_PHONE_FALLBACK = { JOEY_PHONE_NUMBER: '3032190118', HEATHER_PHONE_NUMBER: '7203711561' };
 
 function firstName(name) {
   return (name || '').trim().split(/\s+/)[0] || 'Tech';

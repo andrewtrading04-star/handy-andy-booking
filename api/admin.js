@@ -33,6 +33,7 @@ import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-res
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
 import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines } from './_lib/broker-spec.js';
 import { parseGrasshopperEmail, digitsOf, prettyPhone } from './_lib/grasshopper.js';
+import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
 // Search Console domain per business — the free "what did people search to
@@ -487,76 +488,30 @@ function displayNameFor(scope) {
 // Andy, Joey/Dom's) — office alerts (e.g. a failed estimate-approval booking)
 // go to WHICHEVER company the job belongs to, never a single shared owner
 // number, since the two businesses are staffed by different people.
-// Joey's mobile, confirmed by the owner 2026-08-25. It is also on
-// staff_users.phone (which is what puts her NAME on a call card instead of ten
-// digits) and on the eight lead-gen tracking rows (which is what actually
-// rings her). Written here too so a missing DOMS_SECRETARY_PHONE cannot
-// silently stop her voicemail alerts — an unset env var used to mean "text
-// nobody", which is the quietest possible failure for a waiting customer.
+// Confirmed mobiles (owner, 2026-08-25/26). Also on staff_users.phone (what
+// puts a NAME on a call card instead of ten digits) and on each person's
+// tracking rows (what actually rings them). Written here too so a missing
+// *_SECRETARY_PHONE env var can't silently stop an alert — an unset var used
+// to mean "text nobody", the quietest possible failure for a waiting customer.
 const JOEY_MOBILE = '3032190118';
+const HEATHER_MOBILE = '7203711561';
 
 function secretaryPhoneFor(scope) {
-  // Joey answers Dom's AND the eight Austin/Houston lead-gen lines, so a
-  // voicemail on one of those has to reach her. Before this, the Austin four
-  // texted Heather and the Houston four matched nothing at all and texted
-  // NOBODY — both predate Joey taking those lines, and the Houston gap meant
-  // a lead-gen voicemail could sit unheard with no alert to anyone.
-  // Driven off the same list that grants her the access, so the two can't
-  // drift: add a brand there and its alerts follow automatically.
+  // Driven off the SAME map that grants access (api/_lib/staff-access.js), so
+  // "who answers this brand's phone" and "who can see this brand's calls" can
+  // never drift apart the way they did before this shared: the Austin four
+  // once texted Heather after Joey had already taken those lines, and the
+  // Houston four matched nothing at all and texted NOBODY.
   if (scope === 'doms' || (SECRETARY_EXTRA_BUSINESSES.doms || []).includes(scope)) {
-    // The env var still wins when set, so her number can be changed without a
-    // deploy — but it is no longer the only thing standing between a voicemail
-    // and an alert.
+    // The env var still wins when set, so a number can change without a deploy
+    // — but it is no longer the only thing standing between a voicemail and
+    // an alert.
     return process.env.DOMS_SECRETARY_PHONE || JOEY_MOBILE;
   }
-  // Heather covers Handy Andy and its remaining micro-brands.
-  if (['handy-andy', 'mile-high', 'austin', 'precision', 'tvmountingdenver'].includes(scope)) {
-    return process.env.HANDY_ANDY_SECRETARY_PHONE || '';
+  if (scope === 'handy-andy' || (SECRETARY_EXTRA_BUSINESSES['handy-andy'] || []).includes(scope)) {
+    return process.env.HANDY_ANDY_SECRETARY_PHONE || HEATHER_MOBILE || '';
   }
   return '';
-}
-
-// ── Extra businesses a secretary may act on, beyond their own ───────────────
-// A secretary's token carries ONE primary `scope` — their own company — and
-// every company-specific tool keys off it: Review Calls, Call Performance, My
-// Availability, the payroll view, the greeting name, the "which company am I"
-// checks. That stays exactly as it was. What this adds is a SECOND, wider
-// list: other brands the same person also answers the phone for.
-//
-// Joey now takes the calls for the eight Austin/Houston lead-gen brands, so
-// her Dom's login also unlocks those for taking a call, quoting and booking.
-// Handy Andy is deliberately NOT in this list: that is Heather's company, and
-// nothing about answering a lead-gen line requires reaching it.
-//
-// Data rather than code would be nicer, but a secretary's identity IS an env
-// password today (staff_users has no login path yet), so there is no row to
-// hang this off. Move it into the database if/when logins do.
-const SECRETARY_EXTRA_BUSINESSES = {
-  doms: [
-    'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall',
-    'houstonmounting', 'houstontvinstallation', 'htvmounting', 'tvhanginghouston',
-  ],
-};
-
-// Every business slug a token may act on: its primary scope plus any extras.
-// Owner ('all') is unrestricted, and returns null meaning "apply no filter".
-//
-// The extras are derived from the LIVE map above, not only from the token:
-// admin tokens are long-lived, and Joey's session predated the map — reading
-// the token alone meant her already-open dashboard kept exactly its old access
-// until she logged out and back in, which read as "none of the changes are
-// showing". The token's own `allowed` list is still honoured (union), so a
-// View As session behaves identically either way.
-function allowedSlugsFor(auth) {
-  if (!auth || auth.scope === 'all') return null;
-  const fromScope = SECRETARY_EXTRA_BUSINESSES[auth.scope] || [];
-  const fromToken = Array.isArray(auth.allowed) ? auth.allowed : [];
-  return [auth.scope, ...new Set([...fromScope, ...fromToken])].filter(Boolean);
-}
-// The gate every business-scoped action goes through.
-function mayUseBusiness(auth, slug) {
-  const allowed = allowedSlugsFor(auth);
-  return allowed === null || allowed.includes(slug);
 }
 
 async function login(req, res, body) {
