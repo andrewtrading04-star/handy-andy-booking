@@ -8750,10 +8750,22 @@ function paintCalls(){
   // One flat list, newest first. Rows are tagged with the bucket they came
   // back in so open calls keep their real action buttons (Done/Called back/
   // Ignore) while handled ones show Reopen — same data, one timeline.
+  // Incoming Calls means calls that came in on a tracking number — owner call
+  // (2026-08-26), the same call that retired Grasshopper. Take a Call wizard
+  // rows (kind 'live') are a secretary opening the phone script, not a line
+  // ringing, and they carry none of what this screen is built to show: no
+  // routed-to handset, no voicemail, no recording, and "contacted" true by
+  // definition. Mixed in, they rendered as bare cards with every box blank and
+  // made the streamlined layout look broken.
+  // They are NOT dropped from the app: kind 'live' still drives Call
+  // Performance (api/admin.js, the .eq('kind','live') queries) and still
+  // appears in the Needs callback queue below, which is where an abandoned
+  // intake gets closed out. Only these three period views are tracking-only.
   const periodRows=[
     ...(_callsPeriodData.open||[]).map(r=>({ ...r, _handled:false })),
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
-  ].sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
+  ].filter(r=> r.source==='twilio')
+   .sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
   // Missed = not Contacted: same definition as the box on the card, so the
   // tab and the badge can never disagree about the same call. Live rows are
   // always contacted (the secretary is/was on the phone by definition), so
@@ -8781,7 +8793,7 @@ function paintCalls(){
     <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
       <h2 class="rc-title">📨 Incoming Calls</h2>
-      <div class="rc-sub">Voicemails and tracking-number calls from the office phone. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
+      <div class="rc-sub">Every call that came in on a tracking number. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
     </div></div>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
       <div class="rc-seg">${viewSeg}</div>
