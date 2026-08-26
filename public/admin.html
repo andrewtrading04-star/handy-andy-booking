@@ -86,6 +86,9 @@
     padding:7px 10px;font-size:12.5px;font-weight:600;background:transparent;color:var(--ink);}
   .lg-menu button:hover{background:var(--line2);}
   .lg-menu button.on{background:var(--accent-soft);color:var(--accent);}
+  .lg-group-label{display:block;padding:6px 10px 2px;font-size:10px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);}
+  .lg-group-label:first-child{padding-top:2px;}
 
   .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
   .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
@@ -2333,6 +2336,15 @@ async function openAlertJob(slug, id){
 // name-based, so renaming a business in the DB cannot silently regroup it.
 const OWN_CHIP_SLUGS = ['handy-andy', 'doms'];
 
+// Lead-gen microsites grouped by the metro they actually serve, so the
+// dropdown reads as three short lists instead of one flat alphabetical
+// dump. Slug-based for the same reason as OWN_CHIP_SLUGS above.
+const LEAD_GEN_CITY_GROUPS = [
+  { label: 'Austin',  slugs: ['austin', 'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall'] },
+  { label: 'Houston', slugs: ['houstonmounting', 'houstontvinstallation', 'tvhanginghouston', 'htvmounting', 'precision'] },
+  { label: 'Denver',  slugs: ['tvmountingdenver', 'mile-high'] },
+];
+
 function switchToBusiness(slug){
   const next = businesses.find(b => b.slug === slug);
   if(!next) return;
@@ -2341,6 +2353,22 @@ function switchToBusiness(slug){
   // See the matching comment in openAlertJob — navTo(section) already covers
   // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
   availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
+}
+
+function renderLeadGenMenu(leadGen, isOn){
+  const btn = b => `<button data-slug="${b.slug}" class="${isOn(b)?'on':''}">${esc(b.name)}</button>`;
+  const grouped = new Set();
+  let html = LEAD_GEN_CITY_GROUPS.map(g => {
+    const bizzes = g.slugs.map(sl => leadGen.find(b => b.slug === sl)).filter(Boolean);
+    bizzes.forEach(b => grouped.add(b.slug));
+    if(!bizzes.length) return '';
+    return `<span class="lg-group-label">${esc(g.label)}</span>${bizzes.map(btn).join('')}`;
+  }).join('');
+  // Any lead-gen business not covered by a city group (e.g. a brand new
+  // microsite not yet added above) still shows up, ungrouped, at the end.
+  const rest = leadGen.filter(b => !grouped.has(b.slug));
+  if(rest.length) html += rest.map(btn).join('');
+  return html;
 }
 
 function renderSwitcher(){
@@ -2361,8 +2389,7 @@ function renderSwitcher(){
       <button type="button" id="lgToggle" class="${sel?'on':''}">
         ${esc(sel ? sel.name : 'Lead Gen')}<span class="cx">▾</span>
       </button>
-      <span class="lg-menu" id="lgMenu">${leadGen.map(b =>
-        `<button data-slug="${b.slug}" class="${isOn(b)?'on':''}">${esc(b.name)}</button>`).join('')}</span>
+      <span class="lg-menu" id="lgMenu">${renderLeadGenMenu(leadGen, isOn)}</span>
     </span>`;
   }
   el.innerHTML = html;
