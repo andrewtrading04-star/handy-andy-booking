@@ -8710,18 +8710,19 @@ function callCard(r,handled){
         : `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`)
     : '';
 
-  // Header line, streamlined per spec: Time (most recent first — the list is
-  // already sorted that way) · Business name · Routed to. Prefers the PERSON
-  // who answers a line ("routed to Joey") over ten digits nobody memorises;
-  // falls back to the formatted number for any handset with no matching
-  // staff_users row. forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone
-  // only prettifies bare 10-digit numbers, so the +1 is dropped first or it
-  // renders as raw digits.
+  // Second line of the row: Business · line label · routed to (owner spec —
+  // the time moved to the right edge where every call system puts it, but the
+  // CONTENT of the old header line is all still here). Prefers the PERSON who
+  // answers a line ("routed to Joey") over ten digits nobody memorises; falls
+  // back to the formatted number for any handset with no matching staff_users
+  // row. forwarded_to is stored E.164 (+1XXXXXXXXXX); fmtPhone only prettifies
+  // bare 10-digit numbers, so the +1 is dropped first or it renders raw.
   const routedTo = r.routed_to_name
     || (r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null);
-  const headLine = [
-    callWhen(r),
+  const lineLabel = shortTrackingLabel(r.tracking_label);
+  const subLine = [
     r.business?.name,
+    lineLabel && lineLabel !== r.business?.name ? lineLabel + ' line' : null,
     routedTo ? 'routed to ' + routedTo : (isTracked ? 'not routed' : null),
   ].filter(Boolean).map(esc).join(' · ');
   // A row with no caller number can never be returned. In practice this is
@@ -8732,16 +8733,54 @@ function callCard(r,handled){
   const noNumber = !r.caller_phone && !r.customer
     ? '<div class="rc-meta">No caller number recorded</div>' : '';
 
+  // The at-a-glance disposition icon, leftmost like every professional call
+  // log: what happened to this call before you read a word. Derived from the
+  // same server-computed booleans as the 4 boxes so icon and boxes can never
+  // tell different stories about one call.
+  const disp = isLive ? { g:'📞', bg:'#eef2f7', bd:'var(--line)' }
+    : r.answered===true ? { g:'✓', bg:'#dcfce7', bd:'#86efac', c:'#15803d' }
+    : r.left_voicemail  ? { g:'📨', bg:'#fef3c7', bd:'#fcd34d' }
+    : { g:'✕', bg:'#fee2e2', bd:'#fca5a5', c:'#b91c1c' };
+  const dispIcon = `<div style="flex:none;width:38px;height:38px;border-radius:50%;background:${disp.bg};border:1px solid ${disp.bd};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;${disp.c?'color:'+disp.c+';':''}">${disp.g}</div>`;
+  const durChip = r.duration_sec
+    ? `<span style="font-size:12px;font-weight:700;color:var(--mute);background:var(--line2);border-radius:6px;padding:2px 7px;">${esc(callDuration(r.duration_sec))}</span>` : '';
+
   return `<div class="rc-card" data-call="${esc(r.id)}" style="align-items:flex-start;">
+    ${dispIcon}
     <div class="rc-main">
-      <div class="rc-meta" style="font-weight:700;color:var(--ink);font-size:13px;">${headLine}</div>
-      <div class="rc-name" style="margin-top:2px;">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}</div>
+      <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}${durChip}</div>
+      ${subLine?`<div class="rc-meta" style="margin-top:2px;">${subLine}</div>`:''}
       ${noNumber}
       ${statusBoxes}${extra}${claimLine}
       ${tx}${audio}${job}${handledLine}
     </div>
-    <div class="rc-actions">${actions}</div>
+    <div class="rc-actions">
+      <div class="rc-meta" style="text-align:right;font-weight:700;margin-top:0;">${esc(callWhen(r))}</div>
+      ${actions}
+    </div>
   </div>`;
+}
+// Day separators for the call log — "Tue, Aug 25" bars between days so the
+// Last 7 days view reads as a timeline instead of one undifferentiated pile.
+// Keys off the same market timezone as callWhen so a row never lands under a
+// different day than the timestamp printed on it. Single-day views (Today/
+// Yesterday) skip the bars: one header repeating the tab name is noise.
+function callDayBar(label){
+  return `<div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line);">${esc(label)}</div>`;
+}
+function renderCallRows(rows,withDays){
+  if(!withDays) return rows.map(r=>callCard(r, r._handled)).join('');
+  let out='',lastKey=null;
+  for(const r of rows){
+    let key;
+    try{
+      key=new Date(r.occurred_at).toLocaleDateString('en-US',
+        { timeZone:CALL_TZ[r.market]||'America/Denver', weekday:'short', month:'short', day:'numeric' });
+    }catch(_){ key=new Date(r.occurred_at).toDateString(); }
+    if(key!==lastKey){ out+=callDayBar(key); lastKey=key; }
+    out+=callCard(r, r._handled);
+  }
+  return out;
 }
 const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'};
 function paintCalls(){
@@ -8799,7 +8838,7 @@ function paintCalls(){
       <div class="rc-seg">${viewSeg}</div>
       ${_callsView==='callback'?'':`<div class="rc-seg">${periodSeg}</div>`}
     </div>
-    ${shown.length ? shown.map(r=>callCard(r, r._handled)).join('') : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
+    ${shown.length ? renderCallRows(shown, _callsView!=='callback' && _callsPeriod==='7d') : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
   </div>`;
 
   // Tab switch is a repaint of data already in hand — no refetch, no flash.
