@@ -3612,18 +3612,49 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
 
-  // Add tax as a line item
-  if (Number(body.tax) > 0) {
+  // Add tax as a line item. This used to trust body.tax verbatim — the New
+  // Booking form computes it client-side, and a client bug (or an estimate
+  // converted into a booking, whose carried lines never asked this form to
+  // recompute anything) could create a real, paid job with $0 tax and nobody
+  // would know until the receipt looked short (Heather's report, Aug 2026 —
+  // the Gukole Abioye job shipped the same way). Recompute independently, the
+  // same "never trust the client's total" rule book.js already applies to
+  // widget bookings, and use it whenever the client sent nothing on a real
+  // taxable subtotal. A selections set that ALREADY carries its own tax line
+  // (a converted estimate that had one) is left alone rather than taxed
+  // twice, and a genuinely tax-exempt job (Assurion/GDS/No Charge) always
+  // reaches here with a $0 subtotal in the first place — see recalcTaxLine's
+  // comment above — so this can never invent tax on one of those.
+  // NOT isTaxLine (that helper reads .name — booking_line_items rows;
+  // selections here are the client's { label, price, quantity } shape).
+  const isTaxSelection = (s) => /^\s*tax\b/i.test(String((s && s.label) || ''));
+  const hasOwnTaxLine = selections.some(isTaxSelection);
+  const taxableSubtotal = selections.filter(s => !isTaxSelection(s))
+    .reduce((sum, s) => sum + (Number(s.price) || 0) * (Number(s.quantity) || 1), 0);
+  let tax = Number(body.tax) || 0;
+  if (!hasOwnTaxLine && taxableSubtotal > 0 && tax <= 0) {
+    tax = Math.round(taxableSubtotal * BOOKING_TAX_RATE * 100) / 100;
+    console.warn('[admin] booking_create: client sent no tax on a taxable job (subtotal', taxableSubtotal, ') — added', tax, 'server-side');
+  }
+  if (tax > 0) {
     const { error: taxErr } = await db.from('booking_line_items').insert({
       booking_id: bRow.id, business_id: biz.id,
       kind: 'fee', name: 'Tax (8.25%)',
-      quantity: 1, unit_price: Number(body.tax), line_total: Number(body.tax),
+      quantity: 1, unit_price: tax, line_total: tax,
       service_id: null, option_id: null, taxable: false,
     });
     if (taxErr) {
       console.error('[admin] tax line-item insert failed (booking exists):', taxErr.message);
       postInsertWarning = postInsertWarning || 'Booking was created, but the tax line could not be saved — open the job and re-add it.';
     }
+  }
+  // The booking row's own `price` was already inserted from body.price above,
+  // BEFORE tax was corrected here — if the client's number was short, patch it
+  // now so the stored total actually matches its own line items (and what a
+  // card on file would be charged), not just the receipt breakdown.
+  if (tax > 0 && tax !== (Number(body.tax) || 0)) {
+    const correctedPrice = taxableSubtotal + tax;
+    await db.from('bookings').update({ price: correctedPrice }).eq('id', bRow.id);
   }
 
   await db.from('booking_status_events').insert({
