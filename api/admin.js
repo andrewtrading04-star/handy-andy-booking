@@ -3624,12 +3624,19 @@ async function bookingCreate(req, res, db, auth, body) {
   // (a converted estimate that had one) is left alone rather than taxed
   // twice, and a genuinely tax-exempt job (Assurion/GDS/No Charge) always
   // reaches here with a $0 subtotal in the first place — see recalcTaxLine's
-  // comment above — so this can never invent tax on one of those.
+  // comment above — so this can never invent tax on one of those. EXCEPT
+  // Assurion: those selections are NOT $0 -- nbCollectSelections prices each
+  // one at Steve's payout ("Assurion: <service>", e.g. admin.html ~15718) even
+  // though the customer pays nothing and the client forces subtotal/tax/price
+  // to 0. Without excluding them, this would "correct" every Assurion booking
+  // into a bogus nonzero tax + price. GDS/No Charge really do collect as a
+  // single $0 line, so they need no such exclusion.
   // NOT isTaxLine (that helper reads .name — booking_line_items rows;
   // selections here are the client's { label, price, quantity } shape).
   const isTaxSelection = (s) => /^\s*tax\b/i.test(String((s && s.label) || ''));
+  const isAssurionSelection = (s) => /^\s*assurion\s*:/i.test(String((s && s.label) || ''));
   const hasOwnTaxLine = selections.some(isTaxSelection);
-  const taxableSubtotal = selections.filter(s => !isTaxSelection(s))
+  const taxableSubtotal = selections.filter(s => !isTaxSelection(s) && !isAssurionSelection(s))
     .reduce((sum, s) => sum + (Number(s.price) || 0) * (Number(s.quantity) || 1), 0);
   let tax = Number(body.tax) || 0;
   if (!hasOwnTaxLine && taxableSubtotal > 0 && tax <= 0) {

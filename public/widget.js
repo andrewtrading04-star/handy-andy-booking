@@ -699,8 +699,17 @@
     if(k==='lifting'){
       const cat=getMaxSizeCat();
       if(cat==='small')return true;
-      // Skip lifting entirely for 98"+ TVs outside Denver (no 2-tech requirement there)
-      if(cat==='xlarge'&&territoryId!==DENVER_ID)return true;
+      // Skip lifting entirely for 98"+ TVs outside Denver (no 2-tech requirement
+      // there). Was comparing territoryId (the legacy Zenbooker Denver id)
+      // directly -- on every NATIVE booking (all of them, now) territoryId is a
+      // CRM service-area id and can never equal that legacy string, so this was
+      // unconditionally true and skipped the lifting question -- and therefore
+      // the $70 fee and the second-tech flag -- for EVERY 98"+ TV everywhere,
+      // Denver included. isDenver() already exists for exactly this check (see
+      // goNext()'s matching auto-select below) and correctly reads the native
+      // path's areaName instead. This is the actual reason a 98"+ TV (Steve
+      // Houston's job, Aug 2026) never even got the fee, let alone a 2nd tech.
+      if(cat==='xlarge'&&!isDenver())return true;
     }
     return false;
   }

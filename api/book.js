@@ -581,9 +581,9 @@ async function idempotentPrior(db, bizId, idempotencyKey) {
 // that tech, so a different tech can still come back), updates the row, and if
 // nobody is left it alerts the office immediately so a human assigns or calls
 // the customer while they are still at their screen.
-async function recoverUnassignedBooking(db, { slug, bizId, bookingId, dateStr, slotKey, serviceAreaId = null, timezone = null, businessName, customerName, whenStr }) {
+async function recoverUnassignedBooking(db, { slug, bizId, bookingId, dateStr, slotKey, serviceAreaId = null, timezone = null, businessName, customerName, whenStr, excludeTechId = null }) {
   let rescueId = null;
-  try { rescueId = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone, crossHire: true }); }
+  try { rescueId = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone, crossHire: true, excludeTechId }); }
   catch (e) { console.warn('[book] rescue pick failed:', e.message); }
   if (rescueId) {
     try {
@@ -902,6 +902,9 @@ async function bookDoms(req, res) {
       slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, timezone: tz,
       businessName: "Dom's TV Mounting",
       customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+      // Never rescue-pick the tech already committed as the secondary — a
+      // large-TV job must not end up with the same person on both legs.
+      excludeTechId: secondary_technician_id,
       whenStr: fmtWhen(startUTC, tz, dateStr),
     });
   }
@@ -1311,6 +1314,8 @@ async function bookNative(req, res, slug) {
       slug, bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId, timezone: tz,
       businessName: DISPLAY.name,
       customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+      // Never rescue-pick the tech already committed as the secondary.
+      excludeTechId: secondary_technician_id,
       whenStr: fmtWhen(startUTC, tz, dateStr),
     });
   }
