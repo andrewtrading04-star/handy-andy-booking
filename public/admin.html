@@ -1024,6 +1024,17 @@
     .mobilebar{display:flex;}
     .week{min-width:880px;}
     .view-scroll{overflow:auto;}
+    /* .cal-nav (prev/range/next/Today + the search box) is a non-wrapping flex
+       row; with the search box in it, its own min-content width (~580px) blows
+       right past a phone's viewport. .cal-head's flex-wrap only lets .cal-nav
+       and .view-toggle break onto separate lines -- it can't shrink .cal-nav's
+       own children -- so without this the whole page (not just this row) got a
+       horizontal scrollbar, since nothing here clips overflow the way
+       .greeting/.view-scroll do. Letting .cal-nav wrap drops the search box to
+       its own line instead. */
+    .cal-nav{flex-wrap:wrap;row-gap:8px;}
+    #jobSearchWrap input[type=text]{width:150px;}
+    #jobSearchWrap input[type=text]:focus{width:180px;}
   }
 
   /* Mobile: New Booking calendar responsiveness */
