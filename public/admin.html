@@ -207,6 +207,7 @@
   .evt.overdue{border:1.5px solid var(--red);border-left:3px solid var(--red);background:#fef2f2;animation:evtPulse 1.8s ease-in-out infinite;}
   @keyframes evtPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0);}50%{box-shadow:0 0 0 4px rgba(239,68,68,.22);}}
   @media (prefers-reduced-motion:reduce){ .evt.overdue{animation:none;box-shadow:0 0 0 3px rgba(239,68,68,.18);} }
+  .evt-liftwarn{font-size:10.5px;font-weight:800;color:#b45309;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:2px 7px;display:inline-block;margin:4px 0 2px;}
   .xco-secondary-tag{display:inline-block;font-size:10px;font-weight:800;background:#ffb366;color:#7a4620;padding:2px 6px;border-radius:4px;margin-left:4px;}
   body.doms .xco-secondary-tag{background:#4d8dff;color:#fff;}
   .job.xco-secondary .xco-secondary-tag{background:#ffb366;color:#7a4620;}
@@ -2649,8 +2650,16 @@ function evtCard(b){
     <span class="evt-light-pay evt-light-${L.pay}" title="${esc(EVT_LIGHT_TITLE.pay[L.pay])}${overdue?` — ${odDays}d overdue`:''}">${dollarSignSvg()}</span>
     <span class="evt-light-done evt-light-${L.done}" title="${esc(EVT_LIGHT_TITLE.done[L.done])}"></span>
   </span>`;
+  // A large-TV job (needs_lifting) with no second tech assigned is exactly the
+  // gap that let a 100" TV job go out solo (Steve Houston, Aug 2026): the
+  // widget auto-assigns one tech and, until now, nothing surfaced that the
+  // fee-billed lift never got a second person. Shown on the card itself, not
+  // just the detail panel, so dispatch can't miss it while just scanning the
+  // week.
+  const missingSecondTech = !!b.needs_lifting && !b.secondary_technician_id && b.status!=='cancelled' && b.status!=='no_show';
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}${lightsHtml}</div>
+    ${missingSecondTech?`<div class="evt-liftwarn" title="Large TV — billed for a second technician, but none is assigned yet.">⚠ Needs 2nd tech</div>`:''}
     <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
     <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?(b.econ.net_tech_pay!=null
       ? `<span class="evt-techpay${b.econ.net_tech_pay<0?' neg':''}" title="CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}">${money(b.econ.net_tech_pay)}</span>`

@@ -526,7 +526,7 @@ async function pickFairest(db, eligible, dateStr, tz) {
 // exact date+slot, so a public booking actually OCCUPIES the slot (prevents
 // two customers grabbing the same window). Falls back to any tech free that slot,
 // else null (the office will assign). Returns a CRM technician id.
-export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false }) {
+export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false, excludeTechId = null }) {
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return null;
   let areaTz = null;
@@ -541,7 +541,9 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   const baseQ = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q.order('created_at', { ascending: true }); };
   let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day');
   if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await baseQ('id'));
-  const list = techs || [];
+  // excludeTechId: the second-tech pick (a large-TV job needing two people)
+  // must never hand back the SAME tech already assigned as primary.
+  const list = (techs || []).filter(t => !excludeTechId || t.id !== excludeTechId);
   // A tech at their daily job cap is not eligible for this date. Counts JOBS
   // (bookedSlotsOneTech's jobCount), not slots — see that function's comment.
   // Previously this compared against `booked.size` (a slot-KEY count), which
@@ -583,7 +585,7 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
         .order('created_at', { ascending: true });
       let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day');
       if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
-      const partnerEligible = await eligibleFrom(pTechs || []);
+      const partnerEligible = await eligibleFrom((pTechs || []).filter(t => !excludeTechId || t.id !== excludeTechId));
       const partnerPick = await pickFairest(db, partnerEligible, dateStr, tz);
       if (partnerPick) return partnerPick;
     }

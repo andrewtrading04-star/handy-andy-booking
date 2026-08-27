@@ -695,6 +695,15 @@ async function bookDoms(req, res) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
   }
   const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge, await multiTvDiscountConfigFor(db));
+  // The widget relabels EVERY option in its "lifting" question to exactly
+  // "Second Technician" once it's billed (see buildRequestLineItems in
+  // widget.js) -- covers both "70-85in and cannot lift" and "85in or larger".
+  // That's the only signal this endpoint gets that a job needs two people; a
+  // large-TV job that auto-assigned just one tech (the Steve Houston job,
+  // Aug 2026) is exactly what this flags. tv_size_category is left null: the
+  // widget's original size wording never survives past that relabel, so
+  // there's no honest way to recover which bucket it was.
+  const needsLifting = lines.some(l => /second technician/i.test(l.name || '') && (Number(l.line_total) || 0) > 0);
   // Sales tax (8.25%), same block as bookNative; Dom's never had this. Without
   // it, `subtotal` was tax-EXCLUSIVE while the widget's own total is
   // tax-INCLUSIVE, so the two were never comparable amounts to begin with; the
@@ -760,6 +769,16 @@ async function bookDoms(req, res) {
       return res.status(409).json({ error: 'We could not confirm that time is still open. Please try again in a moment.', conflict: true });
     }
     return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
+  }
+  // A large-TV job needs a second tech on the same slot. Try to auto-assign
+  // one the same way the primary was picked; if nobody's free, the booking
+  // still goes through (a customer must never be turned away for this) but
+  // needs_lifting stays true below so the office sees it's short a person
+  // instead of it silently going out single-tech.
+  let secondary_technician_id = null;
+  if (needsLifting) {
+    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true, excludeTechId: technician_id }); }
+    catch (e) { console.warn('[book-doms] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
   }
   // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
   // confirmation-email block) — best-effort.
@@ -837,6 +856,7 @@ async function bookDoms(req, res) {
       landing_page: b.landing_page || null, traffic_source: b.traffic_source || null,
       service_area_id: area?.id || null,
       technician_id,
+      secondary_technician_id, needs_lifting: needsLifting,
       status: technician_id ? 'assigned' : 'confirmed',
       scheduled_at: startUTC.toISOString(),
       scheduled_end: endUTC ? endUTC.toISOString() : null,
@@ -909,6 +929,15 @@ async function bookDoms(req, res) {
     await notifyTechAssigned(db, { id: biz.id, name: "Dom's TV Mounting", timezone: tz },
       result.technician_id, startUTC.toISOString(), tz, { bookingId })
       .catch(e => console.error('[book-doms] tech notify failed:', e.message));
+  }
+  // The auto-picked second tech (large-TV job) doesn't go through the same
+  // slot-race recovery as the primary above — texting off the locally-picked
+  // id is fine here since mirrorBooking only ever falls back to unassigned on
+  // a PRIMARY tech/slot collision.
+  if (secondary_technician_id && bookingId) {
+    await notifyTechAssigned(db, { id: biz.id, name: "Dom's TV Mounting", timezone: tz },
+      secondary_technician_id, startUTC.toISOString(), tz, { bookingId })
+      .catch(e => console.error('[book-doms] second-tech notify failed:', e.message));
   }
 
   maybeSendBigBracketAlert({
@@ -1124,6 +1153,11 @@ async function bookNative(req, res, slug) {
   // steppedMultiTvPriceDiscount) fetches the same row via the public
   // multi_tv_discount action below.
   const multiTvDiscountAmt = applyMultiTvDiscounts(lines, surcharge, await multiTvDiscountConfigFor(db));
+  // See the matching comment in bookDoms: the widget relabels every option in
+  // its "lifting" question to exactly "Second Technician" once it's billed,
+  // covering both "70-85in and cannot lift" and "85in or larger" — the only
+  // signal this endpoint gets that the job needs two people.
+  const needsLifting = lines.some(l => /second technician/i.test(l.name || '') && (Number(l.line_total) || 0) > 0);
   // Sales tax (8.25%) on the taxable subtotal (services + fees, not coupons or
   // an existing tax line) — added server-side so a stale/tampered widget can't
   // drop it. Placed before the coupon so tax is on the pre-discount amount.
@@ -1161,6 +1195,14 @@ async function bookNative(req, res, slug) {
       return res.status(409).json({ error: 'We could not confirm that time is still open. Please try again in a moment.', conflict: true });
     }
     return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
+  }
+  // A large-TV job needs a second tech on the same slot — try the same
+  // pick, excluding the primary. If nobody's free the booking still goes
+  // through single-tech; needs_lifting below keeps it flagged for the office.
+  let secondary_technician_id = null;
+  if (needsLifting) {
+    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, excludeTechId: technician_id }); }
+    catch (e) { console.warn('[book-ha] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
   }
   let technicianName = null, technicianPhoto = null;
   try {
@@ -1229,6 +1271,7 @@ async function bookNative(req, res, slug) {
       landing_page: b.landing_page || null, traffic_source: b.traffic_source || null,
       service_area_id: serviceAreaId,
       technician_id,
+      secondary_technician_id, needs_lifting: needsLifting,
       status: technician_id ? 'assigned' : 'confirmed',
       scheduled_at: startUTC.toISOString(),
       scheduled_end: endUTC ? endUTC.toISOString() : null,
@@ -1289,6 +1332,13 @@ async function bookNative(req, res, slug) {
     await notifyTechAssigned(db, { id: biz.id, name: DISPLAY.name, timezone: tz },
       result.technician_id, startUTC.toISOString(), tz, { bookingId })
       .catch(e => console.error('[book-ha] tech notify failed:', e.message));
+  }
+  // Same caveat as bookDoms: the auto-picked second tech doesn't go through
+  // the slot-race recovery above, which only ever falls back on the PRIMARY.
+  if (secondary_technician_id && bookingId) {
+    await notifyTechAssigned(db, { id: biz.id, name: DISPLAY.name, timezone: tz },
+      secondary_technician_id, startUTC.toISOString(), tz, { bookingId })
+      .catch(e => console.error('[book-ha] second-tech notify failed:', e.message));
   }
 
   maybeSendBigBracketAlert({

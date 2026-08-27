@@ -135,6 +135,11 @@ export async function mirrorBooking(ctx = {}) {
       // right key. Only set when the caller stamps it (native paths); Zenbooker
       // mirrors leave it NULL = legacy global/slug behavior.
       ...(ctx.stripe_account ? { stripe_account: ctx.stripe_account } : {}),
+      // A second tech, auto-picked by book.js when the widget's "Second
+      // Technician" line item was billed (large TV) — see needs_lifting below.
+      ...(ctx.secondary_technician_id ? { secondary_technician_id: ctx.secondary_technician_id } : {}),
+      ...(ctx.needs_lifting != null ? { needs_lifting: !!ctx.needs_lifting } : {}),
+      ...(ctx.tv_size_category ? { tv_size_category: ctx.tv_size_category } : {}),
       price, tip: Number(ctx.tip) || 0,
       address_line1: a.line1 || null, address_line2: a.line2 || null, city: a.city || null, state: a.state || null, postal_code: a.postal_code || null,
       notes: first(ctx.notes, providerName && `Zenbooker tech: ${providerName}`),
