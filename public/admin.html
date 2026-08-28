@@ -8747,8 +8747,16 @@ function callCard(r,handled){
   const routedTo = r.routed_to_name
     || (r.forwarded_to ? fmtPhone(String(r.forwarded_to).replace(/^\+?1/, '')) : null);
   const lineLabel = shortTrackingLabel(r.tracking_label);
+  // The number the CUSTOMER dialed (grasshopper_number — legacy name, holds
+  // every tracking number regardless of carrier) — distinct from
+  // caller_pretty (the customer's own number) and easy to confuse with it at
+  // a glance, so it gets its own spot rather than living only in the raw API
+  // response. Office asked to see it directly on the card instead of having
+  // to infer it from the business/line label.
+  const dialedNum = isTracked && r.grasshopper_number ? fmtPhone(r.grasshopper_number) : null;
   const subLine = [
     r.business?.name,
+    dialedNum ? 'called ' + dialedNum : null,
     lineLabel && lineLabel !== r.business?.name ? lineLabel + ' line' : null,
     routedTo ? 'routed to ' + routedTo : (isTracked ? 'not routed' : null),
   ].filter(Boolean).map(esc).join(' · ');
@@ -8968,11 +8976,19 @@ function paintCallBanner(call){
     at=new Date(call.occurred_at).toLocaleTimeString('en-US',
       { timeZone:(CALL_TZ[call.market]||'America/Denver'), hour:'numeric', minute:'2-digit' });
   }catch(_){}
+  // Only say "left a voicemail" when there is actually something to play
+  // (same left_voicemail flag the call card's own icon and boxes use — see
+  // api/admin.js calls()). Otherwise this is a call nobody picked up and the
+  // caller hung up with no message: saying "voicemail" sent Heather looking
+  // for an Open/play button that doesn't exist on the card, for a call she
+  // never actually missed hearing ring.
+  const verb = call.left_voicemail ? 'left a voicemail' : 'called and got no answer — no message left';
+  const emoji = call.left_voicemail ? '📨' : '✕';
   const bar=document.createElement('div');
   bar.id='callBanner';
   bar.style.cssText='background:#fff7ed;border-bottom:1px solid #fed7aa;padding:10px 14px;font-size:13.5px;color:#9a3412;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
-  bar.innerHTML=`<span>📨</span>
-    <span><b>${esc(who)}</b> left a voicemail${at?' at '+esc(at):''}. Return their call.</span>
+  bar.innerHTML=`<span>${emoji}</span>
+    <span><b>${esc(who)}</b> ${esc(verb)}${at?' at '+esc(at):''}. Return their call.</span>
     <button id="callBannerGo" style="background:#9a3412;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:800;cursor:pointer;">Open</button>
     <button id="callBannerX" title="Dismiss" aria-label="Dismiss this notification" style="margin-left:auto;background:transparent;border:none;color:#9a3412;font-size:19px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>`;
   // Anchored inside <main>, above the schedule/content area — NOT
