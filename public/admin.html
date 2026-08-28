@@ -247,6 +247,7 @@
   .avb-day{min-height:50px;}
   .avb-day.today{background:#f5f9ff;}
   .avb-offlbl{color:#cbd3dd;font-size:12px;font-weight:700;}
+  .avb-offtag{flex:none;font-size:10px;font-weight:800;letter-spacing:.03em;color:#b91c1c;background:#fee2e2;border:1px solid #fca5a5;border-radius:5px;padding:2px 6px;}
   .avpills{display:flex;flex-wrap:wrap;gap:4px;}
   .avpill{display:inline-flex;align-items:center;justify-content:center;min-width:30px;padding:3px 6px;border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.2px;background:#eef1f5;color:#aeb7c3;}
   .avpill.on{color:#fff;}
@@ -2856,10 +2857,17 @@ async function renderAvailabilityGrid(dates){
   dates.forEach(ds=>{ const h=colHeadLabel(ds); html+=`<div class="avb-cell avb-head${ds===todayStr()?' today':''}">${h.dow}<span class="avb-md">${esc(h.md)}</span></div>`; });
   techs.forEach(t=>{
     const ed=canEdit(t);
+    const isOff=t.status==='off';
     html+=`<div class="avb-cell avb-tech${ed?'':' ro'}" data-tech="${t.id}" data-name="${esc(t.name)}" data-biz="${esc(t.business_slug||'')}"${ed?` role="button" tabindex="0" title="Edit ${esc(t.name)}'s schedule"`:''}>`+
-      `${avatar(t)}<span class="avb-tname">${esc(t.name)}</span></div>`;
+      `${avatar(t)}<span class="avb-tname">${esc(t.name)}</span>${isOff?'<span class="avb-offtag" title="Marked off — won\'t be offered any new jobs until switched back">OFF</span>':''}</div>`;
     dates.forEach(ds=>{
-      const today=ds===todayStr(); let pills='', anyOn=false;
+      const today=ds===todayStr();
+      // Someone marked "off" (owner spec, 2026-08-28) reads as off across the
+      // whole board regardless of their underlying weekly schedule — the
+      // schedule itself is left untouched (so switching back to available
+      // instantly restores it), this is purely how it's DISPLAYED while off.
+      if(isOff){ html+=`<div class="avb-cell avb-day${today?' today':''}"><span class="avb-offlbl" title="Marked off">OFF</span></div>`; return; }
+      let pills='', anyOn=false;
       // Only the slots they ARE available for — booked/off slots are omitted.
       slots.forEach(s=>{ const r=slotState(t,ds,s.key); if(!r.on) return; anyOn=true;
         pills+=`<span class="avpill on${r.exc?' exc':''}" style="background:${techColor(t)}" title="${esc(s.label)}${r.exc?' · one-time change':''}">${shortSlot(s)}</span>`;
@@ -3113,6 +3121,11 @@ function bkPrimaryTechOptionsHtml(b){
   const ownRoster = ownBizTechs.length ? ownBizTechs : techCache; // fallback if business_id is ever missing on old data
   let assignableTechs = b.service_area_id ? ownRoster.filter(t=>t.service_area_id===b.service_area_id) : ownRoster;
   if(!assignableTechs.length) assignableTechs=ownRoster; // no tech tagged to this metro yet — don't leave the dropdown empty
+  // A tech marked "off" (owner spec, 2026-08-28: e.g. a no-show suspension)
+  // must not be handed NEW jobs — same "never hide an existing assignment"
+  // exception as the metro filter above: if they're already on this job,
+  // still show/keep them selected rather than silently blanking the field.
+  assignableTechs=assignableTechs.filter(t=>t.status!=='off');
   const currentTech = ownRoster.find(t=>t.id===b.technician_id);
   if(currentTech && !assignableTechs.some(t=>t.id===currentTech.id)) assignableTechs=[...assignableTechs, currentTech];
   // Metro name per area id, from the calendar payload's own areas list
@@ -3205,7 +3218,9 @@ function openBooking(b){
   // actually scheduled+free; else it stays unassigned).
   const secondTechOpts=['<option value="">— None —</option>',
     '<option value="any">⭐ Auto-pick scheduled 2nd tech</option>', xcoSecondOpt,
-    ...techCache.map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
+    // Same "off" exclusion as the primary picker, same already-assigned exception.
+    ...techCache.filter(t=>t.status!=='off'||t.id===b.secondary_technician_id)
+      .map(t=>`<option value="${t.id}" ${t.id===b.secondary_technician_id?'selected':''}>${esc(t.name)}</option>`)].join('');
   const LIFT_LABEL={ under70:'TV under 70"', can:'TV 70–85", customer can help lift', cannot:'TV 70–85", customer cannot help lift', big:'TV 86" or larger' };
   // The 2nd-tech picker is available on ANY assignable booking — so the office can
   // add a second tech after the fact (e.g. the customer changes their mind), not
@@ -14656,9 +14671,13 @@ function nbStartProgressTimer(){
 // roster if no zip is set or none of our techs are tagged to that metro (so the
 // dropdown is never empty due to missing area data).
 function nbFilterOwn(techs){
-  if(!nbZipAreaId) return techs;
-  const matched=(techs||[]).filter(t=>t.service_area_id===nbZipAreaId);
-  return matched.length?matched:techs;
+  // A brand-new job (unlike reassigning an existing one) has no "already
+  // assigned" exception to preserve — a tech marked "off" simply isn't a
+  // valid pick here.
+  const eligible=(techs||[]).filter(t=>t.status!=='off');
+  if(!nbZipAreaId) return eligible;
+  const matched=eligible.filter(t=>t.service_area_id===nbZipAreaId);
+  return matched.length?matched:eligible;
 }
 // Every company pool we can book from: always our own, plus the partner company
 // (if any). Each tech <select> lists EVERY tech from EVERY pool, grouped by

@@ -1544,11 +1544,11 @@ async function availabilityOverview(req, res, db, auth) {
   if (!wantAll && !biz) return res.status(404).json({ error: 'Business not found' });
   const bizById = new Map((allBiz || []).map(b => [b.id, b]));
   let techQ = db.from('technicians')
-    .select('id, name, color, business_id').eq('active', true).order('name');
+    .select('id, name, color, business_id, status').eq('active', true).order('name');
   if (!wantAll) techQ = techQ.eq('business_id', biz.id);
   const { data: techRows } = await techQ;
   const techs = (techRows || []).map(t => ({
-    id: t.id, name: t.name, color: t.color,
+    id: t.id, name: t.name, color: t.color, status: t.status,
     business_slug: bizById.get(t.business_id)?.slug || null,
   }));
   const ids = techs.map(t => t.id);
@@ -5831,7 +5831,7 @@ async function partnerTechnicians(req, res, db, auth) {
   }
 
   let query = db.from('technicians')
-    .select('id, name, service_area_id').eq('business_id', partner.id).eq('active', true);
+    .select('id, name, service_area_id').eq('business_id', partner.id).eq('active', true).neq('status', 'off');
   if (serviceAreaId) query = query.eq('service_area_id', serviceAreaId);
   const { data, error } = await query.order('name');
   if (error) throw error;
