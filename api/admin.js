@@ -1533,14 +1533,31 @@ async function availabilityOverview(req, res, db, auth) {
   if (!slug) return res.status(400).json({ error: 'business is required' });
   const { data: allBiz } = await db.from('businesses')
     .select('id, slug, name, timezone').eq('active', true).order('name');
-  const biz = (allBiz || []).find(b => b.slug === slug);
-  if (!biz) return res.status(404).json({ error: 'Business not found' });
   const bizList = (allBiz || []).map(b => ({ slug: b.slug, name: b.name }));
-  const { data: techs } = await db.from('technicians')
-    .select('id, name, color').eq('business_id', biz.id).eq('active', true).order('name');
-  const ids = (techs || []).map(t => t.id);
+  // business=all: ONE board with every active tech across every company —
+  // the owner asked for this after the per-company pills turned out to be 11
+  // empty boards (only Handy Andy and Doms actually employ techs). Each tech
+  // carries business_slug so the client can decide per-tech editability (the
+  // set/exception endpoints still verify tech∈business server-side).
+  const wantAll = slug === 'all';
+  const biz = wantAll ? null : (allBiz || []).find(b => b.slug === slug);
+  if (!wantAll && !biz) return res.status(404).json({ error: 'Business not found' });
+  const bizById = new Map((allBiz || []).map(b => [b.id, b]));
+  let techQ = db.from('technicians')
+    .select('id, name, color, business_id').eq('active', true).order('name');
+  if (!wantAll) techQ = techQ.eq('business_id', biz.id);
+  const { data: techRows } = await techQ;
+  const techs = (techRows || []).map(t => ({
+    id: t.id, name: t.name, color: t.color,
+    business_slug: bizById.get(t.business_id)?.slug || null,
+  }));
+  const ids = techs.map(t => t.id);
+  // Per-tech tz fallback for occupancy: a booking with no service-area tz
+  // falls back to ITS TECH's own business tz (in single-business mode that is
+  // the same `tz` as before).
+  const techTz = new Map((techRows || []).map(t => [t.id, bizById.get(t.business_id)?.timezone || 'America/Denver']));
 
-  const tz = biz.timezone || 'America/Denver';
+  const tz = (biz && biz.timezone) || 'America/Denver';
   let availability = [], exceptions = [], bookings = [];
   if (ids.length) {
     const { data: av } = await db.from('technician_availability')
@@ -1604,7 +1621,7 @@ async function availabilityOverview(req, res, db, auth) {
     const idSet = new Set(ids);
     const occRows = [];
     for (const b of (bk || [])) {
-      const btz = areaTzMap.get(b.service_area_id) || tz;
+      const btz = areaTzMap.get(b.service_area_id) || techTz.get(b.technician_id) || tz;
       const slot_key = slotKeyForLocalTime(localHHMM(btz, b.scheduled_at));
       if (!slot_key) continue;
       const date = localDateStr(btz, b.scheduled_at);
@@ -1618,7 +1635,7 @@ async function availabilityOverview(req, res, db, auth) {
     }
     bookings = occRows;
   }
-  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs || [], availability, exceptions, bookings, businesses: bizList, business: { slug: biz.slug, name: biz.name } });
+  return res.status(200).json({ slots: SLOTS, days: DAYS, technicians: techs, availability, exceptions, bookings, businesses: bizList, business: wantAll ? { slug: 'all', name: 'All technicians' } : { slug: biz.slug, name: biz.name } });
 }
 
 // ── Bookings list ────────────────────────────────────────────────────────────

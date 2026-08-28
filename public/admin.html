@@ -2810,38 +2810,26 @@ function renderListView(dates){
 let _availFetchSeq=0;
 async function renderAvailabilityGrid(dates){
   const view=document.getElementById('view');
-  // Default the Availability tab to YOUR OWN business; the toggle can switch it
-  // to another company to check their coverage (read-only).
-  if(!availViewSlug) availViewSlug=current.slug;
-  if(!availData || availData.slug!==availViewSlug){
+  // ONE board, every active tech across every company (owner call, 2026-08-28)
+  // — the per-company pill bar was 11 empty boards, since only Handy Andy and
+  // Doms actually employ techs. Editability is per TECH now: you can edit the
+  // schedules of techs whose company you can act on (same server-side gate as
+  // before), everyone else's rows are read-only.
+  if(!availData){
     view.innerHTML='<div class="empty">Loading…</div>';
     const mySeq=++_availFetchSeq;
     const gone=()=>mySeq!==_availFetchSeq || section!=='schedule' || calMode!=='availability';
     try{
-      const d=await api('availability_overview',{ params:{ business: availViewSlug }});
+      const d=await api('availability_overview',{ params:{ business: 'all' }});
       if(gone()) return;
-      availData={ slug:availViewSlug, slots:d.slots, days:d.days, technicians:d.technicians||[],
-        businesses:d.businesses||[],
+      availData={ slots:d.slots, days:d.days, technicians:d.technicians||[],
         recurringSet:new Set((d.availability||[]).map(a=>`${a.technician_id}:${a.day_of_week}:${a.slot_key}`)),
         exMap:Object.fromEntries((d.exceptions||[]).map(e=>[`${e.technician_id}:${e.date}:${e.slot_key}`, e.is_available])),
         bookedSet:new Set((d.bookings||[]).map(b=>`${b.technician_id}:${b.date}:${b.slot_key}`)) };
     }catch(err){ if(gone()) return; view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; return; }
   }
   const techs=availData.technicians, slots=availData.slots;
-  // Business toggle pills — only when there's more than one company to view. Your
-  // own business is marked so it's clear when you're peeking at another's.
-  const bizList=availData.businesses||[];
-  const togglePills = bizList.length>1
-    ? `<div class="avb-bizbar">${bizList.map(b=>{
-        const on=b.slug===availViewSlug, own=b.slug===current.slug;
-        return `<button class="avb-bizpill${on?' on':''}" data-bizslug="${esc(b.slug)}">${esc(b.name)}${own?' <span class="avb-own">(yours)</span>':''}</button>`;
-      }).join('')}${availViewSlug!==current.slug?`<span class="avb-viewing">Viewing another company — read-only</span>`:''}</div>`
-    : '';
-  const bindBizPills=()=>view.querySelectorAll('.avb-bizpill').forEach(el=>el.addEventListener('click',()=>{
-    if(el.dataset.bizslug===availViewSlug) return;
-    availViewSlug=el.dataset.bizslug; availData=null; renderCalBody();
-  }));
-  if(!techs.length){ view.innerHTML=togglePills+'<div class="empty">No active technicians for this company.</div>'; bindBizPills(); return; }
+  if(!techs.length){ view.innerHTML='<div class="empty">No active technicians.</div>'; return; }
   // Available = scheduled (recurring weekly, then any one-time exception for the
   // exact date) AND not already booked for that slot. A slot the tech has a job
   // in is NOT available. Returns { on, exc }.
@@ -2853,18 +2841,22 @@ async function renderAvailabilityGrid(dates){
     return { on, exc };
   };
 
-  const readOnly = availViewSlug!==current.slug;   // another company's board — view only
-  let html=togglePills+'<div class="avb-wrap">';
+  // A tech is editable when their company is one this login can act on —
+  // `businesses` is exactly the allowed list the server issued at login, so
+  // this mirrors the server-side gate (which still re-checks on every save).
+  const canEdit = t => (businesses||[]).some(x=>x.slug===t.business_slug);
+  let html='<div class="avb-wrap">';
   html+=`<div class="avb-legend">`+
     `<span class="avb-leg-item"><span class="avpill on" style="background:var(--accent)">8a</span> Available</span>`+
     `<span class="avb-leg-item"><span class="avpill on exc" style="background:var(--accent)">8a</span> One-time change</span>`+
-    `<span class="avb-leg-hint">${readOnly?'Read-only — switch back to your company to edit':'Tap a technician to edit their schedule'}</span>`+
+    `<span class="avb-leg-hint">Tap a technician to edit their schedule</span>`+
   `</div>`;
   html+='<div class="avb-scroll"><div class="availboard">';
   html+='<div class="avb-cell avb-head avb-corner">Technician</div>';
   dates.forEach(ds=>{ const h=colHeadLabel(ds); html+=`<div class="avb-cell avb-head${ds===todayStr()?' today':''}">${h.dow}<span class="avb-md">${esc(h.md)}</span></div>`; });
   techs.forEach(t=>{
-    html+=`<div class="avb-cell avb-tech${readOnly?' ro':''}" data-tech="${t.id}" data-name="${esc(t.name)}"${readOnly?'':` role="button" tabindex="0" title="Edit ${esc(t.name)}'s schedule"`}>`+
+    const ed=canEdit(t);
+    html+=`<div class="avb-cell avb-tech${ed?'':' ro'}" data-tech="${t.id}" data-name="${esc(t.name)}" data-biz="${esc(t.business_slug||'')}"${ed?` role="button" tabindex="0" title="Edit ${esc(t.name)}'s schedule"`:''}>`+
       `${avatar(t)}<span class="avb-tname">${esc(t.name)}</span></div>`;
     dates.forEach(ds=>{
       const today=ds===todayStr(); let pills='', anyOn=false;
@@ -2877,11 +2869,10 @@ async function renderAvailabilityGrid(dates){
   });
   html+='</div></div></div>';
   view.innerHTML=html;
-  bindBizPills();
-  // Editing a schedule is only allowed on YOUR OWN company's board — another
-  // company's board is read-only (no edit clicks bound).
-  if(!readOnly) view.querySelectorAll('.avb-tech').forEach(el=>{
-    const go=()=>openAvailability(el.dataset.tech, el.dataset.name);
+  // Edit clicks bind only on techs whose company this login can act on (the
+  // .ro rows have no binding and no button role).
+  view.querySelectorAll('.avb-tech:not(.ro)').forEach(el=>{
+    const go=()=>openAvailability(el.dataset.tech, el.dataset.name, el.dataset.biz);
     el.addEventListener('click',go);
     el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });
   });
@@ -12193,18 +12184,23 @@ async function saveTech(payload){
 }
 
 // ── Technician availability editor (weekly + one-time exceptions) ───────────
-let availTechId=null, availDefs=null, availState=new Set();
+let availTechId=null, availTechBiz=null, availDefs=null, availState=new Set();
 let availExceptions=[], exEditState=new Set();
 document.getElementById('availCloseBtn').addEventListener('click',()=>document.getElementById('availModal').classList.add('hidden'));
 
-async function openAvailability(techId, techName){
+async function openAvailability(techId, techName, techBiz){
   availTechId=techId;
+  // The merged all-techs board can show an editable tech from an allowed
+  // company that isn't `current.slug` (e.g. a secretary's extra business) —
+  // always resolve against the TECH's own business, not whichever company
+  // happens to be selected elsewhere in the app.
+  availTechBiz=techBiz||current.slug;
   document.getElementById('availTitle').textContent=`Availability — ${techName}`;
   document.getElementById('availErr').textContent='';
   const body=document.getElementById('availBody'); body.innerHTML='<div class="empty">Loading…</div>';
   document.getElementById('availModal').classList.remove('hidden');
   try{
-    const d=await api('tech_availability',{ params:{ business:current.slug, tech_id:techId }});
+    const d=await api('tech_availability',{ params:{ business:availTechBiz, tech_id:techId }});
     availDefs={ slots:d.slots, days:d.days };
     availState=new Set((d.availability||[]).map(a=>`${a.day_of_week}:${a.slot_key}`));
     availExceptions=d.exceptions||[];
@@ -12262,9 +12258,9 @@ async function saveException(){
   if(!date){ toast('Pick a date first'); return; }
   const btn=document.getElementById('exSave'); btn.disabled=true;
   try{
-    await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:[...exEditState]}});
+    await api('tech_availability_exception_set',{method:'POST',body:{business:availTechBiz,tech_id:availTechId,date,selected:[...exEditState]}});
     toast('Saved for '+dateLabel(date)); availData=null;
-    const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+    const d=await api('tech_availability',{params:{business:availTechBiz,tech_id:availTechId}}); availExceptions=d.exceptions||[];
     renderExceptionList();
   }catch(e){ toast(e.message); }
   btn.disabled=false;
@@ -12293,9 +12289,9 @@ function renderExceptionList(){
     const date=b.dataset.revert; b.disabled=true;
     const dow=new Date(date+'T00:00:00').getDay();
     try{
-      await api('tech_availability_exception_set',{method:'POST',body:{business:current.slug,tech_id:availTechId,date,selected:recurringKeysFor(dow)}});
+      await api('tech_availability_exception_set',{method:'POST',body:{business:availTechBiz,tech_id:availTechId,date,selected:recurringKeysFor(dow)}});
       toast('Reverted '+dateLabel(date)); availData=null;
-      const d=await api('tech_availability',{params:{business:current.slug,tech_id:availTechId}}); availExceptions=d.exceptions||[];
+      const d=await api('tech_availability',{params:{business:availTechBiz,tech_id:availTechId}}); availExceptions=d.exceptions||[];
       if(document.getElementById('exDate').value===date) openExceptionEditor(date);
       renderExceptionList();
     }catch(e){ toast(e.message); b.disabled=false; }
@@ -12306,7 +12302,7 @@ document.getElementById('availSaveBtn').addEventListener('click',async()=>{
   document.getElementById('availErr').textContent='';
   const slots=[...availState].map(s=>{ const [day,key]=s.split(':'); return { day_of_week:Number(day), slot_key:key }; });
   try{
-    await api('tech_availability_set',{ method:'POST', body:{ business:current.slug, tech_id:availTechId, slots }});
+    await api('tech_availability_set',{ method:'POST', body:{ business:availTechBiz, tech_id:availTechId, slots }});
     toast('Availability saved'); availData=null; document.getElementById('availModal').classList.add('hidden');
   }catch(err){ document.getElementById('availErr').textContent=err.message; }
   btn.disabled=false;
