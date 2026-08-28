@@ -72,6 +72,7 @@ function bookingStripePk(slug) {
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
+import { isSecondaryIneligibleName, bringsOwnSecondTech } from './_lib/second-tech.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
 // What the office is allowed to SET a booking to. ACTIVE_STATUSES above still
@@ -80,23 +81,12 @@ const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arri
 // new can be created there. See TECH_STATUS in api/tech.js for the tech side.
 const SETTABLE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'completed', 'cancelled', 'no_show'];
 
-// Technicians who can NEVER be the second tech on a two-person job. They cover
-// out-of-town territories (Zach → Austin, Juan → Houston) and only ever work as
-// the primary on their own jobs. The frontend hides them from the second-tech
-// dropdown; this server-side list is the backstop so an "Any <company>"
-// auto-pick can't slip them into the secondary slot. Matched case-insensitively
-// by first name. Keep in sync with nbPopulateSecondTechs() in admin.html.
-//
-// These SAME techs bring their OWN second person on two-person jobs (an
-// off-schedule spouse/helper). So when one of them is the PRIMARY, we never
-// assign — nor require — a roster second tech: they cover it themselves. The
-// customer is still charged the two-person fee (the lifting line item stays).
-// bringsOwnSecondTech() is the readable alias for that primary-side rule.
-const SECONDARY_INELIGIBLE_NAMES = ['juan', 'zach'];
-function isSecondaryIneligibleName(name) {
-  return SECONDARY_INELIGIBLE_NAMES.includes((name || '').trim().toLowerCase());
-}
-const bringsOwnSecondTech = isSecondaryIneligibleName;
+// Technicians who can NEVER be the second tech on a two-person job (Zach →
+// Austin, Juan → Houston) — and who, as PRIMARY, bring their own off-schedule
+// second person instead of a roster secondary. Shared with api/book.js (the
+// public widget path) via api/_lib/second-tech.js so the two paths can't
+// drift apart. Keep the frontend's own copy (nbPopulateSecondTechs() in
+// admin.html — it can't import a server module) in sync by hand.
 
 // ── Cross-company booking ────────────────────────────────────────────────────
 // Each business may book the OTHER company's technicians when its own are full.

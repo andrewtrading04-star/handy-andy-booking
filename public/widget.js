@@ -699,17 +699,18 @@
     if(k==='lifting'){
       const cat=getMaxSizeCat();
       if(cat==='small')return true;
-      // Skip lifting entirely for 98"+ TVs outside Denver (no 2-tech requirement
-      // there). Was comparing territoryId (the legacy Zenbooker Denver id)
-      // directly -- on every NATIVE booking (all of them, now) territoryId is a
-      // CRM service-area id and can never equal that legacy string, so this was
-      // unconditionally true and skipped the lifting question -- and therefore
-      // the $70 fee and the second-tech flag -- for EVERY 98"+ TV everywhere,
-      // Denver included. isDenver() already exists for exactly this check (see
-      // goNext()'s matching auto-select below) and correctly reads the native
-      // path's areaName instead. This is the actual reason a 98"+ TV (Steve
-      // Houston's job, Aug 2026) never even got the fee, let alone a 2nd tech.
-      if(cat==='xlarge'&&!isDenver())return true;
+      // 98"+ TVs bill the two-person fee and require the lifting question in
+      // EVERY metro (Denver, Houston, Austin) — never skipped. What differs by
+      // metro is what happens on the BACKEND once it's billed: Denver auto-
+      // assigns a real second technician; Houston/Austin's single techs (Juan,
+      // Zach) bring their own off-schedule helper instead (see
+      // api/_lib/second-tech.js server-side). This used to compare territoryId
+      // (the legacy Zenbooker Denver id) directly against a Denver-only gate --
+      // on every NATIVE booking territoryId is a CRM service-area id and can
+      // never equal that legacy string, so the gate was unconditionally true
+      // and skipped the lifting question -- and therefore the $70 fee -- for
+      // EVERY 98"+ TV everywhere, Denver included. That's the actual reason a
+      // 98"+ TV (Steve Houston's job, Aug 2026) never even got the fee.
     }
     return false;
   }
@@ -2174,8 +2175,10 @@
     while(ni<STEP_KEYS.length&&shouldSkip(STEP_KEYS[ni]))ni++;
     // If entering slots, fetch them
     if(STEP_KEYS[ni]==='slots')fetchSlots();
-    // If entering lifting and cat is large, auto-select
-    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='xlarge'&&isDenver()){
+    // If entering lifting and cat is large, auto-select (bLifting() itself
+    // does this too on render; this just pre-fills before that happens, in
+    // every metro now — see the shouldSkip('lifting') comment above).
+    if(STEP_KEYS[ni]==='lifting'&&getMaxSizeCat()==='xlarge'){
       const sec=getSec('lifting');
       const opt=sec?.options.find(o=>o.forCat==='large');
       if(opt)selectOnly(sec.id,opt.id);

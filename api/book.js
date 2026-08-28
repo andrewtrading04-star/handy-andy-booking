@@ -11,6 +11,7 @@ import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracke
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
+import { bringsOwnSecondTech } from './_lib/second-tech.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
@@ -770,16 +771,6 @@ async function bookDoms(req, res) {
     }
     return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
   }
-  // A large-TV job needs a second tech on the same slot. Try to auto-assign
-  // one the same way the primary was picked; if nobody's free, the booking
-  // still goes through (a customer must never be turned away for this) but
-  // needs_lifting stays true below so the office sees it's short a person
-  // instead of it silently going out single-tech.
-  let secondary_technician_id = null;
-  if (needsLifting) {
-    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true, excludeTechId: technician_id }); }
-    catch (e) { console.warn('[book-doms] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
-  }
   // Resolve the assigned tech's name (+ photo/bio for the "Meet your tech"
   // confirmation-email block) — best-effort.
   let technicianName = null, technicianPhoto = null;
@@ -788,6 +779,18 @@ async function bookDoms(req, res) {
     technicianName = _t?.name || null;
     technicianPhoto = _t || null;
   } catch (e) { /* name is best-effort */ }
+  // A large-TV job needs a second tech on the same slot — UNLESS the primary
+  // is Juan or Zach, who bring their own off-schedule helper instead of a
+  // roster second tech (same rule the admin booking form applies; see
+  // api/_lib/second-tech.js). Otherwise try to auto-assign one the same way
+  // the primary was picked; if nobody's free, the booking still goes through
+  // (a customer must never be turned away for this) but needs_lifting stays
+  // true below so the office sees it's short a person.
+  let secondary_technician_id = null;
+  if (needsLifting && !bringsOwnSecondTech(technicianName)) {
+    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true, excludeTechId: technician_id }); }
+    catch (e) { console.warn('[book-doms] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
+  }
 
   // ── Save the card on file in DOMS' Stripe account (best-effort). The card was
   // tokenized client-side with Doms' publishable key, so only Doms' secret key
@@ -1199,20 +1202,24 @@ async function bookNative(req, res, slug) {
     }
     return res.status(409).json({ error: SLOT_TAKEN_MSG, conflict: true, slot_taken: true });
   }
-  // A large-TV job needs a second tech on the same slot — try the same
-  // pick, excluding the primary. If nobody's free the booking still goes
-  // through single-tech; needs_lifting below keeps it flagged for the office.
-  let secondary_technician_id = null;
-  if (needsLifting) {
-    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, excludeTechId: technician_id }); }
-    catch (e) { console.warn('[book-ha] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
-  }
   let technicianName = null, technicianPhoto = null;
   try {
     const { data: _t } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
     technicianName = _t?.name || null;
     technicianPhoto = _t || null;
   } catch (e) { /* name is best-effort */ }
+  // A large-TV job needs a second tech on the same slot — UNLESS the primary
+  // is Juan (Houston) or Zach (Austin), who bring their own off-schedule
+  // helper instead of a roster second tech (same rule the admin booking form
+  // applies; see api/_lib/second-tech.js) — Denver has real techs, so a large
+  // TV there DOES get a genuine second one auto-assigned. If nobody's free
+  // the booking still goes through single-tech; needs_lifting below keeps it
+  // flagged for the office either way.
+  let secondary_technician_id = null;
+  if (needsLifting && !bringsOwnSecondTech(technicianName)) {
+    try { secondary_technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, excludeTechId: technician_id }); }
+    catch (e) { console.warn('[book-ha] second-tech pick failed (booking proceeds single-tech, needs_lifting flags it):', e.message); }
+  }
 
   // ── Save the card on file in this business's own Stripe account (best-effort), using
   // HANDY_ANDY_STRIPE_SECRET_KEY. The card is tokenized in the browser with the
