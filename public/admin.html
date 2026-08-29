@@ -7978,19 +7978,33 @@ function onScreen(name){
   if(section==='analyticshub') return (ANALYTICS_TABS.find(t=>t.id===analyticsHubTab)||{}).screen===name;
   return section===name;
 }
+// The way out of a hub (Calls, Analytics) back to the Schedule. Lives HERE,
+// not inside any individual tab's own render(), specifically so it survives
+// switching tabs: it used to live inside one tab's own HTML (Incoming Calls'
+// stray "← Other" link), which meant it vanished the moment you clicked any
+// other tab, since each tab's render() replaces the whole view. Rendered once
+// per hub repaint, alongside the tab row, so every tab has it or none do.
+function hubBackBar(){
+  return `<button type="button" class="btn ghost sm" id="hubBack" style="margin-bottom:10px;width:auto;">← Back</button>`;
+}
 async function renderHub(tabs, activeId, onPick){
   const view=document.getElementById('view');
   const vis=tabs.filter(t=>t.show());
   if(!vis.length){ view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
   const cur=vis.find(t=>t.id===activeId) || vis[0];
   await cur.render();
-  if(vis.length<2) return cur.id;   // one screen is just that screen, no tab row
-  const bar=`<div class="hub-tabs">`+vis.map(t=>
-    `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
   // The child owns .wrap; putting the row inside it keeps the page's existing
   // horizontal padding instead of a full-bleed bar that lines up with nothing.
   const wrap=view.querySelector('.wrap')||view;
-  wrap.insertAdjacentHTML('afterbegin', bar);
+  if(vis.length<2){   // one screen is just that screen, no tab row -- still needs a way back
+    wrap.insertAdjacentHTML('afterbegin', hubBackBar());
+    wrap.querySelector('#hubBack').addEventListener('click',()=>navTo('schedule'));
+    return cur.id;
+  }
+  const bar=`<div class="hub-tabs">`+vis.map(t=>
+    `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
+  wrap.insertAdjacentHTML('afterbegin', hubBackBar()+bar);
+  wrap.querySelector('#hubBack').addEventListener('click',()=>navTo('schedule'));
   wrap.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
   return cur.id;
 }
