@@ -388,64 +388,12 @@ function destinationFor(line) {
   return (hour >= open && hour < close) ? primary : line.after_hours_forward_to;
 }
 
-// POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
-async function handleVoiceInbound(req, res) {
-  const params = await twilioVoiceParams(req, res, 'voice_inbound');
-  if (!params) return;
-  const sid = params.CallSid || '';
-  const from = tenDigits(params.From);
-  const to = tenDigits(params.To);
-  let line = null;
-  try {
-    const db = serviceClient();
-    const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
-      .eq('phone', to).maybeSingle();
-    line = data && data.active ? data : null;
-
-    // Log first, forward second — but the whole block is wrapped, because if
-    // logging throws the call must still connect. A customer reaching a human
-    // matters more than the analytics row.
-    let business_id = null;
-    if (line && line.business_slug) {
-      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
-      business_id = biz?.id || null;
-    }
-    let customer_id = null;
-    if (from) {
-      const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
-      customer_id = (c || [])[0]?.id || null;
-    }
-    await db.from('calls').insert({
-      business_id,
-      source: 'twilio',
-      kind: 'inbound',
-      caller_phone: from || 'unknown',
-      grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
-      tracking_label: line?.label || null,
-      market: line?.market || null,
-      // The handset actually dialed for THIS call, not the line's daytime
-      // default — on an after-hours line those differ, and the Calls tab's
-      // "routed to" (plus the missed-call text, which is sent to this number)
-      // must name whoever really rang.
-      forwarded_to: destinationFor(line),
-      twilio_call_sid: sid,
-      occurred_at: new Date().toISOString(),
-      customer_id,
-      status: 'new',
-      // An unmapped number is a config gap, never a reason to drop a caller —
-      // same rule as GRASSHOPPER_LINES. The office sees the warning on the card.
-      warnings: line ? null : ['Number is not in tracking_numbers - call still connected'],
-    });
-  } catch (e) {
-    console.error('[voice_inbound] log failed:', e.message);
-  }
-
-  // No forwarding destination configured (or an unknown number): take a
-  // message rather than hanging up on a real customer. Resolved through the
-  // business-hours split, so an after-hours line rings its night handset.
+// Shared by the direct path (IVR gate off) and handleVoiceGather (gate
+// passed): builds the actual forwarding <Dial>. Split out so the gate can sit
+// in FRONT of this without duplicating the disclosure/recording/whisper logic.
+function dialTwiml(line, callerFrom, sid) {
   const dialTo = destinationFor(line);
-  if (!line || !dialTo) return xml(res, voicemailTwiml(sid));
+  if (!line || !dialTo) return voicemailTwiml(sid);
 
   // callerId is the CALLER's own number, not ours, so whoever picks up sees who
   // is really calling and can just hit redial. Twilio permits this for straight
@@ -479,7 +427,125 @@ async function handleVoiceInbound(req, res) {
   // moment the person picks up and plays only to THEM — the caller hears
   // ringing throughout — so you answer already knowing what you picked up.
   const whisper = voiceUrl('voice_whisper', { label: line.label || '', sid });
-  return xml(res, `<Response>${disclosure}<Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(params.From || '')}" action="${xmlEsc(action)}" method="POST"${rec}${recStatusCb}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(dialTo)}</Number></Dial></Response>`);
+  return `<Response>${disclosure}<Dial timeout="${Number(line.ring_seconds) || 20}" answerOnBridge="true" callerId="${xmlEsc(callerFrom || '')}" action="${xmlEsc(action)}" method="POST"${rec}${recStatusCb}><Number url="${xmlEsc(whisper)}" method="POST">${xmlEsc(dialTo)}</Number></Dial></Response>`;
+}
+
+// "Press 1 to continue" — a real caller taps one key and never notices the
+// delay; a robocall/scam autodialer plays a pre-recorded message into dead
+// air and gets nothing back, so it never reaches a human or a voicemail box.
+// Per-line, defaulting on (tracking_numbers.ivr_gate_enabled, migration 0101 —
+// owner call 2026-08-29, scammer volume on the tracking lines).
+function ivrGateTwiml(sid) {
+  const action = voiceUrl('voice_gather', { sid });
+  return '<Response><Gather numDigits="1" timeout="8" action="' + xmlEsc(action) + '" method="POST">'
+    + '<Say voice="Polly.Joanna">To reduce spam calls, press 1 to continue.</Say>'
+    + '</Gather><Say voice="Polly.Joanna">We did not get a response. Goodbye.</Say><Hangup/></Response>';
+}
+
+// POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
+async function handleVoiceInbound(req, res) {
+  const params = await twilioVoiceParams(req, res, 'voice_inbound');
+  if (!params) return;
+  const sid = params.CallSid || '';
+  const from = tenDigits(params.From);
+  const to = tenDigits(params.To);
+  let line = null;
+  let blocked = false;
+  try {
+    const db = serviceClient();
+    const { data } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled')
+      .eq('phone', to).maybeSingle();
+    line = data && data.active ? data : null;
+
+    if (from) {
+      const { data: b } = await db.from('blocked_numbers').select('id').eq('phone', from).maybeSingle();
+      blocked = !!b;
+    }
+
+    // Log first, forward second — but the whole block is wrapped, because if
+    // logging throws the call must still connect. A customer reaching a human
+    // matters more than the analytics row.
+    let business_id = null;
+    if (line && line.business_slug) {
+      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
+      business_id = biz?.id || null;
+    }
+    let customer_id = null;
+    if (from) {
+      const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
+      customer_id = (c || [])[0]?.id || null;
+    }
+    await db.from('calls').insert({
+      business_id,
+      source: 'twilio',
+      kind: 'inbound',
+      caller_phone: from || 'unknown',
+      grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
+      tracking_label: line?.label || null,
+      market: line?.market || null,
+      // The handset actually dialed for THIS call, not the line's daytime
+      // default — on an after-hours line those differ, and the Calls tab's
+      // "routed to" (plus the missed-call text, which is sent to this number)
+      // must name whoever really rang. A blocked number never actually rings
+      // anyone, so this stays descriptive metadata only for those rows.
+      forwarded_to: destinationFor(line),
+      twilio_call_sid: sid,
+      occurred_at: new Date().toISOString(),
+      customer_id,
+      // Blocked calls are pre-resolved — nobody needs to call a blocked
+      // number back, so this never sits in the Needs-callback queue.
+      status: blocked ? 'ignored' : 'new',
+      handled_by: blocked ? 'Blocked number' : null,
+      handled_at: blocked ? new Date().toISOString() : null,
+      // An unmapped number is a config gap, never a reason to drop a caller —
+      // same rule as GRASSHOPPER_LINES. The office sees the warning on the card.
+      warnings: blocked ? ['Blocked number — call was rejected before ringing'] : (line ? null : ['Number is not in tracking_numbers - call still connected']),
+    });
+  } catch (e) {
+    console.error('[voice_inbound] log failed:', e.message);
+  }
+
+  // Rejected with no ring, no voicemail prompt, nothing for a scammer to work
+  // with — same principle as the IVR gate below, just skipping the prompt
+  // entirely for a number that's already proven itself unwanted.
+  if (blocked) return xml(res, '<Response><Reject/></Response>');
+
+  if (line && line.ivr_gate_enabled) return xml(res, ivrGateTwiml(sid));
+  return xml(res, dialTwiml(line, params.From, sid));
+}
+
+// POST /api/analytics?action=voice_gather&sid=... — the caller either pressed
+// a key or the Gather above timed out. Re-looks-up the line itself (Twilio's
+// gather POST doesn't carry it) rather than trusting anything client-supplied.
+async function handleVoiceGather(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_gather', { sid });
+  if (!params) return;
+  const to = tenDigits(params.To);
+  let line = null;
+  try {
+    const db = serviceClient();
+    const { data } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+      .eq('phone', to).maybeSingle();
+    line = data && data.active ? data : null;
+  } catch (e) {
+    console.error('[voice_gather] line lookup failed:', e.message);
+  }
+  if ((params.Digits || '').toString() !== '1') {
+    // No key, or the wrong key — never voicemail here: a real customer who
+    // mis-taps gets a second chance by simply calling back, and giving a
+    // scam dialer a record/transcribe prompt is exactly the thing the gate
+    // exists to deny it.
+    try {
+      const db = serviceClient();
+      await db.from('calls').update({ status: 'ignored', handled_by: 'No response to IVR prompt', handled_at: new Date().toISOString() })
+        .eq('twilio_call_sid', params.CallSid || '').eq('status', 'new');
+    } catch (e) { console.error('[voice_gather] resolve failed:', e.message); }
+    return xml(res, '<Response><Hangup/></Response>');
+  }
+  return xml(res, dialTwiml(line, params.From, sid));
 }
 
 // POST /api/analytics?action=voice_status&sid=... — the <Dial> finished.
@@ -617,6 +683,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && action === 'voice_whisper') return handleVoiceWhisper(req, res);
   if (req.method === 'POST' && action === 'voice_status') return handleVoiceStatus(req, res);
   if (req.method === 'POST' && action === 'voice_recording') return handleVoiceRecording(req, res);
+  if (req.method === 'POST' && action === 'voice_gather') return handleVoiceGather(req, res);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');

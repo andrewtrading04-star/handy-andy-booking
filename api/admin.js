@@ -414,6 +414,8 @@ export default async function handler(req, res) {
       case 'call_recording':    return await callRecording(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
+      case 'call_block':        return await callBlock(req, res, db, auth, body);
+      case 'call_delete':       return await callDelete(req, res, db, auth, body);
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
@@ -7280,6 +7282,42 @@ async function callUpdate(req, res, db, auth, body) {
     }
   }
   const { error } = await db.from('calls').update(patch).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// Block a caller number business-wide (owner call, 2026-08-29 — scammer/
+// robocall volume on the tracking lines). Blocks by NUMBER, not by call row,
+// so it also covers every other tracking line the same scammer tries next —
+// see handleVoiceInbound in api/analytics.js, which rejects a blocked number
+// before it ever rings anyone. Same auth model as callUpdate/callClaim above
+// (any signed-in office login, no extra business gate) since every call this
+// screen shows is already scoped to businesses that login can see.
+async function callBlock(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: call, error: e0 } = await db.from('calls').select('id, caller_phone').eq('id', id).single();
+  if (e0 || !call) return res.status(404).json({ error: 'Call not found' });
+  const phone = (call.caller_phone || '').replace(/\D/g, '').slice(-10);
+  if (!phone || phone.length !== 10) return res.status(400).json({ error: 'This call has no caller number to block' });
+  const { error } = await db.from('blocked_numbers').upsert({
+    phone, call_id: id, blocked_by: auth.name || auth.role || 'office', reason: (body.reason || '').toString().slice(0, 200) || null,
+  }, { onConflict: 'phone', ignoreDuplicates: false });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, phone });
+}
+
+// Permanently remove a call row from the log (owner call, 2026-08-29 — cleaning
+// up spam/scam entries, not something a normal missed-call resolution covers).
+// Owner-only: unlike blocking (reversible, additive) this is destructive and
+// every secretary shares the same Calls tab, so a wider gate here matters.
+async function callDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('calls').delete().eq('id', id);
   if (error) throw error;
   return res.status(200).json({ ok: true });
 }

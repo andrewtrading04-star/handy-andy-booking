@@ -8722,7 +8722,9 @@ function callCard(r,handled){
            </div>`)
     : handled
     ? `<div class="rc-btn-row">${hasPhone?`<a class="rc-btn" href="${tel}">Call again</a>`:''}
-       <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button></div>`
+       <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button>
+       ${hasPhone?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every tracking line">🚫 Block</button>`:''}
+       ${role==='owner'?`<button class="rc-btn ghost" data-calldelete="${esc(r.id)}" title="Permanently remove this call from the log">Delete</button>`:''}</div>`
     : `${callBtn}
        <div class="rc-btn-row">
          <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
@@ -8824,9 +8826,16 @@ function renderCallRows(rows,withDays){
   return out;
 }
 const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'};
+// Owner-only "Who" filter — Joey and Heather each already only see their OWN
+// scoped calls (viewerSlugs in api/admin.js calls()), so this only means
+// anything for the owner's cross-business view, which otherwise mixes both
+// secretaries' lines into one list. Keyed off routed_to_name (already
+// computed server-side from forwarded_to -> staff_users), so "Joey" here is
+// exactly the same person the interruption banner would name.
+let _callsWho='all';
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
-  const open=(_callsData.open||[]).map(r=>({ ...r, _handled:false }));
+  let open=(_callsData.open||[]).map(r=>({ ...r, _handled:false }));
   // One flat list, newest first. Rows are tagged with the bucket they came
   // back in so open calls keep their real action buttons (Done/Called back/
   // Ignore) while handled ones show Reopen — same data, one timeline.
@@ -8841,11 +8850,19 @@ function paintCalls(){
   // Performance (api/admin.js, the .eq('kind','live') queries) and still
   // appears in the Needs callback queue below, which is where an abandoned
   // intake gets closed out. Only these three period views are tracking-only.
-  const periodRows=[
+  let periodRows=[
     ...(_callsPeriodData.open||[]).map(r=>({ ...r, _handled:false })),
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
   ].filter(r=> r.source==='twilio')
    .sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
+  const whoNames=role==='owner' ? [...new Set([...periodRows,...open].map(r=>r.routed_to_name).filter(Boolean))].sort() : [];
+  if(whoNames.length>1){
+    if(_callsWho!=='all' && !whoNames.includes(_callsWho)) _callsWho='all';
+    if(_callsWho!=='all'){
+      periodRows=periodRows.filter(r=>r.routed_to_name===_callsWho);
+      open=open.filter(r=>r.routed_to_name===_callsWho);
+    }
+  } else _callsWho='all';
   // Missed = not Contacted: same definition as the box on the card, so the
   // tab and the badge can never disagree about the same call. Live rows are
   // always contacted (the secretary is/was on the phone by definition), so
@@ -8869,6 +8886,8 @@ function paintCalls(){
     `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" data-callview="${v.id}">${v.label}</button>`).join('');
   const periodSeg=['today','yesterday','7d'].map(p=>
     `<button type="button" class="rc-seg-btn ${_callsPeriod===p?'on':''}" data-callperiod="${p}">${esc(CALL_PERIOD_LABEL[p])}</button>`).join('');
+  const whoSeg=whoNames.length>1 ? `<div class="rc-seg">${['all',...whoNames].map(w=>
+    `<button type="button" class="rc-seg-btn ${_callsWho===w?'on':''}" data-callwho="${esc(w)}">${w==='all'?'Everyone':esc(w)}</button>`).join('')}</div>` : '';
   view.innerHTML=`<div class="wrap">
     <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
@@ -8878,6 +8897,7 @@ function paintCalls(){
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
       <div class="rc-seg">${viewSeg}</div>
       ${_callsView==='callback'?'':`<div class="rc-seg">${periodSeg}</div>`}
+      ${whoSeg}
     </div>
     ${shown.length ? renderCallRows(shown, _callsView!=='callback' && _callsPeriod==='7d') : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
   </div>`;
@@ -8888,6 +8908,9 @@ function paintCalls(){
   }));
   view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
     _callsPeriod=b.dataset.callperiod; renderCalls();
+  }));
+  view.querySelectorAll('[data-callwho]').forEach(b=>b.addEventListener('click',()=>{
+    _callsWho=b.dataset.callwho; paintCalls();
   }));
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
@@ -8907,6 +8930,22 @@ function paintCalls(){
     ()=>callDial(b.dataset.calldial, b.dataset.callphone)));
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
+  }));
+  view.querySelectorAll('[data-callblock]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm(`Block ${b.dataset.callphone}? They will be rejected on every tracking line before anyone's phone rings — no ring, no voicemail.`)) return;
+    b.disabled=true;
+    try{
+      await api('call_block',{ method:'POST', body:{ id:b.dataset.callblock }});
+      toast('Blocked'); await renderCalls();
+    }catch(e){ toast(e.message||'Could not block'); b.disabled=false; }
+  }));
+  view.querySelectorAll('[data-calldelete]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Permanently delete this call from the log? This cannot be undone.')) return;
+    b.disabled=true;
+    try{
+      await api('call_delete',{ method:'POST', body:{ id:b.dataset.calldelete }});
+      toast('Deleted'); await renderCalls();
+    }catch(e){ toast(e.message||'Could not delete'); b.disabled=false; }
   }));
   focusPendingCall(view);
 }
