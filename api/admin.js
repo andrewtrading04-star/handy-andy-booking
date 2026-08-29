@@ -441,6 +441,7 @@ export default async function handler(req, res) {
       case 'call_event':        return await callEvent(req, res, db, auth, body);
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
+      case 'call_numbers':      return await callNumbers(req, res, db, auth);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
@@ -9416,6 +9417,35 @@ async function auditReport(req, res, db, auth) {
     // coverage does not read as a quiet stretch for the business.
     missing_days: daily.filter(d => d.counted == null).map(d => d.date),
   });
+}
+
+// Every Twilio tracking number across the whole portfolio, with the business
+// it belongs to and where a call to it actually rings. Owner-only, same as
+// Performance/Audit -- forward_to is a real personal cell number, not
+// something a secretary needs to see to do her job.
+async function callNumbers(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  const [{ data: numbers }, { data: businesses }] = await Promise.all([
+    db.from('tracking_numbers')
+      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
+      .order('business_slug'),
+    db.from('businesses').select('slug, name, url'),
+  ]);
+
+  const bizBySlug = {};
+  for (const b of (businesses || [])) bizBySlug[b.slug] = b;
+
+  const rows = (numbers || []).map(n => {
+    const biz = bizBySlug[n.business_slug] || {};
+    return {
+      ...n,
+      business_name: biz.name || n.business_slug,
+      business_url: biz.url || null,
+    };
+  });
+
+  return res.status(200).json({ numbers: rows });
 }
 
 // A secretary's own booking numbers: how many calls she took, how many became

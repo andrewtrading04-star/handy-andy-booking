@@ -7948,6 +7948,7 @@ const CALL_TABS=[
   { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
+  { id:'numbers',     label:'Numbers',      screen:'callnumbers',   show:()=>role==='owner',       render:()=>renderCallNumbers() },
 ];
 // Handyman Analytics only makes sense for businesses that actually book
 // handyman work. Handy Andy and Dom's both run a `<slug>-handyman` widget
@@ -8199,6 +8200,65 @@ async function renderCallAudit(){
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${lineRows}</div>
   </div>`;
   view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
+}
+
+// Every tracking number across the whole portfolio, which business/website it
+// belongs to, and where a call to it actually rings -- cross-business on
+// purpose (unlike Audit/Performance, which follow the sidebar's current
+// business): a routing directory is only useful seen whole, not one row at a
+// time. api/admin.js callNumbers() enforces owner-only server-side.
+const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17203711561':'Heather', '+13374997817':'Owner' };
+function friendlyForward(e164){
+  if(!e164) return 'Voicemail only';
+  return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));
+}
+async function renderCallNumbers(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await api('call_numbers'); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+
+  const rows=(d.numbers||[]).slice().sort((a,b)=>
+    (a.business_name||'').localeCompare(b.business_name||'') || (a.market||'').localeCompare(b.market||''));
+
+  const tr=rows.map(n=>{
+    const hours = n.hours_start!=null
+      ? `${n.hours_start}:00–${n.hours_end}:00 ${esc(n.hours_timezone||'')}`
+      : 'Always';
+    return `<tr style="${n.active?'':'opacity:.5;'}">
+      <td style="padding:9px 10px;white-space:nowrap;">${esc(fmtPhone(n.phone))}</td>
+      <td style="padding:9px 10px;">${n.business_url
+        ? `<a href="${esc(n.business_url)}" target="_blank" rel="noopener">${esc(n.business_name)}</a>`
+        : esc(n.business_name)}</td>
+      <td style="padding:9px 10px;">${esc(n.market||'')}</td>
+      <td style="padding:9px 10px;">${esc(friendlyForward(n.forward_to))}</td>
+      <td style="padding:9px 10px;">${esc(friendlyForward(n.after_hours_forward_to))}</td>
+      <td style="padding:9px 10px;">${hours}</td>
+      <td style="padding:9px 10px;">${n.active?'Active':'Retired'}</td>
+    </tr>`;
+  }).join('');
+
+  view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div>
+      <h2 class="rc-title">📇 Numbers</h2>
+      <div class="rc-sub">Every tracking number across the portfolio — which business it belongs to and where a call actually rings.</div>
+    </div></div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--line2);text-align:left;">
+          <th style="padding:9px 10px;">Number</th>
+          <th style="padding:9px 10px;">Business</th>
+          <th style="padding:9px 10px;">Market</th>
+          <th style="padding:9px 10px;">Rings to</th>
+          <th style="padding:9px 10px;">After hours</th>
+          <th style="padding:9px 10px;">Hours</th>
+          <th style="padding:9px 10px;">Status</th>
+        </tr></thead>
+        <tbody>${tr}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 // Each secretary's own booking numbers -- her calls, how many became jobs, her
