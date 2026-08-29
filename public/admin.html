@@ -7978,12 +7978,14 @@ function onScreen(name){
   if(section==='analyticshub') return (ANALYTICS_TABS.find(t=>t.id===analyticsHubTab)||{}).screen===name;
   return section===name;
 }
-// The way out of a hub (Calls, Analytics) back to the Schedule. Lives HERE,
-// not inside any individual tab's own render(), specifically so it survives
-// switching tabs: it used to live inside one tab's own HTML (Incoming Calls'
-// stray "← Other" link), which meant it vanished the moment you clicked any
-// other tab, since each tab's render() replaces the whole view. Rendered once
-// per hub repaint, alongside the tab row, so every tab has it or none do.
+// Jumps back to this hub's own default tab (vis[0] -- for the Calls hub
+// that's Incoming Calls, its landing tab). Lives HERE, not inside any
+// individual tab's own render(), specifically so it survives switching tabs:
+// it used to live inside one tab's own HTML (Incoming Calls' stray "← Other"
+// link), which meant it vanished the moment you clicked any other tab, since
+// each tab's render() replaces the whole view. Rendered once per hub repaint,
+// alongside the tab row, so every tab has it or none do. Hidden while already
+// on the default tab -- there is nowhere for it to take you from there.
 function hubBackBar(){
   return `<button type="button" class="btn ghost sm" id="hubBack" style="margin-bottom:10px;width:auto;">← Back</button>`;
 }
@@ -7993,18 +7995,18 @@ async function renderHub(tabs, activeId, onPick){
   if(!vis.length){ view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
   const cur=vis.find(t=>t.id===activeId) || vis[0];
   await cur.render();
+  // One screen is just that screen -- no tab row, and no "back" either: with
+  // only one tab, it IS the default, so there is nowhere else in this hub to
+  // return to.
+  if(vis.length<2) return cur.id;
   // The child owns .wrap; putting the row inside it keeps the page's existing
   // horizontal padding instead of a full-bleed bar that lines up with nothing.
   const wrap=view.querySelector('.wrap')||view;
-  if(vis.length<2){   // one screen is just that screen, no tab row -- still needs a way back
-    wrap.insertAdjacentHTML('afterbegin', hubBackBar());
-    wrap.querySelector('#hubBack').addEventListener('click',()=>navTo('schedule'));
-    return cur.id;
-  }
+  const onDefault = cur.id===vis[0].id;
   const bar=`<div class="hub-tabs">`+vis.map(t=>
     `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
-  wrap.insertAdjacentHTML('afterbegin', hubBackBar()+bar);
-  wrap.querySelector('#hubBack').addEventListener('click',()=>navTo('schedule'));
+  wrap.insertAdjacentHTML('afterbegin', (onDefault?'':hubBackBar())+bar);
+  if(!onDefault) wrap.querySelector('#hubBack').addEventListener('click',()=>onPick(vis[0].id));
   wrap.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
   return cur.id;
 }
