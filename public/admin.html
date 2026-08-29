@@ -8723,7 +8723,7 @@ function callCard(r,handled){
   // learns Heather is already on this one. Kept OUT of the 4 boxes (it's a
   // right-now collision warning, not a property of the call itself).
   const claimLine = r.claim_active
-    ? `<div style="margin-top:6px;font-size:12.5px;font-weight:700;${r.claimed_by_me?'color:#15803d;':'color:#b91c1c;'}">${r.claimed_by_me?'You are calling this':esc(r.claimed_by)+' is calling this now'}</div>`
+    ? `<div style="margin-top:6px;font-size:12.5px;font-weight:700;${r.claimed_by_me?'color:#15803d;':'color:#b91c1c;'}">${r.claimed_by_me?'You claimed this callback':esc(r.claimed_by)+' claimed this callback'}</div>`
     : '';
 
   // The job this call produced, if any. This is the whole point of matching on
@@ -8759,15 +8759,15 @@ function callCard(r,handled){
     : '';
 
   const hasPhone=!!r.caller_phone;
-  const tel=`tel:+1${esc(r.caller_phone)}`;
-  // The call button CLAIMS before it dials (see callDial). Someone else's live
-  // claim turns it grey and states who is on it, which is the whole point: the
-  // office kept ringing customers twice because a voicemail Heather was already
-  // returning still looked untouched to Joey.
+  // This claims the callback ("I'm on this") without attempting to dial
+  // anything — the CRM tracks calls, it never places them; the office calls
+  // back from their own phone. It exists purely to stop two people ringing
+  // the same customer: the office kept ringing customers twice because a
+  // voicemail Heather was already returning still looked untouched to Joey.
   const otherHas = r.claim_active && !r.claimed_by_me;
-  const callBtn = !hasPhone ? '' : otherHas
-    ? `<button class="rc-call disabled" data-calldial="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" style="border:none;">${esc(r.claimed_by)} is calling — dial anyway</button>`
-    : `<button class="rc-call" data-calldial="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" style="border:none;cursor:pointer;">📞 Call ${esc(r.caller_pretty)}</button>`;
+  const claimBtn = !hasPhone ? '' : otherHas
+    ? `<button class="rc-call disabled" data-callclaim="${esc(r.id)}" style="border:none;">${esc(r.claimed_by)} is already on this — claim anyway</button>`
+    : `<button class="rc-call" data-callclaim="${esc(r.id)}" style="border:none;cursor:pointer;">I'm calling ${esc(r.caller_pretty)} back</button>`;
   // A live call already logged its own outcome through the wizard's resolution
   // step (or can be resolved from here if the secretary skipped it) — the
   // voicemail-oriented Done/Called back/Ignore buttons don't fit "I was just
@@ -8781,11 +8781,11 @@ function callCard(r,handled){
              <button class="rc-btn red" data-callresolve="refused" data-callid="${esc(r.id)}">Declined</button>
            </div>`)
     : handled
-    ? `<div class="rc-btn-row">${hasPhone?`<a class="rc-btn" href="${tel}">Call again</a>`:''}
+    ? `<div class="rc-btn-row">
        <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button>
        ${hasPhone?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every tracking line">🚫 Block</button>`:''}
        ${role==='owner'?`<button class="rc-btn ghost" data-calldelete="${esc(r.id)}" title="Permanently remove this call from the log">Delete</button>`:''}</div>`
-    : `${callBtn}
+    : `${claimBtn}
        <div class="rc-btn-row">
          <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
          <button class="rc-btn amber" data-callact="called_back" data-callid="${esc(r.id)}">Called back</button>
@@ -8949,7 +8949,6 @@ function paintCalls(){
   const whoSeg=whoNames.length>1 ? `<div class="rc-seg">${['all',...whoNames].map(w=>
     `<button type="button" class="rc-seg-btn ${_callsWho===w?'on':''}" data-callwho="${esc(w)}">${w==='all'?'Everyone':esc(w)}</button>`).join('')}</div>` : '';
   view.innerHTML=`<div class="wrap">
-    <button class="btn ghost sm" onclick="navTo('other')" style="margin-bottom:10px;width:auto;">← Other</button>
     <div class="rc-head"><div>
       <h2 class="rc-title">📨 Incoming Calls</h2>
       <div class="rc-sub">Every call that came in on a tracking number. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
@@ -8986,8 +8985,8 @@ function paintCalls(){
       await renderCalls();
     }catch(e){ toast(e.message||'Could not update'); b.disabled=false; }
   }));
-  view.querySelectorAll('[data-calldial]').forEach(b=>b.addEventListener('click',
-    ()=>callDial(b.dataset.calldial, b.dataset.callphone)));
+  view.querySelectorAll('[data-callclaim]').forEach(b=>b.addEventListener('click',
+    ()=>claimCallback(b.dataset.callclaim)));
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
@@ -9032,27 +9031,26 @@ function focusPendingCall(view){
   catch(_){ target.scrollIntoView(); }
   setTimeout(()=>target.classList.remove('rc-focus'), 2600);
 }
-// Claim the voicemail, THEN dial. Claiming first is what stops two people
-// ringing the same customer: the moment Heather taps Call, Joey's screen shows
-// it as hers. If someone else already holds it the server answers 409 and we
-// ask rather than block — there are good reasons to double up, but it must be a
-// decision, not an accident.
-async function callDial(id, pretty){
-  const dial=()=>{ window.location.href='tel:+1'+String(pretty).replace(/\D/g,''); };
+// Claims the callback -- marks it as "being handled by me" without placing
+// any call. The CRM only ever tracks calls; the office dials from their own
+// phone. This is what stops two people ringing the same customer: the moment
+// Heather claims one, Joey's screen shows it as hers. If someone else already
+// holds it the server answers 409 and we ask rather than block — there are
+// good reasons to double up, but it must be a decision, not an accident.
+async function claimCallback(id){
   try{
     await api('call_claim',{ method:'POST', body:{ id }});
   }catch(e){
     const msg=e.message||'';
-    if(/started calling this/i.test(msg)){
-      if(!confirm(`${msg}\n\nCall them anyway?`)) return;
-      try{ await api('call_claim',{ method:'POST', body:{ id, force:true }}); }catch(_){ /* dial regardless */ }
+    if(/claimed this/i.test(msg)){
+      if(!confirm(`${msg}\n\nClaim it anyway?`)) return;
+      try{ await api('call_claim',{ method:'POST', body:{ id, force:true }}); }
+      catch(e2){ toast(e2.message||'Could not claim this'); return; }
     }else{
-      // Claiming failed for some other reason (offline, endpoint down). Never
-      // block the actual phone call over bookkeeping.
-      toast('Could not mark this as claimed, dialing anyway.');
+      toast(msg||'Could not claim this');
+      return;
     }
   }
-  dial();
   renderCalls();
 }
 

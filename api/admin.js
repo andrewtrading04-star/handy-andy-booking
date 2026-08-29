@@ -7210,11 +7210,12 @@ async function callClaim(req, res, db, auth, body) {
     .select('id, status, claimed_by, claimed_at, booking_id').eq('id', id).single();
   if (e0 || !cur) return res.status(404).json({ error: 'Call not found' });
 
-  // Someone else is mid-call. Report it instead of silently stealing the claim.
+  // Someone else already claimed this callback. Report it instead of silently
+  // stealing the claim.
   if (!body.force && claimIsHot(cur) && cur.claimed_by !== me) {
     const mins = Math.max(1, Math.round((Date.now() - new Date(cur.claimed_at).getTime()) / 60000));
     return res.status(409).json({
-      error: `${cur.claimed_by} started calling this ${mins} minute${mins === 1 ? '' : 's'} ago.`,
+      error: `${cur.claimed_by} claimed this ${mins} minute${mins === 1 ? '' : 's'} ago.`,
       claimed_by: cur.claimed_by, minutes_ago: mins, code: 'already_claimed',
     });
   }
