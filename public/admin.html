@@ -6235,9 +6235,11 @@ async function renderLaunch(){
       Sorted by readiness, not alphabetical. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
       Click a card for the full breakdown and to tick the checklist.
     </p>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
-      ${col('Blocked','#dc2626',blocked,false,laHtml)}
-      ${col('In progress','#b45309',progress)}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
+      ${col('Blocked','#dc2626',blocked,true,laHtml)}
+      ${col('In progress','#b45309',progress,true)}
+    </div>
+    <div style="margin-top:20px;">
       ${col('Businesses','#15803d',ready,true)}
     </div>
   </div>`;
