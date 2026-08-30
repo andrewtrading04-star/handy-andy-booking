@@ -6217,19 +6217,18 @@ async function renderLaunch(){
   const blocked=scored.filter(x=>x.s.blocked);
   const ready=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
   const progress=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total);
-  const col=(title,color,rows)=>`<div>
+  const col=(title,color,rows,grid,extraHtml)=>`<div>
     <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
-    ${rows.map(x=>launchCardHtml(x.b, items)).join('') || '<p style="font-size:12px;color:var(--mute);">None.</p>'}
+    <div${grid?' style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"':''}>
+      ${rows.map(x=>launchCardHtml(x.b, items)).join('')}${extraHtml||''}
+      ${(rows.length===0 && !extraHtml) ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
+    </div>
   </div>`;
 
-  const mScored=markets.map(m=>({ m, s:launchMarketScoreOf(m, marketItems) }));
-  const mBlocked=mScored.filter(x=>x.s.blocked);
-  const mReady=mScored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
-  const mProgress=mScored.filter(x=>!x.s.blocked && x.s.passed<x.s.total);
-  const mCol=(title,color,rows)=>`<div>
-    <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
-    ${rows.map(x=>launchMarketCardHtml(x.m, marketItems)).join('') || '<p style="font-size:12px;color:var(--mute);">None.</p>'}
-  </div>`;
+  // LA is a market page under handy-andy, not its own business — shown here
+  // as an extra card in Blocked rather than in a separate Markets section.
+  const laMarket=markets.find(m=>m.slug==='la');
+  const laHtml=laMarket ? launchMarketCardHtml(laMarket, marketItems) : '';
 
   view.innerHTML=`<div class="wrap">
     <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
@@ -6237,20 +6236,10 @@ async function renderLaunch(){
       Click a card for the full breakdown and to tick the checklist.
     </p>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
-      ${col('Blocked','#dc2626',blocked)}
+      ${col('Blocked','#dc2626',blocked,false,laHtml)}
       ${col('In progress','#b45309',progress)}
-      ${col('Ready to compete','#15803d',ready)}
+      ${col('Businesses','#15803d',ready,true)}
     </div>
-    ${markets.length ? `
-    <h3 style="font-size:15px;margin:28px 0 4px;">Markets</h3>
-    <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
-      A location page inside an existing business — not a new company, so no Stripe/Resend of its own. Blocked means it can't take a booking or an estimate yet.
-    </p>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
-      ${mCol('Blocked','#dc2626',mBlocked)}
-      ${mCol('In progress','#b45309',mProgress)}
-      ${mCol('Ready to compete','#15803d',mReady)}
-    </div>` : ''}
   </div>`;
 
   view.querySelectorAll('[data-launch-card]').forEach(card=>{

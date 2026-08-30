@@ -97,7 +97,10 @@
     // because nothing checks this map against what each site actually has.
     // Dom's own page at /thank-you/ is real and live (confirmed 200).
     'doms':       'https://www.domstvmounting.com/thank-you/',
-    'mile-high':  'https://handy-andy-booking.vercel.app/thank-you.html?b=mile-high',
+    // Mile High now has its own real /thank-you page: the Next.js site went
+    // live on Vercel 2026-08-30 and milehightvmounting.com moved off
+    // landingsite.ai to Vercel nameservers the same day (confirmed serving).
+    'mile-high':  'https://milehightvmounting.com/thank-you',
     'austin':     'https://www.austinmounting.com/thank-you',
     'precision':  'https://handy-andy-booking.vercel.app/thank-you.html?b=precision',
     // Real /thank-you page confirmed in the Next.js site (Austin template).

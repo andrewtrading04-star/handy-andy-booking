@@ -689,7 +689,7 @@ export function appointmentReminderEmail(details = {}, brand = EMAIL_BRANDS['han
     serviceName: details.serviceName, baseUrl: details.baseUrl,
   });
 
-  const subject = `Your appointment is 24 hours away!`;
+  const subject = `We will see you tomorrow!`;
 
   const html = `<!doctype html>
 <html>
