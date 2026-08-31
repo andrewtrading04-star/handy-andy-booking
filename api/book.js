@@ -15,6 +15,14 @@ import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 
+// Owner rule (2026-08-31): no paid job, any business, any metro, ever books
+// under $139 — "if it's not 139 then I don't want it." A flat floor, not
+// per-metro (Austin's cheaper widget price no longer means a cheaper actual
+// minimum). GDS redemptions, Assurion, No Charge/Callback, and Handyman Labor
+// are intentionally exempt — they're office-only flows that never touch this
+// file; see NB_MINIMUMS / the exemption checks in admin.html's New Booking.
+const MIN_TICKET_PRICE = 139;
+
 // service_area_zips stores bare 5-digit zips; a ZIP+4 ("80220-1032") from any
 // caller misses the exact-match lookup and reads a covered address as
 // out-of-area. Keep the leading 5 digits (same helper as api/admin.js and
@@ -748,6 +756,15 @@ async function bookDoms(req, res) {
     console.warn('[book-doms] price mismatch: server', subtotal, 'vs widget', widgetTotal,
       '- charging the server total; widget total is stale or the client-side preview did not match.');
   }
+  // Hard $139 minimum ticket (owner rule 2026-08-31): "if it's not 139 then I
+  // don't want it." Enforced here, not just in the widget's client-side
+  // realItemsFloor(), so a stale/tampered client (or a request that skips the
+  // widget's own topup, e.g. an add-on-only booking) can never create a job
+  // under the floor. This is a hard reject, not a topup — the customer must
+  // add more service or the booking doesn't happen.
+  if (price < MIN_TICKET_PRICE) {
+    return res.status(400).json({ error: `Jobs must total at least $${MIN_TICKET_PRICE}. Please add another service or add-on.`, below_minimum: true });
+  }
 
   // ── Pick an available Doms tech BEFORE saving the card or writing anything.
   // The customer's slot list is a snapshot from when they reached the calendar
@@ -1160,6 +1177,13 @@ async function bookNative(req, res, slug) {
   const subtotal = lines.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
   const widgetTotal = sum.total != null ? Number(sum.total) : subtotal;
   const price = Math.max(subtotal, widgetTotal) || subtotal;
+  // Hard $139 minimum ticket (owner rule 2026-08-31) — see the matching
+  // comment in bookDoms above. Applies to every native business/metro, not
+  // just Denver's own $139 default; Austin's cheaper $119 widget price is no
+  // longer allowed to actually book under $139.
+  if (price < MIN_TICKET_PRICE) {
+    return res.status(400).json({ error: `Jobs must total at least $${MIN_TICKET_PRICE}. Please add another service or add-on.`, below_minimum: true });
+  }
 
   // ── Pick a tech from THIS metro's roster BEFORE saving the card or writing
   // anything, and REJECT with a 409 if nobody is available anymore. Same guard

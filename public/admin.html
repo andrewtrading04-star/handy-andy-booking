@@ -12512,7 +12512,6 @@ function openTakeCall(){
   nbConvertLines=null; renderNbConvertSummary();
   nbCustomLines=[]; nbRenderCustomLines();
   nbSourceEstimateId=null;
-  nbMinWaived=false;
   nbServiceId=null;
   { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=''; }
   document.getElementById('callWizErr').textContent='';
@@ -14468,7 +14467,7 @@ async function openNewBooking(prefill){
   nbSourceEstimateId=(prefill&&prefill._sourceEstimateId)||null;   // archive it on save
   document.getElementById('nbUpsellPanel').classList.add('hidden');   // collapse the add-ons popover
   nbUpsSel={}; nbUpsCustom=[]; document.getElementById('nbUpsCustom').innerHTML='';
-  nbAreaName=''; nbMinWaived=false;                                   // reset branch-minimum state
+  nbAreaName='';                                                      // reset branch-minimum state
   { const w=document.getElementById('nbMinWarn'); if(w){ w.style.display='none'; w.innerHTML=''; } }
   document.getElementById('nbPaymentMethod').value='';
   document.getElementById('nbCardWrap').style.display='none';
@@ -14700,7 +14699,6 @@ let nbOwnTechs=[], nbPartner=null;
 // techs who cover that metro (e.g. 80123 -> Kregg & Steve). Null = show everyone.
 let nbZipAreaId=null;
 let nbAreaName='';        // metro name of the entered zip (Denver / Austin / Houston)
-let nbMinWaived=false;    // office chose to send below the branch minimum anyway
 // Idle assistant line shown in the dark "What's the customer's ZIP Code?" card
 // before anything is typed (or after the field is cleared) — kept as one string
 // so the reset path and the change handler never drift apart.
@@ -16180,30 +16178,23 @@ document.getElementById('nbSteps').addEventListener('click',e=>{
   if(nbHandleOptClick(e)) renderNbSteps();
 });
 // ── Branch service minimum ───────────────────────────────────────────────────
-// Minimum job price by business + metro, mirroring the online booking widget
-// (Austin is cheaper). The office New Booking never enforced this, so a sub-$139
-// job like a $99 32" mount could be created and sent. We now top up to the floor
-// (waivable) and warn. Change a number here to change that branch's minimum.
-const NB_MINIMUMS = {
-  'handy-andy': { austin: 119, default: 139 },   // matches the customer booking widget
-  'doms':       { default: 135 },                 // Denver-based
-};
-function nbCurrentMinimum(){
-  const m = NB_MINIMUMS[(current&&current.slug)] || {};
-  if(/austin/i.test(nbAreaName||'') && m.austin!=null) return m.austin;
-  return (m.default!=null) ? m.default : 0;
-}
-// Top-up needed to reach the branch minimum for a set of raw (pre-top-up)
-// selections. GDS / Assurion are $0 flows and handyman has its own 2-hr min, so
-// they're exempt; a waiver or an empty cart also yields no top-up.
+// Owner rule (2026-08-31): a flat $139 minimum, every business, every metro —
+// "if it's not 139 then I don't want it." No more per-metro discount (Austin
+// used to be $119, Dom's $135) and no waiver — the server enforces this too
+// (see MIN_TICKET_PRICE in api/admin.js's bookingCreate), so there is no path
+// to actually save a job under $139 anymore, waived or not.
+const NB_MINIMUM = 139;
+function nbCurrentMinimum(){ return NB_MINIMUM; }
+// Top-up needed to reach the $139 floor for a set of raw (pre-top-up)
+// selections. GDS / Assurion / No Charge / Handyman are exempt — see the
+// matching server-side exemptions in bookingCreate.
 function nbMinimumTopUp(rawSelections){
-  if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbNoChargeActive || nbMinWaived) return 0;
+  if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbNoChargeActive) return 0;
   const min=nbCurrentMinimum(); if(!(min>0)) return 0;
   const sum=(rawSelections||[]).reduce((s,x)=>s+x.price*x.quantity,0);
   if(!(sum>0) || sum>=min) return 0;
   return Math.round((min-sum)*100)/100;
 }
-function nbToggleMinWaive(){ nbMinWaived=!nbMinWaived; updateNbTotal(); }
 function nbCollectSelections(){
   const out=[];
   // Guaranteed Dismount: a single $0 line — the payroll engine reads this as a
@@ -16307,23 +16298,18 @@ function updateNbTotal(){
     <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:#eef2f7;border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:8px;"><span>Total</span><span style="color:#4ade80;">$${total.toFixed(2)}</span></div>`;
   renderNbMinWarn(selections);
 }
-// Below-branch-minimum banner: shows when the (non-exempt) job is under the floor,
-// noting the auto-added top-up, with a Waive/Apply toggle.
+// Below-minimum banner: shows when the (non-exempt) job is under the $139
+// floor, noting the auto-added top-up. Not waivable (owner rule 2026-08-31) —
+// the server rejects a sub-minimum job regardless, so this is informational.
 function renderNbMinWarn(selections){
   const warn=document.getElementById('nbMinWarn'); if(!warn) return;
   const min=nbCurrentMinimum();
   const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum'&&!/^multi-tv discount$|^multi-tv price discount/i.test(s.label||'')).reduce((s,x)=>s+x.price*x.quantity,0);
   const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && !nbNoChargeActive && rawSum>0 && min>0;
   if(!applies || rawSum>=min){ warn.style.display='none'; warn.innerHTML=''; return; }
-  const metro=nbAreaName?esc(nbAreaName)+' ':'';
   const topup=Math.round((min-rawSum)*100)/100;
-  if(nbMinWaived){
-    warn.className='nb-min-warn waived';
-    warn.innerHTML=`⚠️ Below the $${min} ${metro}minimum — <b>waived</b>. <a onclick="nbToggleMinWaive()">Apply minimum</a>`;
-  } else {
-    warn.className='nb-min-warn floored';
-    warn.innerHTML=`⚠️ Below the $${min} ${metro}minimum — added a <b>$${topup} Service minimum</b> line. <a onclick="nbToggleMinWaive()">Waive</a>`;
-  }
+  warn.className='nb-min-warn floored';
+  warn.innerHTML=`⚠️ Below the $${min} minimum — added a <b>$${topup} Service minimum</b> line.`;
   warn.style.display='';
 }
 // Build the booking notes. For Assurion, embed the payout breakdown in the

@@ -3250,6 +3250,12 @@ async function saveCardOnFile(pmId, cust, slug = null) {
 const PRICE_SANITY_LINE_CEILING = 2000;   // per line item / per fee, in dollars
 const PRICE_SANITY_TOTAL_CEILING = 5000;  // whole booking / estimate / charge
 
+// Owner rule (2026-08-31): flat $139 minimum on every normal paid job, every
+// business, every metro — no per-metro exception (Austin used to be $119).
+// GDS, Assurion, No Charge/Callback (all $0), and Handyman Labor (hourly) are
+// exempt. Mirrors MIN_TICKET_PRICE in api/book.js (the public widget).
+const MIN_TICKET_PRICE = 139;
+
 // Returns null when everything is within the sane range; otherwise a short,
 // specific message naming the exact absurd number and line — reused as both
 // the 409 error text and (verbatim) the client's confirmation-dialog text, so
@@ -3592,6 +3598,23 @@ async function bookingCreate(req, res, db, auth, body) {
   if (body.confirm_high_price !== true) {
     const issue = priceSanityIssue({ lines: body.selections, total: body.price });
     if (issue) return res.status(409).json({ error: issue, code: 'high_price_confirm_required' });
+  }
+
+  // Hard $139 minimum ticket (owner rule 2026-08-31): "if it's not 139 then I
+  // don't want it." Mirrors the same floor in api/book.js — this is the office
+  // New Booking tool's server-side backstop, since the client-side warn/topup
+  // in admin.html can be bypassed by anyone calling this endpoint directly.
+  // GDS, Assurion, and No Charge/Callback are intentionally $0 (the office UI
+  // sends price:0 for all three), and Handyman Labor is hourly, not a TV
+  // mounting ticket — none of those are subject to this floor. Everything
+  // else — any normal paid job, any business, any metro — is a hard reject,
+  // not a topup: the office must add more service or the booking doesn't happen.
+  {
+    const _price = Number(body.price) || 0;
+    const _isHandyman = Array.isArray(body.selections) && body.selections.some(s => /^Handyman Labor:/i.test((s && s.label) || ''));
+    if (_price > 0 && _price < MIN_TICKET_PRICE && !_isHandyman) {
+      return res.status(400).json({ error: `Jobs must total at least $${MIN_TICKET_PRICE}. Add another service or add-on before saving.`, below_minimum: true });
+    }
   }
 
   // Signed review-link token (30-day TTL) so the completion follow-up can point
@@ -10657,6 +10680,15 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     if (cust.state) patch.state = cust.state;
     if (cust.zip) patch.postal_code = cust.zip;
     if (Object.keys(patch).length) await db.from('customers').update(patch).eq('id', customer_id).eq('business_id', biz.id);
+  }
+
+  // Hard $139 minimum ticket (owner rule 2026-08-31) — see MIN_TICKET_PRICE.
+  // An estimate is office-authored, so a normal (non-$0) one should already
+  // have cleared the same floor at send time, but this is real money about to
+  // be charged on approval, so it's checked again here rather than trusted.
+  if ((Number(totals.total) || 0) > 0 && Number(totals.total) < MIN_TICKET_PRICE) {
+    const e = new Error(`This estimate totals $${Number(totals.total).toFixed(2)}, under the $${MIN_TICKET_PRICE} minimum — it cannot be booked as-is.`);
+    e.conflict = true; throw e;
   }
 
   const bookingInsert = {
