@@ -77,7 +77,7 @@ function bookingStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
-import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan } from './_lib/payroll.js';
+import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
@@ -1299,16 +1299,29 @@ function classifyService(b) {
 // expected to earn. When includePay is false (secretary) the payroll engine is
 // never run, so those private numbers don't leave the server.
 // What the business pays to BUY each bracket (hardware cost), deducted from
-// profit. Juan buys his own brackets and is reimbursed through his payout, so for
-// a Juan job the hardware cost is already counted there — don't double-deduct.
-// Customer-supplied / in-the-box brackets cost the business nothing.
+// profit. Customer-supplied / in-the-box brackets cost the business nothing.
+//
+// Juan is a special case, gated on the SAME cutoff as his payroll rate
+// (JUAN_BRACKET_ZERO_FROM, imported from payroll.js): before 2026-08-16 he
+// bought his own brackets and was reimbursed through an elevated payout rate,
+// so counting the hardware cost here too would have double-deducted it. From
+// that date on the owner buys the brackets and ships them to Juan directly —
+// a real out-of-pocket cost — while his payout reimbursement was zeroed at
+// the same time, so it now needs to be counted here exactly like every other
+// tech's bracket, or it's an invisible cost that silently overstates profit
+// on every one of his jobs. (Found 2026-09-02: profit had been overstated on
+// every Juan job with a paid bracket since the 8/16 change.)
 const BRACKET_HW_COST = [
   { test: /full\s*motion/i, cost: 60 },
   { test: /tilting/i,       cost: 28 },
   { test: /\bflat\b/i,      cost: 20 },
 ];
-function bracketHardwareCost(lineItems, hasJuan) {
-  if (hasJuan) return 0;
+function bracketHardwareCost(lineItems, hasJuan, scheduledAt) {
+  if (hasJuan) {
+    const t = scheduledAt ? new Date(scheduledAt) : null;
+    const ownBracket = t && !isNaN(t) && t < JUAN_BRACKET_ZERO_FROM;
+    if (ownBracket) return 0;
+  }
   let total = 0;
   for (const li of lineItems || []) {
     const n = String(li.name || '');
@@ -1495,8 +1508,9 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
       for (let i = 0; i < techNames.length; i++) {
         payout += Number(computeJobPay({ ...projJob, is_secondary: i > 0 }, techNames[i]).pay) || 0;
       }
-      // Bracket hardware the business bought (skipped when Juan supplies his own).
-      const bracketCost = bracketHardwareCost(b.line_items, techNames.some(isJuan));
+      // Bracket hardware the business bought (Juan's own-bracket exemption
+      // ended 2026-08-16 — see bracketHardwareCost).
+      const bracketCost = bracketHardwareCost(b.line_items, techNames.some(isJuan), b.scheduled_at);
       // Tips are 100% the tech's and pass straight through (customer -> tech), so
       // they RAISE the tech's payout but never touch business profit — profit is
       // computed from the service price and base pay only, with the tip excluded
@@ -9131,10 +9145,9 @@ async function estimateDecline(req, res, db, auth, body) {
 // is subtracted too, same as the Profit card does.
 //
 // No tech is assigned yet at quote time, so this prices the job for a standard
-// (non-Juan) tech: Juan supplies his own brackets and is reimbursed through his
-// payout, which makes his jobs look CHEAPER to the business. Quoting against
-// the standard rate is the conservative choice — the real job can only come in
-// at or above this projection, never below it.
+// tech rather than guessing who it'll land on. Juan's own rates differ (higher
+// base pay on some sizes, no bracket reimbursement since 2026-08-16 — see
+// bracketHardwareCost), but standard-rate is the conservative default here.
 const QUOTE_PROFIT_FLOOR = 50;
 // A second, independent ceiling: a share of the ticket. The profit floor alone
 // scales with the job, so a fat multi-TV ticket would have permitted several

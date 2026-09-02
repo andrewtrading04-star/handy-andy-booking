@@ -441,7 +441,11 @@ function gdsRedeemedRate(scheduledAt) {
 // that comes in the box" keys, which pay $15 to EVERY tech -- that is install
 // labor, not a bracket Juan bought, and zeroing it would underpay him relative
 // to the other techs for identical work.
-const JUAN_BRACKET_ZERO_FROM = new Date('2026-08-16T00:00:00Z');
+// Exported: api/admin.js's bracketHardwareCost() uses the same cutoff to
+// decide whether a Juan job's bracket is a real business cost (see the
+// matching comment there) — Juan stopped buying his own brackets on this
+// same date, which is WHY his payout reimbursement was zeroed here.
+export const JUAN_BRACKET_ZERO_FROM = new Date('2026-08-16T00:00:00Z');
 const JUAN_BRACKET_KEYS = new Set([
   'flat bracket', 'flat',
   'tilting bracket', 'tilting',
