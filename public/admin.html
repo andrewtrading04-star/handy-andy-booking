@@ -11104,6 +11104,12 @@ async function renderBrackets(){
           </thead>
           <tbody>`;
 
+    // Brackets are a shared physical resource — a tech carries one truck stock
+    // regardless of which company's job they're on, so this list always spans
+    // every business's roster now (see the matching comment on the
+    // bracket_inventory endpoint). The company tag just tells the office where
+    // that person's roster row normally lives; it's not a filter.
+    const BIZ_LABEL={'doms':"Dom's",'handy-andy':'Handy Andy'};
     for(const tech of inv.inventory||[]){
       const total=tech.flat+tech.tilting+tech.full_motion;
       const lowTypes=invLowBracketTypes(tech);
@@ -11113,8 +11119,9 @@ async function renderBrackets(){
       const bChip=bLow?(role==='owner'
         ? `<span class="inv-chip" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})" title="Low on ${esc(lowLabel)} — add stock for ${esc(tech.technician_name)}">⚠ Reorder ${esc(lowLabel)}</span>`
         : `<span class="inv-chip static" title="Low on ${esc(lowLabel)}">⚠ Low: ${esc(lowLabel)}</span>`):'';
+      const bizTag=tech.business?`<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--mute);background:var(--line2);padding:2px 6px;border-radius:6px;vertical-align:middle;">${esc(BIZ_LABEL[tech.business]||tech.business)}</span>`:'';
       html+=`<tr>
-        <td>${esc(tech.technician_name)}</td>
+        <td>${esc(tech.technician_name)}${bizTag}</td>
         <td class="bracket-qty"><span class="${invLowType(tech,'flat')?'low':''}">${tech.flat}</span></td>
         <td class="bracket-qty"><span class="${invLowType(tech,'tilting')?'low':''}">${tech.tilting}</span></td>
         <td class="bracket-qty"><span class="${invLowType(tech,'full_motion')?'low':''}">${tech.full_motion}</span></td>

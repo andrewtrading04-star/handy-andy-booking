@@ -11803,41 +11803,53 @@ async function secretariesList(req, res, db, auth) {
 // ── Bracket Inventory ────────────────────────────────────────────────────────
 // Get current bracket inventory for all technicians in the business
 async function bracketInventory(req, res, db, auth) {
+  // A tech carries ONE physical stock of brackets in their truck regardless of
+  // which company's customer they're serving that day (see the matching
+  // comment on adjustBracketInventory) — same "shared resource" reasoning
+  // bracketPurchases already uses. So this reads across EVERY active
+  // business's technicians, not just the one currently loaded in the
+  // dashboard (found 2026-09-02: the Inventory tab only ever showed whoever
+  // belonged to the currently-viewed company, silently hiding the other
+  // company's techs entirely). resolveBusiness still runs first, purely to
+  // enforce the caller's own auth/scope.
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
+
+  const { data: bizes } = await db.from('businesses').select('id, slug').eq('active', true);
+  const slugById = new Map((bizes || []).map(b => [b.id, b.slug]));
+  const bizIds = (bizes || []).map(b => b.id);
 
   let { data: inv, error } = await db.from('bracket_inventory')
-    .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, appletv_bracket_qty, updated_at,
+    .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, appletv_bracket_qty, updated_at,
              technician:technicians ( id, name )`)
-    .eq('business_id', bizId);
+    .in('business_id', bizIds);
   // appletv_bracket_qty arrives with migration 0087; degrade to the pre-0087
   // select, then the pre-0039 select, so this endpoint never breaks on an
   // environment that hasn't run every migration yet.
   if (error && /appletv_bracket_qty/.test(error.message || '')) {
     ({ data: inv, error } = await db.from('bracket_inventory')
-      .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
+      .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
                technician:technicians ( id, name )`)
-      .eq('business_id', bizId));
+      .in('business_id', bizIds));
   }
   // wire_plate_qty arrives with migration 0039; degrade gracefully if not applied yet.
   if (error && /wire_plate_qty/.test(error.message || '')) {
     ({ data: inv, error } = await db.from('bracket_inventory')
-      .select(`id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
+      .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
                technician:technicians ( id, name )`)
-      .eq('business_id', bizId));
+      .in('business_id', bizIds));
   }
   if (error) throw error;
 
-  // Ensure every active tech has an inventory row (create if missing)
+  // Ensure every active tech (on ANY business) has an inventory row (create if missing)
   const { data: techs } = await db.from('technicians')
-    .select('id, name').eq('business_id', bizId).eq('active', true).order('name');
+    .select('id, name, business_id').in('business_id', bizIds).eq('active', true).order('name');
 
   const invByTech = new Map((inv || []).map(i => [i.technician_id, i]));
   const missing = (techs || []).filter(t => !invByTech.has(t.id));
 
   if (missing.length) {
     const toInsert = missing.map(t => ({
-      business_id: bizId,
+      business_id: t.business_id,
       technician_id: t.id,
       flat_qty: 0,
       tilting_qty: 0,
@@ -11849,6 +11861,7 @@ async function bracketInventory(req, res, db, auth) {
   const final = (inv || []).concat(
     missing.map(t => ({
       id: null,
+      business_id: t.business_id,
       technician_id: t.id,
       flat_qty: 0,
       tilting_qty: 0,
@@ -11858,31 +11871,33 @@ async function bracketInventory(req, res, db, auth) {
     }))
   );
 
-  // Which techs actually STOCK wire-concealment plates? The wire_plate_qty
+  // Which BUSINESSES actually stock wire-concealment plates? The wire_plate_qty
   // column is `not null default 0`, so a 0 can mean either "ran out" or "never
   // tracked". Businesses that don't do behind-the-wall wire concealment (e.g.
   // Handy Andy) sit at 0 forever, so a blanket "0 <= 3 = low" fires a permanent
   // false alarm. Distinguish via purchase history: a business is plate-tracked
-  // if it has ever ordered plates; a tech is plate-tracked if their business is
+  // if it has ever ordered plates; a tech is plate-tracked if THEIR business is
   // OR they currently hold >0. Untracked techs are excluded from plate low-stock
   // warnings; a tracked tech who genuinely burns to 0 STILL warns (real shortage).
-  let bizPlateTracked = false;
+  // Computed per business now (was a single bool for just the loaded business).
+  const plateTrackedBizIds = new Set();
   try {
-    const { count } = await db.from('wire_plate_purchases')
-      .select('id', { count: 'exact', head: true }).eq('business_id', bizId);
-    bizPlateTracked = (count || 0) > 0;
+    const { data: plateRows } = await db.from('wire_plate_purchases')
+      .select('business_id').in('business_id', bizIds);
+    for (const r of (plateRows || [])) plateTrackedBizIds.add(r.business_id);
   } catch { /* table missing on older deploys → treat as untracked (no false alarms) */ }
 
   return res.status(200).json({
     inventory: final.map(i => ({
       technician_id: i.technician_id,
       technician_name: i.technician?.name || 'Unknown',
+      business: slugById.get(i.business_id) || null,
       flat: i.flat_qty || 0,
       tilting: i.tilting_qty || 0,
       full_motion: i.full_motion_qty || 0,
       total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
       wire_plate: i.wire_plate_qty || 0,
-      wire_plate_tracked: bizPlateTracked || (i.wire_plate_qty || 0) > 0,
+      wire_plate_tracked: plateTrackedBizIds.has(i.business_id) || (i.wire_plate_qty || 0) > 0,
       appletv_bracket: i.appletv_bracket_qty || 0,
       updated_at: i.updated_at,
     })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
@@ -12063,17 +12078,21 @@ async function bracketUpdate(req, res, db, auth, body) {
 
   if (!techId) return res.status(400).json({ error: 'technician_id required' });
 
-  // Verify tech belongs to the business
-  const { data: tech } = await db.from('technicians').select('id').eq('id', techId).eq('business_id', bizId).single();
+  // Brackets are shared across companies (same reasoning as bracket_inventory
+  // and bracketAssign) — the Inventory tab now lists every business's techs
+  // together, so this edits the tech's OWN home business row, not whichever
+  // business tab happened to be loaded when the office opened the modal.
+  const { data: tech } = await db.from('technicians').select('id, business_id').eq('id', techId).single();
   if (!tech) return res.status(404).json({ error: 'Technician not found' });
+  const techBizId = tech.business_id;
 
   // Get or create inventory row
   let { data: inv } = await db.from('bracket_inventory')
-    .select('*').eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+    .select('*').eq('technician_id', techId).eq('business_id', techBizId).maybeSingle();
 
   if (!inv) {
     await db.from('bracket_inventory').insert({
-      business_id: bizId,
+      business_id: techBizId,
       technician_id: techId,
       flat_qty: 0,
       tilting_qty: 0,
@@ -12117,7 +12136,7 @@ async function bracketUpdate(req, res, db, auth, body) {
   if (wantsWirePlate && hasWirePlateCol) patch.wire_plate_qty = wirePlate;
   if (wantsAppleTv && hasAppleTvCol) patch.appletv_bracket_qty = appleTv;
   const { error: e1 } = await db.from('bracket_inventory').update(patch)
-    .eq('technician_id', techId).eq('business_id', bizId);
+    .eq('technician_id', techId).eq('business_id', techBizId);
   if (e1) throw e1;
 
   // Log manual corrections too — a 'set' or 'adjust' changes the documented
@@ -12135,7 +12154,7 @@ async function bracketUpdate(req, res, db, auth, body) {
       if (wantsAppleTv && hasAppleTvCol && (inv.appletv_bracket_qty || 0) !== appleTv) changes.push(`appletv ${inv.appletv_bracket_qty || 0}→${appleTv}`);
       if (changes.length) {
         await db.from('bracket_usage_logs').insert({
-          business_id: bizId, booking_id: body.booking_id || null, technician_id: techId,
+          business_id: techBizId, booking_id: body.booking_id || null, technician_id: techId,
           logged_by_kind: 'admin',
           notes: `manual ${action} by office: ${changes.join(', ')}${body.notes ? ` — ${body.notes}` : ''}`,
         });
@@ -12146,7 +12165,7 @@ async function bracketUpdate(req, res, db, auth, body) {
   // Log usage if applicable
   if (action === 'usage' && (body.flat_delta || body.tilting_delta || body.full_motion_delta || wantsWirePlate || wantsAppleTv)) {
     const log = {
-      business_id: bizId,
+      business_id: techBizId,
       booking_id: body.booking_id || null,
       technician_id: techId,
       flat_used: Math.abs(body.flat_delta || 0),
@@ -12167,7 +12186,7 @@ async function bracketUpdate(req, res, db, auth, body) {
   if (wantsAppleTv && hasAppleTvCol && action !== 'usage' && body.appletv_bracket_delta > 0) {
     try {
       await db.from('appletv_bracket_log').insert({
-        business_id: bizId, technician_id: techId,
+        business_id: techBizId, technician_id: techId,
         qty: body.appletv_bracket_delta, added_by: auth.name || auth.role || 'owner',
         notes: body.notes || null,
       });
@@ -12513,10 +12532,20 @@ async function bracketAssign(req, res, db, auth, body) {
   if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
   if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
 
-  // Verify tech belongs to the business.
+  // Brackets are shared across companies (same "one truck stock" reasoning as
+  // bracket_inventory/bracketPurchases) — the delivery is a real physical
+  // package, and the tech who actually receives it may belong to either
+  // business, not just the one whose purchase-row copy is loaded here. So this
+  // does NOT filter by bizId, unlike the purchase lookup above (which legitimately
+  // is one specific business's mirrored copy of the order).
   const { data: tech } = await db.from('technicians')
-    .select('id, name').eq('id', techId).eq('business_id', bizId).maybeSingle();
+    .select('id, name, business_id').eq('id', techId).eq('active', true).maybeSingle();
   if (!tech) return res.status(404).json({ error: 'Technician not found' });
+  // The tech's OWN home business, not the purchase-row's bizId — a Handy Andy
+  // tech assigned from the Dom's tab must still credit HIS bracket_inventory
+  // row, or this creates a phantom duplicate stock row under the wrong
+  // business (the exact bug class just fixed in bracket_inventory itself).
+  const techBizId = tech.business_id;
 
   const flat = purchase.flat_qty || 0;
   const tilting = purchase.tilting_qty || 0;
@@ -12550,7 +12579,7 @@ async function bracketAssign(req, res, db, auth, body) {
   if (credited) {
     const { data: inv } = await db.from('bracket_inventory')
       .select('id, flat_qty, tilting_qty, full_motion_qty')
-      .eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+      .eq('technician_id', techId).eq('business_id', techBizId).maybeSingle();
     if (inv) {
       const { error: upErr } = await db.from('bracket_inventory').update({
         flat_qty: (inv.flat_qty || 0) + flat,
@@ -12560,7 +12589,7 @@ async function bracketAssign(req, res, db, auth, body) {
       if (upErr) throw upErr;
     } else {
       const { error: insErr } = await db.from('bracket_inventory').insert({
-        business_id: bizId,
+        business_id: techBizId,
         technician_id: techId,
         flat_qty: flat,
         tilting_qty: tilting,
