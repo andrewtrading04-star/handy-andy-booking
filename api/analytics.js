@@ -1,5 +1,5 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
-import { verifyToken } from './_lib/auth.js';
+import { verifyToken, signToken } from './_lib/auth.js';
 import { sendSMS } from './_lib/sms.js';
 import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 import crypto from 'crypto';
@@ -454,7 +454,7 @@ async function handleVoiceInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled')
       .eq('phone', to).maybeSingle();
     line = data && data.active ? data : null;
 
@@ -510,6 +510,13 @@ async function handleVoiceInbound(req, res) {
   // with — same principle as the IVR gate below, just skipping the prompt
   // entirely for a number that's already proven itself unwanted.
   if (blocked) return xml(res, '<Response><Reject/></Response>');
+
+  // AI voice-bot pilot (2026-09-03): a line with ai_bot_enabled routes into the
+  // bot flow instead of ringing a human at all. Deliberately bypasses the IVR
+  // spam gate — this is a single zero-traffic test number for now, not a
+  // public-facing line yet; add the gate back here before ever enabling this
+  // on a real ad-driven number.
+  if (line && line.ai_bot_enabled) return xml(res, '<Response><Redirect method="POST">' + xmlEsc(voiceUrl('voice_bot_start', { sid })) + '</Redirect></Response>');
 
   if (line && line.ivr_gate_enabled) return xml(res, ivrGateTwiml(sid));
   return xml(res, dialTwiml(line, params.From, sid));
@@ -613,6 +620,571 @@ async function handleVoiceRecording(req, res) {
   return xml(res, '<Response><Say voice="Polly.Joanna">Thanks. We will call you right back.</Say><Hangup/></Response>');
 }
 
+// ── AI Voice Bot (pilot, 2026-09-03) ─────────────────────────────────────────
+// A turn-based Twilio <Gather>/<Say> loop that walks a caller through the same
+// booking conversation the Call Wizard scripts for a human secretary (see
+// public/admin.html renderCallWiz()): category -> zip -> TV questions (or a
+// handyman description) -> real availability -> priced recap -> customer info
+// -> booking_create. Deliberately NOT Media Streams / ConversationRelay — every
+// turn is a plain webhook round-trip, so it costs nothing beyond ordinary
+// Twilio voice minutes plus the included Gather speech recognition. No LLM in
+// the loop at all: every question is a numbered menu matched deterministically
+// against the SAME service catalog the office prices from (api/admin.js's
+// `services`/`service_options` actions), so pricing can never drift from what
+// a human would quote, and there's no API key to configure for this to work.
+//
+// Session state lives in app.voice_bot_sessions (one row per CallSid) because
+// serverless functions are stateless between webhook hits. Gated per-line by
+// tracking_numbers.ai_bot_enabled (default false everywhere) — see the branch
+// in handleVoiceInbound above. Pilot scope is intentionally narrow: no
+// discount negotiation, no GDS/Assurion/cross-company, no card collection
+// (books with card_skipped-equivalent, same as the human "collect at service"
+// escape hatch) — any of those, or two failed/ambiguous answers in a row on
+// any single question, transfers the live call to the line's own forward_to
+// human, reusing dialTwiml() so nothing about human fallback is reimplemented.
+
+const AFTER_HOURS_SLOT_KEY = 's5';
+function botAfterHoursFee(slotKey, dateStr) {
+  if (slotKey !== AFTER_HOURS_SLOT_KEY) return 0;
+  const isSunday = dateStr ? new Date(dateStr + 'T12:00:00').getDay() === 0 : false;
+  return isSunday ? 100 : 75;
+}
+const BOT_TAX_RATE = 0.0825;     // matches New Booking / Call Wizard's TAX_RATE
+const BOT_MIN_TICKET = 139;      // matches MIN_TICKET_PRICE in api/admin.js/api/book.js
+const BOT_HANDYMAN_HOURLY = 85;  // matches HANDYMAN_HOURLY in public/admin.html
+
+// A short-lived internal admin token, minted in-process (same SESSION_SECRET
+// the real dashboard login signs with) so the bot can call the office's own
+// authenticated actions — zip/availability/pricing/booking — instead of
+// reimplementing any of that logic. role:'owner', scope:'all' so it can act
+// on ANY business (the bot may be answering for a lead-gen brand that isn't
+// 'handy-andy' or 'doms'), same as a real owner login would.
+function botToken() {
+  return signToken({ kind: 'admin', role: 'owner', scope: 'all', name: 'AI Voice Bot' }, 3600);
+}
+async function adminApi(action, { method = 'GET', params = {}, body = null } = {}) {
+  const qs = new URLSearchParams({ action, ...params }).toString();
+  const url = `${publicBase()}/api/admin?${qs}`;
+  const r = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${botToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await r.json(); } catch (_) { /* non-JSON error page */ }
+  if (!r.ok) {
+    const e = new Error(data.error || `admin ${action} failed (${r.status})`);
+    e.status = r.status; e.data = data;
+    throw e;
+  }
+  return data;
+}
+
+async function botSessionGet(db, callSid) {
+  const { data } = await db.from('voice_bot_sessions').select('*').eq('call_sid', callSid).maybeSingle();
+  return data;
+}
+async function botSessionSave(db, callSid, patch) {
+  await db.from('voice_bot_sessions').update({ ...patch, updated_at: new Date().toISOString() }).eq('call_sid', callSid);
+}
+
+// ── TwiML builders (bot-specific; reuses xml/xmlEsc/voiceUrl from above) ─────
+function botMenuTwiml(action, sayIntro, options) {
+  const lines = options.map((o, i) => `Press or say ${i + 1} for ${o.say}.`).join(' ');
+  return '<Response><Gather input="speech dtmf" numDigits="1" timeout="6" speechTimeout="auto" action="'
+    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(`${sayIntro} ${lines}`) + '</Say></Gather>'
+    + '<Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
+}
+function botOpenTwiml(action, sayIntro) {
+  return '<Response><Gather input="speech dtmf" timeout="8" speechTimeout="auto" action="'
+    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(sayIntro) + '</Say></Gather>'
+    + '<Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
+}
+function botSayRedirect(sayText, action) {
+  return '<Response><Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say><Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
+}
+function botHangup(sayText) {
+  return '<Response>' + (sayText ? '<Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say>' : '') + '<Hangup/></Response>';
+}
+// Escalation: reuses dialTwiml() verbatim (whisper/disclosure/recording/
+// voicemail fallback all come along for free), just prefixes one spoken line.
+function botTransfer(line, callerFrom, sid, sayFirst) {
+  const twiml = dialTwiml(line, callerFrom, sid);
+  return sayFirst ? twiml.replace('<Response>', '<Response><Say voice="Polly.Joanna">' + xmlEsc(sayFirst) + '</Say>') : twiml;
+}
+
+// ── Menu answer matching (deterministic — no LLM) ────────────────────────────
+const NUM_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const BOT_STOPWORDS = new Set(['the', 'a', 'an', 'is', 'are', 'has', 'have', 'will', 'with', 'for', 'and', 'or', 'to', 'of', 'tv', 'on', 'in', 'my', 'i']);
+function botTermsFor(label) {
+  const bare = String(label || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim();
+  const words = bare.split(/\s+/).filter(w => w.length >= 3 && !BOT_STOPWORDS.has(w));
+  const terms = new Set(words);
+  for (let i = 0; i < words.length - 1; i++) terms.add(words[i] + ' ' + words[i + 1]);
+  return [...terms];
+}
+// options: [{ say, terms, ...anything }]. digits/speech come straight off the
+// Twilio Gather POST (params.Digits / params.SpeechResult).
+function botMatchMenu(options, { digits, speech }) {
+  if (digits) {
+    const idx = parseInt(digits, 10) - 1;
+    if (idx >= 0 && idx < options.length) return options[idx];
+  }
+  const s = (speech || '').toLowerCase().trim();
+  if (!s) return null;
+  const asNum = parseInt(s, 10);
+  if (Number.isFinite(asNum) && asNum >= 1 && asNum <= options.length) return options[asNum - 1];
+  const firstWord = s.split(/\s+/)[0];
+  const wIdx = NUM_WORDS.indexOf(firstWord);
+  if (wIdx >= 1 && wIdx <= options.length) return options[wIdx - 1];
+  let best = null, bestLen = 0;
+  for (const o of options) {
+    for (const t of (o.terms || [])) {
+      if (t && s.includes(t) && t.length > bestLen) { bestLen = t.length; best = o; }
+    }
+  }
+  return best;
+}
+function botYes(speech, digits) {
+  if (digits === '1') return true;
+  if (digits === '2') return false;
+  const s = (speech || '').toLowerCase();
+  if (/\b(yes|yeah|yep|sure|correct|that works|sounds good|book it)\b/.test(s)) return true;
+  if (/\b(no|nope|not|different|change)\b/.test(s)) return false;
+  return null;
+}
+function botParseDigitsFrom(speech, digits, count) {
+  if (digits && new RegExp(`^\\d{${count}}$`).test(digits)) return digits;
+  const stripped = String(speech || '').replace(/\D/g, '');
+  if (stripped.length === count) return stripped;
+  if (count === 10 && stripped.length === 11 && stripped.startsWith('1')) return stripped.slice(1);
+  const DIGIT_WORDS = { zero: '0', oh: '0', one: '1', two: '2', to: '2', too: '2', three: '3', four: '4', for: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9' };
+  let out = '';
+  for (const w of String(speech || '').toLowerCase().split(/\s+/)) {
+    if (/^\d$/.test(w)) out += w;
+    else if (DIGIT_WORDS[w] != null) out += DIGIT_WORDS[w];
+  }
+  return out.length === count ? out : null;
+}
+function botSpokenMoney(n) {
+  const v = Math.round(Number(n) || 0);
+  return `${v} dollar${v === 1 ? '' : 's'}`;
+}
+
+// Fetches the TV-mounting option catalog once (at the zip step) and caches it
+// on the session so every later question is a plain lookup, not a re-fetch.
+// Mirrors exactly what serviceOptions() returns; only the fields the bot
+// needs (id, label, price, sizecat) survive into the cached copy.
+async function botLoadCatalog(businessSlug, serviceId) {
+  const { groups } = await adminApi('service_options', { params: { business: businessSlug, service_id: serviceId } });
+  const byKey = {};
+  for (const g of (groups || [])) {
+    byKey[g.key] = (g.options || []).map(o => ({
+      id: o.id, label: o.label, price: Number(o.price) || 0,
+      sizecat: o.metadata && o.metadata.sizecat || null,
+    }));
+  }
+  return byKey;
+}
+function botMenuOptionsFrom(catalogGroup) {
+  return (catalogGroup || []).map(o => ({ say: o.label, terms: botTermsFor(o.label), catalogOpt: o }));
+}
+
+// Builds the priced selections array in the same shape booking_create expects
+// (mirrors nbCollectSelections()'s output shape: option_id/label/price/qty),
+// plus travel surcharge and after-hours fee as their own lines, plus a
+// "Service minimum" top-up if the raw total is under the $139 floor — the
+// exact same auto-topup behavior nbMinimumTopUp() applies in the office tool.
+function botBuildSelections(d) {
+  const out = [];
+  if (d.category === 'tv') {
+    for (const key of ['size', 'bracket', 'fireplace', 'surface', 'wires', 'lifting', 'extras']) {
+      const picked = d.answers && d.answers[key];
+      if (picked && picked.price > 0) out.push({ option_id: picked.id || null, label: picked.label, price: picked.price, quantity: 1 });
+      else if (picked) out.push({ option_id: picked.id || null, label: picked.label, price: 0, quantity: 1 });
+    }
+  } else if (d.category === 'handyman') {
+    const hrs = Math.max(2, Number(d.handymanHours) || 2);
+    out.push({ option_id: null, label: `Handyman Labor: ${d.handymanDesc || 'as described'} — ${hrs} hour${hrs === 1 ? '' : 's'}`, price: BOT_HANDYMAN_HOURLY, quantity: hrs });
+  }
+  if (d.surcharge > 0) out.push({ option_id: null, label: 'Travel', price: d.surcharge, quantity: 1 });
+  const ahFee = botAfterHoursFee(d.slotKey, d.date);
+  if (ahFee > 0) out.push({ option_id: null, label: 'After-Hours Service Fee (8 PM)', price: ahFee, quantity: 1 });
+  const rawSum = out.filter(x => x.label !== 'Service minimum').reduce((s, x) => s + x.price * x.quantity, 0);
+  if (rawSum > 0 && rawSum < BOT_MIN_TICKET) out.push({ option_id: null, label: 'Service minimum', price: Math.round((BOT_MIN_TICKET - rawSum) * 100) / 100, quantity: 1 });
+  return out;
+}
+
+// POST /api/analytics?action=voice_bot_start — the very first turn on a
+// bot-enabled line (redirected here from handleVoiceInbound).
+async function handleVoiceBotStart(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_bot_start', { sid });
+  if (!params) return;
+  const to = tenDigits(params.To);
+  const from = params.From || '';
+  const db = serviceClient();
+  let line = null;
+  try {
+    const { data } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone, ai_bot_enabled')
+      .eq('phone', to).maybeSingle();
+    line = data || null;
+    // Safety net: got redirected here but the flag is off (race with someone
+    // flipping it mid-call) — fall back to the normal human-forwarding path
+    // rather than dead-ending the caller.
+    if (!line || !line.ai_bot_enabled) return xml(res, dialTwiml(line, from, params.CallSid || ''));
+
+    const { data: biz } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', line.business_slug).maybeSingle();
+    if (!biz) return xml(res, botHangup("Sorry, we're having trouble right now. Please call back in a few minutes."));
+
+    const { services: svcs } = await adminApi('services', { params: { business: biz.slug } }).catch(() => ({ services: [] }));
+    const tvService = (svcs || []).find(s => /tv\s*mount|tv\s*install/i.test(s.category || s.name || ''));
+    const handymanService = (svcs || []).find(s => /handyman/i.test(s.category || s.name || ''));
+    if (!tvService && !handymanService) return xml(res, botHangup("Sorry, we're having trouble right now. Please call back in a few minutes."));
+
+    const onlyOne = (tvService && !handymanService) ? 'tv' : (!tvService && handymanService) ? 'handyman' : null;
+    const session = {
+      call_sid: params.CallSid || '',
+      business_id: biz.id, business_slug: biz.slug,
+      tracking_number: line.phone, caller_phone: tenDigits(from),
+      step: onlyOne ? 'zip' : 'category',
+      data: {
+        tvServiceId: tvService ? tvService.id : null,
+        handymanServiceId: handymanService ? handymanService.id : null,
+        category: onlyOne, businessName: biz.name, timezone: biz.timezone || 'America/Denver',
+        forwardTo: line.forward_to, answers: {},
+      },
+      retry_count: 0,
+    };
+    await db.from('voice_bot_sessions').upsert(session, { onConflict: 'call_sid' });
+
+    const greetName = biz.name || 'our company';
+    const turnAction = voiceUrl('voice_bot_turn', { sid: session.call_sid });
+    if (!onlyOne) {
+      return xml(res, botMenuTwiml(turnAction, `Thanks for calling ${greetName}! I can help you book an appointment.`,
+        [{ say: 'TV mounting' }, { say: 'handyman services' }]));
+    }
+    return xml(res, botOpenTwiml(turnAction,
+      `Thanks for calling ${greetName}! I can help you book a ${onlyOne === 'tv' ? 'TV mounting' : 'handyman'} appointment. What's your 5 digit zip code?`));
+  } catch (e) {
+    console.error('[voice_bot_start] failed:', e.message);
+    return xml(res, botTransfer(line, from, params.CallSid || '', "Sorry, I'm having trouble right now — let me connect you with someone."));
+  }
+}
+
+// POST /api/analytics?action=voice_bot_turn&sid=... — every subsequent Gather
+// result on a bot call lands here. Loads the session by CallSid, dispatches on
+// session.step, and returns the next question (or books / transfers / hangs
+// up). One big step switch, matching the size of everything else this file's
+// voice handlers already do inline — see the file-level comment above for the
+// overall design.
+async function handleVoiceBotTurn(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_bot_turn', { sid });
+  if (!params) return;
+  const digits = (params.Digits || '').toString().trim();
+  const speech = (params.SpeechResult || '').toString().trim();
+  const callerFrom = params.From || '';
+  const db = serviceClient();
+  const action = voiceUrl('voice_bot_turn', { sid });
+
+  const session = await botSessionGet(db, sid);
+  if (!session) return xml(res, botHangup('Sorry, this call has expired. Please call back.'));
+  const d = session.data || {};
+  const step = session.step;
+
+  // Line row, re-fetched fresh (needed for any transfer on this turn — never
+  // trust a stale copy of forward_to/recording settings from session start).
+  const { data: line } = await db.from('tracking_numbers')
+    .select('phone, label, business_slug, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+    .eq('phone', session.tracking_number).maybeSingle();
+
+  const retry = async (sayText) => {
+    const n = (session.retry_count || 0) + 1;
+    if (n > 2) {
+      await botSessionSave(db, sid, { retry_count: 0 });
+      return xml(res, botTransfer(line, callerFrom, sid, "Let me connect you with someone who can help with that."));
+    }
+    await botSessionSave(db, sid, { retry_count: n });
+    return xml(res, botSayRedirect(sayText, action));
+  };
+  const goto = async (nextStep, patch, sayText, twimlFn) => {
+    const newData = { ...d, ...(patch || {}) };
+    // Awaited: some twimlFns (schedule/recap/booking) are async, and passing an
+    // un-awaited Promise straight to xml() would send "[object Promise]" as
+    // the TwiML body instead of the real markup.
+    const twiml = await twimlFn(newData);
+    await botSessionSave(db, sid, { step: nextStep, data: newData, retry_count: 0 });
+    return xml(res, twiml);
+  };
+
+  try {
+    switch (step) {
+
+      case 'category': {
+        const opt = botMatchMenu([
+          { say: 'tv', terms: ['tv', 'mount', 'mounting', 'television'] },
+          { say: 'handyman', terms: ['handyman', 'handy', 'handywork'] },
+        ], { digits, speech });
+        if (!opt) return retry("Sorry, I didn't catch that. Press or say 1 for TV mounting, or 2 for handyman services.");
+        const cat = opt.say === 'tv' ? 'tv' : 'handyman';
+        return goto('zip', { category: cat },
+          null, () => botOpenTwiml(action, `Great. What's your 5 digit zip code?`));
+      }
+
+      case 'zip': {
+        const zip = botParseDigitsFrom(speech, digits, 5);
+        if (!zip) return retry("Sorry, I need your 5 digit zip code. You can say it or enter it on the keypad.");
+        let za;
+        try { za = await adminApi('zip_area', { params: { business: session.business_slug, postal_code: zip } }); }
+        catch (e) { return retry("Sorry, I couldn't check that zip code. Could you say it again?"); }
+        if (!za.service_area_id) {
+          await botSessionSave(db, sid, { retry_count: 0 });
+          return xml(res, botTransfer(line, callerFrom, sid, "That zip code is outside our normal service area — let me connect you with someone who can take a closer look."));
+        }
+        const nd = { ...d, zip, surcharge: Number(za.surcharge) || 0 };
+        if (nd.category === 'tv') {
+          let catalog;
+          try { catalog = await botLoadCatalog(session.business_slug, nd.tvServiceId); }
+          catch (e) { return retry("Sorry, I'm having trouble pulling up pricing. Could you give me a moment and repeat your last answer?"); }
+          nd.catalog = catalog;
+          return goto('tv_size', nd, null, (nn) => botMenuTwiml(action, "What size is your TV?", botMenuOptionsFrom(nn.catalog.size)));
+        }
+        return goto('handyman_desc', nd, null, () => botOpenTwiml(action, "What do you need done?"));
+      }
+
+      // ── TV Mounting path ──────────────────────────────────────────────────
+      case 'tv_size': {
+        const opts = botMenuOptionsFrom(d.catalog.size);
+        const opt = botMatchMenu(opts, { digits, speech });
+        if (!opt) return retry("Sorry, which size TV is it — you can say the size, like 60 to 69 inches?");
+        const answers = { ...d.answers, size: opt.catalogOpt };
+        const bracketOpts = d.catalog.bracket || [];
+        if (!bracketOpts.length) {
+          return goto('tv_fireplace', { answers }, null, (nn) => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
+        }
+        return goto('tv_bracket', { answers }, null, (nn) => botMenuTwiml(action, "Do you already have a mounting bracket, or would you like us to bring one?", botMenuOptionsFrom(nn.catalog.bracket)));
+      }
+      case 'tv_bracket': {
+        const opts = botMenuOptionsFrom(d.catalog.bracket);
+        const opt = botMatchMenu(opts, { digits, speech });
+        if (!opt) return retry("Sorry, do you have your own bracket, or should we bring a flat, tilting, or full motion bracket?");
+        const answers = { ...d.answers, bracket: opt.catalogOpt };
+        return goto('tv_fireplace', { answers }, null, () => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
+      }
+      case 'tv_fireplace': {
+        const yn = botYes(speech, digits);
+        if (yn === null) return retry("Sorry, is the TV going over a fireplace — yes or no?");
+        const fpOpts = d.catalog.fireplace || [];
+        // "TV NOT above a fireplace" contains the substring "above a
+        // fireplace" too, so a plain regex test can't tell the two options
+        // apart — a label only counts as the POSITIVE one if it also lacks "not".
+        const isAboveFireplace = (label) => /above a fireplace/i.test(label) && !/\bnot\b/i.test(label);
+        const picked = fpOpts.find(o => isAboveFireplace(o.label) === yn);
+        const answers = { ...d.answers, fireplace: picked || { label: yn ? 'TV above a fireplace' : 'TV NOT above a fireplace', price: 0 } };
+        return goto('tv_surface', { answers }, null, (nn) => botMenuTwiml(action, "What kind of wall is it going on?", botMenuOptionsFrom(nn.catalog.surface)));
+      }
+      case 'tv_surface': {
+        const opts = botMenuOptionsFrom(d.catalog.surface);
+        const opt = botMatchMenu(opts, { digits, speech });
+        if (!opt) return retry("Sorry, is the wall drywall, brick, stone or tile, or stucco?");
+        const answers = { ...d.answers, surface: opt.catalogOpt };
+        const wireOpts = d.catalog.wires || [];
+        if (!wireOpts.length) return goto('tv_extras', { answers }, null, (nn) => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
+        return goto('tv_wires', { answers }, null, (nn) => botMenuTwiml(action, "Would you like to hide the wires?", botMenuOptionsFrom(nn.catalog.wires)));
+      }
+      case 'tv_wires': {
+        const opts = botMenuOptionsFrom(d.catalog.wires);
+        const opt = botMatchMenu(opts, { digits, speech });
+        if (!opt) return retry("Sorry, would you like the wires hidden behind the wall, hidden outside the wall, or left hanging?");
+        const answers = { ...d.answers, wires: opt.catalogOpt };
+        const sizecat = answers.size && answers.size.sizecat;
+        const needsLifting = sizecat && sizecat !== 'small' && (d.catalog.lifting || []).length;
+        if (needsLifting) {
+          return goto('tv_lifting', { answers }, null, (nn) => botMenuTwiml(action, "Since it's a larger TV, will you be able to help lift it, or should we send a second technician?", botMenuOptionsFrom(nn.catalog.lifting)));
+        }
+        return goto('tv_extras', { answers }, null, () => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
+      }
+      case 'tv_lifting': {
+        const opts = botMenuOptionsFrom(d.catalog.lifting);
+        const opt = botMatchMenu(opts, { digits, speech });
+        if (!opt) return retry("Sorry, will you be able to help lift the TV, or would you like a second technician?");
+        const answers = { ...d.answers, lifting: opt.catalogOpt };
+        return goto('tv_extras', { answers }, null, () => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
+      }
+      case 'tv_extras': {
+        const s = speech.toLowerCase();
+        let answers = d.answers;
+        if (!/\b(no|none|nothing|that's it|that is it|nope)\b/.test(s) && !digits) {
+          const opts = botMenuOptionsFrom((d.catalog.extras || []).filter(o => !/^other$/i.test(o.label)));
+          const opt = botMatchMenu(opts, { digits: '', speech });
+          if (opt) answers = { ...d.answers, extras: opt.catalogOpt };
+        }
+        return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
+      }
+
+      // ── Handyman path ──────────────────────────────────────────────────────
+      case 'handyman_desc': {
+        if (!speech) return retry("Sorry, could you describe what you need done?");
+        return goto('handyman_hours', { handymanDesc: speech }, null, () => botOpenTwiml(action, `Got it. About how many hours of work is that, at ${BOT_HANDYMAN_HOURLY} dollars an hour, with a 2 hour minimum? You can say a number.`));
+      }
+      case 'handyman_hours': {
+        const n = parseInt(digits || speech, 10);
+        if (!Number.isFinite(n) || n < 1) return retry("Sorry, about how many hours — you can just say a number like 2 or 3?");
+        return goto('schedule_date', { handymanHours: Math.max(2, n) }, null, (nn) => botAskDate(nn, action, session.business_slug));
+      }
+
+      // ── Scheduling ──────────────────────────────────────────────────────────
+      case 'schedule_date': {
+        const dates = d._dateChoices || [];
+        // Terms include the weekday name (lowercased) so "Thursday" matches
+        // even though the menu is numbered — a caller answering with the day
+        // name instead of "1/2/3" is at least as likely as using the number.
+        const opt = botMatchMenu(dates.map((ds, i) => ({ say: botSpokenDate(ds), terms: [botSpokenDate(ds).split(',')[0].toLowerCase()], dateStr: ds })), { digits, speech });
+        if (!opt) return retry("Sorry, which day works best — you can say the number?");
+        return goto('schedule_slot', { date: opt.dateStr, _dateChoices: null }, null, (nn) => botAskSlot(nn, session.business_slug, action));
+      }
+      case 'schedule_slot': {
+        const slots = d._slotChoices || [];
+        const opt = botMatchMenu(slots.map((s, i) => ({ say: s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? ` — that one has an after-hours fee` : ''), terms: [], slot: s })), { digits, speech });
+        if (!opt) return retry("Sorry, which time works best — you can say the number?");
+        const answers = { ...d.answers };
+        return goto('recap', { slotKey: opt.slot.slot_key, slotLabel: opt.slot.label, _slotChoices: null }, null, (nn) => botRecap(nn, action));
+      }
+
+      case 'recap': {
+        const yn = botYes(speech, digits);
+        if (yn === null) return retry("Sorry, does that work for you — yes or no?");
+        if (!yn) {
+          await botSessionSave(db, sid, { retry_count: 0 });
+          return xml(res, botTransfer(line, callerFrom, sid, "No problem — let me connect you with someone who can go over some options."));
+        }
+        return goto('customer_name', {}, null, () => botOpenTwiml(action, "Great, let's get you booked. Can I get your first and last name?"));
+      }
+
+      // ── Customer info ────────────────────────────────────────────────────
+      case 'customer_name': {
+        if (!speech) return retry("Sorry, could you say your first and last name?");
+        const name = speech.replace(/\b\w/g, c => c.toUpperCase());
+        const last4 = (session.caller_phone || '').slice(-4);
+        return goto('customer_phone', { name }, null, () => last4
+          ? botMenuTwiml(action, `Thanks. Is the best number to reach you the one you're calling from, ending in ${last4.split('').join(' ')}?`, [{ say: 'yes, that one' }, { say: 'no, a different number' }])
+          : botOpenTwiml(action, "What's the best phone number to reach you?"));
+      }
+      case 'customer_phone': {
+        if (session.caller_phone && !d._phoneAsked) {
+          const yn = botYes(speech, digits);
+          if (yn === null) return retry("Sorry, is that the right number — yes or no?");
+          if (yn) return goto('customer_email', { phone: session.caller_phone }, null, () => botOpenTwiml(action, "What's your email? You can also just say skip."));
+          return goto('customer_phone', { _phoneAsked: true }, null, () => botOpenTwiml(action, "What's the best number to reach you?"));
+        }
+        const phone = botParseDigitsFrom(speech, digits, 10);
+        if (!phone) return retry("Sorry, could you say your 10 digit phone number again?");
+        return goto('customer_email', { phone }, null, () => botOpenTwiml(action, "What's your email? You can also just say skip."));
+      }
+      case 'customer_email': {
+        const s = speech.toLowerCase();
+        const email = /\b(skip|no email|none|don't have)\b/.test(s) ? null : (speech || null);
+        return goto('customer_address', { email }, null, () => botOpenTwiml(action, "And what's the street address for the appointment?"));
+      }
+      case 'customer_address': {
+        if (!speech) return retry("Sorry, could you give me the street address again?");
+        return goto('book', { address: speech }, null, (nn) => botDoBooking(db, session, nn, line, callerFrom));
+      }
+
+      default:
+        return xml(res, botTransfer(line, callerFrom, sid, "Sorry, something went wrong on my end — let me connect you with someone."));
+    }
+  } catch (e) {
+    console.error(`[voice_bot_turn] step=${step} failed:`, e.message);
+    return xml(res, botTransfer(line, callerFrom, sid, "Sorry, I'm having trouble right now — let me connect you with someone."));
+  }
+}
+
+// Fetches the soonest 3 open dates (this month, spilling into next month if
+// this month is nearly out) and stashes them on the session so schedule_date
+// can match the caller's answer against exactly what was just read aloud.
+async function botAskDate(d, action, businessSlug) {
+  const now = new Date();
+  const months = [now, new Date(now.getFullYear(), now.getMonth() + 1, 1)];
+  let dates = [];
+  for (const m of months) {
+    const month = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`;
+    try {
+      const r = await adminApi('available_dates', { params: { business: businessSlug, month, technician_id: 'any', pool: 'own', postal_code: d.zip } });
+      dates = dates.concat(r.dates || []);
+    } catch (e) { /* try the next month anyway */ }
+    if (dates.length >= 3) break;
+  }
+  dates = dates.slice(0, 3);
+  d._dateChoices = dates;
+  if (!dates.length) return botHangup("I'm sorry, we don't have any openings in your area right now. Please call back soon or we'll follow up by text.");
+  const menu = dates.map((ds, i) => ({ say: botSpokenDate(ds) }));
+  return botMenuTwiml(action, "Let me check the calendar.", menu);
+}
+function botSpokenDate(dateStr) {
+  try {
+    const dt = new Date(dateStr + 'T12:00:00');
+    return dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  } catch (_) { return dateStr; }
+}
+async function botAskSlot(d, businessSlug, action) {
+  let slots = [];
+  try {
+    const r = await adminApi('available_slots', { params: { business: businessSlug, date: d.date, technician_id: 'any', pool: 'own', postal_code: d.zip } });
+    slots = r.slots || [];
+  } catch (e) { /* fall through to empty */ }
+  d._slotChoices = slots;
+  if (!slots.length) return botSayRedirect("Sorry, that day just filled up.", action);
+  const menu = slots.map(s => ({ say: s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? `, which has an after-hours fee` : '') }));
+  return botMenuTwiml(action, `Here's what's open ${botSpokenDate(d.date)}.`, menu);
+}
+function botRecap(d, action) {
+  const selections = botBuildSelections(d);
+  const subtotal = selections.reduce((s, x) => s + x.price * x.quantity, 0);
+  const tax = Math.round(subtotal * BOT_TAX_RATE * 100) / 100;
+  const total = Math.round((subtotal + tax) * 100) / 100;
+  d._priced = { selections, subtotal, tax, total };
+  const what = d.category === 'tv' ? (d.answers.size ? d.answers.size.label + ' TV mount' : 'TV mount') : `${d.handymanHours || 2} hours of handyman work`;
+  return botMenuTwiml(action,
+    `Okay, I have ${what} on ${botSpokenDate(d.date)}, ${d.slotLabel}. The total before tax is ${botSpokenMoney(total)}. Does that work for you?`,
+    [{ say: 'yes, that works' }, { say: 'no' }]);
+}
+// The actual booking_create call. Runs at the END of a step (not its own
+// step) so the caller never sits through a bare "processing" turn — the write
+// happens inline and the very next TwiML is either the confirmation or the
+// transfer. Returns a TwiML string like every other step (does NOT call
+// xml(res,...) itself) so goto()'s single await-then-xml() stays the one
+// place a response is ever sent for a turn.
+async function botDoBooking(db, session, d, line, callerFrom) {
+  const priced = d._priced || (() => { const sel = botBuildSelections(d); const sub = sel.reduce((s, x) => s + x.price * x.quantity, 0); const tax = Math.round(sub * BOT_TAX_RATE * 100) / 100; return { selections: sel, subtotal: sub, tax, total: Math.round((sub + tax) * 100) / 100 }; })();
+  const body = {
+    business: session.business_slug,
+    idempotency_key: `voicebot-${session.call_sid}`,
+    customer: {
+      name: d.name || 'Phone Customer', phone: d.phone || session.caller_phone || null,
+      email: d.email || null, postal_code: d.zip, address_line1: d.address || null,
+    },
+    service_id: d.category === 'tv' ? d.tvServiceId : d.handymanServiceId,
+    technician_id: 'any', pool: 'own',
+    scheduled_date: d.date, scheduled_slot: d.slotKey,
+    selections: priced.selections, subtotal: priced.subtotal, tax: priced.tax, price: priced.total,
+    payment_method: 'card',   // no payment_method_id — same "collect at service" path the human Skip-for-now checkbox uses
+    notes: 'Booked by AI Voice Bot (pilot)',
+    sms_consent: true,
+  };
+  try {
+    await adminApi('booking_create', { method: 'POST', body });
+    await botSessionSave(db, session.call_sid, { step: 'done' });
+    return botHangup(`You're all set for ${botSpokenDate(d.date)}, ${d.slotLabel}. The total is ${botSpokenMoney(priced.total)}, and we'll text you a confirmation. Thanks for calling, and we'll see you then!`);
+  } catch (e) {
+    console.error('[voice_bot] booking_create failed:', e.message, e.data || '');
+    await botSessionSave(db, session.call_sid, { retry_count: 0 });
+    return botTransfer(line, callerFrom, session.call_sid, "I'm sorry, that time just became unavailable — let me connect you with someone who can find another slot.");
+  }
+}
+
 // POST /api/analytics?action=sms_inbound — someone texted a tracking number.
 // Same shape as handleVoiceInbound: look the number up, log it, then relay the
 // text content to whoever the line forwards to (as a plain SMS, not a call) so
@@ -684,6 +1256,8 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && action === 'voice_status') return handleVoiceStatus(req, res);
   if (req.method === 'POST' && action === 'voice_recording') return handleVoiceRecording(req, res);
   if (req.method === 'POST' && action === 'voice_gather') return handleVoiceGather(req, res);
+  if (req.method === 'POST' && action === 'voice_bot_start') return handleVoiceBotStart(req, res);
+  if (req.method === 'POST' && action === 'voice_bot_turn') return handleVoiceBotTurn(req, res);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
