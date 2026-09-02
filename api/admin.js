@@ -4355,6 +4355,23 @@ async function bookingUpdate(req, res, db, auth, body) {
             await db.from('bookings').update({
               metadata: { ...(cur?.metadata || existing.metadata || {}), bracket_deducted_at: now },
             }).eq('id', id);
+          } else {
+            // No technician/supplier on file at completion — can't charge a
+            // specific truck's stock, but the brackets really were used and
+            // must not vanish silently (found 2026-09-02 auditing bracket
+            // inventory drift). Log it unattributed and deliberately leave
+            // bracket_deducted_at UNSET, so once a technician/supplier IS on
+            // file, a future reopen->recomplete (or the line-item-edit
+            // reconciliation in bookingLineItemsSave) still performs the
+            // real deduction instead of skipping it forever.
+            try {
+              await db.from('bracket_usage_logs').insert({
+                business_id: biz.id, booking_id: id, technician_id: null,
+                flat_used: need.flat || 0, tilting_used: need.tilting || 0, full_motion_used: need.full_motion || 0,
+                logged_by_kind: 'system',
+                notes: 'job completion (office) — no supplier on file at completion; inventory NOT deducted, needs manual attribution',
+              });
+            } catch (e2) { console.error(`[bracket] unattributed log failed for booking ${id}:`, e2.message); }
           }
         }
       } catch (e) {
@@ -4618,6 +4635,39 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
   const { error: upErr } = await db.from('bookings')
     .update({ price, subtotal }).eq('id', id).eq('business_id', biz.id);
   if (upErr) throw upErr;
+
+  // If real company brackets were already deducted for this booking
+  // (bracket_deducted_at stamped — the job completed and the deduction ran),
+  // an edit that changes which/how-many bracket-type lines are on the ticket
+  // must reconcile the supplier's physical stock too, or the inventory and
+  // ledger silently diverge from what the ticket now actually says (found
+  // 2026-09-02 auditing bracket inventory — this was the one LIVE gap behind
+  // an otherwise-historical drift, since bookingLineItemsSave never touched
+  // bracket accounting at all). Mirrors the "restore old supplier, charge new
+  // supplier" pattern in api/tech.js's jobBracketSetSupplier — same idea, just
+  // keyed on a QUANTITY change instead of a supplier change.
+  if (existing.metadata?.bracket_deducted_at) {
+    try {
+      const oldQtys = detectBracketQtys(oldRows || []);
+      const newQtys = detectBracketQtys(items);
+      if (oldQtys.flat !== newQtys.flat || oldQtys.tilting !== newQtys.tilting || oldQtys.full_motion !== newQtys.full_motion) {
+        let supplier = null;
+        try {
+          const { data: sup } = await db.from('bookings')
+            .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
+          supplier = sup?.bracket_supplied_by || sup?.technician_id || null;
+        } catch (_) { /* pre-0035: bracket_supplied_by column absent */ }
+        if (supplier) {
+          if (bracketTotal(oldQtys) > 0) await adjustBracketInventory(db, biz.id, supplier, oldQtys, +1, id, 'line items edited: reverted old bracket count');
+          if (bracketTotal(newQtys) > 0) await adjustBracketInventory(db, biz.id, supplier, newQtys, -1, id, 'line items edited: charged new bracket count');
+        } else {
+          console.warn(`[bracket] line-item edit changed bracket qty on completed booking ${id} but no supplier on file — inventory NOT reconciled`);
+        }
+      }
+    } catch (e) {
+      console.error(`[bracket] reconcile-on-edit failed for booking ${id}:`, e.message);
+    }
+  }
 
   // SEAL the rewrite with a second CAS bump. The claim above happens BEFORE
   // the insert/delete land (separate PostgREST transactions), so a fetch in
