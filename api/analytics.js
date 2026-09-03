@@ -1001,11 +1001,19 @@ async function handleVoiceBotTurn(req, res) {
         if (!bracketOpts.length) {
           return goto('tv_fireplace', { answers }, null, (nn) => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
         }
-        return goto('tv_bracket', { answers }, null, (nn) => botMenuTwiml(action, "Do you already have a mounting bracket, or would you like us to bring one?", botMenuOptionsFrom(nn.catalog.bracket)));
+        // Open question, not a 9-item menu — this catalog has "own bracket",
+        // three sizes of Flat/Tilting/Full Motion, three 85"-100" variants, a
+        // Samsung Frame in-box bracket, and Mantel Mount, and reading all of
+        // those as "press 1 for X, press 2 for Y..." was the single longest
+        // stretch of any question in the call. Matched by keyword against the
+        // full catalog either way, so nothing on the pricing side changes.
+        return goto('tv_bracket', { answers }, null, () => botOpenTwiml(action, "Do you have your own bracket, or would you like us to bring a flat, tilting, or full motion one?"));
       }
       case 'tv_bracket': {
         const opts = botMenuOptionsFrom(d.catalog.bracket);
-        const opt = botMatchMenu(opts, { digits, speech });
+        // digits intentionally ignored — no numbered menu was read, so a
+        // stray keypress shouldn't be reinterpreted as "option #N".
+        const opt = botMatchMenu(opts, { digits: '', speech });
         if (!opt) return retry("Sorry, do you have your own bracket, or should we bring a flat, tilting, or full motion bracket?");
         const answers = { ...d.answers, bracket: opt.catalogOpt };
         return goto('tv_fireplace', { answers }, null, () => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
@@ -1019,16 +1027,15 @@ async function handleVoiceBotTurn(req, res) {
         // apart — a label only counts as the POSITIVE one if it also lacks "not".
         const isAboveFireplace = (label) => /above a fireplace/i.test(label) && !/\bnot\b/i.test(label);
         const picked = fpOpts.find(o => isAboveFireplace(o.label) === yn);
-        const answers = { ...d.answers, fireplace: picked || { label: yn ? 'TV above a fireplace' : 'TV NOT above a fireplace', price: 0 } };
-        return goto('tv_surface', { answers }, null, (nn) => botMenuTwiml(action, "What kind of wall is it going on?", botMenuOptionsFrom(nn.catalog.surface)));
-      }
-      case 'tv_surface': {
-        const opts = botMenuOptionsFrom(d.catalog.surface);
-        const opt = botMatchMenu(opts, { digits, speech });
-        if (!opt) return retry("Sorry, is the wall drywall, brick, stone or tile, or stucco?");
-        const answers = { ...d.answers, surface: opt.catalogOpt };
+        let answers = { ...d.answers, fireplace: picked || { label: yn ? 'TV above a fireplace' : 'TV NOT above a fireplace', price: 0 } };
+        // Wall-surface question skipped entirely (owner request, 2026-09-03)
+        // — defaults to Drywall (the free, most common case) rather than
+        // asking. A tech who finds brick/stone/stucco on site adjusts the
+        // ticket in person, same as any other on-site correction.
+        const drywall = (d.catalog.surface || []).find(o => /drywall/i.test(o.label)) || { label: 'Drywall', price: 0 };
+        answers = { ...answers, surface: drywall };
         const wireOpts = d.catalog.wires || [];
-        if (!wireOpts.length) return goto('tv_extras', { answers }, null, (nn) => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
+        if (!wireOpts.length) return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
         return goto('tv_wires', { answers }, null, (nn) => botMenuTwiml(action, "Would you like to hide the wires?", botMenuOptionsFrom(nn.catalog.wires)));
       }
       case 'tv_wires': {
@@ -1041,23 +1048,17 @@ async function handleVoiceBotTurn(req, res) {
         if (needsLifting) {
           return goto('tv_lifting', { answers }, null, (nn) => botMenuTwiml(action, "Since it's a larger TV, will you be able to help lift it, or should we send a second technician?", botMenuOptionsFrom(nn.catalog.lifting)));
         }
-        return goto('tv_extras', { answers }, null, () => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
+        // Extras ("anything else?") question skipped entirely (owner request,
+        // 2026-09-03) — straight to scheduling. A caller who wants a soundbar
+        // or Apple TV install can still mention it and the office adds the
+        // line item, same as any other post-booking adjustment.
+        return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
       }
       case 'tv_lifting': {
         const opts = botMenuOptionsFrom(d.catalog.lifting);
         const opt = botMatchMenu(opts, { digits, speech });
         if (!opt) return retry("Sorry, will you be able to help lift the TV, or would you like a second technician?");
         const answers = { ...d.answers, lifting: opt.catalogOpt };
-        return goto('tv_extras', { answers }, null, () => botOpenTwiml(action, "Would you like to add anything else, like a soundbar install or an Apple TV setup? Just say what you'd like, or say no."));
-      }
-      case 'tv_extras': {
-        const s = speech.toLowerCase();
-        let answers = d.answers;
-        if (!/\b(no|none|nothing|that's it|that is it|nope)\b/.test(s) && !digits) {
-          const opts = botMenuOptionsFrom((d.catalog.extras || []).filter(o => !/^other$/i.test(o.label)));
-          const opt = botMatchMenu(opts, { digits: '', speech });
-          if (opt) answers = { ...d.answers, extras: opt.catalogOpt };
-        }
         return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
       }
 
@@ -1149,7 +1150,7 @@ async function botAskDate(d, action, businessSlug) {
   for (const m of months) {
     const month = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`;
     try {
-      const r = await adminApi('available_dates', { params: { business: businessSlug, month, technician_id: 'any', pool: 'own', postal_code: d.zip } });
+      const r = await adminApi('available_dates', { params: { business: businessSlug, month, technician_id: 'any', pool: 'cross', postal_code: d.zip } });
       dates = dates.concat(r.dates || []);
     } catch (e) { /* try the next month anyway */ }
     if (dates.length >= 3) break;
@@ -1169,7 +1170,7 @@ function botSpokenDate(dateStr) {
 async function botAskSlot(d, businessSlug, action) {
   let slots = [];
   try {
-    const r = await adminApi('available_slots', { params: { business: businessSlug, date: d.date, technician_id: 'any', pool: 'own', postal_code: d.zip } });
+    const r = await adminApi('available_slots', { params: { business: businessSlug, date: d.date, technician_id: 'any', pool: 'cross', postal_code: d.zip } });
     slots = r.slots || [];
   } catch (e) { /* fall through to empty */ }
   d._slotChoices = slots;
@@ -1204,7 +1205,12 @@ async function botDoBooking(db, session, d, line, callerFrom) {
       email: d.email || null, postal_code: d.zip, address_line1: d.address || null,
     },
     service_id: d.category === 'tv' ? d.tvServiceId : d.handymanServiceId,
-    technician_id: 'any', pool: 'own',
+    // 'cross' (host roster + partner fallback), not 'own': most of the
+    // lead-gen brands this bot answers for have ZERO technicians of their
+    // own by design (they borrow their parent company's roster via
+    // PARTNER_SLUG in api/admin.js) — 'own' alone would silently return no
+    // availability at all for those, the exact bug found 2026-09-03.
+    technician_id: 'any', pool: 'cross',
     scheduled_date: d.date, scheduled_slot: d.slotKey,
     selections: priced.selections, subtotal: priced.subtotal, tax: priced.tax, price: priced.total,
     payment_method: 'card',   // no payment_method_id — same "collect at service" path the human Skip-for-now checkbox uses

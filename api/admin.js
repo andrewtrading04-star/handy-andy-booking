@@ -119,6 +119,15 @@ const PARTNER_SLUG = {
   // Austin lead-gen quad — one-directional like the other micro-brands: each
   // books Handy Andy's (Austin) techs, never the reverse.
   'atxmountpros': 'handy-andy', 'atxtvmount': 'handy-andy', 'austinmountingpros': 'handy-andy', 'austintvinstall': 'handy-andy',
+  // Denver + Houston lead-gen brands — same one-directional pattern, just
+  // missing from this copy of the table (api/_lib/availability.js's own
+  // PARTNER_SLUG already had all five; this one drifted out of sync). None of
+  // these five have any technicians of their own, so "Any Technician" on any
+  // of them was silently returning zero availability with no partner
+  // fallback (found 2026-09-03 — a TV Hanging Houston auto-pick came back
+  // with no open dates in a real zip its own service_area_zips covers fine).
+  'tvmountingdenver': 'handy-andy',
+  'houstonmounting': 'handy-andy', 'houstontvinstallation': 'handy-andy', 'tvhanginghouston': 'handy-andy', 'htvmounting': 'handy-andy',
 };
 
 // The partner business row for a host slug, or null when there isn't one.
