@@ -14,8 +14,23 @@
 export function bracketTotal(q) { return Math.abs(q.flat || 0) + Math.abs(q.tilting || 0) + Math.abs(q.full_motion || 0); }
 
 async function callBracketMove(db, { businessId, technicianId, kind, flat, tilting, fullMotion, idempotencyKey, bookingId, purchaseId, orderNum, reason, actor }) {
+  // A tech carries ONE physical stock of brackets in their truck, regardless of
+  // which company's customer they're serving that day. Stock therefore lives on
+  // the row keyed by the tech's OWN home business -- never the job's or the
+  // purchase row's, which differ on a cross-hire job. Resolving it here (rather
+  // than trusting each caller) is deliberate: this is the single choke point
+  // every bracket movement goes through, so no future caller can get it wrong.
+  // Passing the job's business instead would silently create an all-zero
+  // phantom row under the other company and clamp the deduction to nothing --
+  // the bug commit 5199678 fixed on 2026-07-16, reintroduced and re-fixed here.
+  let homeBizId = businessId;
+  if (technicianId) {
+    const { data: techRow } = await db.from('technicians')
+      .select('business_id').eq('id', technicianId).maybeSingle();
+    if (techRow?.business_id) homeBizId = techRow.business_id;
+  }
   const { data, error } = await db.rpc('bracket_move', {
-    p_business_id: businessId,
+    p_business_id: homeBizId,
     p_technician_id: technicianId,
     p_kind: kind,
     // An explicit null must survive to SQL: for a recount it means "leave this
