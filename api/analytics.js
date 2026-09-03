@@ -689,10 +689,16 @@ async function botSessionSave(db, callSid, patch) {
 }
 
 // ── TwiML builders (bot-specific; reuses xml/xmlEsc/voiceUrl from above) ─────
-function botMenuTwiml(action, sayIntro, options) {
-  const lines = options.map((o, i) => `Press or say ${i + 1} for ${o.say}.`).join(' ');
+// sayText is spoken AS WRITTEN — no auto-generated "Press or say 1 for X,
+// press or say 2 for Y" (owner request, 2026-09-03: it read too robotic and
+// took too long). Write the choices INTO the question itself in plain
+// English ("...behind the wall, outside the wall, or left hanging?"); the
+// options array is still used to MATCH the answer (botMatchMenu), and a
+// keypress still silently works as a 1/2/3-in-order fallback even though
+// it's never announced.
+function botMenuTwiml(action, sayText) {
   return '<Response><Gather input="speech dtmf" numDigits="1" timeout="6" speechTimeout="auto" action="'
-    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(`${sayIntro} ${lines}`) + '</Say></Gather>'
+    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say></Gather>'
     + '<Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
 }
 function botOpenTwiml(action, sayIntro) {
@@ -896,8 +902,7 @@ async function handleVoiceBotStart(req, res) {
     const greetName = biz.name || 'our company';
     const turnAction = voiceUrl('voice_bot_turn', { sid: session.call_sid });
     if (!onlyOne) {
-      return xml(res, botMenuTwiml(turnAction, `Thanks for calling ${greetName}! I can help you book an appointment.`,
-        [{ say: 'TV mounting' }, { say: 'handyman services' }]));
+      return xml(res, botMenuTwiml(turnAction, `Thanks for calling ${greetName}! Would you like to book TV mounting or handyman services?`));
     }
     return xml(res, botOpenTwiml(turnAction,
       `Thanks for calling ${greetName}! I can help you book a ${onlyOne === 'tv' ? 'TV mounting' : 'handyman'} appointment. What's your 5 digit zip code?`));
@@ -934,11 +939,13 @@ async function handleVoiceBotTurn(req, res) {
     .select('phone, label, business_slug, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone')
     .eq('phone', session.tracking_number).maybeSingle();
 
+  // 3 misses tolerated (owner request, 2026-09-03 — escalating after just 2
+  // felt instant/abrupt on a real call) before handing off to a human.
   const retry = async (sayText) => {
     const n = (session.retry_count || 0) + 1;
-    if (n > 2) {
+    if (n > 3) {
       await botSessionSave(db, sid, { retry_count: 0 });
-      return xml(res, botTransfer(line, callerFrom, sid, "Let me connect you with someone who can help with that."));
+      return xml(res, botTransfer(line, callerFrom, sid, "I'm having a little trouble understanding — let me connect you with someone who can help."));
     }
     await botSessionSave(db, sid, { retry_count: n });
     return xml(res, botSayRedirect(sayText, action));
@@ -961,7 +968,7 @@ async function handleVoiceBotTurn(req, res) {
           { say: 'tv', terms: ['tv', 'mount', 'mounting', 'television'] },
           { say: 'handyman', terms: ['handyman', 'handy', 'handywork'] },
         ], { digits, speech });
-        if (!opt) return retry("Sorry, I didn't catch that. Press or say 1 for TV mounting, or 2 for handyman services.");
+        if (!opt) return retry("I didn't catch that — would you like TV mounting or handyman services?");
         const cat = opt.say === 'tv' ? 'tv' : 'handyman';
         return goto('zip', { category: cat },
           null, () => botOpenTwiml(action, `Great. What's your 5 digit zip code?`));
@@ -969,10 +976,10 @@ async function handleVoiceBotTurn(req, res) {
 
       case 'zip': {
         const zip = botParseDigitsFrom(speech, digits, 5);
-        if (!zip) return retry("Sorry, I need your 5 digit zip code. You can say it or enter it on the keypad.");
+        if (!zip) return retry("I need your 5 digit zip code. You can say it or enter it on the keypad.");
         let za;
         try { za = await adminApi('zip_area', { params: { business: session.business_slug, postal_code: zip } }); }
-        catch (e) { return retry("Sorry, I couldn't check that zip code. Could you say it again?"); }
+        catch (e) { return retry("I couldn't check that zip code. Could you say it again?"); }
         if (!za.service_area_id) {
           await botSessionSave(db, sid, { retry_count: 0 });
           return xml(res, botTransfer(line, callerFrom, sid, "That zip code is outside our normal service area — let me connect you with someone who can take a closer look."));
@@ -981,7 +988,7 @@ async function handleVoiceBotTurn(req, res) {
         if (nd.category === 'tv') {
           let catalog;
           try { catalog = await botLoadCatalog(session.business_slug, nd.tvServiceId); }
-          catch (e) { return retry("Sorry, I'm having trouble pulling up pricing. Could you give me a moment and repeat your last answer?"); }
+          catch (e) { return retry("I'm having trouble pulling up pricing. Could you give me a moment and repeat your last answer?"); }
           nd.catalog = catalog;
           return goto('tv_size', nd, null, () => botOpenTwiml(action, "What size is your TV, in inches?"));
         }
@@ -995,11 +1002,11 @@ async function handleVoiceBotTurn(req, res) {
         // range (botSizeRangeFor), which is both faster and how a human
         // secretary actually asks this on a real call.
         const opt = botMatchSize(d.catalog.size, { digits, speech });
-        if (!opt) return retry("Sorry, what size is the TV — just the number of inches is fine?");
+        if (!opt) return retry("What size is the TV — just the number of inches is fine?");
         const answers = { ...d.answers, size: opt };
         const bracketOpts = d.catalog.bracket || [];
         if (!bracketOpts.length) {
-          return goto('tv_fireplace', { answers }, null, (nn) => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
+          return goto('tv_fireplace', { answers }, null, (nn) => botMenuTwiml(action, "Is your TV going over a fireplace?"));
         }
         // Open question, not a 9-item menu — this catalog has "own bracket",
         // three sizes of Flat/Tilting/Full Motion, three 85"-100" variants, a
@@ -1014,13 +1021,13 @@ async function handleVoiceBotTurn(req, res) {
         // digits intentionally ignored — no numbered menu was read, so a
         // stray keypress shouldn't be reinterpreted as "option #N".
         const opt = botMatchMenu(opts, { digits: '', speech });
-        if (!opt) return retry("Sorry, do you have your own bracket, or should we bring a flat, tilting, or full motion bracket?");
+        if (!opt) return retry("Do you have your own bracket, or should we bring a flat, tilting, or full motion bracket?");
         const answers = { ...d.answers, bracket: opt.catalogOpt };
-        return goto('tv_fireplace', { answers }, null, () => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
+        return goto('tv_fireplace', { answers }, null, () => botMenuTwiml(action, "Is your TV going over a fireplace?"));
       }
       case 'tv_fireplace': {
         const yn = botYes(speech, digits);
-        if (yn === null) return retry("Sorry, is the TV going over a fireplace — yes or no?");
+        if (yn === null) return retry("Is the TV going over a fireplace — yes or no?");
         const fpOpts = d.catalog.fireplace || [];
         // "TV NOT above a fireplace" contains the substring "above a
         // fireplace" too, so a plain regex test can't tell the two options
@@ -1036,17 +1043,17 @@ async function handleVoiceBotTurn(req, res) {
         answers = { ...answers, surface: drywall };
         const wireOpts = d.catalog.wires || [];
         if (!wireOpts.length) return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
-        return goto('tv_wires', { answers }, null, (nn) => botMenuTwiml(action, "Would you like to hide the wires?", botMenuOptionsFrom(nn.catalog.wires)));
+        return goto('tv_wires', { answers }, null, () => botMenuTwiml(action, "Would you like the wires hidden behind the wall, hidden outside the wall, or left hanging down?"));
       }
       case 'tv_wires': {
         const opts = botMenuOptionsFrom(d.catalog.wires);
         const opt = botMatchMenu(opts, { digits, speech });
-        if (!opt) return retry("Sorry, would you like the wires hidden behind the wall, hidden outside the wall, or left hanging?");
+        if (!opt) return retry("Would you like the wires hidden behind the wall, hidden outside the wall, or left hanging?");
         const answers = { ...d.answers, wires: opt.catalogOpt };
         const sizecat = answers.size && answers.size.sizecat;
         const needsLifting = sizecat && sizecat !== 'small' && (d.catalog.lifting || []).length;
         if (needsLifting) {
-          return goto('tv_lifting', { answers }, null, (nn) => botMenuTwiml(action, "Since it's a larger TV, will you be able to help lift it, or should we send a second technician?", botMenuOptionsFrom(nn.catalog.lifting)));
+          return goto('tv_lifting', { answers }, null, () => botMenuTwiml(action, "Since it's a larger TV, will you be able to help lift it, or should we send a second technician?"));
         }
         // Extras ("anything else?") question skipped entirely (owner request,
         // 2026-09-03) — straight to scheduling. A caller who wants a soundbar
@@ -1057,19 +1064,19 @@ async function handleVoiceBotTurn(req, res) {
       case 'tv_lifting': {
         const opts = botMenuOptionsFrom(d.catalog.lifting);
         const opt = botMatchMenu(opts, { digits, speech });
-        if (!opt) return retry("Sorry, will you be able to help lift the TV, or would you like a second technician?");
+        if (!opt) return retry("Will you be able to help lift the TV, or would you like a second technician?");
         const answers = { ...d.answers, lifting: opt.catalogOpt };
         return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
       }
 
       // ── Handyman path ──────────────────────────────────────────────────────
       case 'handyman_desc': {
-        if (!speech) return retry("Sorry, could you describe what you need done?");
+        if (!speech) return retry("Could you describe what you need done?");
         return goto('handyman_hours', { handymanDesc: speech }, null, () => botOpenTwiml(action, `Got it. About how many hours of work is that, at ${BOT_HANDYMAN_HOURLY} dollars an hour, with a 2 hour minimum? You can say a number.`));
       }
       case 'handyman_hours': {
         const n = parseInt(digits || speech, 10);
-        if (!Number.isFinite(n) || n < 1) return retry("Sorry, about how many hours — you can just say a number like 2 or 3?");
+        if (!Number.isFinite(n) || n < 1) return retry("About how many hours — you can just say a number like 2 or 3?");
         return goto('schedule_date', { handymanHours: Math.max(2, n) }, null, (nn) => botAskDate(nn, action, session.business_slug));
       }
 
@@ -1080,20 +1087,20 @@ async function handleVoiceBotTurn(req, res) {
         // even though the menu is numbered — a caller answering with the day
         // name instead of "1/2/3" is at least as likely as using the number.
         const opt = botMatchMenu(dates.map((ds, i) => ({ say: botSpokenDate(ds), terms: [botSpokenDate(ds).split(',')[0].toLowerCase()], dateStr: ds })), { digits, speech });
-        if (!opt) return retry("Sorry, which day works best — you can say the number?");
+        if (!opt) return retry("Which day works best — you can say the number?");
         return goto('schedule_slot', { date: opt.dateStr, _dateChoices: null }, null, (nn) => botAskSlot(nn, session.business_slug, action));
       }
       case 'schedule_slot': {
         const slots = d._slotChoices || [];
         const opt = botMatchMenu(slots.map((s, i) => ({ say: s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? ` — that one has an after-hours fee` : ''), terms: [], slot: s })), { digits, speech });
-        if (!opt) return retry("Sorry, which time works best — you can say the number?");
+        if (!opt) return retry("Which time works best — you can say the number?");
         const answers = { ...d.answers };
         return goto('recap', { slotKey: opt.slot.slot_key, slotLabel: opt.slot.label, _slotChoices: null }, null, (nn) => botRecap(nn, action));
       }
 
       case 'recap': {
         const yn = botYes(speech, digits);
-        if (yn === null) return retry("Sorry, does that work for you — yes or no?");
+        if (yn === null) return retry("Does that work for you — yes or no?");
         if (!yn) {
           await botSessionSave(db, sid, { retry_count: 0 });
           return xml(res, botTransfer(line, callerFrom, sid, "No problem — let me connect you with someone who can go over some options."));
@@ -1103,22 +1110,22 @@ async function handleVoiceBotTurn(req, res) {
 
       // ── Customer info ────────────────────────────────────────────────────
       case 'customer_name': {
-        if (!speech) return retry("Sorry, could you say your first and last name?");
+        if (!speech) return retry("Could you say your first and last name?");
         const name = speech.replace(/\b\w/g, c => c.toUpperCase());
         const last4 = (session.caller_phone || '').slice(-4);
         return goto('customer_phone', { name }, null, () => last4
-          ? botMenuTwiml(action, `Thanks. Is the best number to reach you the one you're calling from, ending in ${last4.split('').join(' ')}?`, [{ say: 'yes, that one' }, { say: 'no, a different number' }])
+          ? botMenuTwiml(action, `Thanks. Is the best number to reach you the one you're calling from, ending in ${last4.split('').join(' ')}?`)
           : botOpenTwiml(action, "What's the best phone number to reach you?"));
       }
       case 'customer_phone': {
         if (session.caller_phone && !d._phoneAsked) {
           const yn = botYes(speech, digits);
-          if (yn === null) return retry("Sorry, is that the right number — yes or no?");
+          if (yn === null) return retry("Is that the right number — yes or no?");
           if (yn) return goto('customer_email', { phone: session.caller_phone }, null, () => botOpenTwiml(action, "What's your email? You can also just say skip."));
           return goto('customer_phone', { _phoneAsked: true }, null, () => botOpenTwiml(action, "What's the best number to reach you?"));
         }
         const phone = botParseDigitsFrom(speech, digits, 10);
-        if (!phone) return retry("Sorry, could you say your 10 digit phone number again?");
+        if (!phone) return retry("Could you say your 10 digit phone number again?");
         return goto('customer_email', { phone }, null, () => botOpenTwiml(action, "What's your email? You can also just say skip."));
       }
       case 'customer_email': {
@@ -1127,7 +1134,7 @@ async function handleVoiceBotTurn(req, res) {
         return goto('customer_address', { email }, null, () => botOpenTwiml(action, "And what's the street address for the appointment?"));
       }
       case 'customer_address': {
-        if (!speech) return retry("Sorry, could you give me the street address again?");
+        if (!speech) return retry("Could you give me the street address again?");
         return goto('book', { address: speech }, null, (nn) => botDoBooking(db, session, nn, line, callerFrom));
       }
 
@@ -1158,8 +1165,16 @@ async function botAskDate(d, action, businessSlug) {
   dates = dates.slice(0, 3);
   d._dateChoices = dates;
   if (!dates.length) return botHangup("I'm sorry, we don't have any openings in your area right now. Please call back soon or we'll follow up by text.");
-  const menu = dates.map((ds, i) => ({ say: botSpokenDate(ds) }));
-  return botMenuTwiml(action, "Let me check the calendar.", menu);
+  const list = botSpokenList(dates.map(botSpokenDate));
+  return botMenuTwiml(action, `The soonest openings are ${list}. Which day works best?`);
+}
+// "A" / "A or B" / "A, B, or C" — used to speak a short dynamic list (dates,
+// times) inline instead of an enumerated "press 1 for A, press 2 for B" menu.
+function botSpokenList(items) {
+  if (!items.length) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} or ${items[1]}`;
+  return items.slice(0, -1).join(', ') + ', or ' + items[items.length - 1];
 }
 function botSpokenDate(dateStr) {
   try {
@@ -1175,8 +1190,8 @@ async function botAskSlot(d, businessSlug, action) {
   } catch (e) { /* fall through to empty */ }
   d._slotChoices = slots;
   if (!slots.length) return botSayRedirect("Sorry, that day just filled up.", action);
-  const menu = slots.map(s => ({ say: s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? `, which has an after-hours fee` : '') }));
-  return botMenuTwiml(action, `Here's what's open ${botSpokenDate(d.date)}.`, menu);
+  const list = botSpokenList(slots.map(s => s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? ` with an after-hours fee` : '')));
+  return botMenuTwiml(action, `Here's what's open ${botSpokenDate(d.date)}: ${list}. Which works best?`);
 }
 function botRecap(d, action) {
   const selections = botBuildSelections(d);
@@ -1186,8 +1201,7 @@ function botRecap(d, action) {
   d._priced = { selections, subtotal, tax, total };
   const what = d.category === 'tv' ? (d.answers.size ? botSpeakLabel(d.answers.size.label) + ' TV mount' : 'TV mount') : `${d.handymanHours || 2} hours of handyman work`;
   return botMenuTwiml(action,
-    `Okay, I have ${what} on ${botSpokenDate(d.date)}, ${d.slotLabel}. The total before tax is ${botSpokenMoney(total)}. Does that work for you?`,
-    [{ say: 'yes, that works' }, { say: 'no' }]);
+    `Okay, I have ${what} on ${botSpokenDate(d.date)}, ${d.slotLabel}. The total before tax is ${botSpokenMoney(total)}. Does that work for you?`);
 }
 // The actual booking_create call. Runs at the END of a step (not its own
 // step) so the caller never sits through a bare "processing" turn — the write
