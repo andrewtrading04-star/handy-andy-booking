@@ -1,7 +1,7 @@
 # voice-bridge — AI Voice Bot v2
 
-Standalone WebSocket bridge between Twilio ConversationRelay and OpenAI
-(Chat Completions + function calling). **Not part of the Vercel deploy** —
+Standalone WebSocket bridge between Twilio ConversationRelay and Claude
+(Anthropic Messages API + tool use). **Not part of the Vercel deploy** —
 Vercel serverless functions can't hold a WebSocket open for the length of a
 phone call, so this needs its own always-on host.
 
@@ -10,7 +10,7 @@ phone call, so this needs its own always-on host.
 - Accepts the ConversationRelay WebSocket Twilio opens for each call.
 - Twilio itself handles speech-to-text and text-to-speech (ElevenLabs voice,
   configured in the TwiML) — this process only ever sees/sends plain text.
-- Runs the conversation through OpenAI with 6 tools (`tools.js`), each a thin
+- Runs the conversation through Claude with 6 tools (`tools.js`), each a thin
   wrapper around the CRM's real `/api/admin` actions — pricing, availability,
   and the actual booking write all happen there, never invented by the model.
 - Persists a `voice_bot_sessions` row per call (same table v1 uses) so a

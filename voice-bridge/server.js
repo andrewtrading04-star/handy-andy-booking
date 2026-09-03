@@ -1,7 +1,7 @@
 // Standalone always-on bridge: Twilio ConversationRelay (WebSocket, plain
 // JSON text messages — Twilio itself handles speech-to-text and
 // text-to-speech, so no raw audio ever passes through this process) <->
-// OpenAI Chat Completions with function calling, which drives the
+// Claude (Anthropic Messages API with tool use), which drives the
 // conversation using the tools in tools.js (all backed by the CRM's real
 // /api/admin actions). Not a Vercel serverless function — this needs a
 // persistent process (Fly.io/Render/Railway), since ConversationRelay holds
@@ -15,7 +15,9 @@ import { TOOL_SCHEMAS, runTool } from './tools.js';
 import { buildSystemPrompt } from './prompt.js';
 
 const PORT = process.env.PORT || 8080;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// Haiku: fastest/cheapest Claude, and latency is what matters most on a live
+// call. Bump to a Sonnet model via env if reasoning quality ever needs it.
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
 const MAX_TOOL_HOPS = 6;
 
 const server = http.createServer((req, res) => {
@@ -43,7 +45,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 wss.on('connection', (ws) => {
-  const call = { ws, history: [], ctx: null, ended: false };
+  const call = { ws, system: '', history: [], ctx: null, ended: false };
 
   ws.on('message', async (raw) => {
     let msg;
@@ -102,15 +104,17 @@ async function handleSetup(call, msg) {
     step: 'in_progress', data: { engine: 'v2' }, retry_count: 0,
   }).catch((e) => console.error('[voice-bridge] session upsert failed:', e.message));
 
-  const sys = buildSystemPrompt({ businessName: biz.name, hasTv: !!tvService, hasHandyman: !!handymanService });
-  call.history.push({ role: 'system', content: sys });
-
   const greetName = biz.name || 'us';
   const greeting = (tvService && handymanService)
     ? `Thanks for calling ${greetName}! Are you looking to book TV mounting or handyman service today?`
     : `Thanks for calling ${greetName}! What can we help you get scheduled today?`;
+
+  // Claude's Messages API requires the transcript to open with a user turn,
+  // so the greeting we speak first lives in the system prompt as context
+  // rather than as a leading assistant message.
+  call.system = buildSystemPrompt({ businessName: biz.name, hasTv: !!tvService, hasHandyman: !!handymanService })
+    + `\n\nYou have ALREADY greeted the caller with: "${greeting}" — do not greet them again; pick up from their reply.`;
   speak(call, greeting);
-  call.history.push({ role: 'assistant', content: greeting });
 }
 
 async function handleTurn(call, callerText) {
@@ -118,36 +122,38 @@ async function handleTurn(call, callerText) {
   call.history.push({ role: 'user', content: callerText });
 
   for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
-    const resp = await callOpenAI(call.history);
-    const choice = resp.choices && resp.choices[0];
-    const message = choice && choice.message;
-    if (!message) throw new Error('no message from OpenAI');
+    const resp = await callClaude(call.system, call.history);
+    const blocks = resp.content || [];
+    if (!blocks.length) throw new Error('empty response from Claude');
 
-    if (message.tool_calls && message.tool_calls.length) {
-      call.history.push({ role: 'assistant', content: message.content || null, tool_calls: message.tool_calls });
-      for (const tc of message.tool_calls) {
-        let args = {};
-        try { args = JSON.parse(tc.function.arguments || '{}'); } catch (_) { /* bad args from model */ }
+    // Claude returns text and tool_use blocks together in one assistant
+    // turn; the whole block list goes back into history verbatim so the
+    // tool_result turn that follows can reference each tool_use id.
+    call.history.push({ role: 'assistant', content: blocks });
+    const toolUses = blocks.filter((b) => b.type === 'tool_use');
+    const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
+
+    if (toolUses.length) {
+      const results = [];
+      for (const tu of toolUses) {
         let result;
-        try { result = await runTool(tc.function.name, args, call.ctx); }
+        try { result = await runTool(tu.name, tu.input || {}, call.ctx); }
         catch (e) { result = { error: e.message }; }
-        call.history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+        results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) });
 
-        if (tc.function.name === 'book_job' && result && result.booked) {
+        if (tu.name === 'book_job' && result && result.booked) {
           await sessionSave(call.ctx.callSid, { step: 'done', data: { engine: 'v2', booked: true, total: result.total } }).catch(() => {});
         }
-        if (tc.function.name === 'transfer_to_human') {
+        if (tu.name === 'transfer_to_human') {
           speak(call, "Sure thing — one moment while I connect you.");
           return endCall(call);
         }
       }
+      call.history.push({ role: 'user', content: results });
       continue; // let the model see the tool results and respond
     }
 
-    if (message.content) {
-      call.history.push({ role: 'assistant', content: message.content });
-      speak(call, message.content);
-    }
+    if (text) speak(call, text);
     return;
   }
   // Hit the hop cap without a final answer — don't leave the caller hanging.
@@ -155,13 +161,13 @@ async function handleTurn(call, callerText) {
   endCall(call);
 }
 
-async function callOpenAI(history) {
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+async function callClaude(system, history) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: OPENAI_MODEL, messages: history, tools: TOOL_SCHEMAS, tool_choice: 'auto', temperature: 0.4 }),
+    headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 400, system, messages: history, tools: TOOL_SCHEMAS, temperature: 0.4 }),
   });
-  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${await r.text().catch(() => '')}`);
+  if (!r.ok) throw new Error(`Claude ${r.status}: ${await r.text().catch(() => '')}`);
   return r.json();
 }
 

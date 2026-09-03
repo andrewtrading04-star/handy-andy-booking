@@ -1,9 +1,9 @@
-// Tool schema (OpenAI function-calling format) + handlers. Every handler
-// calls the CRM's existing /api/admin actions via adminApi() — same actions
-// the v1 bot already exercised successfully in production, same params. No
-// pricing/scheduling/booking logic is reimplemented here; the model can only
-// ever act through these, so it can never quote a number that didn't come
-// from the real catalog/pricing engine.
+// Tool schema (Anthropic Messages API tool-use format) + handlers. Every
+// handler calls the CRM's existing /api/admin actions via adminApi() — same
+// actions the v1 bot already exercised successfully in production, same
+// params. No pricing/scheduling/booking logic is reimplemented here; the
+// model can only ever act through these, so it can never quote a number that
+// didn't come from the real catalog/pricing engine.
 import { adminApi } from './adminApi.js';
 
 const BOT_TAX_RATE = 0.0825;
@@ -11,89 +11,74 @@ const BOT_MIN_TICKET = 139;
 const BOT_HANDYMAN_HOURLY = 85;
 const AFTER_HOURS_SLOT_KEY = 's5';
 
+const SELECTION_ITEM = { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, price: { type: 'number' } } };
+
 export const TOOL_SCHEMAS = [
   {
-    type: 'function',
-    function: {
-      name: 'check_zip',
-      description: 'Check whether a postal code is in the service area for this business, and get the tech pool for later scheduling calls.',
-      parameters: { type: 'object', properties: { postal_code: { type: 'string' } }, required: ['postal_code'] },
+    name: 'check_zip',
+    description: 'Check whether a postal code is in the service area for this business, and get the tech pool for later scheduling calls.',
+    input_schema: { type: 'object', properties: { postal_code: { type: 'string' } }, required: ['postal_code'] },
+  },
+  {
+    name: 'get_catalog',
+    description: 'Get the priced option groups (TV size, bracket, fireplace, wires, lifting, extras) for TV mounting, or confirm handyman is available. Call once near the start of a TV mounting conversation so you know the real option labels and prices to offer.',
+    input_schema: { type: 'object', properties: { category: { type: 'string', enum: ['tv', 'handyman'] } }, required: ['category'] },
+  },
+  {
+    name: 'get_availability',
+    description: 'Get real open appointment dates (and, given a chosen date, time slots) for this postal code. Call with just postal_code first to get dates; call again with postal_code + date to get that day\'s slots.',
+    input_schema: {
+      type: 'object',
+      properties: { postal_code: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD, only once a date has been chosen' } },
+      required: ['postal_code'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'get_catalog',
-      description: 'Get the priced option groups (TV size, bracket, fireplace, wires, lifting, extras) for TV mounting, or confirm handyman is available. Call once near the start of a TV mounting conversation so you know the real option labels and prices to offer.',
-      parameters: { type: 'object', properties: { category: { type: 'string', enum: ['tv', 'handyman'] } }, required: ['category'] },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_availability',
-      description: 'Get real open appointment dates (and, given a chosen date, time slots) for this postal code. Call with just postal_code first to get dates; call again with postal_code + date to get that day\'s slots.',
-      parameters: {
-        type: 'object',
-        properties: { postal_code: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD, only once a date has been chosen' } },
-        required: ['postal_code'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'price_job',
-      description: 'Price the job so far from the selections collected. Call this before reading a total out loud, and again if anything changes. Never state a dollar amount that didn\'t come from this tool.',
-      parameters: {
-        type: 'object',
-        properties: {
-          category: { type: 'string', enum: ['tv', 'handyman'] },
-          selections: {
-            type: 'array',
-            description: 'Each chosen option, as returned by get_catalog (id/label/price), one per group actually chosen (size, bracket, fireplace, wires, lifting, extras) for tv; empty for handyman.',
-            items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, price: { type: 'number' } } },
-          },
-          handyman_hours: { type: 'number', description: 'Only for category handyman, minimum 2' },
-          handyman_desc: { type: 'string' },
-          slot_key: { type: 'string', description: 'The chosen time slot key, if picked yet — needed to flag the after-hours fee' },
-          date: { type: 'string' },
+    name: 'price_job',
+    description: 'Price the job so far from the selections collected. Call this before reading a total out loud, and again if anything changes. Never state a dollar amount that didn\'t come from this tool.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['tv', 'handyman'] },
+        selections: {
+          type: 'array',
+          description: 'Each chosen option, as returned by get_catalog (id/label/price), one per group actually chosen (size, bracket, fireplace, wires, lifting, extras) for tv; empty for handyman.',
+          items: SELECTION_ITEM,
         },
-        required: ['category'],
+        handyman_hours: { type: 'number', description: 'Only for category handyman, minimum 2' },
+        handyman_desc: { type: 'string' },
+        slot_key: { type: 'string', description: 'The chosen time slot key, if picked yet — needed to flag the after-hours fee' },
+        date: { type: 'string' },
       },
+      required: ['category'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'book_job',
-      description: 'Actually create the booking. Only call this after the caller has explicitly confirmed the recap (price, date, time) out loud. This is a real, final booking — never call it speculatively.',
-      parameters: {
-        type: 'object',
-        properties: {
-          category: { type: 'string', enum: ['tv', 'handyman'] },
-          selections: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, price: { type: 'number' } } } },
-          handyman_hours: { type: 'number' },
-          handyman_desc: { type: 'string' },
-          date: { type: 'string' },
-          slot_key: { type: 'string' },
-          slot_label: { type: 'string' },
-          name: { type: 'string' },
-          phone: { type: 'string' },
-          email: { type: 'string' },
-          address: { type: 'string' },
-        },
-        required: ['category', 'date', 'slot_key', 'name', 'address'],
+    name: 'book_job',
+    description: 'Actually create the booking. Only call this after the caller has explicitly confirmed the recap (price, date, time) out loud. This is a real, final booking — never call it speculatively.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['tv', 'handyman'] },
+        selections: { type: 'array', items: SELECTION_ITEM },
+        handyman_hours: { type: 'number' },
+        handyman_desc: { type: 'string' },
+        date: { type: 'string' },
+        slot_key: { type: 'string' },
+        slot_label: { type: 'string' },
+        name: { type: 'string' },
+        phone: { type: 'string' },
+        email: { type: 'string' },
+        address: { type: 'string' },
+        postal_code: { type: 'string' },
       },
+      required: ['category', 'date', 'slot_key', 'name', 'address'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'transfer_to_human',
-      description: 'End the AI conversation and transfer the live call to a human. Use this any time the caller asks for a person, pushes back on price, needs something outside a standard TV mounting or handyman booking (insurance/warranty jobs, discounts, GDS/gift codes), or you cannot confidently help after a couple of tries.',
-      parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
-    },
+    name: 'transfer_to_human',
+    description: 'End the AI conversation and transfer the live call to a human. Use this any time the caller asks for a person, pushes back on price, needs something outside a standard TV mounting or handyman booking (insurance/warranty jobs, discounts, GDS/gift codes), or you cannot confidently help after a couple of tries.',
+    input_schema: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
   },
 ];
 
