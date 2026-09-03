@@ -10,6 +10,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
+import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -78,27 +79,10 @@ async function applyMigration(filename) {
 // alias of 'in_route' (rank 0) so old rows compare correctly.
 const BRACKET_STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
-// Adjust a tech's bracket_inventory by a (possibly negative) delta, clamped at
-// zero. Used to self-heal inventory when an already-assigned order's quantities
-// are corrected from the email.
-async function adjustBracketInventory(db, businessId, technicianId, delta) {
-  const clamp = (n) => Math.max(0, n || 0);
-  const { data: inv } = await db.from('bracket_inventory')
-    .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
-  if (!inv) {
-    await db.from('bracket_inventory').insert({
-      business_id: businessId, technician_id: technicianId,
-      flat_qty: clamp(delta.flat), tilting_qty: clamp(delta.tilting), full_motion_qty: clamp(delta.full_motion),
-    });
-    return;
-  }
-  await db.from('bracket_inventory').update({
-    flat_qty:        clamp((inv.flat_qty || 0)        + delta.flat),
-    tilting_qty:     clamp((inv.tilting_qty || 0)     + delta.tilting),
-    full_motion_qty: clamp((inv.full_motion_qty || 0) + delta.full_motion),
-  }).eq('id', inv.id);
-}
+// Bracket_inventory moves ONLY through ledgerCreditDelivery / ledgerAdjustDelivery
+// now (migration 0088, api/_lib/bracket-moves.js) -- both keyed on the Walmart
+// order number, so a re-parsed email or an overlapping cron run credits or
+// corrects the same order exactly once instead of every time this endpoint fires.
 
 // Sync one Walmart order into bracket_purchases. Auth/method checked by caller.
 //   • Unassigned everywhere → mirror the order to every active business as an
@@ -189,15 +173,34 @@ async function bracketSync(req, res) {
     // Inventory moves ONLY on delivery — never while an order is in route.
     // Credit the full order the first time it flips to delivered; after that,
     // self-heal by any later quantity correction from a follow-up email.
-    if (!wasDelivered && nowDelivered && totalQty > 0) {
-      await adjustBracketInventory(db, assignedRow.business_id, assignedRow.technician_id,
-        { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty });
-    } else if (wasDelivered && qtyChanged) {
-      await adjustBracketInventory(db, assignedRow.business_id, assignedRow.technician_id, {
-        flat:        flat_qty        - (assignedRow.flat_qty || 0),
-        tilting:     tilting_qty     - (assignedRow.tilting_qty || 0),
-        full_motion: full_motion_qty - (assignedRow.full_motion_qty || 0),
-      });
+    // Keyed on walmart_order_num (migration 0088) so a re-parsed email or an
+    // overlapping cron run can only ever credit this order once. Resolve the
+    // tech's REAL home business rather than trusting assignedRow.business_id
+    // -- that's just whichever business tab the order happened to be assigned
+    // from, which can differ from the tech's own stock (the exact phantom-row
+    // bug fixed for bracketAssign in commit 5199678, 2026-07-16).
+    if ((!wasDelivered && nowDelivered && totalQty > 0) || (wasDelivered && qtyChanged)) {
+      const { data: tech } = await db.from('technicians').select('business_id').eq('id', assignedRow.technician_id).maybeSingle();
+      const homeBizId = tech?.business_id || assignedRow.business_id;
+      if (!wasDelivered && nowDelivered && totalQty > 0) {
+        await ledgerCreditDelivery(db, {
+          businessId: homeBizId, technicianId: assignedRow.technician_id,
+          qtys: { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty },
+          purchaseId: assignedRow.id, orderNum: walmart_order_num, actor: 'system:bracket-sync',
+        });
+      } else {
+        await ledgerAdjustDelivery(db, {
+          businessId: homeBizId, technicianId: assignedRow.technician_id,
+          deltaQtys: {
+            flat:        flat_qty        - (assignedRow.flat_qty || 0),
+            tilting:     tilting_qty     - (assignedRow.tilting_qty || 0),
+            full_motion: full_motion_qty - (assignedRow.full_motion_qty || 0),
+          },
+          purchaseId: assignedRow.id, orderNum: walmart_order_num,
+          tag: `qty-${flat_qty}-${tilting_qty}-${full_motion_qty}`,
+          reason: 'quantity corrected by a follow-up delivery email', actor: 'system:bracket-sync',
+        });
+      }
     }
     if (Object.keys(patch).length) {
       const { error } = await db.from('bracket_purchases').update(patch).eq('id', assignedRow.id);
@@ -235,9 +238,15 @@ async function bracketSync(req, res) {
     }
     // Credit inventory ONLY if this order is already delivered at the moment we
     // auto-assign it (e.g. the first email we saw was the delivery notice). An
-    // in-route order adds nothing until its delivery email arrives.
+    // in-route order adds nothing until its delivery email arrives. Keyed on
+    // walmart_order_num so this can never double-credit alongside the
+    // assignedRow branch above or a re-parsed email.
     if (status === 'delivered' && totalQty > 0) {
-      await adjustBracketInventory(db, matched.business_id, matched.id, { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty });
+      await ledgerCreditDelivery(db, {
+        businessId: matched.business_id, technicianId: matched.id,
+        qtys: { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty },
+        purchaseId: (own || {}).id || null, orderNum: walmart_order_num, actor: 'system:bracket-sync',
+      });
     }
     // Remove the still-unassigned twin(s) of this order in other businesses.
     for (const r of (rows || [])) {

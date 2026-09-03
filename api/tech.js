@@ -12,6 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
+import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
@@ -989,7 +990,13 @@ async function status(req, res, db, auth, body) {
             .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
           supplier = sup?.bracket_supplied_by || sup?.technician_id || auth.tech_id;
         } catch (_) { /* pre-0035: fall back to the completing tech */ }
-        await adjustBracketInventory(db, jobBizId, supplier, need, -1, id, 'job completion');
+        // Keyed on job:<id> (migration 0088) -- shared with the office
+        // completion path in admin.js, so whichever side completes the job
+        // first performs the real deduction and the other is a harmless no-op.
+        await debitForJob(db, {
+          businessId: jobBizId, technicianId: supplier, qtys: need, bookingId: id,
+          reason: 'job completion', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
+        });
         // Re-read metadata so we preserve the wire-plate stamp set just above.
         const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
         await db.from('bookings').update({
@@ -1235,8 +1242,24 @@ async function jobBracketSetSupplier(req, res, db, auth, body) {
   // old supplier to the new one (give it back, take from the new).
   const { data: metaRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
   if (metaRow?.metadata?.bracket_deducted_at) {
-    if (prev) await adjustBracketInventory(db, b.business_id, prev, qtys, +1, id, 'supplier change: returned to previous supplier');
-    await adjustBracketInventory(db, b.business_id, supplierId, qtys, -1, id, 'supplier change: new supplier charged');
+    // Keyed on (booking, prev->new) so re-submitting the SAME supplier change
+    // is a no-op, while a genuinely different change on the same job (rare,
+    // but possible if the supplier is corrected twice) still records its own
+    // move.
+    const changeTag = `${prev || 'none'}-to-${supplierId}`;
+    if (prev) {
+      await ledgerAdjust(db, {
+        businessId: b.business_id, technicianId: prev, deltaQtys: qtys, bookingId: id,
+        reason: 'supplier change: returned to previous supplier', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
+        idempotencyKey: `job-supplier-return:${id}:${changeTag}`,
+      });
+    }
+    await ledgerAdjust(db, {
+      businessId: b.business_id, technicianId: supplierId,
+      deltaQtys: { flat: -(qtys.flat || 0), tilting: -(qtys.tilting || 0), full_motion: -(qtys.full_motion || 0) },
+      bookingId: id, reason: 'supplier change: new supplier charged', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
+      idempotencyKey: `job-supplier-charge:${id}:${changeTag}`,
+    });
   }
 
   const { error: upErr } = await db.from('bookings')
@@ -1774,56 +1797,11 @@ function bracketLabel(q) {
   return parts.join(', ');
 }
 
-// Add (sign +1) or subtract (sign -1) bracket quantities from a tech's inventory
-// row, creating it if missing. Floors at 0 so the read-only count never goes negative.
-//
-// Inventory is tracked per TECH, not per job — one physical truck stock,
-// regardless of which company's customer it's used for. Since Denver
-// cross-hire (a tech can complete a job for the OTHER company), `businessId`
-// here may be the JOB's business, which can differ from the tech's own.
-// Always resolve+use the tech's real home business_id so a cross-hire job
-// deducts from their actual stock instead of creating a phantom always-zero
-// row under the other company (the bug that made TK show a false "reorder"
-// alert under Handy Andy's inventory table).
-async function adjustBracketInventory(db, businessId, techId, qtys, sign, bookingId = null, reason = '') {
-  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
-  const homeBizId = techRow?.business_id || businessId;
-  const { data: inv } = await db.from('bracket_inventory')
-    .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('business_id', homeBizId).eq('technician_id', techId).maybeSingle();
-  const cur = inv || { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
-  const next = {
-    flat_qty:        Math.max(0, (Number(cur.flat_qty) || 0) + sign * (qtys.flat || 0)),
-    tilting_qty:     Math.max(0, (Number(cur.tilting_qty) || 0) + sign * (qtys.tilting || 0)),
-    full_motion_qty: Math.max(0, (Number(cur.full_motion_qty) || 0) + sign * (qtys.full_motion || 0)),
-  };
-  if (inv) await db.from('bracket_inventory').update({ ...next, updated_at: new Date().toISOString() }).eq('id', inv.id);
-  else await db.from('bracket_inventory').insert({ business_id: homeBizId, technician_id: techId, ...next });
-  // Ledger: every automatic move writes a usage-log row so a count that looks
-  // wrong later can be reconstructed (TK's counts, 2026-08-21: deductions and
-  // manual sets left no history, so WHY the number drifted was unprovable).
-  // The clamp warning matters most: Math.max(0,...) above silently swallows a
-  // decrement when the documented count is already too low — that's drift
-  // compounding invisibly unless it's recorded here. Best-effort; never blocks
-  // the inventory write, which already happened.
-  try {
-    if ((qtys.flat || 0) + (qtys.tilting || 0) + (qtys.full_motion || 0) > 0) {
-      const clamped = [];
-      if (sign < 0) {
-        if ((qtys.flat || 0) > 0        && (Number(cur.flat_qty) || 0)        < (qtys.flat || 0))        clamped.push('flat');
-        if ((qtys.tilting || 0) > 0     && (Number(cur.tilting_qty) || 0)     < (qtys.tilting || 0))     clamped.push('tilting');
-        if ((qtys.full_motion || 0) > 0 && (Number(cur.full_motion_qty) || 0) < (qtys.full_motion || 0)) clamped.push('full_motion');
-      }
-      await db.from('bracket_usage_logs').insert({
-        business_id: homeBizId, booking_id: bookingId, technician_id: techId,
-        flat_used: qtys.flat || 0, tilting_used: qtys.tilting || 0, full_motion_used: qtys.full_motion || 0,
-        logged_by_kind: 'system',
-        notes: (sign < 0 ? 'auto-deduct' : 'restore') + (reason ? ` (${reason})` : '')
-          + (clamped.length ? ` — WARNING: ${clamped.join('/')} already below the deducted qty, decrement clamped at 0 (documented count was too low before this job)` : ''),
-      });
-    }
-  } catch (e) { console.error('[bracket] usage-log write failed:', e.message); }
-}
+// flat/tilting/full_motion brackets moved off this direct read-modify-write
+// helper and onto api/_lib/bracket-moves.js (migration 0088's bracket_moves
+// ledger) -- see debitForJob / adjust, imported above. That's the only thing
+// allowed to change those three columns now; wire_plate_qty and
+// appletv_bracket_qty (below) are not yet on the ledger.
 
 // Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
 // the wall" service. Match on behind + wall + a wire/conceal word so small label
