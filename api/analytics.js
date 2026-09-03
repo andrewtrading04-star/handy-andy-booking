@@ -328,9 +328,9 @@ async function twilioVoiceParams(req, res, action, extraQuery = {}) {
 function voicemailTwiml(sid) {
   const done = voiceUrl('voice_recording', { sid });
   return '<Response>'
-    + '<Say voice="Polly.Joanna">Sorry we missed you. Please leave your name, number and what you need after the tone, and we will call you right back.</Say>'
+    + '<Say voice="Polly.Joanna-Generative">Sorry we missed you. Please leave your name, number and what you need after the tone, and we will call you right back.</Say>'
     + `<Record maxLength="120" playBeep="true" timeout="4" transcribe="true" transcribeCallback="${xmlEsc(done)}" action="${xmlEsc(done)}" method="POST"/>`
-    + '<Say voice="Polly.Joanna">We did not get a message. Goodbye.</Say>'
+    + '<Say voice="Polly.Joanna-Generative">We did not get a message. Goodbye.</Say>'
     + '</Response>';
 }
 
@@ -348,7 +348,7 @@ async function handleVoiceWhisper(req, res) {
   const params = await twilioVoiceParams(req, res, 'voice_whisper', { label, sid });
   if (!params) return;
   if (!label) return xml(res, '<Response/>');
-  return xml(res, `<Response><Say voice="Polly.Joanna">${xmlEsc(label)}</Say></Response>`);
+  return xml(res, `<Response><Say voice="Polly.Joanna-Generative">${xmlEsc(label)}</Say></Response>`);
 }
 
 // Which handset a line rings RIGHT NOW.
@@ -419,7 +419,7 @@ function dialTwiml(line, callerFrom, sid) {
   // recording is on costs nothing in one-party states and is correct
   // everywhere, with no state lookup table to maintain as the fleet grows.
   const disclosure = line.record_calls
-    ? '<Say voice="Polly.Joanna">This call may be recorded for quality and training purposes.</Say>'
+    ? '<Say voice="Polly.Joanna-Generative">This call may be recorded for quality and training purposes.</Say>'
     : '';
   // The whisper: because callerId is the customer's number, the handset cannot
   // say WHICH line rang, and with a dozen numbers across several cities that
@@ -438,8 +438,8 @@ function dialTwiml(line, callerFrom, sid) {
 function ivrGateTwiml(sid) {
   const action = voiceUrl('voice_gather', { sid });
   return '<Response><Gather numDigits="1" timeout="8" action="' + xmlEsc(action) + '" method="POST">'
-    + '<Say voice="Polly.Joanna">To reduce spam calls, press 1 to continue.</Say>'
-    + '</Gather><Say voice="Polly.Joanna">We did not get a response. Goodbye.</Say><Hangup/></Response>';
+    + '<Say voice="Polly.Joanna-Generative">To reduce spam calls, press 1 to continue.</Say>'
+    + '</Gather><Say voice="Polly.Joanna-Generative">We did not get a response. Goodbye.</Say><Hangup/></Response>';
 }
 
 // POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
@@ -617,7 +617,7 @@ async function handleVoiceRecording(req, res) {
   } catch (e) {
     console.error('[voice_recording] update failed:', e.message);
   }
-  return xml(res, '<Response><Say voice="Polly.Joanna">Thanks. We will call you right back.</Say><Hangup/></Response>');
+  return xml(res, '<Response><Say voice="Polly.Joanna-Generative">Thanks. We will call you right back.</Say><Hangup/></Response>');
 }
 
 // ── AI Voice Bot (pilot, 2026-09-03) ─────────────────────────────────────────
@@ -698,25 +698,25 @@ async function botSessionSave(db, callSid, patch) {
 // it's never announced.
 function botMenuTwiml(action, sayText) {
   return '<Response><Gather input="speech dtmf" numDigits="1" timeout="6" speechTimeout="auto" action="'
-    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say></Gather>'
+    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna-Generative">' + xmlEsc(sayText) + '</Say></Gather>'
     + '<Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
 }
 function botOpenTwiml(action, sayIntro) {
   return '<Response><Gather input="speech dtmf" timeout="8" speechTimeout="auto" action="'
-    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna">' + xmlEsc(sayIntro) + '</Say></Gather>'
+    + xmlEsc(action) + '" method="POST"><Say voice="Polly.Joanna-Generative">' + xmlEsc(sayIntro) + '</Say></Gather>'
     + '<Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
 }
 function botSayRedirect(sayText, action) {
-  return '<Response><Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say><Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
+  return '<Response><Say voice="Polly.Joanna-Generative">' + xmlEsc(sayText) + '</Say><Redirect method="POST">' + xmlEsc(action) + '</Redirect></Response>';
 }
 function botHangup(sayText) {
-  return '<Response>' + (sayText ? '<Say voice="Polly.Joanna">' + xmlEsc(sayText) + '</Say>' : '') + '<Hangup/></Response>';
+  return '<Response>' + (sayText ? '<Say voice="Polly.Joanna-Generative">' + xmlEsc(sayText) + '</Say>' : '') + '<Hangup/></Response>';
 }
 // Escalation: reuses dialTwiml() verbatim (whisper/disclosure/recording/
 // voicemail fallback all come along for free), just prefixes one spoken line.
 function botTransfer(line, callerFrom, sid, sayFirst) {
   const twiml = dialTwiml(line, callerFrom, sid);
-  return sayFirst ? twiml.replace('<Response>', '<Response><Say voice="Polly.Joanna">' + xmlEsc(sayFirst) + '</Say>') : twiml;
+  return sayFirst ? twiml.replace('<Response>', '<Response><Say voice="Polly.Joanna-Generative">' + xmlEsc(sayFirst) + '</Say>') : twiml;
 }
 
 // ── Menu answer matching (deterministic — no LLM) ────────────────────────────
