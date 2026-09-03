@@ -79,6 +79,7 @@ function bookingStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
+import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'arrived', 'in_progress', 'completed'];
@@ -1509,6 +1510,7 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
         travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
         // Two assigned techs split the job 50/50 even without a "lift help" line.
         second_tech: techNames.length > 1,
+        is_houston: await isHoustonBooking(db, biz.id, biz.slug, b.service_area_id),
       };
       let payout = 0;
       // techNames[0] is the lead, [1] the secondary. Tell the engine which one is
@@ -6539,7 +6541,7 @@ async function fetchBookingRows(makeQuery) {
 // further without re-checking api/_lib/payroll.js.
 function economicsSelect() {
   const base = `id, status, payment_status, payment_method, amount_paid, price, subtotal, tip, notes, customer_notes,
-          zenbooker_job_number, scheduled_at, postal_code,
+          zenbooker_job_number, scheduled_at, postal_code, service_area_id,
           service:services ( name ),
           technician:technicians!technician_id ( name ),
           line_items:booking_line_items ( name, kind, quantity, unit_price, line_total )`;
@@ -9402,6 +9404,9 @@ async function quoteEconomics(req, res, db, auth, body) {
     scheduled_at: body.scheduled_at || new Date().toISOString(),
     travel_payout: 0,   // derived from the ticket's own surcharge line by the engine
     second_tech: false,
+    // No real booking yet, so only a zip on the quote (if the office entered one)
+    // can resolve the metro beyond the Houston-exclusive brands.
+    is_houston: await isHoustonBooking(db, biz.id, biz.slug, await serviceAreaIdFromPostal(db, biz.id, body.postal_code)),
   };
   const { pay, flags } = computeJobPay(projJob, 'Office Quote');
   const payout = Number(pay) || 0;
@@ -11260,7 +11265,7 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
   const { data: jobs, error: jobErr } = await db.from('bookings')
     .select(`
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid, payment_method,
-      tip, notes, customer_notes, zenbooker_job_number, postal_code,
+      tip, notes, customer_notes, zenbooker_job_number, postal_code, service_area_id,
       technician_id, secondary_technician_id,
       customers(name), services(name),
       line_items:booking_line_items(kind, name, quantity, unit_price, line_total)
@@ -11310,6 +11315,7 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
 
   for (const b of jobs || []) {
     const techList = jobTechs[b.id] || [];
+    const isHouston = await isHoustonBooking(db, biz.id, biz.slug, b.service_area_id);
     for (const techId of techList) {
       if (!techPayroll[techId]) continue;
 
@@ -11333,6 +11339,7 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
         // the assigned helper earns $0.
         second_tech: (jobTechs[b.id] || []).length > 1,
         is_secondary: techId === b.secondary_technician_id && techId !== b.technician_id,
+        is_houston: isHouston,
       }, techPayroll[techId].name);
 
       const jobBase = {

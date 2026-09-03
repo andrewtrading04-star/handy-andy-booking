@@ -35,6 +35,7 @@ function jobStripePk(slug) {
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
+import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 
 // A job is not "complete" until the tech has documented it with photos.
@@ -537,6 +538,7 @@ async function job(req, res, db, auth) {
       // a solo tech keeps it all. Juan/TK bring their own helper and never split.
       second_tech: !!data.secondary_technician_id,
       is_secondary: data.secondary_technician_id === auth.tech_id && data.technician_id !== auth.tech_id,
+      is_houston: await isHoustonBooking(db, data.business_id, data.business?.slug, data.service_area_id),
     }, viewerName);
     // Keep cents — a two-tech split can be a half-dollar (e.g. $122.50), so don't
     // round it away to $122/$123.
@@ -2079,7 +2081,7 @@ async function techPayroll(req, res, db, auth) {
   const secCol = techHasSecondCol ? 'secondary_technician_id, ' : '';
   const jobsSelect = `
       id, scheduled_at, status, subtotal, price, payment_status, amount_paid,
-      tip, notes, customer_notes, zenbooker_job_number, postal_code, technician_id, ${secCol}
+      tip, notes, customer_notes, zenbooker_job_number, postal_code, service_area_id, technician_id, ${secCol}
       customers(name), services(name),
       line_items:booking_line_items(kind, name, quantity, unit_price, line_total)
     `;
@@ -2115,6 +2117,7 @@ async function techPayroll(req, res, db, auth) {
   let totalPay = 0;
 
   for (const b of jobs || []) {
+    const isHouston = await isHoustonBooking(db, auth.business_id, businessSlug, b.service_area_id);
     const result = computeJobPay({
       status: b.status,
       payment_status: b.payment_status,
@@ -2132,6 +2135,7 @@ async function techPayroll(req, res, db, auth) {
       travel_payout: travelPayoutByZip.get(String(b.postal_code || '')) || 0,
       second_tech: !!b.secondary_technician_id,
       is_secondary: techId === b.secondary_technician_id && techId !== b.technician_id,
+      is_houston: isHouston,
     }, techName);
 
     const base = {

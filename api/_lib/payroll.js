@@ -573,17 +573,22 @@ export function computeJobPay(job, techName) {
   // what detectMultiTech reads from the line items. Merely ASSIGNING a helper to a
   // normal one-person job must NOT halve the base: the lead keeps the full base and
   // the assigned helper earns $0 for that job (handled just below).
-  const multiTech = detectMultiTech(job);          // "Second Technician" ($70) fee line present?
+  const multiTech = detectMultiTech(job);          // "Second Technician" fee line present?
   // Owner rules for the second tech:
   //   • TWO real system techs on the job  -> split the tech pay 50/50.
   //   • ONE tech on the job               -> that tech keeps ALL the pay.
-  //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay
-  //     (so $30 each on a split, or the whole $60 to a solo tech).
+  //   • A "Second Technician" line        -> adds a flat bonus to the job's tech pay
+  //     (so half each on a split, or the whole bonus to a solo tech).
   // job.second_tech is only ever true when a REAL system tech is assigned as
   // secondary (Juan/TK's own off-system helper is never entered as one) — so
   // it always means an actual two-person job, no exception for who's primary.
   const twoTechs = !!job.second_tech;
-  const feeBonus = multiTech.secondTechBonus > 0 ? 60 : 0;
+  // Houston pays $70 for this bonus (customer price $85); every other metro
+  // stays at $60 (customer price $70). job.is_houston is resolved by the
+  // caller via _lib/houston-bonus.js — payroll.js stays DB-free, so it never
+  // decides "is this Houston" itself, only what to do once told.
+  const SECOND_TECH_BONUS = job.is_houston ? 70 : 60;
+  const feeBonus = multiTech.secondTechBonus > 0 ? SECOND_TECH_BONUS : 0;
 
   // ── Detect after-hours fee: $75 bonus for 8 PM-or-later jobs ──
   let afterHoursBonus = 0;
@@ -815,9 +820,11 @@ export function computeJobPay(job, techName) {
   // ── Second-tech pay rules (per owner) ────────────────────────────────────────
   //   • TWO real system techs on the job  -> split base + tips 50/50 (each half).
   //   • ONE tech on the job               -> that tech keeps ALL the base + tips.
-  //   • A "Second Technician" ($70) line  -> adds a flat $60 to the job's tech pay.
-  //       - two techs: $30 to each (the $60 splits with the base)
-  //       - one tech:  the whole $60 to that tech
+  //   • A "Second Technician" line        -> adds a flat bonus to the job's tech
+  //     pay: $60 everywhere except Houston, where it's $70 (customer pays $85
+  //     there vs. $70 elsewhere — see SECOND_TECH_BONUS above).
+  //       - two techs: half each (the bonus splits with the base)
+  //       - one tech:  the whole bonus to that tech
   //   • Juan/TK bring their OWN off-system helper (not a paid system tech) on
   //     their solo bookings — but that's simply the "ONE tech on the job" case
   //     above (job.second_tech is false, so twoTechs is already false; no
@@ -832,8 +839,8 @@ export function computeJobPay(job, techName) {
   //   • Travel is ONE trip's surcharge — SPLIT between the two techs (owner rule).
   //   • After-hours ($75) is a per-trip stipend — each tech on the trip earns it.
   if (twoTechs) {
-    // The WHOLE tech-pay pool splits evenly: all base labor + the $60 second-tech
-    // add-on + tips, divided by two. Split to the CENT — e.g. 70 + 80 + 35 + 60 =
+    // The WHOLE tech-pay pool splits evenly: all base labor + the second-tech
+    // add-on ($60, or $70 in Houston) + tips, divided by two. Split to the CENT — e.g. 70 + 80 + 35 + 60 =
     // 245 → $122.50 each (not $122 or $123). Travel is one trip's surcharge, so it
     // splits too (half each). After-hours stays full to each tech.
     let baseTotal = 0;
@@ -849,9 +856,9 @@ export function computeJobPay(job, techName) {
     return { pay: round2(finalPay), breakdown: newBreakdown, flags, state: state === 'partial' ? 'partial' : 'paid' };
   } else {
     // Single tech (or Juan/TK with their own helper) — full base + tips, plus the
-    // whole $60 when a "Second Technician" line is present.
+    // whole bonus when a "Second Technician" line is present.
     if (tip) breakdown.push({ label: 'Tip (100%)', amount: tip });
-    if (feeBonus) breakdown.push({ label: 'Second Technician bonus ($60)', amount: feeBonus });
+    if (feeBonus) breakdown.push({ label: `Second Technician bonus ($${feeBonus})`, amount: feeBonus });
     if (afterHoursBonus) breakdown.push({ label: 'After-Hours bonus (8 PM)', amount: afterHoursBonus });
     if (travelPayout) breakdown.push({ label: 'Travel payout', amount: travelPayout });
     pay += tip + feeBonus + afterHoursBonus + travelPayout;
