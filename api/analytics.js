@@ -760,9 +760,19 @@ function botMatchMenu(options, { digits, speech }) {
 // escalated on the very first try. Real calendar/clock meaning is checked
 // FIRST here; menu position is still a fallback for someone who does say
 // "one" or "the first one".
+const ORDINAL_WORDS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20, thirtieth: 30, thirty: 30, twenty: 20 };
+function botOrdinalDayFrom(s) {
+  const m = s.match(/\b(twenty|thirty)[\s-]?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)?\b|\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth)\b/);
+  if (!m) return null;
+  if (m[1]) return (ORDINAL_WORDS[m[1]] || 0) + (m[2] ? ORDINAL_WORDS[m[2]] : 0);
+  return ORDINAL_WORDS[m[3]] || null;
+}
 function botMatchDate(dates, { digits, speech }) {
   const s = (speech || '').toLowerCase();
-  const dayNum = (s.match(/\d{1,2}/) || [])[0];
+  if (/\btomorrow\b/.test(s) && dates[1]) return dates[1];
+  if (/\btoday\b/.test(s) && dates[0]) return dates[0];
+  if (/\bday after tomorrow\b/.test(s) && dates[2]) return dates[2];
+  const dayNum = (s.match(/\d{1,2}/) || [])[0] || botOrdinalDayFrom(s);
   if (dayNum) {
     const n = parseInt(dayNum, 10);
     const hit = dates.find(ds => parseInt(ds.slice(-2), 10) === n);
