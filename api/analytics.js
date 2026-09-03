@@ -803,6 +803,61 @@ function botMatchSlot(slots, { digits, speech }) {
   if (wIdx >= 1 && wIdx <= slots.length) return slots[wIdx - 1];
   return null;
 }
+// ── Claude reasoning fallback (optional, 2026-09-03) ─────────────────────────
+// Every matcher above is deterministic and free — it runs FIRST and handles
+// the common case instantly with zero API cost. Only when it can't confidently
+// resolve an answer does a step reach for Claude, and only if the caller
+// actually said something (never on silence/timeout) and ANTHROPIC_API_KEY is
+// configured — if it's not set, every function here is a silent no-op and the
+// bot behaves exactly as before (a plain retry), so this is a pure upgrade,
+// never a new failure mode. Never trusts the model's text as data: the answer
+// is always re-validated against the real choices list before being used for
+// anything (pricing, scheduling, booking).
+async function botClaudeCall(prompt, maxTokens) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4500);
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens || 20, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!r.ok) { console.error('[voice_bot] Claude call failed:', r.status, await r.text().catch(() => '')); return null; }
+    const data = await r.json();
+    return ((data.content && data.content[0] && data.content[0].text) || '').trim();
+  } catch (e) {
+    console.error('[voice_bot] Claude call errored:', e.message);
+    return null;
+  }
+}
+// Picks the closest of a list of plain-text choices, or null. Used for every
+// step whose valid answers are a short list of labels (category, bracket,
+// wires, lifting, and the spoken date/time menus).
+async function botClaudeChoose(question, speech, choices) {
+  if (!speech || !choices.length) return null;
+  const prompt = `A caller on a phone booking call was asked: "${question}"\nThey said: "${speech}"\n`
+    + `Which ONE of these is the closest match to what they meant? Reply with ONLY the exact text of that choice, character for character, nothing else. If none reasonably match, reply exactly: NONE\n\nChoices:\n`
+    + choices.map(c => `- ${c}`).join('\n');
+  const text = await botClaudeCall(prompt, 40);
+  if (!text || /^NONE$/i.test(text)) return null;
+  // Re-validated against the real list — the model's own words are never
+  // trusted as the answer, only used to point at one of OUR options.
+  return choices.find(c => c.toLowerCase().trim() === text.toLowerCase().trim()) || null;
+}
+// Plain yes/no via Claude, for when botYes()'s keyword regex comes up empty
+// (e.g. "that's fine", "go ahead", "I'd rather not").
+async function botClaudeYesNo(question, speech) {
+  if (!speech) return null;
+  const prompt = `A caller on a phone booking call was asked: "${question}"\nThey said: "${speech}"\nIs that a yes or a no? Reply with ONLY one word: YES, NO, or UNCLEAR.`;
+  const text = await botClaudeCall(prompt, 5);
+  if (!text) return null;
+  if (/^YES$/i.test(text)) return true;
+  if (/^NO$/i.test(text)) return false;
+  return null;
+}
 function botYes(speech, digits) {
   if (digits === '1') return true;
   if (digits === '2') return false;
@@ -1016,10 +1071,14 @@ async function handleVoiceBotTurn(req, res) {
     switch (step) {
 
       case 'category': {
-        const opt = botMatchMenu([
+        let opt = botMatchMenu([
           { say: 'tv', terms: ['tv', 'mount', 'mounting', 'television'] },
           { say: 'handyman', terms: ['handyman', 'handy', 'handywork'] },
         ], { digits, speech });
+        if (!opt && speech) {
+          const picked = await botClaudeChoose('Would you like TV mounting or handyman services?', speech, ['TV mounting', 'handyman services']);
+          if (picked) opt = { say: picked === 'TV mounting' ? 'tv' : 'handyman' };
+        }
         if (!opt) return retry("I didn't catch that — would you like TV mounting or handyman services?");
         const cat = opt.say === 'tv' ? 'tv' : 'handyman';
         return goto('zip', { category: cat },
@@ -1053,7 +1112,14 @@ async function handleVoiceBotTurn(req, res) {
         // ("about 55 inches") and it's bucketed into the right catalog size
         // range (botSizeRangeFor), which is both faster and how a human
         // secretary actually asks this on a real call.
-        const opt = botMatchSize(d.catalog.size, { digits, speech });
+        let opt = botMatchSize(d.catalog.size, { digits, speech });
+        if (!opt && speech) {
+          // No digit in what they said at all ("it's pretty big", "a medium
+          // sized one") — let Claude match the vague description to one of
+          // the real size-bracket labels instead of just giving up.
+          const picked = await botClaudeChoose('What size is your TV, in inches?', speech, d.catalog.size.map(o => o.label));
+          if (picked) opt = d.catalog.size.find(o => o.label === picked) || null;
+        }
         if (!opt) return retry("What size is the TV — just the number of inches is fine?");
         const answers = { ...d.answers, size: opt };
         const bracketOpts = d.catalog.bracket || [];
@@ -1072,13 +1138,18 @@ async function handleVoiceBotTurn(req, res) {
         const opts = botMenuOptionsFrom(d.catalog.bracket);
         // digits intentionally ignored — no numbered menu was read, so a
         // stray keypress shouldn't be reinterpreted as "option #N".
-        const opt = botMatchMenu(opts, { digits: '', speech });
+        let opt = botMatchMenu(opts, { digits: '', speech });
+        if (!opt && speech) {
+          const picked = await botClaudeChoose('Do you have your own bracket, or would you like us to bring a flat, tilting, or full motion one?', speech, d.catalog.bracket.map(o => o.label));
+          if (picked) opt = { catalogOpt: d.catalog.bracket.find(o => o.label === picked) };
+        }
         if (!opt) return retry("Do you have your own bracket, or should we bring a flat, tilting, or full motion bracket?");
         const answers = { ...d.answers, bracket: opt.catalogOpt };
         return goto('tv_fireplace', { answers }, null, () => botMenuTwiml(action, "Is your TV going over a fireplace?"));
       }
       case 'tv_fireplace': {
-        const yn = botYes(speech, digits);
+        let yn = botYes(speech, digits);
+        if (yn === null && speech) yn = await botClaudeYesNo('Is the TV going over a fireplace?', speech);
         if (yn === null) return retry("Is the TV going over a fireplace — yes or no?");
         const fpOpts = d.catalog.fireplace || [];
         // "TV NOT above a fireplace" contains the substring "above a
@@ -1099,7 +1170,11 @@ async function handleVoiceBotTurn(req, res) {
       }
       case 'tv_wires': {
         const opts = botMenuOptionsFrom(d.catalog.wires);
-        const opt = botMatchMenu(opts, { digits, speech });
+        let opt = botMatchMenu(opts, { digits, speech });
+        if (!opt && speech) {
+          const picked = await botClaudeChoose('Would you like the wires hidden behind the wall, hidden outside the wall, or left hanging?', speech, d.catalog.wires.map(o => o.label));
+          if (picked) opt = { catalogOpt: d.catalog.wires.find(o => o.label === picked) };
+        }
         if (!opt) return retry("Would you like the wires hidden behind the wall, hidden outside the wall, or left hanging?");
         const answers = { ...d.answers, wires: opt.catalogOpt };
         const sizecat = answers.size && answers.size.sizecat;
@@ -1115,7 +1190,11 @@ async function handleVoiceBotTurn(req, res) {
       }
       case 'tv_lifting': {
         const opts = botMenuOptionsFrom(d.catalog.lifting);
-        const opt = botMatchMenu(opts, { digits, speech });
+        let opt = botMatchMenu(opts, { digits, speech });
+        if (!opt && speech) {
+          const picked = await botClaudeChoose('Will you be able to help lift the TV, or should we send a second technician?', speech, d.catalog.lifting.map(o => o.label));
+          if (picked) opt = { catalogOpt: d.catalog.lifting.find(o => o.label === picked) };
+        }
         if (!opt) return retry("Will you be able to help lift the TV, or would you like a second technician?");
         const answers = { ...d.answers, lifting: opt.catalogOpt };
         return goto('schedule_date', { answers }, null, (nn) => botAskDate(nn, action, session.business_slug));
@@ -1135,20 +1214,35 @@ async function handleVoiceBotTurn(req, res) {
       // ── Scheduling ──────────────────────────────────────────────────────────
       case 'schedule_date': {
         const dates = d._dateChoices || [];
-        const dateStr = botMatchDate(dates, { digits, speech });
+        let dateStr = botMatchDate(dates, { digits, speech });
+        if (!dateStr && speech) {
+          // Grounded with today's date so relative phrases ("tomorrow",
+          // "whenever's soonest") resolve correctly — botMatchDate alone has
+          // no sense of "relative to today", only literal days/numbers.
+          const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+          const labels = dates.map(botSpokenDate);
+          const picked = await botClaudeChoose(`Today is ${todayLabel}. Which day works best for the appointment?`, speech, labels);
+          if (picked) dateStr = dates[labels.indexOf(picked)];
+        }
         if (!dateStr) return retry("Which day works best — you can just tell me the day, like Thursday or the 4th?");
         return goto('schedule_slot', { date: dateStr, _dateChoices: null }, null, (nn) => botAskSlot(nn, session.business_slug, action));
       }
       case 'schedule_slot': {
         const slots = d._slotChoices || [];
-        const opt = botMatchSlot(slots, { digits, speech });
+        let opt = botMatchSlot(slots, { digits, speech });
+        if (!opt && speech) {
+          const labels = slots.map(s => s.label);
+          const picked = await botClaudeChoose(`Which time works best on ${botSpokenDate(d.date)}?`, speech, labels);
+          if (picked) opt = slots[labels.indexOf(picked)];
+        }
         if (!opt) return retry("Which time works best — morning, afternoon, or evening is fine?");
         const answers = { ...d.answers };
         return goto('recap', { slotKey: opt.slot_key, slotLabel: opt.label, _slotChoices: null }, null, (nn) => botRecap(nn, action));
       }
 
       case 'recap': {
-        const yn = botYes(speech, digits);
+        let yn = botYes(speech, digits);
+        if (yn === null && speech) yn = await botClaudeYesNo('Does the appointment time and price work for you?', speech);
         if (yn === null) return retry("Does that work for you — yes or no?");
         if (!yn) {
           await botSessionSave(db, sid, { retry_count: 0 });
@@ -1168,7 +1262,8 @@ async function handleVoiceBotTurn(req, res) {
       }
       case 'customer_phone': {
         if (session.caller_phone && !d._phoneAsked) {
-          const yn = botYes(speech, digits);
+          let yn = botYes(speech, digits);
+          if (yn === null && speech) yn = await botClaudeYesNo("Is the caller's own phone number the best number to reach them?", speech);
           if (yn === null) return retry("Is that the right number — yes or no?");
           if (yn) return goto('customer_email', { phone: session.caller_phone }, null, () => botOpenTwiml(action, "What's your email? You can also just say skip."));
           return goto('customer_phone', { _phoneAsked: true }, null, () => botOpenTwiml(action, "What's the best number to reach you?"));
