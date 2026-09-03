@@ -786,8 +786,42 @@ async function botLoadCatalog(businessSlug, serviceId) {
   }
   return byKey;
 }
+// Catalog labels are written for a screen, not a voice: "33"-59"" reads out
+// loud as "thirty-three MINUS fifty-nine" (Polly reads a numeral-to-numeral
+// hyphen or en-dash as subtraction), and the inch marks either get skipped
+// oddly or read as "inch". Only the SPOKEN text goes through this — matching
+// still runs against the raw label in botTermsFor, where the punctuation
+// doesn't matter.
+function botSpeakLabel(label) {
+  return String(label || '')
+    .replace(/(\d)\s*[-–—]\s*(\d)/g, '$1 to $2')
+    .replace(/["″]/g, '')
+    .replace(/(\d)\+/g, '$1 or more');
+}
 function botMenuOptionsFrom(catalogGroup) {
-  return (catalogGroup || []).map(o => ({ say: o.label, terms: botTermsFor(o.label), catalogOpt: o }));
+  return (catalogGroup || []).map(o => ({ say: botSpeakLabel(o.label), terms: botTermsFor(o.label), catalogOpt: o }));
+}
+// TV size range parsed from the catalog label itself (no separate min/max
+// columns exist), so a caller can just say a number ("about 55 inches")
+// instead of sitting through a 6-item menu — reading all six sizes out loud
+// was the single slowest part of the call. Ranges are contiguous (0-32,
+// 33-59, 60-69, 70-85, 86-97, 98+), so any real TV size lands in exactly one.
+function botSizeRangeFor(label) {
+  const nums = String(label || '').match(/\d+/g);
+  if (!nums || !nums.length) return null;
+  if (/or less|under/i.test(label)) return { min: 0, max: parseInt(nums[0], 10) };
+  if (/\+/.test(label) || nums.length === 1) return { min: parseInt(nums[0], 10), max: Infinity };
+  return { min: parseInt(nums[0], 10), max: parseInt(nums[nums.length - 1], 10) };
+}
+function botMatchSize(catalogGroup, { digits, speech }) {
+  const raw = digits || (String(speech || '').match(/\d+/) || [])[0];
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return null;
+  for (const o of (catalogGroup || [])) {
+    const r = botSizeRangeFor(o.label);
+    if (r && n >= r.min && n <= r.max) return o;
+  }
+  return null;
 }
 
 // Builds the priced selections array in the same shape booking_create expects
@@ -949,17 +983,20 @@ async function handleVoiceBotTurn(req, res) {
           try { catalog = await botLoadCatalog(session.business_slug, nd.tvServiceId); }
           catch (e) { return retry("Sorry, I'm having trouble pulling up pricing. Could you give me a moment and repeat your last answer?"); }
           nd.catalog = catalog;
-          return goto('tv_size', nd, null, (nn) => botMenuTwiml(action, "What size is your TV?", botMenuOptionsFrom(nn.catalog.size)));
+          return goto('tv_size', nd, null, () => botOpenTwiml(action, "What size is your TV, in inches?"));
         }
         return goto('handyman_desc', nd, null, () => botOpenTwiml(action, "What do you need done?"));
       }
 
       // ── TV Mounting path ──────────────────────────────────────────────────
       case 'tv_size': {
-        const opts = botMenuOptionsFrom(d.catalog.size);
-        const opt = botMatchMenu(opts, { digits, speech });
-        if (!opt) return retry("Sorry, which size TV is it — you can say the size, like 60 to 69 inches?");
-        const answers = { ...d.answers, size: opt.catalogOpt };
+        // Open question, not a 6-item menu — the caller just says a number
+        // ("about 55 inches") and it's bucketed into the right catalog size
+        // range (botSizeRangeFor), which is both faster and how a human
+        // secretary actually asks this on a real call.
+        const opt = botMatchSize(d.catalog.size, { digits, speech });
+        if (!opt) return retry("Sorry, what size is the TV — just the number of inches is fine?");
+        const answers = { ...d.answers, size: opt };
         const bracketOpts = d.catalog.bracket || [];
         if (!bracketOpts.length) {
           return goto('tv_fireplace', { answers }, null, (nn) => botMenuTwiml(action, "Is your TV going over a fireplace?", [{ say: 'no, not over a fireplace' }, { say: 'yes, over a fireplace' }]));
@@ -1146,7 +1183,7 @@ function botRecap(d, action) {
   const tax = Math.round(subtotal * BOT_TAX_RATE * 100) / 100;
   const total = Math.round((subtotal + tax) * 100) / 100;
   d._priced = { selections, subtotal, tax, total };
-  const what = d.category === 'tv' ? (d.answers.size ? d.answers.size.label + ' TV mount' : 'TV mount') : `${d.handymanHours || 2} hours of handyman work`;
+  const what = d.category === 'tv' ? (d.answers.size ? botSpeakLabel(d.answers.size.label) + ' TV mount' : 'TV mount') : `${d.handymanHours || 2} hours of handyman work`;
   return botMenuTwiml(action,
     `Okay, I have ${what} on ${botSpokenDate(d.date)}, ${d.slotLabel}. The total before tax is ${botSpokenMoney(total)}. Does that work for you?`,
     [{ say: 'yes, that works' }, { say: 'no' }]);
