@@ -5,7 +5,7 @@ import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { serviceClient } from './_lib/supabase.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
-import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod } from './_lib/stripe.js';
+import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod, stripe } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, maybeSendLeadGenBookingAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
@@ -179,6 +179,57 @@ async function cardSetupPublic(req, res) {
     console.warn('[card-setup] failed, widget will fall back to tokenize-only:', e.message);
     return res.status(200).json({ disabled: true });
   }
+}
+
+// Public: the landing page after an invoice's Stripe Checkout redirects back
+// (pay.html) calls this to find out whether the payment actually went through
+// and, the first time it's confirmed, to record it on the booking. No login —
+// the only thing a caller can do with a booking id + a real Stripe session id
+// is learn/settle THAT session's own payment, which Stripe itself already
+// authorized; there's nothing here an attacker could use to pay someone
+// else's invoice or see anything beyond "paid: true/false".
+async function payStatusPublic(req, res) {
+  const q = req.query || {};
+  const bookingId = (q.booking || '').toString().trim();
+  const sessionId = (q.session_id || '').toString().trim();
+  if (!bookingId || !sessionId) return res.status(400).json({ error: 'booking and session_id required' });
+  const db = serviceClient();
+  const { data: b, error } = await db.from('bookings')
+    .select('id, business_id, amount_paid, payment_status, stripe_account, business:businesses ( slug )')
+    .eq('id', bookingId).maybeSingle();
+  if (error || !b) return res.status(404).json({ error: 'Invoice not found' });
+
+  const acct = { account: b.stripe_account || null, slug: b.business?.slug };
+  let session;
+  try { session = await stripe(`/checkout/sessions/${encodeURIComponent(sessionId)}`, { method: 'GET', ...acct }); }
+  catch (e) { return res.status(400).json({ error: 'Could not verify this payment with Stripe: ' + e.message }); }
+
+  // The session must be THIS booking's own — never trust a session id alone.
+  if ((session.metadata || {}).booking_id !== bookingId) {
+    return res.status(400).json({ error: 'This payment link does not match this invoice.' });
+  }
+
+  const paid = session.payment_status === 'paid';
+  if (!paid) return res.status(200).json({ ok: true, paid: false });
+  if (b.payment_status === 'paid') return res.status(200).json({ ok: true, paid: true });
+
+  const amount = (Number(session.amount_total) || 0) / 100;
+  const patch = {
+    payment_status: 'paid',
+    paid_at: new Date().toISOString(),
+    amount_paid: Math.round(((Number(b.amount_paid) || 0) + amount) * 100) / 100,
+  };
+  if (session.payment_intent) patch.stripe_payment_intent_id = session.payment_intent;
+  // Guard against double-recording if the success page reloads/re-fires.
+  await db.from('bookings').update(patch).eq('id', bookingId).neq('payment_status', 'paid');
+  try {
+    await db.from('booking_notes').insert({
+      booking_id: bookingId, business_id: b.business_id,
+      body: `Invoice paid online — $${amount.toFixed(2)} via card`,
+      author_kind: 'system', author_id: null, author_name: 'Online payment',
+    });
+  } catch (e) { /* best-effort */ }
+  return res.status(200).json({ ok: true, paid: true, amount });
 }
 
 // Public: whether a business's transactional email is wired up. Reports the
@@ -1584,6 +1635,7 @@ export default async function handler(req, res) {
   // Live multi-TV discount numbers for the widget, see multiTvDiscountPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'multi_tv_discount') return multiTvDiscountPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'pay_status') return payStatusPublic(req, res);
   if (req.method === 'POST' && ((req.query || {}).action === 'card_setup' || (req.body || {}).action === 'card_setup')) return cardSetupPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
   // One-tap "on my way" link from the pre-job nudge text. Read on GET, act on POST.

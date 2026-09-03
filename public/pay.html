@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Payment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e7e9ee;
+    --ink:#222a35; --ink-2:#3a4453; --mute:#7a8694;
+    --accent:#2563eb;
+    --green:#22c55e; --green-ink:#15803d; --green-soft:#e8f8ee;
+    --red:#ef4444; --red-soft:#fef2f2; --red-ink:#b91c1c;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;letter-spacing:-.01em;}
+  .container{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:36px 28px;width:100%;max-width:440px;box-shadow:0 18px 50px rgba(20,30,50,.10);text-align:center;}
+  .icon{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:28px;}
+  .icon.ok{background:var(--green-soft);color:var(--green-ink);}
+  .icon.err{background:var(--red-soft);color:var(--red-ink);}
+  .icon.wait{background:#eef4ff;color:var(--accent);}
+  h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin-bottom:8px;}
+  .sub{color:var(--mute);font-size:15px;line-height:1.55;}
+  .amt{font-size:28px;font-weight:900;color:var(--green-ink);margin:14px 0 4px;}
+  .spinner{width:28px;height:28px;border:3px solid #dbe4f5;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 18px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+  <div class="container" id="app">
+    <div class="spinner"></div>
+    <h1>Confirming your payment…</h1>
+    <div class="sub">Just a moment.</div>
+  </div>
+
+<script>
+const API = '/api/book';
+const qs = new URLSearchParams(location.search);
+const booking = qs.get('booking') || '';
+const sessionId = qs.get('session_id') || '';
+const canceled = qs.get('canceled') === '1';
+const app = document.getElementById('app');
+
+function render(iconClass, icon, title, sub, amount) {
+  app.innerHTML = `
+    <div class="icon ${iconClass}">${icon}</div>
+    <h1>${title}</h1>
+    ${amount ? `<div class="amt">$${amount.toFixed(2)}</div>` : ''}
+    <div class="sub">${sub}</div>`;
+}
+
+(async () => {
+  if (canceled) {
+    render('err', '✕', 'Payment canceled', 'No charge was made. You can use the same link again whenever you’re ready to pay.');
+    return;
+  }
+  if (!booking || !sessionId) {
+    render('err', '✕', 'Missing payment info', 'This link looks incomplete. Please use the link from your invoice email or text.');
+    return;
+  }
+  try {
+    const res = await fetch(`${API}?action=pay_status&booking=${encodeURIComponent(booking)}&session_id=${encodeURIComponent(sessionId)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not confirm your payment.');
+    if (data.paid) {
+      render('ok', '✓', 'Payment received', 'Thank you — your invoice is paid in full. A receipt will follow by email.', data.amount);
+    } else {
+      render('wait', '…', 'Payment not completed', 'It doesn’t look like this payment went through. If you were charged, please contact us before trying again.');
+    }
+  } catch (e) {
+    render('err', '✕', 'Could not confirm payment', e.message || 'Please contact us and we’ll check on it.');
+  }
+})();
+</script>
+</body>
+</html>

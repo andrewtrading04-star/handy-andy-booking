@@ -1175,7 +1175,11 @@ export function receiptEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
             ${netPaid > 0 ? `<div style="font-size:13px;color:#9a3412;margin-top:3px;">${money(netPaid)} already paid</div>` : ''}
           </td></tr>
         </table>
-      </td></tr>`;
+      </td></tr>
+      ${details.payUrl ? `
+      <tr><td style="padding:16px 30px 0;text-align:center;">
+        <a href="${esc(details.payUrl)}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:800;padding:13px 34px;border-radius:10px;">Pay ${esc(money(due))} now &rarr;</a>
+      </td></tr>` : ''}`;
   }
 
   const subject = `${heading} from ${b.name}${details.receiptNo ? ` (#${details.receiptNo})` : ''}`;

@@ -419,6 +419,7 @@ export default async function handler(req, res) {
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
+      case 'invoice_send':      return await invoiceSend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
       case 'call_recording':    return await callRecording(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
@@ -6114,6 +6115,144 @@ async function receiptSend(req, res, db, auth, body) {
   } catch (e) { console.warn('[receipt] note log failed:', e.message); }
   console.log(`[receipt] ${kind} for ${id} sent by ${auth.name || auth.role} to ${b.customer.email}`);
   return res.status(200).json({ ok: true, kind, to: b.customer.email });
+}
+
+// ── Invoice send: email + SMS with a payable Stripe Checkout link ────────────
+// Distinct from receipt_send just above (which auto-detects receipt vs invoice
+// from payment state and only emails). This is the explicit "bill the
+// customer" action from the Line items card: it always sends an INVOICE
+// (refused only when nothing is actually owed), creates a real Stripe
+// Checkout Session so the customer can pay by card straight from the
+// email/text with no login, and sends BOTH channels the office has on file —
+// email is required, SMS is best-effort when there's a phone number.
+async function invoiceSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  const cols = (withAcct) => `id, scheduled_at, price, tip, amount_paid, amount_refunded, payment_status,
+      ${withAcct ? 'stripe_account, ' : ''}
+      address_line1, city, state, postal_code,
+      customer:customers ( name, email, phone ),
+      technician:technicians!technician_id ( name ),
+      service_area:service_areas ( timezone ),
+      line_items:booking_line_items ( name, kind, quantity, line_total )`;
+  let { data: b, error } = await db.from('bookings').select(cols(true)).eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (error && missingColumn(error.message) === 'stripe_account') {
+    ({ data: b, error } = await db.from('bookings').select(cols(false)).eq('id', id).eq('business_id', biz.id).maybeSingle());
+  }
+  if (error) throw error;
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b.customer?.email) return res.status(400).json({ error: 'No customer email on file for this job.' });
+  if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off.' });
+
+  const total = Number(b.price) || 0;
+  const tip = Number(b.tip) || 0;
+  const paid = Number(b.amount_paid) || 0;
+  const refunded = Number(b.amount_refunded) || 0;
+  const netPaid = Math.max(0, Math.round((paid - refunded) * 100) / 100);
+  const amountDue = Math.max(0, Math.round((total + tip - netPaid) * 100) / 100);
+  // Never generate a payable link (or a text demanding money) for a job that
+  // doesn't actually owe anything — same guard as receipt_send's $0 invoice check.
+  if (amountDue <= 0) return res.status(400).json({ error: 'Nothing is owed on this job — there is no balance to invoice.' });
+
+  // Same tax/adjustment reconciliation as receipt_send, so the itemization on
+  // an invoice always sums to the total actually billed. See the long comment
+  // in receiptSend above for why this can't just trust the stored line items.
+  const allLines = b.line_items || [];
+  const isTax = (li) => /^tax\b/i.test(String(li.name || ''));
+  const explicitTax = allLines.filter(isTax).reduce((s, li) => s + (Number(li.line_total) || 0), 0);
+  const lines = allLines.filter(li => !isTax(li)).map(li => ({ label: li.name, qty: li.quantity, amount: li.line_total }));
+  const subtotal = lines.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+  const gap = Math.round((total - (subtotal + explicitTax)) * 100) / 100;
+  const gapIsTax = gap > 0 && subtotal > 0;
+  const tax = explicitTax + (gapIsTax ? gap : 0);
+  const adjustment = gapIsTax ? 0 : gap;
+
+  const tz = b.service_area?.timezone || biz.timezone || 'America/Denver';
+  const longDate = (iso) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('en-US', { timeZone: tz, month: 'long', day: 'numeric', year: 'numeric' }); }
+    catch { return ''; }
+  };
+
+  const acct = { account: b.stripe_account || null, slug: biz.slug };
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const brand = brandFor(biz.slug);
+  const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+
+  // The pay link is best-effort: a business with no Stripe account configured
+  // (or a live Stripe hiccup) must still be able to send the invoice itself —
+  // it just won't carry a "pay now" button, same as any invoice mailed before
+  // online payment existed.
+  let payUrl = null;
+  if (stripeConfigured(acct)) {
+    try {
+      const session = await stripe('/checkout/sessions', {
+        method: 'POST', ...acct,
+        body: {
+          mode: 'payment',
+          customer_email: b.customer.email,
+          'payment_method_types[0]': 'card',
+          'line_items[0][quantity]': 1,
+          'line_items[0][price_data][currency]': 'usd',
+          'line_items[0][price_data][unit_amount]': Math.round(amountDue * 100),
+          'line_items[0][price_data][product_data][name]': `Invoice — ${brand.name}`,
+          success_url: `${baseUrl}/pay.html?booking=${encodeURIComponent(b.id)}&business=${encodeURIComponent(biz.slug)}&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/pay.html?booking=${encodeURIComponent(b.id)}&business=${encodeURIComponent(biz.slug)}&canceled=1`,
+          'metadata[booking_id]': b.id,
+          'metadata[business_slug]': biz.slug,
+        },
+      });
+      payUrl = session.url;
+    } catch (e) {
+      console.warn('[invoice] Stripe Checkout session failed, sending invoice without a pay link:', e.message);
+    }
+  }
+
+  const { subject, html } = receiptEmail({
+    kind: 'invoice',
+    receiptNo: String(b.id).replace(/-/g, '').slice(0, 8).toUpperCase(),
+    customerName: b.customer.name || 'Customer',
+    serviceDate: longDate(b.scheduled_at),
+    technicianName: b.technician?.name || null,
+    address: { line1: b.address_line1, city: b.city, state: b.state, zip: b.postal_code },
+    lines, tax, adjustment, tip, total,
+    netPaid, amountDue,
+    amountRefunded: refunded,
+    payUrl,
+  }, brand);
+
+  const { from } = emailConfig(biz.slug);
+  const emailResult = await sendEmail({ slug: biz.slug, to: b.customer.email, subject, html, replyTo: from });
+  if (!emailResult.sent) return res.status(502).json({ error: 'Email failed to send: ' + (emailResult.skipped || emailResult.error || 'unknown error') });
+
+  let smsResult = { ok: false, skipped: 'no_phone' };
+  if (b.customer.phone) {
+    const text = payUrl
+      ? `${brand.name}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl}`
+      : `${brand.name}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay.`;
+    smsResult = await sendSMSResult(b.customer.phone, text);
+  }
+
+  // Best-effort audit note, same pattern as receipt_send — a financial
+  // document going out must be answerable later without breaking the send.
+  try {
+    await db.from('booking_notes').insert({
+      booking_id: b.id, business_id: biz.id,
+      body: `Invoice sent to ${b.customer.email}${smsResult.ok ? ' + text' : ''} — ${money(amountDue)} due${payUrl ? ' (with pay link)' : ''}`,
+      author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null,
+      author_name: adminAuthorName(auth),
+    });
+  } catch (e) { console.warn('[invoice] note log failed:', e.message); }
+
+  console.log(`[invoice] sent for ${id} by ${auth.name || auth.role} to ${b.customer.email}${smsResult.ok ? ' + sms' : ''}`);
+  return res.status(200).json({
+    ok: true, to: b.customer.email, amountDue,
+    sms: smsResult.ok ? 'sent' : (smsResult.skipped || smsResult.error || 'not_sent'),
+    payUrl: !!payUrl,
+  });
 }
 
 // ── "$100 review invite" text (Technicians screen) ───────────────────────────

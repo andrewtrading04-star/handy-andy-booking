@@ -86,8 +86,8 @@
     padding:7px 10px;font-size:12.5px;font-weight:600;background:transparent;color:var(--ink);}
   .lg-menu button:hover{background:var(--line2);}
   .lg-menu button.on{background:var(--accent-soft);color:var(--accent);}
-  .lg-group-label{display:block;padding:6px 10px 2px;font-size:10px;font-weight:700;
-    text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);}
+  .lg-group-label{display:block;padding:6px 10px 2px;font-size:12px;font-weight:700;
+    text-decoration:underline;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);}
   .lg-group-label:first-child{padding-top:2px;}
 
   .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
@@ -3317,9 +3317,10 @@ function openBooking(b){
     </div>
     <div class="bk-sec"><div class="bk-sec-h">Line items</div>
       <div id="bkLineItems"></div>
-      <div style="display:flex;gap:8px;margin-top:8px;">
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
         <button type="button" class="btn ghost sm" id="bkLiAdd">+ Add line item</button>
         <button type="button" class="btn ghost sm" id="bkLiDiscount" style="color:#4ade80;border-color:rgba(74,222,128,.4);">💲 Add discount</button>
+        <button type="button" class="btn ghost sm" id="bkSendInvoice" ${b.customer&&b.customer.email?'':'disabled title="No customer email on file"'} style="color:#60a5fa;border-color:rgba(96,165,250,.4);">🧾 Send invoice</button>
       </div>
       <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:12px;">
         <button type="button" class="btn sm" id="bkLiSave">Save line items</button>
@@ -3401,6 +3402,26 @@ function openBooking(b){
       toast(`${(r.kind==='invoice'?'Invoice':'Receipt')} sent to ${r.to} ✓`);
       sr.textContent='Sent ✓';
     }catch(err){ toast(err.message||'Could not send'); sr.disabled=false; sr.textContent=prev; }
+  };
+  // Explicit "bill the customer" action: always sends an invoice (with a
+  // payable Stripe link when configured) by email, plus a text when there's
+  // a phone on file — unlike Send Receipt above, which only emails and picks
+  // receipt vs invoice automatically from payment state.
+  const si=document.getElementById('bkSendInvoice');
+  if(si) si.onclick=async()=>{
+    const email=(b.customer&&b.customer.email)||'';
+    if(!confirm(`Send an invoice to ${email}${b.customer&&b.customer.phone?' and text the payment link to '+b.customer.phone:''}?`)) return;
+    si.disabled=true; const prev=si.textContent; si.textContent='Sending…';
+    try{
+      const r=await api('invoice_send',{ method:'POST', body:{ business:current.slug, id:b.id }});
+      const parts=[`Invoice sent to ${r.to} ✓`];
+      if(r.sms==='sent') parts.push('text sent ✓');
+      else if(r.sms==='no_phone') parts.push('no phone on file, no text sent');
+      else if(r.sms) parts.push(`text not sent (${r.sms})`);
+      if(!r.payUrl) parts.push('⚠ no online pay link (Stripe not configured)');
+      toast(parts.join(' · '));
+      si.textContent='Sent ✓';
+    }catch(err){ toast(err.message||'Could not send invoice'); si.disabled=false; si.textContent=prev; }
   };
   const rf=document.getElementById('bkRefund'); if(rf) rf.onclick=async()=>{
     let max;
