@@ -1,0 +1,18 @@
+{
+  "name": "voice-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone always-on WebSocket bridge between Twilio ConversationRelay and OpenAI for the AI voice bot v2. Not deployed to Vercel — needs a persistent-connection host (Fly.io/Render/Railway).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

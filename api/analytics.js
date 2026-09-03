@@ -454,7 +454,7 @@ async function handleVoiceInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled, ai_bot_v2_enabled')
       .eq('phone', to).maybeSingle();
     line = data && data.active ? data : null;
 
@@ -510,6 +510,23 @@ async function handleVoiceInbound(req, res) {
   // with — same principle as the IVR gate below, just skipping the prompt
   // entirely for a number that's already proven itself unwanted.
   if (blocked) return xml(res, '<Response><Reject/></Response>');
+
+  // AI voice-bot v2 (2026-09-03): realtime ConversationRelay bot, checked
+  // before v1 so the two flags can never both fire on one call. The bridge
+  // server (voice-bridge/) does its own business/catalog lookup off the
+  // Twilio Setup message's `to` number — nothing else to pass here besides
+  // the call SID for a v1-shaped fallback if the relay itself fails to
+  // connect. If the relay session ends without an explicit transfer (e.g. the
+  // bridge crashes), Twilio falls through to the `action` URL below, which
+  // hands the caller to a human rather than dead-ending the call.
+  if (line && line.ai_bot_v2_enabled) {
+    const bridgeUrl = process.env.VOICE_BRIDGE_URL; // wss://... , no trailing slash
+    if (bridgeUrl) {
+      const fallbackAction = voiceUrl('voice_bot_v2_fallback', { sid });
+      return xml(res, '<Response><Connect action="' + xmlEsc(fallbackAction) + '"><ConversationRelay url="' + xmlEsc(bridgeUrl + '/relay') + '" ttsProvider="ElevenLabs" voice="' + xmlEsc(process.env.VOICE_BRIDGE_TTS_VOICE || 'Rachel') + '" welcomeGreeting=""><Parameter name="sid" value="' + xmlEsc(sid) + '"/></ConversationRelay></Connect></Response>');
+    }
+    // No bridge configured — don't dead-end the caller, fall through to v1/human.
+  }
 
   // AI voice-bot pilot (2026-09-03): a line with ai_bot_enabled routes into the
   // bot flow instead of ringing a human at all. Deliberately bypasses the IVR
@@ -1459,6 +1476,24 @@ async function handleSmsInbound(req, res) {
   return xml(res, '<Response><Message>Thanks for reaching out! We got your text and will call you back shortly.</Message></Response>');
 }
 
+// POST /api/analytics?action=voice_bot_v2_fallback — Twilio hits this
+// whenever the <Connect><ConversationRelay> session ends WITHOUT the bridge
+// having already issued its own transfer TwiML (e.g. the bridge process
+// crashed, the WebSocket never connected, or it simply hung up cleanly after
+// a completed booking with nothing left to say). Never dead-ends the caller —
+// same human-forwarding fallback v1 uses.
+async function handleVoiceBotV2Fallback(req, res) {
+  const sid = (req.query.sid || '').toString();
+  const params = await twilioVoiceParams(req, res, 'voice_bot_v2_fallback', { sid });
+  if (!params) return;
+  const to = tenDigits(params.To);
+  const db = serviceClient();
+  const { data: line } = await db.from('tracking_numbers')
+    .select('phone, label, business_slug, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+    .eq('phone', to).maybeSingle();
+  return xml(res, dialTwiml(line, params.From, params.CallSid || sid));
+}
+
 export default async function handler(req, res) {
   const action = (req.query.action || '').toString();
   if (req.method === 'POST' && action === 'sms_status') return handleTwilioStatus(req, res);
@@ -1471,6 +1506,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && action === 'voice_gather') return handleVoiceGather(req, res);
   if (req.method === 'POST' && action === 'voice_bot_start') return handleVoiceBotStart(req, res);
   if (req.method === 'POST' && action === 'voice_bot_turn') return handleVoiceBotTurn(req, res);
+  if (req.method === 'POST' && action === 'voice_bot_v2_fallback') return handleVoiceBotV2Fallback(req, res);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
