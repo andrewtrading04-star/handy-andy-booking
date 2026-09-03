@@ -751,6 +751,58 @@ function botMatchMenu(options, { digits, speech }) {
   }
   return best;
 }
+// Date and time-slot answers get their own matchers instead of botMatchMenu:
+// once the menu stopped announcing "press 1/2/3" (owner request, 2026-09-03),
+// a caller naturally answers with the actual calendar day ("the 4th",
+// "September 4th") or clock time ("8 AM", "morning") — not a menu POSITION —
+// and botMatchMenu's number-word/digit fallback was silently misreading that
+// as "option #4", which doesn't exist on a 3-item menu, so it just failed and
+// escalated on the very first try. Real calendar/clock meaning is checked
+// FIRST here; menu position is still a fallback for someone who does say
+// "one" or "the first one".
+function botMatchDate(dates, { digits, speech }) {
+  const s = (speech || '').toLowerCase();
+  const dayNum = (s.match(/\d{1,2}/) || [])[0];
+  if (dayNum) {
+    const n = parseInt(dayNum, 10);
+    const hit = dates.find(ds => parseInt(ds.slice(-2), 10) === n);
+    if (hit) return hit;
+  }
+  const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  for (const ds of dates) {
+    let dow;
+    try { dow = new Date(ds + 'T12:00:00').getDay(); } catch (_) { continue; }
+    if (s.includes(WEEKDAYS[dow])) return ds;
+  }
+  if (digits) { const idx = parseInt(digits, 10) - 1; if (idx >= 0 && idx < dates.length) return dates[idx]; }
+  const wIdx = NUM_WORDS.indexOf(s.split(/\s+/)[0]);
+  if (wIdx >= 1 && wIdx <= dates.length) return dates[wIdx - 1];
+  return null;
+}
+function botMatchSlot(slots, { digits, speech }) {
+  const s = (speech || '').toLowerCase();
+  const m = s.match(/(\d{1,2})\s*(am|pm)?/);
+  if (m) {
+    let hr = parseInt(m[1], 10);
+    const ap = m[2];
+    if (ap === 'pm' && hr < 12) hr += 12;
+    if (ap === 'am' && hr === 12) hr = 0;
+    const hourOf = (sl) => parseInt((sl.start || '').split(':')[0], 10);
+    let hit = slots.find(sl => hourOf(sl) === hr);
+    // No am/pm given and the hour reads as a small number (1-7) — office
+    // hours run 8 AM to 10:30 PM, so "at 2" almost always means 2 PM, not
+    // 2 AM (which is never a real slot anyway).
+    if (!hit && !ap && hr >= 1 && hr <= 7) hit = slots.find(sl => hourOf(sl) === hr + 12);
+    if (hit) return hit;
+  }
+  if (/\bmorning\b/.test(s)) { const hit = slots.find(sl => (sl.start || '') < '12:00'); if (hit) return hit; }
+  if (/\bafternoon\b/.test(s)) { const hit = slots.find(sl => (sl.start || '') >= '12:00' && (sl.start || '') < '17:00'); if (hit) return hit; }
+  if (/\b(evening|night)\b/.test(s)) { const hit = slots.find(sl => (sl.start || '') >= '17:00'); if (hit) return hit; }
+  if (digits) { const idx = parseInt(digits, 10) - 1; if (idx >= 0 && idx < slots.length) return slots[idx]; }
+  const wIdx = NUM_WORDS.indexOf(s.split(/\s+/)[0]);
+  if (wIdx >= 1 && wIdx <= slots.length) return slots[wIdx - 1];
+  return null;
+}
 function botYes(speech, digits) {
   if (digits === '1') return true;
   if (digits === '2') return false;
@@ -1083,19 +1135,16 @@ async function handleVoiceBotTurn(req, res) {
       // ── Scheduling ──────────────────────────────────────────────────────────
       case 'schedule_date': {
         const dates = d._dateChoices || [];
-        // Terms include the weekday name (lowercased) so "Thursday" matches
-        // even though the menu is numbered — a caller answering with the day
-        // name instead of "1/2/3" is at least as likely as using the number.
-        const opt = botMatchMenu(dates.map((ds, i) => ({ say: botSpokenDate(ds), terms: [botSpokenDate(ds).split(',')[0].toLowerCase()], dateStr: ds })), { digits, speech });
-        if (!opt) return retry("Which day works best — you can say the number?");
-        return goto('schedule_slot', { date: opt.dateStr, _dateChoices: null }, null, (nn) => botAskSlot(nn, session.business_slug, action));
+        const dateStr = botMatchDate(dates, { digits, speech });
+        if (!dateStr) return retry("Which day works best — you can just tell me the day, like Thursday or the 4th?");
+        return goto('schedule_slot', { date: dateStr, _dateChoices: null }, null, (nn) => botAskSlot(nn, session.business_slug, action));
       }
       case 'schedule_slot': {
         const slots = d._slotChoices || [];
-        const opt = botMatchMenu(slots.map((s, i) => ({ say: s.label + (botAfterHoursFee(s.slot_key, d.date) > 0 ? ` — that one has an after-hours fee` : ''), terms: [], slot: s })), { digits, speech });
-        if (!opt) return retry("Which time works best — you can say the number?");
+        const opt = botMatchSlot(slots, { digits, speech });
+        if (!opt) return retry("Which time works best — morning, afternoon, or evening is fine?");
         const answers = { ...d.answers };
-        return goto('recap', { slotKey: opt.slot.slot_key, slotLabel: opt.slot.label, _slotChoices: null }, null, (nn) => botRecap(nn, action));
+        return goto('recap', { slotKey: opt.slot_key, slotLabel: opt.label, _slotChoices: null }, null, (nn) => botRecap(nn, action));
       }
 
       case 'recap': {
