@@ -769,6 +769,7 @@ function botOrdinalDayFrom(s) {
 }
 function botMatchDate(dates, { digits, speech }) {
   const s = (speech || '').toLowerCase();
+  if (/\b(soonest|earliest|first available|whatever'?s? (soonest|earliest|first)|any(time|day)|next available)\b/.test(s) && dates[0]) return dates[0];
   if (/\btomorrow\b/.test(s) && dates[1]) return dates[1];
   if (/\btoday\b/.test(s) && dates[0]) return dates[0];
   if (/\bday after tomorrow\b/.test(s) && dates[2]) return dates[2];
@@ -791,6 +792,7 @@ function botMatchDate(dates, { digits, speech }) {
 }
 function botMatchSlot(slots, { digits, speech }) {
   const s = (speech || '').toLowerCase();
+  if (/\b(soonest|earliest|first available|whatever'?s? (soonest|earliest|first)|any(time)?|next available)\b/.test(s) && slots[0]) return slots[0];
   const m = s.match(/(\d{1,2})\s*(am|pm)?/);
   if (m) {
     let hr = parseInt(m[1], 10);
