@@ -18,9 +18,13 @@ async function callBracketMove(db, { businessId, technicianId, kind, flat, tilti
     p_business_id: businessId,
     p_technician_id: technicianId,
     p_kind: kind,
-    p_flat: flat || 0,
-    p_tilting: tilting || 0,
-    p_full_motion: fullMotion || 0,
+    // An explicit null must survive to SQL: for a recount it means "leave this
+    // field alone" and the function coalesces it to the current count. Turning
+    // it into 0 (which `|| 0` and `?? 0` both do) would instead ZERO the field.
+    // undefined still becomes 0, for non-recount callers that omit a field.
+    p_flat: flat === null ? null : (flat ?? 0),
+    p_tilting: tilting === null ? null : (tilting ?? 0),
+    p_full_motion: fullMotion === null ? null : (fullMotion ?? 0),
     p_idempotency_key: idempotencyKey,
     p_booking_id: bookingId || null,
     p_purchase_id: purchaseId || null,

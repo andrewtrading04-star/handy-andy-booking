@@ -12628,31 +12628,25 @@ async function bracketParseEmail(req, res, db, auth, body) {
     result = { id: p.id, action: 'created' };
   }
 
-  // Update inventory: read current, add purchased qty, write back. (Supabase JS
-  // has no atomic increment, so we read-then-write.)
-  const { data: inv } = await db.from('bracket_inventory')
-    .select('id, flat_qty, tilting_qty, full_motion_qty')
-    .eq('technician_id', tech.id).eq('business_id', bizId).maybeSingle();
-  if (inv) {
-    await db.from('bracket_inventory').update({
-      flat_qty: (inv.flat_qty || 0) + flatQty,
-      tilting_qty: (inv.tilting_qty || 0) + tiltingQty,
-      full_motion_qty: (inv.full_motion_qty || 0) + fullMotionQty,
-    }).eq('id', inv.id);
-  } else {
-    await db.from('bracket_inventory').insert({
-      business_id: bizId,
-      technician_id: tech.id,
-      flat_qty: flatQty,
-      tilting_qty: tiltingQty,
-      full_motion_qty: fullMotionQty,
-    });
-  }
-
+  // Inventory is deliberately NOT credited here. This endpoint records that an
+  // order EXISTS; brackets are credited only when that order is DELIVERED, by
+  // the email sync (api/migrate.js bracketSync), the Assign button, or the
+  // status dropdown -- all of which go through bracket_move() keyed on the
+  // order number, so an order can only ever be credited once no matter how
+  // many of those paths see it.
+  //
+  // It used to credit right here, with a read-then-write and no idempotency
+  // key: re-submitting the same order credited it again every time, it
+  // credited at ORDER time (a rule superseded 2026-07-07 by commit 3e13303,
+  // which moved every other path to credit-on-delivery), and it wrote to the
+  // currently-loaded business rather than the tech's home business, spawning
+  // the phantom-row bug. Found in the 2026-09-03 post-implementation review.
   return res.status(200).json({
     ok: true,
     purchase: result,
-    inventory_updated: {
+    inventory_updated: null,
+    note: 'Order recorded. Brackets are credited when the order is marked delivered.',
+    ordered: {
       flat: flatQty,
       tilting: tiltingQty,
       full_motion: fullMotionQty,
