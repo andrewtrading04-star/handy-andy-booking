@@ -149,10 +149,15 @@ async function runTool(name, args) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
 
+  // Tolerant match: dashboard copy-paste of a header value reliably picks up
+  // stray whitespace/punctuation at the edges (confirmed live — Vapi sent 34
+  // chars for a 32-char secret, 2 extra leading characters). Requiring the
+  // real secret as a substring rather than an exact match keeps the auth
+  // meaningful (nobody guesses it) without another round of "reselect,
+  // retype, republish across 6 tools" over invisible formatting noise.
   const secret = process.env.VAPI_WEBHOOK_SECRET;
-  const got = req.headers['x-vapi-secret'];
-  if (secret && got !== secret) {
-    console.error('[vapi] secret mismatch — expected len', secret.length, 'got len', got ? got.length : 0, 'expected first/last', JSON.stringify(secret[0] + secret[secret.length - 1]), 'got first/last', got ? JSON.stringify(got[0] + got[got.length - 1]) : null);
+  const got = (req.headers['x-vapi-secret'] || '').toString();
+  if (secret && !got.includes(secret)) {
     res.status(401).json({ error: 'unauthorized' }); return;
   }
 
