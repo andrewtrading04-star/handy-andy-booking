@@ -150,7 +150,11 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
 
   const secret = process.env.VAPI_WEBHOOK_SECRET;
-  if (secret && req.headers['x-vapi-secret'] !== secret) { res.status(401).json({ error: 'unauthorized' }); return; }
+  const got = req.headers['x-vapi-secret'];
+  if (secret && got !== secret) {
+    console.error('[vapi] secret mismatch — expected len', secret.length, 'got len', got ? got.length : 0, 'expected first/last', JSON.stringify(secret[0] + secret[secret.length - 1]), 'got first/last', got ? JSON.stringify(got[0] + got[got.length - 1]) : null);
+    res.status(401).json({ error: 'unauthorized' }); return;
+  }
 
   const toolCalls = (req.body && req.body.message && req.body.message.toolCalls) || [];
   const results = [];
