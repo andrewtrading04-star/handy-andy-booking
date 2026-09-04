@@ -2971,9 +2971,10 @@ function notificationLog(b){
   return rows.join('');
 }
 // Delegated click handler for every "Resend" button in the notification log —
-// lives once on #bkTitle rather than re-bound per render, since notificationLog()
-// is re-injected via innerHTML on every openBooking() call.
-document.getElementById('bkTitle')?.addEventListener('click', async (e)=>{
+// lives once on #bkBody rather than re-bound per render, since notificationLog()
+// (rendered inside #bkBody, see the bk-receipts block below) is re-injected via
+// innerHTML on every openBooking() call.
+document.getElementById('bkBody')?.addEventListener('click', async (e)=>{
   const btn=e.target.closest('.notif-resend-btn');
   if(!btn) return;
   const kind=btn.dataset.nrKind, id=btn.dataset.nrId, technicianId=btn.dataset.nrTechnicianId;
