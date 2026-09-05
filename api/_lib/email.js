@@ -40,10 +40,22 @@ export function emailConfig(slug) {
   }
   // Shared fallback account (owner's 2026-08-20 decision): rather than
   // paying/verifying a separate Resend account per new business, one account
-  // — set up under houstonmounting.com — holds every OTHER brand's domain too
-  // as an additional verified sender. The apiKey is the same across all of
-  // them; only `from` differs, so each business's mail still arrives branded
-  // correctly. A business's own dedicated key (if it has a real, separate
+  // — set up under houstonmounting.com — serves every OTHER brand here too.
+  // The apiKey is the same across all of them; only `from` differs.
+  //
+  // CORRECTION 2026-09-05: the original plan was for that one account to also
+  // hold each brand's OWN domain as an additional verified sender. That was
+  // never actually done — only houstonmounting.com was ever verified in it.
+  // Resend authorizes a verified DOMAIN, not an address, so every brand below
+  // that sent `from` its own domain was silently rejected: no confirmation
+  // email ever reached those customers. Fixed by setting each brand's
+  // *_EMAIL_FROM env var to its display name over the verified address, e.g.
+  //   "TV Hanging Houston <contact@houstonmounting.com>"
+  // which keeps the brand correct in the customer's inbox. The literal
+  // per-brand defaults below are the pre-fix values and would NOT send —
+  // they only apply if the env var is removed. If a brand later gets its own
+  // domain verified (as houstontvmountingpros.com now is), drop its env var
+  // and the default becomes correct again. A business's own dedicated key (if it has a real, separate
   // account already, e.g. one set up before this decision) always wins —
   // this is a fallback, not a replacement. Still never falls back to Handy
   // Andy's own account/address: that mistake (a Mile High customer greeted
@@ -94,37 +106,61 @@ export function emailConfig(slug) {
     };
   }
   // Austin lead-gen quad — same per-brand-key-wins/shared-fallback pattern as
-  // the Houston quad above, but on its OWN dedicated Resend account
-  // (AUSTIN_LEADGEN_RESEND_API_KEY), NOT the houstonmounting shared account and
-  // NOT the austin brand's AUSTIN_RESEND_API_KEY. And as everywhere else here:
-  // never a fallback to Handy Andy's RESEND_API_KEY — a customer of one of
-  // these brands greeted by Handy Andy is exactly the mistake this whole
-  // per-business system exists to prevent. Until the shared key is set, these
-  // brands' emails skip with a logged reason instead of arriving from the
-  // wrong company.
+  // the Houston quad above. The original plan was a dedicated Resend account
+  // for these four (AUSTIN_LEADGEN_RESEND_API_KEY); that key was never created,
+  // so for months all four silently sent nothing. It is still honored first if
+  // it ever appears, but the real fallback is now the austin brand's
+  // AUSTIN_RESEND_API_KEY (owner's call, 2026-09-05), because austinmounting.com
+  // is the only Austin domain actually verified in Resend.
+  //
+  // IMPORTANT — a verified DOMAIN is what Resend authorizes, not an address.
+  // These four brands' own domains are NOT verified anywhere, so a `from` at
+  // their own domain is rejected and the confirmation never arrives. Their
+  // *_EMAIL_FROM env vars therefore carry the brand's display name over
+  // austinmounting.com's verified address:
+  //   "ATX Mount Pros <contact@austinmounting.com>"
+  // The customer still sees the right brand in their inbox. The literal
+  // defaults below are what would be used if that env var were ever removed,
+  // and they would NOT send — keep the env vars set.
+  //
+  // As everywhere else here: never a fallback to Handy Andy's RESEND_API_KEY —
+  // a customer of one of these brands greeted by Handy Andy is exactly the
+  // mistake this whole per-business system exists to prevent.
   if (slug === 'atxmountpros') {
     return {
-      apiKey: process.env.ATXMOUNTPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      apiKey: process.env.ATXMOUNTPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY || process.env.AUSTIN_RESEND_API_KEY,
       from:   process.env.ATXMOUNTPROS_EMAIL_FROM || 'contact@atxmountpros.com',
     };
   }
   if (slug === 'atxtvmount') {
     return {
-      apiKey: process.env.ATXTVMOUNT_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      apiKey: process.env.ATXTVMOUNT_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY || process.env.AUSTIN_RESEND_API_KEY,
       from:   process.env.ATXTVMOUNT_EMAIL_FROM || 'contact@atxtvmount.com',
     };
   }
   if (slug === 'austinmountingpros') {
     return {
-      apiKey: process.env.AUSTINMOUNTINGPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      apiKey: process.env.AUSTINMOUNTINGPROS_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY || process.env.AUSTIN_RESEND_API_KEY,
       from:   process.env.AUSTINMOUNTINGPROS_EMAIL_FROM || 'contact@austinmountingpros.com',
     };
   }
   if (slug === 'austintvinstall') {
     return {
-      apiKey: process.env.AUSTINTVINSTALL_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY,
+      apiKey: process.env.AUSTINTVINSTALL_RESEND_API_KEY || process.env.AUSTIN_LEADGEN_RESEND_API_KEY || process.env.AUSTIN_RESEND_API_KEY,
       from:   process.env.AUSTINTVINSTALL_EMAIL_FROM || 'contact@austintvinstall.com',
     };
+  }
+  // LA trio (tvmountinglosangeles / latvpro / lainstall) — real, active
+  // business rows, but unstaffed demand-gauging funnels with no Resend sender
+  // of their own. Without this branch they fell through to the Handy Andy
+  // default below and would have emailed an LA customer from Handy Andy's
+  // account: the precise cross-brand mistake every comment in this file warns
+  // about. Returning no key makes sendEmail() skip with a logged reason
+  // instead. The launch checklist hides the email item for these three to
+  // match (LAUNCH_NO_EMAIL_SLUGS in public/admin.html) — give one a verified
+  // sender and it must be removed from BOTH places.
+  if (slug === 'tvmountinglosangeles' || slug === 'latvpro' || slug === 'lainstall') {
+    return { apiKey: null, from: null };
   }
   return {
     apiKey: process.env.RESEND_API_KEY,

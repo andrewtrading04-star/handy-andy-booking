@@ -5979,6 +5979,17 @@ function launchEffective(b, key){
 // left as an unticked box, or they'd sit permanently "In progress" for an
 // item that will never legitimately get done through here.
 const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','austin','austinmountingpros','atxtvmount','atxmountpros','austintvinstall','precision','houstontvmountingpros','latvpro','lainstall','tvmountinglosangeles']);
+// Businesses that deliberately have NO confirmation email, given the same hard
+// exclusion as the no-GBP set above. The three LA brands are unstaffed
+// demand-gauging funnels (see the CA-range fallback in api/service-area.js).
+// They had no entry in emailConfig() at all, so they fell through to its final
+// default and would have emailed an LA customer from Handy Andy's account —
+// the exact mistake that whole per-business system exists to prevent.
+// api/_lib/email.js now returns no key for them, so nothing sends, and the
+// checklist item is removed to match rather than sitting permanently red for
+// something nobody intends to set up. Give one a real verified sender and it
+// should come off this list.
+const LAUNCH_NO_EMAIL_SLUGS = new Set(['latvpro','lainstall','tvmountinglosangeles']);
 // City grouping for the Launch monitoring board. No `city` column exists on
 // the business record, so this is a plain slug lookup maintained by hand —
 // add new slugs here as they're onboarded, or they fall into "Other".
@@ -5992,13 +6003,19 @@ const LAUNCH_CITY_ORDER = ['Denver','Austin','Houston','Los Angeles','Other'];
 function launchCityOf(slug){ return LAUNCH_CITY_OF[slug] || 'Other'; }
 function launchItemsFor(b, items){
   if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
+  if(LAUNCH_NO_EMAIL_SLUGS.has(b.slug)) items = items.filter(it => it.key!=='email_keys');
   return items;
 }
+// Whether the email item counts for this business at all. Used by the score,
+// the blocked test and the next-action line so all three agree — leaving it in
+// the `hard` list while hiding the row would keep the card permanently Blocked
+// on an item the owner cannot even see.
+function launchWantsEmail(b){ return !LAUNCH_NO_EMAIL_SLUGS.has(b.slug); }
 function launchScoreOf(b, items){
   items = launchItemsFor(b, items);
   const hard = [
     launchEffective(b,'stripe_keys'),
-    launchEffective(b,'email_keys'),
+    ...(launchWantsEmail(b) ? [launchEffective(b,'email_keys')] : []),
     launchEffective(b,'website_live'),
     !!b.checklist.widget_embedded,
   ];
@@ -6014,8 +6031,8 @@ function launchNextAction(b, items){
   items = launchItemsFor(b, items);
   if(!b.stripe.wired) return `Wire "${b.slug}" into ACCOUNT_KEY_ENV (api/_lib/stripe.js)`;
   if(!launchEffective(b,'stripe_keys')) return 'Add Stripe keys';
-  if(!b.email.wired) return `Wire "${b.slug}" into EMAIL_BRANDS (api/_lib/email.js)`;
-  if(!launchEffective(b,'email_keys')) return 'Add a Resend key';
+  if(launchWantsEmail(b) && !b.email.wired) return `Wire "${b.slug}" into EMAIL_BRANDS (api/_lib/email.js)`;
+  if(launchWantsEmail(b) && !launchEffective(b,'email_keys')) return 'Add a Resend key';
   if(!b.url) return 'Set the website URL on the business record';
   if(!launchEffective(b,'website_live')) return `Website is down (${b.site.error || b.site.status || 'unreachable'})`;
   if(!b.checklist.widget_embedded) return 'Confirm the booking widget is actually on the page';
@@ -6041,8 +6058,8 @@ const GITHUB_EDIT_BASE = 'https://github.com/andrewtrading04-star/handy-andy-boo
 function launchActionHref(b){
   if(!b.stripe.wired) return GITHUB_EDIT_BASE + 'api/_lib/stripe.js';
   if(!launchEffective(b,'stripe_keys')) return VERCEL_ENV_URL;
-  if(!b.email.wired) return GITHUB_EDIT_BASE + 'api/_lib/email.js';
-  if(!launchEffective(b,'email_keys')) return VERCEL_ENV_URL;
+  if(launchWantsEmail(b) && !b.email.wired) return GITHUB_EDIT_BASE + 'api/_lib/email.js';
+  if(launchWantsEmail(b) && !launchEffective(b,'email_keys')) return VERCEL_ENV_URL;
   if(!b.url) return null;
   if(!launchEffective(b,'website_live')) return b.url;
   return null;
