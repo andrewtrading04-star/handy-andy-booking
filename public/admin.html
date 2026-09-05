@@ -5978,6 +5978,17 @@ function launchEffective(b, key){
 // left as an unticked box, or they'd sit permanently "In progress" for an
 // item that will never legitimately get done through here.
 const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','mile-high','austin','austinmountingpros','atxtvmount','atxmountpros','austintvinstall']);
+// City grouping for the Launch monitoring board. No `city` column exists on
+// the business record, so this is a plain slug lookup maintained by hand —
+// add new slugs here as they're onboarded, or they fall into "Other".
+const LAUNCH_CITY_OF = {
+  'doms':'Denver', 'handy-andy':'Denver', 'mile-high':'Denver', 'tvmountingdenver':'Denver',
+  'austin':'Austin', 'austinmountingpros':'Austin', 'atxtvmount':'Austin', 'atxmountpros':'Austin', 'austintvinstall':'Austin',
+  'houstonmounting':'Houston', 'houstontvinstallation':'Houston', 'htvmounting':'Houston', 'tvhanginghouston':'Houston', 'precision':'Houston', 'houstontvmountingpros':'Houston',
+  'tvmountinglosangeles':'Los Angeles', 'latvpro':'Los Angeles', 'lainstall':'Los Angeles',
+};
+const LAUNCH_CITY_ORDER = ['Denver','Austin','Houston','Los Angeles','Other'];
+function launchCityOf(slug){ return LAUNCH_CITY_OF[slug] || 'Other'; }
 function launchItemsFor(b, items){
   if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
   return items;
@@ -6241,34 +6252,66 @@ async function renderLaunch(){
   const markets=data.markets||[];
 
   const scored=businesses.map(b=>({ b, s:launchScoreOf(b, items) }));
-  const blocked=scored.filter(x=>x.s.blocked);
-  const ready=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total);
-  const progress=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total);
-  const col=(title,color,rows,grid,extraHtml)=>`<div>
-    <p style="font-size:12px;font-weight:800;color:${color};margin:0 0 8px;">${esc(title)} · ${rows.length}</p>
-    <div${grid?' style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"':''}>
-      ${rows.map(x=>launchCardHtml(x.b, items)).join('')}${extraHtml||''}
-      ${(rows.length===0 && !extraHtml) ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
-    </div>
-  </div>`;
+  const blockedCount=scored.filter(x=>x.s.blocked).length;
+  const readyCount=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total).length;
+  const progressCount=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total).length;
 
-  // LA is a market page under handy-andy, not its own business — shown here
-  // as an extra card in Blocked rather than in a separate Markets section.
+  // LA is a market page under handy-andy, not its own business — folded into
+  // the Los Angeles city group as an extra card rather than a separate section.
   const laMarket=markets.find(m=>m.slug==='la');
   const laHtml=laMarket ? launchMarketCardHtml(laMarket, marketItems) : '';
+  const laBlocked=laMarket ? launchMarketScoreOf(laMarket, marketItems).blocked : false;
+
+  // Group by city instead of by readiness — readiness still drives each
+  // card's ring color and the per-city status dot, it just no longer decides
+  // which section a business sits in.
+  const byCity={};
+  for(const x of scored){
+    const city=launchCityOf(x.b.slug);
+    (byCity[city] = byCity[city]||[]).push(x);
+  }
+  const cities=LAUNCH_CITY_ORDER.filter(c=>byCity[c]||(c==='Los Angeles' && laMarket));
+
+  const statTile=(label,value,color)=>`<div style="background:#12151c;border-radius:10px;padding:12px 16px;min-width:110px;">
+    <div style="font-size:22px;font-weight:800;color:${color};line-height:1.1;">${value}</div>
+    <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#8b93a7;margin-top:3px;">${esc(label)}</div>
+  </div>`;
+
+  const cityBlock=(city)=>{
+    const rows=byCity[city]||[];
+    const extra = (city==='Los Angeles') ? laHtml : '';
+    const cityBlocked = rows.filter(x=>x.s.blocked).length + (extra ? (laBlocked?1:0) : 0);
+    const total = rows.length + (extra?1:0);
+    const dotColor = cityBlocked>0 ? 'var(--red)' : 'var(--green)';
+    return `<div style="margin-bottom:22px;">
+      <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>
+        <p style="font-size:13px;font-weight:800;margin:0;">${esc(city)}</p>
+        <span style="font-size:11.5px;color:var(--mute);">${total} business${total===1?'':'es'}${cityBlocked?` · ${cityBlocked} blocked`:''}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">
+        ${rows.map(x=>launchCardHtml(x.b, items)).join('')}${extra}
+        ${(total===0) ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
+      </div>
+    </div>`;
+  };
 
   view.innerHTML=`<div class="wrap">
-    <p style="color:var(--mute);font-size:13px;margin-bottom:14px;">
-      Sorted by readiness, not alphabetical. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
+    <div style="background:#0b0d12;border-radius:14px;padding:16px 18px;margin-bottom:18px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-right:8px;">
+        <span style="width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(21,128,61,.18);"></span>
+        <span style="color:#fff;font-weight:800;font-size:13px;">Launch Monitor</span>
+      </div>
+      ${statTile('Live',readyCount,'var(--green)')}
+      ${statTile('In progress',progressCount,'#f2b84b')}
+      ${statTile('Blocked',blockedCount,'#ff6b6b')}
+      ${statTile('Total',businesses.length + (laMarket?1:0),'#9aa4bd')}
+    </div>
+    <p style="color:var(--mute);font-size:12.5px;margin:0 0 16px;">
+      Grouped by city. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
       Click a card for the full breakdown and to tick the checklist.
     </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
-      ${col('Blocked','#dc2626',blocked,true,laHtml)}
-      ${col('In progress','#b45309',progress,true)}
-    </div>
-    <div style="margin-top:20px;">
-      ${col('Businesses','#15803d',ready,true)}
-    </div>
+    ${cities.map(cityBlock).join('')}
   </div>`;
 
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
