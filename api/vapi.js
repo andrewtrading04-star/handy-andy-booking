@@ -169,7 +169,34 @@ export default async function handler(req, res) {
     res.status(401).json({ error: 'unauthorized' }); return;
   }
 
-  const toolCalls = (req.body && req.body.message && req.body.message.toolCalls) || [];
+  const body = req.body || {};
+  const toolCalls = (body.message && body.message.toolCalls) || null;
+
+  // Vapi has two tool flavors that hit a webhook, with different wire shapes:
+  //  - "Custom Tool" (function): {message:{toolCalls:[{id, function:{name,
+  //    arguments}}]}}, answered with {results:[{toolCallId, result}]}.
+  //  - "API Request" (integration): the schema-builder properties are POSTed
+  //    as a FLAT body ({business_slug, postal_code}), no tool name, and the
+  //    response body is handed to the model as-is.
+  // The dashboard tools were built as API Request, so every live call landed
+  // here with no toolCalls -> empty results -> the model improvised "not
+  // serviced" for a zip the CRM serves. Infer the tool from the fields
+  // present so both shapes work, since the API Request flavor never tells us
+  // which tool fired.
+  if (!toolCalls) {
+    const name = body.tool || (req.query && req.query.tool)
+      || ('postal_code' in body ? 'check_zip' : 'reason' in body ? 'transfer_to_human' : null);
+    let result;
+    if (!name) result = { error: 'unrecognized request shape' };
+    else {
+      try { result = await runTool(name, body); }
+      catch (e) { result = { error: e.message }; }
+    }
+    console.log('[vapi:flat]', name, JSON.stringify(body), '->', JSON.stringify(result));
+    res.status(200).json(result);
+    return;
+  }
+
   const results = [];
   for (const tc of toolCalls) {
     const fn = tc.function || {};
