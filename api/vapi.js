@@ -154,6 +154,39 @@ async function runTool(name, args) {
   }
 }
 
+// Lets ONE assistant answer every lead-gen number instead of cloning it per
+// brand: each of these numbers is set in Vapi with NO assistant directly
+// attached, so Vapi calls this webhook at the start of every inbound call
+// asking which assistant to use. We look up which brand owns the dialed
+// number and hand back the shared assistant plus that brand's business_slug
+// as a dynamic variable ({{business_slug}} in the system prompt) — so the
+// same script, same voice, same tools serve every Houston/Denver/Austin
+// lead-gen line, each still only ever checking its own zip list.
+async function handleAssistantRequest(req, res, message) {
+  const assistantId = process.env.VAPI_SHARED_ASSISTANT_ID;
+  if (!assistantId) { res.status(200).json({ error: 'VAPI_SHARED_ASSISTANT_ID not configured' }); return; }
+
+  const call = message.call || {};
+  const dialedRaw = (call.to && (call.to.phoneNumber || call.to.number))
+    || (call.phoneNumber && call.phoneNumber.number)
+    || (message.phoneNumber && message.phoneNumber.number)
+    || '';
+  const dialed = dialedRaw.toString().replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
+
+  if (!dialed) { res.status(200).json({ error: 'could not determine dialed number from assistant-request payload' }); return; }
+
+  const db = serviceClient();
+  const { data: line } = await db.from('tracking_numbers').select('business_slug').eq('phone', dialed).maybeSingle();
+  if (!line) { res.status(200).json({ error: `no tracking_numbers row for ${dialed}` }); return; }
+
+  const { data: biz } = await db.from('businesses').select('name').eq('slug', line.business_slug).maybeSingle();
+
+  res.status(200).json({
+    assistantId,
+    assistantOverrides: { variableValues: { business_slug: line.business_slug, business_name: (biz && biz.name) || line.business_slug } },
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
 
@@ -170,6 +203,11 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
+
+  if (body.message && body.message.type === 'assistant-request') {
+    return handleAssistantRequest(req, res, body.message);
+  }
+
   const toolCalls = (body.message && body.message.toolCalls) || null;
 
   // Vapi has two tool flavors that hit a webhook, with different wire shapes:
