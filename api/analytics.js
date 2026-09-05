@@ -442,6 +442,21 @@ function ivrGateTwiml(sid) {
     + '</Gather><Say voice="Polly.Joanna-Generative">We did not get a response. Goodbye.</Say><Hangup/></Response>';
 }
 
+// Numbers that ring and forward like anyone else but leave no row behind
+// (migration 0104 — the owner's own handset test-dialing the tracking lines
+// was showing up as a lead). Never throws: if the lookup fails we log the
+// call, because a missing row is worse than an extra one.
+async function isSilentNumber(db, phone) {
+  if (!phone) return false;
+  try {
+    const { data } = await db.from('silent_numbers').select('id').eq('phone', phone).maybeSingle();
+    return !!data;
+  } catch (e) {
+    console.error('[silent_numbers] lookup failed:', e.message);
+    return false;
+  }
+}
+
 // POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
 async function handleVoiceInbound(req, res) {
   const params = await twilioVoiceParams(req, res, 'voice_inbound');
@@ -462,6 +477,13 @@ async function handleVoiceInbound(req, res) {
       const { data: b } = await db.from('blocked_numbers').select('id').eq('phone', from).maybeSingle();
       blocked = !!b;
     }
+
+    // A silent number skips the insert but nothing else — the call still gets
+    // the IVR gate, the dial, the recording and the voicemail box, so a test
+    // call exercises the same path a real one takes. The later status /
+    // recording callbacks key on twilio_call_sid, so with no row to match they
+    // are harmless no-ops and no missed-call text goes out either.
+    if (await isSilentNumber(db, from)) return finishVoiceInbound(res, line, params, sid, blocked);
 
     // Log first, forward second — but the whole block is wrapped, because if
     // logging throws the call must still connect. A customer reaching a human
@@ -506,6 +528,12 @@ async function handleVoiceInbound(req, res) {
     console.error('[voice_inbound] log failed:', e.message);
   }
 
+  return finishVoiceInbound(res, line, params, sid, blocked);
+}
+
+// Everything voice_inbound does after logging — split out so the silent-number
+// path can skip the row without duplicating the routing decisions.
+function finishVoiceInbound(res, line, params, sid, blocked) {
   // Rejected with no ring, no voicemail prompt, nothing for a scammer to work
   // with — same principle as the IVR gate below, just skipping the prompt
   // entirely for a number that's already proven itself unwanted.
@@ -1422,6 +1450,9 @@ async function handleSmsInbound(req, res) {
       const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
       business_id = biz?.id || null;
     }
+    // Same rule as the voice path: the text still relays, it just isn't logged.
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body);
+
     let customer_id = null;
     if (from) {
       const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
@@ -1444,6 +1475,12 @@ async function handleSmsInbound(req, res) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
+  return finishSmsInbound(res, line, from, body);
+}
+
+// The relay-and-ack tail of sms_inbound, split out so a silent number can skip
+// the row without skipping the relay.
+async function finishSmsInbound(res, line, from, body) {
   // Same day/night split the call path uses: a text landing at 3am must not
   // wake whoever answers that line during the day.
   const smsTo = destinationFor(line);
