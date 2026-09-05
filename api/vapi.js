@@ -87,7 +87,15 @@ async function runTool(name, args) {
 
   switch (name) {
     case 'check_zip': {
-      const za = await adminApi('zip_area', { params: { business: businessSlug, postal_code: args.postal_code } });
+      // The transcribed utterance often carries trailing punctuation (e.g.
+      // "77007." from a caller ending their sentence) which the model can
+      // pass straight through as the tool argument -- strip everything but
+      // digits so a real, correctly-serviced zip never gets misreported as
+      // out-of-area over stray formatting. Confirmed live: a call for the
+      // genuinely-serviced zip 77007 was told "not in our service area"
+      // because of exactly this.
+      const cleanZip = (args.postal_code || '').toString().replace(/\D/g, '');
+      const za = await adminApi('zip_area', { params: { business: businessSlug, postal_code: cleanZip } });
       return za.service_area_id ? { in_service_area: true } : { in_service_area: false };
     }
     case 'get_catalog': {
