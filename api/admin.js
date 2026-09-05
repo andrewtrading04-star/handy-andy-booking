@@ -454,6 +454,7 @@ export default async function handler(req, res) {
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'call_numbers':      return await callNumbers(req, res, db, auth);
+      case 'call_number_set_ai_voice': return await callNumberSetAiVoice(req, res, db, auth, body);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
@@ -5446,11 +5447,18 @@ async function photoGallery(req, res, db, auth) {
   try { ({ biz, crossBusinessToPostOnly } = await resolveBusinessForPhotos(db, auth, req.query.business)); } catch (e) { return bail(res, e); }
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   const offset = Number(req.query.offset) || 0;
-  const sel = (withStatus) => {
+  // ?logo=1 narrows to the logo shots (migration 0105) — a finished mount with
+  // the company logo up on the customer's TV. Filtered server-side, unlike the
+  // status tabs which filter in the client, because these are the needle: the
+  // office wants every one ever taken, not just the ones that happen to fall in
+  // the newest 200 photos the gallery preloads.
+  const logoOnly = req.query.logo === '1' || req.query.logo === 'true';
+  const sel = (withStatus, withLogo) => {
     let q = db.from('booking_photos')
-      .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''},
+      .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''}${withLogo ? ', logo_shot, logo_note' : ''},
              booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians!technician_id ( name ) )`)
       .eq('business_id', biz.id);
+    if (withLogo && logoOnly) q = q.is('logo_shot', true);
     // The cross-business hole above only ever opens the To Post bucket -- New,
     // Posted, Records, and anything private-to-New-Booking stays invisible to
     // her from the other company, enforced here rather than trusted from the
@@ -5460,26 +5468,34 @@ async function photoGallery(req, res, db, auth) {
     if (crossBusinessToPostOnly) q = withStatus ? q.eq('status', 'to_post') : q.eq('id', '00000000-0000-0000-0000-000000000000');
     return q.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
   };
-  // Try selecting the photo category (status). If the migration hasn't been
-  // applied yet the column is missing — fall back and treat everything as
-  // 'new' (the inbox) so the gallery still loads.
-  let { data, error } = await sel(true);
+  // Try selecting the photo category (status) and the logo-shot tag. If either
+  // migration hasn't been applied yet the column is missing — fall back so the
+  // gallery still loads: no status means treat everything as 'new' (the inbox),
+  // no logo column means the Logo tab is simply empty rather than an error.
   let hasStatus = true;
+  let hasLogo = true;
+  let { data, error } = await sel(true, true);
+  if (error && /logo_shot|logo_note/i.test(error.message || '')) {
+    hasLogo = false;
+    ({ data, error } = await sel(true, false));
+  }
   if (error && /status/i.test(error.message || '')) {
     hasStatus = false;
-    ({ data, error } = await sel(false));
+    ({ data, error } = await sel(false, hasLogo));
   }
   if (error) throw error;
   const photos = (data || []).map(p => ({
     id: p.id, url: p.url, caption: p.caption, uploader_name: p.uploader_name, created_at: p.created_at,
     booking_id: p.booking_id,
+    logo_shot: hasLogo ? !!p.logo_shot : false,
+    logo_note: hasLogo ? (p.logo_note || null) : null,
     status: hasStatus ? (p.status || 'new') : 'new',
     customer_name: p.booking?.customer?.name || 'Customer',
     technician_name: p.booking?.technician?.name || null,
     scheduled_at: p.booking?.scheduled_at || null,
     status_booking: p.booking?.status || null,
   }));
-  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit, status_supported: hasStatus });
+  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit, status_supported: hasStatus, logo_supported: hasLogo });
 }
 
 // Move a photo between categories (New / To Post / Posted / Records). No-op-safe:
@@ -9707,7 +9723,7 @@ async function callNumbers(req, res, db, auth) {
 
   const [{ data: numbers }, { data: businesses }] = await Promise.all([
     db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
+      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone, ai_voice_connected')
       .order('business_slug'),
     db.from('businesses').select('slug, name, url'),
   ]);
@@ -9725,6 +9741,21 @@ async function callNumbers(req, res, db, auth) {
   });
 
   return res.status(200).json({ numbers: rows });
+}
+
+// Manual toggle for the Numbers screen -- there's no automatic way to detect
+// that a number has been imported into Vapi and pointed at the AI voice
+// receptionist, since that's configured entirely in Twilio/Vapi's own
+// dashboards, invisible to this app. This just records what the owner says
+// is true so the office can see it at a glance.
+async function callNumberSetAiVoice(req, res, db, auth, body) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const phone = (body && body.phone || '').toString().trim();
+  if (!phone) return res.status(400).json({ error: 'phone is required' });
+  const connected = !!(body && body.connected);
+  const { error } = await db.from('tracking_numbers').update({ ai_voice_connected: connected }).eq('phone', phone);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }
 
 // A secretary's own booking numbers: how many calls she took, how many became

@@ -4577,6 +4577,13 @@ function galleryIsCrossBusiness(){ return galleryBizSlug==='handy-andy'; }
 // Multi-select for bulk move/delete. Cleared on tab switch (selections don't
 // carry across categories — a photo picked in New has nothing to do with To Post).
 let gallerySelected=new Set();
+// Logo shots (migration 0105): finished mounts with the company logo up on the
+// customer's TV, tagged twice a day by the vision cron. A cross-cut view rather
+// than a triage bucket -- a photo is a logo shot AND is in New/To Post/etc -- so
+// it gets its own server-filtered list instead of joining PHOTO_CATS. null =
+// not fetched yet; the fetch is lazy so the normal gallery never pays for it.
+let galleryLogoPhotos=null;
+let galleryLogoLoading=false;
 // Photo categories (manual triage buckets). Order = the owner's pipeline.
 // Legacy 'private' photos fold into the New inbox until re-filed.
 const PHOTO_CATS=[
@@ -4596,7 +4603,9 @@ async function renderGallery(){
     const biz=galleryBizSlug||current.slug;
     const d=await api('photo_gallery',{ params:{ business:biz, limit:200 }});
     galleryPhotos=d.photos||[];
+    galleryLogoPhotos=null;   // refetched on demand, so it can't go stale behind a business switch
     drawGallery();
+    if(galleryGroup==='logo') loadLogoShots();
   }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 
@@ -8330,6 +8339,12 @@ async function renderCallNumbers(){
       <td style="padding:9px 10px;">${esc(friendlyForward(n.after_hours_forward_to))}</td>
       <td style="padding:9px 10px;">${hours}</td>
       <td style="padding:9px 10px;">${n.active?'Active':'Retired'}</td>
+      <td style="padding:9px 10px;">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" data-ai-voice="${esc(n.phone)}" ${n.ai_voice_connected?'checked':''}/>
+          <span>${n.ai_voice_connected?'Connected':'Not connected'}</span>
+        </label>
+      </td>
     </tr>`;
   }).join('');
 
@@ -8348,11 +8363,24 @@ async function renderCallNumbers(){
           <th style="padding:9px 10px;">After hours</th>
           <th style="padding:9px 10px;">Hours</th>
           <th style="padding:9px 10px;">Status</th>
+          <th style="padding:9px 10px;">AI voice</th>
         </tr></thead>
         <tbody>${tr}</tbody>
       </table>
     </div>
   </div>`;
+  view.querySelectorAll('[data-ai-voice]').forEach(cb=>cb.addEventListener('change', async ()=>{
+    const phone=cb.dataset.aiVoice, connected=cb.checked;
+    const label=cb.nextElementSibling;
+    cb.disabled=true;
+    try{
+      await api('call_number_set_ai_voice',{ method:'POST', body:{ phone, connected } });
+      label.textContent = connected ? 'Connected' : 'Not connected';
+    }catch(e){
+      cb.checked=!connected;
+      alert('Could not save: '+e.message);
+    }finally{ cb.disabled=false; }
+  }));
 }
 
 // Each secretary's own booking numbers -- her calls, how many became jobs, her
