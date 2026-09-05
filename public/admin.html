@@ -4606,6 +4606,34 @@ function photoCatLabel(k){ const c=PHOTO_CATS.find(x=>x.key===k); return c?c.lab
 let galleryCache={};     // folder key -> { photos, has_more }
 let galleryCounts=null;
 let galleryLoading=false;
+let galleryScanning=false;
+
+// Owner-only "Scan now": works through the unscanned backlog in batches until
+// it's empty, refreshing the Logo folder as hits come in. Batched rather than
+// one big call because the vision pass has to finish inside the serverless
+// function's timeout; the loop is what makes a 1000-photo backfill a single
+// click instead of thirteen days of waiting for the cron.
+async function galleryScanLogos(){
+  if(galleryScanning) return;
+  galleryScanning=true; drawGallery();
+  let totalHits=0, passes=0;
+  try{
+    while(galleryCounts&&galleryCounts.unscanned>0&&passes<20){
+      const d=await api('photo_logo_scan',{ method:'POST', body:{ limit:120 }});
+      passes++;
+      if(d.skipped){ toast(d.skipped); break; }
+      totalHits+=d.hits||0;
+      galleryCounts.unscanned=d.unscanned_total??0;
+      galleryCounts.logo=(galleryCounts.logo||0)+(d.hits||0);
+      delete galleryCache.logo;            // refetch so new hits appear in date order
+      if(galleryGroup==='logo') await loadGalleryFolder('logo');
+      drawGallery();
+      if(!d.scanned) break;                // nothing progressed — stop rather than spin
+    }
+    toast(`Found ${totalHits} logo shot${totalHits===1?'':'s'}${galleryCounts&&galleryCounts.unscanned>0?` — ${galleryCounts.unscanned} still to check`:''}`);
+  }catch(e){ toast(e.message||'Scan failed'); }
+  finally{ galleryScanning=false; drawGallery(); }
+}
 
 function galleryParamsFor(key){
   const p={ business:galleryBizSlug||current.slug, limit:100 };
@@ -4726,6 +4754,12 @@ function drawGallery(){
       : shown.length
         ? `<div class="gallery">${shown.map(card).join('')}</div>`
         : `<div class="empty">${logoView?'No logo shots tagged yet. The scan runs twice a day over new photos.':'No photos in '+esc(photoCatLabel(galleryGroup))+'.'}</div>`}
+    ${logoView&&!crossBiz&&role==='owner'&&galleryCounts&&galleryCounts.unscanned>0
+      ? `<div style="text-align:center;margin:12px 0;">
+          <button type="button" id="galScan" ${galleryScanning?'disabled':''}>${galleryScanning?'Scanning…':`Scan ${galleryCounts.unscanned} remaining photo${galleryCounts.unscanned===1?'':'s'} for logo shots`}</button>
+          <div class="sub" style="margin-top:6px;">Runs automatically twice a day — this just does it now.</div>
+        </div>`
+      : ''}
     ${page&&page.has_more
       ? `<div style="text-align:center;margin:16px 0;"><button type="button" id="galMore" ${galleryLoading?'disabled':''}>${galleryLoading?'Loading…':`Load more (${Math.max(((galleryCounts&&galleryCounts[galleryGroup])||0)-shown.length,0)} older)`}</button></div>`
       : ''}
@@ -4736,6 +4770,7 @@ function drawGallery(){
     loadGalleryFolder(galleryGroup);   // no-op if this folder is already cached
   }));
   document.getElementById('galMore')?.addEventListener('click',()=>loadGalleryFolder(galleryGroup,{append:true}));
+  document.getElementById('galScan')?.addEventListener('click',galleryScanLogos);
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
   view.querySelectorAll('.gal-check').forEach(chk=>chk.addEventListener('click',e=>{
     e.stopPropagation();

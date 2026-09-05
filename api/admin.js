@@ -402,6 +402,7 @@ export default async function handler(req, res) {
       case 'booking_note_add':     return await bookingNoteAdd(req, res, db, auth, body);
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
+      case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'customer_detail':   return await customerDetail(req, res, db, auth);
@@ -5522,16 +5523,20 @@ async function photoGallery(req, res, db, auth) {
       return apply(q);
     };
     try {
-      const [cNew, cToPost, cPosted, cRecords, cLogo] = await Promise.all([
+      const [cNew, cToPost, cPosted, cRecords, cLogo, cUnscanned] = await Promise.all([
         countFor(q => q.or('status.is.null,status.eq.new,status.eq.private')),
         countFor(q => q.eq('status', 'to_post')),
         countFor(q => q.eq('status', 'posted')),
         countFor(q => q.eq('status', 'records')),
         hasLogo ? countFor(q => q.is('logo_shot', true)) : Promise.resolve({ count: 0 }),
+        hasLogo ? countFor(q => q.is('logo_scanned_at', null)) : Promise.resolve({ count: 0 }),
       ]);
       counts = {
         new: cNew.count || 0, to_post: cToPost.count || 0, posted: cPosted.count || 0,
         records: cRecords.count || 0, logo: cLogo.count || 0,
+        // How many are still waiting on the vision pass — drives the "Scan now"
+        // button's label so the owner can see the backfill draining.
+        unscanned: cUnscanned.count || 0,
       };
     } catch (e) { console.warn('[photo_gallery] counts failed:', e.message); }
   }
@@ -5539,6 +5544,23 @@ async function photoGallery(req, res, db, auth) {
     photos, limit, offset, has_more: photos.length === limit,
     status_supported: hasStatus, logo_supported: hasLogo, counts,
   });
+}
+
+// Run the logo-shot vision scan on demand, from the Photos tab, instead of
+// waiting for the twice-a-day cron to work through the backlog 40 at a time.
+// Owner-only: it spends money on API calls, and it is the owner's tagging
+// decision to re-run, not the office's. Same underlying pass as the cron, so
+// it stays idempotent — an already-scanned photo is never looked at twice.
+async function photoLogoScan(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { scanLogoPhotos } = await import('./_lib/photo-logo-scan.js');
+  // Capped well under the function timeout: at ~5 concurrent and a couple of
+  // seconds each, 120 is roughly 45s of work. The client loops until the
+  // unscanned count reaches zero, so a big backfill just takes a few passes.
+  const limit = Math.min(Number(body.limit) || 120, 200);
+  const summary = await scanLogoPhotos({ limit });
+  return res.status(200).json({ ok: true, ...summary });
 }
 
 // Move a photo between categories (New / To Post / Posted / Records). No-op-safe:
