@@ -455,7 +455,6 @@ export default async function handler(req, res) {
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'call_numbers':      return await callNumbers(req, res, db, auth);
-      case 'call_number_set_ai_voice': return await callNumberSetAiVoice(req, res, db, auth, body);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
@@ -9783,14 +9782,54 @@ async function auditReport(req, res, db, auth) {
 // it belongs to and where a call to it actually rings. Owner-only, same as
 // Performance/Audit -- forward_to is a real personal cell number, not
 // something a secretary needs to see to do her job.
+// Twilio itself is the only source of truth for whether a number's voice
+// webhook actually points at Vapi (importing a number into Vapi silently
+// rewrites this URL on Twilio's side -- nothing in our own DB changes when
+// that happens). Pulled fresh every time the Numbers screen loads rather than
+// cached, since a number can be imported/removed from Vapi at any moment
+// outside this app. 10s timeout + swallow-on-failure: a slow/erroring Twilio
+// call should degrade to "can't tell" for every row, never break the page.
+let _twilioNumbersCache = null; // { at, byPhone: Map<10-digit, voiceUrl> }
+const TWILIO_NUMBERS_CACHE_MS = 30 * 1000;
+async function fetchTwilioVoiceUrls() {
+  if (_twilioNumbersCache && (Date.now() - _twilioNumbersCache.at) < TWILIO_NUMBERS_CACHE_MS) return _twilioNumbersCache.byPhone;
+  const sid = process.env.TWILIO_ACCOUNT_SID, token = process.env.TWILIO_AUTH_TOKEN;
+  const byPhone = new Map();
+  if (!sid || !token) return byPhone;
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  let url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PageSize=200`;
+  try {
+    for (let page = 0; page < 5 && url; page++) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
+      const r = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: ctrl.signal });
+      clearTimeout(t);
+      if (!r.ok) break;
+      const data = await r.json();
+      for (const rec of (data.incoming_phone_numbers || [])) {
+        const ten = (rec.phone_number || '').replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
+        if (ten) byPhone.set(ten, rec.voice_url || '');
+      }
+      url = data.next_page_uri ? `https://api.twilio.com${data.next_page_uri}` : null;
+    }
+  } catch (e) { /* Twilio unreachable/slow -- callers treat a missing entry as "unknown" */ }
+  _twilioNumbersCache = { at: Date.now(), byPhone };
+  return byPhone;
+}
+function aiVoiceStatusFor(voiceUrl) {
+  if (voiceUrl == null) return 'unknown';   // Twilio call failed/timed out
+  return /vapi\.ai/i.test(voiceUrl) ? 'connected' : 'not_connected';
+}
+
 async function callNumbers(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
-  const [{ data: numbers }, { data: businesses }] = await Promise.all([
+  const [{ data: numbers }, { data: businesses }, voiceUrlByPhone] = await Promise.all([
     db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone, ai_voice_connected')
+      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
       .order('business_slug'),
     db.from('businesses').select('slug, name, url'),
+    fetchTwilioVoiceUrls(),
   ]);
 
   const bizBySlug = {};
@@ -9798,29 +9837,16 @@ async function callNumbers(req, res, db, auth) {
 
   const rows = (numbers || []).map(n => {
     const biz = bizBySlug[n.business_slug] || {};
+    const hasVoiceUrl = voiceUrlByPhone.has(n.phone);
     return {
       ...n,
       business_name: biz.name || n.business_slug,
       business_url: biz.url || null,
+      ai_voice_status: aiVoiceStatusFor(hasVoiceUrl ? voiceUrlByPhone.get(n.phone) : null),
     };
   });
 
   return res.status(200).json({ numbers: rows });
-}
-
-// Manual toggle for the Numbers screen -- there's no automatic way to detect
-// that a number has been imported into Vapi and pointed at the AI voice
-// receptionist, since that's configured entirely in Twilio/Vapi's own
-// dashboards, invisible to this app. This just records what the owner says
-// is true so the office can see it at a glance.
-async function callNumberSetAiVoice(req, res, db, auth, body) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-  const phone = (body && body.phone || '').toString().trim();
-  if (!phone) return res.status(400).json({ error: 'phone is required' });
-  const connected = !!(body && body.connected);
-  const { error } = await db.from('tracking_numbers').update({ ai_voice_connected: connected }).eq('phone', phone);
-  if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ ok: true });
 }
 
 // A secretary's own booking numbers: how many calls she took, how many became
