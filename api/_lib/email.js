@@ -75,6 +75,12 @@ export function emailConfig(slug) {
       from:   process.env.TVHANGINGHOUSTON_EMAIL_FROM || 'contact@tvhanginghouston.com',
     };
   }
+  if (slug === 'houstontvmountingpros') {
+    return {
+      apiKey: process.env.HOUSTONTVMOUNTINGPROS_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
+      from:   process.env.HOUSTONTVMOUNTINGPROS_EMAIL_FROM || 'contact@houstontvmountingpros.com',
+    };
+  }
   if (slug === 'htvmounting') {
     return {
       apiKey: process.env.HTVMOUNTING_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
@@ -139,6 +145,7 @@ export const EMAIL_BRANDS = {
   'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvinstallation.com' },
   'tvhanginghouston':      { slug: 'tvhanginghouston',      name: 'TV Hanging Houston',       accent: '#0288D1', website: 'tvhanginghouston.com' },
   'htvmounting':           { slug: 'htvmounting',           name: 'HTV Mounting',             accent: '#0288D1', website: 'htvmounting.com' },
+  'houstontvmountingpros':   { slug: 'houstontvmountingpros',   name: 'H-Town TV Mounting',       accent: '#c9a25c', website: 'houstontvmountingpros.com' },
   // Austin lead-gen quad: accents match each site's own --accent token
   // (app/globals.css in each <slug>-site repo) so the email, widget and site
   // all read as one brand. atxtvmount deliberately shares austin's #1E56E0 —

@@ -135,6 +135,7 @@ const PARTNER_SLUG = {
   'houstontvinstallation': { slug: 'handy-andy', metro: /houston/i },
   'tvhanginghouston':      { slug: 'handy-andy', metro: /houston/i },
   'htvmounting':           { slug: 'handy-andy', metro: /houston/i },
+  'houstontvmountingpros':   { slug: 'handy-andy', metro: /houston/i },
   'atxmountpros':          { slug: 'handy-andy', metro: /austin/i },
   'atxtvmount':            { slug: 'handy-andy', metro: /austin/i },
   'austinmountingpros':    { slug: 'handy-andy', metro: /austin/i },

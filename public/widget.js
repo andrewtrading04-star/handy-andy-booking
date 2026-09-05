@@ -21,7 +21,7 @@
   // The legal trading name shown in the SMS-consent disclosure below -- must
   // name the actual company the customer is opting in to hear from, not just
   // whichever widget copy happens to be running.
-  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation', 'tvmountingdenver':'TV Mounting Denver', 'houstonmounting':'Houston Mounting', 'houstontvinstallation':'Houston TV Installation', 'tvhanginghouston':'TV Hanging Houston', 'htvmounting':'HTV Mounting', 'atxmountpros':'ATX Mount Pros', 'atxtvmount':'ATX TV Mounting', 'austinmountingpros':'Austin Mounting Pros', 'austintvinstall':'Austin TV Installation' }[BUSINESS] || 'Handy Andy TV Mounting';
+  const BUSINESS_NAME = { 'handy-andy':'Handy Andy TV Mounting', 'mile-high':'Mile High TV Mounting', 'austin':'TV Mounting & Handyman Austin', 'precision':'Precision TV Installation', 'tvmountingdenver':'TV Mounting Denver', 'houstonmounting':'Houston Mounting', 'houstontvinstallation':'Houston TV Installation', 'tvhanginghouston':'TV Hanging Houston', 'htvmounting':'HTV Mounting', 'atxmountpros':'ATX Mount Pros', 'atxtvmount':'ATX TV Mounting', 'austinmountingpros':'Austin Mounting Pros', 'austintvinstall':'Austin TV Installation', 'houstontvmountingpros':'H-Town TV Mounting' }[BUSINESS] || 'Handy Andy TV Mounting';
   // The phone number shown in customer-facing fallback messages ("call us to
   // confirm/verify"). Used to be hardcoded to Handy Andy's Houston line for
   // every business, which told a Mile High or Austin customer to call a
@@ -33,7 +33,7 @@
   // The four Austin lead-gen brands (atxmountpros / atxtvmount /
   // austinmountingpros / austintvinstall) each have their own Twilio
   // tracking number, matching what their sites publish.
-  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'(346) 394-8137', 'tvmountingdenver':'(983) 204-0866', 'houstonmounting':'(346) 660-4850', 'houstontvinstallation':'(346) 657-0917', 'tvhanginghouston':'(346) 660-4780', 'htvmounting':'(346) 586-8209', 'atxmountpros':'(737) 325-8921', 'atxtvmount':'(737) 380-0921', 'austinmountingpros':'(737) 276-0224', 'austintvinstall':'(737) 317-7658' }[BUSINESS] ?? '713-876-9032';
+  const CONTACT_PHONE = { 'handy-andy':'713-876-9032', 'mile-high':'(720) 799-0036', 'austin':'(737) 381-3800', 'precision':'(346) 394-8137', 'tvmountingdenver':'(983) 204-0866', 'houstonmounting':'(346) 660-4850', 'houstontvinstallation':'(346) 657-0917', 'tvhanginghouston':'(346) 660-4780', 'htvmounting':'(346) 586-8209', 'atxmountpros':'(737) 325-8921', 'atxtvmount':'(737) 380-0921', 'austinmountingpros':'(737) 276-0224', 'austintvinstall':'(737) 317-7658', 'houstontvmountingpros':'' }[BUSINESS] ?? '713-876-9032';
   // Accent color, driven by BUSINESS -- every ${ACCENT}/${ACCENT_LIGHT}/
   // ${ACCENT_RGB} reference throughout the widget's inline styles (buttons,
   // selected-state borders, the calendar, the coupon badge, etc.) reads from
@@ -53,8 +53,8 @@
   // below — its own identity, no longer austin's indigo),
   // austinmountingpros is antique brass #8a6a2c, austintvinstall is deep teal
   // #0d7a68 — so widget and site read as one brand.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#c9803d', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#e0a165', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97' }[BUSINESS] || '#ff9944';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#c9803d', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68', 'houstontvmountingpros':'#c9a25c' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#e0a165', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97', 'houstontvmountingpros':'#e2c37f' }[BUSINESS] || '#ff9944';
   // Deep "ink" tones, driven by BUSINESS -- every ${INK}/${INK_DEEP}
   // reference throughout the widget's inline styles (modal header gradients,
   // panel titles, the bracket-diagram SVGs) reads from these two instead of a
@@ -62,9 +62,9 @@
   // not listed keeps the exact original navy (#1a2f6b/#12224f) byte-for-byte
   // via the || default, so their live embeds are visually unchanged. Only the
   // four Austin lead-gen quad brands get their own deep tones.
-  const INK      = { 'atxmountpros':'#7c2d12', 'atxtvmount':'#2b2b30', 'austinmountingpros':'#4a3a18', 'austintvinstall':'#0b3d36' }[BUSINESS] || '#1a2f6b';
-  const INK_DEEP = { 'atxmountpros':'#5a1f0c', 'atxtvmount':'#18181c', 'austinmountingpros':'#2f2410', 'austintvinstall':'#07271f' }[BUSINESS] || '#12224f';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'201,128,63', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104' }[BUSINESS] || '255,102,0';
+  const INK      = { 'atxmountpros':'#7c2d12', 'atxtvmount':'#2b2b30', 'austinmountingpros':'#4a3a18', 'austintvinstall':'#0b3d36', 'houstontvmountingpros':'#1f1d19' }[BUSINESS] || '#1a2f6b';
+  const INK_DEEP = { 'atxmountpros':'#5a1f0c', 'atxtvmount':'#18181c', 'austinmountingpros':'#2f2410', 'austintvinstall':'#07271f', 'houstontvmountingpros':'#131210' }[BUSINESS] || '#12224f';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'201,128,63', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104', 'houstontvmountingpros':'201,162,92' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -120,6 +120,10 @@
     'atxtvmount':         'https://handy-andy-booking.vercel.app/thank-you.html?b=atxtvmount',
     'austinmountingpros': 'https://handy-andy-booking.vercel.app/thank-you.html?b=austinmountingpros',
     'austintvinstall':    'https://handy-andy-booking.vercel.app/thank-you.html?b=austintvinstall',
+    // H-Town TV Mounting (houstontvmountingpros.com): same hosted fallback
+    // until the domain is connected to its Vercel project, then flip to
+    // https://houstontvmountingpros.com/thank-you (the site ships that page).
+    'houstontvmountingpros': 'https://handy-andy-booking.vercel.app/thank-you.html?b=houstontvmountingpros',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
