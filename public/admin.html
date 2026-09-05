@@ -4595,6 +4595,20 @@ const PHOTO_CATS=[
 function photoCat(p){ const s=(p&&p.status)||'new'; return (s==='to_post'||s==='posted'||s==='records')?s:'new'; }
 function photoCatLabel(k){ const c=PHOTO_CATS.find(x=>x.key===k); return c?c.label:'New'; }
 
+// Fetches the logo shots, all-time, straight from the server (?logo=1) rather
+// than filtering what's already loaded -- the whole point of the folder is to
+// surface one that was taken three months ago, which the newest-200 preload
+// would never contain. Fetched once per gallery visit and cached.
+async function loadLogoShots(){
+  if(galleryLogoPhotos!==null||galleryLogoLoading) return;
+  galleryLogoLoading=true;
+  try{
+    const d=await api('photo_gallery',{ params:{ business:galleryBizSlug||current.slug, limit:200, logo:1 }});
+    galleryLogoPhotos=d.photos||[];
+  }catch(e){ galleryLogoPhotos=[]; toast(e.message||'Could not load logo shots'); }
+  finally{ galleryLogoLoading=false; if(galleryGroup==='logo') drawGallery(); }
+}
+
 async function renderGallery(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
@@ -4625,7 +4639,8 @@ function drawGallery(){
   }
   const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=0);
   galleryPhotos.forEach(p=>{ counts[photoCat(p)]++; });
-  const shown=galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
+  const logoView=galleryGroup==='logo';
+  const shown=logoView ? (galleryLogoPhotos||[]) : galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
   const shownIds=new Set(shown.map(p=>String(p.id)));
   // Drop any selected id that scrolled out of the current tab (e.g. it got
   // moved by someone else / a stale selection from before a tab switch).
@@ -4642,7 +4657,7 @@ function drawGallery(){
         <input type="checkbox" class="gal-check" data-pid="${esc(p.id)}" title="Select photo" ${checked?'checked':''}>
         <img src="${esc(p.url)}" loading="lazy" alt="job photo">
         <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
-          <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}</span><br>
+          <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}${logoView?' · in '+esc(photoCatLabel(cur)):''}</span><br>
           <label class="gal-movelbl">Move to <select class="gal-move" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}">${opts}</select></label>
         </figcaption>
       </figure>`;
@@ -4659,14 +4674,20 @@ function drawGallery(){
     ${switcher}
     <div class="gal-tabs">
       ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
+      ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryLogoPhotos?` <span class="gal-count">${galleryLogoPhotos.length}</span>`:''}</button>`}
     </div>
     ${bulkBar}
-    ${shown.length
-      ? `<div class="gallery">${shown.map(card).join('')}</div>`
-      : `<div class="empty">No photos in ${esc(photoCatLabel(galleryGroup))}.</div>`}
+    ${logoView&&galleryLogoPhotos===null
+      ? `<div class="empty">Finding logo shots…</div>`
+      : shown.length
+        ? `<div class="gallery">${shown.map(card).join('')}</div>`
+        : `<div class="empty">${logoView?'No logo shots tagged yet. The scan runs twice a day over new photos.':'No photos in '+esc(photoCatLabel(galleryGroup))+'.'}</div>`}
   </div>`;
   view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; gallerySelected.clear(); renderGallery(); }));
-  view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{ galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery(); }));
+  view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{
+    galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery();
+    if(galleryGroup==='logo') loadLogoShots();
+  }));
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
   view.querySelectorAll('.gal-check').forEach(chk=>chk.addEventListener('click',e=>{
     e.stopPropagation();

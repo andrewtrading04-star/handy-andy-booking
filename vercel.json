@@ -4,7 +4,9 @@
   "crons": [
     { "path": "/api/migrate?action=send_reminders", "schedule": "0 15 * * *" },
     { "path": "/api/migrate?action=daily_digest", "schedule": "0 3 * * *" },
-    { "path": "/api/migrate?action=tech_late_check", "schedule": "*/10 * * * *" }
+    { "path": "/api/migrate?action=tech_late_check", "schedule": "*/10 * * * *" },
+    { "path": "/api/migrate?action=photo_logo_scan", "schedule": "0 19 * * *" },
+    { "path": "/api/migrate?action=photo_logo_scan", "schedule": "0 5 * * *" }
   ],
   "rewrites": [
     { "source": "/handy-andy", "destination": "/admin.html" },

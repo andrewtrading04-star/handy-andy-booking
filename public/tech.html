@@ -409,6 +409,22 @@
   </div>
 </div>
 
+<!-- Bonus award (migration 0105). Auto-opens on the Jobs screen when the owner
+     has awarded a bonus this tech hasn't seen yet. Deliberately the ONLY modal
+     here with no backdrop-tap and no X: the whole point is that it gets read
+     once, so Close is the single way out and closing it is what records the
+     acknowledgement server-side. -->
+<div id="bonusModal" class="lightbox hidden">
+  <div style="background:#fff;border-radius:16px;padding:30px 26px;max-width:320px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;">
+    <div style="width:56px;height:56px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:27px;">&#127942;</div>
+    <div style="font-size:12px;font-weight:800;letter-spacing:.6px;color:#b45309;margin-bottom:6px;">YOU EARNED A BONUS</div>
+    <div id="bonusAmt" style="font-size:42px;font-weight:800;color:#222a35;line-height:1;margin-bottom:12px;">$0</div>
+    <p id="bonusMsg" style="color:#7a8694;font-size:15px;line-height:1.5;margin-bottom:20px;"></p>
+    <div style="background:#f4f6f9;border-radius:9px;padding:10px;font-size:12.5px;color:#7a8694;margin-bottom:20px;">Added to your pay &mdash; check the Payroll tab.</div>
+    <button class="btn" id="bonusClose" style="width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;">Close</button>
+  </div>
+</div>
+
 <!-- How to get the logo onto the customer's TV. Opened ON DEMAND from the photo
      card (and the Help tab) — never auto-opens, never blocks completing a job,
      so a tech who already knows the drill never sees it. The remote path is
@@ -860,8 +876,38 @@ async function showJobs(date){
   document.getElementById('techName').textContent=tech?tech.name:'';
   renderTechNotice();
   loadReviewBanners();
+  loadBonusPopup();
   await loadWeek();
 }
+
+// Bonus popup. Queued rather than stacked — if two bonuses are waiting the
+// second one opens as soon as the first is closed, so neither gets skipped.
+// The close handler acknowledges server-side; the modal is dismissed first
+// either way, because a tech on bad signal must never be trapped behind it.
+let bonusQueue=[];
+async function loadBonusPopup(){
+  if(!document.getElementById('bonusModal')) return;
+  try{
+    const d=await api('tech_bonus_unseen');
+    bonusQueue=d.bonuses||[];
+    showNextBonus();
+  }catch(e){ /* best-effort — never block the jobs screen on this */ }
+}
+function showNextBonus(){
+  const modal=document.getElementById('bonusModal');
+  const b=bonusQueue[0];
+  if(!b){ modal.classList.add('hidden'); return; }
+  document.getElementById('bonusAmt').textContent='$'+Number(b.amount||0);
+  document.getElementById('bonusMsg').textContent=b.message||'';
+  modal.classList.remove('hidden');
+}
+document.getElementById('bonusClose')?.addEventListener('click',async()=>{
+  const b=bonusQueue.shift();
+  showNextBonus();
+  if(!b) return;
+  try{ await api('tech_bonus_ack',{method:'POST',body:{id:b.id}}); }
+  catch(e){ /* stays closed for this session; it would reappear on the next open */ }
+});
 
 // Google review banners — one per unseen review, newest first, shown right at
 // the top of the main Jobs screen. 5-star is celebratory gold; 4-star-or-less

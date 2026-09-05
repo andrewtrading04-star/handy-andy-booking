@@ -9,6 +9,7 @@ import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
+import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
 import fs from 'fs';
@@ -943,6 +944,31 @@ export default async function handler(req, res) {
       return await googleReviewSync(req, res);
     } catch (e) {
       console.error('[google_review_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Logo-shot tagging. Runs Claude vision over booking photos that have never
+  // been scanned and marks the ones showing the company logo up on the
+  // customer's TV — the shots worth posting. Twice a day is plenty at ~15 new
+  // photos a day, and every photo is looked at exactly once (the verdict is
+  // stored), so a re-run is cheap rather than a re-scan. Secured by
+  // CRON_SECRET, same as everything else here.
+  //   &limit=N  scan up to N this run (default 40, max 300 — raise it to
+  //             chew through the backfill of older photos faster)
+  //   &dry=1    report how many are waiting without calling the API
+  if (action === 'photo_logo_scan') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await scanLogoPhotos({ limit: req.query.limit, dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[photo_logo_scan]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

@@ -11482,6 +11482,40 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
     }
   } catch (e) { console.warn('[payroll] review bonus lookup failed:', e.message); }
 
+  // ── One-off bonuses (migration 0105) ─────────────────────────────────────
+  // The generic version of the block above: any number per tech, each with its
+  // own label. Same pseudo-job treatment for the same reason — it has to reach
+  // the number the owner types into the payroll processor, or the tech sees a
+  // bonus in their app that never actually gets paid. awarded_on is a plain
+  // date, so a simple inclusive range matches the Sun-Sat week exactly.
+  try {
+    const { data: bonuses } = await db.from('tech_bonuses')
+      .select('id, technician_id, amount, reason, awarded_on, technician:technicians!technician_id(name, business_id)')
+      .gte('awarded_on', parsedWeek).lte('awarded_on', weekEnd);
+    for (const bns of bonuses || []) {
+      if (bns.technician?.business_id !== biz.id) continue;   // shows under the tech's own business only
+      const amt = Math.round(Number(bns.amount) || 0);
+      if (!amt) continue;
+      const tId = bns.technician_id;
+      if (!techPayroll[tId]) techPayroll[tId] = { name: bns.technician?.name || 'Technician', jobs: [], deferred: [], total: 0 };
+      techPayroll[tId].jobs.push({
+        id: `bonus-${bns.id}`,
+        bonus: true,   // the client excludes bonus rows from "jobs worked" counts
+        customer_name: bns.reason || 'Bonus',
+        service: 'Bonus',
+        time: '',
+        scheduled_at: bns.awarded_on,
+        business_name: biz.name,
+        business_slug: biz.slug,
+        tech_pay: amt,
+        breakdown: [{ label: bns.reason || 'Bonus', amount: amt }],
+        flags: [],
+        needs_review: false,
+      });
+      techPayroll[tId].total += amt;
+    }
+  } catch (e) { console.warn('[payroll] tech bonus lookup failed:', e.message); }
+
   return Object.entries(techPayroll)
     .map(([id, t]) => ({ ...t, _id: id }))
     .filter(t => t.jobs.length > 0 || t.deferred.length > 0);

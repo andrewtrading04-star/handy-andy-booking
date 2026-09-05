@@ -153,6 +153,8 @@ export default async function handler(req, res) {
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
       case 'review_listings': return await techReviewListings(req, res, db, auth);
       case 'review_checkin_set': return await techReviewCheckinSet(req, res, db, auth, body);
+      case 'tech_bonus_unseen': return await techBonusUnseen(req, res, db, auth);
+      case 'tech_bonus_ack':    return await techBonusAck(req, res, db, auth, body);
       case 'me': return await me(req, res, db, auth);
       case 'wire_plate_set': return await wirePlateSet(req, res, db, auth, body);
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
@@ -2187,6 +2189,35 @@ async function techPayroll(req, res, db, auth) {
     }
   } catch { /* migration 0090 not applied yet */ }
 
+  // ── One-off bonuses (migration 0105) ─────────────────────────────────────
+  // Same treatment as the review bonus above: its own labeled line in the week
+  // containing awarded_on, so the tech sees what it was for and when it lands.
+  // Unlike the review bonus there can be several, so they're listed, not
+  // collapsed. Best-effort — a missing table just means no lines.
+  try {
+    const { data: bonuses } = await db.from('tech_bonuses')
+      .select('id, amount, reason, awarded_on')
+      .eq('technician_id', techId)
+      .gte('awarded_on', weekStart).lte('awarded_on', weekEnd)
+      .order('awarded_on', { ascending: true });
+    for (const b of bonuses || []) {
+      const amt = Math.round(Number(b.amount) || 0);
+      if (!amt) continue;
+      paidJobs.push({
+        id: `bonus-${b.id}`,
+        bonus: true,   // mirrors admin payroll's flag: not a worked job
+        customer_name: b.reason || 'Bonus',
+        service: 'Bonus',
+        time: '',
+        tech_pay: amt,
+        breakdown: [{ label: b.reason || 'Bonus', amount: amt }],
+        flags: [],
+        needs_review: false,
+      });
+      totalPay += amt;
+    }
+  } catch { /* migration 0105 not applied yet */ }
+
   return res.status(200).json({
     week_start: weekStart,
     week_end: weekEnd,
@@ -2266,6 +2297,43 @@ async function techReviews(req, res, db, auth) {
     .sort((a, b) => (new Date(b.reviewed_at || 0).getTime()) - (new Date(a.reviewed_at || 0).getTime()));
 
   return res.status(200).json({ average, total, week_count: weekCount, reviews });
+}
+
+// ── One-off bonuses (migration 0105) ────────────────────────────────────────
+// A bonus the owner awarded this tech. Two separate jobs: it shows as its own
+// payroll line (see techPayroll below), and — if it carries a message — it pops
+// a congratulations modal the tech has to close. "Unacknowledged" is per-bonus
+// and stored server-side, exactly like the Google review banners: closing it on
+// one phone closes it everywhere and forever, so it can never nag twice.
+//
+// A bonus with no message is paid silently — useful for a correction or a
+// routine adjustment that doesn't warrant a celebration.
+async function techBonusUnseen(req, res, db, auth) {
+  const { data, error } = await db.from('tech_bonuses')
+    .select('id, amount, reason, message, awarded_on')
+    .eq('technician_id', auth.tech_id)
+    .is('acknowledged_at', null)
+    .not('message', 'is', null)
+    .order('awarded_on', { ascending: true })
+    .limit(5);
+  if (error) throw error;
+  return res.status(200).json({
+    bonuses: (data || []).map(b => ({ ...b, amount: Math.round(Number(b.amount) || 0) })),
+  });
+}
+
+async function techBonusAck(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  // technician_id scoped so a tech can only ever acknowledge their OWN bonus.
+  // Not .single() — a double-tap (or a retry after a flaky network) must be a
+  // no-op, never a 404 that pops the modal back up.
+  const { error } = await db.from('tech_bonuses')
+    .update({ acknowledged_at: new Date().toISOString() })
+    .eq('id', id).eq('technician_id', auth.tech_id).is('acknowledged_at', null);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // ── Google review notifications (main Jobs screen banner) ──────────────────
