@@ -81,9 +81,19 @@ async function loadBizContext(businessSlug) {
   return { biz, tvServiceId: tvService ? tvService.id : null, handymanServiceId: handymanService ? handymanService.id : null };
 }
 
+// The pilot number (TV Hanging Houston) still has the shared assistant
+// directly attached in Vapi's dashboard rather than going through the
+// assistant-request lookup (couldn't clear that field via the dashboard UI --
+// Vapi offers no visible "unassign" control once an assistant is set on a
+// number). A direct assignment never receives assistantOverrides, so
+// {{business_slug}} in the prompt reaches here unresolved, literally. Rather
+// than leave the pilot broken while that gets sorted out, treat the literal
+// template string as this one known number's brand.
+const FALLBACK_BUSINESS_SLUG = 'tvhanginghouston';
+
 async function runTool(name, args) {
-  const businessSlug = args.business_slug;
-  if (!businessSlug) return { error: 'missing business_slug' };
+  let businessSlug = args.business_slug;
+  if (!businessSlug || businessSlug === '{{business_slug}}') businessSlug = FALLBACK_BUSINESS_SLUG;
 
   switch (name) {
     case 'check_zip': {
