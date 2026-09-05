@@ -6279,20 +6279,28 @@ async function renderLaunch(){
 
   const cityBlock=(city)=>{
     const rows=byCity[city]||[];
-    const extra = (city==='Los Angeles') ? laHtml : '';
-    const cityBlocked = rows.filter(x=>x.s.blocked).length + (extra ? (laBlocked?1:0) : 0);
-    const total = rows.length + (extra?1:0);
+    // Within a city, needs-attention cards (blocked or in progress) lead;
+    // fully-ready ones drop to their own row underneath so a finished
+    // business never sits above something that still needs a fix.
+    const needsAttention=rows.filter(x=>!(x.s.passed===x.s.total && !x.s.blocked));
+    const readyRows=rows.filter(x=>x.s.passed===x.s.total && !x.s.blocked);
+    const laReady = laMarket && !laBlocked;
+    const laNotReady = laMarket && laBlocked;
+    const topHtml = needsAttention.map(x=>launchCardHtml(x.b, items)).join('') + (city==='Los Angeles' && laNotReady ? laHtml : '');
+    const readyHtml = readyRows.map(x=>launchCardHtml(x.b, items)).join('') + (city==='Los Angeles' && laReady ? laHtml : '');
+    const cityBlocked = rows.filter(x=>x.s.blocked).length + (city==='Los Angeles' && laNotReady ? 1 : 0);
+    const total = rows.length + (city==='Los Angeles' && laMarket ? 1 : 0);
     const dotColor = cityBlocked>0 ? 'var(--red)' : 'var(--green)';
+    const grid=(html)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">${html}</div>`;
     return `<div style="margin-bottom:22px;">
       <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;">
         <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>
         <p style="font-size:13px;font-weight:800;margin:0;">${esc(city)}</p>
         <span style="font-size:11.5px;color:var(--mute);">${total} business${total===1?'':'es'}${cityBlocked?` · ${cityBlocked} blocked`:''}</span>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">
-        ${rows.map(x=>launchCardHtml(x.b, items)).join('')}${extra}
-        ${(total===0) ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
-      </div>
+      ${total===0 ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
+      ${topHtml ? grid(topHtml) : ''}
+      ${readyHtml ? `<div style="margin-top:${topHtml?'10px':'0'};">${grid(readyHtml)}</div>` : ''}
     </div>`;
   };
 
