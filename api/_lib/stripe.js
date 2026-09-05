@@ -22,7 +22,6 @@ const ACCOUNT_KEY_ENV = {
   'mile-high':  'MILE_HIGH_STRIPE_SECRET_KEY',
   austin:       'AUSTIN_STRIPE_SECRET_KEY',
   precision:    'PRECISION_STRIPE_SECRET_KEY',
-  tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_SECRET_KEY',
   // Houston lead-gen quad (houstonmounting, houstontvinstallation,
   // tvhanginghouston, htvmounting) deliberately share ONE Stripe account —
   // houstonmounting.com's — instead of each getting its own. Only one account
@@ -39,7 +38,8 @@ const LEGACY_SLUG_ACCOUNT = {
   'mile-high':  'mile-high',
   austin:       'austin',   // always its own account, never global -- born after the split
   precision:    'precision',// same
-  tvmountingdenver: 'tvmountingdenver', // same
+  // TV Mounting Denver now charges on Mile High's Stripe account, not its own.
+  tvmountingdenver: 'mile-high',
   // All four Houston lead-gen brands charge on the shared houstonmounting
   // account, never their own — there is no per-slug account for them.
   houstonmounting:         'houstonmounting',

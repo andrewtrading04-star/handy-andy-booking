@@ -117,7 +117,8 @@ const STRIPE_PK_ENV = {
   'mile-high':  'MILE_HIGH_STRIPE_PUBLISHABLE_KEY',
   austin:       'AUSTIN_STRIPE_PUBLISHABLE_KEY',
   precision:    'PRECISION_STRIPE_PUBLISHABLE_KEY',
-  tvmountingdenver: 'TVMOUNTINGDENVER_STRIPE_PUBLISHABLE_KEY',
+  // TV Mounting Denver now shares Mile High's Stripe account/publishable key.
+  tvmountingdenver: 'MILE_HIGH_STRIPE_PUBLISHABLE_KEY',
   // Houston lead-gen quad — all four share one Stripe account (houstonmounting's,
   // see ACCOUNT_KEY_ENV in stripe.js), so all four also share this one
   // publishable key. Var name is `Publishable_key_houston_mounting`, not the
