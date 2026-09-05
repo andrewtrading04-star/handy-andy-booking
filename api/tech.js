@@ -12,6 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
+import { ensureReviewToken } from './_lib/review-token.js';
 import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
@@ -1065,6 +1066,11 @@ async function status(req, res, db, auth, body) {
   // On completion: send the branded review-request email immediately, and an SMS
   // 20 minutes later (if the customer opted in). The tech app, not the dashboard,
   // is where jobs are normally completed — so this is the path that matters.
+  //
+  // Heal a missing review link before deciding whether to send: estimate-
+  // approved bookings were created without one, so the tech marking them
+  // complete used to log "no review_token" and the customer got nothing.
+  if (next === 'completed') await ensureReviewToken(db, existing);
   if (next === 'completed' && existing.review_token) {
     console.log(`[review] job ${id} marked completed, review_token=${existing.review_token}, email=${existing.customer?.email}`);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
@@ -1151,7 +1157,7 @@ async function status(req, res, db, auth, body) {
       }
     }
   } else if (next === 'completed') {
-    console.log(`[review] job ${id} marked completed but no review_token`);
+    console.error(`[review] job ${id} marked completed but a review_token could not be minted — no review request sent`);
   }
 
   return res.status(200).json({ ok: true, status: next });

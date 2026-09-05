@@ -15,6 +15,7 @@
 // ============================================================================
 import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
+import { ensureReviewToken } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
@@ -3739,8 +3740,7 @@ async function bookingCreate(req, res, db, auth, body) {
   if (bErr) throw bErr;
 
   // Generate the review-link token now that we have the booking id.
-  const reviewToken = signToken({ kind: 'review', booking_id: bRow.id }, 2592000);
-  await db.from('bookings').update({ review_token: reviewToken }).eq('id', bRow.id);
+  await ensureReviewToken(db, { id: bRow.id });
 
   // NOTE: the booking row already exists past this point. NOTHING below may
   // throw a 500 — that would tell the office "booking failed" for a booking
@@ -4176,7 +4176,15 @@ async function bookingUpdate(req, res, db, auth, body) {
       if (!SETTABLE_STATUSES.includes(body.status)) {
         return res.status(400).json({ error: `Unknown status "${body.status}". Allowed: ${SETTABLE_STATUSES.join(', ')}` });
       }
-      patch.status = newStatus = body.status; break;
+      patch.status = newStatus = body.status;
+      // Mirror the tech app (TECH_STATUS stamp in api/tech.js): a dashboard
+      // completion used to leave completed_at NULL, so about half of Denver's
+      // completed jobs had no completion time and sorted to the wrong end of
+      // the Reviews tab. Only on the transition INTO completed — a replayed
+      // "completed" on an already-completed job (double-click, stale tab)
+      // must not overwrite the tech's real completion time.
+      if (body.status === 'completed' && existing.status !== 'completed') patch.completed_at = now;
+      break;
     default:
       return res.status(400).json({ error: `Unknown booking action "${body.action}"` });
   }
@@ -4275,7 +4283,10 @@ async function bookingUpdate(req, res, db, auth, body) {
       status: newStatus, note: `Set by ${auth.role} (dashboard)`,
     });
 
-    // Send review email and SMS when job is completed
+    // Send review email and SMS when job is completed. Heal a missing review
+    // link first (estimate-approved bookings were created without one, so
+    // completing them used to send nothing at all).
+    if (newStatus === 'completed') await ensureReviewToken(db, existing);
     if (newStatus === 'completed' && existing.review_token) {
       const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       // Click-tracking redirect URL for both email and SMS — logs which channel the click came from
@@ -7053,10 +7064,14 @@ async function reviewRequests(req, res, db, auth) {
   const cols = (t) => `id, scheduled_at, completed_at, review_rating, review_text, reviewed_at, review_token, metadata, sms_consent,
       ${t ? REVIEW_TRACK_COLS + ', ' : ''}
       customer:customers(name, email, phone), technician:technicians!technician_id(name)`;
+  // Ordered by scheduled_at (ALWAYS set), not completed_at: dashboard-completed
+  // jobs had completed_at NULL until 2026-09-06, and Postgres sorts NULLs first
+  // on a DESC order — so dozens of old null-stamped jobs pinned the top of the
+  // list and a job completed yesterday sat pages down where nobody saw it.
   let hasTrack = true;
   let { data, error, count } = await db.from('bookings').select(cols(true), { count: 'exact' })
     .eq('business_id', biz.id).eq('status', 'completed')
-    .order('completed_at', { ascending: false }).range(from, to);
+    .order('scheduled_at', { ascending: false }).range(from, to);
   // Any tracking column missing (migrations 0033/0062/0063 not applied) →
   // re-select without them; the bookings.metadata stamps carry the sent-at
   // data as fallback (delivered/status/per-channel-opened have no metadata
@@ -7065,7 +7080,7 @@ async function reviewRequests(req, res, db, auth) {
     hasTrack = false;
     ({ data, error, count } = await db.from('bookings').select(cols(false), { count: 'exact' })
       .eq('business_id', biz.id).eq('status', 'completed')
-      .order('completed_at', { ascending: false }).range(from, to));
+      .order('scheduled_at', { ascending: false }).range(from, to));
   }
   if (error) throw error;
 
@@ -7123,7 +7138,10 @@ async function reviewScoreboard(db, businessId, hasTrack) {
   const { data, error } = await db.from('bookings')
     .select('review_email_sent_at, review_email_delivered_at, review_email_clicked_at, review_sms_sent_at, review_sms_delivered_at, review_sms_clicked_at, review_clicked_at, review_click_channel')
     .eq('business_id', businessId).eq('status', 'completed')
-    .gte('completed_at', sinceISO);
+    // scheduled_at, not completed_at — same reason as reviewRequests above:
+    // dashboard-completed jobs with a NULL completed_at silently fell out of
+    // the 30-day tally.
+    .gte('scheduled_at', sinceISO);
   if (error || !data) return { windowDays, email: null, sms: null };
 
   const tally = (sentKey, deliveredKey, clickedKey) => {
@@ -7177,7 +7195,11 @@ async function reviewResend(req, res, db, auth, body) {
     .select('id, review_token, metadata, sms_consent, customer:customers(name, email, phone)')
     .eq('id', id).eq('business_id', biz.id).single();
   if (error || !b) return res.status(404).json({ error: 'Booking not found' });
-  if (!b.review_token) return res.status(400).json({ error: 'This job has no review link yet.' });
+  // Mint the link on demand instead of refusing — this button was the office's
+  // only way to reach a customer whose job was created without a token, and it
+  // used to be the one path that couldn't help them either.
+  await ensureReviewToken(db, b);
+  if (!b.review_token) return res.status(500).json({ error: 'Could not create a review link for this job. Try again.' });
 
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
 
@@ -11097,6 +11119,12 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     delete insertObj[missing];
   }
   if (bErr) throw bErr;
+
+  // Review-link token, exactly as bookingCreate mints one. This path never did,
+  // so every estimate-approved job reached completion with review_token NULL
+  // and the completion hook (tech.js / bookingUpdate) sent nothing — 8 of 8
+  // such jobs in the 120 days before 2026-09-06 got no review request.
+  await ensureReviewToken(db, { id: bRow.id });
 
   // Canonical ticket order from birth (TVs smallest-first, then work, then
   // travel/discounts); tax gets the next sort_order so it's always the last line.
