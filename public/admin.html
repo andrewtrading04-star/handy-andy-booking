@@ -6255,52 +6255,40 @@ async function renderLaunch(){
   const blockedCount=scored.filter(x=>x.s.blocked).length;
   const readyCount=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total).length;
   const progressCount=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total).length;
+  const isReady=x=>!x.s.blocked && x.s.passed===x.s.total;
 
   // LA is a market page under handy-andy, not its own business — folded into
-  // the Los Angeles city group as an extra card rather than a separate section.
+  // whichever top-level section (Unfinished/Finished) matches its own status.
   const laMarket=markets.find(m=>m.slug==='la');
   const laHtml=laMarket ? launchMarketCardHtml(laMarket, marketItems) : '';
   const laBlocked=laMarket ? launchMarketScoreOf(laMarket, marketItems).blocked : false;
 
-  // Group by city instead of by readiness — readiness still drives each
-  // card's ring color and the per-city status dot, it just no longer decides
-  // which section a business sits in.
+  const unfinished=scored.filter(x=>!isReady(x));
+  const finished=scored.filter(isReady);
+
+  // Finished businesses group by city; unfinished stays a flat list — the
+  // whole point of that section is "everything that still needs a look",
+  // and splitting it by city would just scatter the punch list.
   const byCity={};
-  for(const x of scored){
+  for(const x of finished){
     const city=launchCityOf(x.b.slug);
     (byCity[city] = byCity[city]||[]).push(x);
   }
-  const cities=LAUNCH_CITY_ORDER.filter(c=>byCity[c]||(c==='Los Angeles' && laMarket));
+  const finishedCities=LAUNCH_CITY_ORDER.filter(c=>byCity[c]||(c==='Los Angeles' && laMarket && !laBlocked));
 
   const statTile=(label,value,color)=>`<div style="background:#12151c;border-radius:10px;padding:12px 16px;min-width:110px;">
     <div style="font-size:22px;font-weight:800;color:${color};line-height:1.1;">${value}</div>
     <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#8b93a7;margin-top:3px;">${esc(label)}</div>
   </div>`;
+  const grid=(html)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">${html}</div>`;
 
   const cityBlock=(city)=>{
     const rows=byCity[city]||[];
-    // Within a city, needs-attention cards (blocked or in progress) lead;
-    // fully-ready ones drop to their own row underneath so a finished
-    // business never sits above something that still needs a fix.
-    const needsAttention=rows.filter(x=>!(x.s.passed===x.s.total && !x.s.blocked));
-    const readyRows=rows.filter(x=>x.s.passed===x.s.total && !x.s.blocked);
-    const laReady = laMarket && !laBlocked;
-    const laNotReady = laMarket && laBlocked;
-    const topHtml = needsAttention.map(x=>launchCardHtml(x.b, items)).join('') + (city==='Los Angeles' && laNotReady ? laHtml : '');
-    const readyHtml = readyRows.map(x=>launchCardHtml(x.b, items)).join('') + (city==='Los Angeles' && laReady ? laHtml : '');
-    const cityBlocked = rows.filter(x=>x.s.blocked).length + (city==='Los Angeles' && laNotReady ? 1 : 0);
-    const total = rows.length + (city==='Los Angeles' && laMarket ? 1 : 0);
-    const dotColor = cityBlocked>0 ? 'var(--red)' : 'var(--green)';
-    const grid=(html)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">${html}</div>`;
-    return `<div style="margin-bottom:22px;">
-      <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;">
-        <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>
-        <p style="font-size:13px;font-weight:800;margin:0;">${esc(city)}</p>
-        <span style="font-size:11.5px;color:var(--mute);">${total} business${total===1?'':'es'}${cityBlocked?` · ${cityBlocked} blocked`:''}</span>
-      </div>
-      ${total===0 ? '<p style="font-size:12px;color:var(--mute);">None.</p>' : ''}
-      ${topHtml ? grid(topHtml) : ''}
-      ${readyHtml ? `<div style="margin-top:${topHtml?'10px':'0'};">${grid(readyHtml)}</div>` : ''}
+    const extra = (city==='Los Angeles' && laMarket && !laBlocked) ? laHtml : '';
+    const total = rows.length + (extra?1:0);
+    return `<div style="margin-bottom:18px;">
+      <p style="font-size:12px;font-weight:800;color:var(--mute);margin:0 0 8px;">${esc(city)} · ${total}</p>
+      ${grid(rows.map(x=>launchCardHtml(x.b, items)).join('') + extra)}
     </div>`;
   };
 
@@ -6316,10 +6304,13 @@ async function renderLaunch(){
       ${statTile('Total',businesses.length + (laMarket?1:0),'#9aa4bd')}
     </div>
     <p style="color:var(--mute);font-size:12.5px;margin:0 0 16px;">
-      Grouped by city. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
+      Unfinished first, finished ones below grouped by city. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
       Click a card for the full breakdown and to tick the checklist.
     </p>
-    ${cities.map(cityBlock).join('')}
+    <p style="font-size:12px;font-weight:800;color:#b45309;margin:0 0 8px;">Unfinished · ${unfinished.length + (laMarket&&laBlocked?1:0)}</p>
+    ${grid(unfinished.map(x=>launchCardHtml(x.b, items)).join('') + (laMarket&&laBlocked?laHtml:'') || '<p style="font-size:12px;color:var(--mute);">None.</p>')}
+    <p style="font-size:12px;font-weight:800;color:#15803d;margin:22px 0 8px;">Finished · ${readyCount + (laMarket&&!laBlocked?1:0)}</p>
+    ${finishedCities.length ? finishedCities.map(cityBlock).join('') : '<p style="font-size:12px;color:var(--mute);">None yet.</p>'}
   </div>`;
 
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
