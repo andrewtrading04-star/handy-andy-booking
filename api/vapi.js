@@ -179,6 +179,7 @@ export default async function handler(req, res) {
     let result;
     try { result = await runTool(fn.name, args); }
     catch (e) { result = { error: e.message }; }
+    console.log('[vapi]', fn.name, JSON.stringify(args), '->', JSON.stringify(result));
     // Vapi requires result/error as strings, never objects — see
     // docs.vapi.ai/tools/custom-tools.
     results.push({ toolCallId: tc.id, result: JSON.stringify(result) });
