@@ -1489,8 +1489,27 @@ async function computeJobEconomics(db, biz, rows, includePay, travelMap = null) 
   const travelPayoutByZip = includePay ? (travelMap || await travelPayoutMap(db, biz.id)) : null;
   const out = {};
   for (const b of rows) {
-    const cost = Number(b.price) || 0;
-    const econ = { service_cat: classifyService(b), customer_cost: cost };
+    // Revenue for profit is what the business actually KEPT: the ticket price
+    // less anything refunded to the customer. A refund never decrements
+    // amount_paid anywhere in this codebase (bookingPayment writes only
+    // payment_status + amount_refunded), and nothing here used to read that
+    // column at all — so every refunded job counted its full pre-refund price
+    // as revenue and overstated profit by exactly the refund. Found 2026-09-05
+    // on Hannah Kelarek's 9/2 job: $80 service-area surcharge refunded, still
+    // booked as revenue. 8 completed jobs were affected, $873.84 total.
+    //
+    // customer_cost stays GROSS so the job card keeps matching the ticket and
+    // the receipt; the refund is surfaced separately as econ.refunded.
+    //
+    // Not clamped at zero: refunding more than the service price is a real loss
+    // and should read as one. (Tips are excluded from profit on both sides, so a
+    // refund that included a tip nets slightly conservative here — rare enough,
+    // and erring toward understating profit, that it isn't worth guessing which
+    // part of a flat refund amount was tip.)
+    const gross = Number(b.price) || 0;
+    const refunded = Number(b.amount_refunded) || 0;
+    const cost = Math.round((gross - refunded) * 100) / 100;
+    const econ = { service_cat: classifyService(b), customer_cost: gross, refunded };
     if (includePay) {
       const techNames = [];
       if (b.technician?.name) techNames.push(b.technician.name);
@@ -6540,7 +6559,7 @@ async function fetchBookingRows(makeQuery) {
 // was built by tracing every job.* / b.* read in that call chain — don't trim
 // further without re-checking api/_lib/payroll.js.
 function economicsSelect() {
-  const base = `id, status, payment_status, payment_method, amount_paid, price, subtotal, tip, notes, customer_notes,
+  const base = `id, status, payment_status, payment_method, amount_paid, price, subtotal, tip, notes, customer_notes${arCol()},
           zenbooker_job_number, scheduled_at, postal_code, service_area_id,
           service:services ( name ),
           technician:technicians!technician_id ( name ),
@@ -6561,6 +6580,13 @@ async function fetchEconomicsRows(makeQuery) {
   const codeOk = (e) => e.code === '42703' || String(e.code || '').startsWith('PGRST');
   if (error && codeOk(error) && /secondary_technician_id/.test(error.message || '')) {
     bookingLiftCols = false;
+    ({ data, error } = await makeQuery(economicsSelect()));
+  }
+  // amount_refunded (migration 0061) is optional here for the same reason it is
+  // everywhere else: degrade to the pre-0061 shape rather than break the whole
+  // dashboard. Profit then reads gross (the old behaviour) instead of net.
+  if (error && codeOk(error) && isAmountRefundedErr(error)) {
+    amountRefundedCol = false;
     ({ data, error } = await makeQuery(economicsSelect()));
   }
   return { data, error };

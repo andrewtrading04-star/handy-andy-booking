@@ -310,6 +310,7 @@
   .ec-item{display:inline-flex;gap:5px;align-items:baseline;color:var(--ink);font-weight:800;}
   .ec-item label{color:var(--mute);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;}
   .ec-item.ec-profit{color:#15803d;} .ec-item.ec-profit.neg{color:#dc2626;}
+  .ec-item.ec-refunded{color:#dc2626;}
   .ec-pay{margin-left:auto;font-weight:800;font-size:10.5px;padding:2px 9px;border-radius:999px;letter-spacing:.3px;white-space:nowrap;}
   .ec-pay.paid{background:#dcfce7;color:#15803d;} .ec-pay.unpaid{background:#fee2e2;color:#b91c1c;} .ec-pay.refunded{background:#f1f5f9;color:#64748b;}
   .est-filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
@@ -2769,6 +2770,10 @@ function listEcon(b){
   return `<div class="evt-econ">`+
     `<span class="ec-svc ${catCls}">${esc(ec.service_cat)}</span>`+
     `<span class="ec-item"><label>Total</label> ${money(ec.customer_cost)}</span>`+
+    // Total stays the gross ticket price (matches the receipt), so on a refunded
+    // job show what went back too — otherwise Profit looks wrong next to a Total
+    // it no longer derives from.
+    (Number(ec.refunded) > 0 ? `<span class="ec-item ec-refunded"><label>Refunded</label> −${money(ec.refunded)}</span>` : '')+
     priv+
     `<span class="ec-pay ${payCls}">${payLbl}</span>`+
   `</div>`;
