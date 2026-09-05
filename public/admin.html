@@ -4582,8 +4582,6 @@ let gallerySelected=new Set();
 // than a triage bucket -- a photo is a logo shot AND is in New/To Post/etc -- so
 // it gets its own server-filtered list instead of joining PHOTO_CATS. null =
 // not fetched yet; the fetch is lazy so the normal gallery never pays for it.
-let galleryLogoPhotos=null;
-let galleryLogoLoading=false;
 // Photo categories (manual triage buckets). Order = the owner's pipeline.
 // Legacy 'private' photos fold into the New inbox until re-filed.
 const PHOTO_CATS=[
@@ -4595,32 +4593,72 @@ const PHOTO_CATS=[
 function photoCat(p){ const s=(p&&p.status)||'new'; return (s==='to_post'||s==='posted'||s==='records')?s:'new'; }
 function photoCatLabel(k){ const c=PHOTO_CATS.find(x=>x.key===k); return c?c.label:'New'; }
 
-// Fetches the logo shots, all-time, straight from the server (?logo=1) rather
-// than filtering what's already loaded -- the whole point of the folder is to
-// surface one that was taken three months ago, which the newest-200 preload
-// would never contain. Fetched once per gallery visit and cached.
-async function loadLogoShots(){
-  if(galleryLogoPhotos!==null||galleryLogoLoading) return;
-  galleryLogoLoading=true;
+// Each folder is fetched and paged on its OWN, rather than pulling the newest
+// 200 photos overall and sorting them into folders in the browser.
+//
+// The old way silently lost photos as the table grew: by Sep 2026 Handy Andy
+// had 148 photos in Posted but only 6 of them were inside that 200-row window,
+// so Posted looked all but empty and older photos appeared to have been
+// deleted. They hadn't -- they were just past the edge of what got loaded.
+// A per-folder query can't have that failure mode, however lopsided the
+// folders get. galleryCounts comes from real server-side counts, so a tab
+// badge always shows what the folder actually holds, not what's on screen.
+let galleryCache={};     // folder key -> { photos, has_more }
+let galleryCounts=null;
+let galleryLoading=false;
+
+function galleryParamsFor(key){
+  const p={ business:galleryBizSlug||current.slug, limit:100 };
+  if(key==='logo') p.logo=1; else p.status=key;
+  return p;
+}
+
+async function loadGalleryFolder(key,{append=false}={}){
+  if(galleryLoading) return;
+  const cached=galleryCache[key];
+  if(cached&&!append) return;
+  galleryLoading=true;
+  if(append) drawGallery();   // repaint so the button can show its loading state
   try{
-    const d=await api('photo_gallery',{ params:{ business:galleryBizSlug||current.slug, limit:200, logo:1 }});
-    galleryLogoPhotos=d.photos||[];
-  }catch(e){ galleryLogoPhotos=[]; toast(e.message||'Could not load logo shots'); }
-  finally{ galleryLogoLoading=false; if(galleryGroup==='logo') drawGallery(); }
+    const params=galleryParamsFor(key);
+    if(append) params.offset=(cached?.photos.length)||0;
+    const d=await api('photo_gallery',{ params });
+    const got=d.photos||[];
+    galleryCache[key]={ photos: append&&cached ? cached.photos.concat(got) : got, has_more: !!d.has_more };
+    if(d.counts) galleryCounts=d.counts;
+  }catch(e){
+    if(!append) galleryCache[key]={ photos:[], has_more:false };
+    toast(e.message||'Could not load photos');
+  }finally{
+    galleryLoading=false;
+    if(galleryGroup===key) drawGallery();
+  }
+}
+
+// Folders are separate server queries now, so a photo leaving one has to be
+// removed from that folder's cached page by hand -- and the folder it lands in
+// dropped, so it refetches with the new arrival in its right place by date
+// rather than being appended out of order.
+function galleryDrop(ids){
+  const gone=new Set(ids.map(String));
+  const page=galleryCache[galleryGroup];
+  if(page) page.photos=page.photos.filter(p=>!gone.has(String(p.id)));
+  if(galleryCounts&&galleryCounts[galleryGroup]!=null) galleryCounts[galleryGroup]=Math.max(galleryCounts[galleryGroup]-gone.size,0);
+  gone.forEach(id=>gallerySelected.delete(id));
+}
+function galleryMoved(ids,to){
+  galleryDrop(ids);
+  delete galleryCache[to];
+  if(galleryCounts&&galleryCounts[to]!=null) galleryCounts[to]+=ids.length;
 }
 
 async function renderGallery(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   if(galleryIsCrossBusiness()) galleryGroup='to_post';   // the only bucket she's allowed to see there
-  try{
-    const biz=galleryBizSlug||current.slug;
-    const d=await api('photo_gallery',{ params:{ business:biz, limit:200 }});
-    galleryPhotos=d.photos||[];
-    galleryLogoPhotos=null;   // refetched on demand, so it can't go stale behind a business switch
-    drawGallery();
-    if(galleryGroup==='logo') loadLogoShots();
-  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+  galleryCache={}; galleryCounts=null;   // wiped so a business switch can't show the other company's photos
+  await loadGalleryFolder(galleryGroup);
+  drawGallery();
 }
 
 function drawGallery(){
@@ -4632,15 +4670,21 @@ function drawGallery(){
       <button class="gal-tab ${!crossBiz?'on':''}" data-galbiz="own">Dom's photos</button>
       <button class="gal-tab ${crossBiz?'on':''}" data-galbiz="ha">Handy Andy: To Post</button>
     </div>` : '';
-  if(!galleryPhotos.length){
+  const totalKnown=galleryCounts ? PHOTO_CATS.reduce((n,c)=>n+(galleryCounts[c.key]||0),0) : null;
+  if(totalKnown===0){
     view.innerHTML=`<div class="wrap">${switcher}<div class="empty">${crossBiz?'Nothing in Handy Andy’s To Post right now.':'No job photos yet. Technicians add photos to each job from their app.'}</div></div>`;
     view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; renderGallery(); }));
     return;
   }
-  const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=0);
-  galleryPhotos.forEach(p=>{ counts[photoCat(p)]++; });
+  // Badge counts are the server's real per-folder totals; they only fall back to
+  // "what's loaded" on the cross-business view, where counts aren't returned.
+  const counts={}; PHOTO_CATS.forEach(c=>counts[c.key]=galleryCounts?(galleryCounts[c.key]||0):((galleryCache[c.key]?.photos.length)||0));
   const logoView=galleryGroup==='logo';
-  const shown=logoView ? (galleryLogoPhotos||[]) : galleryPhotos.filter(p=>photoCat(p)===galleryGroup);
+  const page=galleryCache[galleryGroup];
+  const shown=page?page.photos:[];
+  // galleryPhotos stays the currently-shown list so the move/delete handlers
+  // below keep working unchanged.
+  galleryPhotos=shown;
   const shownIds=new Set(shown.map(p=>String(p.id)));
   // Drop any selected id that scrolled out of the current tab (e.g. it got
   // moved by someone else / a stale selection from before a tab switch).
@@ -4674,20 +4718,24 @@ function drawGallery(){
     ${switcher}
     <div class="gal-tabs">
       ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
-      ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryLogoPhotos?` <span class="gal-count">${galleryLogoPhotos.length}</span>`:''}</button>`}
+      ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryCounts?` <span class="gal-count">${galleryCounts.logo||0}</span>`:''}</button>`}
     </div>
     ${bulkBar}
-    ${logoView&&galleryLogoPhotos===null
-      ? `<div class="empty">Finding logo shots…</div>`
+    ${!page
+      ? `<div class="empty">Loading…</div>`
       : shown.length
         ? `<div class="gallery">${shown.map(card).join('')}</div>`
         : `<div class="empty">${logoView?'No logo shots tagged yet. The scan runs twice a day over new photos.':'No photos in '+esc(photoCatLabel(galleryGroup))+'.'}</div>`}
+    ${page&&page.has_more
+      ? `<div style="text-align:center;margin:16px 0;"><button type="button" id="galMore" ${galleryLoading?'disabled':''}>${galleryLoading?'Loading…':`Load more (${Math.max(((galleryCounts&&galleryCounts[galleryGroup])||0)-shown.length,0)} older)`}</button></div>`
+      : ''}
   </div>`;
   view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; gallerySelected.clear(); renderGallery(); }));
   view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{
     galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery();
-    if(galleryGroup==='logo') loadLogoShots();
+    loadGalleryFolder(galleryGroup);   // no-op if this folder is already cached
   }));
+  document.getElementById('galMore')?.addEventListener('click',()=>loadGalleryFolder(galleryGroup,{append:true}));
   view.querySelectorAll('.gal-item').forEach(fig=>fig.querySelector('img').addEventListener('click',()=>openLightbox(fig.dataset.full)));
   view.querySelectorAll('.gal-check').forEach(chk=>chk.addEventListener('click',e=>{
     e.stopPropagation();
@@ -4702,8 +4750,7 @@ function drawGallery(){
     try{
       await api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:btn.dataset.bid, photo_id:btn.dataset.pid }});
       toast('Photo deleted');
-      galleryPhotos=galleryPhotos.filter(p=>String(p.id)!==String(btn.dataset.pid));
-      gallerySelected.delete(String(btn.dataset.pid));
+      galleryDrop([btn.dataset.pid]);
       drawGallery();
     }catch(err){ btn.disabled=false; toast(err.message||'Could not delete photo'); }
   }));
@@ -4716,7 +4763,11 @@ function drawGallery(){
       await api('booking_photo_set_status',{ method:'POST', body:{ business:galleryBizSlug||current.slug, id:sel.dataset.bid, photo_id:sel.dataset.pid, status:to }});
       if(prev) prev.status=to;
       toast('Moved to '+photoCatLabel(to));
-      drawGallery();   // photo leaves the current tab and appears under the target
+      // In the Logo folder a move is a re-file, not a departure: the photo is
+      // still a logo shot, so it stays put and just shows its new bucket.
+      if(galleryGroup!=='logo'){ galleryMoved([sel.dataset.pid],to); }
+      else { delete galleryCache[to]; }
+      drawGallery();
     }catch(err){ sel.disabled=false; if(prev) prev.status=before; sel.value=photoCat({status:before}); toast(err.message||'Could not move photo'); }
   }));
   // ── Bulk actions (act on every currently-selected photo in this tab) ──────
@@ -4731,7 +4782,9 @@ function drawGallery(){
       api('booking_photo_set_status',{ method:'POST', body:{ business:bizSlug, id:p.booking_id, photo_id:p.id, status:to }})
     ));
     const failed=results.filter(r=>r.status==='rejected').length;
-    targets.forEach((p,i)=>{ if(results[i].status==='fulfilled') p.status=to; });
+    const movedIds=[];
+    targets.forEach((p,i)=>{ if(results[i].status==='fulfilled'){ p.status=to; movedIds.push(p.id); } });
+    if(movedIds.length){ if(galleryGroup!=='logo') galleryMoved(movedIds,to); else delete galleryCache[to]; }
     gallerySelected.clear();
     toast(failed ? `Moved ${targets.length-failed} of ${targets.length} — ${failed} failed` : `Moved ${targets.length} photo${targets.length===1?'':'s'} to ${photoCatLabel(to)}`);
     drawGallery();
@@ -4745,7 +4798,7 @@ function drawGallery(){
       api('booking_photo_delete',{ method:'POST', body:{ business:current.slug, id:p.booking_id, photo_id:p.id }})
     ));
     const failedIds=new Set(targets.filter((p,i)=>results[i].status==='rejected').map(p=>String(p.id)));
-    galleryPhotos=galleryPhotos.filter(p=>!ids.includes(String(p.id))||failedIds.has(String(p.id)));
+    galleryDrop(ids.filter(id=>!failedIds.has(String(id))));
     const failed=failedIds.size;
     gallerySelected.clear();
     toast(failed ? `Deleted ${targets.length-failed} of ${targets.length} — ${failed} failed` : `Deleted ${targets.length} photo${targets.length===1?'':'s'}`);

@@ -5448,17 +5448,33 @@ async function photoGallery(req, res, db, auth) {
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   const offset = Number(req.query.offset) || 0;
   // ?logo=1 narrows to the logo shots (migration 0105) — a finished mount with
-  // the company logo up on the customer's TV. Filtered server-side, unlike the
-  // status tabs which filter in the client, because these are the needle: the
-  // office wants every one ever taken, not just the ones that happen to fall in
-  // the newest 200 photos the gallery preloads.
+  // the company logo up on the customer's TV.
   const logoOnly = req.query.logo === '1' || req.query.logo === 'true';
+
+  // ?status=<bucket> filters the folder SERVER-side.
+  //
+  // This used to be done in the client, over whatever the newest 200 photos
+  // happened to be, which quietly became a bug as the table grew: by Sep 2026
+  // Handy Andy had 148 photos in Posted but only 6 of them fell inside that
+  // 200-row window, so the Posted folder looked nearly empty and older photos
+  // appeared to have vanished. Nothing was ever deleted — they were simply
+  // past the edge of what got loaded. Filtering here means a folder shows its
+  // own newest N regardless of how much sits in the other folders.
+  //
+  // 'new' is the catch-all: legacy 'private' rows and any null fold into the
+  // inbox, matching photoCat() in admin.html.
+  const statusFilter = (req.query.status || '').toString();
   const sel = (withStatus, withLogo) => {
     let q = db.from('booking_photos')
       .select(`id, url, caption, uploader_name, created_at, booking_id${withStatus ? ', status' : ''}${withLogo ? ', logo_shot, logo_note' : ''},
              booking:bookings ( id, scheduled_at, status, customer:customers ( name ), technician:technicians!technician_id ( name ) )`)
       .eq('business_id', biz.id);
     if (withLogo && logoOnly) q = q.is('logo_shot', true);
+    if (withStatus && statusFilter && PHOTO_CATEGORIES.includes(statusFilter)) {
+      q = statusFilter === 'new'
+        ? q.or('status.is.null,status.eq.new,status.eq.private')
+        : q.eq('status', statusFilter);
+    }
     // The cross-business hole above only ever opens the To Post bucket -- New,
     // Posted, Records, and anything private-to-New-Booking stays invisible to
     // her from the other company, enforced here rather than trusted from the
@@ -5495,7 +5511,34 @@ async function photoGallery(req, res, db, auth) {
     scheduled_at: p.booking?.scheduled_at || null,
     status_booking: p.booking?.status || null,
   }));
-  return res.status(200).json({ photos, limit, offset, has_more: photos.length === limit, status_supported: hasStatus, logo_supported: hasLogo });
+  // True per-folder totals. The tab badges used to count only what was loaded,
+  // so they under-reported for exactly the same reason the folders did. These
+  // are head-only counts (no rows fetched) against the existing status index,
+  // so five of them cost far less than the page of photos above.
+  let counts = null;
+  if (hasStatus && !crossBusinessToPostOnly) {
+    const countFor = (apply) => {
+      let q = db.from('booking_photos').select('id', { count: 'exact', head: true }).eq('business_id', biz.id);
+      return apply(q);
+    };
+    try {
+      const [cNew, cToPost, cPosted, cRecords, cLogo] = await Promise.all([
+        countFor(q => q.or('status.is.null,status.eq.new,status.eq.private')),
+        countFor(q => q.eq('status', 'to_post')),
+        countFor(q => q.eq('status', 'posted')),
+        countFor(q => q.eq('status', 'records')),
+        hasLogo ? countFor(q => q.is('logo_shot', true)) : Promise.resolve({ count: 0 }),
+      ]);
+      counts = {
+        new: cNew.count || 0, to_post: cToPost.count || 0, posted: cPosted.count || 0,
+        records: cRecords.count || 0, logo: cLogo.count || 0,
+      };
+    } catch (e) { console.warn('[photo_gallery] counts failed:', e.message); }
+  }
+  return res.status(200).json({
+    photos, limit, offset, has_more: photos.length === limit,
+    status_supported: hasStatus, logo_supported: hasLogo, counts,
+  });
 }
 
 // Move a photo between categories (New / To Post / Posted / Records). No-op-safe:
