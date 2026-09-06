@@ -172,9 +172,22 @@ async function runTool(name, args) {
 // as a dynamic variable ({{business_slug}} in the system prompt) — so the
 // same script, same voice, same tools serve every Houston/Denver/Austin
 // lead-gen line, each still only ever checking its own zip list.
+// If this webhook can't answer for any reason (env unset, unknown payload
+// shape, number missing from tracking_numbers, DB hiccup), Vapi has no
+// assistant to run and the caller gets a dead line. Returning a
+// `destination` instead makes Vapi forward the call straight to a human --
+// a webhook problem degrades to "rang a person" rather than "hung up on a
+// lead". Owner's line is the catch-all because it's the only number that's
+// valid for every brand.
+const SAFE_FALLBACK_DESTINATION = '+13374997817';
+function forwardToHuman(res, reason, number) {
+  console.error('[vapi:assistant-request] falling back to human transfer:', reason);
+  res.status(200).json({ destination: { type: 'number', number: number || SAFE_FALLBACK_DESTINATION, message: '' } });
+}
+
 async function handleAssistantRequest(req, res, message) {
   const assistantId = process.env.VAPI_SHARED_ASSISTANT_ID;
-  if (!assistantId) { res.status(200).json({ error: 'VAPI_SHARED_ASSISTANT_ID not configured' }); return; }
+  if (!assistantId) return forwardToHuman(res, 'VAPI_SHARED_ASSISTANT_ID not configured');
 
   const call = message.call || {};
   const dialedRaw = (call.to && (call.to.phoneNumber || call.to.number))
@@ -183,13 +196,22 @@ async function handleAssistantRequest(req, res, message) {
     || '';
   const dialed = dialedRaw.toString().replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
 
-  if (!dialed) { res.status(200).json({ error: 'could not determine dialed number from assistant-request payload' }); return; }
+  // The dialed-number paths above were written from Vapi's docs, not from a
+  // captured real payload -- log the shape once so the first live call
+  // confirms (or corrects) it. Caller number is the only PII here.
+  console.log('[vapi:assistant-request] dialed=', dialed || '(none)', 'keys=', Object.keys(message).join(','), 'call.keys=', Object.keys(call).join(','));
 
-  const db = serviceClient();
-  const { data: line } = await db.from('tracking_numbers').select('business_slug, forward_to, after_hours_forward_to').eq('phone', dialed).maybeSingle();
-  if (!line) { res.status(200).json({ error: `no tracking_numbers row for ${dialed}` }); return; }
+  if (!dialed) return forwardToHuman(res, 'could not determine dialed number from payload');
 
-  const { data: biz } = await db.from('businesses').select('name').eq('slug', line.business_slug).maybeSingle();
+  let line = null, biz = null;
+  try {
+    const db = serviceClient();
+    ({ data: line } = await db.from('tracking_numbers').select('business_slug, forward_to, after_hours_forward_to').eq('phone', dialed).maybeSingle());
+    if (!line) return forwardToHuman(res, `no tracking_numbers row for ${dialed}`);
+    ({ data: biz } = await db.from('businesses').select('name').eq('slug', line.business_slug).maybeSingle());
+  } catch (e) {
+    return forwardToHuman(res, `db error: ${e.message}`, line && (line.forward_to || line.after_hours_forward_to));
+  }
 
   res.status(200).json({
     assistantId,
