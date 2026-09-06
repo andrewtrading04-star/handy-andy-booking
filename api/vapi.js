@@ -186,15 +186,34 @@ async function handleAssistantRequest(req, res, message) {
   if (!dialed) { res.status(200).json({ error: 'could not determine dialed number from assistant-request payload' }); return; }
 
   const db = serviceClient();
-  const { data: line } = await db.from('tracking_numbers').select('business_slug').eq('phone', dialed).maybeSingle();
+  const { data: line } = await db.from('tracking_numbers').select('business_slug, forward_to, after_hours_forward_to').eq('phone', dialed).maybeSingle();
   if (!line) { res.status(200).json({ error: `no tracking_numbers row for ${dialed}` }); return; }
 
   const { data: biz } = await db.from('businesses').select('name').eq('slug', line.business_slug).maybeSingle();
 
   res.status(200).json({
     assistantId,
-    assistantOverrides: { variableValues: { business_slug: line.business_slug, business_name: (biz && biz.name) || line.business_slug } },
+    assistantOverrides: { variableValues: {
+      business_slug: line.business_slug,
+      business_name: (biz && biz.name) || line.business_slug,
+      dispatch_target: dispatchTargetFor(line.forward_to || line.after_hours_forward_to),
+    } },
   });
+}
+
+// Every lead-gen number rings one of three real people, but the shared
+// assistant only has one hardcoded destination per Transfer Call tool (Vapi
+// tools don't support a templated phone number) -- so the model is told
+// WHICH tool to call via this dynamic variable instead. Falls back to
+// after_hours_forward_to when forward_to is unset (the LA line has no
+// daytime forward configured at all, only an after-hours one).
+const DISPATCH_TARGET_BY_NUMBER = {
+  '+13032190118': 'joey',
+  '+17203711561': 'heather',
+  '+13374997817': 'owner',
+};
+function dispatchTargetFor(e164) {
+  return DISPATCH_TARGET_BY_NUMBER[e164] || 'joey';
 }
 
 export default async function handler(req, res) {
