@@ -13060,7 +13060,12 @@ function cwJobSummary(){
     });
   };
   each('bracket',(o,ct)=>{
-    if(/own/i.test(o.label)) return `${ct} customer-supplied bracket${ct===1?'':'s'}`;
+    // A bracket the customer already owns costs nothing and changes nothing
+    // about the job, so it has no place in a sentence whose whole point is
+    // justifying a price — "1 customer-supplied bracket" just confused the
+    // total. Brackets we're actually selling still get read back below since
+    // those are what the quoted number is paying for.
+    if(/own/i.test(o.label)) return null;
     // "Tilting (recommended)" / "85"-100" TV Tilting Bracket" -> "tilting"
     const kind=o.label.replace(/\(.*?\)/g,'').replace(/bracket/ig,'')
       .replace(/\d+["”]?\s*-\s*\d+["”]?/g,'').replace(/\bTV\b/ig,'').trim().toLowerCase();
