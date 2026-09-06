@@ -6797,6 +6797,7 @@ const GMB_LISTINGS = {
     houston: ['https://g.page/r/CdizxHwpwcE0EBM/review', 'https://g.page/r/CeA7fWzbLgO8EBM/review'],
     denver:  ['https://g.page/r/Ccj-ZjdeLtzfEBM/review', 'https://g.page/r/CWcIi45TvszbEBM/review'],
     austin:  ['https://g.page/r/CYE7aX6tVMnkEBM/review'],
+    'los-angeles': ['https://g.page/r/CfCMbSKempPwEBM/review'],
   },
   'doms': {
     _all: ['https://g.page/r/Cffr7Tp2DSNOEBM/review'],
@@ -6835,6 +6836,7 @@ function resolveGoogleReviewUrl({ slug, techName, areaName, bookingId }) {
     if (a.includes('houston')) metro = 'houston';
     else if (a.includes('denver')) metro = 'denver';
     else if (a.includes('austin')) metro = 'austin';
+    else if (a.includes('los angeles')) metro = 'los-angeles';
   }
   // 3) default
   if (!metro) metro = HA_DEFAULT_METRO;
