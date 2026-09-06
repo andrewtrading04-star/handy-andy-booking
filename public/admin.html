@@ -12687,6 +12687,12 @@ function callWizReset(){
     // instead of showing all three levers at once, so it needs to remember
     // which rung it is on and which it has already visited. `step` stays
     // 'discount' for every rung, so the funnel in api/admin.js is untouched.
+    // Extras starts collapsed behind a Yes/No ("Is there anything else you would
+    // like added?") rather than dumping the whole add-on list on every call —
+    // most calls add nothing here, and reading through Apple TV/Soundbar/LED
+    // Lights/etc. every time trained secretaries to rush past a card most
+    // customers say no to. null=unanswered, 'no'=collapsed, 'yes'=expanded.
+    extrasGate:null,
     discRung:'source', discSeen:['source'], discCallId:null,
     discEntry:{}, discSpoken:null,
     // Uncommitted text carried across repaints, and the in-flight guard for the
@@ -13874,6 +13880,13 @@ async function renderCallWiz(){
       optsHtml=nbGroupOptsHtml(card.g, false)+
         `<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${gCount} TV${gCount===1?'':'s'} on this job</div>`;
       if(gCount===0) blocked='Add at least one TV to continue.';
+    } else if(card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0){
+      // Collapsed gate: most calls add nothing here, so ask Yes/No first and
+      // only reveal the full add-on list (and the Frame/Gallery question that
+      // rides along with it) once the answer is Yes. A photo/item already on
+      // the job (gCount>0 — e.g. the secretary backed up after adding one)
+      // skips the gate above and goes straight to the expanded list.
+      optsHtml=callWizChoiceRow([{value:'yes',label:'Yes'},{value:'no',label:'No'}]);
     } else {
       const g=card.g;
       const tvBound=NB_TV_BOUND.has(g.key);
@@ -13893,13 +13906,17 @@ async function renderCallWiz(){
         blocked=`Pick one for each TV (${gCount} of ${capN}).`;
       }
     }
+    // The gate replaces Back/Continue with its own Yes/No — neither answer
+    // needs a second tap to confirm, and Continue would be meaningless before
+    // the question is even answered.
+    const isExtrasGate = card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0;
     const stepNo=callWiz.optStep+1;
     body.innerHTML=`${callWizScript(callWizGroupScript(card))}
       ${optsHtml}
       ${blocked?`<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${esc(blocked)}</div>`:''}
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button type="button" class="btn ghost" id="cwOptBack" style="width:auto;">Back</button>
-        <button type="button" class="btn" id="cwOptNext" style="flex:1;" ${blocked?'disabled':''}>Continue</button>
+        ${isExtrasGate?'':`<button type="button" class="btn" id="cwOptNext" style="flex:1;" ${blocked?'disabled':''}>Continue</button>`}
       </div>
       <div style="margin-top:8px;font-size:11.5px;color:var(--mute);text-align:center;">Question ${stepNo} of ${cards.length}</div>`;
     document.getElementById('cwOptBack').addEventListener('click', ()=>{
@@ -13909,16 +13926,30 @@ async function renderCallWiz(){
       else callWiz.step='zip';
       renderCallWiz();
     });
-    document.getElementById('cwOptNext').addEventListener('click', ()=>{
-      cwTrack('question_answered',{
-        question: card.kind==='frame' ? 'frame' : card.g.key,
-        tv_count: nbTotalTvs(),
-        n: card.kind==='frame' ? nbFrameTvQty.frame : nbGroupCount(card.g.id),
+    if(isExtrasGate){
+      body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
+        const yes=b.dataset.cwchoice==='yes';
+        callWiz.extrasGate=yes?'yes':'no';
+        if(yes){ renderCallWiz(); return; }   // reveals the add-on list, same card
+        // "No" needs nothing further picked, so it advances immediately —
+        // exactly what tapping Continue with zero items chosen would have done.
+        cwTrack('question_answered',{ question:'extras', tv_count:nbTotalTvs(), n:0 });
+        callWiz.optStep++;
+        if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
+        renderCallWiz();
+      }));
+    } else {
+      document.getElementById('cwOptNext').addEventListener('click', ()=>{
+        cwTrack('question_answered',{
+          question: card.kind==='frame' ? 'frame' : card.g.key,
+          tv_count: nbTotalTvs(),
+          n: card.kind==='frame' ? nbFrameTvQty.frame : nbGroupCount(card.g.id),
+        });
+        callWiz.optStep++;
+        if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
+        renderCallWiz();
       });
-      callWiz.optStep++;
-      if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
-      renderCallWiz();
-    });
+    }
     return;
   }
   if(s==='handydesc'){
