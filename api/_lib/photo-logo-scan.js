@@ -5,9 +5,12 @@
 // scrolling the whole Photos tab.
 //
 // Runs from a cron (api/migrate.js?action=photo_logo_scan, twice a day) over
-// booking_photos rows that have never been scanned. Every photo is looked at
-// exactly once and the verdict is stored — logo_shot true/false plus a one-line
-// reason — so the gallery filter is a plain indexed query, not a live API call.
+// booking_photos rows that have never been scanned, limited to status='posted'
+// — the curated set the office actually pulls logo shots from, not the much
+// larger 'records' bucket of raw job photos nobody is going to post. Every
+// photo is looked at exactly once and the verdict is stored — logo_shot
+// true/false plus a one-line reason — so the gallery filter is a plain
+// indexed query, not a live API call.
 //
 // Deliberately Haiku with a tiny max_tokens: this is a yes/no question about a
 // very distinctive object (a bright multi-colored splash logo lighting up an
@@ -128,11 +131,13 @@ async function scanOne(db, photo) {
   return { id: photo.id, logo_shot: hit, note };
 }
 
-// Pulls the oldest unscanned photos and works through them CONCURRENCY at a
-// time. Oldest-first so a backfill drains predictably and a stuck photo can't
-// starve the queue behind it (a failure leaves it unscanned, so it is retried
-// on the next run — acceptable, since the same photo failing forever is a
-// broken URL, which the office would want to know about anyway).
+// Pulls the newest unscanned photos and works through them CONCURRENCY at a
+// time. Newest-first so this week's jobs — the ones the office actually wants
+// to post — get tagged within hours instead of waiting behind a months-deep
+// historical backfill; the backfill still drains, just last. A stuck photo
+// can't starve the queue behind it (a failure leaves it unscanned, so it is
+// retried on the next run — acceptable, since the same photo failing forever
+// is a broken URL, which the office would want to know about anyway).
 export async function scanLogoPhotos({ limit, dryRun } = {}) {
   if (!process.env.ANTHROPIC_API_KEY) return { skipped: 'ANTHROPIC_API_KEY not set', scanned: 0, hits: 0 };
 
@@ -142,13 +147,14 @@ export async function scanLogoPhotos({ limit, dryRun } = {}) {
   const { data, error } = await db.from('booking_photos')
     .select('id, url, created_at')
     .is('logo_scanned_at', null)
-    .order('created_at', { ascending: true })
+    .eq('status', 'posted')
+    .order('created_at', { ascending: false })
     .limit(n);
   if (error) throw error;
 
   const queue = data || [];
   const { count: remaining } = await db.from('booking_photos')
-    .select('id', { count: 'exact', head: true }).is('logo_scanned_at', null);
+    .select('id', { count: 'exact', head: true }).is('logo_scanned_at', null).eq('status', 'posted');
 
   if (dryRun) return { dry_run: true, would_scan: queue.length, unscanned_total: remaining ?? null };
   if (!queue.length) return { scanned: 0, hits: 0, unscanned_total: 0 };
