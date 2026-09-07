@@ -440,7 +440,7 @@ export default async function handler(req, res) {
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
       case 'avg_ticket':        return await avgTicketRange(req, res, db, auth);
       case 'gsc_queries':       return await gscQueries(req, res, db, auth);
-      case 'dfw_pages_analytics': return await dfwPagesAnalytics(req, res, auth);
+      case 'city_pages_analytics': return await cityPagesAnalytics(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
@@ -562,7 +562,11 @@ async function login(req, res, body) {
   // The switcher is driven entirely by this list, so a secretary with extra
   // brands gets them here (they land in its "Lead Gen" dropdown automatically).
   const loginExtra = scope === 'all' ? [] : (SECRETARY_EXTRA_BUSINESSES[scope] || []);
-  let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
+  // analytics_config (migration 0106) rides along here so the client-side
+  // Analytics screens (website-traffic backend, Cities tab) never need their
+  // own hardcoded per-business map — one place fills it in, this is the one
+  // place it reaches the browser.
+  let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange, analytics_config').eq('active', true).order('name');
   if (scope !== 'all') q = q.in('slug', [scope, ...loginExtra]);
   const { data: businesses, error } = await q;
   if (error) throw error;
@@ -648,7 +652,9 @@ async function sessionStatus(req, res) {
   if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
 
   const db = serviceClient();
-  let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
+  // See the matching comment in login() — analytics_config travels with the
+  // business list so long-lived sessions get it too, not just a fresh login.
+  let q = db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange, analytics_config').eq('active', true).order('name');
   const sessionAllowed = allowedSlugsFor(auth);
   if (sessionAllowed) q = q.in('slug', sessionAllowed);
   const { data: businesses, error } = await q;
@@ -5591,7 +5597,7 @@ async function analyticsOverview(req, res, db, auth) {
     const pub = serviceClientPublic();
     // widget + created_at only — this table can run to tens of thousands of
     // rows in 30 days, and neither the count nor the max() needs anything
-    // else. Paginated the same way dfwPagesAnalytics/analytics.js already do,
+    // else. Paginated the same way cityPagesAnalytics/analytics.js already do,
     // since Supabase caps a single response at 1000 rows.
     for (let page = 0; page < 100; page++) {
       const { data, error } = await pub.from('events').select('widget, created_at')
@@ -8547,36 +8553,47 @@ async function gscQueries(req, res, db, auth) {
   }
 }
 
-// ── DFW location-page monitoring ────────────────────────────────────────────
-// The 6 new Dallas/Arlington/Fort Worth landing pages the owner wants watched
-// closely. Reads directly from public.web_events (the same table the external
-// website-analytics backend itself reads — see WEB_ANA_ORIGIN in admin.html)
-// rather than adding a 7th endpoint over there, since these pages need per-path
-// filtering the existing site-wide endpoints don't offer.
-const DFW_LOCATION_PAGES = [
-  '/frametvmounting-dallas', '/frametvmounting-arlington', '/frametvmounting-fortworth',
-  '/tvmounting-dallas', '/tvmounting-arlington', '/tvmounting-fortworth',
-];
-// A visit to a DFW page from outside US timezones is unusual enough to flag —
+// ── City landing-page monitoring ────────────────────────────────────────────
+// Started as 6 hardcoded Dallas/Arlington/Fort Worth paths the owner wanted
+// watched closely; generalized (migration 0106) to any business's own set of
+// city landing pages, read from analytics_config.city_pages instead of a
+// literal array — today that's only Handy Andy (9 pages: Denver, Austin x2,
+// and the original DFW six), because it's the one business whose own site
+// covers multiple metros from one domain; every other business here already
+// IS a single city, so this tab simply doesn't apply to them. Reads directly
+// from public.web_events (the same table the external website-analytics
+// backend itself reads — see webBackend() in admin.html) rather than adding
+// another endpoint over there, since this needs per-path filtering the
+// site-wide endpoints don't offer.
+//
+// A visit to a city page from outside US timezones is unusual enough to flag —
 // not proof of a bot, but worth a second look. Kept intentionally short (just
 // the zones real US visitors would plausibly show) rather than an exhaustive
 // exclude-list, so anything odd defaults to "flagged", not "trusted".
 const US_TIMEZONES = new Set(['America/Chicago', 'America/New_York', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Anchorage', 'Pacific/Honolulu']);
 
-function dfwPagePath(url) {
+function cityPagePath(url) {
   try { return new URL(url).pathname.replace(/\/$/, '') || '/'; } catch { return (url || '').split('?')[0]; }
 }
 
-async function dfwPagesAnalytics(req, res, auth) {
+async function cityPagesAnalytics(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data: bizCfg } = await db.from('businesses').select('url, analytics_config').eq('id', biz.id).maybeSingle();
+  const cityPages = (bizCfg && bizCfg.analytics_config && bizCfg.analytics_config.city_pages) || [];
+  if (!cityPages.length) {
+    return res.status(200).json({ pages: [], sessions: [], totalSessions: 0, flaggedSessions: 0, error: `No city pages configured for ${biz.slug}` });
+  }
+  const ownHost = (() => { try { return new URL(bizCfg.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+
   const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const db = serviceClientPublic();
+  const pub = serviceClientPublic();
   // Pulled unfiltered-by-path and filtered in JS below (small volume — these
   // pages are brand new) so session-level math (dwell time, bounce, referrer
   // chains) can be computed once from one dataset instead of N round trips.
-  const { data, error } = await db.from('web_events')
+  const { data, error } = await pub.from('web_events')
     .select('event_type, page_url, session_id, referrer, metadata, created_at')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
@@ -8584,19 +8601,19 @@ async function dfwPagesAnalytics(req, res, auth) {
   if (error) throw error;
 
   const rows = (data || [])
-    .map(r => ({ ...r, path: dfwPagePath(r.page_url) }))
-    .filter(r => DFW_LOCATION_PAGES.includes(r.path));
+    .map(r => ({ ...r, path: cityPagePath(r.page_url) }))
+    .filter(r => cityPages.includes(r.path));
 
   // Per-page rollup.
   const perPage = {};
-  for (const p of DFW_LOCATION_PAGES) perPage[p] = { path: p, views: 0, sessions: new Set(), clicks: 0, dwellBySession: {}, scrollBySession: {}, devices: {}, referrers: {} };
+  for (const p of cityPages) perPage[p] = { path: p, views: 0, sessions: new Set(), clicks: 0, dwellBySession: {}, scrollBySession: {}, devices: {}, referrers: {} };
   for (const r of rows) {
     const bucket = perPage[r.path];
     if (r.event_type === 'page_view') {
       bucket.views++;
       bucket.sessions.add(r.session_id);
       const ref = (r.referrer || '').trim();
-      const refKey = !ref ? '(direct)' : (dfwPagePath(ref).startsWith('/') && ref.includes('ihandyandy.com')) ? `internal: ${dfwPagePath(ref)}` : (() => { try { return new URL(ref).hostname.replace(/^www\./, ''); } catch { return ref.slice(0, 60); } })();
+      const refKey = !ref ? '(direct)' : (cityPagePath(ref).startsWith('/') && ownHost && ref.includes(ownHost)) ? `internal: ${cityPagePath(ref)}` : (() => { try { return new URL(ref).hostname.replace(/^www\./, ''); } catch { return ref.slice(0, 60); } })();
       bucket.referrers[refKey] = (bucket.referrers[refKey] || 0) + 1;
       const dev = (r.metadata && r.metadata.device) || 'unknown';
       bucket.devices[dev] = (bucket.devices[dev] || 0) + 1;
@@ -8619,7 +8636,7 @@ async function dfwPagesAnalytics(req, res, auth) {
   }
   const avg = (obj) => { const v = Object.values(obj); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0; };
   const topEntries = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ label: k, count: v }));
-  const pages = DFW_LOCATION_PAGES.map(p => {
+  const pages = cityPages.map(p => {
     const b = perPage[p];
     return {
       path: p,
