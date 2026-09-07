@@ -1,7 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
 import { sendSMS } from './_lib/sms.js';
-import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 import crypto from 'crypto';
 
 // Delivery-status webhooks (Twilio + Resend) live in THIS file rather than a
@@ -1522,7 +1521,20 @@ export default async function handler(req, res) {
     const supabase = serviceClientPublic();
 
     const WIDGET = (req.query.widget || 'handy-andy').toString();
-    if (![...ALL_BUSINESS_SLUGS, 'handy-andy-handyman', 'doms-handyman'].includes(WIDGET)) {
+    // Recognizes a widget tag if it's a business's configured funnel_backend
+    // (app.businesses.analytics_config, migration 0106). DB-driven so a new
+    // business is wired up by adding one row of config, not a code deploy —
+    // this is the check that 400'd every "TV Mounting Los Angeles" request
+    // before analytics_config existed, because LA had never been added to
+    // the old hardcoded ALL_BUSINESS_SLUGS list. The two handyman-estimate
+    // widgets are fixed literal tags, independent of their business's own
+    // funnel_backend (doms's is renamed to 'doms-tv', but 'doms-handyman'
+    // is not) — kept as an explicit exception rather than derived from it.
+    const validWidget = WIDGET === 'handy-andy-handyman' || WIDGET === 'doms-handyman'
+      ? true
+      : !!(await serviceClient().from('businesses')
+          .select('id').eq('active', true).eq('analytics_config->>funnel_backend', WIDGET).maybeSingle()).data;
+    if (!validWidget) {
       return res.status(400).json({ error: 'Invalid widget' });
     }
     // Pick the funnel for this widget (booking vs handyman estimate).

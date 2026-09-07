@@ -1,5 +1,4 @@
-import { serviceClientPublic } from './_lib/supabase.js';
-import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
+import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,15 +9,39 @@ export default async function handler(req, res) {
 
   const { session_id, event_type, step_name, value, device_type, traffic_source, city, state, zip_code, error_message, customer_name, widget } = req.body;
 
-  // Which widget produced this event. The TV-mounting booking widget doesn't send
-  // one (legacy) → default 'handy-andy'. The handyman estimate widget sends
-  // '<slug>-handyman'. Allowlisted so the column can't be polluted with junk.
-  const WIDGETS = [...ALL_BUSINESS_SLUGS, 'handy-andy-handyman', 'doms-handyman'];
-  const widgetTag = WIDGETS.includes(widget) ? widget : 'handy-andy';
-
   try {
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return res.status(500).json({ error: 'Missing Supabase credentials' });
+    }
+
+    // Which widget produced this event, validated against app.businesses.
+    // analytics_config (migration 0106) rather than a hardcoded slug list —
+    // a business is trackable the moment its config row exists, no deploy.
+    // The handyman-estimate widget for HA/Doms is a fixed literal tag,
+    // independent of its business's own funnel_backend (Doms's booking
+    // widget is renamed 'doms-tv'; 'doms-handyman' is not).
+    //
+    // No `widget` field at all is the true LEGACY case — the original
+    // TV-mounting booking widget predates this field entirely, so its
+    // absence really does mean Handy Andy, same as always.
+    //
+    // An explicit widget value that matches nothing used to fall back
+    // silently to 'handy-andy' too — which meant a business that was never
+    // wired up (found 2026-09-07: the LA trio) had its real traffic quietly
+    // counted as Handy Andy's, with nothing anywhere to reveal it was
+    // happening. That case now lands in a visibly-separate 'unrecognized'
+    // bucket instead: still captured, never misattributed to a business
+    // that didn't earn it.
+    const db = serviceClient();
+    let widgetTag;
+    if (!widget) {
+      widgetTag = 'handy-andy';
+    } else if (widget === 'handy-andy-handyman' || widget === 'doms-handyman') {
+      widgetTag = widget;
+    } else {
+      const { data } = await db.from('businesses')
+        .select('id').eq('active', true).eq('analytics_config->>funnel_backend', widget).maybeSingle();
+      widgetTag = data ? widget : 'unrecognized';
     }
 
     // Service-role (public schema) so the analytics `events` table can have RLS

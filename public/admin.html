@@ -4917,6 +4917,94 @@ function anaUrl(mode){
   return anaBase()+'?'+anaWParam()+'days='+mode;
 }
 
+// ── Analytics: portfolio overview ────────────────────────────────────────────
+// One health check across every business's booking-funnel tracking, backed by
+// api/admin.js's analyticsOverview() (migration 0106's analytics_config).
+// Landing tab for the Analytics hub — "is every site actually reporting" is
+// worth seeing before drilling into any one business's own funnel. Built
+// after "TV Mounting Los Angeles" 400'd on its Website tab and turned out to
+// have never been wired into analytics at all; this is what would have shown
+// that on its own, without someone happening to click into that one business.
+let anaOverviewData=null, anaOverviewFilter=null;
+async function renderAnalyticsOverview(){
+  const view=document.getElementById('view');
+  view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
+  try{
+    const d=await api('analytics_overview');
+    anaOverviewData=d.businesses||[];
+  }catch(e){
+    view.innerHTML=`<div class="ana"><div class="card err" style="padding:18px;">${esc(e.message||'Could not load the analytics overview')}</div></div>`;
+    return;
+  }
+  drawAnaOverview();
+}
+// green = seen a visitor in the last 2 days; amber = gone quiet (2-14 days);
+// red = 14+ days or literally never; gray = no funnel tag configured at all
+// (should not happen once analytics_config is filled in, but shown honestly
+// rather than silently sorted in with "reporting").
+function anaOverviewStatus(b){
+  if(!b.tracked) return 'gray';
+  if(!b.last_event) return 'red';
+  const days=(Date.now()-new Date(b.last_event).getTime())/86400000;
+  if(days>14) return 'red';
+  if(days>2) return 'amber';
+  return 'green';
+}
+function anaOverviewAgo(iso){
+  if(!iso) return 'No data recorded';
+  const days=(Date.now()-new Date(iso).getTime())/86400000;
+  return (days<1 ? Math.max(1,Math.round(days*24))+'h' : Math.round(days)+'d')+' ago';
+}
+const ANA_OVERVIEW_LABEL={green:'Reporting',amber:'Quiet',red:'No data',gray:'Not tracked'};
+function drawAnaOverview(){
+  const view=document.getElementById('view');
+  const counts={green:0,amber:0,red:0,gray:0};
+  anaOverviewData.forEach(b=>counts[anaOverviewStatus(b)]++);
+  const order={red:0,amber:1,gray:2,green:3};
+  let rows=[...anaOverviewData].sort((a,b)=>order[anaOverviewStatus(a)]-order[anaOverviewStatus(b)] || b.events_30d-a.events_30d);
+  if(anaOverviewFilter) rows=rows.filter(b=>anaOverviewStatus(b)===anaOverviewFilter);
+  const tile=(key,label,val,cls)=>`<div class="card kpi" data-anafilter="${key}" style="cursor:pointer;${anaOverviewFilter===key?'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);':''}">
+    <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
+  view.innerHTML=`<div class="ana">
+    <div class="ana-head"><div><h1>Analytics</h1>
+      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · sorted by what needs attention first</div></div></div>
+    <div class="grid kpis" style="grid-template-columns:repeat(4,1fr);">
+      ${tile('','All businesses',anaOverviewData.length)}
+      ${tile('green','Reporting normally',counts.green,'good')}
+      ${tile('amber','Gone quiet',counts.amber)}
+      ${tile('red','No data',counts.red,'bad')}
+    </div>
+    <div class="section card" style="padding:0;overflow:hidden;">
+      <table>
+        <thead><tr><th>Business</th><th>Status</th><th class="num">Events, 30d</th><th>Last seen</th></tr></thead>
+        <tbody>
+          ${rows.map(b=>{
+            const s=anaOverviewStatus(b);
+            return `<tr class="ana-ov-row" data-slug="${esc(b.slug)}" style="cursor:pointer;">
+              <td><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}</div>
+                <div class="sub" style="font-size:11.5px;">${esc(b.url||'')}</div></td>
+              <td><span class="pill ${s}">${ANA_OVERVIEW_LABEL[s]}</span></td>
+              <td class="num">${b.events_30d.toLocaleString()}</td>
+              <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+  view.querySelectorAll('[data-anafilter]').forEach(el=>el.addEventListener('click',()=>{
+    anaOverviewFilter=el.dataset.anafilter||null; drawAnaOverview();
+  }));
+  // Clicking a business jumps straight to its own Bookings funnel -- the
+  // Overview answers "is anyone watching this site", the drill-down answers
+  // "what are they doing on it".
+  view.querySelectorAll('.ana-ov-row').forEach(el=>el.addEventListener('click',()=>{
+    const slug=el.dataset.slug;
+    if(slug && current && slug!==current.slug) switchToBusiness(slug);
+    analyticsHubTab='bookings'; renderAnalyticsHub();
+  }));
+}
+
 // Handyman Analytics reuses the entire booking-analytics view, just scoped to the
 // "<slug>-handyman" widget (the estimate.html funnel). Owner-only (gated in nav).
 async function renderHandymanAnalytics(){ return renderAnalytics('handyman'); }
@@ -8157,6 +8245,7 @@ const CALL_TABS=[
 // for them -- hidden rather than shown-but-empty.
 const HANDYMAN_SLUGS = new Set(['handy-andy', 'doms', 'austin']);
 const ANALYTICS_TABS=[
+  { id:'overview', label:'Overview', screen:'analyticsoverview', show:()=>role==='owner', render:()=>renderAnalyticsOverview() },
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
@@ -8164,7 +8253,10 @@ const ANALYTICS_TABS=[
 // callHubTab starts null and resolves on first render: the owner lands on
 // the Log (the by-number call view they asked for), while secretaries land
 // on Review Calls -- their queue, the thing they open this tab to work.
-let callHubTab=null, analyticsHubTab='bookings';
+// Analytics defaults to Overview -- "is every site actually reporting data" is
+// the first thing worth seeing, before drilling into any one business's own
+// funnel (see analyticsOverview() in api/admin.js, migration 0106).
+let callHubTab=null, analyticsHubTab='overview';
 // `section` is now the hub, so a bare section==='calls' silently stops matching
 // and anything hanging off it (auto-refresh polls, "am I looking at this list
 // right now" checks) quietly dies. onScreen() asks the question that is actually

@@ -404,6 +404,7 @@ export default async function handler(req, res) {
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
+      case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'customer_detail':   return await customerDetail(req, res, db, auth);
@@ -5558,6 +5559,74 @@ async function photoGallery(req, res, db, auth) {
 
 // Run the logo-shot vision scan on demand, from the Photos tab, instead of
 // waiting for the twice-a-day cron to work through the backlog 40 at a time.
+// ── Analytics: portfolio overview (migration 0106) ──────────────────────────
+// One health check across every business's booking-funnel tracking: is it
+// even wired up, and when did it last actually see a visitor. Built after
+// "TV Mounting Los Angeles" turned out to 400 on its own analytics tab — LA
+// wasn't alone in being silently unmonitored, it was just the one someone
+// happened to click into. Owner-only: this is portfolio-wide traffic data,
+// not any one business's own numbers.
+//
+// Reads app.businesses.analytics_config for the `widget` tag each business's
+// events are stored under (see migration 0106 — this is what replaces the 5
+// hand-maintained slug lists the old code kept in analytics.js, log-event.js
+// and admin.html), then does ONE grouped query over the last 30 days of
+// public.events rather than one round trip per business.
+async function analyticsOverview(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  const { data: rows, error: bizErr } = await db.from('businesses')
+    .select('id, slug, name, url, analytics_config').eq('active', true).order('name');
+  if (bizErr) throw bizErr;
+
+  const tagToBiz = new Map();
+  for (const b of rows || []) {
+    const tag = b.analytics_config && b.analytics_config.funnel_backend;
+    if (tag) tagToBiz.set(tag, b);
+  }
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const stats = new Map(); // tag -> { n30, lastSeen }
+  if (tagToBiz.size) {
+    const pub = serviceClientPublic();
+    // widget + created_at only — this table can run to tens of thousands of
+    // rows in 30 days, and neither the count nor the max() needs anything
+    // else. Paginated the same way dfwPagesAnalytics/analytics.js already do,
+    // since Supabase caps a single response at 1000 rows.
+    for (let page = 0; page < 100; page++) {
+      const { data, error } = await pub.from('events').select('widget, created_at')
+        .in('widget', [...tagToBiz.keys()])
+        .gte('created_at', since)
+        .range(page * 1000, page * 1000 + 999);
+      if (error) throw error;
+      for (const r of data || []) {
+        const s = stats.get(r.widget) || { n30: 0, lastSeen: null };
+        s.n30++;
+        if (!s.lastSeen || r.created_at > s.lastSeen) s.lastSeen = r.created_at;
+        stats.set(r.widget, s);
+      }
+      if (!data || data.length < 1000) break;
+    }
+  }
+
+  const businesses = (rows || []).map(b => {
+    const cfg = b.analytics_config || null;
+    const tag = cfg && cfg.funnel_backend;
+    const s = tag ? stats.get(tag) : null;
+    return {
+      slug: b.slug, name: b.name, url: b.url,
+      tracked: !!tag,
+      national: !!(cfg && Array.isArray(cfg.city_pages) && cfg.city_pages.length),
+      has_traffic_backend: !!(cfg && cfg.traffic_backend),
+      has_gsc: !!(cfg && cfg.gsc_domain),
+      events_30d: s ? s.n30 : 0,
+      last_event: s ? s.lastSeen : null,
+    };
+  });
+
+  return res.status(200).json({ businesses, since });
+}
+
 // Owner-only: it spends money on API calls, and it is the owner's tagging
 // decision to re-run, not the office's. Same underlying pass as the cron, so
 // it stays idempotent — an already-scanned photo is never looked at twice.
@@ -8431,7 +8500,11 @@ async function avgTicketRange(req, res, db, auth) {
 //   - dimensions=['query','page'] -> which landing page each query lands on
 async function gscQueries(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const domain = GSC_DOMAIN_BY_SLUG[biz.slug];
+  // gsc_domain (app.businesses.analytics_config, migration 0106) is the source
+  // of truth now; GSC_DOMAIN_BY_SLUG stays only as a fallback for a business
+  // whose config row predates the migration having run against it.
+  const { data: bizCfg } = await db.from('businesses').select('analytics_config').eq('slug', biz.slug).maybeSingle();
+  const domain = (bizCfg && bizCfg.analytics_config && bizCfg.analytics_config.gsc_domain) || GSC_DOMAIN_BY_SLUG[biz.slug];
   if (!domain) return res.status(200).json({ rows: [], strikingDistance: [], queryPages: [], brandSplit: null, error: `No Search Console domain configured for ${biz.slug}` });
   const days = Math.max(1, Math.min(Number(req.query.days) || 28, 480));
   // Search Console data lags ~2-3 days behind real time, so end a few days
