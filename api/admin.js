@@ -5601,14 +5601,23 @@ async function analyticsOverview(req, res, db, auth) {
     // Paginated the same way cityPagesAnalytics/analytics.js already do,
     // since Supabase caps a single response at 1000 rows.
     for (let page = 0; page < 100; page++) {
-      const { data, error } = await pub.from('events').select('widget, created_at, session_id')
+      const { data, error } = await pub.from('events').select('widget, created_at, session_id, event_type')
         .in('widget', [...tagToBiz.keys()])
         .gte('created_at', since)
         .range(page * 1000, page * 1000 + 999);
       if (error) throw error;
       for (const r of data || []) {
         let s = stats.get(r.widget);
-        if (!s) { s = { n30: 0, lastSeen: null, visitors: new Set(), byDay: new Map() }; stats.set(r.widget, s); }
+        if (!s) {
+          s = {
+            n30: 0, lastSeen: null, visitors: new Set(), byDay: new Map(),
+            // The booking page is the money step, so it gets its own counters:
+            // who reached the widget, and who actually came out the far end.
+            bookVisitors: new Set(), bookByDay: new Map(),
+            bookings: 0, bookingsByDay: new Map(),
+          };
+          stats.set(r.widget, s);
+        }
         s.n30++;
         if (!s.lastSeen || r.created_at > s.lastSeen) s.lastSeen = r.created_at;
         // Same visitor rule the per-business funnel already uses (see
@@ -5627,6 +5636,22 @@ async function analyticsOverview(req, res, db, auth) {
         let ds = s.byDay.get(day);
         if (!ds) { ds = new Set(); s.byDay.set(day, ds); }
         ds.add(visitor);
+
+        // ── Booking page ────────────────────────────────────────────────────
+        // The widget emits exactly one page_view ('zip_verify') from boot(),
+        // so a page_view row IS "this person opened the booking widget" — the
+        // /book arrival, deduped to people rather than counting reloads.
+        if (r.event_type === 'page_view') {
+          s.bookVisitors.add(visitor);
+          let bd = s.bookByDay.get(day);
+          if (!bd) { bd = new Set(); s.bookByDay.set(day, bd); }
+          bd.add(visitor);
+        } else if (r.event_type === 'booking_confirmed') {
+          // Counted as events, not people: two genuine bookings from one
+          // household is two jobs, and collapsing them would understate revenue.
+          s.bookings++;
+          s.bookingsByDay.set(day, (s.bookingsByDay.get(day) || 0) + 1);
+        }
       }
       if (!data || data.length < 1000) break;
     }
@@ -5654,11 +5679,30 @@ async function analyticsOverview(req, res, db, auth) {
       // site that saw one visitor on one day reads as 0.0/day rather than 1/day.
       avg_visitors_day: Math.round((visitors30 / 30) * 10) / 10,
       visitors_by_day: s ? dayKeys.map(d => (s.byDay.get(d) ? s.byDay.get(d).size : 0)) : dayKeys.map(() => 0),
+      // Booking page: people who actually opened the widget, and what came of it.
+      book_visits_30d: s ? s.bookVisitors.size : 0,
+      book_by_day: s ? dayKeys.map(d => (s.bookByDay.get(d) ? s.bookByDay.get(d).size : 0)) : dayKeys.map(() => 0),
+      bookings_30d: s ? s.bookings : 0,
+      bookings_by_day: s ? dayKeys.map(d => s.bookingsByDay.get(d) || 0) : dayKeys.map(() => 0),
       last_event: s ? s.lastSeen : null,
     };
   });
 
-  return res.status(200).json({ businesses, since, days: dayKeys });
+  // Portfolio-wide daily series for the booking-page chart. Summed from the
+  // per-business series rather than recounted, so the chart and the table can
+  // never disagree with each other.
+  const book_by_day_total = dayKeys.map((_, i) => businesses.reduce((n, b) => n + b.book_by_day[i], 0));
+  const bookings_by_day_total = dayKeys.map((_, i) => businesses.reduce((n, b) => n + b.bookings_by_day[i], 0));
+
+  return res.status(200).json({
+    businesses, since, days: dayKeys,
+    totals: {
+      book_visits_30d: businesses.reduce((n, b) => n + b.book_visits_30d, 0),
+      bookings_30d: businesses.reduce((n, b) => n + b.bookings_30d, 0),
+      book_by_day: book_by_day_total,
+      bookings_by_day: bookings_by_day_total,
+    },
+  });
 }
 
 // Owner-only: it spends money on API calls, and it is the owner's tagging

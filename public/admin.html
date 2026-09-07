@@ -4925,18 +4925,65 @@ function anaUrl(mode){
 // after "TV Mounting Los Angeles" 400'd on its Website tab and turned out to
 // have never been wired into analytics at all; this is what would have shown
 // that on its own, without someone happening to click into that one business.
-let anaOverviewData=null, anaOverviewFilter=null;
+let anaOverviewData=null, anaOverviewFilter=null, anaOverviewTotals=null, anaOverviewDays=[], anaBookChart=null;
 async function renderAnalyticsOverview(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
   try{
     const d=await api('analytics_overview');
     anaOverviewData=d.businesses||[];
+    anaOverviewTotals=d.totals||null;
+    anaOverviewDays=d.days||[];
   }catch(e){
     view.innerHTML=`<div class="ana"><div class="card err" style="padding:18px;">${esc(e.message||'Could not load the analytics overview')}</div></div>`;
     return;
   }
   drawAnaOverview();
+  // Chart.js is lazy-loaded across this admin; the booking chart draws itself
+  // in once the library lands so the table is never blocked waiting on a CDN.
+  ensureChartJs().then(drawAnaBookChart).catch(()=>{
+    const el=document.getElementById('anaBookChartWrap');
+    if(el) el.innerHTML='<div style="padding:18px;color:var(--mute);font-size:13px;">Chart library did not load. The booking numbers above and in the table are still accurate.</div>';
+  });
+}
+// Portfolio-wide booking-page chart. This is the money step -- everything else
+// on the Overview is upstream of it -- so it sits above the table rather than
+// being one more column to scan for.
+function drawAnaBookChart(){
+  const cv=document.getElementById('anaBookChart');
+  if(!cv || typeof Chart==='undefined' || !anaOverviewTotals) return;
+  try{ if(anaBookChart) anaBookChart.destroy(); }catch(e){}
+  const labels=(anaOverviewDays||[]).map(d=>{
+    const [,m,day]=d.split('-'); return `${Number(m)}/${Number(day)}`;
+  });
+  anaBookChart=new Chart(cv,{
+    data:{labels,datasets:[
+      {type:'bar',label:'Reached /book',data:anaOverviewTotals.book_by_day||[],
+       backgroundColor:'rgba(37,99,235,0.28)',borderColor:'rgba(37,99,235,0.9)',
+       borderWidth:1,borderRadius:2,order:2},
+      {type:'line',label:'Booked',data:anaOverviewTotals.bookings_by_day||[],
+       borderColor:'#16a34a',backgroundColor:'#16a34a',borderWidth:2,
+       pointRadius:2,pointHoverRadius:4,tension:0.25,order:1},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:true,position:'top',align:'end',
+          labels:{boxWidth:10,boxHeight:10,usePointStyle:true,pointStyle:'circle',font:{size:11}}},
+        tooltip:{callbacks:{title:it=>{
+          const iso=(anaOverviewDays||[])[it[0].dataIndex]||'';
+          return iso ? new Date(iso+'T00:00:00Z').toUTCString().slice(0,16) : '';
+        }}},
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{maxTicksLimit:10,font:{size:10},color:'#8a8f98'}},
+        // Whole people only -- a "2.5 bookings" gridline would be nonsense.
+        y:{beginAtZero:true,ticks:{precision:0,font:{size:10},color:'#8a8f98'},
+           grid:{color:'rgba(0,0,0,0.05)'}},
+      },
+    },
+  });
 }
 // green = seen a visitor in the last 2 days; amber = gone quiet (2-14 days);
 // red = 14+ days or literally never; gray = no funnel tag configured at all
@@ -4986,6 +5033,10 @@ function drawAnaOverview(){
   let rows=[...anaOverviewData].sort((a,b)=>(b.visitors_30d||0)-(a.visitors_30d||0) || (b.events_30d||0)-(a.events_30d||0));
   if(anaOverviewFilter) rows=rows.filter(b=>anaOverviewStatus(b)===anaOverviewFilter);
   const totalVisitors=anaOverviewData.reduce((n,b)=>n+(b.visitors_30d||0),0);
+  // Read from the server-computed totals when present, but fall back to summing
+  // the rows so the header still shows real numbers against an older payload.
+  const bookTotal=anaOverviewTotals?anaOverviewTotals.book_visits_30d:anaOverviewData.reduce((n,b)=>n+(b.book_visits_30d||0),0);
+  const bookedTotal=anaOverviewTotals?anaOverviewTotals.bookings_30d:anaOverviewData.reduce((n,b)=>n+(b.bookings_30d||0),0);
   const tile=(key,label,val,cls)=>`<div class="card kpi" data-anafilter="${key}" style="cursor:pointer;${anaOverviewFilter===key?'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);':''}">
     <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
   view.innerHTML=`<div class="ana">
@@ -4997,12 +5048,32 @@ function drawAnaOverview(){
       ${tile('amber','Gone quiet',counts.amber)}
       ${tile('red','No data',counts.red,'bad')}
     </div>
+    <div class="section card" id="anaBookChartWrap" style="padding:16px 18px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">Booking page, last 30 days</div>
+          <div style="font-size:12px;color:var(--mute);margin-top:2px;">
+            Everything else on this page is upstream of this line.
+          </div>
+        </div>
+        <div style="display:flex;gap:22px;text-align:right;">
+          <div><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;">Reached /book</div>
+            <div style="font-size:22px;font-weight:700;">${bookTotal.toLocaleString()}</div></div>
+          <div><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;">Booked</div>
+            <div style="font-size:22px;font-weight:700;color:#16a34a;">${bookedTotal.toLocaleString()}</div></div>
+          <div><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;">Conversion</div>
+            <div style="font-size:22px;font-weight:700;">${bookTotal?((bookedTotal/bookTotal)*100).toFixed(1)+'%':'—'}</div></div>
+        </div>
+      </div>
+      <div style="height:220px;position:relative;"><canvas id="anaBookChart"></canvas></div>
+    </div>
     <div class="section card" style="padding:0;overflow:hidden;">
       <table>
         <thead><tr>
           <th>Business</th><th>Status</th>
           <th class="num">Visitors, 30d</th><th class="num">Avg/day</th>
           <th>Visitors per day</th>
+          <th class="num">Reached /book</th><th class="num">Booked</th>
           <th class="num">Events, 30d</th><th>Last seen</th>
         </tr></thead>
         <tbody>
@@ -5016,6 +5087,8 @@ function drawAnaOverview(){
               <td class="num" style="font-weight:700;">${v.toLocaleString()}</td>
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
+              <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5029,6 +5102,10 @@ function drawAnaOverview(){
         booking widget can fire 20+ events, and someone who comes back next week
         still counts once. <b>Avg/day</b> divides by the full 30 days, so a site
         with a single visitor on a single day reads 0.0, not 1.0.</div>
+      <div style="margin-top:5px;"><b>Reached /book</b> — people who actually
+        opened the booking widget, deduped, so reloading the page does not
+        inflate it. <b>Booked</b> counts confirmed bookings as events, not
+        people: two real jobs from one household is two jobs.</div>
       <div style="margin-top:5px;"><b>Events</b> — every tracked interaction
         (page views, funnel steps, answers, ZIP checks, bookings). Useful as a
         depth signal next to visitors, not as a people count.</div>
