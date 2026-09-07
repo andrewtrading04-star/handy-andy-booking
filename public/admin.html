@@ -4956,18 +4956,41 @@ function anaOverviewAgo(iso){
   return (days<1 ? Math.max(1,Math.round(days*24))+'h' : Math.round(days)+'d')+' ago';
 }
 const ANA_OVERVIEW_LABEL={green:'Reporting',amber:'Quiet',red:'No data',gray:'Not tracked'};
+// 30-day visitors-per-day sparkline. Drawn to one scale (this row's own busiest
+// day), with the last day marked, so the shape reads as "is this trending up or
+// dying" at a glance. An all-zero row draws a flat baseline rather than nothing,
+// because "no traffic" is itself the answer the Overview exists to give.
+function anaSpark(series){
+  const s=Array.isArray(series)?series:[];
+  if(!s.length) return '<span style="color:var(--mute);">—</span>';
+  const w=104,h=24,pad=2,max=Math.max(...s,1);
+  const step=s.length>1?(w-pad*2)/(s.length-1):0;
+  const pts=s.map((v,i)=>[pad+i*step, h-pad-(v/max)*(h-pad*2)]);
+  const line=pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const last=pts[pts.length-1];
+  const peak=max.toLocaleString();
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img"
+    aria-label="Visitors per day over the last 30 days, peak ${peak}" style="display:block;overflow:visible;">
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="var(--accent)"/>
+  </svg>`;
+}
 function drawAnaOverview(){
   const view=document.getElementById('view');
   const counts={green:0,amber:0,red:0,gray:0};
   anaOverviewData.forEach(b=>counts[anaOverviewStatus(b)]++);
-  const order={red:0,amber:1,gray:2,green:3};
-  let rows=[...anaOverviewData].sort((a,b)=>order[anaOverviewStatus(a)]-order[anaOverviewStatus(b)] || b.events_30d-a.events_30d);
+  // Busiest first. The status-priority sort this replaced answered "what is
+  // broken"; the KPI tiles above still answer that and now double as filters,
+  // so the table itself is free to answer "where is the traffic".
+  let rows=[...anaOverviewData].sort((a,b)=>(b.visitors_30d||0)-(a.visitors_30d||0) || (b.events_30d||0)-(a.events_30d||0));
   if(anaOverviewFilter) rows=rows.filter(b=>anaOverviewStatus(b)===anaOverviewFilter);
+  const totalVisitors=anaOverviewData.reduce((n,b)=>n+(b.visitors_30d||0),0);
   const tile=(key,label,val,cls)=>`<div class="card kpi" data-anafilter="${key}" style="cursor:pointer;${anaOverviewFilter===key?'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);':''}">
     <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
   view.innerHTML=`<div class="ana">
     <div class="ana-head"><div><h1>Analytics</h1>
-      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · sorted by what needs attention first</div></div></div>
+      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · most traffic first</div></div></div>
     <div class="grid kpis" style="grid-template-columns:repeat(4,1fr);">
       ${tile('','All businesses',anaOverviewData.length)}
       ${tile('green','Reporting normally',counts.green,'good')}
@@ -4976,20 +4999,52 @@ function drawAnaOverview(){
     </div>
     <div class="section card" style="padding:0;overflow:hidden;">
       <table>
-        <thead><tr><th>Business</th><th>Status</th><th class="num">Events, 30d</th><th>Last seen</th></tr></thead>
+        <thead><tr>
+          <th>Business</th><th>Status</th>
+          <th class="num">Visitors, 30d</th><th class="num">Avg/day</th>
+          <th>Visitors per day</th>
+          <th class="num">Events, 30d</th><th>Last seen</th>
+        </tr></thead>
         <tbody>
           ${rows.map(b=>{
             const s=anaOverviewStatus(b);
+            const v=b.visitors_30d||0, avg=b.avg_visitors_day||0;
             return `<tr class="ana-ov-row" data-slug="${esc(b.slug)}" style="cursor:pointer;">
               <td><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}</div>
                 <div class="sub" style="font-size:11.5px;">${esc(b.url||'')}</div></td>
               <td><span class="pill ${s}">${ANA_OVERVIEW_LABEL[s]}</span></td>
-              <td class="num">${b.events_30d.toLocaleString()}</td>
+              <td class="num" style="font-weight:700;">${v.toLocaleString()}</td>
+              <td class="num">${avg.toFixed(1)}</td>
+              <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
+              <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
+    </div>
+    <div class="section card" style="padding:14px 16px;font-size:12.5px;line-height:1.65;color:var(--mute);">
+      <div style="font-weight:700;color:var(--ink);margin-bottom:6px;">What these columns mean</div>
+      <div><b>Visitors</b> — distinct people, not clicks. One person browsing the
+        booking widget can fire 20+ events, and someone who comes back next week
+        still counts once. <b>Avg/day</b> divides by the full 30 days, so a site
+        with a single visitor on a single day reads 0.0, not 1.0.</div>
+      <div style="margin-top:5px;"><b>Events</b> — every tracked interaction
+        (page views, funnel steps, answers, ZIP checks, bookings). Useful as a
+        depth signal next to visitors, not as a people count.</div>
+      <div style="margin-top:5px;"><b>Status</b> — how recently <i>any</i> event
+        arrived: <span class="pill green">Reporting</span> within 2 days ·
+        <span class="pill amber">Quiet</span> 2–14 days ·
+        <span class="pill red">No data</span> 14+ days or never ·
+        <span class="pill gray">Not tracked</span> means no analytics tag is
+        configured for that business at all, so it could be busy and we would
+        never know.</div>
+      <div style="margin-top:5px;"><b>Last seen</b> — when the most recent event
+        landed. "15d ago" means nobody has touched that site's tracked funnel in
+        over two weeks.</div>
+      <div style="margin-top:5px;">Counts come from the booking-widget tracking
+        script, so they cover pages carrying that script — not raw web traffic to
+        every URL on the domain.</div>
     </div>
   </div>`;
   view.querySelectorAll('[data-anafilter]').forEach(el=>el.addEventListener('click',()=>{

@@ -5595,30 +5595,53 @@ async function analyticsOverview(req, res, db, auth) {
   const stats = new Map(); // tag -> { n30, lastSeen }
   if (tagToBiz.size) {
     const pub = serviceClientPublic();
-    // widget + created_at only — this table can run to tens of thousands of
-    // rows in 30 days, and neither the count nor the max() needs anything
-    // else. Paginated the same way cityPagesAnalytics/analytics.js already do,
+    // widget + created_at + session_id. session_id is what turns a raw event
+    // count into a PEOPLE count: an event total answers "how busy", not "how
+    // many", and one visitor clicking through the funnel can log 20+ rows.
+    // Paginated the same way cityPagesAnalytics/analytics.js already do,
     // since Supabase caps a single response at 1000 rows.
     for (let page = 0; page < 100; page++) {
-      const { data, error } = await pub.from('events').select('widget, created_at')
+      const { data, error } = await pub.from('events').select('widget, created_at, session_id')
         .in('widget', [...tagToBiz.keys()])
         .gte('created_at', since)
         .range(page * 1000, page * 1000 + 999);
       if (error) throw error;
       for (const r of data || []) {
-        const s = stats.get(r.widget) || { n30: 0, lastSeen: null };
+        let s = stats.get(r.widget);
+        if (!s) { s = { n30: 0, lastSeen: null, visitors: new Set(), byDay: new Map() }; stats.set(r.widget, s); }
         s.n30++;
         if (!s.lastSeen || r.created_at > s.lastSeen) s.lastSeen = r.created_at;
-        stats.set(r.widget, s);
+        // Same visitor rule the per-business funnel already uses (see
+        // api/analytics.js): a session id is "<visitor>.<session>", so the part
+        // before the first dot is the stable visitor, and one person who comes
+        // back next week counts once. Ids with no dot are their own visitor.
+        const sid = r.session_id || '';
+        if (!sid) continue;
+        const visitor = sid.includes('.') ? sid.split('.')[0] : sid;
+        s.visitors.add(visitor);
+        // UTC day. The portfolio spans Denver/Houston/Austin/LA, so there is no
+        // single correct local midnight here; a per-business tz split would move
+        // a handful of late-evening visits one bucket over and change neither
+        // the 30-day total nor the average.
+        const day = r.created_at.slice(0, 10);
+        let ds = s.byDay.get(day);
+        if (!ds) { ds = new Set(); s.byDay.set(day, ds); }
+        ds.add(visitor);
       }
       if (!data || data.length < 1000) break;
     }
   }
 
+  // Dense, zero-filled 30-day axis so a quiet day reads as a real zero in the
+  // sparkline instead of being compressed out of the line entirely.
+  const dayKeys = [];
+  for (let i = 29; i >= 0; i--) dayKeys.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+
   const businesses = (rows || []).map(b => {
     const cfg = b.analytics_config || null;
     const tag = cfg && cfg.funnel_backend;
     const s = tag ? stats.get(tag) : null;
+    const visitors30 = s ? s.visitors.size : 0;
     return {
       slug: b.slug, name: b.name, url: b.url,
       tracked: !!tag,
@@ -5626,11 +5649,16 @@ async function analyticsOverview(req, res, db, auth) {
       has_traffic_backend: !!(cfg && cfg.traffic_backend),
       has_gsc: !!(cfg && cfg.gsc_domain),
       events_30d: s ? s.n30 : 0,
+      visitors_30d: visitors30,
+      // Averaged over the full 30-day window, not just days with traffic, so a
+      // site that saw one visitor on one day reads as 0.0/day rather than 1/day.
+      avg_visitors_day: Math.round((visitors30 / 30) * 10) / 10,
+      visitors_by_day: s ? dayKeys.map(d => (s.byDay.get(d) ? s.byDay.get(d).size : 0)) : dayKeys.map(() => 0),
       last_event: s ? s.lastSeen : null,
     };
   });
 
-  return res.status(200).json({ businesses, since });
+  return res.status(200).json({ businesses, since, days: dayKeys });
 }
 
 // Owner-only: it spends money on API calls, and it is the owner's tagging
