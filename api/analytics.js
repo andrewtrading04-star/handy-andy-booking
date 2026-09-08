@@ -1,6 +1,7 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
 import { sendSMS } from './_lib/sms.js';
+import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 
 // Delivery-status webhooks (Twilio + Resend) live in THIS file rather than a
@@ -1557,7 +1558,12 @@ export default async function handler(req, res) {
       if (untilISO) q = q.lte('created_at', untilISO);
       const { data, error } = await q;
       if (error) throw error;
-      events.push(...data);
+      // Crawlers, monitors and our own tooling are dropped at write time now
+      // (api/log-event.js), but rows logged before that shipped are still in
+      // the table. The same shared rule is applied on read so this funnel and
+      // the portfolio Overview can never report two different numbers for the
+      // same business.
+      events.push(...data.filter(e => !isBotUserAgent(e.browser)));
       if (data.length < 1000) break;
     }
 

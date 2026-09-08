@@ -1,4 +1,5 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
+import { isBotUserAgent } from './_lib/bot-filter.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,6 +9,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { session_id, event_type, step_name, value, device_type, traffic_source, city, state, zip_code, error_message, customer_name, widget } = req.body;
+
+  // Crawlers, monitors and our own tooling never become customers, so they are
+  // dropped here rather than filtered in a dozen downstream queries. Left as a
+  // 200: the widget must not treat this as an error and retry, and a crawler
+  // executing our JS should get the same boring answer a customer does.
+  // Found via precisiontvinstallation.com / tvmountingdenver.com, where this
+  // traffic was ~100 sessions each and made a dead funnel look like a broken one.
+  if (isBotUserAgent(req.headers['user-agent'])) {
+    return res.status(200).json({ ok: true, skipped: 'bot' });
+  }
 
   try {
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

@@ -25,6 +25,7 @@ import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
+import { isBotUserAgent } from './_lib/bot-filter.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
@@ -5601,12 +5602,17 @@ async function analyticsOverview(req, res, db, auth) {
     // Paginated the same way cityPagesAnalytics/analytics.js already do,
     // since Supabase caps a single response at 1000 rows.
     for (let page = 0; page < 100; page++) {
-      const { data, error } = await pub.from('events').select('widget, created_at, session_id, event_type')
+      const { data, error } = await pub.from('events').select('widget, created_at, session_id, event_type, browser')
         .in('widget', [...tagToBiz.keys()])
         .gte('created_at', since)
         .range(page * 1000, page * 1000 + 999);
       if (error) throw error;
       for (const r of data || []) {
+        // api/log-event.js drops these at the door now, but rows logged before
+        // that shipped are still in the table — same rule applied on read so the
+        // 30-day window doesn't show two different realities either side of the
+        // deploy. Safe to delete once the bot rows age out of the window.
+        if (isBotUserAgent(r.browser)) continue;
         let s = stats.get(r.widget);
         if (!s) {
           s = {
