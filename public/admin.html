@@ -5037,6 +5037,8 @@ function drawAnaOverview(){
   // the rows so the header still shows real numbers against an older payload.
   const bookTotal=anaOverviewTotals?anaOverviewTotals.book_visits_30d:anaOverviewData.reduce((n,b)=>n+(b.book_visits_30d||0),0);
   const bookedTotal=anaOverviewTotals?anaOverviewTotals.bookings_30d:anaOverviewData.reduce((n,b)=>n+(b.bookings_30d||0),0);
+  const cancelledTotal=anaOverviewTotals?(anaOverviewTotals.bookings_cancelled_30d||0):anaOverviewData.reduce((n,b)=>n+(b.bookings_cancelled_30d||0),0);
+  const internalTotal=anaOverviewTotals?(anaOverviewTotals.bookings_internal_30d||0):anaOverviewData.reduce((n,b)=>n+(b.bookings_internal_30d||0),0);
   const tile=(key,label,val,cls)=>`<div class="card kpi" data-anafilter="${key}" style="cursor:pointer;${anaOverviewFilter===key?'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);':''}">
     <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
   view.innerHTML=`<div class="ana">
@@ -5065,6 +5067,10 @@ function drawAnaOverview(){
             <div style="font-size:22px;font-weight:700;">${bookTotal?((bookedTotal/bookTotal)*100).toFixed(1)+'%':'—'}</div></div>
         </div>
       </div>
+      <div style="font-size:11.5px;color:var(--mute);margin-top:2px;">
+        Booked counts surviving widget bookings only.
+        ${cancelledTotal?`<b>${cancelledTotal}</b> cancelled`:'No cancellations'}${internalTotal?` · <b>${internalTotal}</b> test booking${internalTotal===1?'':'s'} excluded`:''} in the same window.
+      </div>
       <div style="height:220px;position:relative;"><canvas id="anaBookChart"></canvas></div>
     </div>
     <div class="section card" style="padding:0;overflow:hidden;">
@@ -5088,7 +5094,12 @@ function drawAnaOverview(){
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
-              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}${
+                (b.bookings_cancelled_30d||b.bookings_internal_30d)
+                  ? `<div style="font-weight:400;font-size:10.5px;color:var(--mute);">${[
+                      b.bookings_cancelled_30d?`${b.bookings_cancelled_30d} cancelled`:'',
+                      b.bookings_internal_30d?`${b.bookings_internal_30d} test`:'',
+                    ].filter(Boolean).join(' · ')}</div>` : ''}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5104,8 +5115,11 @@ function drawAnaOverview(){
         with a single visitor on a single day reads 0.0, not 1.0.</div>
       <div style="margin-top:5px;"><b>Reached /book</b> — people who actually
         opened the booking widget, deduped, so reloading the page does not
-        inflate it. <b>Booked</b> counts confirmed bookings as events, not
-        people: two real jobs from one household is two jobs.</div>
+        inflate it. <b>Booked</b> counts surviving bookings taken through the
+        widget: cancelled jobs and known test bookings are excluded from the
+        number but shown underneath it, so it can always be reconciled. Jobs
+        created by the office or over the phone are not counted here — they
+        never touched the booking page.</div>
       <div style="margin-top:5px;"><b>Events</b> — every tracked interaction
         (page views, funnel steps, answers, ZIP checks, bookings). Useful as a
         depth signal next to visitors, not as a people count.</div>

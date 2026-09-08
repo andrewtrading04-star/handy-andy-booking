@@ -42,6 +42,51 @@ export function isBotUserAgent(ua) {
   return BOT_UA.test(s) || INTERNAL_UA.test(s);
 }
 
+// ── Internal / test bookings ────────────────────────────────────────────────
+// A user agent can't catch these: the owner books from an ordinary browser, so
+// a test booking is byte-for-byte indistinguishable from a customer's until you
+// look at who it is. Found 2026-09-08: all 8 "bookings" across milehightv-
+// mounting.com, austinmounting.com, houstonmounting.com, houstontvinstallation
+// .com and htvmounting.com were the owner testing each new site's funnel --
+// same name, email, phone and street address on every one, all cancelled
+// immediately. Left uncorrected, five sites looked like they were converting.
+//
+// Add contacts without a deploy via INTERNAL_TEST_CONTACTS (comma-separated
+// emails and/or phone numbers); the default below is the owner's own.
+const DEFAULT_INTERNAL_CONTACTS = ['andrewtrading04@gmail.com', '3374997817'];
+
+/** Digits only, so +1 (337) 499-7817 and 3374997817 compare equal. */
+function normPhone(v) { return String(v || '').replace(/\D/g, ''); }
+
+function internalContactSet() {
+  const extra = (process.env.INTERNAL_TEST_CONTACTS || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const out = new Set();
+  for (const raw of [...DEFAULT_INTERNAL_CONTACTS, ...extra]) {
+    const v = String(raw).toLowerCase();
+    out.add(v);
+    const digits = normPhone(v);
+    // 10-digit US numbers also match their +1-prefixed form.
+    if (digits.length >= 10) { out.add(digits); out.add(digits.slice(-10)); }
+  }
+  return out;
+}
+
+/**
+ * True when a booking's contact details belong to the owner/testers rather than
+ * a paying customer. Matches on email or phone; either alone is enough.
+ * @param {{email?:string, phone?:string}|null|undefined} contact
+ */
+export function isInternalContact(contact) {
+  if (!contact) return false;
+  const set = internalContactSet();
+  const email = String(contact.email || '').trim().toLowerCase();
+  if (email && set.has(email)) return true;
+  const digits = normPhone(contact.phone);
+  if (digits && (set.has(digits) || set.has(digits.slice(-10)))) return true;
+  return false;
+}
+
 // Same rule as a Postgres-flavoured regex, for filtering rows already logged
 // before write-time dropping existed. Must stay in step with the two above.
 export const BOT_UA_SQL = '(bot\\M|bot/|robot|crawl|spider|slurp|ahrefs|semrush|majestic|moz\\.com|dotbot|dataprovider|screaming ?frog|sitecheck|siteaudit|uptime|pingdom|gtmetrix|lighthouse|pagespeed|headless|phantomjs|puppeteer|playwright|selenium|webdriver|python-requests|python-urllib|curl/|wget/|libwww|okhttp|java/|go-http|node-fetch|axios/|got/|scrapy|facebookexternalhit|externalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|slackbot|embedly|preview|feedfetcher|apis-google|mediapartners|adsbot|google-agent|petalbot|bytespider|amazonbot|applebot|yandex|baiduspider|duckduckbot|sogou|Claude/|Electron/|vercel-screenshot|vercel-favicon)';

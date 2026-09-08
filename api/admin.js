@@ -25,7 +25,7 @@ import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { isBotUserAgent } from './_lib/bot-filter.js';
+import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
@@ -5652,14 +5652,37 @@ async function analyticsOverview(req, res, db, auth) {
           let bd = s.bookByDay.get(day);
           if (!bd) { bd = new Set(); s.bookByDay.set(day, bd); }
           bd.add(visitor);
-        } else if (r.event_type === 'booking_confirmed') {
-          // Counted as events, not people: two genuine bookings from one
-          // household is two jobs, and collapsing them would understate revenue.
-          s.bookings++;
-          s.bookingsByDay.set(day, (s.bookingsByDay.get(day) || 0) + 1);
         }
+        // NB bookings are NOT counted from booking_confirmed events here. That
+        // event knows nothing about who booked or whether it survived, so it
+        // cannot tell a real job from the owner testing the funnel, nor from a
+        // booking cancelled a minute later. Counted from app.bookings below.
       }
       if (!data || data.length < 1000) break;
+    }
+  }
+
+  // ── Bookings: from the booking records, not the event stream ───────────────
+  // source='widget' keeps this a true /book funnel number — office- and
+  // phone-created jobs never touched the booking page, so counting them would
+  // invent conversions the page never produced. Cancelled jobs are counted
+  // separately rather than dropped silently: a customer who books and cancels
+  // is a real signal, just not revenue.
+  const bookedByBiz = new Map(); // business_id -> { kept, cancelled, internal, byDay }
+  {
+    const { data: bkRows, error: bkErr } = await db.from('bookings')
+      .select('business_id, created_at, status, customer:customers ( email, phone )')
+      .eq('source', 'widget')
+      .gte('created_at', since);
+    if (bkErr) throw bkErr;
+    for (const bk of bkRows || []) {
+      let e = bookedByBiz.get(bk.business_id);
+      if (!e) { e = { kept: 0, cancelled: 0, internal: 0, byDay: new Map() }; bookedByBiz.set(bk.business_id, e); }
+      if (isInternalContact(bk.customer)) { e.internal++; continue; }
+      if (bk.status === 'cancelled') { e.cancelled++; continue; }
+      e.kept++;
+      const day = String(bk.created_at).slice(0, 10);
+      e.byDay.set(day, (e.byDay.get(day) || 0) + 1);
     }
   }
 
@@ -5672,6 +5695,7 @@ async function analyticsOverview(req, res, db, auth) {
     const cfg = b.analytics_config || null;
     const tag = cfg && cfg.funnel_backend;
     const s = tag ? stats.get(tag) : null;
+    const bk = bookedByBiz.get(b.id) || null;
     const visitors30 = s ? s.visitors.size : 0;
     return {
       slug: b.slug, name: b.name, url: b.url,
@@ -5688,8 +5712,12 @@ async function analyticsOverview(req, res, db, auth) {
       // Booking page: people who actually opened the widget, and what came of it.
       book_visits_30d: s ? s.bookVisitors.size : 0,
       book_by_day: s ? dayKeys.map(d => (s.bookByDay.get(d) ? s.bookByDay.get(d).size : 0)) : dayKeys.map(() => 0),
-      bookings_30d: s ? s.bookings : 0,
-      bookings_by_day: s ? dayKeys.map(d => s.bookingsByDay.get(d) || 0) : dayKeys.map(() => 0),
+      // Real, surviving bookings only. cancelled/internal are surfaced beside
+      // it rather than hidden, so the number can always be reconciled.
+      bookings_30d: bk ? bk.kept : 0,
+      bookings_cancelled_30d: bk ? bk.cancelled : 0,
+      bookings_internal_30d: bk ? bk.internal : 0,
+      bookings_by_day: bk ? dayKeys.map(d => bk.byDay.get(d) || 0) : dayKeys.map(() => 0),
       last_event: s ? s.lastSeen : null,
     };
   });
@@ -5705,6 +5733,8 @@ async function analyticsOverview(req, res, db, auth) {
     totals: {
       book_visits_30d: businesses.reduce((n, b) => n + b.book_visits_30d, 0),
       bookings_30d: businesses.reduce((n, b) => n + b.bookings_30d, 0),
+      bookings_cancelled_30d: businesses.reduce((n, b) => n + b.bookings_cancelled_30d, 0),
+      bookings_internal_30d: businesses.reduce((n, b) => n + b.bookings_internal_30d, 0),
       book_by_day: book_by_day_total,
       bookings_by_day: bookings_by_day_total,
     },
