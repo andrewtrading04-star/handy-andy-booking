@@ -5069,7 +5069,7 @@ function drawAnaOverview(){
       </div>
       <div style="font-size:11.5px;color:var(--mute);margin-top:2px;">
         Booked counts surviving widget bookings only.
-        ${cancelledTotal?`<b>${cancelledTotal}</b> cancelled`:'No cancellations'}${internalTotal?` · <b>${internalTotal}</b> test booking${internalTotal===1?'':'s'} excluded`:''} in the same window.
+        ${cancelledTotal?`<b>${cancelledTotal}</b> cancelled`:'No cancellations'} in the same window.
       </div>
       <div style="height:220px;position:relative;"><canvas id="anaBookChart"></canvas></div>
     </div>
@@ -5095,11 +5095,8 @@ function drawAnaOverview(){
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
               <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}${
-                (b.bookings_cancelled_30d||b.bookings_internal_30d)
-                  ? `<div style="font-weight:400;font-size:10.5px;color:var(--mute);">${[
-                      b.bookings_cancelled_30d?`${b.bookings_cancelled_30d} cancelled`:'',
-                      b.bookings_internal_30d?`${b.bookings_internal_30d} test`:'',
-                    ].filter(Boolean).join(' · ')}</div>` : ''}</td>
+                b.bookings_cancelled_30d
+                  ? `<div style="font-weight:400;font-size:10.5px;color:var(--mute);">${b.bookings_cancelled_30d} cancelled</div>` : ''}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5116,8 +5113,8 @@ function drawAnaOverview(){
       <div style="margin-top:5px;"><b>Reached /book</b> — people who actually
         opened the booking widget, deduped, so reloading the page does not
         inflate it. <b>Booked</b> counts surviving bookings taken through the
-        widget: cancelled jobs and known test bookings are excluded from the
-        number but shown underneath it, so it can always be reconciled. Jobs
+        widget: cancelled jobs are excluded from the number but shown
+        underneath it, and internal test bookings are filtered out. Jobs
         created by the office or over the phone are not counted here — they
         never touched the booking page.</div>
       <div style="margin-top:5px;"><b>Events</b> — every tracked interaction
