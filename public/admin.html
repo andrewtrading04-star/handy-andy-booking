@@ -13465,6 +13465,14 @@ function cwDiscountRaw(){
        + (Number(callWiz.discManual) || 0);
 }
 function cwDiscountMax(){
+  // Handyman calls are hourly, not TV Mounting, and the "noroom" screen they
+  // always land on tells the secretary out loud there is nothing to give
+  // ("just for our records, there is no money on this one"). Once the recap
+  // started sending a real priced labor line to economics (for the profit
+  // projection), max_discount stopped being 0 on 3+ hour jobs even though the
+  // screen still says it is -- so hard-zero it here for anything that isn't a
+  // TV job, matching what the secretary is told to say.
+  if(callWiz.service!=='TV Mounting') return 0;
   return callWiz.econ ? Math.max(0, Number(callWiz.econ.max_discount) || 0) : 0;
 }
 function cwDiscountApplied(){
@@ -13514,7 +13522,12 @@ function cwHandymanLine(){
   if(!callWiz || callWiz.service==='TV Mounting') return null;
   const hrs=cwHandymanHours();
   const desc=(callWiz.handymanDesc||'').trim()||'as described on the call';
-  return { option_id:null, label:`Handyman Labor: ${desc} — ${hrs} hour${hrs===1?'':'s'}`, price:HANDYMAN_HOURLY, quantity:hrs };
+  // No "— N hours" baked into the label: every consumer of this line (recap,
+  // confirmation email, estimate SMS/email) already appends its own "×N" for
+  // quantity>1, so a label that also spells out the hours doubled up into
+  // "…— 3 hours ×3" on real customer emails. quantity stays the hour count
+  // (payroll pays off it) — only the redundant text moves out of the label.
+  return { option_id:null, label:`Handyman Labor: ${desc}`, price:HANDYMAN_HOURLY, quantity:hrs };
 }
 // Snapshot the booking card's inputs into callWiz so a Back tap or repaint
 // restores them instead of blanking the form.
