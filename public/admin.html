@@ -13020,6 +13020,14 @@ function callWizReset(){
     zip:'', areaName:null, otherBiz:null, surcharge:0,
     optStep:0, optsLoaded:false,
     handymanDesc:'',
+    // Hours of handyman labor. The call script used to skip this entirely and
+    // push the job at $0, so the server bounced every phone-booked handyman job
+    // for being under the $139 minimum. Two-hour minimum, same as New Booking.
+    handymanHours:2,
+    // Customer details typed on the booking card. They were only ever read out
+    // of the DOM at submit, so tapping Back (or any repaint) wiped the name,
+    // phone, email and address and the secretary had to retype all of it.
+    cust:{ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true },
     // Discount state, only ever populated on the "customer pushed back" branch.
     // econ holds the server's profit projection for THIS quote, which is what
     // caps how much can be given away.
@@ -13496,6 +13504,34 @@ function cwLadderSpend(){
 function cwRemainingRoom(){ return Math.floor(cwLadderSpend().remaining + 1e-9); }
 // One number feeds the screen and the mouth, so they cannot disagree.
 function cwCloseTotal(){ return Math.max(0,(Number(callWiz.preDiscountTotal)||0)-cwDiscountApplied()); }
+// The one handyman labor line a phone-booked handyman job carries: hours x the
+// flat hourly rate, two-hour minimum. Label MUST start with "Handyman Labor:" --
+// that prefix is what api/admin.js keys on to exempt hourly work from the $139
+// floor. Shared by the recap, the booking submit, and the emailed estimate so
+// all three quote the same number.
+function cwHandymanHours(){ return Math.max(2, Math.round(Number(callWiz.handymanHours)||2)); }
+function cwHandymanLine(){
+  if(!callWiz || callWiz.service==='TV Mounting') return null;
+  const hrs=cwHandymanHours();
+  const desc=(callWiz.handymanDesc||'').trim()||'as described on the call';
+  return { option_id:null, label:`Handyman Labor: ${desc} — ${hrs} hour${hrs===1?'':'s'}`, price:HANDYMAN_HOURLY, quantity:hrs };
+}
+// Snapshot the booking card's inputs into callWiz so a Back tap or repaint
+// restores them instead of blanking the form.
+function cwSaveCust(){
+  if(!callWiz || !callWiz.cust) return;
+  const v=id=>{ const el=document.getElementById(id); return el?el.value:null; };
+  const c=callWiz.cust;
+  const n=v('cwCustName'); if(n!==null) c.name=n;
+  const ph=v('cwCustPhone'); if(ph!==null) c.phone=ph;
+  const em=v('cwCustEmail'); if(em!==null) c.email=em;
+  const a=v('cwCustAddr'); if(a!==null) c.addr=a;
+  const ci=v('cwCustCity'); if(ci!==null) c.city=ci;
+  const st=v('cwCustState'); if(st!==null) c.state=st;
+  const pm=v('cwPayMethod'); if(pm!==null) c.pay=pm;
+  const sk=document.getElementById('cwSkipCard'); if(sk) c.skipCard=!!sk.checked;
+  const sm=document.getElementById('cwSmsConsent'); if(sm) c.sms=!!sm.checked;
+}
 function cwCloseDisplay(){ return Math.round(cwCloseTotal()); }
 function cwCloseHasCents(){ return Math.abs(cwCloseTotal()-cwCloseDisplay())>0.004; }
 function cwMoneyCents(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
@@ -13894,9 +13930,10 @@ async function cwSubmitBooking(){
     // A handyman call collects the job in plain words and nothing else — no
     // option catalog, so nbCollectSelections() is empty. Without this the tech
     // arrives at the door with a booking that says only who took the call.
-    if(!isTv && callWiz.handymanDesc){
-      selections.push({ option_id:null, label:'Handyman — '+callWiz.handymanDesc, price:0, quantity:1 });
-    }
+    // Priced at hours x $85 (two-hour minimum), not $0 -- a $0 line plus a
+    // travel fee landed under the $139 floor and the server refused it.
+    const hmLine=cwHandymanLine();
+    if(hmLine) selections.push(hmLine);
     // Never stack this call's own travel fee on top of one already riding in via
     // a converted estimate's carried lines (nbConvertLines), same guard as the
     // New Booking form's auto-fill (see nbCarriedTravelLine()). This path had its
@@ -14299,12 +14336,34 @@ async function renderCallWiz(){
     return;
   }
   if(s==='handydesc'){
+    const hrs=cwHandymanHours();
     body.innerHTML=`${callWizScript('What do you need done?')}
       <textarea class="search" id="cwDesc" style="margin:0;min-height:70px;" placeholder="e.g. hang three shelves, fix a leaky faucet…">${esc(callWiz.handymanDesc)}</textarea>
+      ${callWizScript(`Handyman work is ${money(HANDYMAN_HOURLY)} an hour with a two hour minimum. About how long do you think that will take?`)}
+      <div class="nb-optq on" style="margin-top:6px;">
+        <span class="nb-optlabel">Hours of labor</span>
+        <span class="nb-price">$${HANDYMAN_HOURLY}/hr</span>
+        <span class="nb-stepper">
+          <button type="button" class="nb-tv-q-btn" id="cwHrsMinus"${hrs<=2?' disabled':''}>−</button>
+          <span class="nb-qty" id="cwHrsQty">${hrs}</span>
+          <button type="button" class="nb-tv-q-btn" id="cwHrsPlus">+</button>
+        </span>
+      </div>
+      <div class="nb-hint" id="cwHrsTotal" style="margin-top:6px;font-weight:700;">${hrs} hours × $${HANDYMAN_HOURLY} = $${hrs*HANDYMAN_HOURLY} before tax</div>
       <button type="button" class="btn" id="cwDescNext" style="margin-top:10px;">Continue</button>
       ${cwBackBtnHtml('Back to the zip')}`;
+    const setHrs=d=>{
+      callWiz.handymanHours=Math.max(2, cwHandymanHours()+d);
+      const h=cwHandymanHours();
+      document.getElementById('cwHrsQty').textContent=h;
+      document.getElementById('cwHrsMinus').disabled=h<=2;
+      document.getElementById('cwHrsTotal').textContent=`${h} hours × $${HANDYMAN_HOURLY} = $${h*HANDYMAN_HOURLY} before tax`;
+    };
+    document.getElementById('cwHrsMinus').addEventListener('click', ()=>setHrs(-1));
+    document.getElementById('cwHrsPlus').addEventListener('click', ()=>setHrs(1));
     document.getElementById('cwDescNext').addEventListener('click', ()=>{
       callWiz.handymanDesc=document.getElementById('cwDesc').value.trim();
+      if(!callWiz.handymanDesc){ err.textContent='Write down what they need done first — the tech reads this at the door.'; return; }
       callWiz.step='schedule'; renderCallWiz();
     });
     // Keep whatever they've typed when stepping back, so it isn't lost.
@@ -14498,8 +14557,10 @@ async function renderCallWiz(){
     if(callWiz.service==='TV Mounting'){
       try{ priced=nbCollectSelections(); }catch(e){ priced=[]; }
       priced.forEach(l=>items.push([`${l.label}${l.quantity>1?` ×${l.quantity}`:''}`, l.price*l.quantity]));
-    } else if(callWiz.handymanDesc){
-      context.push(['Job', callWiz.handymanDesc]);
+    } else {
+      if(callWiz.handymanDesc) context.push(['Job', callWiz.handymanDesc]);
+      const hm=cwHandymanLine();
+      if(hm){ priced=[hm]; items.push([`${hm.label} ×${hm.quantity}`, hm.price*hm.quantity]); }
     }
     // Travel fee and the 8 PM after-hours fee are part of what the customer
     // pays before tax, so they belong in the number read out on the call —
@@ -14869,6 +14930,9 @@ async function renderCallWiz(){
   if(s==='customer'){
     const disc=cwDiscountApplied();
     const isTv=callWiz.service==='TV Mounting';
+    if(!callWiz.cust) callWiz.cust={ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true };
+    const c=callWiz.cust;
+    const payVal=c.pay!==null ? c.pay : (isTv?'card':'');
     let whenTxt='';
     if(callWiz.prefDate){
       let day=callWiz.prefDate;
@@ -14877,34 +14941,34 @@ async function renderCallWiz(){
     }
     body.innerHTML=`${callWizScript('Perfect. I\'ll schedule this now. Can I get your first and last name?')}
       <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">${esc(whenTxt)}${disc>0?` · ${esc(money(disc))} off applied`:''}</div>
-      <input class="search" id="cwCustName" style="margin:0 0 8px;" placeholder="Full name *">
+      <input class="search" id="cwCustName" style="margin:0 0 8px;" placeholder="Full name *" value="${esc(c.name)}">
       <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <input class="search" id="cwCustPhone" style="margin:0;" placeholder="Phone *" inputmode="tel">
-        <input class="search" id="cwCustEmail" style="margin:0;" placeholder="Email *" inputmode="email">
+        <input class="search" id="cwCustPhone" style="margin:0;" placeholder="Phone *" inputmode="tel" value="${esc(c.phone)}">
+        <input class="search" id="cwCustEmail" style="margin:0;" placeholder="Email *" inputmode="email" value="${esc(c.email)}">
       </div>
       ${callWizScript('And what is the service address?')}
-      <input class="search" id="cwCustAddr" style="margin:0 0 8px;" placeholder="Street address">
+      <input class="search" id="cwCustAddr" style="margin:0 0 8px;" placeholder="Street address" value="${esc(c.addr)}">
       <div style="display:flex;gap:8px;margin-bottom:14px;">
-        <input class="search" id="cwCustCity" style="margin:0;" placeholder="City">
-        <input class="search" id="cwCustState" style="margin:0;max-width:80px;" placeholder="ST">
+        <input class="search" id="cwCustCity" style="margin:0;" placeholder="City" value="${esc(c.city)}">
+        <input class="search" id="cwCustState" style="margin:0;max-width:80px;" placeholder="ST" value="${esc(c.state)}">
         <input class="search" style="margin:0;max-width:90px;background:var(--line2);" value="${esc(callWiz.zip||'')}" disabled>
       </div>
       ${callWizScript(isTv?'Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.':'How will you be paying?')}
       <select class="search" id="cwPayMethod" style="margin:0 0 8px;width:100%;">
         <option value="">Select payment method</option>
-        <option value="card"${isTv?' selected':''}>Credit Card</option>
-        ${isTv?'':'<option value="cash">Cash</option><option value="quote">Quote (no charge)</option>'}
+        <option value="card"${payVal==='card'?' selected':''}>Credit Card</option>
+        ${isTv?'':`<option value="cash"${payVal==='cash'?' selected':''}>Cash</option><option value="quote"${payVal==='quote'?' selected':''}>Quote (no charge)</option>`}
       </select>
       <div id="cwCardWrap" style="display:none;margin-bottom:10px;">
         <div id="cwStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
         <div style="font-size:11px;color:var(--mute);margin-top:6px;">Card is saved and charged at time of service.</div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;">
-          <input type="checkbox" id="cwSkipCard" style="cursor:pointer;width:16px;height:16px;">
+          <input type="checkbox" id="cwSkipCard"${c.skipCard?' checked':''} style="cursor:pointer;width:16px;height:16px;">
           <span>Skip for now — add the card later from the job</span>
         </label>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12.5px;cursor:pointer;">
-        <input type="checkbox" id="cwSmsConsent" checked style="cursor:pointer;width:16px;height:16px;">
+        <input type="checkbox" id="cwSmsConsent"${c.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;">
         <span>Okay to text them about this job</span>
       </label>
       <button type="button" class="btn" id="cwBookNow" style="margin-bottom:7px;">Book it</button>
@@ -14917,8 +14981,14 @@ async function renderCallWiz(){
     };
     pmSel.addEventListener('change', syncCard);
     syncCard();
+    // Persist every keystroke so nothing typed here is lost to a Back tap, a
+    // failed submit, or the modal being clicked away and resumed.
+    ['cwCustName','cwCustPhone','cwCustEmail','cwCustAddr','cwCustCity','cwCustState','cwPayMethod','cwSkipCard','cwSmsConsent'].forEach(id=>{
+      const el=document.getElementById(id); if(!el) return;
+      el.addEventListener('input', cwSaveCust); el.addEventListener('change', cwSaveCust);
+    });
     document.getElementById('cwBookNow').addEventListener('click', cwSubmitBooking);
-    document.getElementById('cwCustBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
+    document.getElementById('cwCustBack').addEventListener('click', ()=>{ cwSaveCust(); callWiz.step='recap'; renderCallWiz(); });
     return;
   }
 
@@ -14953,7 +15023,7 @@ async function renderCallWiz(){
       const label = callWiz.service==='TV Mounting'
         ? `TV mounting — ${tvCount} TV${tvCount===1?'':'s'}`
         : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
-      if(!sels.length) sels=[{ label, quantity:1, price:0 }];
+      if(!sels.length){ const hm=cwHandymanLine(); sels=[hm?{ label:hm.label, quantity:hm.quantity, price:hm.price }:{ label, quantity:1, price:0 }]; }
       // A travel fee and any discount already offered out loud have to be on the
       // estimate too, or the written number contradicts the one the customer
       // was just read on the phone.
