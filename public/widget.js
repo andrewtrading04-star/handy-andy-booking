@@ -120,10 +120,10 @@
     'atxtvmount':         'https://handy-andy-booking.vercel.app/thank-you.html?b=atxtvmount',
     'austinmountingpros': 'https://handy-andy-booking.vercel.app/thank-you.html?b=austinmountingpros',
     'austintvinstall':    'https://handy-andy-booking.vercel.app/thank-you.html?b=austintvinstall',
-    // H-Town TV Mounting (houstontvmountingpros.com): same hosted fallback
-    // until the domain is connected to its Vercel project, then flip to
-    // https://houstontvmountingpros.com/thank-you (the site ships that page).
-    'houstontvmountingpros': 'https://handy-andy-booking.vercel.app/thank-you.html?b=houstontvmountingpros',
+    // H-Town TV Mounting (houstontvmountingpros.com): domain is now live on
+    // Vercel and the site ships its own /thank-you page, so send bookings
+    // there instead of the hosted CRM fallback.
+    'houstontvmountingpros': 'https://houstontvmountingpros.com/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
