@@ -1305,6 +1305,19 @@
   .ana .fpct{ color:var(--mute); }
   @media(max-width:768px){ .ana .fstep{ flex-direction:column; align-items:stretch; } .ana .flbl{ text-align:left; } .ana .ftrack{ min-width:100%; } .ana .fdrop{ min-width:100%; } }
   .ana table{ width:100%; border-collapse:collapse; font-size:13px; background:transparent; border:none; border-radius:0; }
+  /* Portfolio Overview only. Scrolled sideways on a phone the numbers quickly
+     detach from the site they belong to, so the name column is pinned. The
+     opaque background matters: without it the scrolled columns show through. */
+  .ana-ov-scroll table{ min-width:820px; }
+  .ana-ov-scroll th:first-child, .ana-ov-scroll td:first-child{
+    position:sticky; left:0; z-index:2; background:#fff;
+    box-shadow:1px 0 0 var(--line);
+  }
+  .ana-ov-scroll thead th:first-child{ z-index:3; background:var(--wash,#f7f8fa); }
+  @media (max-width:760px){
+    .ana-ov-scroll table{ min-width:760px; font-size:12.5px; }
+    .ana-ov-scroll th:first-child, .ana-ov-scroll td:first-child{ max-width:170px; }
+  }
   .ana th{ text-align:left; color:var(--mute); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding:6px 8px; border-bottom:1px solid var(--line); background:transparent; }
   .ana th.num, .ana td.num{ text-align:right; }
   .ana td{ padding:8px; border-bottom:1px solid #f3f3f6; vertical-align:top; }
@@ -5114,7 +5127,11 @@ function drawAnaOverview(){
       </div>
       <div style="height:220px;position:relative;"><canvas id="anaBookChart"></canvas></div>
     </div>
-    <div class="section card" style="padding:0;overflow:hidden;">
+    <!-- overflow-x:auto, not hidden: this table is ~1240px of columns and a
+         phone is ~400px wide, so hidden silently clipped Reached /book, Booked,
+         Events and Last seen with no way to reach them. Matches how every other
+         wide table in this admin is wrapped. -->
+    <div class="section card ana-ov-scroll" style="padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table>
         <thead><tr>
           ${ANA_OV_COLS.map(c=>{
