@@ -438,7 +438,7 @@ function dialTwiml(line, callerFrom, sid) {
 function ivrGateTwiml(sid) {
   const action = voiceUrl('voice_gather', { sid });
   return '<Response><Gather numDigits="1" timeout="8" action="' + xmlEsc(action) + '" method="POST">'
-    + '<Say voice="Polly.Joanna-Generative">To reduce spam calls, press 1 to continue.</Say>'
+    + '<Say voice="Polly.Joanna-Generative">Please press 1 to continue.</Say>'
     + '</Gather><Say voice="Polly.Joanna-Generative">We did not get a response. Goodbye.</Say><Hangup/></Response>';
 }
 

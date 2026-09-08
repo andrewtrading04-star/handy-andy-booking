@@ -26,7 +26,7 @@ export const SECRETARY_EXTRA_BUSINESSES = {
   ],
   'handy-andy': [
     'atxtvmount', 'austintvinstall', 'houstonmounting', 'htvmounting',
-    'austin', 'mile-high',
+    'austin', 'mile-high', 'houstontvmountingpros',
   ],
 };
 
