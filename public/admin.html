@@ -5072,7 +5072,9 @@ function drawAnaOverview(){
   // so the table itself is free to answer "where is the traffic".
   let rows=anaOverviewSorted(anaOverviewData);
   if(anaOverviewFilter) rows=rows.filter(b=>anaOverviewStatus(b)===anaOverviewFilter);
-  const totalVisitors=anaOverviewData.reduce((n,b)=>n+(b.visitors_30d||0),0);
+  // Server total is deduplicated across a site's markets; the row-sum fallback
+  // is only for an older payload and can double-count cross-market sessions.
+  const totalVisitors=(anaOverviewTotals&&anaOverviewTotals.visitors_30d!=null)?anaOverviewTotals.visitors_30d:anaOverviewData.reduce((n,b)=>n+(b.visitors_30d||0),0);
   // Read from the server-computed totals when present, but fall back to summing
   // the rows so the header still shows real numbers against an older payload.
   const bookTotal=anaOverviewTotals?anaOverviewTotals.book_visits_30d:anaOverviewData.reduce((n,b)=>n+(b.book_visits_30d||0),0);
@@ -5135,7 +5137,7 @@ function drawAnaOverview(){
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
-              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};" title="${b.bookings_na?'Not attributable: this page has no service city of its own, so its bookings land in the metro the customer booked':''}">${b.bookings_na?'—':(b.bookings_30d||0).toLocaleString()}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5175,7 +5177,8 @@ function drawAnaOverview(){
         analytics; every other row counts people who opened the booking widget.
         The two are not directly comparable, but <b>Reached /book</b> and
         <b>Booked</b> are. Bookings land in a market by the service city on the
-        job.</div>
+        job, so the main-site row shows — for Booked: its visitors' jobs are
+        counted in whichever metro they booked.</div>
       <div style="margin-top:5px;">Counts on non-market rows come from the
         booking-widget tracking script, so they cover pages carrying that script
         — not raw web traffic to every URL on the domain.</div>

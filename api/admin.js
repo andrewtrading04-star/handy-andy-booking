@@ -5712,6 +5712,11 @@ async function analyticsOverview(req, res, db, auth) {
   // site counts people who opened its widget. Flagged as `market: true` so the
   // UI can say so rather than quietly comparing two different things.
   const marketRowsByBiz = new Map();
+  // Distinct sessions across ALL of a business's markets. A session that reads
+  // the Denver page and then the homepage is rightly a visitor to both rows,
+  // but it is one person in the portfolio total -- summing rows would count it
+  // twice (measured: 914 summed vs 851 distinct, 51 sessions in 2+ markets).
+  const marketDedup = new Map(); // slug -> { visitors:Set, book:Set, bookByDay:Map<day,Set> }
   {
     const withMarkets = (rows || []).filter(b => b.analytics_config
       && Array.isArray(b.analytics_config.markets) && b.analytics_config.markets.length);
@@ -5741,8 +5746,9 @@ async function analyticsOverview(req, res, db, auth) {
           try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
           catch { continue; }
           let e = sess.get(r.session_id);
-          if (!e) { e = { paths: new Set(), days: new Map(), last: null }; sess.set(r.session_id, e); }
+          if (!e) { e = { paths: new Set(), days: new Map(), views: new Map(), last: null }; sess.set(r.session_id, e); }
           e.paths.add(path);
+          e.views.set(path, (e.views.get(path) || 0) + 1); // real page views, for the Events column
           const day = String(r.created_at).slice(0, 10);
           if (!e.days.has(path)) e.days.set(path, new Set());
           e.days.get(path).add(day);
@@ -5753,6 +5759,7 @@ async function analyticsOverview(req, res, db, auth) {
 
       const bkAll = bookingsByBiz.get(b.id) || [];
       const out = [];
+      const dedup = { visitors: new Set(), book: new Set(), bookByDay: new Map() };
       for (const m of b.analytics_config.markets) {
         const paths = (m.paths || []).map(p => p.replace(/\/+$/, '') || '/');
         const cities = new Set((m.cities || []).map(c => String(c).toLowerCase()));
@@ -5763,27 +5770,35 @@ async function analyticsOverview(req, res, db, auth) {
           const hit = paths.some(p => e.paths.has(p));
           if (!hit) continue;
           visitors.add(sid);
+          dedup.visitors.add(sid);
           for (const p of paths) {
+            events += e.views.get(p) || 0; // page views of this market's pages
             for (const d of (e.days.get(p) || [])) {
               if (!byDay.has(d)) byDay.set(d, new Set());
               byDay.get(d).add(sid);
-              events++;
             }
           }
           // Reached the booking page in the same session as this market's page.
           if (e.paths.has('/book')) {
             bookVisitors.add(sid);
+            dedup.book.add(sid);
             for (const p of paths) for (const d of (e.days.get(p) || [])) {
               if (!bookByDay.has(d)) bookByDay.set(d, new Set());
               bookByDay.get(d).add(sid);
+              if (!dedup.bookByDay.has(d)) dedup.bookByDay.set(d, new Set());
+              dedup.bookByDay.get(d).add(sid);
             }
           }
           if (!lastSeen || (e.last && e.last > lastSeen)) lastSeen = e.last;
         }
-        // Bookings land in a market by the service city on the job.
+        // Bookings land in a market by the service city on the job. A market
+        // with no cities (the homepage) has nothing to attribute: those
+        // visitors' jobs land in whichever metro they booked, so it reports
+        // "not applicable" rather than a zero that reads as a dead funnel.
+        const bookingsNa = cities.size === 0;
         let kept = 0, cancelled = 0, internal = 0;
         const bookingsByDay = new Map();
-        for (const bk of bkAll) {
+        if (!bookingsNa) for (const bk of bkAll) {
           const city = String(bk.city || '').toLowerCase().trim();
           if (!city || !cities.has(city)) continue;
           if (bk.internal) { internal++; continue; }
@@ -5807,6 +5822,7 @@ async function analyticsOverview(req, res, db, auth) {
           visitors_by_day: dayKeys.map(d => (byDay.get(d) ? byDay.get(d).size : 0)),
           book_visits_30d: bookVisitors.size,
           book_by_day: dayKeys.map(d => (bookByDay.get(d) ? bookByDay.get(d).size : 0)),
+          bookings_na: bookingsNa,
           bookings_30d: kept,
           bookings_cancelled_30d: cancelled,
           bookings_internal_30d: internal,
@@ -5815,6 +5831,7 @@ async function analyticsOverview(req, res, db, auth) {
         });
       }
       marketRowsByBiz.set(b.slug, out);
+      marketDedup.set(b.slug, dedup);
     }
   }
 
@@ -5852,16 +5869,26 @@ async function analyticsOverview(req, res, db, auth) {
   // them: showing both would double every one of its numbers in the totals.
   .flatMap(b => marketRowsByBiz.get(b.slug) || [b]);
 
-  // Portfolio-wide daily series for the booking-page chart. Summed from the
-  // per-business series rather than recounted, so the chart and the table can
-  // never disagree with each other.
-  const book_by_day_total = dayKeys.map((_, i) => businesses.reduce((n, b) => n + b.book_by_day[i], 0));
+  // Portfolio-wide totals. Single-site rows sum cleanly; a multi-market
+  // business contributes its DISTINCT session sets instead of the sum of its
+  // market rows, or one person on two of its pages counts twice. Bookings
+  // never overlap (one service city each) so those still sum.
+  const single = businesses.filter(b => !b.market);
+  const dedups = [...marketDedup.values()];
+  const visitors_30d_total = single.reduce((n, b) => n + b.visitors_30d, 0)
+    + dedups.reduce((n, d) => n + d.visitors.size, 0);
+  const book_visits_30d_total = single.reduce((n, b) => n + b.book_visits_30d, 0)
+    + dedups.reduce((n, d) => n + d.book.size, 0);
+  const book_by_day_total = dayKeys.map((d, i) =>
+    single.reduce((n, b) => n + b.book_by_day[i], 0)
+    + dedups.reduce((n, x) => n + (x.bookByDay.get(d) ? x.bookByDay.get(d).size : 0), 0));
   const bookings_by_day_total = dayKeys.map((_, i) => businesses.reduce((n, b) => n + b.bookings_by_day[i], 0));
 
   return res.status(200).json({
     businesses, since, days: dayKeys,
     totals: {
-      book_visits_30d: businesses.reduce((n, b) => n + b.book_visits_30d, 0),
+      visitors_30d: visitors_30d_total,
+      book_visits_30d: book_visits_30d_total,
       bookings_30d: businesses.reduce((n, b) => n + b.bookings_30d, 0),
       bookings_cancelled_30d: businesses.reduce((n, b) => n + b.bookings_cancelled_30d, 0),
       bookings_internal_30d: businesses.reduce((n, b) => n + b.bookings_internal_30d, 0),
