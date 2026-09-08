@@ -675,29 +675,55 @@ async function googleReviewSync(req, res) {
   const rating = Math.max(1, Math.min(5, parseInt(body.rating) || 0)) || null;
   const review_text = (body.review_text || '').toString().trim() || null;
   const review_date = body.review_date || null;
+  // Which GBP listing this review was left on (migration 0108). The parser
+  // resolves it from the arriving mailbox + the subject's business name, and
+  // sends null when those don't identify exactly one listing.
+  const location_key = (body.location_key || '').toString().trim() || null;
+  const location_cid = (body.location_cid || '').toString().trim() || null;
+  const gbp_display_name = (body.gbp_display_name || '').toString().trim() || null;
+  const source_mailbox = (body.source_mailbox || '').toString().trim() || null;
   if (!slug || !google_key || !rating) return res.status(400).json({ error: 'business, google_key, rating required' });
 
   const db = serviceClient();
   const { data: biz } = await db.from('businesses').select('id, slug').eq('slug', slug).eq('active', true).maybeSingle();
   if (!biz) return res.status(404).json({ error: `Unknown business "${slug}"` });
 
-  // Already stored? Keep it (preserves the seen flag + any manual re-attribution).
+  // Already stored? Keep the row (preserves the seen flag + any manual
+  // re-attribution) — but DO adopt a listing it doesn't have yet. Every review
+  // ingested before 0108 has location_key = null, and the only way to fill them
+  // in is a deep re-scan of the same emails; without this branch that re-scan
+  // would report "exists" for all of them and attribute nothing.
+  //
+  // Strictly a fill, never an overwrite: an existing location_key is left
+  // alone, so a re-scan can't flip a correctly-filed review onto another
+  // listing, and a hand-correction in the dashboard survives.
   const { data: existing } = await db.from('google_reviews')
-    .select('id').eq('business_id', biz.id).eq('google_key', google_key).maybeSingle();
-  if (existing) return res.status(200).json({ ok: true, action: 'exists', id: existing.id });
+    .select('id, location_key').eq('business_id', biz.id).eq('google_key', google_key).maybeSingle();
+  if (existing) {
+    if (location_key && !existing.location_key) {
+      const { error: upErr } = await db.from('google_reviews')
+        .update({ location_key, location_cid, gbp_display_name, source_mailbox })
+        .eq('id', existing.id);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      console.log('[google_review_sync] attributed', slug, reviewer_name, '→', location_key);
+      return res.status(200).json({ ok: true, action: 'attributed', id: existing.id, location_key });
+    }
+    return res.status(200).json({ ok: true, action: 'exists', id: existing.id, location_key: existing.location_key });
+  }
 
   const { technician_id, booking_id } = await matchTechByReviewer(db, biz.id, reviewer_name);
 
   const { data: ins, error } = await db.from('google_reviews').insert({
     business_id: biz.id, reviewer_name, rating, review_text, review_date,
     google_key, technician_id, booking_id, seen: false,
+    location_key, location_cid, gbp_display_name, source_mailbox,
   }).select('id').maybeSingle();
   if (error) {
     // Unique race (another run inserted it) is fine.
     if (/duplicate key|unique/i.test(error.message || '')) return res.status(200).json({ ok: true, action: 'exists' });
     return res.status(500).json({ error: error.message });
   }
-  console.log('[google_review_sync]', slug, reviewer_name, `${rating}★`, technician_id ? 'matched-tech' : 'no-match');
+  console.log('[google_review_sync]', slug, reviewer_name, `${rating}★`, location_key || 'UNATTRIBUTED', technician_id ? 'matched-tech' : 'no-match');
 
   // A real Google review is separate from the in-app 1–5★ flow (admin.js's
   // review handler texts the tech there: bad text on 1-4, congratulations on

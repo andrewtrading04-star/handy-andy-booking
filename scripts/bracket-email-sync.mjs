@@ -198,10 +198,12 @@ async function scanMailbox({ user, pass, idx }, todayISO) {
       const email = { subject: parsed.subject || '', text: parsed.text || '', html: parsed.html || '', todayISO };
       const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address || '').toLowerCase();
 
-      // Google Business Profile review notification.
-      const review = parseGoogleReviewEmail({ ...email, emailDateISO: parsed.date ? new Date(parsed.date).toISOString() : undefined });
+      // Google Business Profile review notification. `mailbox` matters: for
+      // every listing but the two Houston ones it is what identifies WHICH
+      // listing the review was left on (migration 0108).
+      const review = parseGoogleReviewEmail({ ...email, emailDateISO: parsed.date ? new Date(parsed.date).toISOString() : undefined, mailbox: user });
       if (review) {
-        console.log(`[bracket-sync] ${user}: google review ${review.business} ${review.rating}★ by ${review.reviewer_name}`);
+        console.log(`[bracket-sync] ${user}: google review ${review.business} ${review.rating}★ by ${review.reviewer_name} → ${review.location_key || 'UNATTRIBUTED'}`);
         reviews.push(review);
       }
 

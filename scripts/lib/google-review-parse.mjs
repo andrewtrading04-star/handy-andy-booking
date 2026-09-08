@@ -9,7 +9,13 @@
 //   Body:    "...you got a new 5-star review ... R Scott Dahms
 //             Professional, experienced, good communication. Perfect.
 //             Reply to review"
+//
+// The subject's trailing business name is also how a review is attributed to
+// ONE of the seven listings (migration 0108): the two Houston listings share a
+// notification inbox and differ ONLY by that name. So it is captured raw, never
+// normalized away, and handed to resolveLocation() with the arriving mailbox.
 // ============================================================================
+import { resolveLocation } from './gmb-locations.mjs';
 
 export function stripHtml(html) {
   if (!html) return '';
@@ -33,7 +39,11 @@ function detectBusiness(text) {
 
 // Parse a whole email into a Google-review payload, or null if it isn't an
 // identifiable Google Business Profile review notification.
-export function parseGoogleReviewEmail({ subject = '', text = '', html = '', emailDateISO } = {}) {
+// `mailbox` is the address of the inbox this email was fetched from. It is
+// half of the listing attribution (the other half is the subject's business
+// name) and is optional only so existing callers/tests keep working — without
+// it, anything but a uniquely-named listing stays unattributed.
+export function parseGoogleReviewEmail({ subject = '', text = '', html = '', emailDateISO, mailbox = null } = {}) {
   const body = (text && text.trim()) ? text : stripHtml(html);
   const hay = `${subject}\n${body}`;
 
@@ -46,7 +56,11 @@ export function parseGoogleReviewEmail({ subject = '', text = '', html = '', ema
   if (!rating || rating < 1 || rating > 5) return null;
 
   // Business: from the subject "... left a review for <Business>", else anywhere.
+  // Keep the matched name VERBATIM as well — detectBusiness() collapses both
+  // Houston listings to the same slug, so the raw name is the only thing left
+  // that can tell them apart.
   const bm = subject.match(/left a review for\s+(.+)$/i);
+  const gbp_display_name = bm ? bm[1].trim().replace(/\s+/g, ' ') : null;
   const business = detectBusiness(bm ? bm[1] : hay);
   if (!business) return null;
 
@@ -83,8 +97,22 @@ export function parseGoogleReviewEmail({ subject = '', text = '', html = '', ema
   // Stable dedupe key so re-scanning the same email is idempotent (no review id
   // is exposed in the email, so key on business + reviewer + rating + a text
   // snippet).
+  //
+  // DO NOT add the listing to this key. Every review already stored was keyed
+  // without it; adding it would make each of them look new on the next scan and
+  // duplicate all 84 rows. Attribution rides alongside the key, never inside it.
   const snippet = (review_text || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
   const google_key = `${business}:${(reviewer || '').toLowerCase()}:${rating}:${snippet}`;
 
-  return { business, reviewer_name: reviewer, rating, review_text, review_date, google_key };
+  // Which of our listings this review was left on. null when the signals don't
+  // identify exactly one — stored unattributed rather than filed wrongly.
+  const location = resolveLocation({ business, mailbox, displayName: gbp_display_name });
+
+  return {
+    business, reviewer_name: reviewer, rating, review_text, review_date, google_key,
+    gbp_display_name,
+    source_mailbox: mailbox || null,
+    location_key: location ? location.key : null,
+    location_cid: location ? location.cid : null,
+  };
 }

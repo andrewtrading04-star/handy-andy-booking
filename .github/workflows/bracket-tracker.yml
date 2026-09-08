@@ -31,6 +31,10 @@ on:
         description: 'Send the 5 approved customer/tech SMS templates to this number (e.g. 13374997817) to prove Twilio is wired up. Runs before, not instead of, the email scan.'
         required: false
         default: ''
+      lookback_days:
+        description: 'Override the email lookback window (default 45). Set to 400 for a one-off deep re-scan that attributes already-stored Google reviews to their GBP listing. Slow, and safe to repeat: existing rows are only filled in, never duplicated or overwritten.'
+        required: false
+        default: ''
 
 jobs:
   sync:
@@ -116,4 +120,7 @@ jobs:
           # One-off add/re-tier of a service-area zip (manual dispatch only).
           # "zip,area,surcharge,payout"; when set the script seeds it and skips the scan.
           ADD_ZIP:               ${{ github.event.inputs.add_zip }}
+          # One-off deep re-scan (manual dispatch only). Empty on the schedule,
+          # so the every-15-min run keeps its normal 45-day window.
+          LOOKBACK_DAYS:         ${{ github.event.inputs.lookback_days }}
         run: node scripts/bracket-email-sync.mjs
