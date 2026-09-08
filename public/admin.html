@@ -5686,7 +5686,19 @@ async function loadWebAnalytics(){
   const content=document.getElementById('webContent');
   try{
     const base=webBackend();
-    if(!base){ if(content) content.innerHTML=`<div class="card"><div class="empty">No website-analytics backend is configured for this business yet.</div></div>`; return; }
+    if(!base){
+      if(content) content.innerHTML=`<div class="card"><div class="empty">No website-analytics backend is configured for this business yet.</div></div>`;
+      // The header subtitle starts as literal "Loading…" and is only ever
+      // updated by webRender() below — which this early return skips — so
+      // without this it stayed stuck reading "Loading…" forever even though
+      // the content area had already resolved to a clear, final answer.
+      const upd=document.getElementById('webUpdated'); if(upd) upd.textContent='Not connected';
+      // Nothing will ever load here without a code change (a config row, not
+      // user action), so the 90s auto-refresh poll is pure waste — stop it
+      // rather than silently re-fetching nothing every 90 seconds.
+      if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+      return;
+    }
     // Kick off Chart.js alongside the data fetches (not after) — see loadAnalytics.
     const chartReady=ensureChartJs().catch(()=>{});
     const {from,to}=webRange(webDays);
