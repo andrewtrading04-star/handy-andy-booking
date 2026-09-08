@@ -4926,6 +4926,46 @@ function anaUrl(mode){
 // have never been wired into analytics at all; this is what would have shown
 // that on its own, without someone happening to click into that one business.
 let anaOverviewData=null, anaOverviewFilter=null, anaOverviewTotals=null, anaOverviewDays=[], anaBookChart=null;
+// Which column the Overview table is sorted by. Busiest-first on load, because
+// the question the page opens on is "where is the traffic".
+let anaOverviewSort={key:'visitors_30d',dir:'desc'};
+// Sortable columns. `num:true` means a click should start descending (biggest
+// first is what you want from a count); text and status start ascending.
+const ANA_OV_COLS=[
+  {key:'name',        label:'Business',        num:false},
+  {key:'status',      label:'Status',          num:false},
+  {key:'visitors_30d',label:'Visitors',        num:true, cls:'num'},
+  {key:'avg_visitors_day',label:'Avg/day',     num:true, cls:'num'},
+  {key:'spark',       label:'Visitors per day',num:false,sortable:false},
+  {key:'book_visits_30d',label:'Reached /book',num:true, cls:'num'},
+  {key:'bookings_30d',label:'Booked',          num:true, cls:'num'},
+  {key:'events_30d',  label:'Events',          num:true, cls:'num'},
+  {key:'last_event',  label:'Last seen',       num:true},
+];
+// Rank for the Status column so sorting walks the health scale rather than the
+// alphabet -- "No data" next to "Not tracked" is the useful adjacency.
+const ANA_STATUS_RANK={red:0,gray:1,amber:2,green:3};
+function anaOverviewSortVal(b,key){
+  if(key==='status') return ANA_STATUS_RANK[anaOverviewStatus(b)];
+  if(key==='name') return String(b.name||'').toLowerCase();
+  // Never-seen sorts as the oldest possible time, so "no data" lands at the
+  // bottom on newest-first rather than jumping to the top as a 0.
+  if(key==='last_event') return b.last_event ? new Date(b.last_event).getTime() : -Infinity;
+  return Number(b[key]||0);
+}
+function anaOverviewSorted(rows){
+  const {key,dir}=anaOverviewSort;
+  const mul=dir==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
+    const va=anaOverviewSortVal(a,key), vb=anaOverviewSortVal(b,key);
+    let c;
+    if(typeof va==='string'||typeof vb==='string') c=String(va).localeCompare(String(vb));
+    else c=va<vb?-1:va>vb?1:0;
+    // Ties fall back to visitors so the order is stable and still meaningful.
+    if(c===0) c=(Number(a.visitors_30d||0)-Number(b.visitors_30d||0));
+    return c*mul;
+  });
+}
 async function renderAnalyticsOverview(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
@@ -5030,7 +5070,7 @@ function drawAnaOverview(){
   // Busiest first. The status-priority sort this replaced answered "what is
   // broken"; the KPI tiles above still answer that and now double as filters,
   // so the table itself is free to answer "where is the traffic".
-  let rows=[...anaOverviewData].sort((a,b)=>(b.visitors_30d||0)-(a.visitors_30d||0) || (b.events_30d||0)-(a.events_30d||0));
+  let rows=anaOverviewSorted(anaOverviewData);
   if(anaOverviewFilter) rows=rows.filter(b=>anaOverviewStatus(b)===anaOverviewFilter);
   const totalVisitors=anaOverviewData.reduce((n,b)=>n+(b.visitors_30d||0),0);
   // Read from the server-computed totals when present, but fall back to summing
@@ -5043,7 +5083,7 @@ function drawAnaOverview(){
     <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
   view.innerHTML=`<div class="ana">
     <div class="ana-head"><div><h1>Analytics</h1>
-      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · most traffic first</div></div></div>
+      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · sorted by ${esc((ANA_OV_COLS.find(c=>c.key===anaOverviewSort.key)||{label:'visitors'}).label.toLowerCase())}${anaOverviewSort.dir==='desc'?' (high to low)':' (low to high)'}</div></div></div>
     <div class="grid kpis" style="grid-template-columns:repeat(4,1fr);">
       ${tile('','All businesses',anaOverviewData.length)}
       ${tile('green','Reporting normally',counts.green,'good')}
@@ -5075,11 +5115,13 @@ function drawAnaOverview(){
     <div class="section card" style="padding:0;overflow:hidden;">
       <table>
         <thead><tr>
-          <th>Business</th><th>Status</th>
-          <th class="num">Visitors, 30d</th><th class="num">Avg/day</th>
-          <th>Visitors per day</th>
-          <th class="num">Reached /book</th><th class="num">Booked</th>
-          <th class="num">Events, 30d</th><th>Last seen</th>
+          ${ANA_OV_COLS.map(c=>{
+            if(c.sortable===false) return `<th${c.cls?` class="${c.cls}"`:''}>${esc(c.label)}</th>`;
+            const active=anaOverviewSort.key===c.key;
+            const arrow=active?(anaOverviewSort.dir==='asc'?' ▲':' ▼'):'';
+            return `<th${c.cls?` class="${c.cls}"`:''} data-anasort="${c.key}" title="Sort by ${esc(c.label)}"
+              style="cursor:pointer;user-select:none;${active?'color:var(--ink);':''}">${esc(c.label)}<span style="font-size:9px;opacity:.75;">${arrow}</span></th>`;
+          }).join('')}
         </tr></thead>
         <tbody>
           ${rows.map(b=>{
@@ -5131,6 +5173,15 @@ function drawAnaOverview(){
         every URL on the domain.</div>
     </div>
   </div>`;
+  // Click a column to sort by it. Same column again reverses; a new column
+  // starts descending for counts (biggest first) and ascending for names.
+  view.querySelectorAll('[data-anasort]').forEach(el=>el.addEventListener('click',()=>{
+    const key=el.dataset.anasort;
+    const col=ANA_OV_COLS.find(c=>c.key===key);
+    if(anaOverviewSort.key===key) anaOverviewSort={key,dir:anaOverviewSort.dir==='asc'?'desc':'asc'};
+    else anaOverviewSort={key,dir:col&&col.num?'desc':'asc'};
+    drawAnaOverview();
+  }));
   view.querySelectorAll('[data-anafilter]').forEach(el=>el.addEventListener('click',()=>{
     anaOverviewFilter=el.dataset.anafilter||null; drawAnaOverview();
   }));
@@ -5142,6 +5193,10 @@ function drawAnaOverview(){
     if(slug && current && slug!==current.slug) switchToBusiness(slug);
     analyticsHubTab='bookings'; renderAnalyticsHub();
   }));
+  // Re-rendering replaced the <canvas>, so the chart has to be drawn again.
+  // Only once Chart.js has actually landed -- the initial load kicks off the
+  // lazy import and calls this itself when it resolves.
+  if(typeof Chart!=='undefined') drawAnaBookChart();
 }
 
 // Handyman Analytics reuses the entire booking-analytics view, just scoped to the
