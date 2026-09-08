@@ -5719,15 +5719,23 @@ async function analyticsOverview(req, res, db, auth) {
       const pub = serviceClientPublic();
       const host = (() => { try { return new URL(b.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
       // session -> { paths:Set, days:Set, last }
+      //
+      // page_view only, and filtered to this business's own host in the query.
+      // web_events carries ~190k rows per 30 days for this site, almost all of
+      // it time_on_page ticks firing every 30s — pulling it all would be tens
+      // of round trips AND still truncate, silently undercounting markets.
+      // Page views alone are a couple of thousand, which is what "which pages
+      // did this session touch" actually needs.
       const sess = new Map();
-      for (let page = 0; page < 40; page++) {
+      for (let page = 0; page < 12; page++) {
         const { data, error } = await pub.from('web_events')
           .select('session_id, page_url, created_at, user_agent')
+          .eq('event_type', 'page_view')
+          .ilike('page_url', `%${host}%`)
           .gte('created_at', since)
           .range(page * 1000, page * 1000 + 999);
         if (error) throw error;
         for (const r of data || []) {
-          if (host && !String(r.page_url || '').includes(host)) continue; // other hosts + localhost
           if (isBotUserAgent(r.user_agent)) continue;
           let path;
           try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
