@@ -5669,17 +5669,24 @@ async function analyticsOverview(req, res, db, auth) {
   // separately rather than dropped silently: a customer who books and cancels
   // is a real signal, just not revenue.
   const bookedByBiz = new Map(); // business_id -> { kept, cancelled, internal, byDay }
+  // Same bookings kept per-row as well, so a multi-market business can split
+  // them by service city without a second trip to the database.
+  const bookingsByBiz = new Map(); // business_id -> [{ city, created_at, cancelled, internal }]
   {
     const { data: bkRows, error: bkErr } = await db.from('bookings')
-      .select('business_id, created_at, status, customer:customers ( email, phone )')
+      .select('business_id, created_at, status, city, customer:customers ( email, phone )')
       .eq('source', 'widget')
       .gte('created_at', since);
     if (bkErr) throw bkErr;
     for (const bk of bkRows || []) {
       let e = bookedByBiz.get(bk.business_id);
       if (!e) { e = { kept: 0, cancelled: 0, internal: 0, byDay: new Map() }; bookedByBiz.set(bk.business_id, e); }
-      if (isInternalContact(bk.customer)) { e.internal++; continue; }
-      if (bk.status === 'cancelled') { e.cancelled++; continue; }
+      const internal = isInternalContact(bk.customer);
+      const cancelled = bk.status === 'cancelled';
+      if (!bookingsByBiz.has(bk.business_id)) bookingsByBiz.set(bk.business_id, []);
+      bookingsByBiz.get(bk.business_id).push({ city: bk.city, created_at: bk.created_at, cancelled, internal });
+      if (internal) { e.internal++; continue; }
+      if (cancelled) { e.cancelled++; continue; }
       e.kept++;
       const day = String(bk.created_at).slice(0, 10);
       e.byDay.set(day, (e.byDay.get(day) || 0) + 1);
@@ -5690,6 +5697,118 @@ async function analyticsOverview(req, res, db, auth) {
   // sparkline instead of being compressed out of the line entirely.
   const dayKeys = [];
   for (let i = 29; i >= 0; i--) dayKeys.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+
+  // ── Multi-market businesses ───────────────────────────────────────────────
+  // One domain covering several metros (today only ihandyandy.com) is really
+  // several independent operations sharing a site, and rolling them into one
+  // row hides that Denver is carrying it while Dallas has never sold a job.
+  // Split per analytics_config.markets — each entry names its landing pages
+  // and the service cities its bookings land in.
+  //
+  // Measured from public.web_events, NOT the booking-widget events used for
+  // every other row: the widget stream has no page attribution at all, so it
+  // physically cannot say which metro a visitor came through. That means these
+  // rows' Visitors count everyone who landed on the page, while a single-city
+  // site counts people who opened its widget. Flagged as `market: true` so the
+  // UI can say so rather than quietly comparing two different things.
+  const marketRowsByBiz = new Map();
+  {
+    const withMarkets = (rows || []).filter(b => b.analytics_config
+      && Array.isArray(b.analytics_config.markets) && b.analytics_config.markets.length);
+    for (const b of withMarkets) {
+      const pub = serviceClientPublic();
+      const host = (() => { try { return new URL(b.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+      // session -> { paths:Set, days:Set, last }
+      const sess = new Map();
+      for (let page = 0; page < 40; page++) {
+        const { data, error } = await pub.from('web_events')
+          .select('session_id, page_url, created_at, user_agent')
+          .gte('created_at', since)
+          .range(page * 1000, page * 1000 + 999);
+        if (error) throw error;
+        for (const r of data || []) {
+          if (host && !String(r.page_url || '').includes(host)) continue; // other hosts + localhost
+          if (isBotUserAgent(r.user_agent)) continue;
+          let path;
+          try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
+          catch { continue; }
+          let e = sess.get(r.session_id);
+          if (!e) { e = { paths: new Set(), days: new Map(), last: null }; sess.set(r.session_id, e); }
+          e.paths.add(path);
+          const day = String(r.created_at).slice(0, 10);
+          if (!e.days.has(path)) e.days.set(path, new Set());
+          e.days.get(path).add(day);
+          if (!e.last || r.created_at > e.last) e.last = r.created_at;
+        }
+        if (!data || data.length < 1000) break;
+      }
+
+      const bkAll = bookingsByBiz.get(b.id) || [];
+      const out = [];
+      for (const m of b.analytics_config.markets) {
+        const paths = (m.paths || []).map(p => p.replace(/\/+$/, '') || '/');
+        const cities = new Set((m.cities || []).map(c => String(c).toLowerCase()));
+        const visitors = new Set(), bookVisitors = new Set();
+        const byDay = new Map(), bookByDay = new Map();
+        let lastSeen = null, events = 0;
+        for (const [sid, e] of sess) {
+          const hit = paths.some(p => e.paths.has(p));
+          if (!hit) continue;
+          visitors.add(sid);
+          for (const p of paths) {
+            for (const d of (e.days.get(p) || [])) {
+              if (!byDay.has(d)) byDay.set(d, new Set());
+              byDay.get(d).add(sid);
+              events++;
+            }
+          }
+          // Reached the booking page in the same session as this market's page.
+          if (e.paths.has('/book')) {
+            bookVisitors.add(sid);
+            for (const p of paths) for (const d of (e.days.get(p) || [])) {
+              if (!bookByDay.has(d)) bookByDay.set(d, new Set());
+              bookByDay.get(d).add(sid);
+            }
+          }
+          if (!lastSeen || (e.last && e.last > lastSeen)) lastSeen = e.last;
+        }
+        // Bookings land in a market by the service city on the job.
+        let kept = 0, cancelled = 0, internal = 0;
+        const bookingsByDay = new Map();
+        for (const bk of bkAll) {
+          const city = String(bk.city || '').toLowerCase().trim();
+          if (!city || !cities.has(city)) continue;
+          if (bk.internal) { internal++; continue; }
+          if (bk.cancelled) { cancelled++; continue; }
+          kept++;
+          const d = String(bk.created_at).slice(0, 10);
+          bookingsByDay.set(d, (bookingsByDay.get(d) || 0) + 1);
+        }
+        const v = visitors.size;
+        out.push({
+          slug: `${b.slug}::${String(m.name).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          parent_slug: b.slug,
+          market: true,
+          name: m.name,
+          url: paths.map(p => `https://${host}${p === '/' ? '' : p}`).join(' · '),
+          tracked: true, national: false,
+          has_traffic_backend: true, has_gsc: false,
+          events_30d: events,
+          visitors_30d: v,
+          avg_visitors_day: Math.round((v / 30) * 10) / 10,
+          visitors_by_day: dayKeys.map(d => (byDay.get(d) ? byDay.get(d).size : 0)),
+          book_visits_30d: bookVisitors.size,
+          book_by_day: dayKeys.map(d => (bookByDay.get(d) ? bookByDay.get(d).size : 0)),
+          bookings_30d: kept,
+          bookings_cancelled_30d: cancelled,
+          bookings_internal_30d: internal,
+          bookings_by_day: dayKeys.map(d => bookingsByDay.get(d) || 0),
+          last_event: lastSeen,
+        });
+      }
+      marketRowsByBiz.set(b.slug, out);
+    }
+  }
 
   const businesses = (rows || []).map(b => {
     const cfg = b.analytics_config || null;
@@ -5720,7 +5839,10 @@ async function analyticsOverview(req, res, db, auth) {
       bookings_by_day: bk ? dayKeys.map(d => bk.byDay.get(d) || 0) : dayKeys.map(() => 0),
       last_event: s ? s.lastSeen : null,
     };
-  });
+  })
+  // A multi-market business is replaced by its markets, not listed alongside
+  // them: showing both would double every one of its numbers in the totals.
+  .flatMap(b => marketRowsByBiz.get(b.slug) || [b]);
 
   // Portfolio-wide daily series for the booking-page chart. Summed from the
   // per-business series rather than recounted, so the chart and the table can

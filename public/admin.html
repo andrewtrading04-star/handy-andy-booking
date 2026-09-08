@@ -5083,7 +5083,7 @@ function drawAnaOverview(){
     <div class="lbl">${esc(label)}</div><div class="val ${cls||''}">${val}</div></div>`;
   view.innerHTML=`<div class="ana">
     <div class="ana-head"><div><h1>Analytics</h1>
-      <div class="ana-sub">${anaOverviewData.length} businesses · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · sorted by ${esc((ANA_OV_COLS.find(c=>c.key===anaOverviewSort.key)||{label:'visitors'}).label.toLowerCase())}${anaOverviewSort.dir==='desc'?' (high to low)':' (low to high)'}</div></div></div>
+      <div class="ana-sub">${anaOverviewData.length} sites &amp; markets · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · sorted by ${esc((ANA_OV_COLS.find(c=>c.key===anaOverviewSort.key)||{label:'visitors'}).label.toLowerCase())}${anaOverviewSort.dir==='desc'?' (high to low)':' (low to high)'}</div></div></div>
     <div class="grid kpis" style="grid-template-columns:repeat(4,1fr);">
       ${tile('','All businesses',anaOverviewData.length)}
       ${tile('green','Reporting normally',counts.green,'good')}
@@ -5127,8 +5127,8 @@ function drawAnaOverview(){
           ${rows.map(b=>{
             const s=anaOverviewStatus(b);
             const v=b.visitors_30d||0, avg=b.avg_visitors_day||0;
-            return `<tr class="ana-ov-row" data-slug="${esc(b.slug)}" style="cursor:pointer;">
-              <td><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}</div>
+            return `<tr class="ana-ov-row" data-slug="${esc(b.parent_slug||b.slug)}" style="cursor:pointer;">
+              <td><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}${b.market?' <span class="pill" style="background:#eef2ff;color:#4338ca;">MARKET</span>':''}</div>
                 <div class="sub" style="font-size:11.5px;">${esc(b.url||'')}</div></td>
               <td><span class="pill ${s}">${ANA_OVERVIEW_LABEL[s]}</span></td>
               <td class="num" style="font-weight:700;">${v.toLocaleString()}</td>
@@ -5168,9 +5168,17 @@ function drawAnaOverview(){
       <div style="margin-top:5px;"><b>Last seen</b> — when the most recent event
         landed. "15d ago" means nobody has touched that site's tracked funnel in
         over two weeks.</div>
-      <div style="margin-top:5px;">Counts come from the booking-widget tracking
-        script, so they cover pages carrying that script — not raw web traffic to
-        every URL on the domain.</div>
+      <div style="margin-top:5px;"><span class="pill" style="background:#eef2ff;color:#4338ca;">MARKET</span>
+        rows are one metro of a site that covers several from a single domain,
+        broken out so each is judged on its own. Their <b>Visitors</b> counts
+        everyone who landed on that metro's pages, measured from full site
+        analytics; every other row counts people who opened the booking widget.
+        The two are not directly comparable, but <b>Reached /book</b> and
+        <b>Booked</b> are. Bookings land in a market by the service city on the
+        job.</div>
+      <div style="margin-top:5px;">Counts on non-market rows come from the
+        booking-widget tracking script, so they cover pages carrying that script
+        — not raw web traffic to every URL on the domain.</div>
     </div>
   </div>`;
   // Click a column to sort by it. Same column again reverses; a new column
