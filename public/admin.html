@@ -5068,8 +5068,7 @@ function drawAnaOverview(){
         </div>
       </div>
       <div style="font-size:11.5px;color:var(--mute);margin-top:2px;">
-        Booked counts surviving widget bookings only.
-        ${cancelledTotal?`<b>${cancelledTotal}</b> cancelled`:'No cancellations'} in the same window.
+        Booked counts bookings taken through the booking page.
       </div>
       <div style="height:220px;position:relative;"><canvas id="anaBookChart"></canvas></div>
     </div>
@@ -5094,9 +5093,7 @@ function drawAnaOverview(){
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
-              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}${
-                b.bookings_cancelled_30d
-                  ? `<div style="font-weight:400;font-size:10.5px;color:var(--mute);">${b.bookings_cancelled_30d} cancelled</div>` : ''}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};">${(b.bookings_30d||0).toLocaleString()}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5112,9 +5109,8 @@ function drawAnaOverview(){
         with a single visitor on a single day reads 0.0, not 1.0.</div>
       <div style="margin-top:5px;"><b>Reached /book</b> — people who actually
         opened the booking widget, deduped, so reloading the page does not
-        inflate it. <b>Booked</b> counts surviving bookings taken through the
-        widget: cancelled jobs are excluded from the number but shown
-        underneath it, and internal test bookings are filtered out. Jobs
+        inflate it. <b>Booked</b> counts jobs booked through the widget that
+        are still standing; cancelled and internal bookings are left out. Jobs
         created by the office or over the phone are not counted here — they
         never touched the booking page.</div>
       <div style="margin-top:5px;"><b>Events</b> — every tracked interaction
