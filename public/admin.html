@@ -1428,6 +1428,13 @@
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> <span id="navCallHubLabel">Calls</span> <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
+      <!-- Texts. Deliberately its OWN section rather than a tab inside the
+           Calls hub: CALL_TABS is hand-tuned per secretary, so a tab added
+           there would change which tab each of them lands on AND feed the
+           CALL_TABS.some(t=>t.show()) gate that decides whether the Calls
+           button renders at all. An unanswered customer text also deserves a
+           badge visible from every screen, not one buried inside a hub. -->
+      <button data-nav="messages" id="navMessages"><span class="ic" data-ico="messages">💬</span> Messages <span class="nav-badge" id="msgBadge" style="display:none;"></span></button>
       <button data-nav="mycallperf" id="navMyCallPerf"><span class="ic" data-ico="phone">📞</span> My Call Performance</button>
       <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
@@ -1897,6 +1904,7 @@ function slotLabelHtml(s){ const base=esc(s.label); return s&&s.bonus ? `${base}
 // ic('name') is used in dynamic markup; static nav icons carry data-ico and are
 // themed by applyIconTheme() whenever the active business changes.
 const ICONS = {
+  messages: {e:'💬', f:'fa-regular fa-comments'},
   tools:    {e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
   schedule: {e:'📅', f:'fa-regular fa-calendar'},
   customers:{e:'👥', f:'fa-solid fa-users'},
@@ -2196,6 +2204,12 @@ function enterApp(){
   if(navAnaHub) navAnaHub.style.display = ANALYTICS_TABS.some(t=>t.show()) ? '' : 'none';
   const navCallHub=document.getElementById('navCallHub');
   if(navCallHub) navCallHub.style.display = CALL_TABS.some(t=>t.show()) ? '' : 'none';
+  // Messages is for everyone, owner and secretary alike — answering a customer
+  // who texted is a secretary's job first and foremost. The server scopes the
+  // thread list to the caller's own businesses (messagesList in api/admin.js
+  // via allowedSlugsFor), so there is nothing to hide here.
+  const navMsg=document.getElementById('navMessages');
+  if(navMsg) navMsg.style.display = '';
   // Was "Review Calls" for Joey specifically, back when her hub held nothing
   // else (Performance/Audit are owner-only, My Performance moved to its own
   // top-level screen). That's no longer true — she also has Log, the actual
@@ -2448,7 +2462,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2459,6 +2473,7 @@ function navTo(s){
     else if(s==='technicians') renderTechnicians();
     else if(s==='reviews') renderReviews();
     else if(s==='callhub') renderCallHub();
+    else if(s==='messages') renderMessages();
     else if(s==='mycallperf') renderMyCallPerformance();
     else if(s==='gallery') renderGallery();
     else if(s==='analyticshub') renderAnalyticsHub();
@@ -2488,6 +2503,7 @@ function refreshCurrent(){
   // Re-rendering the hub, not the child directly, so the tab row comes back with
   // it. Calling the child alone would repaint the screen without its tabs.
   else if(section==='callhub') renderCallHub();
+  else if(section==='messages') renderMessages();
   else if(section==='mycallperf') renderMyCallPerformance();
   else if(section==='gallery') renderGallery();
   else if(section==='analyticshub') renderAnalyticsHub();
@@ -9708,6 +9724,246 @@ setInterval(()=>{
   if(document.hidden||!current) return;
   if(onScreen('calllog')) renderCalls();
   else refreshCallsBadge();
+}, 20000);
+
+// ── Messages (two-way SMS) ───────────────────────────────────────────────────
+// A customer texts one of our published numbers; this is where the office
+// reads it and texts back. Before migration 0109 an inbound text was relayed
+// to a handset and thrown away, so there was nothing to read and no way to
+// answer — the owner's words were "i just want to be able to send text back to
+// customers when they text any of my numbers."
+//
+// A conversation is the PAIR (our number, their number). The same person can
+// text two of our brands and those stay two separate threads, because a reply
+// has to go back out from the number they actually texted — answering a text
+// to the Greenway Plaza line from the toll-free number reads as a stranger.
+//
+// Modeled on renderCalls()/paintCalls() below: an async render that owns the
+// fetch and the caches, and a synchronous paint that reads only module globals
+// and re-attaches every listener.
+//
+// NOTE the null here, not {}. renderCalls' own `let _callsData={open:[],...}`
+// paired with `const firstLoad=!_callsData` is a live bug — an object literal
+// is always truthy, so its first-paint and error branches can never run. This
+// cache starts null so the same test actually works.
+let _msgThreads=null;      // conversation list, newest activity first
+let _msgOpen=null;         // {our, customer} of the open thread, null = list
+let _msgThread=null;       // the open thread's messages
+let _msgDraft={};          // un-sent reply text, keyed "our|customer"
+let _msgLoading=false;
+
+function msgKey(our,customer){ return our+'|'+customer; }
+function msgOpenKey(){ return _msgOpen ? msgKey(_msgOpen.our,_msgOpen.customer) : ''; }
+
+// messages.created_at is a real UTC timestamp written by Postgres now(), NOT a
+// provider-stamped Central time, so it needs none of the CALL_TZ correction the
+// call log carries — plain local formatting is right here.
+function msgWhen(iso){
+  if(!iso) return '';
+  const d=new Date(iso), now=new Date();
+  const sameDay = d.toDateString()===now.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})
+    : d.toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+}
+
+async function renderMessages(){
+  const view=document.getElementById('view');
+  const firstLoad=!_msgThreads;
+  if(firstLoad) view.innerHTML='<div class="wrap"><div class="empty">Loading messages…</div></div>';
+  else if(!view.querySelector('[data-msgview]')) paintMessages();
+
+  // Never repaint over a half-typed reply. The 20s poll below calls straight
+  // in here, and a repaint destroys the textarea with whatever was in it —
+  // losing a secretary's half-written answer to a customer is worse than
+  // showing her a list that is twenty seconds stale.
+  const ta=view.querySelector('[data-msgreply]');
+  if(!firstLoad && ((_msgDraft[msgOpenKey()]||'').trim() || (ta && document.activeElement===ta))) return;
+
+  if(_msgLoading) return;
+  _msgLoading=true;
+  try{
+    const list=await api('messages_list');
+    // The fetch may have outlived the screen. Checking AFTER the await, before
+    // touching #view, is what stops a slow response stomping whatever the user
+    // navigated to in the meantime.
+    if(!firstLoad && !onScreen('messages')) return;
+    _msgThreads=list.threads||[];
+    if(_msgOpen){
+      const t=await api('messages_thread',{params:{ our:_msgOpen.our, customer:_msgOpen.customer }});
+      if(!onScreen('messages')) return;
+      _msgThread=t;
+    }
+    paintMessages();
+    refreshMessagesBadge();
+  }catch(e){
+    if(firstLoad) view.innerHTML='<div class="wrap"><div class="empty">Could not load messages: '+esc(e.message||'')+'</div></div>';
+  }finally{ _msgLoading=false; }
+}
+
+function paintMessages(){
+  const view=document.getElementById('view');
+  if(_msgOpen && _msgThread) return paintMsgThread(view);
+
+  const rows=(_msgThreads||[]);
+  const unread=rows.reduce((n,t)=>n+(t.unread||0),0);
+  let html='<div class="wrap" data-msgview>'
+    +'<div class="rc-head"><div>'
+    +'<h2 class="rc-title">💬 Messages</h2>'
+    +'<div class="rc-sub">Texts customers sent to your business numbers. Reply and it goes back from the same number they texted.</div>'
+    +'</div></div>';
+
+  if(!rows.length){
+    html+='<div class="empty">No text messages yet. When someone texts one of your numbers it will show up here.</div>';
+  } else {
+    if(unread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+unread+' unread</span></div>';
+    for(const t of rows){
+      const who=t.customer_name || t.customer_phone_pretty || t.customer_phone;
+      const preview=(t.last_body||'').slice(0,120);
+      const dir=t.last_direction==='out' ? 'You: ' : '';
+      html+='<div class="rc-card" style="cursor:pointer;" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
+        +'<div style="flex:1;min-width:0;">'
+        +'<div style="display:flex;align-items:center;gap:8px;">'
+        +'<strong>'+esc(who)+'</strong>'
+        +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
+        +'</div>'
+        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
+        +'<div class="rc-meta">to '+esc(t.our_phone_pretty||t.our_phone)+(t.business_slug?' · '+esc(t.business_slug):'')+'</div>'
+        +'</div>'
+        +'<div class="rc-meta" style="white-space:nowrap;">'+esc(msgWhen(t.last_at))+'</div>'
+        +'</div>';
+    }
+  }
+  html+='</div>';
+  view.innerHTML=html;
+
+  view.querySelectorAll('[data-msgopen]').forEach(el=>el.addEventListener('click',()=>{
+    _msgOpen={ our:el.dataset.msgour, customer:el.dataset.msgcust };
+    _msgThread=null;
+    openMsgThread();
+  }));
+}
+
+function paintMsgThread(view){
+  const t=_msgThread;
+  const who=t.customer_name || t.customer_phone_pretty;
+  const key=msgOpenKey();
+  let html='<div class="wrap" data-msgview>'
+    +'<div class="rc-head"><div>'
+    +'<button class="btn" data-msgback="1" style="margin-bottom:8px;">← All messages</button>'
+    +'<h2 class="rc-title">'+esc(who)+'</h2>'
+    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · texted '+esc(t.our_phone_pretty)
+    +(t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
+    +'</div></div></div>';
+
+  html+='<div class="rc-card guided" style="max-height:52vh;overflow-y:auto;">';
+  if(!t.messages.length){
+    html+='<div class="empty">No messages in this conversation.</div>';
+  } else {
+    for(const m of t.messages){
+      const mine=m.direction==='out';
+      const bg = mine ? 'var(--accent-soft)' : 'var(--panel)';
+      const align = mine ? 'margin-left:auto;' : '';
+      let meta=msgWhen(m.created_at);
+      if(mine){
+        if(m.status==='failed'||m.status==='undelivered') meta+=' · NOT DELIVERED'+(m.error?' ('+m.error+')':'');
+        else if(m.status==='delivered') meta+=' · delivered';
+        else if(m.status==='queued') meta+=' · sending…';
+        if(m.sent_by) meta+=' · '+m.sent_by;
+      }
+      const failed=(m.status==='failed'||m.status==='undelivered');
+      html+='<div style="max-width:78%;'+align+'margin-bottom:10px;">'
+        +'<div style="background:'+bg+';border:1px solid '+(failed?'var(--red)':'var(--line)')+';border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;">'
+        +esc(m.body||'')+'</div>'
+        +'<div class="rc-meta" style="'+(mine?'text-align:right;':'')+'">'+esc(meta)+'</div>'
+        +'</div>';
+    }
+  }
+  html+='</div>';
+
+  html+='<div style="margin-top:12px;">'
+    +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
+    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;">'
+    +'<button class="btn" data-msgsend="1">Send</button>'
+    +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)+'</span>'
+    +'</div></div>';
+  html+='</div>';
+  view.innerHTML=html;
+
+  view.querySelector('[data-msgback]').addEventListener('click',()=>{
+    _msgOpen=null; _msgThread=null; paintMessages();
+  });
+
+  const ta=view.querySelector('[data-msgreply]');
+  // Held in _msgDraft rather than re-rendered per keystroke — re-rendering
+  // would steal focus mid-sentence, and the poll checks this map before it
+  // repaints anything.
+  ta.addEventListener('input',()=>{ _msgDraft[key]=ta.value; });
+
+  view.querySelector('[data-msgsend]').addEventListener('click',async(ev)=>{
+    const btn=ev.currentTarget;
+    const text=(ta.value||'').trim();
+    if(!text){ toast('Type a message first'); return; }
+    // Disabled BEFORE the await so a double-click cannot send the text twice.
+    btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
+    try{
+      await api('messages_send',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone, text }});
+      _msgDraft[key]='';
+      ta.value='';
+      _msgThread=null;
+      await openMsgThread();
+    }catch(e){
+      toast(e.message||'Could not send');
+      btn.disabled=false; btn.textContent=prev;
+    }
+  });
+}
+
+// Open (or reopen) the thread in _msgOpen: load it, clear its unread badge,
+// paint. Marking read is best-effort — failing to clear a badge must never
+// stop the conversation from opening.
+async function openMsgThread(){
+  const view=document.getElementById('view');
+  if(!_msgOpen) return;
+  view.innerHTML='<div class="wrap" data-msgview><div class="empty">Loading conversation…</div></div>';
+  try{
+    const t=await api('messages_thread',{params:{ our:_msgOpen.our, customer:_msgOpen.customer }});
+    if(!onScreen('messages')) return;
+    _msgThread=t;
+    paintMsgThread(view);
+    try{
+      await api('messages_read',{ method:'POST', body:{ our:_msgOpen.our, customer:_msgOpen.customer }});
+      const row=(_msgThreads||[]).find(x=>x.our_phone===_msgOpen.our&&x.customer_phone===_msgOpen.customer);
+      if(row) row.unread=0;
+      refreshMessagesBadge();
+    }catch(_){ /* badge only — the conversation is already open and readable */ }
+  }catch(e){
+    view.innerHTML='<div class="wrap" data-msgview><div class="empty">Could not open conversation: '+esc(e.message||'')+'</div></div>';
+  }
+}
+
+// Unread count in the sidebar. Swallows everything: before the server half is
+// deployed this action 404s, and a missing badge is the right failure — not an
+// error toast on every screen in the app.
+async function refreshMessagesBadge(){
+  try{
+    const el=document.getElementById('msgBadge');
+    if(!el) return;
+    const d=(onScreen('messages')&&_msgThreads)
+      ? { unread_total:(_msgThreads||[]).reduce((n,t)=>n+(t.unread||0),0) }
+      : await api('messages_list');
+    const n=d.unread_total||0;
+    el.textContent=n; el.style.display=n?'':'none';
+  }catch(_){ /* endpoint not deployed yet — leave the badge hidden */ }
+}
+
+// Its own interval, NOT the shared pollTimer: navTo() clears pollTimer on every
+// navigation and Analytics/Web Analytics each overwrite it, so a badge that has
+// to keep counting from every screen cannot live there.
+setInterval(()=>{
+  if(document.hidden||!current) return;
+  if(onScreen('messages')) renderMessages();
+  else refreshMessagesBadge();
 }, 20000);
 
 // ── Review Call Log (owner) ──────────────────────────────────────────────────

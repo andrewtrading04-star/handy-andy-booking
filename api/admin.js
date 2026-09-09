@@ -487,6 +487,13 @@ export default async function handler(req, res) {
       case 'secretaries_list': return await secretariesList(req, res, db, auth);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
+      // Two-way SMS (migration 0109). Deliberately NO owner gate on any of
+      // these — a secretary answering customer texts is the entire point. Each
+      // one scopes itself through allowedSlugsFor()/mayUseBusiness() instead.
+      case 'messages_list':   return await messagesList(req, res, db, auth);
+      case 'messages_thread': return await messagesThread(req, res, db, auth);
+      case 'messages_send':   return await messagesSend(req, res, db, auth, body);
+      case 'messages_read':   return await messagesRead(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -13561,4 +13568,202 @@ async function wirePlateRemove(req, res, db, auth, body) {
     if (ignoreErr) console.warn('[wire_plate_remove] failed to record ignore for', on, ignoreErr.message);
   }
   return res.status(200).json({ ok: true, removed, amazon_order_num: on || null });
+}
+
+// ============================================================================
+// Two-way SMS — the Messages tab (migration 0109)
+// ----------------------------------------------------------------------------
+// A customer texts one of our published numbers; the office reads it here and
+// texts back. Before this, handleSmsInbound relayed the text to a handset and
+// discarded it, so there was nothing to read and no way to answer.
+//
+// A conversation is the PAIR (our_phone, customer_phone) — not (business,
+// customer). The same person can text two of our brands, and those must stay
+// separate threads so a reply goes back out from the number they actually
+// texted. Everything below keys on that pair.
+//
+// None of these check auth.role. That is deliberate: answering customer texts
+// is a secretary's job. They scope on business instead, exactly like calls().
+// ============================================================================
+
+// The thread list pulls this many messages and groups them in JS. PostgREST has
+// no GROUP BY, and a DISTINCT ON view would need its own migration for a screen
+// showing a few dozen conversations. Revisit if text volume ever gets serious.
+const MESSAGES_SCAN_LIMIT = 1000;
+
+// Which business owns one of our numbers, with the caller's access enforced.
+// Throws the same {status} shape resolveBusiness does, so callers bail() it.
+async function businessForOurPhone(db, auth, ourPhoneRaw) {
+  const ourPhone = digitsOf(ourPhoneRaw);
+  if (!ourPhone) { const e = new Error('our number is required'); e.status = 400; throw e; }
+  const { data: line } = await db.from('tracking_numbers')
+    .select('phone, business_slug, label').eq('phone', ourPhone).maybeSingle();
+  if (!line || !line.business_slug) {
+    const e = new Error('That number is not one of ours'); e.status = 404; throw e;
+  }
+  // resolveBusiness runs mayUseBusiness() — a secretary cannot open another
+  // brand's conversation by guessing its number.
+  const biz = await resolveBusiness(db, auth, line.business_slug);
+  return { biz, ourPhone, label: line.label || null };
+}
+
+// GET ?action=messages_list — one row per conversation, newest activity first.
+async function messagesList(req, res, db, auth) {
+  const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
+  let q = db.from('messages')
+    .select('customer_phone, our_phone, direction, body, created_at, read_at, status, business_id')
+    .order('created_at', { ascending: false })
+    .limit(MESSAGES_SCAN_LIMIT);
+
+  if (viewerSlugs) {
+    const { data: viewerBiz } = await db.from('businesses').select('id').in('slug', viewerSlugs);
+    const ids = (viewerBiz || []).map(b => b.id);
+    // Same sentinel the calls list uses: an empty allow-list must match nothing,
+    // not everything.
+    q = q.in('business_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+  }
+  const { data: rows, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+
+  const threads = new Map();
+  for (const m of (rows || [])) {
+    const key = `${m.our_phone}|${m.customer_phone}`;
+    let t = threads.get(key);
+    if (!t) {
+      // Rows arrive newest-first, so the first one seen for a pair IS the
+      // latest message — that is the preview line.
+      t = {
+        our_phone: m.our_phone,
+        our_phone_pretty: prettyPhone(m.our_phone),
+        customer_phone: m.customer_phone,
+        customer_phone_pretty: prettyPhone(m.customer_phone),
+        business_id: m.business_id,
+        business_slug: null,
+        last_at: m.created_at,
+        last_body: m.body || '',
+        last_direction: m.direction,
+        unread: 0,
+        customer_name: null,
+        line_label: null,
+      };
+      threads.set(key, t);
+    }
+    if (m.direction === 'in' && !m.read_at) t.unread++;
+  }
+  const list = [...threads.values()];
+
+  // Names and which line they texted, in two batched lookups rather than one
+  // query per thread.
+  const phones = [...new Set(list.map(t => t.customer_phone))];
+  if (phones.length) {
+    const { data: custs } = await db.from('customers').select('phone, name').in('phone', phones);
+    const nameBy = new Map((custs || []).map(c => [c.phone, c.name]));
+    for (const t of list) t.customer_name = nameBy.get(t.customer_phone) || null;
+  }
+  const ourPhones = [...new Set(list.map(t => t.our_phone))];
+  if (ourPhones.length) {
+    const { data: lines } = await db.from('tracking_numbers')
+      .select('phone, label, business_slug').in('phone', ourPhones);
+    const lineBy = new Map((lines || []).map(l => [l.phone, l]));
+    for (const t of list) {
+      const l = lineBy.get(t.our_phone);
+      t.line_label = l ? l.label : null;
+      t.business_slug = l ? l.business_slug : null;
+    }
+  }
+  return res.status(200).json({
+    threads: list,
+    unread_total: list.reduce((n, t) => n + t.unread, 0),
+    // True when the scan cap may have hidden older conversations — better to
+    // say so than to silently look complete.
+    truncated: (rows || []).length >= MESSAGES_SCAN_LIMIT,
+  });
+}
+
+// GET ?action=messages_thread&our=...&customer=... — one full conversation.
+async function messagesThread(req, res, db, auth) {
+  let ctx; try { ctx = await businessForOurPhone(db, auth, req.query.our); } catch (e) { return bail(res, e); }
+  const customer = digitsOf(req.query.customer);
+  if (!customer) return res.status(400).json({ error: 'customer is required' });
+
+  const { data: rows, error } = await db.from('messages')
+    .select('id, direction, body, created_at, status, error, sent_by, read_at')
+    .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer)
+    .order('created_at', { ascending: true }).limit(500);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const { data: c } = await db.from('customers')
+    .select('id, name').eq('phone', customer).limit(1);
+
+  return res.status(200).json({
+    our_phone: ctx.ourPhone,
+    our_phone_pretty: prettyPhone(ctx.ourPhone),
+    line_label: ctx.label,
+    business: ctx.biz.slug,
+    customer_phone: customer,
+    customer_phone_pretty: prettyPhone(customer),
+    customer_name: (c || [])[0] ? (c || [])[0].name : null,
+    customer_id: (c || [])[0] ? (c || [])[0].id : null,
+    messages: rows || [],
+  });
+}
+
+// POST ?action=messages_send — reply in a conversation.
+async function messagesSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let ctx; try { ctx = await businessForOurPhone(db, auth, body.our); } catch (e) { return bail(res, e); }
+  const customer = digitsOf(body.customer);
+  const text = (body.text || '').toString().trim();
+  if (!customer) return res.status(400).json({ error: 'customer is required' });
+  if (!text) return res.status(400).json({ error: 'Message is empty' });
+  // One SMS segment is 160 chars and Twilio bills per segment. 1200 is generous
+  // for a service reply and stops a paste accident becoming an 8-segment text.
+  if (text.length > 1200) return res.status(400).json({ error: 'Message is too long (1200 characters max)' });
+
+  // Insert BEFORE sending so the row id can ride along in the status callback.
+  // A send whose row we failed to create would be invisible in the thread —
+  // worse than a row whose send failed, which at least shows as failed.
+  const { data: row, error: insErr } = await db.from('messages').insert({
+    business_id: ctx.biz.id,
+    customer_phone: customer,
+    our_phone: ctx.ourPhone,
+    direction: 'out',
+    body: text,
+    status: 'queued',
+    sent_by: auth.scope === 'all' ? 'owner' : (auth.scope || null),
+  }).select('id').single();
+  if (insErr) return res.status(500).json({ error: insErr.message });
+
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const statusCallback = baseUrl
+    ? `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(signToken({ kind: 'message', message_id: row.id }, 86400))}`
+    : undefined;
+
+  // `from` is the whole point: the reply leaves from the number the customer
+  // texted. Until the A2P campaign is approved Twilio rejects a local number —
+  // that surfaces below as a real error rather than as silent success.
+  const r = await sendSMSResult(customer, text, { from: ctx.ourPhone, statusCallback });
+
+  if (!r.ok) {
+    const why = r.error || `not sent (${r.skipped})`;
+    await db.from('messages').update({ status: 'failed', error: why }).eq('id', row.id);
+    if (r.skipped === 'notifications_off') return res.status(503).json({ error: 'Texting is turned off right now.' });
+    return res.status(502).json({ error: why, id: row.id });
+  }
+  await db.from('messages').update({ status: 'sent', twilio_sid: r.sid || null }).eq('id', row.id);
+  return res.status(200).json({ ok: true, id: row.id, sid: r.sid || null });
+}
+
+// POST ?action=messages_read — clear the unread badge on one conversation.
+async function messagesRead(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let ctx; try { ctx = await businessForOurPhone(db, auth, body.our); } catch (e) { return bail(res, e); }
+  const customer = digitsOf(body.customer);
+  if (!customer) return res.status(400).json({ error: 'customer is required' });
+  const { error } = await db.from('messages')
+    .update({ read_at: new Date().toISOString() })
+    .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer)
+    .eq('direction', 'in').is('read_at', null);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }

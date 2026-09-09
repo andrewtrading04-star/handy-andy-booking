@@ -178,6 +178,24 @@ async function handleTwilioStatus(req, res) {
           .update({ status, error: errCode ? `Twilio ErrorCode ${errCode}` : null })
           .eq('id', t.tech_sms_log_id);
       }
+    } else if (t && t.kind === 'message' && t.message_id) {
+      // A reply typed by the office in the Messages tab (migration 0109).
+      // Delivery matters more here than anywhere else in the system: a
+      // secretary who thinks she answered a customer, and didn't, is worse
+      // than one who can see it failed and picks up the phone instead.
+      const status = (params.MessageStatus || '').toLowerCase();
+      const db = serviceClient();
+      if (status === 'delivered' || status === 'sent') {
+        await db.from('messages').update({ status }).eq('id', t.message_id);
+      } else if (status === 'failed' || status === 'undelivered') {
+        // ErrorCode 30034 here means the A2P campaign still isn't approved for
+        // the number she replied from — the single most likely failure while
+        // the registration submitted 2026-09-09 is pending.
+        const errCode = (params.ErrorCode || '').toString();
+        await db.from('messages')
+          .update({ status, error: errCode ? `Twilio ErrorCode ${errCode}` : 'Carrier did not deliver' })
+          .eq('id', t.message_id);
+      }
     }
   } catch (e) {
     console.error('[sms_status] error:', e.message);
@@ -1450,14 +1468,49 @@ async function handleSmsInbound(req, res) {
       const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
       business_id = biz?.id || null;
     }
-    // Same rule as the voice path: the text still relays, it just isn't logged.
-    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body);
 
+    // Moved ABOVE the silent-number check so the messages insert below can use
+    // it too. The `calls` insert further down still receives exactly the same
+    // value it always did — this is a reorder, not a behaviour change.
     let customer_id = null;
     if (from) {
       const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
       customer_id = (c || [])[0]?.id || null;
     }
+
+    // Keep the message itself (migration 0109). Until this existed an inbound
+    // text was relayed and then discarded, so the office could never see a
+    // conversation, let alone reply to one.
+    //
+    // DELIBERATELY BEFORE the silent-number check, unlike the `calls` insert.
+    // silent_numbers exists to keep the owner's own test calls out of the
+    // ticket queue — but a thread is not a ticket, and the owner testing
+    // "can I text my number and reply to it" is exactly the case that must
+    // work. Storing his test texts costs nothing and stops the feature from
+    // looking broken when he tries it. (It looked broken once already, for
+    // precisely this reason.)
+    //
+    // twilio_sid is UNIQUE, so Twilio retrying this webhook cannot duplicate a
+    // message. A duplicate is swallowed, not raised: the relay and auto-ack
+    // below must still happen even on a retry we've already stored.
+    if (from && to) {
+      const { error: msgErr } = await db.from('messages').insert({
+        business_id,
+        customer_phone: from,
+        our_phone: to,
+        direction: 'in',
+        body: body || null,
+        twilio_sid: (params.MessageSid || params.SmsSid || '').toString() || null,
+        customer_id,
+      });
+      if (msgErr && !/duplicate key|unique/i.test(msgErr.message || '')) {
+        console.error('[sms_inbound] message store failed:', msgErr.message);
+      }
+    }
+
+    // Same rule as the voice path: the text still relays, it just isn't logged.
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body);
+
     await db.from('calls').insert({
       business_id,
       source: 'twilio',

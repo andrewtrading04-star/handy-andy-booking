@@ -44,9 +44,13 @@ function smsTimeoutSignal() {
   return c.signal;
 }
 
-async function sendViaTwilio(to, message, statusCallback) {
+async function sendViaTwilio(to, message, statusCallback, from) {
   const formData = new URLSearchParams();
-  formData.append('From', process.env.TWILIO_PHONE_NUMBER);
+  // `from` overrides the single account-wide sender. A REPLY must go back out
+  // from the number the customer texted — answering a text to the Greenway
+  // Plaza line from the toll-free number reads as a stranger. Every existing
+  // caller omits it and keeps the old behaviour exactly.
+  formData.append('From', from || process.env.TWILIO_PHONE_NUMBER);
   formData.append('To', to);
   formData.append('Body', message);
   // Twilio POSTs delivery-status updates (queued/sent/delivered/failed/undelivered)
@@ -63,7 +67,12 @@ async function sendViaTwilio(to, message, statusCallback) {
     const t = await res.text().catch(() => '');
     return { ok: false, error: `Twilio ${res.status}: ${t.slice(0, 300)}` };
   }
-  return { ok: true };
+  // Hand back the message SID. The conversation view stores it so a later
+  // delivery receipt can find its row, and so a webhook retry can't duplicate
+  // the message. Parsing must never turn a successful send into a failure.
+  let sid = null;
+  try { sid = (await res.json())?.sid || null; } catch { /* sent regardless */ }
+  return { ok: true, sid };
 }
 
 // Low-level send that REPORTS its outcome instead of swallowing it. Returns
@@ -72,6 +81,9 @@ async function sendViaTwilio(to, message, statusCallback) {
 // reason. `skipped` is a config/precondition miss; `error` is a live provider
 // failure (the message string is safe to show).
 // opts.statusCallback: a URL for Twilio to POST delivery-status updates to.
+// opts.from: send from THIS number instead of the account-wide default. Used by
+//   the Messages tab so a reply comes from the number the customer texted.
+//   Omit it and nothing changes for any existing caller.
 export async function sendSMSResult(phoneNumber, message, opts = {}) {
   // Demo mode: pretend the text sent (no provider call, nothing delivered).
   if (demoMode()) { console.log('[sms:demo] pretend-sent to', String(phoneNumber).slice(-4)); return { ok: true, demo: true }; }
@@ -80,7 +92,7 @@ export async function sendSMSResult(phoneNumber, message, opts = {}) {
   if (!to) return { ok: false, skipped: 'bad_phone' };
   if (!twilioConfigured()) return { ok: false, skipped: 'not_configured' };
   try {
-    const r = await sendViaTwilio(to, message, opts.statusCallback);
+    const r = await sendViaTwilio(to, message, opts.statusCallback, toE164(opts.from));
     if (r.ok) console.log('[SMS] Sent to', to.slice(-4));
     return r;
   } catch (e) {
