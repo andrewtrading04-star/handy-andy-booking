@@ -1426,7 +1426,7 @@
       <button data-nav="estimates"><span class="ic" data-ico="estimate">🧾</span> Estimates <span class="nav-badge" id="estBadge" style="display:none;"></span></button>
       <button data-nav="customers"><span class="ic" data-ico="customers">👥</span> Customers</button>
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
-      <button data-nav="reviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
+      <button data-nav="reviews" id="navReviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> <span id="navCallHubLabel">Calls</span> <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
       <!-- Texts. Deliberately its OWN section rather than a tab inside the
            Calls hub: CALL_TABS is hand-tuned per secretary, so a tab added
@@ -1440,7 +1440,6 @@
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
-      <button data-nav="finances" id="navFinances"><span class="ic" data-ico="finances">🏦</span> Finances</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
       <button data-nav="other" id="navOther"><span class="ic" data-ico="other">⋯</span> Other <span class="nav-badge" id="dispBadge" style="display:none;"></span></button>
@@ -2238,10 +2237,11 @@ function enterApp(){
   // status view, not something a secretary needs mid-shift.
   const navLaunch=document.getElementById('navLaunch');
   if(navLaunch) navLaunch.style.display = role==='owner' ? '' : 'none';
-  // Finances: Andrew's own personal + business bank accounts. Owner only, no
-  // exceptions, ever -- see api/finance.js for the server-side half of this.
-  const navFin=document.getElementById('navFinances');
-  if(navFin) navFin.style.display = role==='owner' ? '' : 'none';
+  // Reviews: owner only. Removed from the secretary view 2026-09-09 at the
+  // owner's request -- the tab is his review-request/GBP oversight, not a
+  // shift task, and every extra tab is one more place to click by mistake.
+  const navRev=document.getElementById('navReviews');
+  if(navRev) navRev.style.display = role==='owner' ? '' : 'none';
   // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
   // his on Dom's — same per-business login scoping the whole feature rides
   // on). Secretaries: owner only, read-only view of both.
@@ -2462,7 +2462,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',finances:'Finances',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -2478,7 +2478,6 @@ function navTo(s){
     else if(s==='gallery') renderGallery();
     else if(s==='analyticshub') renderAnalyticsHub();
     else if(s==='payroll') renderPayroll();
-    else if(s==='finances') renderFinances();
     else if(s==='myavailability') renderMyAvailability();
     else if(s==='secretaries') renderSecretaries();
     else if(s==='other') renderOther();
@@ -6094,6 +6093,10 @@ const FINANCE_TABS=[
   { id:'accounts',       label:'Accounts',       screen:'financeaccounts',       show:()=>role==='owner', render:()=>renderFinanceAccounts() },
 ];
 let financeHubTab='overview';
+// UNREACHABLE since 2026-09-09: the Finances sidebar button and its navTo()
+// route were removed at the owner's request ("not needed"). The screen, its
+// FINANCE_TABS and api/finance.js are left intact so restoring it is a
+// two-line revert, not a rebuild.
 async function renderFinances(){
   financeHubTab = await renderHub(FINANCE_TABS, financeHubTab, id=>{ financeHubTab=id; renderFinances(); }) || financeHubTab;
 }
@@ -8806,6 +8809,7 @@ async function renderCallNumbers(){
       <td style="padding:9px 10px;">${hours}</td>
       <td style="padding:9px 10px;">${n.active?'Active':'Retired'}</td>
       <td style="padding:9px 10px;">${aiVoiceBadge(n.ai_voice_status)}</td>
+      <td style="padding:9px 10px;white-space:nowrap;">${textingBadge(n.texting_status)}</td>
     </tr>`;
   }).join('');
 
@@ -8813,6 +8817,7 @@ async function renderCallNumbers(){
     <div class="rc-head"><div>
       <h2 class="rc-title">📇 Numbers</h2>
       <div class="rc-sub">Every tracking number across the portfolio — which business it belongs to and where a call actually rings.</div>
+      <div class="rc-sub" style="margin-top:6px;">${a2pLine(d.a2p)}</div>
     </div></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -8825,6 +8830,7 @@ async function renderCallNumbers(){
           <th style="padding:9px 10px;">Hours</th>
           <th style="padding:9px 10px;">Status</th>
           <th style="padding:9px 10px;">AI voice</th>
+          <th style="padding:9px 10px;">Texting</th>
         </tr></thead>
         <tbody>${tr}</tbody>
       </table>
@@ -8836,6 +8842,30 @@ async function renderCallNumbers(){
 // so this reflects reality with no manual step. 'unknown' means the Twilio
 // lookup itself failed (e.g. rate limit/timeout), not that the number is
 // unconnected -- shown distinctly so it's never mistaken for "not AI".
+// "Texting" is three things at once, and a bare yes/no would lie: the number
+// must be SMS-capable at Twilio, be in the A2P Messaging Service's sender
+// pool, AND the account's A2P campaign must be approved by the carriers. Any
+// one missing and a reply from that number bounces (ErrorCode 30034). Each
+// state gets its own word so the owner can see WHICH one is missing.
+// 'unknown' = the Twilio lookup itself failed, shown distinctly so it is never
+// read as "not activated".
+function textingBadge(status){
+  if(status==='active')            return '<span style="color:#15803d;font-weight:600;">● Active</span>';
+  if(status==='pending')           return '<span style="color:#b45309;font-weight:600;">◐ Pending approval</span>';
+  if(status==='not_in_pool')       return '<span style="color:#b91c1c;">✕ Not in sender pool</span>';
+  if(status==='no_sms_capability') return '<span style="color:#b91c1c;">✕ No SMS on this number</span>';
+  if(status==='unknown')           return '<span style="color:#9ca3af;">Unknown</span>';
+  return '<span style="color:#6b7280;">Not set up</span>';
+}
+function a2pLine(a){
+  if(!a) return '';
+  if(a.error) return `Texting registration: <span style="color:#9ca3af;">could not read from Twilio (${esc(a.error)})</span>`;
+  const st=(a.campaign_status||'').toUpperCase();
+  const word = st==='VERIFIED' ? '<span style="color:#15803d;font-weight:600;">Approved</span>'
+             : st ? `<span style="color:#b45309;font-weight:600;">${esc(st.replace(/_/g,' ').toLowerCase())}</span>`
+             : '<span style="color:#9ca3af;">no campaign found</span>';
+  return `Texting registration (A2P campaign): ${word}${a.service_name?` · pool: ${esc(a.service_name)} (${a.pool_size} numbers)`:''}`;
+}
 function aiVoiceBadge(status){
   if(status==='connected') return '<span style="color:#15803d;font-weight:600;">● Connected</span>';
   if(status==='unknown') return '<span style="color:#9ca3af;">Unknown</span>';

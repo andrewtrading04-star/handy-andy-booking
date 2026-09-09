@@ -10181,6 +10181,9 @@ async function fetchTwilioVoiceUrls() {
   if (_twilioNumbersCache && (Date.now() - _twilioNumbersCache.at) < TWILIO_NUMBERS_CACHE_MS) return _twilioNumbersCache.byPhone;
   const sid = process.env.TWILIO_ACCOUNT_SID, token = process.env.TWILIO_AUTH_TOKEN;
   const byPhone = new Map();
+  // Ridden along from the same response: whether Twilio says the number can
+  // do SMS at all. Read by callNumbers() via _twilioNumbersCache.smsCap.
+  const smsCap = new Map();
   if (!sid || !token) return byPhone;
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
   let url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PageSize=200`;
@@ -10195,11 +10198,12 @@ async function fetchTwilioVoiceUrls() {
       for (const rec of (data.incoming_phone_numbers || [])) {
         const ten = (rec.phone_number || '').replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
         if (ten) byPhone.set(ten, rec.voice_url || '');
+        if (ten) smsCap.set(ten, !!(rec.capabilities && rec.capabilities.sms));
       }
       url = data.next_page_uri ? `https://api.twilio.com${data.next_page_uri}` : null;
     }
   } catch (e) { /* Twilio unreachable/slow -- callers treat a missing entry as "unknown" */ }
-  _twilioNumbersCache = { at: Date.now(), byPhone };
+  _twilioNumbersCache = { at: Date.now(), byPhone, smsCap };
   return byPhone;
 }
 function aiVoiceStatusFor(voiceUrl) {
@@ -10207,16 +10211,81 @@ function aiVoiceStatusFor(voiceUrl) {
   return /vapi\.ai/i.test(voiceUrl) ? 'connected' : 'not_connected';
 }
 
+// Whether each number can actually SEND a text today. Three Twilio facts, all
+// read live so the Numbers tab reflects reality the day a carrier approves the
+// campaign or a number gets dropped into the pool -- no manual flag to forget:
+//   1. the A2P Messaging Service (registered 2026-09-09 as "Mixed A2P
+//      Messaging Service", discovered by listing Services so no env var has to
+//      be set; TWILIO_MESSAGING_SERVICE_SID overrides if there are ever two)
+//   2. its Sender Pool -- which numbers are in it
+//   3. its US A2P campaign status -- VERIFIED is the only value that sends
+// Same 30s cache / 10s timeout / swallow-on-failure shape as
+// fetchTwilioVoiceUrls above: a slow Twilio must degrade to "unknown" on every
+// row, never break the page. The toll-free sender is NOT here on purpose --
+// it is not a tracking number and lives on toll-free verification, not 10DLC.
+let _twilioSmsCache = null;
+async function fetchTwilioSmsReadiness() {
+  if (_twilioSmsCache && (Date.now() - _twilioSmsCache.at) < TWILIO_NUMBERS_CACHE_MS) return _twilioSmsCache.v;
+  const sid = process.env.TWILIO_ACCOUNT_SID, token = process.env.TWILIO_AUTH_TOKEN;
+  const out = { ok: false, error: null, service_sid: null, service_name: null, pool: new Set(), pool_size: 0, campaign_status: null };
+  if (!sid || !token) { out.error = 'Twilio not configured'; return out; }
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  const get = async (url) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const r = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: ctrl.signal });
+      if (!r.ok) throw new Error(`Twilio ${r.status}`);
+      return await r.json();
+    } finally { clearTimeout(t); }
+  };
+  try {
+    let svcSid = process.env.TWILIO_MESSAGING_SERVICE_SID || null, svcName = null;
+    if (!svcSid) {
+      const d = await get('https://messaging.twilio.com/v1/Services?PageSize=50');
+      const list = d.services || [];
+      // Prefer the one we registered; fall back to the only/first one.
+      const pick = list.find(x => /a2p/i.test(x.friendly_name || '')) || list[0];
+      if (pick) { svcSid = pick.sid; svcName = pick.friendly_name || null; }
+    }
+    if (!svcSid) { out.error = 'no Messaging Service in the account'; _twilioSmsCache = { at: Date.now(), v: out }; return out; }
+    out.service_sid = svcSid; out.service_name = svcName;
+
+    const pool = await get(`https://messaging.twilio.com/v1/Services/${svcSid}/PhoneNumbers?PageSize=100`);
+    for (const n of (pool.phone_numbers || [])) {
+      const ten = (n.phone_number || '').replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
+      if (ten) out.pool.add(ten);
+    }
+    out.pool_size = out.pool.size;
+
+    // Response key has been documented as both `compliance` and
+    // `us_app_to_person`; read either. Anything but VERIFIED means "can't send
+    // yet" -- PENDING / IN_PROGRESS while the carriers vet, FAILED if rejected.
+    const comp = await get(`https://messaging.twilio.com/v1/Services/${svcSid}/Compliance/Usa2p?PageSize=5`);
+    const rows = comp.compliance || comp.us_app_to_person || [];
+    out.campaign_status = rows.length ? (rows[0].campaign_status || null) : null;
+    out.ok = true;
+  } catch (e) {
+    out.error = e.message || String(e);
+  }
+  _twilioSmsCache = { at: Date.now(), v: out };
+  return out;
+}
+
 async function callNumbers(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
-  const [{ data: numbers }, { data: businesses }, voiceUrlByPhone] = await Promise.all([
+  const [{ data: numbers }, { data: businesses }, voiceUrlByPhone, sms] = await Promise.all([
     db.from('tracking_numbers')
       .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
       .order('business_slug'),
     db.from('businesses').select('slug, name, url'),
     fetchTwilioVoiceUrls(),
+    fetchTwilioSmsReadiness(),
   ]);
+  // Filled by fetchTwilioVoiceUrls() above (already awaited), so safe to read.
+  const smsCapByPhone = (_twilioNumbersCache && _twilioNumbersCache.smsCap) || new Map();
+  const campaignApproved = (sms.campaign_status || '').toUpperCase() === 'VERIFIED';
 
   const bizBySlug = {};
   for (const b of (businesses || [])) bizBySlug[b.slug] = b;
@@ -10229,10 +10298,23 @@ async function callNumbers(req, res, db, auth) {
       business_name: biz.name || n.business_slug,
       business_url: biz.url || null,
       ai_voice_status: aiVoiceStatusFor(hasVoiceUrl ? voiceUrlByPhone.get(n.phone) : null),
+      texting_status: !sms.ok ? 'unknown'
+        : smsCapByPhone.has(n.phone) && !smsCapByPhone.get(n.phone) ? 'no_sms_capability'
+        : !sms.pool.has(n.phone) ? 'not_in_pool'
+        : campaignApproved ? 'active'
+        : 'pending',
     };
   });
 
-  return res.status(200).json({ numbers: rows });
+  return res.status(200).json({
+    numbers: rows,
+    a2p: {
+      error: sms.ok ? null : sms.error,
+      campaign_status: sms.campaign_status,
+      service_name: sms.service_name,
+      pool_size: sms.pool_size,
+    },
+  });
 }
 
 // A secretary's own booking numbers: how many calls she took, how many became
