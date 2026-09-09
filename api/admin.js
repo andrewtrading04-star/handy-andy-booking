@@ -13748,6 +13748,19 @@ async function messagesSend(req, res, db, auth, body) {
     const why = r.error || `not sent (${r.skipped})`;
     await db.from('messages').update({ status: 'failed', error: why }).eq('id', row.id);
     if (r.skipped === 'notifications_off') return res.status(503).json({ error: 'Texting is turned off right now.' });
+    // 30034 / "not registered" is the ONE failure that is expected right now:
+    // the A2P 10DLC campaign was submitted 2026-09-09 and the carriers are
+    // still vetting it, so a local number cannot send yet. Left raw this reads
+    // as a broken feature — say what it actually is, in words the office can
+    // act on. Delete this branch once the campaign is approved and it stops
+    // being the likely explanation.
+    if (/30034|A2P|not been registered|unregistered/i.test(why)) {
+      return res.status(502).json({
+        error: `Can't text from ${prettyPhone(ctx.ourPhone)} yet — the phone companies are still approving that number. Give them a call instead for now.`,
+        id: row.id,
+        pending_a2p: true,
+      });
+    }
     return res.status(502).json({ error: why, id: row.id });
   }
   await db.from('messages').update({ status: 'sent', twilio_sid: r.sid || null }).eq('id', row.id);
