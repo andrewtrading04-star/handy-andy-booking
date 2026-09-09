@@ -13599,7 +13599,22 @@ async function businessForOurPhone(db, auth, ourPhoneRaw) {
   const { data: line } = await db.from('tracking_numbers')
     .select('phone, business_slug, label').eq('phone', ourPhone).maybeSingle();
   if (!line || !line.business_slug) {
-    const e = new Error('That number is not one of ours'); e.status = 404; throw e;
+    // The number isn't in tracking_numbers. This is NOT hypothetical: every
+    // automated text this system sends goes out from the toll-free
+    // TWILIO_PHONE_NUMBER, which is not a tracking number — so a customer who
+    // simply REPLIES to their booking confirmation or "on the way" text lands
+    // here. That is probably the most common inbound text we get.
+    //
+    // handleSmsInbound already stores it (with business_id null), so the thread
+    // exists; it just belongs to no brand. The owner must be able to read it,
+    // or the one conversation nobody can answer is the one from the number we
+    // text customers from. A secretary still cannot — there is no business to
+    // check her against, and guessing one would show her another brand's
+    // customers.
+    if (allowedSlugsFor(auth) !== null) {
+      const e = new Error('That number is not one of ours'); e.status = 404; throw e;
+    }
+    return { biz: null, ourPhone, label: (line && line.label) || null };
   }
   // resolveBusiness runs mayUseBusiness() — a secretary cannot open another
   // brand's conversation by guessing its number.
@@ -13654,11 +13669,18 @@ async function messagesList(req, res, db, auth) {
 
   // Names and which line they texted, in two batched lookups rather than one
   // query per thread.
+  // Scoped by business, not phone alone. 26 phone numbers in this database
+  // belong to a customer under MORE THAN ONE brand, so an unscoped
+  // .in('phone', ...) will happily put Dom's customer's name on a Handy Andy
+  // thread — showing one brand's customer identity inside another. It also
+  // misses idx_customers_phone, which leads on (business_id, phone).
   const phones = [...new Set(list.map(t => t.customer_phone))];
-  if (phones.length) {
-    const { data: custs } = await db.from('customers').select('phone, name').in('phone', phones);
-    const nameBy = new Map((custs || []).map(c => [c.phone, c.name]));
-    for (const t of list) t.customer_name = nameBy.get(t.customer_phone) || null;
+  const bizIds = [...new Set(list.map(t => t.business_id).filter(Boolean))];
+  if (phones.length && bizIds.length) {
+    const { data: custs } = await db.from('customers')
+      .select('phone, name, business_id').in('phone', phones).in('business_id', bizIds);
+    const nameBy = new Map((custs || []).map(c => [c.business_id + '|' + c.phone, c.name]));
+    for (const t of list) t.customer_name = nameBy.get(t.business_id + '|' + t.customer_phone) || null;
   }
   const ourPhones = [...new Set(list.map(t => t.our_phone))];
   if (ourPhones.length) {
@@ -13692,14 +13714,18 @@ async function messagesThread(req, res, db, auth) {
     .order('created_at', { ascending: true }).limit(500);
   if (error) return res.status(500).json({ error: error.message });
 
-  const { data: c } = await db.from('customers')
-    .select('id, name').eq('phone', customer).limit(1);
+  // Same cross-brand rule as messagesList: only name the customer from the
+  // business whose line they texted. Unmapped line (ctx.biz null) => no name
+  // rather than a name borrowed from whichever brand matched first.
+  let cq = db.from('customers').select('id, name').eq('phone', customer);
+  if (ctx.biz) cq = cq.eq('business_id', ctx.biz.id); else cq = cq.limit(0);
+  const { data: c } = await cq.limit(1);
 
   return res.status(200).json({
     our_phone: ctx.ourPhone,
     our_phone_pretty: prettyPhone(ctx.ourPhone),
     line_label: ctx.label,
-    business: ctx.biz.slug,
+    business: ctx.biz ? ctx.biz.slug : null,
     customer_phone: customer,
     customer_phone_pretty: prettyPhone(customer),
     customer_name: (c || [])[0] ? (c || [])[0].name : null,
@@ -13724,7 +13750,9 @@ async function messagesSend(req, res, db, auth, body) {
   // A send whose row we failed to create would be invisible in the thread —
   // worse than a row whose send failed, which at least shows as failed.
   const { data: row, error: insErr } = await db.from('messages').insert({
-    business_id: ctx.biz.id,
+    // null when replying on a number that maps to no brand (the toll-free
+    // sender). The reply still goes out; it just isn't filed under a business.
+    business_id: ctx.biz ? ctx.biz.id : null,
     customer_phone: customer,
     our_phone: ctx.ourPhone,
     direction: 'out',
