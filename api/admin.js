@@ -13816,7 +13816,8 @@ async function brandForUnmappedTexters(db, phones, bizById) {
     if (!biz) continue;
     // A customer name only from the SAME brand we picked — never borrow one
     // brand's customer identity for another (see the 26-shared-phones note).
-    const sameBrand = list.find(c => c.business_id === best.business_id && c.name);
+    // Some estimates carry the phone number in customer_name — that isn't a name.
+    const sameBrand = list.find(c => c.business_id === best.business_id && c.name && /[a-z]/i.test(c.name));
     const others = [...new Set(list.map(c => c.business_id))]
       .filter(id => id !== best.business_id)
       .map(id => (bizById.get(id) || {}).name).filter(Boolean);
