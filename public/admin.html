@@ -9860,7 +9860,10 @@ function paintMessages(){
         +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
         +'<div class="rc-meta">to '+esc(t.our_phone_pretty||t.our_phone)+(t.business_slug?' · '+esc(t.business_slug):'')+'</div>'
         +'</div>'
+        +'<div style="display:flex;align-items:center;gap:10px;">'
         +'<div class="rc-meta" style="white-space:nowrap;">'+esc(msgWhen(t.last_at))+'</div>'
+        +'<button class="rc-btn red" data-msgblock="1" data-msgblockour="'+esc(t.our_phone)+'" data-msgblockcust="'+esc(t.customer_phone)+'" data-msgblockpretty="'+esc(t.customer_phone_pretty||t.customer_phone)+'" title="Block this number — no more calls or texts">🚫 Block</button>'
+        +'</div>'
         +'</div>';
     }
   }
@@ -9871,6 +9874,23 @@ function paintMessages(){
     _msgOpen={ our:el.dataset.msgour, customer:el.dataset.msgcust };
     _msgThread=null;
     openMsgThread();
+  }));
+
+  // Block right from the list — stopPropagation so it doesn't also open the
+  // thread underneath it (the button sits inside the same clickable card).
+  view.querySelectorAll('[data-msgblock]').forEach(btn=>btn.addEventListener('click',async(ev)=>{
+    ev.stopPropagation();
+    const our=btn.dataset.msgblockour, customer=btn.dataset.msgblockcust, pretty=btn.dataset.msgblockpretty;
+    if(!confirm(`Block ${pretty}? They will be rejected on every tracking line — no more calls or texts — before anyone sees them.`)) return;
+    btn.disabled=true;
+    try{
+      await api('messages_block',{ method:'POST', body:{ our, customer }});
+      toast('Blocked');
+      await renderMessages();
+    }catch(e){
+      toast(e.message||'Could not block');
+      btn.disabled=false;
+    }
   }));
 }
 
