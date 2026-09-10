@@ -2191,9 +2191,18 @@ const LAUNCH_CHECKLIST_ITEMS = [
 // there would make it eligible for all of that by accident, when the whole
 // point is that it deliberately has none of it. Same jsonb-checklist pattern
 // as businesses.settings.launch_checklist, just a separate table + item set.
+// No LLC item: these pages operate under the parent business's own entity,
+// so forming a separate one was never actually part of the plan (owner
+// confirmed 2026-09-10) — unlike gbp_created/gbp_verified/has_address/
+// can_book, which are real per-page facts regardless of whose LLC is behind
+// the page. GBP is split into created vs. verified, same as the business
+// checklist, because for these pages verification is specifically the video
+// method (no public storefront to mail a postcard to) and that's the actual
+// bottleneck the owner is prioritizing — a page can sit at "created" for a
+// while before the video call actually happens.
 const MARKET_CHECKLIST_ITEMS = [
-  { key: 'llc_formed',              label: 'LLC formed' },
-  { key: 'gbp_done',                label: 'Google Business Profile done' },
+  { key: 'gbp_created',             label: 'Google Business Profile created' },
+  { key: 'gbp_verified',            label: 'GBP verified (video)' },
   { key: 'url_chosen_and_directed', label: 'URL chosen and live' },
   { key: 'has_address',             label: 'Page shows a real address' },
   { key: 'can_book',                label: 'Can book a real appointment or an estimate' },
