@@ -6689,14 +6689,20 @@ function launchCardHtml(b, items){
 // Blocked = can't book, same principle as widget_embedded for a business: a
 // page that can't take a booking or an estimate can't do its job regardless
 // of how many of the other boxes are ticked.
+// A real street address counts toward the score/blocked math exactly like a
+// checklist item would (see MARKET_CHECKLIST_ITEMS comment in api/admin.js
+// for why it's a stored value instead of a checkbox), so every consumer of
+// "how done is this location" — the ring, the stat tiles, Completed vs.
+// Incomplete — sees it without needing its own special case.
 function launchMarketScoreOf(m, items){
-  const passed = items.filter(it => !!m.checklist[it.key]).length;
-  return { passed, total: items.length, blocked: !m.checklist.can_book };
+  const passed = items.filter(it => !!m.checklist[it.key]).length + (m.address ? 1 : 0);
+  return { passed, total: items.length + 1, blocked: !m.checklist.can_book };
 }
 function launchMarketNextAction(m, items){
   if(!m.url) return 'Choose a URL for this page';
   if(m.site.error) return `Page could not be reached (${m.site.error})`;
   if(m.site.checked && !m.site.ok) return `Page returned ${m.site.status}`;
+  if(!m.address) return 'Add the real street address for this location';
   for(const it of items) if(!m.checklist[it.key]) return `Next: ${it.label}`;
   return 'Nothing outstanding.';
 }
@@ -6713,13 +6719,29 @@ function launchMarketDetailHtml(m, items){
       ${esc(it.label)}
     </label>`;
   }).join('');
+  // Street address: a saved text field, not a checkbox — this is the exact
+  // address Google's video verifier will check the location against, so
+  // WHAT it is matters, not just whether someone glanced at one.
+  const addressRow = `<div style="margin:0 0 8px;" onclick="event.stopPropagation();">
+    <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:4px;">Street address (for GBP video verification)</label>
+    <div style="display:flex;gap:6px;">
+      <input type="text" data-launch-market-address-input="${m.id}" value="${esc(m.address||'')}" placeholder="123 Main St, City, ST 00000" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;">
+      <button type="button" data-launch-market-address-save="${m.id}" class="btn ghost" style="width:auto;padding:7px 14px;font-size:12px;">Save</button>
+    </div>
+  </div>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;line-height:1.9;">
     <p style="margin:0 0 6px;font-size:12px;color:var(--mute);">Shares ${esc(m.parentSlug)}'s Stripe, Resend, and website — that's by design, not tracked here.</p>
     ${siteLine}
+    ${addressRow}
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
   </div>`;
+}
+function launchMarketAddressLineHtml(m){
+  return m.address
+    ? `<span style="font-size:11px;color:var(--mute);">${esc(m.address)}</span>`
+    : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`;
 }
 function launchMarketCardHtml(m, items){
   const { passed, total, blocked } = launchMarketScoreOf(m, items);
@@ -6729,6 +6751,7 @@ function launchMarketCardHtml(m, items){
       <div style="min-width:0;">
         <div style="font-weight:800;font-size:14px;">${esc(m.name)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
+        <div class="launch-market-address" style="margin-top:2px;">${launchMarketAddressLineHtml(m)}</div>
       </div>
     </div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchMarketNextAction(m, items))}</p>
@@ -6878,6 +6901,24 @@ async function renderLaunch(){
             catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
             finally{ cb.disabled=false; }
           });
+        });
+        const addrBtn=detail.querySelector('[data-launch-market-address-save]');
+        if(addrBtn) addrBtn.addEventListener('click', async ()=>{
+          const input=detail.querySelector('[data-launch-market-address-input]');
+          const market_id=addrBtn.dataset.launchMarketAddressSave, address=input.value.trim();
+          addrBtn.disabled=true;
+          try{
+            const r=await api('launch_market_address_set',{method:'POST',body:{market_id,address}});
+            m.address=r.address;
+            input.value=m.address||'';
+            card.querySelector('.launch-market-address').innerHTML=launchMarketAddressLineHtml(m);
+            card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
+            const s=launchMarketScoreOf(m, marketItems);
+            card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
+            toast('Address saved');
+          }
+          catch(e){ toast(e.message||'Could not save'); }
+          finally{ addrBtn.disabled=false; }
         });
       }
     });

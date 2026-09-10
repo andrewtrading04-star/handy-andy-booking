@@ -363,6 +363,7 @@ export default async function handler(req, res) {
       case 'launch_status':        return await launchStatus(req, res, db, auth);
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
       case 'launch_market_checklist_set': return await launchMarketChecklistSet(req, res, db, auth, body);
+      case 'launch_market_address_set': return await launchMarketAddressSet(req, res, db, auth, body);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
@@ -2193,24 +2194,28 @@ const LAUNCH_CHECKLIST_ITEMS = [
 // as businesses.settings.launch_checklist, just a separate table + item set.
 // No LLC item: these pages operate under the parent business's own entity,
 // so forming a separate one was never actually part of the plan (owner
-// confirmed 2026-09-10) — unlike gbp_created/gbp_verified/has_address/
-// can_book, which are real per-page facts regardless of whose LLC is behind
-// the page. GBP is split into created vs. verified, same as the business
-// checklist, because for these pages verification is specifically the video
-// method (no public storefront to mail a postcard to) and that's the actual
-// bottleneck the owner is prioritizing — a page can sit at "created" for a
-// while before the video call actually happens.
+// confirmed 2026-09-10) — unlike gbp_created/gbp_verified/can_book, which are
+// real per-page facts regardless of whose LLC is behind the page. GBP is
+// split into created vs. verified, same as the business checklist, because
+// for these pages verification is specifically the video method (no public
+// storefront to mail a postcard to) and that's the actual bottleneck the
+// owner is prioritizing — a page can sit at "created" for a while before the
+// video call actually happens.
+// has_address is deliberately NOT a checkbox here: a real street address is
+// exactly the thing Google's video verifier checks against, so a plain tick
+// couldn't answer "which address" when it's time for the call. `address` is
+// its own column on the row instead (see launchMarketAddressSet below),
+// folded into the score/blocked math the same way a checklist item would be.
 const MARKET_CHECKLIST_ITEMS = [
   { key: 'gbp_created',             label: 'Google Business Profile created' },
   { key: 'gbp_verified',            label: 'GBP verified (video)' },
   { key: 'url_chosen_and_directed', label: 'URL chosen and live' },
-  { key: 'has_address',             label: 'Page shows a real address' },
   { key: 'can_book',                label: 'Can book a real appointment or an estimate' },
 ];
 
 async function launchMarketRows(db) {
   const { data: markets, error } = await db.from('markets')
-    .select('id, slug, name, parent_business_slug, url, active, settings, created_at')
+    .select('id, slug, name, parent_business_slug, url, address, active, settings, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
 
@@ -2232,7 +2237,7 @@ async function launchMarketRows(db) {
     const checklist = (m.settings && m.settings.launch_checklist) || {};
     return {
       id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
-      url: m.url, active: m.active, created_at: m.created_at, site, checklist,
+      url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist,
     };
   }));
 }
@@ -2289,6 +2294,26 @@ async function launchStatus(req, res, db, auth) {
     items: LAUNCH_CHECKLIST_ITEMS, businesses: results,
     marketItems: MARKET_CHECKLIST_ITEMS, markets,
   });
+}
+
+async function launchMarketAddressSet(req, res, db, auth, body) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const marketId = String(body.market_id || '').trim();
+  if (!marketId) return res.status(400).json({ error: 'market_id is required' });
+  // Blank clears it back to "no address on file" rather than storing an
+  // empty string that would read as a real (missing) value everywhere else.
+  const address = String(body.address || '').trim().slice(0, 300) || null;
+
+  const { data: m, error: readErr } = await db.from('markets').select('id').eq('id', marketId).maybeSingle();
+  if (readErr) throw readErr;
+  if (!m) return res.status(404).json({ error: 'Market not found' });
+
+  const { error: writeErr } = await db.from('markets')
+    .update({ address, updated_at: new Date().toISOString() })
+    .eq('id', marketId);
+  if (writeErr) throw writeErr;
+
+  return res.status(200).json({ ok: true, address });
 }
 
 async function launchMarketChecklistSet(req, res, db, auth, body) {
