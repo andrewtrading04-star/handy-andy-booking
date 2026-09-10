@@ -127,7 +127,7 @@
     // PerfectView (houstonperfectviewtvmounting.com): hosted fallback until
     // the domain is attached to its Vercel project, then flip to
     // https://houstonperfectviewtvmounting.com/thank-you (the site ships it).
-    'houstonperfectviewtvmounting': 'https://handy-andy-booking.vercel.app/thank-you.html?b=houstonperfectviewtvmounting',
+    'houstonperfectviewtvmounting': 'https://houstonperfectviewtvmounting.com/thank-you',
   }[BUSINESS] || 'https://www.ihandyandy.com/thankyou/';
   // Zip handed in by the host page (its own hero "check availability" box):
   // <script data-zip="78704"> or a ?zip= query param on the page URL. When a
@@ -164,7 +164,7 @@
   // deliberately the one dark Austin widget: it's the specialist/hard-installs
   // brand, and the dark charcoal surface (T_DARK) is what separates it from
   // its three light-card siblings at a glance.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall') ? T_LIGHT : T_DARK;
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall' || BUSINESS === 'houstonperfectviewtvmounting') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book
