@@ -47,6 +47,7 @@ const LEGACY_SLUG_ACCOUNT = {
   tvhanginghouston:        'houstonmounting',
   htvmounting:             'houstonmounting',
   houstontvmountingpros:   'houstonmounting',
+  houstonperfectviewtvmounting: 'houstonmounting',
   // Austin lead-gen quad, same arrangement as Houston's: all five Austin
   // brands (austin + these four) charge on austinmounting.com's existing
   // 'austin' Stripe account — no per-slug account exists or should be added.

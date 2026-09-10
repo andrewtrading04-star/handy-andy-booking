@@ -129,6 +129,7 @@ const STRIPE_PK_ENV = {
   tvhanginghouston:       'Publishable_key_houston_mounting',
   htvmounting:            'Publishable_key_houston_mounting',
   houstontvmountingpros:  'Publishable_key_houston_mounting',
+  houstonperfectviewtvmounting: 'Publishable_key_houston_mounting',
   // Austin lead-gen quad — all four charge on the existing 'austin' Stripe
   // account (austinmounting.com's, see LEGACY_SLUG_ACCOUNT in stripe.js), so
   // all four share austin's publishable key too.

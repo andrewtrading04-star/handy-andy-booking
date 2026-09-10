@@ -5,7 +5,7 @@
 // not just the business, to avoid overpaying non-Houston jobs.
 export const HOUSTON_ONLY_SLUGS = new Set([
   'houstonmounting', 'htvmounting', 'houstontvinstallation', 'tvhanginghouston',
-  'houstontvmountingpros',
+  'houstontvmountingpros', 'houstonperfectviewtvmounting',
 ]);
 
 // business_id -> Houston service_area id (or null if that business has none),

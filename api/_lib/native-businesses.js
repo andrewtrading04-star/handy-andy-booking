@@ -34,6 +34,7 @@ export const NATIVE_BUSINESS = {
   'tvhanginghouston':     { name: 'TV Hanging Houston',         legalName: 'TV Hanging Houston' },
   'htvmounting':          { name: 'HTV Mounting',                legalName: 'HTV Mounting' },
   'houstontvmountingpros':  { name: 'H-Town TV Mounting',          legalName: 'H-Town TV Mounting' },
+  'houstonperfectviewtvmounting': { name: 'PerfectView TV Mounting', legalName: 'Houston PerfectView TV Mounting' },
   // Austin lead-gen micro-brands, same shape as the Houston quad above: no
   // techs of their own, all borrow Handy Andy's Austin roster (Zach) — see
   // PARTNER_SLUG in availability.js. All four share the existing 'austin'
