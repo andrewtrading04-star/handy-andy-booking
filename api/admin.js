@@ -364,6 +364,7 @@ export default async function handler(req, res) {
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
       case 'launch_market_checklist_set': return await launchMarketChecklistSet(req, res, db, auth, body);
       case 'launch_market_address_set': return await launchMarketAddressSet(req, res, db, auth, body);
+      case 'launch_notes_set':     return await launchNotesSet(req, res, db, auth, body);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
       case 'services':          return await services(req, res, db, auth);
@@ -2239,9 +2240,10 @@ async function launchMarketRows(db) {
       }
     }
     const checklist = (m.settings && m.settings.launch_checklist) || {};
+    const notes = (m.settings && m.settings.launch_notes) || '';
     return {
       id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
-      url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist,
+      url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist, notes,
     };
   }));
 }
@@ -2282,6 +2284,7 @@ async function launchStatus(req, res, db, auth) {
     }
 
     const checklist = (biz.settings && biz.settings.launch_checklist) || {};
+    const notes = (biz.settings && biz.settings.launch_notes) || '';
 
     return {
       id: biz.id, slug: biz.slug, name: biz.name, url: biz.url,
@@ -2291,6 +2294,7 @@ async function launchStatus(req, res, db, auth) {
       email: { wired: emailWired, ready: emailReady },
       site,
       checklist,
+      notes,
     };
   }));
 
@@ -2318,6 +2322,34 @@ async function launchMarketAddressSet(req, res, db, auth, body) {
   if (writeErr) throw writeErr;
 
   return res.status(200).json({ ok: true, address });
+}
+
+// POST ?action=launch_notes_set — free-text notes on a launch card, business
+// or market. Same jsonb-in-settings pattern as launch_checklist rather than a
+// new column: this is scratch space for the owner ("waiting on Kregg",
+// "landlord wants proof of insurance"), not a tracked fact anything else in
+// the app reads, so it doesn't need a migration or its own table.
+async function launchNotesSet(req, res, db, auth, body) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const kind = body.kind === 'market' ? 'market' : 'business';
+  const id = String(body.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  // Generous cap — this is a running log a busy owner may paste updates into
+  // over weeks, not a one-line field. 1 char short of "too big to be useful."
+  const notes = String(body.notes || '').slice(0, 5000);
+
+  const table = kind === 'market' ? 'markets' : 'businesses';
+  const { data: row, error: readErr } = await db.from(table).select('id, settings').eq('id', id).maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) return res.status(404).json({ error: `${kind === 'market' ? 'Market' : 'Business'} not found` });
+
+  const settings = row.settings || {};
+  const { error: writeErr } = await db.from(table)
+    .update({ settings: { ...settings, launch_notes: notes }, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (writeErr) throw writeErr;
+
+  return res.status(200).json({ ok: true, notes });
 }
 
 async function launchMarketChecklistSet(req, res, db, auth, body) {

@@ -6591,6 +6591,39 @@ function launchAutoNote(b, key){
   }
   return null;
 }
+// Free-text notes, shared by business and market detail panels. `kind` tells
+// the save handler which table to write to (see api/admin.js launchNotesSet).
+function launchNotesHtml(kind, id, notes){
+  return `<div style="margin:10px 0 0;" onclick="event.stopPropagation();">
+    <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:4px;">Notes</label>
+    <textarea data-launch-notes-input="${id}" data-launch-notes-kind="${kind}" rows="3" placeholder="e.g. waiting on Kregg for the GBP call, landlord wants proof of insurance…" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;resize:vertical;font-family:inherit;">${esc(notes||'')}</textarea>
+    <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+      <button type="button" data-launch-notes-save="${id}" data-launch-notes-kind="${kind}" class="btn ghost" style="width:auto;padding:7px 14px;font-size:12px;">Save note</button>
+    </div>
+  </div>`;
+}
+// Small "has a note" flag on the collapsed card, so the owner doesn't have to
+// open every card to find the one he left himself a reminder on.
+function launchNotesFlagHtml(notes){
+  return notes ? `<span title="Has a note" style="font-size:11px;color:#92400e;">📝</span>` : '';
+}
+// Wires the textarea + Save button inside one already-rendered detail panel.
+// `onSaved(notes)` lets each caller patch its own local record + card.
+function wireLaunchNotes(detail, onSaved){
+  const btn = detail.querySelector('[data-launch-notes-save]');
+  if(!btn) return;
+  btn.addEventListener('click', async ()=>{
+    const input = detail.querySelector('[data-launch-notes-input]');
+    const id = btn.dataset.launchNotesSave, kind = btn.dataset.launchNotesKind, notes = input.value;
+    btn.disabled = true; const prev = btn.textContent; btn.textContent = 'Saving…';
+    try{
+      const r = await api('launch_notes_set', { method:'POST', body:{ kind, id, notes } });
+      onSaved(r.notes);
+      toast('Note saved');
+    }catch(e){ toast(e.message||'Could not save note'); }
+    finally{ btn.disabled = false; btn.textContent = prev; }
+  });
+}
 function launchDetailHtml(b, items){
   items = launchItemsFor(b, items);
   const checklist=items.map(it=>{
@@ -6619,6 +6652,7 @@ function launchDetailHtml(b, items){
     <div style="display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
+    ${launchNotesHtml('business', b.id, b.notes)}
   </div>`;
 }
 // Phone + site, shown under the business name. Both are optional on the
@@ -6673,7 +6707,7 @@ function launchCardHtml(b, items){
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
       <div style="min-width:0;">
-        <div style="font-weight:800;font-size:14px;">${esc(b.name)}</div>
+        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(b.name)} ${launchNotesFlagHtml(b.notes)}</div>
         ${launchContactHtml(b)}
       </div>
     </div>
@@ -6730,6 +6764,7 @@ function launchMarketDetailHtml(m, items){
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
+    ${launchNotesHtml('market', m.id, m.notes)}
   </div>`;
 }
 function launchMarketAddressLineHtml(m){
@@ -6743,7 +6778,7 @@ function launchMarketCardHtml(m, items){
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
       <div style="min-width:0;">
-        <div style="font-weight:800;font-size:14px;">${esc(m.name)}</div>
+        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(m.name)} ${launchNotesFlagHtml(m.notes)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
         <div class="launch-market-address" style="margin-top:2px;">${launchMarketAddressLineHtml(m)}</div>
       </div>
@@ -6862,6 +6897,10 @@ async function renderLaunch(){
               catch(e){ cb.checked=!value; toast(e.message||'Could not save'); cb.disabled=false; }
             });
           });
+          wireLaunchNotes(detail, (notes)=>{
+            b.notes=notes;
+            card.querySelector('[data-launch-name]').innerHTML = `${esc(b.name)} ${launchNotesFlagHtml(b.notes)}`;
+          });
         };
         paint();
         detail.style.display='block';
@@ -6913,6 +6952,10 @@ async function renderLaunch(){
           }
           catch(e){ toast(e.message||'Could not save'); }
           finally{ addrBtn.disabled=false; }
+        });
+        wireLaunchNotes(detail, (notes)=>{
+          m.notes=notes;
+          card.querySelector('[data-launch-name]').innerHTML = `${esc(m.name)} ${launchNotesFlagHtml(m.notes)}`;
         });
       }
     });
