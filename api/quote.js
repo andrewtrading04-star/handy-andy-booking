@@ -21,6 +21,30 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const body = req.body || {};
+
+  // This endpoint has open CORS (it's posted to cross-origin from
+  // ihandyandy.com), which also makes it trivially discoverable and
+  // spammable by scripts that skip the real page entirely. Real browser
+  // submissions always carry an Origin/Referer for a cross-origin fetch, so
+  // anything claiming a different site (or none at all) is rejected here.
+  // A silent 200 (no email/SMS sent) keeps bots from learning what tripped.
+  const originHeader = String(req.headers.origin || req.headers.referer || '');
+  let fromSite = false;
+  try {
+    const host = new URL(originHeader).hostname.toLowerCase();
+    fromSite = host === 'ihandyandy.com' || host.endsWith('.ihandyandy.com') || host === 'localhost' || host === '127.0.0.1';
+  } catch {}
+  // Invisible field bots fill in but the real form never shows.
+  const isHoneypot = String(body.hp_website || '').trim() !== '';
+  // Real users take at least ~2s to read+fill the form; scripted bots that
+  // do fetch the page and replay its fields post almost instantly.
+  const renderedAt = Number(body.renderedAt || 0);
+  const tooFast = renderedAt > 0 && Date.now() - renderedAt < 1500;
+  if (!fromSite || isHoneypot || tooFast) {
+    console.warn('[quote] blocked suspected bot submission', { fromSite, isHoneypot, tooFast, originHeader });
+    return res.status(200).json({ ok: true });
+  }
+
   const name = String(body.name || '').trim().slice(0, 200);
   const phone = String(body.phone || '').trim().slice(0, 40);
   const email = String(body.email || '').trim().slice(0, 200);
