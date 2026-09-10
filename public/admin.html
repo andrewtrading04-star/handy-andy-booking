@@ -6442,17 +6442,18 @@ function launchEffective(b, key){
   const auto = launchAutoValue(b, key);
   return auto === null ? false : auto;
 }
-// No-GBP businesses, for two different reasons that land on the same
-// exclusion: houstonmounting/houstontvinstallation/tvhanginghouston/
+// No-GBP businesses: houstonmounting/houstontvinstallation/tvhanginghouston/
 // htvmounting/tvmountingdenver and the Austin quad (austinmountingpros/
 // atxtvmount/atxmountpros/austintvinstall) are lead-gen-only funnels with no
 // physical presence (GBP requires a real service address/phone Google will
-// verify, and these brands deliberately have neither). mile-high/austin DO have a
-// real GBP, it's just tracked outside this tool. Either way the item is
-// hard-excluded from the checklist and the score denominator rather than
-// left as an unticked box, or they'd sit permanently "In progress" for an
-// item that will never legitimately get done through here.
-const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','austin','austinmountingpros','atxtvmount','atxmountpros','austintvinstall','precision','houstontvmountingpros','latvpro','lainstall','tvmountinglosangeles']);
+// verify, and these brands deliberately have neither), same as the LA trio
+// below. The item is hard-excluded from the checklist and the score
+// denominator rather than left as an unticked box, or they'd sit permanently
+// "In progress" for an item that will never legitimately get done through
+// here. precision, houstontvmountingpros (H-Town), and austin DO have (or are
+// getting) a real GBP, so as of 2026-09-10 they're tracked normally instead
+// of excluded — mile-high already was.
+const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','austinmountingpros','atxtvmount','atxmountpros','austintvinstall','latvpro','lainstall','tvmountinglosangeles']);
 // Businesses that deliberately have NO confirmation email, given the same hard
 // exclusion as the no-GBP set above. The three LA brands are unstaffed
 // demand-gauging funnels (see the CA-range fallback in api/service-area.js).
@@ -6473,8 +6474,11 @@ const LAUNCH_CITY_OF = {
   'houstonmounting':'Houston', 'houstontvinstallation':'Houston', 'htvmounting':'Houston', 'tvhanginghouston':'Houston', 'precision':'Houston', 'houstontvmountingpros':'Houston',
   'tvmountinglosangeles':'Los Angeles', 'latvpro':'Los Angeles', 'lainstall':'Los Angeles',
 };
-const LAUNCH_CITY_ORDER = ['Denver','Austin','Houston','Los Angeles','Other'];
+const LAUNCH_CITY_ORDER = ['Denver','Austin','Houston','Los Angeles','Dallas','Fort Worth','Arlington','Phoenix','Other'];
 function launchCityOf(slug){ return LAUNCH_CITY_OF[slug] || 'Other'; }
+// A market's own `name` IS the city ("Los Angeles", "Dallas", ...) — unlike a
+// business, whose name is a brand, not a place, so it needs the lookup above.
+function launchMarketCityOf(m){ return m.name || 'Other'; }
 function launchItemsFor(b, items){
   if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
   if(LAUNCH_NO_EMAIL_SLUGS.has(b.slug)) items = items.filter(it => it.key!=='email_keys');
@@ -6743,30 +6747,32 @@ async function renderLaunch(){
   const marketItems=data.marketItems||[];
   const markets=data.markets||[];
 
-  const scored=businesses.map(b=>({ b, s:launchScoreOf(b, items) }));
-  const blockedCount=scored.filter(x=>x.s.blocked).length;
-  const readyCount=scored.filter(x=>!x.s.blocked && x.s.passed===x.s.total).length;
-  const progressCount=scored.filter(x=>!x.s.blocked && x.s.passed<x.s.total).length;
+  // Businesses and markets are scored by their own rules (launchScoreOf vs
+  // launchMarketScoreOf) but from here on are treated as one uniform list of
+  // "launch entries" — each carries its own card-renderer and city, so the
+  // completed/incomplete split and the city grouping below don't need to know
+  // which kind of thing they're looking at.
+  const scoredBiz=businesses.map(b=>({ s:launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) }));
+  const scoredMarket=markets.map(m=>({ s:launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) }));
+  const all=[...scoredBiz, ...scoredMarket];
+
   const isReady=x=>!x.s.blocked && x.s.passed===x.s.total;
+  const blockedCount=all.filter(x=>x.s.blocked).length;
+  const readyCount=all.filter(isReady).length;
+  const progressCount=all.filter(x=>!isReady(x) && !x.s.blocked).length;
 
-  // LA is a market page under handy-andy, not its own business — folded into
-  // whichever top-level section (Unfinished/Finished) matches its own status.
-  const laMarket=markets.find(m=>m.slug==='la');
-  const laHtml=laMarket ? launchMarketCardHtml(laMarket, marketItems) : '';
-  const laBlocked=laMarket ? launchMarketScoreOf(laMarket, marketItems).blocked : false;
-
-  const unfinished=scored.filter(x=>!isReady(x));
-  const finished=scored.filter(isReady);
-
-  // Finished businesses group by city; unfinished stays a flat list — the
-  // whole point of that section is "everything that still needs a look",
-  // and splitting it by city would just scatter the punch list.
-  const byCity={};
-  for(const x of finished){
-    const city=launchCityOf(x.b.slug);
-    (byCity[city] = byCity[city]||[]).push(x);
-  }
-  const finishedCities=LAUNCH_CITY_ORDER.filter(c=>byCity[c]||(c==='Los Angeles' && laMarket && !laBlocked));
+  // Both sections group by city now — completed AND incomplete — so a city's
+  // work-in-progress lives right below its finished businesses instead of
+  // getting scattered into one long incomplete list with everything else.
+  const groupByCity=(list)=>{
+    const byCity={};
+    for(const x of list) (byCity[x.city]=byCity[x.city]||[]).push(x);
+    return byCity;
+  };
+  const completed=all.filter(isReady);
+  const incomplete=all.filter(x=>!isReady(x));
+  const completedByCity=groupByCity(completed);
+  const incompleteByCity=groupByCity(incomplete);
 
   const statTile=(label,value,color)=>`<div style="background:#12151c;border-radius:10px;padding:12px 16px;min-width:110px;">
     <div style="font-size:22px;font-weight:800;color:${color};line-height:1.1;">${value}</div>
@@ -6774,14 +6780,15 @@ async function renderLaunch(){
   </div>`;
   const grid=(html)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">${html}</div>`;
 
-  const cityBlock=(city)=>{
-    const rows=byCity[city]||[];
-    const extra = (city==='Los Angeles' && laMarket && !laBlocked) ? laHtml : '';
-    const total = rows.length + (extra?1:0);
-    return `<div style="margin-bottom:18px;">
-      <p style="font-size:12px;font-weight:800;color:var(--mute);margin:0 0 8px;">${esc(city)} · ${total}</p>
-      ${grid(rows.map(x=>launchCardHtml(x.b, items)).join('') + extra)}
-    </div>`;
+  const section=(byCity)=>{
+    const cities=LAUNCH_CITY_ORDER.filter(c=>byCity[c] && byCity[c].length);
+    return cities.map(city=>{
+      const rows=byCity[city];
+      return `<div style="margin-bottom:18px;">
+        <p style="font-size:12px;font-weight:800;color:var(--mute);margin:0 0 8px;">${esc(city)} &middot; ${rows.length}</p>
+        ${grid(rows.map(x=>x.html).join(''))}
+      </div>`;
+    }).join('');
   };
 
   view.innerHTML=`<div class="wrap">
@@ -6793,16 +6800,16 @@ async function renderLaunch(){
       ${statTile('Live',readyCount,'var(--green)')}
       ${statTile('In progress',progressCount,'#f2b84b')}
       ${statTile('Blocked',blockedCount,'#ff6b6b')}
-      ${statTile('Total',businesses.length + (laMarket?1:0),'#9aa4bd')}
+      ${statTile('Total',all.length,'#9aa4bd')}
     </div>
     <p style="color:var(--mute);font-size:12.5px;margin:0 0 16px;">
-      Unfinished first, finished ones below grouped by city. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
+      Completed businesses first, grouped by city; everything still incomplete sits below, grouped by city too. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
       Click a card for the full breakdown and to tick the checklist.
     </p>
-    <p style="font-size:12px;font-weight:800;color:#b45309;margin:0 0 8px;">Unfinished · ${unfinished.length + (laMarket&&laBlocked?1:0)}</p>
-    ${grid(unfinished.map(x=>launchCardHtml(x.b, items)).join('') + (laMarket&&laBlocked?laHtml:'') || '<p style="font-size:12px;color:var(--mute);">None.</p>')}
-    <p style="font-size:12px;font-weight:800;color:#15803d;margin:22px 0 8px;">Finished · ${readyCount + (laMarket&&!laBlocked?1:0)}</p>
-    ${finishedCities.length ? finishedCities.map(cityBlock).join('') : '<p style="font-size:12px;color:var(--mute);">None yet.</p>'}
+    <p style="font-size:12px;font-weight:800;color:#15803d;margin:0 0 8px;">Completed &middot; ${completed.length}</p>
+    ${completed.length ? section(completedByCity) : '<p style="font-size:12px;color:var(--mute);margin:0 0 22px;">None yet.</p>'}
+    <p style="font-size:12px;font-weight:800;color:#b45309;margin:22px 0 8px;">Incomplete &middot; ${incomplete.length}</p>
+    ${incomplete.length ? section(incompleteByCity) : '<p style="font-size:12px;color:var(--mute);">None.</p>'}
   </div>`;
 
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
