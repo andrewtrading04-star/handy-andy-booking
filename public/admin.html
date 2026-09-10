@@ -9895,12 +9895,13 @@ function paintMessages(){
       const dir=t.last_direction==='out' ? 'You: ' : '';
       html+='<div class="rc-card" style="cursor:pointer;" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
         +'<div style="flex:1;min-width:0;">'
-        +'<div style="display:flex;align-items:center;gap:8px;">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+        +msgBrandChip(t)
         +'<strong>'+esc(who)+'</strong>'
         +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
         +'</div>'
         +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
-        +'<div class="rc-meta">to '+esc(t.our_phone_pretty||t.our_phone)+(t.business_slug?' · '+esc(t.business_slug):'')+'</div>'
+        +'<div class="rc-meta">'+msgLineNote(t)+'</div>'
         +'</div>'
         +'<div style="display:flex;align-items:center;gap:10px;">'
         +'<div class="rc-meta" style="white-space:nowrap;">'+esc(msgWhen(t.last_at))+'</div>'
@@ -9936,6 +9937,25 @@ function paintMessages(){
   }));
 }
 
+// Which COMPANY this conversation is with. Several brands sell the same service
+// in the same city, so this is the first thing on every row — never a slug.
+// Blue = certain (they texted that brand's own number). Amber = worked out
+// from what we last sent them, because they replied to the 888 notification
+// line, which belongs to no brand.
+function msgBrandChip(t){
+  if(!t.business_name) return '<span class="rc-badge gray" title="Could not tell which company this is about">🏢 Company unknown</span>';
+  const guessed=t.brand_source && t.brand_source!=='line';
+  return '<span class="rc-badge '+(guessed?'amber':'blue')+'" style="font-size:12.5px;"'
+    +(guessed?' title="Worked out from '+esc(t.brand_source_label||'')+'"':'')+'>🏢 '+esc(t.business_name)+'</span>';
+}
+function msgLineNote(t){
+  let s='to '+esc(t.our_phone_pretty||t.our_phone);
+  if(t.notify_line) s+=' · notification line, not a company'+(t.brand_source_label?' · company from '+esc(t.brand_source_label):'');
+  else if(t.business_name) s+=' · '+esc(t.business_name)+' line';
+  if(t.brand_others&&t.brand_others.length) s+=' · <span style="color:#92400e;font-weight:600;">also a customer of '+esc(t.brand_others.join(', '))+'</span>';
+  return s;
+}
+
 function paintMsgThread(view){
   const t=_msgThread;
   const who=t.customer_name || t.customer_phone_pretty;
@@ -9943,9 +9963,10 @@ function paintMsgThread(view){
   let html='<div class="wrap" data-msgview>'
     +'<div class="rc-head"><div>'
     +'<button class="btn" data-msgback="1" style="margin-bottom:8px;">← All messages</button>'
+    +'<div style="margin-bottom:6px;">'+msgBrandChip(t)+'</div>'
     +'<h2 class="rc-title">'+esc(who)+'</h2>'
-    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · texted '+esc(t.our_phone_pretty)
-    +(t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
+    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · '+msgLineNote(t)
+    +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
     +'</div></div>'
     +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
     +'</div>';
@@ -9979,7 +10000,9 @@ function paintMsgThread(view){
     +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
     +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;">'
     +'<button class="btn" data-msgsend="1">Send</button>'
-    +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)+'</span>'
+    +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)
+    // The 888 shows no company name on the customer's phone — say who we are.
+    +(t.notify_line?' — their phone shows no company name, so start with "This is '+esc(t.business_name||'[company]')+'…"':'')+'</span>'
     +'</div></div>';
   html+='</div>';
   view.innerHTML=html;

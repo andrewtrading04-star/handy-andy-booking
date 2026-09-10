@@ -13743,6 +13743,98 @@ async function businessForOurPhone(db, auth, ourPhoneRaw) {
   return { biz, ourPhone, label: line.label || null };
 }
 
+// The toll-free TWILIO_PHONE_NUMBER is the NOTIFICATION sender — confirmations,
+// on-the-way, review and estimate texts for EVERY brand go out from it. It is
+// not a business, so a thread on it must never be labeled as one by its line.
+function isNotifyLine(ourPhone) {
+  const n = digitsOf(process.env.TWILIO_PHONE_NUMBER || '');
+  return !!n && digitsOf(ourPhone) === n;
+}
+
+const BRAND_SOURCE_LABEL = {
+  booking: 'their latest booking',
+  estimate: 'their estimate',
+  call: 'they called that brand',
+};
+
+// Which brand is a texter on an UNMAPPED line (the notification number)
+// talking to? Nothing on the text itself says — so look at what we last sent
+// them: every automated 888 text is tied to a booking or an estimate, and the
+// brand of the NEWEST one is the brand they are replying to. Calls to a
+// tracking line are a weaker fallback, used only when there is no booking or
+// estimate at all.
+//
+// Returns Map(customerPhone -> { business_id, slug, name, source, customer_name,
+// others: [brand names] }). `others` lists the other brands this person is ALSO
+// a customer of, so the office can double-check before answering in one voice.
+async function brandForUnmappedTexters(db, phones, bizById) {
+  const out = new Map();
+  if (!phones.length) return out;
+  const cands = new Map(phones.map(p => [p, []]));   // phone -> [{business_id, at, source, name}]
+  const push = (p, c) => { if (cands.has(p) && c.business_id) cands.get(p).push(c); };
+
+  const { data: custs } = await db.from('customers')
+    .select('id, phone, name, business_id').in('phone', phones);
+  const custById = new Map((custs || []).map(c => [c.id, c]));
+  if (custById.size) {
+    const { data: bks } = await db.from('bookings')
+      .select('customer_id, business_id, created_at')
+      .in('customer_id', [...custById.keys()])
+      .order('created_at', { ascending: false }).limit(500);
+    for (const b of (bks || [])) {
+      const c = custById.get(b.customer_id);
+      if (c) push(c.phone, { business_id: b.business_id, at: b.created_at, source: 'booking', name: c.name });
+    }
+  }
+
+  // estimates.customer_phone is free-form ("(206) 451-0606", bare digits, ...),
+  // so match the formats it is actually stored in.
+  const estForms = phones.flatMap(p => [p, prettyPhone(p), `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}`, `+1${p}`]);
+  const { data: ests } = await db.from('estimates')
+    .select('customer_phone, customer_name, business_id, created_at')
+    .in('customer_phone', estForms)
+    .order('created_at', { ascending: false }).limit(500);
+  for (const e of (ests || [])) {
+    push(digitsOf(e.customer_phone), { business_id: e.business_id, at: e.created_at, source: 'estimate', name: e.customer_name });
+  }
+
+  const { data: calls } = await db.from('calls')
+    .select('caller_phone, business_id, created_at')
+    .in('caller_phone', phones).not('business_id', 'is', null)
+    .order('created_at', { ascending: false }).limit(500);
+  const callBy = new Map();
+  for (const c of (calls || [])) {
+    const p = digitsOf(c.caller_phone);
+    if (!callBy.has(p)) callBy.set(p, { business_id: c.business_id, at: c.created_at, source: 'call', name: null });
+  }
+
+  for (const p of phones) {
+    const list = cands.get(p).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const best = list[0] || callBy.get(p);
+    if (!best) continue;
+    const biz = bizById.get(best.business_id);
+    if (!biz) continue;
+    // A customer name only from the SAME brand we picked — never borrow one
+    // brand's customer identity for another (see the 26-shared-phones note).
+    const sameBrand = list.find(c => c.business_id === best.business_id && c.name);
+    const others = [...new Set(list.map(c => c.business_id))]
+      .filter(id => id !== best.business_id)
+      .map(id => (bizById.get(id) || {}).name).filter(Boolean);
+    out.set(p, {
+      business_id: biz.id, slug: biz.slug, name: biz.name,
+      source: best.source, source_label: BRAND_SOURCE_LABEL[best.source] || best.source,
+      customer_name: sameBrand ? sameBrand.name : null,
+      others,
+    });
+  }
+  return out;
+}
+
+async function businessesById(db) {
+  const { data } = await db.from('businesses').select('id, slug, name');
+  return new Map((data || []).map(b => [b.id, b]));
+}
+
 // GET ?action=messages_list — one row per conversation, newest activity first.
 async function messagesList(req, res, db, auth) {
   const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
@@ -13814,6 +13906,34 @@ async function messagesList(req, res, db, auth) {
       t.business_slug = l ? l.business_slug : null;
     }
   }
+
+  // The brand NAME, front and centre — several brands sell the same service
+  // in the same city, and a slug or a bare number is how replies end up in
+  // the wrong company's voice.
+  const bizById = await businessesById(db);
+  const bizBySlug = new Map([...bizById.values()].map(b => [b.slug, b]));
+  for (const t of list) {
+    t.notify_line = isNotifyLine(t.our_phone);
+    const b = (t.business_id && bizById.get(t.business_id)) || (t.business_slug && bizBySlug.get(t.business_slug));
+    t.business_name = b ? b.name : null;
+    t.brand_source = b ? 'line' : null;
+  }
+  // Unmapped line (the 888 notification number): work out the brand from
+  // what we last sent this person. Only the owner ever sees these rows —
+  // secretaries are filtered to business_id above — so this adds a label,
+  // not access.
+  const unmapped = list.filter(t => !t.business_name);
+  const guesses = await brandForUnmappedTexters(db, [...new Set(unmapped.map(t => t.customer_phone))], bizById);
+  for (const t of unmapped) {
+    const g = guesses.get(t.customer_phone);
+    if (!g) continue;
+    t.business_name = g.name;
+    t.business_slug = g.slug;
+    t.brand_source = g.source;
+    t.brand_source_label = g.source_label;
+    t.brand_others = g.others;
+    if (!t.customer_name) t.customer_name = g.customer_name;
+  }
   return res.status(200).json({
     threads: list,
     unread_total: list.reduce((n, t) => n + t.unread, 0),
@@ -13842,14 +13962,29 @@ async function messagesThread(req, res, db, auth) {
   if (ctx.biz) cq = cq.eq('business_id', ctx.biz.id); else cq = cq.limit(0);
   const { data: c } = await cq.limit(1);
 
+  const bizById = await businessesById(db);
+  let brand = null;
+  if (ctx.biz) {
+    const b = bizById.get(ctx.biz.id);
+    brand = { slug: ctx.biz.slug, name: b ? b.name : ctx.biz.slug, source: 'line', source_label: null, others: [] };
+  } else {
+    const g = (await brandForUnmappedTexters(db, [customer], bizById)).get(customer);
+    if (g) brand = g;
+  }
+
   return res.status(200).json({
     our_phone: ctx.ourPhone,
     our_phone_pretty: prettyPhone(ctx.ourPhone),
     line_label: ctx.label,
-    business: ctx.biz ? ctx.biz.slug : null,
+    notify_line: isNotifyLine(ctx.ourPhone),
+    business: brand ? brand.slug : null,
+    business_name: brand ? brand.name : null,
+    brand_source: brand ? brand.source : null,
+    brand_source_label: brand ? brand.source_label : null,
+    brand_others: brand ? brand.others : [],
     customer_phone: customer,
     customer_phone_pretty: prettyPhone(customer),
-    customer_name: (c || [])[0] ? (c || [])[0].name : null,
+    customer_name: (c || [])[0] ? (c || [])[0].name : (brand && brand.customer_name) || null,
     customer_id: (c || [])[0] ? (c || [])[0].id : null,
     messages: rows || [],
   });
