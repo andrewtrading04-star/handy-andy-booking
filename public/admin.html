@@ -6689,20 +6689,14 @@ function launchCardHtml(b, items){
 // Blocked = can't book, same principle as widget_embedded for a business: a
 // page that can't take a booking or an estimate can't do its job regardless
 // of how many of the other boxes are ticked.
-// A real street address counts toward the score/blocked math exactly like a
-// checklist item would (see MARKET_CHECKLIST_ITEMS comment in api/admin.js
-// for why it's a stored value instead of a checkbox), so every consumer of
-// "how done is this location" — the ring, the stat tiles, Completed vs.
-// Incomplete — sees it without needing its own special case.
 function launchMarketScoreOf(m, items){
-  const passed = items.filter(it => !!m.checklist[it.key]).length + (m.address ? 1 : 0);
-  return { passed, total: items.length + 1, blocked: !m.checklist.can_book };
+  const passed = items.filter(it => !!m.checklist[it.key]).length;
+  return { passed, total: items.length, blocked: !m.checklist.can_book };
 }
 function launchMarketNextAction(m, items){
   if(!m.url) return 'Choose a URL for this page';
   if(m.site.error) return `Page could not be reached (${m.site.error})`;
   if(m.site.checked && !m.site.ok) return `Page returned ${m.site.status}`;
-  if(!m.address) return 'Add the real street address for this location';
   for(const it of items) if(!m.checklist[it.key]) return `Next: ${it.label}`;
   return 'Nothing outstanding.';
 }

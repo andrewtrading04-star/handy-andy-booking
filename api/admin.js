@@ -2201,15 +2201,19 @@ const LAUNCH_CHECKLIST_ITEMS = [
 // storefront to mail a postcard to) and that's the actual bottleneck the
 // owner is prioritizing — a page can sit at "created" for a while before the
 // video call actually happens.
-// has_address is deliberately NOT a checkbox here: a real street address is
-// exactly the thing Google's video verifier checks against, so a plain tick
-// couldn't answer "which address" when it's time for the call. `address` is
-// its own column on the row instead (see launchMarketAddressSet below),
-// folded into the score/blocked math the same way a checklist item would be.
+// address_chosen mirrors url_chosen_and_directed: a plain milestone tick for
+// "we've settled on an address", independent of what that address actually
+// is. As of 2026-09-10 the owner hasn't decided Fort Worth's (or the other
+// new locations') address yet, so this needs to sit unticked without
+// blocking on anything else. The literal text goes in `address`, its own
+// column on the row (see launchMarketAddressSet below) — a real street
+// address is exactly the thing Google's video verifier checks against, so
+// WHICH one matters and a checkbox alone couldn't say.
 const MARKET_CHECKLIST_ITEMS = [
   { key: 'gbp_created',             label: 'Google Business Profile created' },
   { key: 'gbp_verified',            label: 'GBP verified (video)' },
   { key: 'url_chosen_and_directed', label: 'URL chosen and live' },
+  { key: 'address_chosen',          label: 'Address chosen' },
   { key: 'can_book',                label: 'Can book a real appointment or an estimate' },
 ];
 
