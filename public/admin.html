@@ -9884,7 +9884,9 @@ function paintMsgThread(view){
     +'<h2 class="rc-title">'+esc(who)+'</h2>'
     +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · texted '+esc(t.our_phone_pretty)
     +(t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
-    +'</div></div></div>';
+    +'</div></div>'
+    +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
+    +'</div>';
 
   html+='<div class="rc-card guided" style="max-height:52vh;overflow-y:auto;">';
   if(!t.messages.length){
@@ -9922,6 +9924,20 @@ function paintMsgThread(view){
 
   view.querySelector('[data-msgback]').addEventListener('click',()=>{
     _msgOpen=null; _msgThread=null; paintMessages();
+  });
+
+  view.querySelector('[data-msgblock]').addEventListener('click',async(ev)=>{
+    if(!confirm(`Block ${t.customer_phone_pretty}? They will be rejected on every tracking line — no more calls or texts — before anyone sees them.`)) return;
+    const btn=ev.currentTarget;
+    btn.disabled=true;
+    try{
+      await api('messages_block',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone }});
+      toast('Blocked');
+      _msgOpen=null; _msgThread=null; paintMessages();
+    }catch(e){
+      toast(e.message||'Could not block');
+      btn.disabled=false;
+    }
   });
 
   const ta=view.querySelector('[data-msgreply]');

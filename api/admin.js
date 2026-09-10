@@ -494,6 +494,7 @@ export default async function handler(req, res) {
       case 'messages_thread': return await messagesThread(req, res, db, auth);
       case 'messages_send':   return await messagesSend(req, res, db, auth, body);
       case 'messages_read':   return await messagesRead(req, res, db, auth, body);
+      case 'messages_block':  return await messagesBlock(req, res, db, auth, body);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -13889,4 +13890,26 @@ async function messagesRead(req, res, db, auth, body) {
     .eq('direction', 'in').is('read_at', null);
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ ok: true });
+}
+
+// POST ?action=messages_block — block a texter, owner or secretary, from
+// the Messages thread itself (2026-09-10 — same request as the Calls tab's
+// 🚫 Block button, but for text harassment/spam instead of robocalls). Reuses
+// the exact blocked_numbers table callBlock() writes to (migration 0101), so
+// one block covers both channels business-wide: a number blocked here is also
+// rejected before it ever rings a tracking line, and vice versa. Same auth
+// gate as messagesSend/messagesRead — any office login that can open this
+// thread can block the number that's in it.
+async function messagesBlock(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let ctx; try { ctx = await businessForOurPhone(db, auth, body.our); } catch (e) { return bail(res, e); }
+  const customer = digitsOf(body.customer);
+  if (!customer || customer.length !== 10) return res.status(400).json({ error: 'customer is required' });
+  const { error } = await db.from('blocked_numbers').upsert({
+    phone: customer,
+    blocked_by: auth.name || auth.role || 'office',
+    reason: (body.reason || '').toString().slice(0, 200) || 'Blocked from Messages',
+  }, { onConflict: 'phone', ignoreDuplicates: false });
+  if (error) throw error;
+  return res.status(200).json({ ok: true, phone: customer });
 }

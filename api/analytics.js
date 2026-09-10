@@ -1456,12 +1456,22 @@ async function handleSmsInbound(req, res) {
   const to = tenDigits(params.To);
   const body = (params.Body || '').toString().trim();
   let line = null;
+  let blocked = false;
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
       .select('phone, label, business_slug, forward_to, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
       .eq('phone', to).maybeSingle();
     line = data && data.active ? data : null;
+
+    // Same blocked_numbers table the voice path checks (handleVoiceInbound
+    // above) and the Messages "Block" button writes to — one block covers
+    // both channels, so a texter blocked here also stops getting relayed or
+    // auto-acked, not just kept out of the calls ticket queue below.
+    if (from) {
+      const { data: b } = await db.from('blocked_numbers').select('id').eq('phone', from).maybeSingle();
+      blocked = !!b;
+    }
 
     let business_id = null;
     if (line && line.business_slug) {
@@ -1509,7 +1519,7 @@ async function handleSmsInbound(req, res) {
     }
 
     // Same rule as the voice path: the text still relays, it just isn't logged.
-    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body);
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked);
 
     await db.from('calls').insert({
       business_id,
@@ -1521,19 +1531,29 @@ async function handleSmsInbound(req, res) {
       transcript: body || null,
       occurred_at: new Date().toISOString(),
       customer_id,
-      status: 'new',
-      warnings: line ? null : ['Number is not in tracking_numbers - text still relayed if possible'],
+      // Same pre-resolved treatment blocked calls get: nobody needs to follow
+      // up on a text from a number that's already blocked.
+      status: blocked ? 'ignored' : 'new',
+      handled_by: blocked ? 'Blocked number' : null,
+      handled_at: blocked ? new Date().toISOString() : null,
+      warnings: blocked ? ['Blocked number — text was not relayed'] : (line ? null : ['Number is not in tracking_numbers - text still relayed if possible']),
     });
   } catch (e) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
-  return finishSmsInbound(res, line, from, body);
+  return finishSmsInbound(res, line, from, body, blocked);
 }
 
 // The relay-and-ack tail of sms_inbound, split out so a silent number can skip
 // the row without skipping the relay.
-async function finishSmsInbound(res, line, from, body) {
+async function finishSmsInbound(res, line, from, body, blocked) {
+  // No relay, no auto-ack — same "give a blocked sender nothing to work with"
+  // principle as the voice path's <Reject/>. The message itself is still kept
+  // (that insert runs above, before this is ever reached), so the thread
+  // stays visible in Messages; it just stops bothering anyone.
+  if (blocked) return xml(res, '<Response/>');
+
   // Same day/night split the call path uses: a text landing at 3am must not
   // wake whoever answers that line during the day.
   const smsTo = destinationFor(line);
