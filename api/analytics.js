@@ -1474,9 +1474,11 @@ async function handleSmsInbound(req, res) {
     }
 
     let business_id = null;
+    let business_name = null;
     if (line && line.business_slug) {
-      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
+      const { data: biz } = await db.from('businesses').select('id, name').eq('slug', line.business_slug).maybeSingle();
       business_id = biz?.id || null;
+      business_name = biz?.name || null;
     }
 
     // Moved ABOVE the silent-number check so the messages insert below can use
@@ -1519,7 +1521,7 @@ async function handleSmsInbound(req, res) {
     }
 
     // Same rule as the voice path: the text still relays, it just isn't logged.
-    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked);
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name);
 
     await db.from('calls').insert({
       business_id,
@@ -1542,12 +1544,12 @@ async function handleSmsInbound(req, res) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
-  return finishSmsInbound(res, line, from, body, blocked);
+  return finishSmsInbound(res, line, from, body, blocked, business_name);
 }
 
 // The relay-and-ack tail of sms_inbound, split out so a silent number can skip
 // the row without skipping the relay.
-async function finishSmsInbound(res, line, from, body, blocked) {
+async function finishSmsInbound(res, line, from, body, blocked, business_name) {
   // No relay, no auto-ack — same "give a blocked sender nothing to work with"
   // principle as the voice path's <Reject/>. The message itself is still kept
   // (that insert runs above, before this is ever reached), so the thread
@@ -1560,7 +1562,12 @@ async function finishSmsInbound(res, line, from, body, blocked) {
   if (line && smsTo && body) {
     try {
       const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
-      await sendSMS(smsTo, `Text${line.label ? ` on ${line.label}` : ''} from ${pretty}: ${body}`);
+      // line.label is the voice whisper script ("Please be aware, this call
+      // is from X.") — wrong verb for a text and reads garbled if reused
+      // verbatim here. Build the SMS relay's own sentence from the business
+      // name instead.
+      const who = business_name ? `Please be aware, this text is from ${business_name}.` : 'Please be aware, this is a text.';
+      await sendSMS(smsTo, `${who} From ${pretty}, it says: ${body}`);
     } catch (e) {
       console.error('[sms_inbound] relay failed:', e.message);
     }
