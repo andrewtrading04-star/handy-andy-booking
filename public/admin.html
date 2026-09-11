@@ -9518,10 +9518,12 @@ function callCard(r,handled){
   // response. Office asked to see it directly on the card instead of having
   // to infer it from the business/line label.
   const dialedNum = isTracked && r.grasshopper_number ? fmtPhone(r.grasshopper_number) : null;
+  const hasLineLabel = lineLabel && lineLabel !== r.business?.name;
   const subLine = [
     r.business?.name,
-    dialedNum ? 'called ' + dialedNum : null,
-    lineLabel && lineLabel !== r.business?.name ? lineLabel + ' line' : null,
+    hasLineLabel
+      ? (dialedNum ? `${lineLabel} line (${dialedNum})` : `${lineLabel} line`)
+      : (dialedNum ? 'called ' + dialedNum : null),
     routedTo ? 'routed to ' + routedTo : (isTracked ? 'not routed' : null),
   ].filter(Boolean).map(esc).join(' · ');
   // A row with no caller number can never be returned. In practice this is
