@@ -4944,6 +4944,18 @@ function anaUrl(mode){
   }
   return anaBase()+'?'+anaWParam()+'days='+mode;
 }
+// The "Compare to" window, ending right where the CURRENTLY SELECTED period
+// starts (not "the last N days from now" again — that's the same window the
+// main period already covers whenever anaCompareDays === anaDays, which is
+// exactly why Compare used to render two identical periods side by side).
+function anaCompareRange(){
+  const periodStartMs = anaDays==='today' ? anaDenverMidnightOf(anaDenverYmd(0)).getTime()
+    : anaDays==='yesterday' ? anaDenverMidnightOf(anaDenverYmd(-1)).getTime()
+    : Date.now() - parseInt(anaDays,10) * 86400000;
+  const to = new Date(periodStartMs - 1000); // 1s before the current period starts, so no event double-counts on the boundary
+  const from = new Date(periodStartMs - anaCompareDays * 86400000);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
 
 // ── Analytics: portfolio overview ────────────────────────────────────────────
 // One health check across every business's booking-funnel tracking, backed by
@@ -5335,7 +5347,8 @@ async function loadAnalytics(){
     const d=await r.json();
     if(d.error) throw new Error(d.error);
     if(anaCompareDays){
-      const rc=await fetch(anaBase()+'?'+anaWParam()+'days='+anaCompareDays);
+      const cr=anaCompareRange();
+      const rc=await fetch(anaBase()+'?'+anaWParam()+'from='+cr.from+'&to='+cr.to);
       if(rc.ok){ const dc=await rc.json(); if(!dc.error) d.comparison=dc; }
     }
     await chartReady;

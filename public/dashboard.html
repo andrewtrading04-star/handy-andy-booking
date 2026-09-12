@@ -167,6 +167,18 @@ function buildAnalyticsUrl(mode){
   }
   return '/api/analytics?days='+mode;
 }
+// The "Compare to" window, ending right where the CURRENTLY SELECTED period
+// starts (not "the last N days from now" again — that's the same window the
+// main period already covers whenever compareDays === currentDays, which is
+// exactly why Compare used to render two identical periods side by side).
+function buildCompareRange(){
+  const periodStartMs = currentDays==='today' ? denverMidnightOf(denverYmd(0)).getTime()
+    : currentDays==='yesterday' ? denverMidnightOf(denverYmd(-1)).getTime()
+    : Date.now() - parseInt(currentDays,10) * 86400000;
+  const to = new Date(periodStartMs - 1000); // 1s before the current period starts, so no event double-counts on the boundary
+  const from = new Date(periodStartMs - compareDays * 86400000);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
 async function load(){
   try{
     const r = await fetch(buildAnalyticsUrl(currentDays));
@@ -175,7 +187,8 @@ async function load(){
     if(d.error) throw new Error(d.error);
 
     if(compareDays){
-      const rc = await fetch('/api/analytics?days=' + compareDays);
+      const cr = buildCompareRange();
+      const rc = await fetch('/api/analytics?from=' + cr.from + '&to=' + cr.to);
       if(!rc.ok) throw new Error('Compare API error ' + rc.status);
       const dc = await rc.json();
       if(dc.error) throw new Error(dc.error);
