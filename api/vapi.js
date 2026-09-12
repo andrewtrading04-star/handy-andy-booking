@@ -149,7 +149,8 @@ async function runTool(name, args) {
         selections: priced.selections, subtotal: priced.subtotal, tax: priced.tax, price: priced.total,
         payment_method: 'card',
         notes: 'Booked by AI Voice Bot v3 (Vapi)',
-        sms_consent: true,
+        // No consent script is read on this path, so no text opt-in (A2P 10DLC).
+        sms_consent: false,
       };
       await adminApi('booking_create', { method: 'POST', body });
       return { booked: true, total: priced.total, date: args.date, slot_label: args.slot_label || args.slot_key };

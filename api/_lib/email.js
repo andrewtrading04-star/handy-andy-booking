@@ -584,7 +584,7 @@ export function bookingConfirmationEmail(details = {}, brand = EMAIL_BRANDS['han
               ${heightCalcBtn}`)}
       ${card('&#128276;', 'On-the-way notification', `
               <ul style="${ul}">
-                <li style="${li}">Once your technician is en route, you'll get an "on-the-way" text message.</li>
+                <li style="${li}">Once your technician is en route, you'll get an "on-the-way" text message if you opted in to texts.</li>
                 <li style="${li}">This typically arrives within 30 to 60 minutes of your scheduled time.</li>
                 <li style="${li}">Your technician will arrive within the 2-hour window of your appointment time.</li>
               </ul>`)}

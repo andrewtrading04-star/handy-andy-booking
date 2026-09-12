@@ -1,6 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
-import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND } from './_lib/sms.js';
+import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState } from './_lib/sms.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 
@@ -1366,7 +1366,7 @@ async function botAskDate(d, action, businessSlug) {
   }
   dates = dates.slice(0, 3);
   d._dateChoices = dates;
-  if (!dates.length) return botHangup("I'm sorry, we don't have any openings in your area right now. Please call back soon or we'll follow up by text.");
+  if (!dates.length) return botHangup("I'm sorry, we don't have any openings in your area right now. Please call back soon.");
   const list = botSpokenList(dates.map(botSpokenDate));
   return botMenuTwiml(action, `The soonest openings are ${list}. Which day works best?`);
 }
@@ -1431,12 +1431,15 @@ async function botDoBooking(db, session, d, line, callerFrom) {
     selections: priced.selections, subtotal: priced.subtotal, tax: priced.tax, price: priced.total,
     payment_method: 'card',   // no payment_method_id — same "collect at service" path the human Skip-for-now checkbox uses
     notes: 'Booked by AI Voice Bot (pilot)',
-    sms_consent: true,
+    // The bot never reads the text-message consent script, so it can never
+    // record a yes. Only the office script or the unchecked web checkbox opts
+    // a customer in (A2P 10DLC; see ihandyandy.com/sms-opt-in).
+    sms_consent: false,
   };
   try {
     await adminApi('booking_create', { method: 'POST', body });
     await botSessionSave(db, session.call_sid, { step: 'done' });
-    return botHangup(`You're all set for ${botSpokenDate(d.date)}, ${d.slotLabel}. The total is ${botSpokenMoney(priced.total)}, and we'll text you a confirmation. Thanks for calling, and we'll see you then!`);
+    return botHangup(`You're all set for ${botSpokenDate(d.date)}, ${d.slotLabel}. The total is ${botSpokenMoney(priced.total)}. Thanks for calling, and we'll see you then!`);
   } catch (e) {
     console.error('[voice_bot] booking_create failed:', e.message, e.data || '');
     await botSessionSave(db, session.call_sid, { retry_count: 0 });
@@ -1528,7 +1531,7 @@ async function handleSmsInbound(req, res) {
     }
 
     // Same rule as the voice path: the text still relays, it just isn't logged.
-    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name);
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name, to);
 
     // A bare STOP/HELP/START keyword gets its automatic handling in
     // finishSmsInbound, but it is still relayed and queued like any other
@@ -1536,7 +1539,7 @@ async function handleSmsInbound(req, res) {
     // appointment. The note records which keyword it was and what was automated.
     const keyword = smsKeyword(body);
     const keywordNote = keyword === 'stop' ? `STOP keyword: texts turned off for this number (${TWILIO_OPTOUT_RE.test(body || '') ? 'Twilio sent the opt-out confirmation' : 'we sent the opt-out confirmation'}); relayed to staff`
-      : keyword === 'help' ? 'HELP keyword: auto-replied with support contact; relayed to staff'
+      : keyword === 'help' ? (line && line.business_slug === 'handy-andy' && TWILIO_HELP_RE.test(body || '') ? 'HELP keyword: Twilio sent the registered help reply; relayed to staff' : 'HELP keyword: auto-replied with support contact; relayed to staff')
       : keyword === 'start' ? 'START keyword: Twilio may re-enable texts to this number, but CRM text consent was NOT restored; relayed to staff'
       : null;
     const callWarnings = blocked ? ['Blocked number — text was not relayed']
@@ -1563,7 +1566,7 @@ async function handleSmsInbound(req, res) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
-  return finishSmsInbound(res, line, from, body, blocked, business_name);
+  return finishSmsInbound(res, line, from, body, blocked, business_name, to);
 }
 
 // A2P 10DLC keywords, matched against the WHOLE text only ("can you stop by
@@ -1576,13 +1579,16 @@ async function handleSmsInbound(req, res) {
 // resubscribe confirmation, so we add no reply, and we deliberately do NOT
 // restore CRM consent (only a recorded opt-in does that). All three are still
 // relayed to staff (relayInboundText) with a note saying what was automated.
-const SMS_STOP_RE = /^\s*(stop\s*all|stop|unsubscribe|cancel|end|quit|revoke|opt[\s-]*out)[\s.!]*$/i;
+// SMS_STOP_RE and SMS_START_RE live in _lib/sms.js: the Messages screen's
+// reply guard reads the same keywords back out of stored texts.
 const SMS_HELP_RE = /^\s*(help|info)[\s.!?]*$/i;
-const SMS_START_RE = /^\s*(start|unstop)[\s.!]*$/i;
 // Twilio's own default opt-out keywords, bare. Only these get Twilio's
 // automatic opt-out + confirmation; the wider SMS_STOP_RE variants ("opt out",
 // "stop all", "Stop.") are honored by us and confirmed by us.
 const TWILIO_OPTOUT_RE = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke|optout)\s*$/i;
+// Bare HELP/INFO. On Handy Andy's campaign lines Twilio's Advanced Opt-Out
+// answers these with the registered help message, so we add no second reply.
+const TWILIO_HELP_RE = /^\s*(help|info)\s*$/i;
 function smsKeyword(body) {
   const s = (body || '').toString();
   if (SMS_STOP_RE.test(s)) return 'stop';
@@ -1648,7 +1654,7 @@ async function relayInboundText(line, from, body, business_name, note = '') {
 
 // The relay-and-ack tail of sms_inbound, split out so a silent number can skip
 // the row without skipping the relay.
-async function finishSmsInbound(res, line, from, body, blocked, business_name) {
+async function finishSmsInbound(res, line, from, body, blocked, business_name, to) {
   const keyword = smsKeyword(body);
   // An opt-out is honored even from a blocked number (Twilio has already
   // stopped sends; the CRM should agree). Either way we send no reply of ours:
@@ -1663,7 +1669,12 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name) {
     // never receive two confirmations.
     if (!blocked && !TWILIO_OPTOUT_RE.test(body || '')) {
       const optBrand = smsBrandName(line && line.business_slug, business_name);
-      return xml(res, `<Response><Message>${xmlEsc(`${optBrand}: You are unsubscribed and will receive no further messages.`)}</Message></Response>`);
+      // Handy Andy's wording is the opt-out message registered on its A2P
+      // campaign (and set as Twilio's Advanced Opt-Out reply), word for word.
+      const optText = optBrand === HANDY_ANDY_SMS_BRAND
+        ? `${optBrand}: You are unsubscribed and will receive no further messages. Questions? Email contact@ihandyandy.com or call (713) 876-9032.`
+        : `${optBrand}: You are unsubscribed and will receive no further messages.`;
+      return xml(res, `<Response><Message>${xmlEsc(optText)}</Message></Response>`);
     }
     return xml(res, '<Response/>');
   }
@@ -1684,6 +1695,14 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name) {
   // at the line that was texted, so a Denver brand never hands out Houston's
   // number or another company's website.
   if (keyword === 'help') {
+    // Handy Andy's lines sit in the campaign's Messaging Service, where
+    // Twilio's Advanced Opt-Out answers a bare HELP/INFO with the registered
+    // help message (the same words as below). Answering too would send two.
+    if (line && line.business_slug === 'handy-andy' && TWILIO_HELP_RE.test(body || '')) {
+      await relayInboundText(line, from, body, business_name, ' (auto: HELP reply sent)');
+      console.log(`[sms_inbound] HELP from ...${String(from || '').slice(-4)}: bare keyword, answered by Twilio, relayed to staff`);
+      return xml(res, '<Response/>');
+    }
     const ld = tenDigits(line && line.phone);
     const contact = brand === HANDY_ANDY_SMS_BRAND
       ? 'call (713) 876-9032, email contact@ihandyandy.com or visit www.ihandyandy.com'
@@ -1702,7 +1721,31 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name) {
 
   await relayInboundText(line, from, body, business_name);
 
+  // One "Thanks for your text!" per conversation, not one per text: skip it
+  // when this thread already had a text either way in the last 12 hours, and
+  // for anyone who opted out ("Stop." isn't blocked by Twilio, so we check).
+  if (!(await shouldAutoAck(from, to))) return xml(res, '<Response/>');
   return xml(res, `<Response><Message>${xmlEsc(`${brand}: Thanks for your text! A team member will reply shortly. Reply HELP for help, STOP to opt out.`)}</Message></Response>`);
+}
+
+// Whether the auto-ack above goes out. Any failed lookup means no ack: a
+// missing "thanks" costs nothing, an unwanted text does.
+async function shouldAutoAck(from, to) {
+  if (!from || !to) return false;
+  try {
+    const db = serviceClient();
+    if ((await smsOptOutState(db, from)) !== false) return false;
+    const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await db.from('messages').select('id')
+      .eq('our_phone', to).eq('customer_phone', from).gte('created_at', since).limit(2);
+    if (error) return false;
+    // The text being answered was stored before this runs, so a second row
+    // means the conversation was already going.
+    return (data || []).length < 2;
+  } catch (e) {
+    console.warn('[sms_inbound] auto-ack check failed:', e.message);
+    return false;
+  }
 }
 
 export default async function handler(req, res) {

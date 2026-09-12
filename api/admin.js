@@ -18,7 +18,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
@@ -3932,6 +3932,21 @@ async function bookingCreate(req, res, db, auth, body) {
     });
     // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
     await sendSMS(c.phone, msg).catch(console.error);
+  } else if (c.phone && body.sms_consent === true) {
+    // No appointment time yet, so there is no booking confirmation to send. The
+    // opt-in still gets its one immediate confirmation text (A2P 10DLC / CTIA),
+    // the same one "Mark opted in" sends.
+    await sendOptInConfirmSms({ customerPhone: c.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_create' }).catch(console.error);
+  }
+
+  // Consent is a compliance record: note who recorded the yes. The office box
+  // is ticked only after the customer says yes to the phone script.
+  if (body.sms_consent === true) {
+    await db.from('booking_notes').insert({
+      business_id: biz.id, booking_id: bRow.id,
+      author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
+      body: 'SMS consent recorded as YES when this booking was created (customer agreed to texts).',
+    }).then(({ error }) => { if (error) console.warn('[booking_create] consent note failed:', error.message); });
   }
 
   // Notify the technician if one was assigned at creation time (job-local tz).
@@ -6817,8 +6832,9 @@ async function invoiceSend(req, res, db, auth, body) {
   if (!emailResult.sent) return res.status(502).json({ error: 'Email failed to send: ' + (emailResult.skipped || emailResult.error || 'unknown error') });
 
   let smsResult = { ok: false, skipped: 'no_phone' };
-  if (b.customer.phone && b.sms_consent === false) {
-    // Declined (or STOPped) texts: the invoice goes by email only.
+  if (b.customer.phone && b.sms_consent !== true) {
+    // Texts are opt-in (A2P 10DLC): anyone who didn't opt in, or who texted
+    // STOP, gets the invoice by email only.
     smsResult = { ok: false, skipped: 'no_sms_consent' };
   } else if (b.customer.phone) {
     // Brand first and a STOP line, like every customer text (A2P 10DLC).
@@ -7669,7 +7685,7 @@ async function reviewResend(req, res, db, auth, body) {
   }
   const channel = body.channel === 'sms' ? 'sms' : 'email';
   const { data: b, error } = await db.from('bookings')
-    .select('id, review_token, metadata, sms_consent, customer:customers(name, email, phone)')
+    .select('id, review_token, metadata, sms_consent, review_sms_sent_at, review_sms_status, customer:customers(name, email, phone)')
     .eq('id', id).eq('business_id', biz.id).single();
   if (error || !b) return res.status(404).json({ error: 'Booking not found' });
   // Mint the link on demand instead of refusing — this button was the office's
@@ -7682,6 +7698,13 @@ async function reviewResend(req, res, db, auth, body) {
 
   if (channel === 'sms') {
     if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
+    // The SMS Terms promise ONE post-service follow-up by text (A2P 10DLC). A
+    // second is allowed only when the first never reached them; otherwise the
+    // reminder goes by email.
+    const smsSentAt = b.review_sms_sent_at || b.metadata?.review_sms_sent_at || null;
+    if (smsSentAt && !['failed', 'undelivered'].includes(String(b.review_sms_status || ''))) {
+      return res.status(409).json({ error: 'The review text was already sent for this job, and we only text it once. Send it by email instead.' });
+    }
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
     const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=sms`;
     const smsStatusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(b.review_token)}`;
@@ -8243,7 +8266,7 @@ const RC_TZ = 'America/Denver';
 // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
 // column) — it must be embedded as a relation, exactly like bookingSelect().
 const rcSelFor = (cc) => `id, status, completed_at, scheduled_at, review_rating, reviewed_at,
-    review_email_opened_at, review_email_count, review_token, postal_code, sms_consent, ${cc}
+    review_email_opened_at, review_email_count, review_token, postal_code, sms_consent, review_sms_sent_at, review_sms_status, metadata, ${cc}
     customer:customers ( name, phone, email, postal_code ),
     technician:technicians!technician_id ( name ),
     service:services ( id, name ),
@@ -8273,6 +8296,9 @@ function rcMapRow(row, b, zipTzMap) {
     zip,   // booking zip first; imported customers often have it only on the booking
     has_email: !!row.customer?.email,
     has_sms: !!(row.customer?.phone && row.sms_consent),
+    // The review text goes out once: reviewResend refuses a second unless the
+    // first failed, so the queue must not offer the text again.
+    review_sms_used: !!((row.review_sms_sent_at || row.metadata?.review_sms_sent_at) && !['failed', 'undelivered'].includes(String(row.review_sms_status || ''))),
     technician_name: row.technician?.name || '—',
     service_name: row.service?.name || 'Service',
     // What they bought — so Joey can reference it on the call.
@@ -14115,6 +14141,18 @@ async function messagesSend(req, res, db, auth, body) {
   // One SMS segment is 160 chars and Twilio bills per segment. 1200 is generous
   // for a service reply and stops a paste accident becoming an 8-segment text.
   if (text.length > 1200) return res.status(400).json({ error: 'Message is too long (1200 characters max)' });
+
+  // A2P 10DLC / CTIA. This screen answers conversations, it never starts
+  // them, so the customer must have texted this number. And an opt-out ends
+  // the conversation: Twilio blocks sends after a bare STOP but not after
+  // "Stop." or "opt out", which we honor the same way until they text START.
+  const optedOut = await smsOptOutState(db, customer);
+  if (optedOut === null) return res.status(503).json({ error: "Couldn't check whether this customer opted out of texts. Try again in a moment." });
+  if (optedOut) return res.status(409).json({ error: 'This customer texted STOP, so we can’t text them. Call them instead.' });
+  const { data: inbound, error: inErr } = await db.from('messages').select('id')
+    .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer).eq('direction', 'in').limit(1);
+  if (inErr) return res.status(503).json({ error: "Couldn't check this conversation. Try again in a moment." });
+  if (!(inbound || []).length) return res.status(409).json({ error: 'You can only reply to a customer who has texted this number. Call them instead.' });
 
   // A2P 10DLC: the FIRST text we send in a conversation must say who we are
   // and how to opt out. Staff type naturally ("Hi Mark, yes we can..."), so

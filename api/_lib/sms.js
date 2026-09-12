@@ -25,6 +25,37 @@ export function smsBrandName(slug, name) {
     || HANDY_ANDY_SMS_BRAND;
 }
 
+// A2P 10DLC keywords, matched against the WHOLE text only ("can you stop by
+// at 3?" or "cancel my appointment" is a customer, not a keyword); trailing
+// punctuation is allowed ("Stop.", "STOP!"). Shared by the inbound webhook
+// (api/analytics.js) and the Messages reply guard (api/admin.js).
+export const SMS_STOP_RE = /^\s*(stop\s*all|stop|unsubscribe|cancel|end|quit|revoke|opt[\s-]*out)[\s.!]*$/i;
+export const SMS_START_RE = /^\s*(start|unstop)[\s.!]*$/i;
+
+// Has this customer opted out of texts? True when their newest STOP-type text
+// to any of our numbers is newer than their newest START/UNSTOP, judged from
+// the inbound texts stored in app.messages. Twilio blocks sends after its own
+// bare keywords, but not after "Stop." or "opt out", which we honor too, so
+// our own sends must check. `phone` is the 10-digit form those rows store.
+// Returns null when the lookup fails, so each caller decides what a failure
+// means (never "not opted out" by accident).
+export async function smsOptOutState(db, phone) {
+  try {
+    const { data, error } = await db.from('messages').select('body')
+      .eq('customer_phone', phone).eq('direction', 'in')
+      .order('created_at', { ascending: false }).limit(300);
+    if (error) return null;
+    for (const m of data || []) {
+      const b = (m.body || '').toString();
+      if (SMS_STOP_RE.test(b)) return true;
+      if (SMS_START_RE.test(b)) return false;
+    }
+    return false;
+  } catch {
+    return null;
+  }
+}
+
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 export function toE164(raw) {
   if (!raw) return null;
