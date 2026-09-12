@@ -5199,23 +5199,40 @@ function drawAnaOverview(){
          Events and Last seen with no way to reach them. Matches how every other
          wide table in this admin is wrapped. -->
     <div class="section card ana-ov-scroll" style="padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-      <table>
+      <!-- The global table CSS rule's overflow:hidden (used everywhere else
+           to clip a table's own corners to its border-radius) also clips a
+           sticky child to the table's own box instead of letting it stick to
+           this div's scroll -- verified with a throwaway repro that the
+           pinned Business column only works once that's off. Overridden
+           here only (not in the shared rule, which every other admin table
+           still needs); the wrapping card div above already draws the same
+           rounded border, so nothing is lost. -->
+      <table style="border:none;border-radius:0;overflow:visible;">
         <thead><tr>
           ${ANA_OV_COLS.map(c=>{
-            if(c.sortable===false) return `<th${c.cls?` class="${c.cls}"`:''}>${esc(c.label)}</th>`;
+            // Business is the identity column -- pinned so it stays on screen
+            // while the ~1240px-wide rest of the table scrolls under it.
+            // z-index over the body cells' own sticky td, opaque background so
+            // scrolled-under cells don't show through, and a hairline right
+            // edge (box-shadow, not border, so it doesn't add to cell height)
+            // marking where the pinned column ends.
+            const sticky=c.key==='name'?'position:sticky;left:0;z-index:2;background:#fafbfc;box-shadow:1px 0 0 var(--line);':'';
+            if(c.sortable===false) return `<th${c.cls?` class="${c.cls}"`:''} style="${sticky}">${esc(c.label)}</th>`;
             const active=anaOverviewSort.key===c.key;
             const arrow=active?(anaOverviewSort.dir==='asc'?' ▲':' ▼'):'';
             return `<th${c.cls?` class="${c.cls}"`:''} data-anasort="${c.key}" title="Sort by ${esc(c.label)}"
-              style="cursor:pointer;user-select:none;${active?'color:var(--ink);':''}">${esc(c.label)}<span style="font-size:9px;opacity:.75;">${arrow}</span></th>`;
+              style="cursor:pointer;user-select:none;${sticky}${active?'color:var(--ink);':''}">${esc(c.label)}<span style="font-size:9px;opacity:.75;">${arrow}</span></th>`;
           }).join('')}
         </tr></thead>
         <tbody>
           ${rows.map(b=>{
             const s=anaOverviewStatus(b);
             const v=b.visitors_30d||0, avg=b.avg_visitors_day||0;
+            // Same pin on the body cell, one z-index below the header's so the
+            // header still wins if a sticky-top header is ever added later.
             return `<tr class="ana-ov-row" data-slug="${esc(b.parent_slug||b.slug)}" style="cursor:pointer;">
-              <td><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}</div>
-                <div class="sub" style="font-size:11.5px;">${esc(b.url||'')}</div></td>
+              <td style="position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 var(--line);"><div style="font-weight:700;">${esc(b.name)}${b.national?' <span class="pill blue">NATIONAL</span>':''}</div>
+                <div class="sub" style="font-size:11.5px;">${esc((b.url||'').replace(/^https?:\/\//i,''))}</div></td>
               <td><span class="pill ${s}">${ANA_OVERVIEW_LABEL[s]}</span></td>
               <td class="num" style="font-weight:700;">${v.toLocaleString()}</td>
               <td class="num">${avg.toFixed(1)}</td>
