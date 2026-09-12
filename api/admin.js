@@ -14,7 +14,7 @@
 // (HANDY_ANDY_PASSWORD / DOMS_PASSWORD) is locked to one business.
 // ============================================================================
 import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
-import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
+import { signToken, verifyToken, getBearer, applyCors, safeEqual, refreshToken, ADMIN_SESSION_MAX } from './_lib/auth.js';
 import { ensureReviewToken } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
@@ -28,7 +28,7 @@ import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, a
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
@@ -307,6 +307,12 @@ function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Offic
 // at every call site below and records each attempt in app.tech_sms_log — the
 // old fire-and-forget version could be frozen by Vercel before Twilio was ever
 // called, and left no trace when it failed.
+
+// The charge path can make several sequential Stripe calls at a 15s cap each
+// (card lookups, create, read, confirm, read-after-error); never let the platform
+// default kill the function mid-confirm with the 'charging' lock held. Same as
+// api/book.js.
+export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   applyCors(req, res);
@@ -596,7 +602,7 @@ async function login(req, res, body) {
   }
   // `scope` stays the ONE primary business (every company-specific tool keys
   // off it); `allowed` is the extra brands this person also answers for.
-  const token = signToken({ kind: 'admin', role, scope, name, ...(loginExtra.length ? { allowed: loginExtra } : {}) });
+  const token = signToken({ kind: 'admin', role, scope, name, ...(loginExtra.length ? { allowed: loginExtra } : {}), sess: 1 });
   // Tell the dashboard which outbound channels are wired up so it can show or
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
   const config = {
@@ -644,7 +650,7 @@ async function viewAs(req, res, db, auth) {
   for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
   const name = displayNameFor(slug);
-  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}) });
+  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}), sess: 1 });
   const config = {
     email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
@@ -659,8 +665,13 @@ async function viewAs(req, res, db, auth) {
 // to restore a session without requiring a new password entry. If the token is
 // invalid or expired, returns 401 and the frontend shows the login screen.
 async function sessionStatus(req, res) {
-  const auth = verifyToken(getBearer(req));
+  const raw = getBearer(req);
+  const auth = verifyToken(raw);
   if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
+  // Slide the session (refreshToken in _lib/auth.js): the dashboard adopts the
+  // returned token; a capped or non-session token is echoed unchanged.
+  const fresh = refreshToken(auth, { maxSeconds: ADMIN_SESSION_MAX });
+  const claims = fresh ? verifyToken(fresh) : auth;
 
   const db = serviceClient();
   // See the matching comment in login() — analytics_config travels with the
@@ -688,7 +699,8 @@ async function sessionStatus(req, res) {
     maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
   return res.status(200).json({
-    token: getBearer(req), role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
+    token: fresh || raw, refreshed: !!fresh, expires_at: claims.exp, session_started_at: claims.sat || claims.iat || null,
+    role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
   });
 }
 
@@ -5025,8 +5037,17 @@ async function bookingPayment(req, res, db, auth, body) {
     // Cash-mark reconciliation: see api/tech.js — a client-side charge timeout
     // doesn't stop Stripe finishing server-side; if an unrecorded landed charge
     // exists, record THAT instead of cash so the customer isn't collected twice.
-    if (act === 'mark_paid' && !b.stripe_payment_intent_id) {
-      const landed = await findLandedCharge(id, acct);
+    let landed = null;
+    if (act === 'mark_paid' && !b.stripe_payment_intent_id) landed = await findLandedCharge(id, acct);
+    else if (act === 'mark_paid' && b.payment_status !== 'paid') {
+      // The row carries an intent from an attempt whose outcome was unknown when
+      // it ended (see chargeCardOnFile) — or an old refunded one. Read it
+      // directly before taking cash: if that charge landed, record it instead.
+      const pend = await pendingIntentState(b.stripe_payment_intent_id, acct);
+      if (pend.state === 'processing') return res.status(409).json({ error: 'A card charge for this booking is still processing at the bank — wait a minute and check before marking it paid.' });
+      landed = pend.landed;
+    }
+    if (act === 'mark_paid') {
       if (landed) {
         const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
         if (landed.customerId) patch.stripe_customer_id = landed.customerId;
@@ -5039,7 +5060,9 @@ async function bookingPayment(req, res, db, auth, body) {
       }
     }
     const patch = act === 'mark_paid'
-      ? { payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0 }
+      ? { payment_status: 'paid', paid_at: now, amount_paid: Number(b.price) || 0,
+          // cash on a row that only carried an unsettled (or refunded) intent: drop it, or the receipt would say "Card"
+          ...(b.stripe_payment_intent_id && b.payment_status !== 'paid' ? { stripe_payment_intent_id: null } : {}) }
       : { payment_status: 'unpaid', paid_at: null };
     const { data: updated } = await db.from('bookings').update(patch)
       .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
@@ -5150,18 +5173,21 @@ async function bookingPayment(req, res, db, auth, body) {
     // unpaid with no recorded intent. A retry at a different amount/card gets
     // a different idempotency key — a second real charge. If an unrecorded
     // landed charge exists, ADOPT it and stop. See api/tech.js for details.
+    // Shared by the search-based guard right below AND the idempotent-replay
+    // adopt after chargeCardOnFile: one write, one warning text.
+    const adoptLanded = async (landed) => {
+      const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+      if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+      if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+      let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
+      if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
+      if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[admin charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
+      return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
+        warning: `This booking was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
+    };
     if (!b.stripe_payment_intent_id) {
       const landed = await findLandedCharge(id, acct);
-      if (landed) {
-        const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
-        if (landed.customerId) patch.stripe_customer_id = landed.customerId;
-        if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
-        let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
-        if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
-        if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[admin charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
-        return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
-          warning: `This booking was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
-      }
+      if (landed) return adoptLanded(landed);
     }
 
     const ticketAmount = body.amount != null ? Number(body.amount) : Number(b.price);
@@ -5202,24 +5228,25 @@ async function bookingPayment(req, res, db, auth, body) {
     pmId = resolved.pmId;
     const card = resolved.card;
 
-    // Keyed on booking id + exact amount + the CARD being charged, with the
-    // SAME 'charge-' prefix the tech path uses (api/tech.js): a true retry —
-    // from EITHER app — replays the same PaymentIntent instead of charging
-    // twice (previously the two paths used different prefixes, so an office
-    // retry of a tech charge, or vice versa, created a second real charge).
-    // Changing the amount OR the card changes the key, so a genuinely new
-    // attempt after a decline is never blocked by Stripe's replay cache.
-    const idempotencyKey = `charge-${id}-${Math.round(dollars * 100)}-${String(pmId).slice(-8)}`;
-    let pi;
+    // One shared helper builds the PaymentIntent for BOTH apps (chargeCardOnFile
+    // in api/_lib/stripe.js) — see api/tech.js jobPayment for the full note.
+    let pi, recovered;
     try {
-      pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
-        amount: Math.round(dollars * 100), currency: 'usd',
-        customer: custId, payment_method: pmId, off_session: true, confirm: true,
-        description: `Booking ${id}`, metadata: { booking_id: id, business: biz.slug, tip: String(tip) },
-        receipt_email: (b.customer && b.customer.email) || undefined,
-      }});
+      ({ pi, recovered } = await chargeCardOnFile({
+        bookingId: id, cents: Math.round(dollars * 100), tip,
+        customerId: custId, paymentMethodId: pmId,
+        receiptEmail: (b.customer && b.customer.email) || null,
+        businessSlug: biz.slug, priorPiId: b.stripe_payment_intent_id || null,
+        ...acct, log: '[admin charge]',
+      }));
     } catch (e) {
       e.status = e.status || 402; e.message = 'Charge failed: ' + e.message; throw e;
+    }
+    if (recovered) {
+      return adoptLanded({ id: pi.id, amount: Math.round(Number(pi.amount)) / 100, tip: Number(pi.metadata && pi.metadata.tip) || 0,
+        // the card the landed intent was actually charged on (it may differ from this request's after a swap)
+        customerId: (typeof pi.customer === 'string' ? pi.customer : pi.customer?.id) || custId,
+        paymentMethodId: (typeof pi.payment_method === 'string' ? pi.payment_method : pi.payment_method?.id) || pmId });
     }
     if (pi.status !== 'succeeded') {
       const e = new Error(`Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.`); e.status = 402; throw e;
@@ -5250,9 +5277,15 @@ async function bookingPayment(req, res, db, auth, body) {
   } catch (e) {
     // Release the lock on any failure so the booking can be retried (or paid
     // with cash) instead of being stuck on 'charging'.
-    try { await db.from('bookings').update({ payment_status: priorPaymentStatus }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
+    // An outcome the helper could not settle (our abort fired mid-confirm, or
+    // Stripe reported it still processing) keeps the intent id on the row, so the
+    // NEXT attempt — from either app — reads that exact intent instead of hoping
+    // Stripe's search has indexed it (see chargeCardOnFile / pendingIntentState).
+    try { await db.from('bookings').update({ payment_status: priorPaymentStatus, ...(e.payment_intent_id ? { stripe_payment_intent_id: e.payment_intent_id } : {}) }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
     const payload = { error: e.message };
     if (e.code) payload.code = e.code;
+    if (e.decline_code) payload.decline_code = e.decline_code;
+    if (e.needs_new_card) payload.needs_new_card = true;
     return res.status(e.status || 500).json(payload);
   }
 }
@@ -6819,7 +6852,7 @@ async function reviewInviteSend(req, res, db, auth, body) {
   if (t.active === false) return res.status(400).json({ error: `${t.name} is deactivated. Reactivate them before sending a review invite.` });
   if (!t.phone) return res.status(400).json({ error: `${t.name} has no phone number set` });
 
-  const token = signToken({ kind: 'tech', tech_id: t.id, business_id: t.business_id }, 14 * 24 * 3600);
+  const token = signToken({ kind: 'tech', tech_id: t.id, business_id: t.business_id, sess: 1 }, 14 * 24 * 3600);
   const base = process.env.PUBLIC_URL
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://handy-andy-booking.vercel.app');
   const link = `${base}/tech.html?login=${encodeURIComponent(token)}#reviews`;

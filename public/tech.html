@@ -525,6 +525,7 @@ async function api(action,{method='GET',params={},body=null,timeoutMs=45000}={})
   // tech force-reloaded the app. See the matching fix in admin.html's api().
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  const sent=token;   // the session this request goes out with (see the 401 branch)
   let res;
   try{
     res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token&&{Authorization:`Bearer ${token}`})},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
@@ -538,8 +539,8 @@ async function api(action,{method='GET',params={},body=null,timeoutMs=45000}={})
   // out and prompt re-login. But a 401 from login is just bad credentials, so let
   // the real error ("Incorrect phone or PIN") surface instead of the misleading
   // "Session expired".
-  if(res.status===401 && action!=='login'){ logout(); throw new Error('Session expired'); }
-  if(!res.ok){ const e=new Error(data.error||'Request failed'); if(data.code) e.code=data.code; throw e; }
+  if(res.status===401 && action!=='login'){ if(token && token===sent) logout({reason:'expired'}); throw new Error('Session expired — sign in again'); }
+  if(!res.ok){ const e=new Error(data.error||'Request failed'); e.status=res.status; if(data.code) e.code=data.code; if(data.decline_code) e.decline_code=data.decline_code; if(data.needs_new_card) e.needs_new_card=true; throw e; }
   return data;
 }
 function esc(s){return(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -808,8 +809,18 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
     showJobs();
   }catch(e2){ err.textContent=e2.message; }
 });
-function logout(){ token='';tech=null; lsDel('ha_tech_token');lsDel('ha_tech_info');
-  show('login'); renderOverdueBar(); }
+function logout(opts){
+  const reason=(opts&&opts.reason)||'manual';   // the ⏻ click handler passes the Event -> 'manual'
+  token='';tech=null; lsDel('ha_tech_token');lsDel('ha_tech_info');
+  // The charge flow and the review QR are full-screen overlays appended to
+  // <body>, not to a view: show('login') would leave them floating over the
+  // PIN screen with body scroll locked after a mid-flow expiry.
+  document.querySelectorAll('.cf-ov,.rl-qr-overlay').forEach(el=>{ try{ el.remove(); }catch(_){} });
+  document.body.style.overflow='';
+  show('login'); renderOverdueBar();
+  const err=document.getElementById('loginErr');
+  if(err) err.textContent = reason==='expired' ? 'Your session expired — sign in again to keep going.' : '';
+}
 document.getElementById('logout').addEventListener('click',logout);
 
 function show(which){
@@ -1799,7 +1810,7 @@ function openChargeFlow(j){
       setTimeout(()=>showDetail(j.id).then(()=>maybePromptComplete(j.id)),400);
     }catch(e){
       charging=false; ov.style.pointerEvents='';
-      chargeError(e.message||'Charge failed');
+      chargeError(e);
       if(btn){ btn.disabled=false; btn.textContent='Charge '+fmtMoney(total()); }
     }
   }
@@ -1839,11 +1850,14 @@ function openChargeFlow(j){
       setTimeout(()=>showDetail(j.id).then(()=>maybePromptComplete(j.id)),400);
     }catch(e){ toast(e.message||'Could not mark paid'); }
   }
-  function chargeError(msg){
+  function chargeError(e){
+    const msg=(e&&e.message)||(typeof e==='string'?e:'Charge failed');
     const host=ov.querySelector('div[style*="flex:1"]'); if(!host) { toast(msg); return; }
     let box=ov.querySelector('#cfErr');
     if(!box){ box=document.createElement('div'); box.id='cfErr'; host.insertBefore(box, host.firstChild); }
-    const noCard=/no card on file|mark paid|not set up|aren't set up/i.test(msg);
+    // needs_new_card comes from the server's decline mapping (friendlyChargeError
+    // in api/_lib/stripe.js): a hard decline offers "Take cash" right away.
+    const noCard=!!(e&&e.needs_new_card) || /no card on file|mark paid|not set up|aren't set up/i.test(msg);
     box.innerHTML=`<div style="background:#3a1414;border:1px solid #7f1d1d;color:#fecaca;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5;margin-bottom:14px;text-align:left;">
         <div style="font-weight:800;margin-bottom:3px;">Card was NOT charged</div>${esc(msg)}</div>`
       + (noCard?`<button id="cfCash" class="btn" style="width:100%;margin-bottom:14px;background:#16a34a;">Take cash — mark paid ✓</button>`:'');
@@ -2757,6 +2771,19 @@ document.getElementById('logoHelpModal').addEventListener('click',e=>{
 
 // Boot
 // ── Boot ─────────────────────────────────────────────────────────────────────
+// Sliding session: 'me' re-signs the token (api/tech.js); adopt it every 30
+// min while visible and on return to the app, so a tech signed in at 7am is
+// not logged out mid-job at 7pm. A 401 here already routes through api()'s
+// logout — that IS the desired outcome for a dead cached token.
+let lastMeRefresh=0;
+async function refreshTechSession(){
+  if(!token||!tech) return;
+  const sent=token; lastMeRefresh=Date.now();
+  try{ const d=await api('me'); if(token!==sent) return; if(d && typeof d.token==='string' && d.token && d.token!==token){ token=d.token; lsSet('ha_tech_token',token); } }
+  catch(_){ /* handled by api() */ }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) return; if(Date.now()-lastMeRefresh>5*60*1000) refreshTechSession(); });
+setInterval(()=>{ if(document.hidden) return; refreshTechSession(); }, 30*60*1000);
 // Magic-link sign-in (?login=<signed tech token>): the "$100 review invite"
 // text carries a link that signs the tech in without phone+PIN and lands on
 // the Reviews tab. The token is the exact shape login issues; the client
@@ -2783,18 +2810,22 @@ document.getElementById('logoHelpModal').addEventListener('click',e=>{
     token=magic;
     history.replaceState(null,'',location.pathname+location.hash);
     api('me').then(d=>{
-      tech=d.technician;
+      tech=d.technician; if(d.token) token=d.token;   // 'me' re-signs the session (sliding expiry)
       lsSet('ha_tech_token',token); lsSet('ha_tech_info',JSON.stringify(tech));
       bizTz=(tech&&tech.tz)||bizTz;
       route();
     }).catch(()=>{
+      // api()'s 401 path may have cleared localStorage and set the expiry
+      // message — put the previous session back in full.
       token=prevToken; tech=prevTech;
+      if(token&&tech){ lsSet('ha_tech_token',token); lsSet('ha_tech_info',JSON.stringify(tech)); }
+      const le=document.getElementById('loginErr'); if(le) le.textContent='';
       if(token&&tech) route();
       else show('login');
     });
     return;
   }
-  if(token&&tech) route();
+  if(token&&tech){ route(); refreshTechSession(); }
   else show('login');
 })();
 </script>
