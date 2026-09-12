@@ -442,7 +442,7 @@ async function job(req, res, db, auth) {
   // secondary_technician_id) so PostgREST knows which relationship to follow.
   // The secondary embed is dropped on deployments predating migration 0019.
   const build = (withSortCol) => () => scopeMine(db.from('bookings')
-    .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price, metadata,
+    .select(`id, status, scheduled_at, scheduled_end, customer_notes, notes, price, metadata, sms_consent,
              review_rating, review_text, reviewed_at, business_id, technician_id, service_area_id,
              address_line1, address_line2, city, state, postal_code, lat, lng,
              payment_status, paid_at, tip, stripe_customer_id, stripe_payment_method_id, stripe_payment_intent_id,
@@ -1053,8 +1053,9 @@ async function status(req, res, db, auth, body) {
   // instant the HTTP response goes out, so a .then()-only send could simply
   // never run. The status change is already committed above, so awaiting only
   // adds a beat to the tech's "On My Way ✓" response.
+  let enRoute = null;
   if (next === 'on_the_way') {
-    await sendEnRouteSms(db, {
+    enRoute = await sendEnRouteSms(db, {
       bookingId: id,
       technicianId: auth.tech_id,
       customerPhone: existing.customer?.phone,
@@ -1155,12 +1156,24 @@ async function status(req, res, db, auth, body) {
           console.error(`[review] SMS failed for booking ${id}:`, e.message);
         }
       }
+    } else if (!existing.metadata?.review_sms_sent_at) {
+      // Stamp the skip so the dashboard's notification log says WHY no review
+      // text went out — it used to leave no trace at all. Guarded twice so a
+      // reopen → texts turned off → re-complete can never overwrite a real send.
+      const why = existing.customer?.phone ? 'skipped_no_consent' : 'skipped_no_phone';
+      console.log(`[review] SMS skipped (${why}) booking=${id}`);
+      try { await db.from('bookings').update({ review_sms_status: why }).eq('id', id).is('review_sms_sent_at', null); } catch { /* column not applied yet */ }
     }
   } else if (next === 'completed') {
     console.error(`[review] job ${id} marked completed but a review_token could not be minted — no review request sent`);
   }
 
-  return res.status(200).json({ ok: true, status: next });
+  // The app shows the tech whether the customer was actually texted; a skip
+  // (no consent / no phone) used to be indistinguishable from a send.
+  return res.status(200).json({
+    ok: true, status: next,
+    ...(enRoute ? { sms: { sent: !!enRoute.ok, skipped: enRoute.skipped || null } } : {}),
+  });
 }
 
 // ── Add / change the card on file (customer wants to pay with a different card) ──
@@ -1974,6 +1987,9 @@ function shapeJob(b, full = false, forTech = false) {
   };
   if (full) {
     out.customer_email = b.customer?.email || null;
+    // Widget customers who left the SMS opt-in box unchecked get NO texts (no
+    // en-route, no review request). The app flags it so the tech calls instead.
+    out.sms_opt_out = b.sms_consent === false;
     out.notes = b.notes || null;
     out.price = b.price;
     // Optimistic-lock revision for the line-items editor (see jobLineItemsSave)

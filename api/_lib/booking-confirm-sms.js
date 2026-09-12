@@ -42,7 +42,10 @@ export async function sendBookingConfirmSms({
   if (!customerPhone) return { ok: false, skipped: 'no_customer_phone' };
   // Opt-in checkbox from the widget. Undefined (older callers) is treated as
   // consent, matching the bookings.sms_consent column default.
-  if (smsConsent === false) return { ok: false, skipped: 'no_sms_consent' };
+  if (smsConsent === false) {
+    console.log(`[${tag}] confirmation SMS skipped: customer did not opt in to texts`);
+    return { ok: false, skipped: 'no_sms_consent' };
+  }
 
   let dateStr;
   try {

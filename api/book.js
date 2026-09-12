@@ -1516,7 +1516,7 @@ async function otwInfo(req, res) {
   if (!t) return res.status(200).json({ ok: false, reason: 'invalid' });
   const db = serviceClient();
   const { data: b } = await db.from('bookings')
-    .select('id, status, on_the_way_at, scheduled_at, service_area_id, business:businesses(name, timezone), customer:customers(name)')
+    .select('id, status, on_the_way_at, scheduled_at, service_area_id, sms_consent, business:businesses(name, timezone), customer:customers(name, phone)')
     .eq('id', t.booking_id).maybeSingle();
   if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
 
@@ -1540,6 +1540,10 @@ async function otwInfo(req, res) {
     customer: b.customer?.name || 'your customer',
     when: whenTxt,
     business: b.business?.name || null,
+    // The page warns the tech up front when tapping won't text anyone, so
+    // they know to call with their ETA instead of assuming the customer knows.
+    sms_opt_out: b.sms_consent === false,
+    phone: b.customer?.phone || null,
   });
 }
 
@@ -1579,15 +1583,19 @@ async function otwSend(req, res) {
 
   // Awaited on purpose — an un-awaited send is silently killed when Vercel
   // freezes the lambda on response.
-  await sendEnRouteSms(db, {
+  const sms = await sendEnRouteSms(db, {
     bookingId: b.id,
     technicianId: tokenTech,
     customerPhone: b.customer?.phone,
     smsConsent: b.sms_consent,
   });
 
-  console.log(`[otw_send] booking=${b.id} tech=${tokenTech} marked en route from nudge link`);
-  return res.status(200).json({ ok: true, already: false, customer: b.customer?.name || 'your customer' });
+  console.log(`[otw_send] booking=${b.id} tech=${tokenTech} marked en route from nudge link; customer text ${sms?.ok ? 'sent' : 'NOT sent (' + (sms?.skipped || sms?.error || 'unknown') + ')'}`);
+  return res.status(200).json({
+    ok: true, already: false, customer: b.customer?.name || 'your customer',
+    sms: { sent: !!sms?.ok, skipped: sms?.skipped || null },
+    phone: b.customer?.phone || null,
+  });
 }
 
 // ── Voicemail deep link ─────────────────────────────────────────────────────

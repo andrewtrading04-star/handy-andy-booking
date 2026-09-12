@@ -146,6 +146,7 @@
   .b-on_the_way,.b-arrived,.b-in_progress{background:rgba(255,107,53,.18);color:var(--orange);}
   .b-completed{background:rgba(39,192,147,.16);color:var(--green);}
   .b-confirmed,.b-pending{background:rgba(255,176,32,.16);color:var(--amber);}
+  .sms-off{margin-top:10px;background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.45);border-radius:10px;padding:10px 12px;color:var(--amber);font-size:14px;font-weight:700;line-height:1.4;}
   .empty{color:var(--mute);text-align:center;padding:60px 20px;}
   /* Cross-company job (booked by the partner company for this tech) */
   .jobc.xco{border-color:#ffb020;box-shadow:0 0 0 1px #ffb020 inset;}
@@ -616,7 +617,7 @@ function streetViewHtml(j){
   }
   return `<div class="sub" style="color:var(--mute);font-size:13px;padding:12px 0;">${ic('location')} Street View unavailable</div>`;
 }
-function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400);}
+function toast(m,ms){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2400);}
 function fmtTime(iso){ if(!iso)return'—'; try{return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:bizTz});}catch{return iso;} }
 
 // ── Iconography ────────────────────────────────────────────────────────────
@@ -680,10 +681,10 @@ const HELP_CONTENT = [
   { id:'detail', label:'Job Detail & Status Updates', icon:'🧰', entries:[
     { id:'detail-flow', q:'What order do I update a job’s status in?',
       tags:['status','on my way','complete','flow','arrived','in progress'],
-      body:`Two taps, that is the whole flow. <b>On My Way</b> when you set off, then <b>Mark Complete</b> when you are done. There is no arrival or start button, so do not go looking for one. The customer gets a text the moment you tap On My Way, so tap it when you actually leave rather than saving it for later.` },
+      body:`Two taps, that is the whole flow. <b>On My Way</b> when you set off, then <b>Mark Complete</b> when you are done. There is no arrival or start button, so do not go looking for one. The customer gets a text the moment you tap On My Way, so tap it when you actually leave rather than saving it for later. Exception: if the job shows a 📵 notice, that customer did not opt in to texts — nothing is sent, so call them with your ETA instead.` },
     { id:'detail-eta', q:'Why does it ask me for an ETA when I tap On My Way?',
       tags:['eta','30 minutes','45 minutes','60 minutes','on the way'],
-      body:`Whatever you pick (30 / 45 / 60 minutes) gets texted to the customer automatically. Give your honest best guess. If you're going to run later than that, a quick call to the customer goes a long way.` },
+      body:`Whatever you pick (30 / 45 / 60 minutes) gets texted to the customer automatically (unless they didn't opt in to texts — then the app tells you to call). Give your honest best guess. If you're going to run later than that, a quick call to the customer goes a long way.` },
     { id:'detail-bracket', q:'A popup reminded me about a bracket box before I could go On My Way. What was that?',
       tags:['bracket box','discretion','popup'],
       body:`A reminder for jobs using a company-supplied bracket: leave the bracket box inside your vehicle. The customer shouldn't see the box the bracket came in.` },
@@ -1136,6 +1137,7 @@ async function showDetail(id){
         <div class="big-name">${esc(j.customer_name)}</div>
         <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
+        ${j.sms_opt_out?`<div class="sms-off">📵 This customer did not opt in to texts — "On My Way" will NOT text them. Call them with your ETA when you head out.</div>`:''}
         <div class="kv">${ic('location')} ${esc(j.address||'No address')}</div>
         ${streetViewHtml(j)}
         ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">${ic('navigate')} Get Directions</a>`:''}
@@ -2651,8 +2653,15 @@ document.querySelectorAll('#etaModal [data-eta]').forEach(btn=>{
     closeEtaModal();
     const eta=parseInt(btn.dataset.eta);
     try{
-      await api('status',{method:'POST',body:{id:pending.id,status:pending.next.to,eta_minutes:eta}});
-      toast(pending.next.label+' ✓'); syncJobStatus(pending.id,pending.next.to); showDetail(pending.id);
+      const r=await api('status',{method:'POST',body:{id:pending.id,status:pending.next.to,eta_minutes:eta}});
+      syncJobStatus(pending.id,pending.next.to); showDetail(pending.id);
+      // The server reports whether the customer was actually texted. A skip
+      // (no consent / no phone) used to look identical to a send from here.
+      if(r&&r.sms&&!r.sms.sent){
+        const k=r.sms.skipped;
+        const why=k==='no_sms_consent'?' (they didn\'t opt in to texts)':(k==='no_customer_phone'||k==='bad_phone')?' (no usable phone on file)':' (the text could not be sent right now)';
+        toast(pending.next.label+' ✓ — but NO text went to the customer'+why+'. Call them with your ETA.',8000);
+      } else toast(pending.next.label+' ✓');
     }catch(e){
       toast(e.message);
       // Never leave the advance button stuck disabled — the tech had no way

@@ -35,6 +35,9 @@
     display:flex;align-items:center;justify-content:center;font-size:27px;font-weight:800;
     margin:0 auto 16px;}
   .err{color:#B0453A;font-size:14px;line-height:1.5;}
+  .warn{background:rgba(200,103,43,.12);border:1px solid rgba(200,103,43,.45);border-radius:10px;
+    padding:11px 13px;margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--ink);text-align:left;}
+  .warn a{color:var(--accent);font-weight:700;text-decoration:none;}
   .hide{display:none;}
   @media (prefers-color-scheme: dark){
     :root{--ink:#ECE7DC;--paper:#14181B;--card:#1E2428;--accent:#E08A46;
@@ -56,14 +59,16 @@
       <div class="eyebrow">Next job</div>
       <h1 id="askName">Your customer</h1>
       <p class="when" id="askWhen"></p>
+      <div class="warn hide" id="askWarn"></div>
       <button id="go" type="button">Send "on my way"</button>
-      <p class="note">This texts the customer that you're en route and marks the job started. Same as the button in the app.</p>
+      <p class="note" id="askNote">This texts the customer that you're en route and marks the job started. Same as the button in the app.</p>
     </div>
 
     <div id="done" class="hide">
-      <div class="check">&#10003;</div>
+      <div class="check" id="doneCheck">&#10003;</div>
       <h1 id="doneName">Sent</h1>
       <p class="note" id="doneNote">The customer has been notified and the job is marked en route.</p>
+      <div class="warn hide" id="doneWarn"></div>
     </div>
 
     <div id="bad" class="hide">
@@ -101,6 +106,17 @@
       }
       $('askName').textContent = d.customer || 'Your customer';
       $('askWhen').textContent = d.when ? ('Scheduled ' + d.when) : '';
+      // No text will go out for this job — say so BEFORE the tap, so the tech
+      // doesn't assume the customer knows they're coming.
+      if (d.sms_opt_out || !d.phone){
+        $('askWarn').textContent = d.sms_opt_out
+          ? 'This customer did not opt in to texts, so tapping will NOT text them. Call them with your ETA.'
+          : 'No phone number on file for this customer, so tapping will NOT text them.';
+        if (d.phone) $('askWarn').innerHTML += ' <a href="tel:' + encodeURIComponent(d.phone) + '">Call ' + d.phone.replace(/[<>&]/g, '') + '</a>';
+        $('askWarn').classList.remove('hide');
+        $('go').textContent = 'Mark "on my way" (no text)';
+        $('askNote').textContent = 'This marks the job started. Same as the button in the app.';
+      }
       show('ask');
     })
     .catch(function(){ fail('Could not reach the server. Check your signal and try again.'); });
@@ -124,10 +140,24 @@
             : 'That did not go through. Open the tech app and tap "On My Way" there.');
         }
         var who = d.customer || 'The customer';
-        $('doneName').textContent = d.already ? 'Already sent' : 'Sent';
+        var noText = !d.already && d.sms && !d.sms.sent;
+        $('doneName').textContent = d.already ? 'Already sent' : (noText ? 'Marked en route' : 'Sent');
         $('doneNote').textContent = d.already
           ? 'This job was already marked en route. Nothing else to do.'
-          : who + ' has been notified and the job is marked en route.';
+          : noText
+            ? 'The job is marked en route, but NO text went to ' + who + '.'
+            : who + ' has been notified and the job is marked en route.';
+        if (noText){
+          $('doneCheck').style.background = 'var(--accent)';
+          var k = d.sms.skipped;
+          $('doneWarn').textContent = k === 'no_sms_consent'
+            ? who + ' did not opt in to texts. Please call them with your ETA.'
+            : (k === 'no_customer_phone' || k === 'bad_phone' || !d.phone)
+              ? 'No usable phone number on file. Please reach ' + who + ' another way.'
+              : 'The text could not be sent right now. Please call ' + who + ' with your ETA.';
+          if (d.phone) $('doneWarn').innerHTML += ' <a href="tel:' + encodeURIComponent(d.phone) + '">Call ' + d.phone.replace(/[<>&]/g, '') + '</a>';
+          $('doneWarn').classList.remove('hide');
+        }
         show('done');
       })
       .catch(function(){

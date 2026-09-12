@@ -2947,6 +2947,16 @@ function notifPill(label,icon,color,text,when,resendAttrs){
 }
 function notificationLog(b){
   const rows=[];
+  const canText=b.sms_consent===true && !!(b.customer&&b.customer.phone);
+  // Can this customer be texted at all? Explains every "Not sent" row below.
+  // Widget customers who leave the SMS opt-in box unchecked land here as
+  // "Not opted in" and get no confirmation / on-the-way / review texts. The
+  // button records a verbal opt-in (or opt-out) taken over the phone.
+  if(typeof b.sms_consent==='boolean'){
+    const on=b.sms_consent;
+    const btn=`<button type="button" class="notif-consent-btn" data-nc-id="${esc(String(b.id))}" data-nc-value="${on?'false':'true'}" style="margin-left:8px;padding:2px 9px;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border,#4a3f36);background:transparent;color:#f2c98a;cursor:pointer;">${on?'Turn texts off':'Mark opted in'}</button>`;
+    rows.push(`<div style="font-size:12px;font-weight:600;color:${on?'#4ade80':'#f87171'};margin-top:2px;display:flex;align-items:center;flex-wrap:wrap;">${on?'✓':'✕'} Customer texts: ${on?'Opted in':'Not opted in — no texts are sent to this customer'}${btn}</div>`);
+  }
   // ALWAYS rendered, even with no status recorded. Migration 0075 (the status
   // columns) went unapplied for a long stretch, so every booking made before it
   // landed has a null status — and a conditional row meant the office had no
@@ -2986,6 +2996,11 @@ function notificationLog(b){
     const resendAttrs={kind:'on_the_way_sms',id:b.id};
     if(st==='delivered') rows.push(notifPill('On the way (text)','✓','#4ade80','Delivered',when,resendAttrs));
     else if(st==='failed'||st==='undelivered') rows.push(notifPill('On the way (text)','✕','#f87171','Not delivered',when,resendAttrs));
+    // Skips are stamped by _lib/en-route.js. The Resend button appears only
+    // once the blocker is gone (office marked them opted in / added a phone),
+    // so the row isn't a dead end — the server re-checks both anyway.
+    else if(st==='skipped_no_consent') rows.push(notifPill('On the way (text)','✕','#f87171','Not sent — customer did not opt in to texts',when,canText?resendAttrs:null));
+    else if(st==='skipped_no_phone') rows.push(notifPill('On the way (text)','✕','#f87171','Not sent — no phone on file',when,canText?resendAttrs:null));
     else rows.push(notifPill('On the way (text)','…','#fbbf24','Sending',when,resendAttrs));
   }
   if(b.review_sms_status){
@@ -2993,6 +3008,8 @@ function notificationLog(b){
     const resendAttrs={kind:'review_sms',id:b.id};
     if(st==='delivered') rows.push(notifPill('Review request (text)','✓','#4ade80','Delivered',when,resendAttrs));
     else if(st==='failed'||st==='undelivered') rows.push(notifPill('Review request (text)','✕','#f87171','Not delivered',when,resendAttrs));
+    else if(st==='skipped_no_consent') rows.push(notifPill('Review request (text)','✕','#f87171','Not sent — customer did not opt in to texts',when,canText?resendAttrs:null));
+    else if(st==='skipped_no_phone') rows.push(notifPill('Review request (text)','✕','#f87171','Not sent — no phone on file',when,canText?resendAttrs:null));
     else rows.push(notifPill('Review request (text)','…','#fbbf24','Sending',when,resendAttrs));
   }
   if(b.review_email_sent_at){
@@ -3008,6 +3025,26 @@ function notificationLog(b){
 // (rendered inside #bkBody, see the bk-receipts block below) is re-injected via
 // innerHTML on every openBooking() call.
 document.getElementById('bkBody')?.addEventListener('click', async (e)=>{
+  // "Mark opted in" / "Turn texts off" on the Customer texts row. Records a
+  // verbal answer taken over the phone; the server leaves an audit note.
+  const cbtn=e.target.closest('.notif-consent-btn');
+  if(cbtn){
+    const id=cbtn.dataset.ncId, value=cbtn.dataset.ncValue==='true';
+    if(value && !confirm('Mark this customer as opted in to texts?\n\nOnly do this if they actually agreed — e.g. they asked for text updates on the phone. They will get on-the-way and review-request texts (each says STOP to opt out).')) return;
+    cbtn.disabled=true; cbtn.textContent='…';
+    try{
+      await api('booking_update',{ method:'POST', body:{ business:current.slug, id, action:'sms_consent', value }});
+      toast(value?'Customer marked opted in to texts ✓':'Texts turned off for this customer ✓');
+      const d=await api('bookings',{ params:{ business:current.slug, id }});
+      const b=(d.bookings||[])[0];
+      if(b) openBooking(b);
+      refreshCurrent();
+    }catch(err){
+      toast(err.message||'Could not update');
+      cbtn.disabled=false; cbtn.textContent=value?'Mark opted in':'Turn texts off';
+    }
+    return;
+  }
   const btn=e.target.closest('.notif-resend-btn');
   if(!btn) return;
   const kind=btn.dataset.nrKind, id=btn.dataset.nrId, technicianId=btn.dataset.nrTechnicianId;
@@ -11482,6 +11519,7 @@ function convertEstimateToJob(id){
   openNewBooking({
     name: e.customer_name, phone: e.customer_phone, email: e.customer_email,
     postal_code: e.customer_zip,
+    sms_consent: e.sms_consent!==false,
     address_line1: e.customer_address||e.address_line1||'',
     city: e.customer_city||'', state: e.customer_state||'',
     line_items: lines,
@@ -15694,6 +15732,9 @@ async function openNewBooking(prefill){
     set('nbCity', prefill.city);
     set('nbState', prefill.state);
     set('nbZip', prefill.postal_code);
+    // An estimate the customer declined texts on must not convert into a
+    // consented booking — form.reset() above restored the box to checked.
+    if(typeof prefill.sms_consent==='boolean'){ const c=document.getElementById('nbSmsConsent'); if(c) c.checked=prefill.sms_consent; }
     // Converted from an estimate: carry its priced lines onto the booking. They
     // ride along as line items (so the office just picks a date/slot + tech).
     if(Array.isArray(prefill.line_items) && prefill.line_items.length){

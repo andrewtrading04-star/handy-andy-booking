@@ -3910,8 +3910,10 @@ async function bookingCreate(req, res, db, auth, body) {
     status, note: `Created by ${auth.role} (dashboard)`,
   });
 
-  // Send booking confirmation SMS to customer (if they opted in)
-  if (c.phone && scheduled_at && body.sms_consent) {
+  // Send booking confirmation SMS to customer (if they opted in). Same test as
+  // the insert above (`!== false`), so a caller that omits the field and gets a
+  // consented row also gets the text — the two used to disagree.
+  if (c.phone && scheduled_at && body.sms_consent !== false) {
     // Use the JOB's local time (tz was resolved from the service area above), so an
     // Austin customer sees Central time — not the business's Mountain time.
     const _d = new Date(scheduled_at);
@@ -3923,7 +3925,8 @@ async function bookingCreate(req, res, db, auth, body) {
       ? `${primaryTechInfo.name} will text you when he's on the way.`
       : `We'll text you when your tech is on the way.`;
     const msg = `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`;
-    sendSMS(c.phone, msg).catch(console.error);
+    // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
+    await sendSMS(c.phone, msg).catch(console.error);
   }
 
   // Notify the technician if one was assigned at creation time (job-local tz).
@@ -4271,6 +4274,12 @@ async function bookingUpdate(req, res, db, auth, body) {
       // must not overwrite the tech's real completion time.
       if (body.status === 'completed' && existing.status !== 'completed') patch.completed_at = now;
       break;
+    case 'sms_consent':
+      // The office records a verbal opt-in/opt-out taken over the phone (e.g.
+      // a widget customer who skipped the checkbox but asks for text updates).
+      // No other path in the app can change this flag once a booking exists.
+      patch.sms_consent = body.value === true || body.value === 'true';
+      break;
     default:
       return res.status(400).json({ error: `Unknown booking action "${body.action}"` });
   }
@@ -4363,6 +4372,15 @@ async function bookingUpdate(req, res, db, auth, body) {
   const { error: e1 } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
   if (e1) throw e1;
 
+  if (body.action === 'sms_consent') {
+    // Consent changes are a compliance record — leave a note saying who flipped it.
+    await db.from('booking_notes').insert({
+      business_id: biz.id, booking_id: id,
+      author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
+      body: `SMS consent turned ${patch.sms_consent ? 'ON' : 'OFF'} from the dashboard${patch.sms_consent ? ' (customer agreed to text updates)' : ''}.`,
+    }).then(({ error }) => { if (error) console.warn('[booking_update] consent note failed:', error.message); });
+  }
+
   if (newStatus) {
     await db.from('booking_status_events').insert({
       booking_id: id, business_id: biz.id, technician_id: patch.technician_id ?? existing.technician_id,
@@ -4433,6 +4451,13 @@ async function bookingUpdate(req, res, db, auth, body) {
         } catch (e) {
           console.error(`[review] SMS failed for booking ${id}:`, e.message);
         }
+      } else if ((!existing.customer?.phone || !existing.sms_consent) && !existing.metadata?.review_sms_sent_at) {
+        // Stamp the skip so the notification log says WHY no review text went
+        // out — it used to leave no trace at all. Guarded twice so a reopen →
+        // texts turned off → re-complete can never overwrite a real send.
+        const why = existing.customer?.phone ? 'skipped_no_consent' : 'skipped_no_phone';
+        console.log(`[review] SMS skipped (${why}) booking=${id}`);
+        try { await db.from('bookings').update({ review_sms_status: why }).eq('id', id).is('review_sms_sent_at', null); } catch { /* column not applied yet */ }
       }
     }
 
@@ -7014,7 +7039,7 @@ function bookingSelect() {
   // secondary_technician_id) because bookings has TWO foreign keys to
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
-  const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at,
+  const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at, sms_consent,
           notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at, zenbooker_job_number${esCol()}${arCol()},
           on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
           review_sms_status, review_sms_sent_at, review_sms_delivered_at,
@@ -7133,6 +7158,9 @@ function shapeBooking(b) {
     paid_at: b.paid_at,
     // Full notification timeline — admin/secretary dashboard only, never sent to
     // the tech app's own booking read (that's a separate query in tech.js).
+    // Whether the customer may be texted at all — explains every skipped row
+    // in the notification log. null only when the read didn't select it.
+    sms_consent: typeof b.sms_consent === 'boolean' ? b.sms_consent : null,
     confirmation_email_status: b.confirmation_email_status || null,
     confirmation_email_sent_at: b.confirmation_email_sent_at || null,
     on_the_way_sms_status: b.on_the_way_sms_status || null,
@@ -7506,9 +7534,11 @@ async function reviewRequests(req, res, db, auth) {
 
   const rows = (data || []).map(b => {
     const hasEmail = !!b.customer?.email;
-    const hasSms = !!b.customer?.phone && !!b.sms_consent;
     const emailSentAt = (hasTrack ? b.review_email_sent_at : null) || b.metadata?.review_email_sent_at || null;
     const smsSentAt = (hasTrack ? b.review_sms_sent_at : null) || b.metadata?.review_sms_sent_at || null;
+    // A text that already went out stays visible even if the office later turns
+    // texts off for this customer; the resend gate (reviewResend) still enforces consent.
+    const hasSms = !!b.customer?.phone && (!!b.sms_consent || !!smsSentAt);
     // Per-channel opened: prefer the 0063 per-channel column; fall back to the
     // 0062 shared "first click" column when it matches this channel (covers
     // clicks recorded before 0063 was applied).
@@ -7535,7 +7565,9 @@ async function reviewRequests(req, res, db, auth) {
       has_email: hasEmail,
       email_count: hasTrack ? (b.review_email_count || 0) : (emailSentAt ? 1 : 0),
       email: channelState(hasEmail, emailSentAt, hasTrack ? b.review_email_delivered_at : null, hasTrack ? b.review_email_status : null, emailOpenedAt),
-      sms: channelState(hasSms, smsSentAt, hasTrack ? b.review_sms_delivered_at : null, hasTrack ? b.review_sms_status : null, smsOpenedAt),
+      // A 'skipped_*' stamp (no consent / no phone at completion) is not a send
+      // state — treat it as "never sent" here so the tab doesn't show a bogus pill.
+      sms: channelState(hasSms, smsSentAt, hasTrack ? b.review_sms_delivered_at : null, hasTrack && !/^skipped_/.test(b.review_sms_status || '') ? b.review_sms_status : null, smsOpenedAt),
       opened_unknown_at: openedUnknownAt,
       rating: b.review_rating || null,
       review_text: b.review_text || null,
@@ -7748,7 +7780,8 @@ async function notificationResend(req, res, db, auth, body) {
   }
 
   if (kind === 'on_the_way_sms') {
-    if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
+    if (!b.customer?.phone) return res.status(400).json({ error: 'No phone number on file for this customer.' });
+    if (!b.sms_consent) return res.status(400).json({ error: 'This customer did not opt in to texts. If they agree by phone, mark them opted in first (Delivery receipts panel).' });
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
     // Wording comes from _lib/en-route.js so this manual resend, the tech app's
     // "On My Way" button and the one-tap nudge link all say the same thing.
@@ -10822,7 +10855,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total';
+  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -11617,7 +11650,9 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     notes: est.description || null,
     address_line1: cust.line1 || null, city: cust.city || null, state: cust.state || null, postal_code: cust.zip || null,
     payment_required: true, payment_method: 'card',
-    sms_consent: true,
+    // Carry the estimate's answer through. This used to hard-code true, so a
+    // customer who declined texts on the estimate form was texted anyway.
+    sms_consent: est.sms_consent !== false,
     stripe_customer_id: card.customerId, stripe_payment_method_id: card.pmId || null,
     metadata: { booked_by: 'Estimate approval (auto-booked)', source_estimate_id: est.id },
   };
@@ -11679,7 +11714,7 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   await notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz, { bookingId: bRow.id })
     .catch(e => console.error('[tech-notify]', e.message));
 
-  if (cust.phone) {
+  if (cust.phone && est.sms_consent !== false) {
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'short', month: 'short', day: 'numeric' });
     const timeStr = _d.toLocaleTimeString('en-US', { timeZone: areaTz, hour: 'numeric', minute: '2-digit' });
@@ -11688,7 +11723,8 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     const techLine = techInfo?.name
       ? `${techInfo.name} will text you when he's on the way.`
       : `We'll text you when your tech is on the way.`;
-    sendSMS(cust.phone, `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`).catch(console.error);
+    // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
+    await sendSMS(cust.phone, `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`).catch(console.error);
   }
 
   if (cust.email) {

@@ -50,8 +50,21 @@ export async function sendEnRouteSms(db, opts = {}) {
     etaMinutes = DEFAULT_ETA_MINUTES,
   } = opts;
 
-  if (!customerPhone) return { ok: false, skipped: 'no_customer_phone' };
-  if (!smsConsent) return { ok: false, skipped: 'no_sms_consent' };
+  // A skip is stamped on the booking so the dashboard's notification log can
+  // say WHY nothing went out. Before this the column stayed NULL and the office
+  // had no trace at all that the customer was never texted.
+  const skipped = !customerPhone ? 'no_customer_phone' : !smsConsent ? 'no_sms_consent' : null;
+  if (skipped) {
+    try {
+      // .is(sent_at, null): a skip never overwrites a real send (reopen →
+      // texts turned off → tapped again must keep the earlier 'delivered').
+      const { error } = await db.from('bookings').update({
+        on_the_way_sms_status: skipped === 'no_sms_consent' ? 'skipped_no_consent' : 'skipped_no_phone',
+      }).eq('id', bookingId).is('on_the_way_sms_sent_at', null);
+      if (error) console.warn('[en-route sms] skip not recorded:', error.message);
+    } catch (e) { console.warn('[en-route sms] skip not recorded:', e.message); }
+    return { ok: false, skipped };
+  }
 
   // The company name must be the JOB's business, not the tech's home company.
   // Handy Andy and Dom's cross-hire each other, and every Mile High job is
