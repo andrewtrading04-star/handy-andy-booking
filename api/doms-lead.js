@@ -50,6 +50,21 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // Same fillMs check as api/quote.js: time from the page's own script
+  // running to the submit event, measured entirely on the visitor's clock by
+  // layout.tsx's leadNotifyJs. Real callers take at least ~2s; a headless
+  // bot that drives the actual page and fires submit near-instantly does
+  // not. This form's markup is landingsite.ai's own black box (no honeypot
+  // field to add), so timing is the one content-agnostic signal available.
+  // A missing/null fillMs (a page still open from before this deploy) skips
+  // the check rather than reading as 0ms.
+  const fillMs = typeof body.fillMs === 'number' && Number.isFinite(body.fillMs) ? body.fillMs : null;
+  const tooFast = fillMs !== null && fillMs >= 0 && fillMs < 1500;
+  if (tooFast) {
+    console.warn('[doms-lead] blocked: too fast', { fillMs, name: name.slice(0, 80), phone });
+    return res.status(200).json({ ok: true });
+  }
+
   if (!name || !phone) {
     return res.status(400).json({ error: 'name and phone are required' });
   }
