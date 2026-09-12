@@ -1804,6 +1804,8 @@ let filterArea = '';           // '' = all territories, else service_area id
 let filterTech = 'all';        // all | unassigned | tech id
 let pollTimer = null;
 let alertTimer = null;         // interval handle for the bad-review alert banner
+let sessionTimer = null;       // sliding-session refresh (see refreshSessionCache)
+let lastSessionRefresh = 0;
 
 // caches
 let techCache = [];
@@ -1829,6 +1831,7 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   // connection eventually gives up and lets the UI recover.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const sent=token;   // the session this request goes out with (see the 401 branch)
   let res;
   try {
     res = await fetch(url, {
@@ -1847,13 +1850,17 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   // bad password or absent session: don't call logout() (it would mask the real
   // server message), let the caller surface "Incorrect password" instead.
   if (res.status === 401 && action !== 'login' && action !== 'session_status') {
-    logout(); throw new Error('Session expired — please sign in again');
+    // Several pollers can 401 in the same second once a token dies; only the
+    // first tears the session down (logout is idempotent, but the login
+    // message / overlay sweep need not run four times).
+    if (token && token===sent) logout({ reason:'expired' });   // only the session THIS request went out with
+    throw new Error('Session expired — please sign in again');
   }
   const data = await res.json().catch(()=>({}));
   // tech_id has to ride along too: apiConfirmUnavailable's "book them anyway?"
   // override is gated on it, so without this every tech_unavailable conflict
   // was a dead end even though both sides were built to offer the override.
-  if (!res.ok) { const e=new Error(data.error || 'Request failed'); if(data.code) e.code=data.code; if(data.tech_id) e.tech_id=data.tech_id; throw e; }
+  if (!res.ok) { const e=new Error(data.error || 'Request failed'); e.status=res.status; if(data.code) e.code=data.code; if(data.tech_id) e.tech_id=data.tech_id; if(data.decline_code) e.decline_code=data.decline_code; if(data.needs_new_card) e.needs_new_card=true; throw e; }
   return data;
 }
 // Finances hits its own serverless function (api/finance.js), not /api/admin
@@ -2083,17 +2090,58 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     if(btn){ btn.disabled=false; }
   }
 });
-function logout(){
+// Everything that lives OUTSIDE #app (the modals are siblings of it; several
+// overlays are appended straight to <body>). Hiding #app alone leaves them
+// floating over the login screen, still wired to handlers that read `current`
+// — that is how Joey's call wizard produced "null is not an object (evaluating
+// 'current.slug')" after a mid-call token expiry (2026-09-11). Runs BEFORE
+// state is cleared so close helpers that touch state still see it; each step
+// is isolated so one throw can never stop logout from reaching the #app/#login
+// swap.
+function dismissAllOverlays(){
+  const step=fn=>{ try{ fn(); }catch(_){} };
+  step(()=>nbStopProgressTimer());
+  step(()=>{ nbModalSession++; });   // in-flight New Booking submits must not re-hide/re-show #modal later
+  ['modal','callWizModal','bkModal','availModal','custModal','custDetailModal','estModal','lightbox','viewAsPopover']
+    .forEach(id=>step(()=>{ const el=document.getElementById(id); if(el) el.classList.add('hidden'); }));
+  step(()=>closeRsModal());
+  step(()=>closeBrokerPanel());
+  step(()=>closeCallDayDetail());
+  step(()=>closeAssignModal());
+  step(()=>closeBracketModal());
+  step(()=>{ document.querySelectorAll('.addr-ac,.charge-ov').forEach(el=>el.remove()); });
+  step(()=>closeSidebar());
+}
+function logout(opts){
+  const reason=(opts&&opts.reason)||'manual';   // the #logout click handler passes the Event -> 'manual'
+  // callWiz is deliberately NOT cleared: a call in progress survives in memory
+  // and "Take a Call" resumes it after sign-in (openTakeCall's resume branch).
+  // A manual sign-out is an explicit hand-off: the next person to sign in on
+  // this tab must not be offered someone else's half-finished call.
+  if(reason!=='expired') callWiz=null;
+  const callOpen=!!(callWiz && callWiz.id && !callWiz.resolution);
+  // With sliding sessions every tab holds its own token. If ANOTHER tab of this
+  // browser already stored a fresher one, an expiry here must not wipe it —
+  // this tab just shows the sign-in screen (a reload picks the live session up).
+  const otherTabLive = reason==='expired' && !!token && !!lsGet('ha_admin_token') && lsGet('ha_admin_token')!==token;
+  dismissAllOverlays();
   token=''; role=''; userName=''; scope=''; appConfig={}; businesses=[]; current=null;
-  lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
-  lsDel('ha_owner_token'); lsDel('ha_owner_role'); lsDel('ha_owner_name'); lsDel('ha_owner_scope'); lsDel('ha_owner_config'); lsDel('ha_owner_biz');
+  if(!otherTabLive){
+    lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
+    lsDel('ha_owner_token'); lsDel('ha_owner_role'); lsDel('ha_owner_name'); lsDel('ha_owner_scope'); lsDel('ha_owner_config'); lsDel('ha_owner_biz');
+  }
   if(pollTimer) clearInterval(pollTimer);
   if(alertTimer){ clearInterval(alertTimer); alertTimer=null; }
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
+  if(sessionTimer){ clearInterval(sessionTimer); sessionTimer=null; }
   const ba=document.getElementById('badAlerts'); if(ba){ ba.classList.add('hidden'); ba.innerHTML=''; }
   const ga=document.getElementById('goodAlerts'); if(ga){ ga.classList.add('hidden'); ga.innerHTML=''; }
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
+  const le=document.getElementById('loginErr');
+  if(le) le.textContent = reason==='expired'
+    ? 'Your session expired — sign in again to keep going.'+(otherTabLive?' (Another tab is still signed in — reloading this one picks that up.)':'')+(callOpen?' The call you were on is saved: tap "Take a Call" after signing in to pick it back up.':'')
+    : '';
 }
 document.getElementById('logout').addEventListener('click', logout);
 
@@ -2271,6 +2319,10 @@ function enterApp(){
   loadBadAlerts();
   if(alertTimer) clearInterval(alertTimer);
   alertTimer=setInterval(()=>{ if(document.hidden) return; loadBadAlerts(); }, 180000);
+  // Slide the session while the dashboard is open and visible (see
+  // refreshSessionCache): every 30 min, plus on return to the tab.
+  if(sessionTimer) clearInterval(sessionTimer);
+  sessionTimer=setInterval(()=>{ if(document.hidden||!token) return; refreshSessionCache(); }, 30*60*1000);
 }
 
 // ── Bad-review alert banner (1-star reviews in the last 24h) ────────────────
@@ -2581,6 +2633,7 @@ async function renderSchedule(silent){
 // yet, so a probe hiccup degrades to the old always-refetch behavior rather
 // than going stale.
 async function pollScheduleIfChanged(){
+  if(!current) return;   // signed out mid-poll (the visibilitychange handler can still reach here)
   if(!calFp){ return renderSchedule(true); }
   try{
     const dates = currentWeekDates();
@@ -4239,6 +4292,7 @@ function openChargeFlowAdmin(b){
   const termsFor=(name)=>`I, ${name||custName||'the customer'}, authorize ${bizName} to charge my card on file ${money(total())} for the services above (${money(base)} service${tip>0?` + ${money(tip)} tip`:''}). I confirm the work was completed to my satisfaction, and I have read and agree to the Terms of Service and Refund Policy.`;
 
   const ov=document.createElement('div');
+  ov.className='charge-ov';   // handle for logout()'s overlay sweep (dismissAllOverlays)
   ov.style.cssText='position:fixed;inset:0;z-index:10000;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;';
   document.body.appendChild(ov);
   const done=()=>{ ov.remove(); };
@@ -4322,6 +4376,7 @@ function openChargeFlowAdmin(b){
     if(step===2) setupSign();
   }
   async function submit(){
+    { const old=ov.querySelector('#cfaErr'); if(old) old.remove(); }   // a retry starts clean
     const btn=ov.querySelector('#cfCharge'); if(btn){ btn.disabled=true; btn.textContent='Charging…'; }
     const nm=signerName;
     try{
@@ -4334,7 +4389,17 @@ function openChargeFlowAdmin(b){
       if(r&&r.warning) alert(r.warning);   // e.g. "already charged on an earlier attempt — no new charge was made"
       else toast('Charged '+money(total())+' — receipt sent ✓');
       refreshCurrent();
-    }catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+money(total()); } }
+    }catch(e){
+      // Persistent, like the tech app's banner: a 2.6s toast is how "Charge
+      // failed: Keys for idempotent requests…" got read as the app being stuck.
+      const host=ov.querySelector('div[style*="flex:1"]')||ov.firstElementChild;
+      if(host){
+        let box=ov.querySelector('#cfaErr');
+        if(!box){ box=document.createElement('div'); box.id='cfaErr'; host.insertBefore(box, host.firstChild); }
+        box.innerHTML=`<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5;margin-bottom:14px;text-align:left;"><div style="font-weight:800;margin-bottom:3px;">Card was NOT charged</div>${esc(e.message)}</div>`;
+      }
+      toast(e.message); if(btn){ btn.disabled=false; btn.textContent='Charge '+money(total()); }
+    }
   }
   function setupSign(){
     const cv=ov.querySelector('#cfSig'); if(!cv) return;
@@ -13358,6 +13423,8 @@ function startGreetingClock(){
 // comes BACK to the tab, refresh the current view once so nothing looks stale.
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
+  if(!token||!current) return;   // signed out: nothing to refresh, and the pollers below read `current`
+  if(Date.now()-lastSessionRefresh>5*60*1000) refreshSessionCache();
   try{
     if(section==='schedule' && calMode==='jobs') pollScheduleIfChanged();
     else if(onScreen('analytics')||onScreen('handyman')){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
@@ -13519,7 +13586,7 @@ document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==
 let callWiz=null;
 function callWizReset(){
   callWiz={
-    id:null, step:'greet', service:null,
+    id:null, business:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null, surcharge:0,
     optStep:0, optsLoaded:false,
     handymanDesc:'',
@@ -13566,7 +13633,14 @@ function openTakeCall(){
   // restarted: re-running the reset would throw away the zip, options, quote and
   // discount already collected and open a SECOND app.calls row for the same
   // conversation, leaving the first one unresolved forever.
+  // A saved call that belongs to a business this login cannot see (a different
+  // person signed in on this tab after an expiry) is dropped, not resumed.
+  if(callWiz && callWiz.id && !callWiz.resolution && callWiz.business && !businesses.some(b=>b.slug===callWiz.business)) callWiz=null;
   if(callWiz && callWiz.id && !callWiz.resolution){
+    // A call logged against a lead-gen brand resumes on that brand: after a
+    // re-login the dashboard opens on her own company, and every wizard step
+    // prices and books against `current`.
+    if(callWiz.business && current.slug!==callWiz.business && businesses.some(b=>b.slug===callWiz.business)) switchToBusiness(callWiz.business);
     document.getElementById('callWizModal').classList.remove('hidden');
     renderCallWiz();
     return;
@@ -13739,10 +13813,15 @@ function cwAmber(line){
 // Log one action from the script. Fire-and-forget on purpose: analytics must
 // never add latency to, or fail, a call the secretary is actually on. Every
 // call site is non-awaited for the same reason.
+// The business a live call is logged against, frozen on callWiz when the call
+// row is created (call_live_start), so the wizard never has to read the
+// dashboard's `current` — which logout() nulls while a request may be in flight.
+function cwBiz(){ return (callWiz && callWiz.business) || (current && current.slug) || null; }
 function cwTrack(event, meta){
   if(!callWiz || !callWiz.id) return;
+  const biz=cwBiz(); if(!biz) return;
   api('call_event',{ method:'POST', body:{
-    business:current.slug, call_id:callWiz.id, event,
+    business:biz, call_id:callWiz.id, event,
     step:callWiz.step, meta:meta||{},
   }}).catch(()=>{});
 }
@@ -14616,8 +14695,9 @@ async function renderCallWiz(){
       document.getElementById('cwSomethingElse').disabled=true;
       const service=b.dataset.cwchoice;
       try{
-        const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
-        callWiz.id=r.id; callWiz.service=service;
+        const biz=current.slug;   // frozen on the call from here on: see cwBiz()
+        const r=await api('call_live_start',{ method:'POST', body:{ business:biz }});
+        callWiz.id=r.id; callWiz.business=biz; callWiz.service=service;
         cwCallUpdate({ service }).catch(()=>{});
         cwTrack('started');
         cwTrack('service_picked',{ service });
@@ -14634,8 +14714,9 @@ async function renderCallWiz(){
       body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
       document.getElementById('cwSomethingElse').disabled=true;
       try{
-        const r=await api('call_live_start',{ method:'POST', body:{ business:current.slug }});
-        callWiz.id=r.id; callWiz.service='Other';
+        const biz=current.slug;
+        const r=await api('call_live_start',{ method:'POST', body:{ business:biz }});
+        callWiz.id=r.id; callWiz.business=biz; callWiz.service='Other';
         cwCallUpdate({ service:'Other', resolution:'other' }).catch(()=>{});
         cwTrack('started');
         cwTrack('service_picked',{ service:'Other' });
@@ -14921,7 +15002,7 @@ async function renderCallWiz(){
       document.getElementById('cwCalTitle').textContent=callWiz.calMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
       const cur=new Date(); cur.setDate(1);
       document.getElementById('cwCalPrev').disabled=(callWiz.calMonth.getFullYear()===cur.getFullYear()&&callWiz.calMonth.getMonth()===cur.getMonth());
-      const params={ business:current.slug, month:cwMonthKey(callWiz.calMonth), technician_id:'any' };
+      const params={ business:cwBiz(), month:cwMonthKey(callWiz.calMonth), technician_id:'any' };
       if(callWiz.zip) params.postal_code=callWiz.zip;
       try{
         const r=await api('available_dates',{ params });
@@ -14986,7 +15067,7 @@ async function renderCallWiz(){
       // open on the date the booking is then submitted with.
       const mySeq=++cwSlotSeq;
       const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
-      const params={ business:current.slug, date, technician_id:'any' };
+      const params={ business:cwBiz(), date, technician_id:'any' };
       if(callWiz.zip) params.postal_code=callWiz.zip;
       try{
         const r=await api('available_slots',{ params });
@@ -18089,7 +18170,7 @@ async function tryAutoLogin(){
     lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
     lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
-  }catch{ /* session invalid or expired — show login screen */ }
+  }catch(e){ if(e && e.status===401 && token) logout({reason:'expired'}); /* else: no session — show the login screen */ }
 }
 // Brand the login screen per dedicated entry link (/handy-andy, /heather,
 // /doms, /joey, or ?team=). Purely cosmetic — the password is what grants
@@ -18130,8 +18211,16 @@ brandLogin();
 // stripe_pk, the Doms card-save fix) would silently never reach long-lived
 // sessions. Only refreshes data; never re-enters the app or touches the view.
 async function refreshSessionCache(){
+  const sent=token; if(!sent) return;
+  lastSessionRefresh=Date.now();
   try{
     const d=await api('session_status');
+    if(token!==sent) return;   // identity switched mid-flight (View As / Back to Admin / fresh login): never overwrite the new session with a stale reply
+    // The server slides the session on every status call (a re-signed token
+    // with a fresh exp — sessionStatus in api/admin.js). Adopting it is what
+    // keeps a dashboard that is open all day from hard-expiring 12h after the
+    // password was typed.
+    if(d && typeof d.token==='string' && d.token && d.token!==token){ token=d.token; lsSet('ha_admin_token',token); }
     if(d && Array.isArray(d.businesses) && d.businesses.length){
       businesses=d.businesses;
       appConfig=d.config||appConfig;
@@ -18141,7 +18230,28 @@ async function refreshSessionCache(){
       lsSet('ha_admin_biz',JSON.stringify(businesses));
       lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
     }
-  }catch{ /* offline or expired token — existing 401 handling covers it */ }
+  }catch(e){
+    // A dead cached token: the boot path enters the app before this runs, so
+    // without this the first authenticated poll bounced her to a bare login
+    // form instead (the "reload a few times" experience).
+    if(e && e.status===401 && token===sent) logout({reason:'expired'});
+  }
+  // While viewing-as, the stashed OWNER token is what "Back to Admin" restores;
+  // it would otherwise expire untouched 12h after it was minted.
+  const ot=lsGet('ha_owner_token');
+  if(ot){
+    try{
+      const u=new URL(API, location.origin); u.searchParams.set('action','session_status');
+      const r=await fetch(u,{ headers:{ Authorization:`Bearer ${ot}` } });
+      if(r.ok){ const od=await r.json().catch(()=>null); if(od && typeof od.token==='string' && od.token && od.token!==ot && lsGet('ha_owner_token')===ot) lsSet('ha_owner_token',od.token); }
+      else if(r.status===401 && lsGet('ha_owner_token')===ot){
+        // The stashed owner session is dead: stop offering "Back to Admin" (it
+        // would restore a token that 401s and sign the live session out too).
+        ['ha_owner_token','ha_owner_role','ha_owner_name','ha_owner_scope','ha_owner_config','ha_owner_biz'].forEach(k=>lsDel(k));
+        updateWhoAvatar();
+      }
+    }catch(_){ /* best-effort */ }
+  }
 }
 
 if(token && businesses.length){ enterApp(); refreshSessionCache(); }

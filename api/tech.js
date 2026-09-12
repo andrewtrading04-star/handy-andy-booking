@@ -11,7 +11,7 @@
 // availability so it reflects in the admin dashboard.
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
-import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
+import { signToken, verifyToken, getBearer, applyCors, refreshToken, TECH_SESSION_MAX } from './_lib/auth.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
@@ -22,7 +22,7 @@ import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_
 import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
-import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge } from './_lib/stripe.js';
+import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
 import { canonicalizeLineItems, isTaxLine, BOOKING_TAX_RATE, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
@@ -113,6 +113,12 @@ const TECH_STATUS = {
 const STATUS_RANK = { pending: 0, confirmed: 0, assigned: 0, on_the_way: 1, arrived: 2, in_progress: 3, completed: 4 };
 const TERMINAL_STATUS = new Set(['completed', 'cancelled', 'no_show']);
 
+// The charge path can make several sequential Stripe calls at a 15s cap each
+// (card lookups, create, read, confirm, read-after-error); never let the platform
+// default kill the function mid-confirm with the 'charging' lock held. Same as
+// api/book.js.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -198,7 +204,7 @@ async function login(req, res, body) {
   if (error) throw error;
   if (!tech) return res.status(401).json({ error: 'Incorrect phone or PIN' });
 
-  const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id });
+  const token = signToken({ kind: 'tech', tech_id: tech.id, business_id: tech.business_id, sess: 1 });
   let slug = '', tz = 'America/Denver';
   try {
     const { data: biz } = await db.from('businesses').select('slug, timezone').eq('id', tech.business_id).single();
@@ -1346,8 +1352,17 @@ async function jobPayment(req, res, db, auth, body) {
     // If an unrecorded landed charge exists, record THAT instead of cash, so
     // the customer is never collected twice (card + cash). Best-effort: a
     // search failure just falls through to the normal cash mark.
-    if (act === 'mark_paid' && !b.stripe_payment_intent_id) {
-      const landed = await findLandedCharge(id, acct);
+    let landed = null;
+    if (act === 'mark_paid' && !b.stripe_payment_intent_id) landed = await findLandedCharge(id, acct);
+    else if (act === 'mark_paid' && b.payment_status !== 'paid') {
+      // The row carries an intent from an attempt whose outcome was unknown when
+      // it ended (see chargeCardOnFile) — or an old refunded one. Read it
+      // directly before taking cash: if that charge landed, record it instead.
+      const pend = await pendingIntentState(b.stripe_payment_intent_id, acct);
+      if (pend.state === 'processing') return res.status(409).json({ error: 'A card charge for this job is still processing at the bank — wait a minute and check before marking it paid.' });
+      landed = pend.landed;
+    }
+    if (act === 'mark_paid') {
       if (landed) {
         const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
         if (landed.customerId) patch.stripe_customer_id = landed.customerId;
@@ -1382,7 +1397,9 @@ async function jobPayment(req, res, db, auth, body) {
 
     const patch = act === 'mark_paid'
       ? { payment_status: 'paid', paid_at: now, amount_paid: cashPrice,
-          ...(body.cash ? { payment_method: 'cash', price: cashPrice } : {}) }
+          ...(body.cash ? { payment_method: 'cash', price: cashPrice } : {}),
+          // cash on a row that only carried an unsettled (or refunded) intent: drop it, or the receipt would say "Card"
+          ...(b.stripe_payment_intent_id && b.payment_status !== 'paid' ? { stripe_payment_intent_id: null } : {}) }
       : { payment_status: 'unpaid', paid_at: null };
     const { data: updated } = await db.from('bookings').update(patch)
       .eq('id', id).eq('payment_status', b.payment_status).select('id').maybeSingle();
@@ -1456,18 +1473,21 @@ async function jobPayment(req, res, db, auth, body) {
       // different tip or a swapped card gets a DIFFERENT key — a second real
       // charge. So if an unrecorded landed charge exists, ADOPT it and stop.
       // Best-effort: a search failure falls through to a normal charge.
+      // Shared by the search-based guard right below AND the idempotent-replay
+      // adopt after chargeCardOnFile: one write, one warning text.
+      const adoptLanded = async (landed) => {
+        const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
+        if (landed.customerId) patch.stripe_customer_id = landed.customerId;
+        if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
+        let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
+        if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
+        if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[tech charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
+        return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
+          warning: `This job was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
+      };
       if (!b.stripe_payment_intent_id) {
         const landed = await findLandedCharge(id, acct);
-        if (landed) {
-          const patch = { payment_status: 'paid', paid_at: now, amount_paid: landed.amount, tip: landed.tip, stripe_payment_intent_id: landed.id };
-          if (landed.customerId) patch.stripe_customer_id = landed.customerId;
-          if (landed.paymentMethodId) patch.stripe_payment_method_id = landed.paymentMethodId;
-          let { error: recErr } = await db.from('bookings').update(patch).eq('id', id);
-          if (recErr) ({ error: recErr } = await db.from('bookings').update(patch).eq('id', id));
-          if (recErr) { await db.from('bookings').update({ payment_status: 'paid' }).eq('id', id); console.error('[tech charge] CRITICAL: landed-charge adopt write failed', { booking: id, pi: landed.id, err: recErr.message }); }
-          return res.status(200).json({ ok: true, payment_status: 'paid', amount: landed.amount, tip: landed.tip, payment_intent_id: landed.id, recovered: true,
-            warning: `This job was ALREADY charged $${landed.amount.toFixed(2)} on an earlier attempt that looked like it failed. No new charge was made.` });
-        }
+        if (landed) return adoptLanded(landed);
       }
 
       const ticketAmount = Number(b.price) || 0;
@@ -1510,27 +1530,34 @@ async function jobPayment(req, res, db, auth, body) {
       pmId = resolved.pmId;
       const card = resolved.card;
 
-      let pi;
+      // One shared helper builds the PaymentIntent for BOTH apps (chargeCardOnFile
+      // in api/_lib/stripe.js): the create is idempotent on a key both apps derive
+      // from booking + amount + card, so a retry from either resumes the same
+      // intent; each confirm is a fresh bank attempt, so a decline is never
+      // replayed and a same-card retry after a decline really asks the bank again.
+      // (Before 2026-09-12 the two apps built DIFFERENT bodies under the SAME key,
+      // which is how one app's attempt hard-blocked the other with Stripe's
+      // "Keys for idempotent requests can only be used with the same parameters".)
+      let pi, recovered;
       try {
-        // Keyed on booking id + exact amount + the CARD being charged, with the
-        // SAME 'charge-' prefix the office path uses (api/admin.js): a true
-        // retry (double-tap, a timed-out request resubmitted — from EITHER app)
-        // has the same key and replays the same PaymentIntent instead of
-        // charging twice. Changing the amount (different tip) OR the card
-        // (customer hands over a new one after a decline) changes the key, so
-        // a genuinely new attempt is never blocked by Stripe's replay cache.
-        // Known residual: retrying the SAME card at the SAME total within 24h
-        // of a decline replays the cached decline — nudge the tip a cent or
-        // take cash if a customer insists the same card will work now.
-        const idempotencyKey = `charge-${id}-${Math.round(total * 100)}-${String(pmId).slice(-8)}`;
-        pi = await stripe('/payment_intents', { ...acct, idempotencyKey, body: {
-          amount: Math.round(total * 100), currency: 'usd',
-          customer: custId, payment_method: pmId, off_session: true, confirm: true,
-          description: `Job ${id}`, metadata: { job_id: id, tip: String(tip) },
-          receipt_email: (b.customer && b.customer.email) || undefined,
-        }});
+        ({ pi, recovered } = await chargeCardOnFile({
+          bookingId: id, cents: Math.round(total * 100), tip,
+          customerId: custId, paymentMethodId: pmId,
+          receiptEmail: (b.customer && b.customer.email) || null,
+          businessSlug: slug, priorPiId: b.stripe_payment_intent_id || null,
+          ...acct, log: '[tech charge]',
+        }));
       } catch (e) {
         e.status = e.status || 402; e.message = 'Charge failed: ' + e.message; throw e;
+      }
+      // An earlier attempt (from either app) already landed this exact charge:
+      // record it, no new charge — same write + warning as the search-based
+      // adopt above; this catches the ~1 min window Stripe search can't.
+      if (recovered) {
+        return adoptLanded({ id: pi.id, amount: Math.round(Number(pi.amount)) / 100, tip: Number(pi.metadata && pi.metadata.tip) || 0,
+        // the card the landed intent was actually charged on (it may differ from this request's after a swap)
+        customerId: (typeof pi.customer === 'string' ? pi.customer : pi.customer?.id) || custId,
+        paymentMethodId: (typeof pi.payment_method === 'string' ? pi.payment_method : pi.payment_method?.id) || pmId });
       }
       if (pi.status !== 'succeeded') {
         const e = new Error(`Charge not completed (status: ${pi.status}). The card may need the customer to re-authenticate.`); e.status = 402; throw e;
@@ -1565,8 +1592,12 @@ async function jobPayment(req, res, db, auth, body) {
     } catch (e) {
       // Release the lock on any failure so the job can be retried (or paid
       // with cash) instead of being stuck on 'charging'.
-      try { await db.from('bookings').update({ payment_status: priorPaymentStatus }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
-      return res.status(e.status || 500).json({ error: e.message });
+      // An outcome the helper could not settle (our abort fired mid-confirm, or
+      // Stripe reported it still processing) keeps the intent id on the row, so the
+      // NEXT attempt — from either app — reads that exact intent instead of hoping
+      // Stripe's search has indexed it (see chargeCardOnFile / pendingIntentState).
+      try { await db.from('bookings').update({ payment_status: priorPaymentStatus, ...(e.payment_intent_id ? { stripe_payment_intent_id: e.payment_intent_id } : {}) }).eq('id', id).eq('payment_status', 'charging'); } catch (_) { /* best-effort */ }
+      return res.status(e.status || 500).json({ error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.decline_code ? { decline_code: e.decline_code } : {}), ...(e.needs_new_card ? { needs_new_card: true } : {}) });
     }
   }
 
@@ -2525,9 +2556,18 @@ async function awardReviewBonusIfComplete(db, techId) {
 // from the login response.
 async function me(req, res, db, auth) {
   const { data: t, error } = await db.from('technicians')
-    .select('id, name, status, businesses(slug, timezone)').eq('id', auth.tech_id).single();
+    .select('id, name, status, active, businesses(slug, timezone)').eq('id', auth.tech_id).single();
   if (error || !t) return res.status(404).json({ error: 'Technician not found' });
+  // A deactivated tech must not keep a sliding session alive: a 401 here logs
+  // the app out on its next refresh instead of up to 14 days later.
+  if (t.active === false) return res.status(401).json({ error: 'Unauthorized' });
+  // Also the tech app's session refresh (there is no other status call): a
+  // PIN / magic-link session slides here, capped at TECH_SESSION_MAX.
+  const raw = getBearer(req);
+  const fresh = refreshToken(auth, { maxSeconds: TECH_SESSION_MAX });
+  const claims = fresh ? verifyToken(fresh) : auth;
   return res.status(200).json({
+    token: fresh || raw, refreshed: !!fresh, expires_at: claims.exp,
     technician: {
       id: t.id, name: t.name, status: t.status,
       slug: t.businesses?.slug || '', tz: t.businesses?.timezone || 'America/Denver',
