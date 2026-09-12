@@ -7,6 +7,23 @@
 // Env vars: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
 import { smsNotificationsOn } from './notify.js';
 import { demoMode } from './demo.js';
+import { NATIVE_BUSINESS } from './native-businesses.js';
+
+// The name every CUSTOMER-facing text starts with ("<Brand>: ..."). The A2P
+// 10DLC campaign is registered as "Handy Andy TV Mounting" and carriers match
+// the name in each message against it, so handy-andy texts must carry the full
+// trading name, not the short "Handy Andy" the job cards and email header use.
+// Every other business keeps its own name. SMS wording only: nothing else in
+// the app renders a business name through this.
+export const HANDY_ANDY_SMS_BRAND = 'Handy Andy TV Mounting';
+export function smsBrandName(slug, name) {
+  const n = (name == null ? '' : String(name)).trim();
+  if (slug === 'handy-andy' || /^handy andy( tv mounting)?$/i.test(n)) return HANDY_ANDY_SMS_BRAND;
+  return n
+    || (slug && NATIVE_BUSINESS[slug] && NATIVE_BUSINESS[slug].name)
+    || (slug === 'doms' ? "Dom's TV Mounting" : '')
+    || HANDY_ANDY_SMS_BRAND;
+}
 
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 export function toE164(raw) {

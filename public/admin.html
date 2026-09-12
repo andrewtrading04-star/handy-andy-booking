@@ -1593,9 +1593,12 @@
         </label>
       </div>
       <textarea class="search" style="margin:0;min-height:60px" id="nbNotes" placeholder="Notes"></textarea>
-      <div class="nb-consent-row" style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;">
-        <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;">
-        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;margin:0;">Send SMS updates about this appointment</label>
+      <!-- A2P 10DLC phone-booking consent: UNCHECKED until the customer says yes
+           to the script in the label. Ticking it without asking is texting
+           someone who never opted in. -->
+      <div class="nb-consent-row" style="display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;">
+        <input type="checkbox" id="nbSmsConsent" style="cursor:pointer;width:18px;height:18px;flex-shrink:0;margin-top:1px;">
+        <label for="nbSmsConsent" style="cursor:pointer;font-size:13px;margin:0;">Customer said yes to text updates — ask first: “Can we text you appointment updates about this job? Message frequency varies, message and data rates may apply, and you can reply STOP to opt out or HELP for help.”</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" type="submit">Create booking</button>
@@ -3030,7 +3033,7 @@ document.getElementById('bkBody')?.addEventListener('click', async (e)=>{
   const cbtn=e.target.closest('.notif-consent-btn');
   if(cbtn){
     const id=cbtn.dataset.ncId, value=cbtn.dataset.ncValue==='true';
-    if(value && !confirm('Mark this customer as opted in to texts?\n\nOnly do this if they actually agreed — e.g. they asked for text updates on the phone. They will get on-the-way and review-request texts (each says STOP to opt out).')) return;
+    if(value && !confirm('Mark this customer as opted in to texts?\n\nOnly if they said yes when you asked: “Can we text you appointment updates about this job? Message frequency varies, message and data rates may apply, and you can reply STOP to opt out or HELP for help.”\n\nThey will get on-the-way and review-request texts (each says STOP to opt out).')) return;
     cbtn.disabled=true; cbtn.textContent='…';
     try{
       await api('booking_update',{ method:'POST', body:{ business:current.slug, id, action:'sms_consent', value }});
@@ -11486,12 +11489,12 @@ function estCard(e){
       ${photo}
     </div>
     <div class="row est-foot">
-      <span class="meta" style="font-size:12px;">${e.sms_consent===false?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
+      <span class="meta" style="font-size:12px;">${e.sms_consent!==true?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button class="btn sm" data-est-convert="${e.id}" title="${e.approved_at?'Create a booking from this approved estimate':'Create a booking now, without waiting for the customer to approve online (e.g. they approved by phone)'}">→ Convert to job${e.approved_at?'':' (unapproved)'}</button>
         <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
-        ${(e.customer_phone&&e.sms_consent!==false&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
+        ${(e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
         ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
         ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
@@ -11519,7 +11522,7 @@ function convertEstimateToJob(id){
   openNewBooking({
     name: e.customer_name, phone: e.customer_phone, email: e.customer_email,
     postal_code: e.customer_zip,
-    sms_consent: e.sms_consent!==false,
+    sms_consent: e.sms_consent===true,
     address_line1: e.customer_address||e.address_line1||'',
     city: e.customer_city||'', state: e.customer_state||'',
     line_items: lines,
@@ -13510,7 +13513,7 @@ function callWizReset(){
     // Customer details typed on the booking card. They were only ever read out
     // of the DOM at submit, so tapping Back (or any repaint) wiped the name,
     // phone, email and address and the secretary had to retype all of it.
-    cust:{ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true },
+    cust:{ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:false },   // text consent starts OFF: tick only after the customer's verbal yes (A2P)
     // Discount state, only ever populated on the "customer pushed back" branch.
     // econ holds the server's profit projection for THIS quote, which is what
     // caps how much can be given away.
@@ -15426,7 +15429,7 @@ async function renderCallWiz(){
   if(s==='customer'){
     const disc=cwDiscountApplied();
     const isTv=callWiz.service==='TV Mounting';
-    if(!callWiz.cust) callWiz.cust={ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true };
+    if(!callWiz.cust) callWiz.cust={ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:false };
     const c=callWiz.cust;
     const payVal=c.pay!==null ? c.pay : (isTv?'card':'');
     let whenTxt='';
@@ -15463,9 +15466,9 @@ async function renderCallWiz(){
           <span>Skip for now — add the card later from the job</span>
         </label>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12.5px;cursor:pointer;">
-        <input type="checkbox" id="cwSmsConsent"${c.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;">
-        <span>Okay to text them about this job</span>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;font-size:12.5px;cursor:pointer;">
+        <input type="checkbox" id="cwSmsConsent"${c.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;">
+        <span>Customer said yes to text updates — ask first: “Can we text you appointment updates about this job? Message frequency varies, message and data rates may apply, and you can reply STOP to opt out or HELP for help.”</span>
       </label>
       <button type="button" class="btn" id="cwBookNow" style="margin-bottom:7px;">Book it</button>
       <button type="button" class="btn ghost" id="cwCustBack">Back</button>`;
@@ -15500,6 +15503,7 @@ async function renderCallWiz(){
       </div>
       <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">Either one is enough — whichever they'd rather give.</div>
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)">
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${callWiz.cust&&callWiz.cust.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>Customer said yes to text updates — ask first: “Can we text you appointment updates about this job? Message frequency varies, message and data rates may apply, and you can reply STOP to opt out or HELP for help.”</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
@@ -15507,7 +15511,10 @@ async function renderCallWiz(){
       const name=document.getElementById('cwName').value.trim();
       const phone=document.getElementById('cwPhone').value.trim();
       const email=document.getElementById('cwEmail').value.trim();
-      if(!phone && !email){ err.textContent='A phone number or an email is needed to send it — whichever they prefer.'; return; }
+      // A text needs the customer's yes to the consent question; without it the
+      // estimate can only go by email.
+      const smsOk=!!(document.getElementById('cwEstSmsConsent')||{}).checked;
+      if(!email && !(phone && smsOk)){ err.textContent=phone?'To text it, ask the text-updates question and tick the box only if they say yes. Otherwise take an email.':'A phone number or an email is needed to send it — whichever they prefer.'; return; }
       const unpriced=nbUnpricedOtherLabel();
       if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
       const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
@@ -15534,6 +15541,7 @@ async function renderCallWiz(){
           business:current.slug, customer_name:name, customer_phone:phone, customer_email:email,
           customer_zip:callWiz.zip, service_label:label,
           selections:sels,
+          sms_consent: smsOk,
         }});
         cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:cwDiscountApplied() });
         await cwCallUpdate({
@@ -15733,7 +15741,8 @@ async function openNewBooking(prefill){
     set('nbState', prefill.state);
     set('nbZip', prefill.postal_code);
     // An estimate the customer declined texts on must not convert into a
-    // consented booking — form.reset() above restored the box to checked.
+    // consented booking — form.reset() above restored the box to unchecked
+    // (its A2P default: ticked only after the customer's verbal yes).
     if(typeof prefill.sms_consent==='boolean'){ const c=document.getElementById('nbSmsConsent'); if(c) c.checked=prefill.sms_consent; }
     // Converted from an estimate: carry its priced lines onto the booking. They
     // ride along as line items (so the office just picks a date/slot + tech).

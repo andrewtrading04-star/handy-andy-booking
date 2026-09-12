@@ -12,7 +12,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors } from './_lib/auth.js';
-import { ensureReviewToken } from './_lib/review-token.js';
+import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
@@ -892,7 +892,7 @@ async function status(req, res, db, auth, body) {
   // advance it too. All downstream writes use the job's OWN business_id, not the
   // tech's home business.
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, status, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug ), customer:customers ( name, phone, email )`), auth)
+    .select(`id, status, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug, name ), customer:customers ( name, phone, email )`), auth)
     .eq('id', id).maybeSingle();
   const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
@@ -1136,7 +1136,9 @@ async function status(req, res, db, auth, body) {
         console.log(`[review] SMS already sent at ${existing.metadata.review_sms_sent_at}, skipping`);
       } else {
         try {
-          const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+          // Wording (brand prefix, ihandyandy.com link for Handy Andy, STOP line)
+          // lives in _lib/review-token.js, shared with both admin.js senders.
+          const msg = reviewRequestSms({ slug, name: existing.business?.name, token: existing.review_token, clickUrl: smsClickUrl });
           const r = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
           if (r.ok) {
             const nowIso = new Date().toISOString();

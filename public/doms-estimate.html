@@ -129,7 +129,7 @@ const state = {
   activeDate: null,       // 'YYYY-MM-DD' currently expanded in the picker
   slots: [],              // [{date, slot_key, label}]
   name: '', phone: '', email: '', zip: '',
-  consent: true,
+  consent: false,         // SMS opt-in — optional, unchecked by default
 };
 
 // ── Analytics tracking → /api/log-event ──────────────────────────────────────
@@ -359,6 +359,9 @@ function toggleSlot(date, key, label){
 async function submit(){
   const next=document.getElementById('next');
   next.disabled=true; next.textContent='Sending…';
+  // Post the checkbox's live state as a real boolean, never a cached default.
+  const consentEl=document.getElementById('consent');
+  if(consentEl) state.consent=consentEl.checked===true;
   try{
     const r=await fetch(`${API_BASE}/estimate?action=submit`,{
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -369,7 +372,7 @@ async function submit(){
         image:state.image||undefined,
         preferred_slots:state.slots,
         customer:{ name:state.name.trim(), phone:state.phone.trim(), email:state.email.trim()||undefined, zip:state.zip.trim()||undefined },
-        sms_consent:state.consent,
+        sms_consent:state.consent===true,
       }),
     });
     const d=await r.json().catch(()=>({}));

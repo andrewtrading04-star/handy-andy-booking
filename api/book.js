@@ -319,23 +319,47 @@ async function multiTvDiscountPublic(req, res) {
 // click-tracking redirect that works identically for email and SMS.
 //
 // The redirect ALWAYS carries the customer's original token, no matter what
-// happens with tracking — a tracking failure (bad token, DB error, migration
-// not applied yet) must never break the review page for the customer.
+// happens with tracking — a tracking failure (DB error, migration not applied
+// yet) must never break the review page for the customer.
+//
+// Exception: a token we can't use at all (missing, or not one of our review
+// tokens) goes to the Handy Andy home page instead of a review page that can
+// only show an error. That covers mangled links and the placeholder link in
+// the A2P campaign sample (www.ihandyandy.com/r/<token> redirects here), which
+// a carrier reviewer will click. A REAL review token that has merely expired
+// still goes to review.html, which explains that in the customer's own
+// business's branding.
+const REVIEW_CLICK_FALLBACK_URL = 'https://www.ihandyandy.com/';
+
+// Shape check only (no signature or expiry check): "is this one of our review
+// tokens, even if expired?" Decides between two redirect targets and nothing
+// else; review.html re-verifies whatever it is handed.
+function looksLikeReviewToken(raw) {
+  if (!raw || !raw.includes('.')) return false;
+  try {
+    const body = JSON.parse(Buffer.from(raw.split('.')[0], 'base64url').toString());
+    return !!(body && body.booking_id && (body.kind === 'review' || !body.kind));
+  } catch { return false; }
+}
+
 async function serveReviewClick(req, res) {
   const rawToken = ((req.query || {}).token || '').toString();
   const channel = ((req.query || {}).ch || '').toString().toLowerCase() === 'sms' ? 'sms' : 'email';
   const perChannelCol = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
+  let t = null;
+  try { t = verifyToken(rawToken); } catch { t = null; }
+  // Accept BOTH token shapes: kind:'review' (admin.js mint, and mirror.js
+  // going forward) AND legacy kindless { booking_id } tokens — mirror.js
+  // minted those for every widget booking until Jul 2026, they live 30
+  // days, and resends reuse the STORED token, so they'll circulate for a
+  // while. A kindless token with a booking_id can only be a review token:
+  // every other token type (admin/tech/on_the_way/estimate_approve) always
+  // sets kind. Without this, the per-channel "opened" stamp was silently
+  // skipped for all widget bookings.
+  const isReview = !!(t && t.booking_id && (t.kind === 'review' || !t.kind));
+  if (!isReview && !looksLikeReviewToken(rawToken)) return res.redirect(302, REVIEW_CLICK_FALLBACK_URL);
   try {
-    const t = verifyToken(rawToken);
-    // Accept BOTH token shapes: kind:'review' (admin.js mint, and mirror.js
-    // going forward) AND legacy kindless { booking_id } tokens — mirror.js
-    // minted those for every widget booking until Jul 2026, they live 30
-    // days, and resends reuse the STORED token, so they'll circulate for a
-    // while. A kindless token with a booking_id can only be a review token:
-    // every other token type (admin/tech/on_the_way/estimate_approve) always
-    // sets kind. Without this, the per-channel "opened" stamp was silently
-    // skipped for all widget bookings.
-    if (t && t.booking_id && (t.kind === 'review' || !t.kind)) {
+    if (isReview) {
       const db = serviceClient();
       const now = new Date().toISOString();
       // Per-channel click (migration 0063) — each channel records its OWN first
@@ -932,7 +956,7 @@ async function bookDoms(req, res) {
       duration_minutes: 120,
       service_name: "Dom's TV Mounting",
       idempotency_key: b.idempotency_key || null,
-      sms_consent: b.sms_consent,
+      sms_consent: b.sms_consent === true,   // explicit opt-in only (A2P); the widget always posts a boolean
       stripe_account: 'doms',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -1072,6 +1096,7 @@ async function bookDoms(req, res) {
     customerPhone: customer.phone,
     smsConsent: b.sms_consent,
     bizName: "Dom's TV Mounting",
+    bizSlug: 'doms',
     techName: technicianName,
     startUTC, tz,
     timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',
@@ -1335,7 +1360,7 @@ async function bookNative(req, res, slug) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
-      sms_consent: b.sms_consent,
+      sms_consent: b.sms_consent === true,   // explicit opt-in only (A2P); the widget always posts a boolean
       stripe_account: slug,
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -1476,6 +1501,7 @@ async function bookNative(req, res, slug) {
     customerPhone: customer.phone,
     smsConsent: b.sms_consent,
     bizName: DISPLAY.name,
+    bizSlug: slug,
     techName: technicianName,
     startUTC, tz,
     timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',

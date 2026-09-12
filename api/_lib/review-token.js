@@ -13,6 +13,7 @@
 // the moment a token is actually needed, so no creation path can ever quietly
 // opt a customer out of review requests again.
 import { signToken, verifyToken } from './auth.js';
+import { smsBrandName } from './sms.js';
 
 export const REVIEW_TOKEN_TTL = 2592000; // 30 days, same as bookingCreate always used
 
@@ -54,4 +55,18 @@ export async function ensureReviewToken(db, booking) {
     console.error(`[review] could not mint review_token for booking ${booking.id}:`, e.message);
     return null;
   }
+}
+
+// The customer-facing review-request text. One template for all three
+// senders (tech app completion in api/tech.js; dashboard completion and the
+// Reviews-tab resend in api/admin.js), so the A2P campaign sample can't drift
+// from what actually goes out. Handy Andy's link is on its own domain
+// (www.ihandyandy.com/r/<token>, which redirects to the same review_click
+// endpoint with ch=sms) because carriers want message links to identify the
+// sender; every other brand keeps the booking-app click URL it already uses.
+export function reviewRequestSms({ slug, name, token, clickUrl }) {
+  const link = slug === 'handy-andy' && token
+    ? `https://www.ihandyandy.com/r/${encodeURIComponent(token)}`
+    : clickUrl;
+  return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link} Reply STOP to opt out.`;
 }

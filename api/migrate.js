@@ -11,6 +11,9 @@ import { checkLateTechs } from './_lib/tech-late.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
+import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
+import { enRouteMessage } from './_lib/en-route.js';
+import { reviewRequestSms } from './_lib/review-token.js';
 import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
 import fs from 'fs';
 import path from 'path';
@@ -1021,13 +1024,16 @@ export default async function handler(req, res) {
       if (!phone) return res.status(400).json({ error: 'phone required' });
       if (!smsConfigured()) return res.status(400).json({ error: 'No SMS provider configured (Twilio env vars missing).' });
 
+      // The three customer texts come from the same builders production sends
+      // with (booking confirmation, on-the-way, review request), so this proof
+      // can't drift from what customers actually receive.
       const templates = [
         { label: 'Customer · booking confirmed',
-          text: "You're booked! ✅ Handy Andy will see you Wed, Jul 8 at 2:00 PM. We'll text you when your tech is on the way. Reply STOP to opt out." },
+          text: bookingConfirmMessage({ bizName: 'Handy Andy', bizSlug: 'handy-andy', dateStr: 'Wed, Jul 8', timeWindow: '12pm - 3pm', techName: 'Zach' }) },
         { label: "Customer · tech's on the way",
-          text: 'Heads up! Zach from Handy Andy is en route (ETA ~15 min). Please prepare for his arrival. STOP to opt out.' },
+          text: enRouteMessage('Zach', 'Handy Andy', 15, 'handy-andy') },
         { label: 'Customer · review request',
-          text: 'How did we do?\n\nLeave your technician a review here:\nhttps://handy-andy-booking.vercel.app/review.html?token=demo\n\nSTOP to opt out' },
+          text: reviewRequestSms({ slug: 'handy-andy', name: 'Handy Andy', token: 'demo', clickUrl: 'https://handy-andy-booking.vercel.app/api/book?action=review_click&token=demo&ch=sms' }) },
         { label: 'Tech · new job assigned',
           text: 'You got a job! Wed, Jul 8, 2:00 PM. Address & details in the app: https://handy-andy-booking.vercel.app/tech.html' },
         { label: 'Tech · job canceled',

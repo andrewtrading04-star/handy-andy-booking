@@ -15,14 +15,15 @@
 // ============================================================================
 import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
-import { ensureReviewToken } from './_lib/review-token.js';
+import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS, sendSMSResult, smsConfigured } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
+import { bookingConfirmMessage, sendOptInConfirmSms } from './_lib/booking-confirm-sms.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
@@ -3770,10 +3771,11 @@ async function bookingCreate(req, res, db, auth, body) {
     payment_method: paymentMethod,
     needs_lifting: !!body.needs_lifting,
     tv_size_category: body.tv_size_category || null,
-    // Opt-out model (every SMS we send already says "STOP to opt out"): default
-    // to consented unless the office explicitly unchecked the box for this
-    // customer. Matches the estimate/quote flow's sms_consent default below.
-    sms_consent: body.sms_consent !== false,
+    // Opt-IN only (A2P 10DLC). The office New Booking and call-intake boxes
+    // start unchecked and are ticked only when the customer says yes to the
+    // verbal script printed on the box, so consent is stored only for an
+    // explicit true. A missing value (older callers) is no consent.
+    sms_consent: body.sms_consent === true,
     idempotency_key: idempotencyKey,
     // Who booked it, for the "Booked by" line on the job detail. Owner = "Admin";
     // a secretary = their name (Heather / Joey). Widget bookings carry source
@@ -3911,20 +3913,23 @@ async function bookingCreate(req, res, db, auth, body) {
   });
 
   // Send booking confirmation SMS to customer (if they opted in). Same test as
-  // the insert above (`!== false`), so a caller that omits the field and gets a
-  // consented row also gets the text — the two used to disagree.
-  if (c.phone && scheduled_at && body.sms_consent !== false) {
+  // the insert above (`=== true`), so the stored row and the text always agree.
+  if (c.phone && scheduled_at && body.sms_consent === true) {
     // Use the JOB's local time (tz was resolved from the service area above), so an
     // Austin customer sees Central time — not the business's Mountain time.
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
     const timeStr = _d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
-    // "He" is a simplification (a technician could be any gender) — matches
-    // the exact wording requested; revisit if the roster ever needs it neutral.
-    const techLine = primaryTechInfo?.name
-      ? `${primaryTechInfo.name} will text you when he's on the way.`
-      : `We'll text you when your tech is on the way.`;
-    const msg = `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`;
+    // Same template as the widget confirmation (_lib/booking-confirm-sms.js):
+    // the slot's window when the office picked a slot, else the exact start.
+    const slotLabel = (body.scheduled_date && body.scheduled_slot)
+      ? ((SLOTS.find(s => s.key === body.scheduled_slot) || {}).label || null) : null;
+    const msg = bookingConfirmMessage({
+      bizName: biz.name, bizSlug: biz.slug,
+      dateStr: slotLabel ? dateStr : `${dateStr} at ${timeStr}`,
+      timeWindow: slotLabel || '',
+      techName: primaryTechInfo?.name || null,
+    });
     // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
     await sendSMS(c.phone, msg).catch(console.error);
   }
@@ -4373,11 +4378,25 @@ async function bookingUpdate(req, res, db, auth, body) {
   if (e1) throw e1;
 
   if (body.action === 'sms_consent') {
+    // A2P 10DLC / CTIA: a phone opt-in gets ONE immediate confirmation text
+    // (brand, frequency, rates, HELP, STOP). Only on the flip from not opted in
+    // to opted in, so re-saving a flag that is already on (stale tab, double
+    // click) never texts the customer twice. Best-effort: never fails the save.
+    let optInNote = '';
+    if (patch.sms_consent === true && existing.sms_consent !== true) {
+      if (existing.customer?.phone) {
+        const r = await sendOptInConfirmSms({ customerPhone: existing.customer.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_update' });
+        optInNote = r.ok ? ' Opt-in confirmation text sent.'
+          : ` Opt-in confirmation text not sent (${String(r.skipped || r.error || 'unknown error').slice(0, 120)}).`;
+      } else {
+        optInNote = ' No phone on file, so no opt-in confirmation text was sent.';
+      }
+    }
     // Consent changes are a compliance record — leave a note saying who flipped it.
     await db.from('booking_notes').insert({
       business_id: biz.id, booking_id: id,
       author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
-      body: `SMS consent turned ${patch.sms_consent ? 'ON' : 'OFF'} from the dashboard${patch.sms_consent ? ' (customer agreed to text updates)' : ''}.`,
+      body: `SMS consent turned ${patch.sms_consent ? 'ON' : 'OFF'} from the dashboard${patch.sms_consent ? ' (customer agreed to text updates)' : ''}.${optInNote}`,
     }).then(({ error }) => { if (error) console.warn('[booking_update] consent note failed:', error.message); });
   }
 
@@ -4436,7 +4455,8 @@ async function bookingUpdate(req, res, db, auth, body) {
       // (Replaces the old setTimeout pattern that never fired on serverless.)
       if (existing.customer?.phone && existing.sms_consent && !existing.metadata?.review_sms_sent_at) {
         try {
-          const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+          // Wording lives in _lib/review-token.js, shared with api/tech.js and the Reviews-tab resend.
+          const msg = reviewRequestSms({ slug: biz.slug, name: biz.name, token: existing.review_token, clickUrl: smsClickUrl });
           const smsResult = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
           if (smsResult.ok) {
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
@@ -6699,7 +6719,7 @@ async function invoiceSend(req, res, db, auth, body) {
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
 
-  const cols = (withAcct) => `id, scheduled_at, price, tip, amount_paid, amount_refunded, payment_status,
+  const cols = (withAcct) => `id, scheduled_at, price, tip, amount_paid, amount_refunded, payment_status, sms_consent,
       ${withAcct ? 'stripe_account, ' : ''}
       address_line1, city, state, postal_code,
       customer:customers ( name, email, phone ),
@@ -6797,10 +6817,15 @@ async function invoiceSend(req, res, db, auth, body) {
   if (!emailResult.sent) return res.status(502).json({ error: 'Email failed to send: ' + (emailResult.skipped || emailResult.error || 'unknown error') });
 
   let smsResult = { ok: false, skipped: 'no_phone' };
-  if (b.customer.phone) {
+  if (b.customer.phone && b.sms_consent === false) {
+    // Declined (or STOPped) texts: the invoice goes by email only.
+    smsResult = { ok: false, skipped: 'no_sms_consent' };
+  } else if (b.customer.phone) {
+    // Brand first and a STOP line, like every customer text (A2P 10DLC).
+    const smsBrand = smsBrandName(biz.slug, biz.name);
     const text = payUrl
-      ? `${brand.name}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl}`
-      : `${brand.name}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay.`;
+      ? `${smsBrand}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl} Reply STOP to opt out.`
+      : `${smsBrand}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay. Reply STOP to opt out.`;
     smsResult = await sendSMSResult(b.customer.phone, text);
   }
 
@@ -7660,7 +7685,8 @@ async function reviewResend(req, res, db, auth, body) {
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
     const smsClickUrl = `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=sms`;
     const smsStatusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(b.review_token)}`;
-    const msg = `How did we do?\n\nLeave your technician a review here:\n${smsClickUrl}\n\nSTOP to opt out`;
+    // Wording lives in _lib/review-token.js, shared with both completion senders.
+    const msg = reviewRequestSms({ slug: biz.slug, name: biz.name, token: b.review_token, clickUrl: smsClickUrl });
     const r = await sendSMSResult(b.customer.phone, msg, { statusCallback: smsStatusCallback });
     if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
 
@@ -7786,7 +7812,7 @@ async function notificationResend(req, res, db, auth, body) {
     // Wording comes from _lib/en-route.js so this manual resend, the tech app's
     // "On My Way" button and the one-tap nudge link all say the same thing.
     const etaMinutes = Number(body.eta_minutes) || DEFAULT_ETA_MINUTES;
-    const msg = enRouteMessage(b.technician?.name, biz.name, etaMinutes);
+    const msg = enRouteMessage(b.technician?.name, biz.name, etaMinutes, biz.slug);
     const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     const otwToken = signToken({ kind: 'on_the_way', booking_id: id }, 3600);
     const statusCallback = `${baseUrl}/api/analytics?action=sms_status&token=${encodeURIComponent(otwToken)}`;
@@ -9459,7 +9485,9 @@ async function estimateCreate(req, res, db, auth, body) {
     // quoted (previously left null — the card showed no tax at all).
     tax_rate: DEFAULT_EST_TAX_RATE,
     status: 'new',
-    sms_consent: body.sms_consent !== false,
+    // Explicit opt-in only (A2P): the New Booking box starts unchecked and is
+    // ticked only after the customer's verbal yes.
+    sms_consent: body.sms_consent === true,
     source: 'manual',
   });
 
@@ -9497,16 +9525,25 @@ async function estimateCreate(req, res, db, auth, body) {
     }
   }
 
+  // A2P 10DLC / CTIA: the verbal yes the office just recorded gets its ONE
+  // opt-in confirmation text first, so the estimate text below is not the
+  // first thing the customer receives. Awaited so it goes out ahead of it.
+  // Best-effort: a failure never blocks the estimate.
+  if (estPhone && body.sms_consent === true) {
+    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create' });
+  }
+
   // Text the customer the estimate + a link to view/approve it. For a customer
   // who only gave a phone number this IS the delivery, not a bonus copy.
   let texted = false;
-  if (estPhone && body.sms_consent !== false && approveUrl) {
+  if (estPhone && body.sms_consent === true && approveUrl) {
     try {
       const { total } = quoteTotals(line_items, DEFAULT_EST_TAX_RATE);
-      const greeting = firstName ? `Hi ${firstName}, ` : '';
+      // Brand first (A2P 10DLC), then the greeting.
+      const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
       const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
       const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
-      const msg = `${greeting}here's your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
+      const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
       const r = await sendSMSResult(estPhone, msg);
       texted = !!r.ok;
       if (texted && !emailed) await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
@@ -9539,10 +9576,11 @@ async function estimateSendSms(req, res, db, auth, body) {
   const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_phone, service_label, description, sms_consent');
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available for this estimate.' });
-  if (est.sms_consent === false) return res.status(400).json({ error: 'Customer did not consent to receive text messages.' });
+  // Explicit opt-in only (A2P 10DLC): a missing answer is not consent.
+  if (est.sms_consent !== true) return res.status(400).json({ error: 'Customer did not consent to receive text messages.' });
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
-  const greeting = firstName ? `Hi ${firstName}, ` : '';
+  const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
   const svcTxt = est.service_label ? `${est.service_label}: ` : '';
   // If the office built priced line items, lead with the total; otherwise fall
   // back to the request description so the text is never empty/meaningless.
@@ -9551,7 +9589,9 @@ async function estimateSendSms(req, res, db, auth, body) {
   const body_txt = items.length
     ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}${Number(est.tax_rate) > 0 ? ' (incl. tax)' : ''}`
     : (est.description || 'Your estimate request');
-  const msg = `${greeting}here's your estimate. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
+  // Brand first and a STOP line (A2P 10DLC). This is campaign sample 3 word for
+  // word, so change the sample if you change this.
+  const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} the estimate you requested. ${svcTxt}${body_txt}. Reply or call us to get scheduled. Reply STOP to opt out.`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
   if (!r.ok) {
@@ -9919,9 +9959,13 @@ async function estimateDecline(req, res, db, auth, body) {
 
   let smsResult = null, emailResult = null;
 
-  if (est.customer_phone && est.sms_consent !== false) {
-    const greeting = firstName ? `Hi ${firstName}, ` : '';
-    const msg = `${greeting}this is ${brand.name}. We're sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl}`;
+  // Explicit opt-in only (A2P 10DLC); the email below still goes out either way.
+  if (est.customer_phone && est.sms_consent === true) {
+    // Brand first (A2P 10DLC) and named only once, then the greeting, with a
+    // STOP line like every customer text.
+    const smsBrand = smsBrandName(biz.slug, biz.name);
+    const opener = firstName ? `Hi ${firstName}, we're` : "We're";
+    const msg = `${smsBrand}: ${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl} Reply STOP to opt out.`;
     smsResult = await sendSMSResult(est.customer_phone, msg);
   }
 
@@ -11652,7 +11696,8 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     payment_required: true, payment_method: 'card',
     // Carry the estimate's answer through. This used to hard-code true, so a
     // customer who declined texts on the estimate form was texted anyway.
-    sms_consent: est.sms_consent !== false,
+    // Explicit opt-in only (A2P 10DLC): a missing answer is not consent.
+    sms_consent: est.sms_consent === true,
     stripe_customer_id: card.customerId, stripe_payment_method_id: card.pmId || null,
     metadata: { booked_by: 'Estimate approval (auto-booked)', source_estimate_id: est.id },
   };
@@ -11714,17 +11759,17 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   await notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz, { bookingId: bRow.id })
     .catch(e => console.error('[tech-notify]', e.message));
 
-  if (cust.phone && est.sms_consent !== false) {
+  if (cust.phone && est.sms_consent === true) {
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'short', month: 'short', day: 'numeric' });
-    const timeStr = _d.toLocaleTimeString('en-US', { timeZone: areaTz, hour: 'numeric', minute: '2-digit' });
-    // "He" is a simplification (a technician could be any gender) — matches
-    // the exact wording requested; revisit if the roster ever needs it neutral.
-    const techLine = techInfo?.name
-      ? `${techInfo.name} will text you when he's on the way.`
-      : `We'll text you when your tech is on the way.`;
+    // Same template as the widget and office confirmations
+    // (_lib/booking-confirm-sms.js), with the window the customer picked.
+    const msg = bookingConfirmMessage({
+      bizName: biz.name, bizSlug: biz.slug,
+      dateStr, timeWindow: slotDef.label, techName: techInfo?.name || null,
+    });
     // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
-    await sendSMS(cust.phone, `You're booked! ✅ We will see you ${dateStr} at ${timeStr}. ${techLine} Reply STOP to opt out.`).catch(console.error);
+    await sendSMS(cust.phone, msg).catch(console.error);
   }
 
   if (cust.email) {
@@ -14071,6 +14116,37 @@ async function messagesSend(req, res, db, auth, body) {
   // for a service reply and stops a paste accident becoming an 8-segment text.
   if (text.length > 1200) return res.status(400).json({ error: 'Message is too long (1200 characters max)' });
 
+  // A2P 10DLC: the FIRST text we send in a conversation must say who we are
+  // and how to opt out. Staff type naturally ("Hi Mark, yes we can..."), so
+  // the brand of the line texted goes in front and a STOP line at the end,
+  // once, and only if the typed text doesn't already have them. Later replies
+  // in the same thread go out exactly as typed. "First" = no earlier outbound
+  // text in this thread that could have reached them (a failed send doesn't
+  // count). If that lookup fails, treat it as first: an extra brand prefix is
+  // harmless, a missing one isn't.
+  let outText = text;
+  let firstInThread = true;
+  try {
+    const { data: prior, error: priorErr } = await db.from('messages').select('status')
+      .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer).eq('direction', 'out').limit(200);
+    if (!priorErr) firstInThread = !(prior || []).some(m => !['failed', 'undelivered'].includes(String(m.status || '')));
+  } catch (e) { console.warn('[messages_send] prior-message check failed:', e.message); }
+  if (firstInThread) {
+    let brand = null;
+    if (ctx.biz) {
+      brand = smsBrandName(ctx.biz.slug, ctx.biz.name);
+    } else {
+      // Unmapped line (the toll-free sender): the same brand guess the thread view shows.
+      try {
+        const g = (await brandForUnmappedTexters(db, [customer], await businessesById(db))).get(customer);
+        if (g) brand = smsBrandName(g.slug, g.name);
+      } catch (e) { console.warn('[messages_send] brand lookup failed:', e.message); }
+      if (!brand) brand = smsBrandName(null, null);
+    }
+    if (!outText.toLowerCase().startsWith(brand.toLowerCase())) outText = `${brand}: ${outText}`;
+    if (!/stop to opt[\s-]?out/i.test(outText)) outText = `${outText} Reply STOP to opt out.`;
+  }
+
   // Insert BEFORE sending so the row id can ride along in the status callback.
   // A send whose row we failed to create would be invisible in the thread —
   // worse than a row whose send failed, which at least shows as failed.
@@ -14081,7 +14157,7 @@ async function messagesSend(req, res, db, auth, body) {
     customer_phone: customer,
     our_phone: ctx.ourPhone,
     direction: 'out',
-    body: text,
+    body: outText,   // what the customer actually receives, prefix/suffix included
     status: 'queued',
     sent_by: auth.scope === 'all' ? 'owner' : (auth.scope || null),
   }).select('id').single();
@@ -14095,7 +14171,7 @@ async function messagesSend(req, res, db, auth, body) {
   // `from` is the whole point: the reply leaves from the number the customer
   // texted. Until the A2P campaign is approved Twilio rejects a local number —
   // that surfaces below as a real error rather than as silent success.
-  const r = await sendSMSResult(customer, text, { from: ctx.ourPhone, statusCallback });
+  const r = await sendSMSResult(customer, outText, { from: ctx.ourPhone, statusCallback });
 
   if (!r.ok) {
     const why = r.error || `not sent (${r.skipped})`;

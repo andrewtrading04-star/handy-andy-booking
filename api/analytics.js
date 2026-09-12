@@ -1,6 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
-import { sendSMS } from './_lib/sms.js';
+import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND } from './_lib/sms.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 
@@ -1457,6 +1457,10 @@ async function handleSmsInbound(req, res) {
   const body = (params.Body || '').toString().trim();
   let line = null;
   let blocked = false;
+  // Declared out here, not inside the try: the relay-and-ack call after the
+  // catch below names the brand with it. Declared inside the try, that call
+  // threw a ReferenceError on every inbound text (no reply, no staff relay).
+  let business_name = null;
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
@@ -1474,10 +1478,13 @@ async function handleSmsInbound(req, res) {
     }
 
     let business_id = null;
-    let business_name = null;
-    if (line && line.business_slug) {
-      const { data: biz } = await db.from('businesses').select('id, name').eq('slug', line.business_slug).maybeSingle();
-      business_id = biz?.id || null;
+    // An INACTIVE tracking number still belongs to a brand: name that brand in
+    // any reply (never fall back to Handy Andy on another company's number),
+    // but keep queue attribution to active lines only, exactly as before.
+    const brandSlug = (line && line.business_slug) || (data && data.business_slug) || null;
+    if (brandSlug) {
+      const { data: biz } = await db.from('businesses').select('id, name').eq('slug', brandSlug).maybeSingle();
+      business_id = line ? (biz?.id || null) : null;
       business_name = biz?.name || null;
     }
 
@@ -1523,6 +1530,17 @@ async function handleSmsInbound(req, res) {
     // Same rule as the voice path: the text still relays, it just isn't logged.
     if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name);
 
+    // A bare STOP/HELP/START keyword gets its automatic handling in
+    // finishSmsInbound, but it is still relayed and queued like any other
+    // text: on a lead line "Info" can be a prospect and "Cancel" can mean the
+    // appointment. The note records which keyword it was and what was automated.
+    const keyword = smsKeyword(body);
+    const keywordNote = keyword === 'stop' ? `STOP keyword: texts turned off for this number (${TWILIO_OPTOUT_RE.test(body || '') ? 'Twilio sent the opt-out confirmation' : 'we sent the opt-out confirmation'}); relayed to staff`
+      : keyword === 'help' ? 'HELP keyword: auto-replied with support contact; relayed to staff'
+      : keyword === 'start' ? 'START keyword: Twilio may re-enable texts to this number, but CRM text consent was NOT restored; relayed to staff'
+      : null;
+    const callWarnings = blocked ? ['Blocked number — text was not relayed']
+      : [keywordNote, line ? null : 'Number is not in tracking_numbers - text still relayed if possible'].filter(Boolean);
     await db.from('calls').insert({
       business_id,
       source: 'twilio',
@@ -1534,11 +1552,12 @@ async function handleSmsInbound(req, res) {
       occurred_at: new Date().toISOString(),
       customer_id,
       // Same pre-resolved treatment blocked calls get: nobody needs to follow
-      // up on a text from a number that's already blocked.
+      // up on a text from a number that's already blocked. A keyword text
+      // stays open ('new'); handled_by only annotates what was automated.
       status: blocked ? 'ignored' : 'new',
-      handled_by: blocked ? 'Blocked number' : null,
+      handled_by: blocked ? 'Blocked number' : keyword ? `Auto-handled ${keyword.toUpperCase()} keyword` : null,
       handled_at: blocked ? new Date().toISOString() : null,
-      warnings: blocked ? ['Blocked number — text was not relayed'] : (line ? null : ['Number is not in tracking_numbers - text still relayed if possible']),
+      warnings: callWarnings.length ? callWarnings : null,
     });
   } catch (e) {
     console.error('[sms_inbound] log failed:', e.message);
@@ -1547,33 +1566,143 @@ async function handleSmsInbound(req, res) {
   return finishSmsInbound(res, line, from, body, blocked, business_name);
 }
 
+// A2P 10DLC keywords, matched against the WHOLE text only ("can you stop by
+// at 3?" or "cancel my appointment" is a customer, not a keyword); trailing
+// punctuation is allowed ("Stop.", "STOP!", "Help?"). STOP: Twilio has already
+// blocked further sends to this number and sends the ONE opt-out
+// confirmation, so we add no reply of our own and clear the CRM consent flag
+// so every consent-gated template skips them too. HELP: reply with who we are
+// and how to reach us. START/UNSTOP: Twilio lifts its block and sends its own
+// resubscribe confirmation, so we add no reply, and we deliberately do NOT
+// restore CRM consent (only a recorded opt-in does that). All three are still
+// relayed to staff (relayInboundText) with a note saying what was automated.
+const SMS_STOP_RE = /^\s*(stop\s*all|stop|unsubscribe|cancel|end|quit|revoke|opt[\s-]*out)[\s.!]*$/i;
+const SMS_HELP_RE = /^\s*(help|info)[\s.!?]*$/i;
+const SMS_START_RE = /^\s*(start|unstop)[\s.!]*$/i;
+// Twilio's own default opt-out keywords, bare. Only these get Twilio's
+// automatic opt-out + confirmation; the wider SMS_STOP_RE variants ("opt out",
+// "stop all", "Stop.") are honored by us and confirmed by us.
+const TWILIO_OPTOUT_RE = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke|optout)\s*$/i;
+function smsKeyword(body) {
+  const s = (body || '').toString();
+  if (SMS_STOP_RE.test(s)) return 'stop';
+  if (SMS_HELP_RE.test(s)) return 'help';
+  if (SMS_START_RE.test(s)) return 'start';
+  return null;
+}
+
+// STOP means stop everywhere we'd text this person: clear sms_consent on every
+// booking and estimate on file for the phone. Matches the phone the way this
+// handler already does (tenDigits), plus the formatted spellings rows are
+// actually stored in: estimate.js saves "(713) 555-0134", and office/widget
+// customer rows keep whatever was typed. Best-effort and never throws, because
+// the webhook must still answer Twilio.
+async function clearSmsConsentForPhone(phone) {
+  const d = tenDigits(phone);
+  if (d.length !== 10) return;
+  const a = d.slice(0, 3), b = d.slice(3, 6), c = d.slice(6);
+  const variants = [d, `1${d}`, `+1${d}`, `(${a}) ${b}-${c}`, `(${a})${b}-${c}`, `${a}-${b}-${c}`, `${a}.${b}.${c}`, `${a} ${b} ${c}`, `+1 (${a}) ${b}-${c}`, `+1 ${a}-${b}-${c}`];
+  try {
+    const db = serviceClient();
+    let bookings = 0, estimates = 0;
+    const { data: custs, error: cErr } = await db.from('customers').select('id').in('phone', variants);
+    if (cErr) console.warn('[sms_inbound] STOP: customer lookup failed:', cErr.message);
+    const ids = (custs || []).map(r => r.id);
+    if (ids.length) {
+      const { data: bk, error: bErr } = await db.from('bookings')
+        .update({ sms_consent: false }).in('customer_id', ids).eq('sms_consent', true).select('id');
+      if (bErr) console.warn('[sms_inbound] STOP: bookings consent update failed:', bErr.message);
+      else bookings = (bk || []).length;
+    }
+    const { data: es, error: eErr } = await db.from('estimates')
+      .update({ sms_consent: false }).in('customer_phone', variants).eq('sms_consent', true).select('id');
+    if (eErr) console.warn('[sms_inbound] STOP: estimates consent update failed:', eErr.message);
+    else estimates = (es || []).length;
+    console.log(`[sms_inbound] STOP from ...${d.slice(-4)}: sms_consent cleared on ${bookings} booking(s), ${estimates} estimate(s)`);
+  } catch (e) {
+    console.warn('[sms_inbound] STOP: consent update failed:', e.message);
+  }
+}
+
+// Relay an inbound text to whoever the line forwards to, as a plain SMS, so a
+// customer text doesn't vanish into a number nobody reads. Same day/night
+// split the call path uses: a text landing at 3am must not wake whoever
+// answers that line during the day. `note` goes after the customer's words so
+// staff can tell an auto-handled keyword (STOP/HELP/START) from a normal text.
+// Best-effort and never throws: the webhook must still answer Twilio.
+async function relayInboundText(line, from, body, business_name, note = '') {
+  const smsTo = destinationFor(line);
+  if (!(line && smsTo && body)) return;
+  try {
+    const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
+    // line.label is the voice whisper script ("Please be aware, this call
+    // is from X.") — wrong verb for a text and reads garbled if reused
+    // verbatim here. Build the SMS relay's own sentence from the business
+    // name instead.
+    const who = business_name ? `Please be aware, this text is from ${business_name}.` : 'Please be aware, this is a text.';
+    await sendSMS(smsTo, `${who} From ${pretty}, it says: ${body}${note || ''}`);
+  } catch (e) {
+    console.error('[sms_inbound] relay failed:', e.message);
+  }
+}
+
 // The relay-and-ack tail of sms_inbound, split out so a silent number can skip
 // the row without skipping the relay.
 async function finishSmsInbound(res, line, from, body, blocked, business_name) {
+  const keyword = smsKeyword(body);
+  // An opt-out is honored even from a blocked number (Twilio has already
+  // stopped sends; the CRM should agree). Either way we send no reply of ours:
+  // Twilio's opt-out confirmation must be the only one. Staff still see it
+  // (it can be a booked customer's "Cancel"), unless the number is blocked.
+  if (keyword === 'stop') {
+    await clearSmsConsentForPhone(from);
+    if (!blocked) await relayInboundText(line, from, body, business_name, ' (auto: customer opted out of texts)');
+    // Twilio only opts out and confirms its own bare keywords. For the other
+    // variants we send the one confirmation ourselves. If Twilio did opt the
+    // number out after all, it rejects this reply (21610), so the customer can
+    // never receive two confirmations.
+    if (!blocked && !TWILIO_OPTOUT_RE.test(body || '')) {
+      const optBrand = smsBrandName(line && line.business_slug, business_name);
+      return xml(res, `<Response><Message>${xmlEsc(`${optBrand}: You are unsubscribed and will receive no further messages.`)}</Message></Response>`);
+    }
+    return xml(res, '<Response/>');
+  }
+
   // No relay, no auto-ack — same "give a blocked sender nothing to work with"
   // principle as the voice path's <Reject/>. The message itself is still kept
   // (that insert runs above, before this is ever reached), so the thread
   // stays visible in Messages; it just stops bothering anyone.
   if (blocked) return xml(res, '<Response/>');
 
-  // Same day/night split the call path uses: a text landing at 3am must not
-  // wake whoever answers that line during the day.
-  const smsTo = destinationFor(line);
-  if (line && smsTo && body) {
-    try {
-      const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
-      // line.label is the voice whisper script ("Please be aware, this call
-      // is from X.") — wrong verb for a text and reads garbled if reused
-      // verbatim here. Build the SMS relay's own sentence from the business
-      // name instead.
-      const who = business_name ? `Please be aware, this text is from ${business_name}.` : 'Please be aware, this is a text.';
-      await sendSMS(smsTo, `${who} From ${pretty}, it says: ${body}`);
-    } catch (e) {
-      console.error('[sms_inbound] relay failed:', e.message);
-    }
+  // Every reply names the brand of the line that was texted. A number that
+  // isn't in tracking_numbers (e.g. the toll-free notification sender) falls
+  // back to Handy Andy TV Mounting, the registered brand.
+  const brand = smsBrandName(line && line.business_slug, business_name);
+
+  // HELP: who we are and how to reach us, per brand. Handy Andy's contact
+  // details only go out under Handy Andy's name; any other brand points back
+  // at the line that was texted, so a Denver brand never hands out Houston's
+  // number or another company's website.
+  if (keyword === 'help') {
+    const ld = tenDigits(line && line.phone);
+    const contact = brand === HANDY_ANDY_SMS_BRAND
+      ? 'call (713) 876-9032, email contact@ihandyandy.com or visit www.ihandyandy.com'
+      : (ld.length === 10 ? `call or text (${ld.slice(0, 3)}) ${ld.slice(3, 6)}-${ld.slice(6)}` : 'reply here and a team member will help you');
+    await relayInboundText(line, from, body, business_name, ' (auto: HELP reply sent)');
+    console.log(`[sms_inbound] HELP from ...${String(from || '').slice(-4)}: answered with support contact, relayed to staff`);
+    return xml(res, `<Response><Message>${xmlEsc(`${brand}: For help ${contact}. Msg frequency varies. Message and data rates may apply. Reply STOP to opt out.`)}</Message></Response>`);
   }
 
-  return xml(res, '<Response><Message>Thanks for reaching out! We got your text and will call you back shortly.</Message></Response>');
+  // START/UNSTOP: Twilio sends its own resubscribe confirmation, so no reply
+  // of ours. CRM consent is NOT restored here; staff just see it came in.
+  if (keyword === 'start') {
+    await relayInboundText(line, from, body, business_name, ' (auto: START keyword)');
+    return xml(res, '<Response/>');
+  }
+
+  await relayInboundText(line, from, body, business_name);
+
+  return xml(res, `<Response><Message>${xmlEsc(`${brand}: Thanks for your text! A team member will reply shortly. Reply HELP for help, STOP to opt out.`)}</Message></Response>`);
 }
 
 export default async function handler(req, res) {

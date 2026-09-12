@@ -8,11 +8,13 @@
 //   POST ?action=submit                     -> create estimate + notify staff
 //
 // On submit, an SMS is sent to each number in
-// businesses.settings.estimate_notify_phones (owner + secretary).
+// businesses.settings.estimate_notify_phones (owner + secretary), and a
+// customer who ticked the SMS opt-in box gets one opt-in confirmation text.
 import { serviceClient } from './_lib/supabase.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { sendSMS, toE164 } from './_lib/sms.js';
+import { sendOptInConfirmSms } from './_lib/booking-confirm-sms.js';
 import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 
@@ -37,11 +39,13 @@ function missingColumn(msg) {
 // this database (e.g. a migration not yet applied). Rather than lose the
 // customer's request, strip the offending column and retry. Handles
 // sms_consent, customer_zip, and any future column drift the same way.
+// `inserted` is the row as actually stored (minus any stripped column), so a
+// caller can tell whether e.g. sms_consent really landed.
 async function insertResilient(db, table, row, returning = 'id') {
   const payload = { ...row };
   for (let i = 0; i < 8; i++) {
     const { data, error } = await db.from(table).insert(payload).select(returning).single();
-    if (!error) return { data, error: null };
+    if (!error) return { data, error: null, inserted: payload };
     const col = missingColumn(error.message);
     if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
       console.warn(`[estimate] '${col}' column missing, retrying without it`);
@@ -273,7 +277,9 @@ async function submit(req, res, db) {
     preferred_slots,
     line_items,
     source: 'widget',
-    sms_consent: body.sms_consent !== false,
+    // SMS is opt-in only: every form's consent box is unchecked by default, so a
+    // missing or non-boolean value means NO consent (A2P 10DLC / CTIA).
+    sms_consent: body.sms_consent === true,
   };
 
   // Quote at the rate the customer was actually shown (the widget sends its own
@@ -283,7 +289,7 @@ async function submit(req, res, db) {
   const taxRate = Number(body.tax_rate);
   if (Number.isFinite(taxRate) && taxRate >= 0 && taxRate <= 0.25) estimateInsert.tax_rate = taxRate;
 
-  const { data: row, error } = await insertResilient(db, 'estimates', estimateInsert);
+  const { data: row, error, inserted } = await insertResilient(db, 'estimates', estimateInsert);
   if (error) throw error;
 
   // ── Notifications ────────────────────────────────────────────────────────
@@ -295,6 +301,15 @@ async function submit(req, res, db) {
   // text and no [SMS] log line at all. Awaiting costs ~1s on a form submit and
   // makes delivery (and its logging) deterministic.
   const notifications = [];
+
+  // A2P 10DLC / CTIA: a customer who ticked the SMS opt-in box (the
+  // /handyman-booking estimate form, or the widget's unstaffed-area request)
+  // gets ONE immediate opt-in confirmation text. Only when consent really was
+  // stored (insertResilient can strip a missing column). Best-effort and
+  // awaited with the rest below, so it can never fail the request.
+  if (inserted && inserted.sms_consent === true && phone) {
+    notifications.push(sendOptInConfirmSms({ customerPhone: phone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate' }));
+  }
 
   // Notify staff (owner + secretary) per business settings, PLUS the
   // business's secretary (Heather/Joey) directly via env var — guarantees they

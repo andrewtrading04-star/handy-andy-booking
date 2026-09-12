@@ -2049,7 +2049,7 @@
       </div>
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:${T.inset}!important;border:1px solid ${T.border}!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:${ACCENT}!important;cursor:pointer!important;">
-        <span style="font-size:12.5px!important;color:${T.muted2}!important;line-height:1.55!important;">I agree to receive appointment and service text messages (booking confirmations, reminders, technician arrival/ETA updates, and follow-ups) from ${BUSINESS_NAME}. Consent is not a condition of booking. Msg frequency varies. Msg &amp; data rates may apply. Reply HELP for help, STOP to opt out.${BUSINESS==='handy-andy'?' <a href="https://www.ihandyandy.com/terms-of-service" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Privacy Policy</a> &amp; <a href="https://www.ihandyandy.com/terms-of-service" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Terms</a>':''}</span>
+        <span style="font-size:12.5px!important;color:${T.muted2}!important;line-height:1.55!important;">I agree to receive appointment and customer-care text messages from ${BUSINESS_NAME} (booking confirmations, technician on-the-way/ETA updates, estimates, invoices, replies about my job, and a post-service follow-up). Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.${BUSINESS==='handy-andy'?' <a href="https://www.ihandyandy.com/privacy-policy" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Privacy Policy</a> &amp; <a href="https://www.ihandyandy.com/terms-of-service#sms-terms" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Terms</a>':''}</span>
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
@@ -2392,13 +2392,15 @@
   // normal THANKYOU_URL redirect (that page's copy is external/unverified,
   // and this flow's copy must stay generic — never revealing there's no
   // tech assigned yet). Exact copy approved against the request_flow_final_step_v2 mockup.
-  function showRequestConfirmation(root){
+  // "text or call" only when the customer ticked the SMS opt-in box; without
+  // it we never text them (A2P 10DLC: unchecked = no texts), so say "call".
+  function showRequestConfirmation(root,smsConsent){
     root.innerHTML=`<div style="text-align:center!important;padding:40px 10px!important;">
       <div style="width:64px!important;height:64px!important;border-radius:50%!important;background:rgba(74,222,128,0.15)!important;display:flex!important;align-items:center!important;justify-content:center!important;margin:0 auto 20px auto!important;">
         <span style="font-size:32px!important;color:${T.ok}!important;">✓</span>
       </div>
       <h1 style="${S.h1};margin-bottom:10px!important;">Request received</h1>
-      <p style="color:${T.muted2}!important;font-size:14px!important;line-height:1.6!important;max-width:340px!important;margin:0 auto!important;">We'll text or call you shortly to confirm your appointment time.</p>
+      <p style="color:${T.muted2}!important;font-size:14px!important;line-height:1.6!important;max-width:340px!important;margin:0 auto!important;">${smsConsent?"We'll text or call you":"We'll call you"} shortly to confirm your appointment time.</p>
     </div>`;
   }
 
@@ -2465,7 +2467,7 @@
         if(r.ok){
           logEvent('booking_confirmed','customer',calcTotal());
           disarmExitIntent(); // request is already submitted — don't let a later back-button replay the trapped state into the exit-intent popup
-          showRequestConfirmation(root);
+          showRequestConfirmation(root,smsConsent);
         }else{
           isSubmitting=false;
           if(submitBtn){submitBtn.textContent='Request Appointment';submitBtn.disabled=false;}

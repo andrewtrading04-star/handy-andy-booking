@@ -63,6 +63,7 @@
   .consent{display:flex;align-items:flex-start;gap:10px;background:var(--line2);border-radius:11px;padding:12px 14px;margin-top:14px;}
   .consent input{width:20px;height:20px;accent-color:var(--accent);margin-top:1px;flex-shrink:0;cursor:pointer;}
   .consent label{font-size:13px;color:var(--ink-2);cursor:pointer;}
+  .consent label a{color:inherit;text-decoration:underline;}
   .nav{display:flex;gap:10px;margin-top:20px;}
   .btn{flex:1;border:none;border-radius:11px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;}
   .btn.primary{background:var(--accent);color:#fff;}
@@ -128,6 +129,18 @@ function renderTrustBar(){
   el.innerHTML = `<b>${parts[0]}</b>` + parts.slice(1).map(p=>`<span class="dot">·</span><span>${p}</span>`).join('');
 }
 
+// Brand named in the SMS-consent label, per business. Hard-mapped for
+// handy-andy so it always matches the registered A2P brand exactly, whatever
+// the businesses.name row says; any other slug uses the name /api/estimate
+// returns at boot (BIZ_NAME).
+const CONSENT_BRANDS = { 'handy-andy':'Handy Andy TV Mounting' };
+let BIZ_NAME = '';
+function consentBrand(){ return CONSENT_BRANDS[SLUG] || BIZ_NAME || 'us'; }
+// Privacy Policy + SMS Terms links shown after the consent label (handy-andy only).
+const CONSENT_LINKS = {
+  'handy-andy': { privacy:'https://www.ihandyandy.com/privacy-policy', terms:'https://www.ihandyandy.com/terms-of-service#sms-terms' },
+};
+
 // Best-effort icon for a service tile, matched by keyword so it degrades
 // gracefully for any business's actual (server-driven) service list instead
 // of assuming Handy Andy's exact category names.
@@ -164,7 +177,7 @@ const state = {
   activeDate: null,       // 'YYYY-MM-DD' currently expanded in the picker
   slots: [],              // [{date, slot_key, label}]
   name: '', phone: '', email: '', zip: '',
-  consent: true,
+  consent: false,         // SMS opt-in — optional, unchecked by default
 };
 
 // ── Analytics tracking → /api/log-event ──────────────────────────────────────
@@ -215,6 +228,7 @@ renderTrustBar();
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Could not load services');
     state.services = d.services || [];
+    BIZ_NAME = d.business?.name || '';
     if(d.business?.name) document.title = d.business.name;
     render();
   }catch(e){
@@ -315,6 +329,10 @@ function stepTimes(){
 }
 
 function stepContact(){
+  const cl = CONSENT_LINKS[SLUG];
+  const consentLinks = cl
+    ? ` <a href="${cl.privacy}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Privacy Policy</a> &amp; <a href="${cl.terms}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Terms</a>`
+    : '';
   const inner = `
     <label class="fld">Your name <span class="req">*</span></label>
     <input type="text" id="cname" value="${esc(state.name)}" placeholder="Full name" autocomplete="name">
@@ -326,7 +344,7 @@ function stepContact(){
     <input type="text" id="czip" value="${esc(state.zip)}" placeholder="e.g. 80203" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)" autocomplete="postal-code">
     <div class="consent">
       <input type="checkbox" id="consent" ${state.consent?'checked':''}>
-      <label for="consent">Text me updates about this estimate (scheduling, confirmations). Msg &amp; data rates may apply. Reply STOP to opt out.</label>
+      <label for="consent">I agree to receive appointment and customer-care text messages from ${esc(consentBrand())} (booking confirmations, technician on-the-way/ETA updates, estimates, invoices, replies about my job, and a post-service follow-up). Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.${consentLinks}</label>
     </div>`;
   return shell('Contact', 'Where should we reach you?', '', inner,
     { nextLabel:'Submit request', nextDisabled: !(state.name.trim() && state.phone.trim() && state.zip.trim()) });
@@ -395,6 +413,9 @@ function toggleSlot(date, key, label){
 async function submit(){
   const next=document.getElementById('next');
   next.disabled=true; next.textContent='Sending…';
+  // Post the checkbox's live state as a real boolean, never a cached default.
+  const consentEl=document.getElementById('consent');
+  if(consentEl) state.consent=consentEl.checked===true;
   try{
     const r=await fetch('/api/estimate?action=submit',{
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -405,7 +426,7 @@ async function submit(){
         image:state.image||undefined,
         preferred_slots:state.slots,
         customer:{ name:state.name.trim(), phone:state.phone.trim(), email:state.email.trim()||undefined, zip:state.zip.trim()||undefined },
-        sms_consent:state.consent,
+        sms_consent:state.consent===true,
       }),
     });
     const d=await r.json().catch(()=>({}));
