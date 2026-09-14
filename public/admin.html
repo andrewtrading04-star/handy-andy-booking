@@ -1068,6 +1068,21 @@
   .bad-alert .ba-title{font-weight:800;color:#991b1b;font-size:14px;line-height:1.3;letter-spacing:.01em;}
   .bad-alert .ba-meta{color:#b4453f;font-size:12.5px;margin-top:3px;line-height:1.4;}
   .bad-alert .ba-arrow{color:#ef4444;font-weight:800;font-size:18px;flex-shrink:0;}
+  /* Email-sync health cards (owner only) — same shell, not clickable, with a Fix line;
+     amber variant for setup/advisory items that never text. */
+  .bad-alert.sync-alert{cursor:default;align-items:flex-start;}
+  .bad-alert.sync-alert:hover{background:#fef2f2;box-shadow:0 2px 8px rgba(239,68,68,.10);}
+  .bad-alert.sync-alert .ba-fix{margin-top:5px;font-size:12.5px;color:#7f1d1d;line-height:1.4;}
+  .bad-alert.sync-alert .ba-fix b{font-weight:800;}
+  .bad-alert.sync-alert .ba-fix a{color:inherit;text-decoration:underline;}
+  .bad-alert.sync-warn,.bad-alert.sync-warn:hover{background:#fffbeb;border-color:#fde68a;border-left-color:#f59e0b;box-shadow:none;}
+  .bad-alert.sync-warn .ba-title{color:#92400e;}
+  .bad-alert.sync-warn .ba-meta,.bad-alert.sync-warn .ba-fix{color:#a16207;}
+  .sync-foot{font-size:12px;color:#7f1d1d;padding:0 6px;}
+  .sync-foot a{color:inherit;}
+  .sync-stat{margin:0 0 12px;font-size:12.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:7px 11px;display:inline-flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .sync-stat.bad{color:#991b1b;background:#fef2f2;border-color:#fecaca;}
+  .sync-stat a{color:inherit;}
 
   /* ── Good-review banner (new Google review) ────────────────────────────── */
   .good-alerts{margin:14px 16px 0;display:flex;flex-direction:column;gap:9px;}
@@ -1483,6 +1498,7 @@
       <strong id="mobTitle">Schedule</strong>
     </div>
 
+    <div id="syncAlerts" class="bad-alerts hidden"></div>
     <div id="badAlerts" class="bad-alerts hidden"></div>
     <div id="goodAlerts" class="good-alerts hidden"></div>
 
@@ -2135,6 +2151,7 @@ function logout(opts){
   if(greetingClock){ clearInterval(greetingClock); greetingClock=null; }
   if(sessionTimer){ clearInterval(sessionTimer); sessionTimer=null; }
   const ba=document.getElementById('badAlerts'); if(ba){ ba.classList.add('hidden'); ba.innerHTML=''; }
+  const sa=document.getElementById('syncAlerts'); if(sa){ sa.classList.add('hidden'); sa.innerHTML=''; } _syncHealth=null;
   const ga=document.getElementById('goodAlerts'); if(ga){ ga.classList.add('hidden'); ga.innerHTML=''; }
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
@@ -2329,10 +2346,94 @@ function enterApp(){
 // Owner sees every business's 1-star reviews; a secretary sees only their own
 // (the server scopes it). Clicking an alert opens the exact job it's about.
 async function loadBadAlerts(){
-  try{ const d=await api('bad_reviews'); renderBadAlerts(d.alerts||[]); }
-  catch(e){ /* non-fatal: leave the banner as-is */ }
+  try{
+    const d=await api('bad_reviews'); renderBadAlerts(d.alerts||[]);
+    // Email-scan health rides along (owner only). A missing field is itself a
+    // problem worth showing — never silently hide the card on a bad read.
+    if(role==='owner'){ _syncHealth=d.sync_health||{error:'no data'}; _syncHealthAt=Date.now(); renderSyncAlerts(_syncHealth,false); if(section==='brackets') refreshSyncStat(); }
+  }
+  catch(e){ if(role==='owner'&&_syncHealth) renderSyncAlerts(_syncHealth,true); /* review banner: leave as-is */ }
   loadGoodAlerts();
 }
+
+// ── Email-sync health cards (api/_lib/bracket-sync-health.js) ───────────────
+// Red = the owner has been (or is about to be) texted; amber = setup/advisory,
+// never texted. The same evaluator produces the text and the card, so what the
+// card says is exactly what the phone said.
+let _syncHealth=null, _syncHealthAt=0;
+const SYNC_LINK_OK=/^https:\/\/(github\.com|myaccount\.google\.com|vercel\.com)\//;
+const SYNC_RUN_PREFIX='https://github.com/andrewtrading04-star/handy-andy-booking/actions/runs/';
+function renderSyncAlerts(h, stale){
+  const el=document.getElementById('syncAlerts'); if(!el) return;
+  let cards=[];
+  if(!h||h.error){
+    cards.push(`<div class="bad-alert sync-alert sync-warn"><div class="ba-ico">🛠️</div><div class="ba-main">
+      <div class="ba-title">SETUP/HEALTH: Email-sync health could not be read (${esc((h&&h.error)||'no data')})</div>
+      <div class="ba-fix"><b>Fix:</b> the scan itself may be fine, but the dashboard cannot see it — check the Vercel logs for bad_reviews</div></div></div>`);
+  } else {
+    const probs=h.problems||[];
+    if(!probs.length){ el.classList.add('hidden'); el.innerHTML=''; return; }
+    cards=probs.map(p=>{
+      const amber=p.level==='amber';
+      const ico=amber?'🛠️':(/^(mailbox:\d+:auth|config:)/.test(p.key)?'📭':'⚠️');
+      const flags=(p.notify===false&&!amber?' (first failure — a text follows if it repeats)':'')+(p.flapping?' (texts paused for today — flapping)':'');
+      const links=(p.links||[]).filter(l=>l&&SYNC_LINK_OK.test(String(l.url))).map(l=>` · <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('');
+      return `<div class="bad-alert sync-alert${amber?' sync-warn':''}"><div class="ba-ico">${ico}</div><div class="ba-main">
+        <div class="ba-title">${amber?'SETUP NEEDED':'EMAIL SYNC BROKEN'}: ${esc(p.title)}${esc(flags)}</div>
+        <div class="ba-meta">${esc(p.detail||'')}${p.since?' · since '+esc(fmtSince(p.since)):''}</div>
+        <div class="ba-fix"><b>Fix:</b> ${esc(p.fix||'')}${links}</div></div></div>`;
+    });
+    const runLink=(h.last_run_url&&String(h.last_run_url).startsWith(SYNC_RUN_PREFIX))?` · <a href="${esc(h.last_run_url)}" target="_blank" rel="noopener">last run log</a>`:'';
+    const la=h.last_alert?` · last alert text: ${esc(smsLabel(h.last_alert))} ${esc(agoText(h.last_alert.at))}`:'';
+    cards.push(`<div class="sync-foot">Last fully successful scan: ${esc(h.last_ok_at?agoText(h.last_ok_at):'never')}${runLink}${la}${stale?' · dashboard read is '+esc(agoText(new Date(_syncHealthAt).toISOString()))+' old':''}</div>`);
+  }
+  el.innerHTML=cards.join(''); el.classList.remove('hidden');
+}
+function smsLabel(a){
+  const s=String((a&&a.sms)||'');
+  if(s==='sent') return a.kind==='recovery'?'sent (all clear)':'sent';
+  if(s.startsWith('skipped:notifications_off')) return '(text NOT sent: notifications off)';
+  if(s.startsWith('skipped:')) return '(text NOT sent: '+s.slice(8)+')';
+  if(s.startsWith('error:')) return '(text failed: '+s.slice(6)+')';
+  return s||'(no text)';
+}
+function agoText(iso){
+  const t=Date.parse(iso); if(!Number.isFinite(t)) return 'unknown';
+  const m=Math.max(0,Math.round((Date.now()-t)/60000));
+  if(m<1) return 'just now'; if(m<60) return m+' min ago';
+  const h=Math.floor(m/60); if(h<48) return h+'h '+(m%60)+'m ago';
+  return Math.floor(h/24)+' days ago';
+}
+function fmtSince(iso){
+  const t=Date.parse(iso); if(!Number.isFinite(t)) return 'unknown';
+  return new Date(t).toLocaleString('en-US',{timeZone:'America/Denver',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' Denver';
+}
+// Brackets tab: one-line status pill + "Scan now" (owner only).
+function syncStatHtml(){
+  if(role!=='owner') return '';
+  const h=_syncHealth;
+  if(!h) return `<div id="syncStat" class="sync-stat">📬 Last email scan: loading…</div>`;
+  if(h.error) return `<div id="syncStat" class="sync-stat bad">📬 Email-scan health unavailable (${esc(h.error)})</div>`;
+  const runLink=(h.last_run_url&&String(h.last_run_url).startsWith(SYNC_RUN_PREFIX))?` · <a href="${esc(h.last_run_url)}" target="_blank" rel="noopener">log</a>`:'';
+  return `<div id="syncStat" class="sync-stat${h.ok?'':' bad'}">📬 Last email scan: ${esc(h.last_ok_at?agoText(h.last_ok_at):'never')} · ${h.mailboxes_ok|0}/${h.mailboxes_total|0} inboxes OK${h.last_run_trigger?' · via '+esc(h.last_run_trigger):''}${runLink} <button type="button" class="btn ghost sm" id="scanNowBtn">Scan now</button></div>`;
+}
+function refreshSyncStat(){
+  const cur=document.getElementById('syncStat'); if(!cur) return;
+  const tmp=document.createElement('div'); tmp.innerHTML=syncStatHtml();
+  const next=tmp.firstElementChild; if(next) cur.replaceWith(next);
+}
+async function scanNow(btn){
+  btn.disabled=true; const was=btn.textContent; btn.textContent='Starting…';
+  try{
+    const r=await api('bracket_sync_run_now',{method:'POST'});
+    if(r.ok) toast('Scan started on GitHub — results in about 2 minutes');
+    else if(r.configured===false) toast('GITHUB_DISPATCH_TOKEN is not set in Vercel — start it from GitHub > Actions > Run workflow');
+    else toast('Could not start the scan: GitHub HTTP '+(r.status||'?')+(r.error?' — '+r.error:''));
+  }catch(e){ toast('Could not start the scan: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent=was; }
+  setTimeout(loadBadAlerts,150000);
+}
+document.addEventListener('click',e=>{ const b=e.target&&e.target.closest&&e.target.closest('#scanNowBtn'); if(b) scanNow(b); });
 // New Google reviews → a dismissible green banner at the top of the dashboard.
 let _googleReviewsCache=[];
 async function loadGoodAlerts(){
@@ -6212,7 +6313,7 @@ function webDrawCharts(d,brand){
 let payrollWeek = null;
 let payrollTechFilter = null;   // null = all techs; set to a tech name to show just them
 let payrollRawData = null;      // last fetched payroll response, cached so the tech filter can re-render without a refetch
-let payrollCombinedMode = false; // true = one merged view across Handy Andy + Dom's (cross-hired techs summed into one line)
+let payrollCombinedMode = true;  // default ON: one merged view across Handy Andy + Dom's (cross-hired techs summed into one line)
 // ── Finances (owner only) ───────────────────────────────────────────────────
 // Andrew's own personal + business bank/card accounts -- entirely separate
 // from every customer/job screen in this app. Talks to api/finance.js, a
@@ -10076,7 +10177,6 @@ function paintMessages(){
       html+='<div class="rc-card" style="cursor:pointer;" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
         +'<div style="flex:1;min-width:0;">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-        +msgBrandChip(t)
         +'<strong>'+esc(who)+'</strong>'
         +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
         +'</div>'
@@ -10129,8 +10229,10 @@ function msgBrandChip(t){
     +(guessed?' title="Worked out from '+esc(t.brand_source_label||'')+'"':'')+'>🏢 '+esc(t.business_name)+'</span>';
 }
 function msgLineNote(t){
-  let s='to '+esc(t.our_phone_pretty||t.our_phone);
-  if(t.notify_line) s+=' · notification line, not a company'+(t.brand_source_label?' · company from '+esc(t.brand_source_label):'');
+  // The shared 888 line belongs to no brand, so show it by name rather than
+  // as a number customers might try to call back.
+  let s = t.notify_line ? 'to No reply Line' : 'to '+esc(t.our_phone_pretty||t.our_phone);
+  if(t.notify_line) s+=(t.brand_source_label?' · company from '+esc(t.brand_source_label):'');
   else if(t.business_name) s+=' · '+esc(t.business_name)+' line';
   if(t.brand_others&&t.brand_others.length) s+=' · <span style="color:#92400e;font-weight:600;">also a customer of '+esc(t.brand_others.join(', '))+'</span>';
   return s;
@@ -12214,7 +12316,7 @@ async function renderBrackets(){
     window._bracketInv=inv.inventory||[];   // tech list for the Assign modal
     attachIncomingStock(inv.inventory, purch.purchases, wpPend.orders);
 
-    let html=`<div class="wrap">
+    let html=`<div class="wrap">${syncStatHtml()}
       <div class="bracket-section">
         <h3>Current Inventory by Technician</h3>
         <table class="bracket-table">
