@@ -15,11 +15,13 @@ import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { enRouteMessage } from './_lib/en-route.js';
 import { reviewRequestSms } from './_lib/review-token.js';
 import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
+import { ingestBracketSyncReport, bracketSyncWatchdog } from './_lib/bracket-sync-health.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Allow the long-running Doms import to use the full Hobby-plan budget.
+// 60 s covers the long-running Doms import and the bracket-sync watchdog (one
+// 10 s GitHub call, a few DB ops, at most two SMS sends).
 export const config = { maxDuration: 60 };
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -973,6 +975,52 @@ export default async function handler(req, res) {
       return await googleReviewSync(req, res);
     } catch (e) {
       console.error('[google_review_sync]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Health report from the bracket-tracker GitHub Action: which inboxes logged
+  // in, what failed and why, what got synced. Posted once per run from the
+  // script's finish() (with one retry); a non-2xx here makes that run exit 1 on
+  // purpose — it is the one case where the CRM could not have alerted anyone.
+  // Every "how stale is it" timestamp is stamped with THIS server's clock; the
+  // report's own times are display-only. Secured by CRON_SECRET.
+  if (action === 'bracket_sync_health') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const out = await ingestBracketSyncReport(serviceClient(), req.body, new Date());
+      console.log('[bracket_sync_health]', JSON.stringify(out));
+      return res.status(200).json({ ok: true, ...out });
+    } catch (e) {
+      const bad = e && e.code === 'BAD_REPORT';
+      console.error('[bracket_sync_health]', (e && e.stack) || e);
+      return res.status(bad ? 400 : 500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Every-15-min heartbeat (Vercel Cron, vercel.json). Starts the GitHub email
+  // scan through GITHUB_DISPATCH_TOKEN (workflow_dispatch starts in seconds;
+  // GitHub's own schedule was firing every 2–5 h) and raises stale_run /
+  // dispatch:* when scans stop completing or the token/workflow breaks.
+  // &dry=1 evaluates only — no dispatch, no text, no write.
+  if (action === 'bracket_sync_watchdog') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dry = req.query.dry === '1' || req.query.dry === 'true';
+      const out = await bracketSyncWatchdog(serviceClient(), { now: new Date(), dry });
+      console.log('[bracket_sync_watchdog]', JSON.stringify(out));
+      return res.status(200).json({ ok: true, ...out });
+    } catch (e) {
+      console.error('[bracket_sync_watchdog]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

@@ -21,6 +21,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
+import { readState as readBracketSyncState, readDispatch as readBracketSyncDispatch, summarizeForDashboard as bracketSyncSummary, dispatchBracketScan } from './_lib/bracket-sync-health.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { bookingConfirmMessage, sendOptInConfirmSms } from './_lib/booking-confirm-sms.js';
@@ -366,6 +367,14 @@ export default async function handler(req, res) {
         const dryRun = req.query.dry === '1';
         const out = await sendDailyBookingDigest({ force: true, dryRun, offset });
         return res.status(200).json({ ok: true, ...out });
+      }
+      // "Scan now" on the Brackets tab: starts the Gmail email scan on GitHub
+      // right away instead of waiting for the next 15-min tick. Read-only on
+      // our side — the dispatch document is the watchdog's alone to write.
+      case 'bracket_sync_run_now': {
+        if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+        const r = await dispatchBracketScan();
+        return res.status(200).json({ ok: r.ok, configured: r.configured, status: r.status, error: r.ok ? null : (r.body || null) });
       }
       case 'launch_status':        return await launchStatus(req, res, db, auth);
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
@@ -8885,6 +8894,20 @@ async function googleReviewUpdate(req, res, db, auth, body) {
 // carries enough to display (tech, customer name/phone, appointment date) and
 // the booking id so the dashboard can open the exact job on click.
 async function badReviews(req, res, db, auth) {
+  // Email-scan health rides along on this poll (owner only). Computed first and
+  // on its own so a lib exception can never blank the review alerts; a failed
+  // read is reported as { error } so the dashboard shows "could not read"
+  // rather than silently nothing.
+  let sync_health = null;
+  if (auth.role === 'owner') {
+    try {
+      const [state, dispatch] = await Promise.all([readBracketSyncState(db), readBracketSyncDispatch(db)]);
+      sync_health = bracketSyncSummary({ state, dispatch }, new Date());
+    } catch (e) {
+      console.error('[bad_reviews] sync_health unavailable:', e.message);
+      sync_health = { error: String((e && e.message) || e).slice(0, 120) };
+    }
+  }
   // Businesses this token may see. The list itself enforces the scoping.
   let bizQ = db.from('businesses').select('id, slug, name').eq('active', true);
   const badReviewAllowed = allowedSlugsFor(auth);
@@ -8893,7 +8916,7 @@ async function badReviews(req, res, db, auth) {
   if (bizErr) throw bizErr;
   const bizById = new Map((bizRows || []).map(b => [b.id, b]));
   const bizIds = (bizRows || []).map(b => b.id);
-  if (!bizIds.length) return res.status(200).json({ alerts: [] });
+  if (!bizIds.length) return res.status(200).json({ alerts: [], sync_health });
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: revs, error } = await db.from('bookings')
@@ -8922,7 +8945,7 @@ async function badReviews(req, res, db, auth) {
       review_text: r.review_text || '',
     };
   });
-  return res.status(200).json({ alerts });
+  return res.status(200).json({ alerts, sync_health });
 }
 
 // ── Estimates (customer quote requests from the public estimate page) ────────
