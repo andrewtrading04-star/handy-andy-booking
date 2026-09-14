@@ -42,7 +42,9 @@ export function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
 // or duplicate calls happen afterward — claimed atomically via a primary-key
 // insert into system_flags (migration 0074). If two bookings somehow trigger
 // this in the same instant, only the one that wins the insert sends the text.
-async function claimOnce(db, key) {
+// Also the dedupe primitive for bracket-sync-health.js (bracket_sync_alert:*,
+// bracket_sync_recovered:*, bracket_sync:housekeeping:* keys).
+export async function claimOnce(db, key) {
   const { error } = await db.from('system_flags').insert({ key, value: { at: new Date().toISOString() } });
   return !error; // true only for whoever actually inserted the row first
 }
