@@ -2327,25 +2327,30 @@ function reviewListingsCardHtml(){
   // the new page(s) as a plain request: the bonus is one-time, so no second
   // $100 is promised here. Everyone else sees the $100 pitch for all pages.
   const one=todo.length===1;
+  // A tech who's already been paid gets no progress count ("5 of 6 done")
+  // and no $100 rules block — those only make sense while chasing the bonus.
+  // Just the plain ask for whatever page(s) are left.
   const head=bonus
     ? `<div class="rl-title">📣 ${one?'One new page':'New pages'} to review</div>
         <div class="rl-sub">We added ${one?'a new Google page':todo.length+' new Google pages'}. Leave ${one?'it':'each one'} a 5-star review, then check the box.</div>`
     : `<div class="rl-title">📣 Leave us a review, get $100</div>
         <div class="rl-sub">Leave a 5-star Google review on all ${listings.length} of our pages and get a <b>FREE $100</b> added to your payroll.${doneCount?` You've done ${doneCount} already, ${one?'just this one left':'just these '+todo.length+' left'}.`:''}</div>`;
-  return `<div class="rl-card" id="rlCard">
-    <div class="rl-head">
-      <div>
-        ${head}
-        <div class="rl-rules">Every review must:
+  const rules=bonus ? '' : `<div class="rl-rules">Every review must:
           <ul>
             <li>Mention one of these: your city (Houston, Austin, Denver or Los Angeles), TV mounting, home theater, or Samsung Frame</li>
             <li>Not mention any names</li>
             <li>Be 5 stars</li>
           </ul>
-        </div>
+        </div>`;
+  const progress=bonus ? '' : `<div class="rl-progress">Check the box after each one. <b>(${doneCount} of ${listings.length} done)</b></div>`;
+  return `<div class="rl-card" id="rlCard">
+    <div class="rl-head">
+      <div>
+        ${head}
+        ${rules}
         <div class="rl-sub">Already reviewed one of our pages? Tap the same Review button. Your old review opens, add one of the words above, hit save. That counts.</div>
         <div class="rl-sub" style="margin-top:6px;">You can also send these links to family and friends. Anyone can leave us a review.</div>
-        <div class="rl-progress">Check the box after each one. <b>(${doneCount} of ${listings.length} done)</b></div>
+        ${progress}
       </div>
     </div>
     ${rows}
