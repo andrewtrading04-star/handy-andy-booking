@@ -7,6 +7,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
 import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod, stripe } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
+import { expandReviewCode } from './_lib/review-code.js';
 import { isLikelyStreetAddress } from './_lib/address.js';
 import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, maybeSendLeadGenBookingAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
@@ -343,7 +344,7 @@ function looksLikeReviewToken(raw) {
 }
 
 async function serveReviewClick(req, res) {
-  const rawToken = ((req.query || {}).token || '').toString();
+  const rawToken = expandReviewCode(((req.query || {}).token || '').toString()) || '';
   const channel = ((req.query || {}).ch || '').toString().toLowerCase() === 'sms' ? 'sms' : 'email';
   const perChannelCol = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
   let t = null;

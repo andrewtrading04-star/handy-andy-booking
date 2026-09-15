@@ -14,6 +14,7 @@
 // opt a customer out of review requests again.
 import { signToken, verifyToken } from './auth.js';
 import { smsBrandName } from './sms.js';
+import { compactReviewToken } from './review-code.js';
 
 export const REVIEW_TOKEN_TTL = 2592000; // 30 days, same as bookingCreate always used
 
@@ -113,6 +114,7 @@ const REVIEW_LINK_PREFIX = {
 // same call already made for staff Messages replies.
 export function reviewRequestSms({ slug, name, token, clickUrl }) {
   const prefix = REVIEW_LINK_PREFIX[slug];
-  const link = prefix && token ? `${prefix}${encodeURIComponent(token)}` : clickUrl;
+  const code = token ? compactReviewToken(token) : null;
+  const link = prefix && code ? `${prefix}${encodeURIComponent(code)}` : clickUrl;
   return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link}`;
 }
