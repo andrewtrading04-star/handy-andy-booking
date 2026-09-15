@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=1">
+<link rel="stylesheet" href="/calls-inbox.css?v=2">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -1579,7 +1579,7 @@
       </div>
     </div>
 
-    <div class="view-scroll"><div id="view"></div></div>
+    <div class="view-scroll"><nav id="hubNavigation" aria-label="Section navigation" hidden></nav><div id="view"></div></div>
   </main>
 </div>
 
@@ -2662,6 +2662,7 @@ function navTo(s){
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   section=s;
+  document.getElementById('hubNavigation').hidden=true;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
   document.getElementById('schedSidebar').classList.toggle('hidden',!sched);
@@ -9112,31 +9113,36 @@ function hubBackBar(){
 }
 async function renderHub(tabs, activeId, onPick){
   const view=document.getElementById('view');
+  const navigation=document.getElementById('hubNavigation');
   const vis=tabs.filter(t=>t.show());
-  if(!vis.length){ view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
+  if(!vis.length){ navigation.hidden=true; view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
   const cur=vis.find(t=>t.id===activeId) || vis[0];
-  await cur.render();
+  if(tabs===CALL_TABS) callHubTab=cur.id;
+  else if(tabs===ANALYTICS_TABS) analyticsHubTab=cur.id;
   // One screen is just that screen -- no tab row, and no "back" either: with
   // only one tab, it IS the default, so there is nowhere else in this hub to
   // return to.
-  if(vis.length<2) return cur.id;
-  // The child owns .wrap; putting the row inside it keeps the page's existing
-  // horizontal padding instead of a full-bleed bar that lines up with nothing.
-  const wrap=view.querySelector('.wrap')||view;
+  if(vis.length<2){ navigation.hidden=true; await cur.render(); return cur.id; }
+  // Match the content padding in the stable navigation shell, never inside
+  // the child-owned .wrap that filters and background refreshes replace.
   const onDefault = cur.id===vis[0].id;
   const bar=`<div class="hub-tabs">`+vis.map(t=>
-    `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
-  wrap.insertAdjacentHTML('afterbegin', (onDefault?'':hubBackBar())+bar);
-  if(!onDefault) wrap.querySelector('#hubBack').addEventListener('click',()=>onPick(vis[0].id));
-  wrap.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
+    `<button type="button" class="seg-btn ${t.id===cur.id?'on':''}" aria-pressed="${t.id===cur.id}" data-hub="${t.id}">${esc(t.label)}</button>`).join('')+`</div>`;
+  // A stable sibling of #view: child renders and polling cannot delete it.
+  // Paint before awaiting the child so navigation remains usable while loading.
+  navigation.innerHTML=(onDefault?'':hubBackBar())+bar;
+  navigation.hidden=false;
+  if(!onDefault) navigation.querySelector('#hubBack').addEventListener('click',()=>onPick(vis[0].id));
+  navigation.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
+  await cur.render();
   return cur.id;
 }
 async function renderCallHub(){
   if(!callHubTab) callHubTab = role==='owner' ? 'log' : 'reviewcalls';
-  callHubTab = await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); }) || callHubTab;
+  await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); });
 }
 async function renderAnalyticsHub(){
-  analyticsHubTab = await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); }) || analyticsHubTab;
+  await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); });
 }
 // days/offset per the auditReport API: offset shifts the window back in whole
 // days (0 = ending today), days is the window size. Today and Yesterday are

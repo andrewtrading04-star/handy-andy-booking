@@ -9,6 +9,16 @@ const source=html.slice(html.indexOf('let _callsData='),html.indexOf('// Scroll 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function context(extra={}){return vm.createContext({console,Date,Set,Promise,API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
 test('admin scripts parse',()=>{for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))if(m[1].trim())new vm.Script(m[1]);});
+test('hub navigation survives child repaint and stays separate from content',async()=>{
+ const view={innerHTML:''},navigation={hidden:true,innerHTML:'',querySelectorAll:()=>[],querySelector:()=>({addEventListener(){}})};
+ const tabs=[{id:'log',label:'Incoming Calls',show:()=>true,render:async()=>{view.innerHTML='Calls loaded';}},{id:'review',label:'Review Calls',show:()=>true,render:async()=>{view.innerHTML='Reviews loaded';}}];
+ const ctx=vm.createContext({document:{getElementById:id=>id==='view'?view:navigation},CALL_TABS:tabs,ANALYTICS_TABS:[],callHubTab:'log',esc:escape,hubBackBar:()=>'<button id="hubBack">Back</button>'});
+ vm.runInContext(html.slice(html.indexOf('async function renderHub('),html.indexOf('async function renderCallHub(')),ctx);
+ await ctx.renderHub(tabs,'log',()=>{});const before=navigation.innerHTML;
+ view.innerHTML='Calls repainted after filter or poll';assert.equal(navigation.innerHTML,before);assert.equal(navigation.hidden,false);assert.match(before,/Incoming Calls/);
+ await ctx.renderHub(tabs,'review',()=>{});assert.match(navigation.innerHTML,/aria-pressed="true" data-hub="review"/);
+ assert.match(html,/<nav id="hubNavigation"[^>]*><\/nav><div id="view">/);
+});
 test('inbox escapes content and selects notification target',()=>{
  const ctx=context();vm.runInContext(source,ctx);
  ctx.rows=[{id:'a',customer:{name:'<img onerror=alert(1)>'},transcript:'<script>bad</script>',status:'new',answered:false,occurred_at:'2026-09-15T10:00:00Z'}, {id:'b',status:'resolved',answered:true,occurred_at:'2026-09-15T11:00:00Z'}];
