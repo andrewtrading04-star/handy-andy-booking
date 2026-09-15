@@ -6504,11 +6504,55 @@ async function technicians(req, res, db, auth) {
   try {
     const areaIds = [...new Set(techs.map(t => t.service_area_id).filter(Boolean))];
     if (areaIds.length) {
-      const { data: areas } = await db.from('service_areas').select('id, name').in('id', areaIds);
-      const nameOf = new Map((areas || []).map(a => [a.id, a.name]));
-      for (const t of techs) t.area_name = nameOf.get(t.service_area_id) || null;
+      const { data: areas } = await db.from('service_areas').select('id, name, unstaffed').in('id', areaIds);
+      const areaOf = new Map((areas || []).map(a => [a.id, a]));
+      for (const t of techs) {
+        const a = areaOf.get(t.service_area_id);
+        t.area_name = a ? a.name : null;
+        // A metro that isn't taking online bookings yet (unstaffed) never
+        // auto-assigns anyone, whatever their weekly times say.
+        t.area_unstaffed = !!(a && a.unstaffed);
+      }
     }
   } catch { /* labels are cosmetic, never fail the roster over them */ }
+
+  // Each tech's weekly times as a short summary for their card ("Mon 11a-1p ·
+  // Wed 8-10a, 11a-1p"). Before invite sign-ups (0111) staff set these by hand
+  // and knew them; now a tech picks their own on the join page, so the card has
+  // to show what they picked without opening the Availability editor, and a
+  // tech with NO weekly times (never auto-assigned) has to stand out.
+  // Best-effort: on any error the card just doesn't show the line.
+  for (const t of techs) { t.weekly_slots = null; t.weekly_summary = null; }
+  try {
+    const ids = techs.map(t => t.id);
+    if (ids.length) {
+      const { data: av } = await db.from('technician_availability')
+        .select('technician_id, day_of_week, slot_key').in('technician_id', ids);
+      const hm = (s) => { let [h, m] = s.split(':').map(Number); const ap = h >= 12 ? 'p' : 'a'; h = h % 12 || 12; return { t: h + (m ? ':' + String(m).padStart(2, '0') : ''), ap }; };
+      const label = Object.fromEntries(SLOTS.map(s => { const a = hm(s.start), b = hm(s.end); return [s.key, a.ap === b.ap ? `${a.t}-${b.t}${b.ap}` : `${a.t}${a.ap}-${b.t}${b.ap}`]; }));
+      const order = SLOTS.map(s => s.key);
+      const byTech = new Map();
+      for (const r of av || []) { if (!byTech.has(r.technician_id)) byTech.set(r.technician_id, []); byTech.get(r.technician_id).push(r); }
+      for (const t of techs) {
+        const rows = byTech.get(t.id) || [];
+        t.weekly_slots = rows.length;
+        // Consecutive days with the same times collapse ("Mon-Fri 8-10a, 11a-1p").
+        const WEEK = [1, 2, 3, 4, 5, 6, 0];
+        const dayText = (d) => {
+          const keys = rows.filter(r => r.day_of_week === d).map(r => r.slot_key).sort((x, y) => order.indexOf(x) - order.indexOf(y));
+          return !keys.length ? '' : keys.length === order.length ? 'all day' : keys.map(k => label[k]).join(', ');
+        };
+        const runs = [];
+        for (const d of WEEK) {
+          const txt = dayText(d), last = runs[runs.length - 1];
+          if (txt && last && last.txt === txt && WEEK.indexOf(last.to) === WEEK.indexOf(d) - 1) last.to = d;
+          else if (txt) runs.push({ from: d, to: d, txt });
+        }
+        const ab = (d) => DAYS[d].slice(0, 3);
+        t.weekly_summary = runs.map(r => `${r.from === r.to ? ab(r.from) : `${ab(r.from)}-${ab(r.to)}`} ${r.txt}`).join(' · ');
+      }
+    }
+  } catch (e) { console.warn('[admin] weekly times summary non-fatal:', e.message); }
 
   // $100 review-program progress per tech, so the Technicians screen shows how
   // far each one has got instead of only whether an invite went out. Counts

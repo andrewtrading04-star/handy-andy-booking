@@ -8125,7 +8125,8 @@ async function renderTechnicians(){
           <div style="display:flex;align-items:center;gap:10px;">
             ${t.photo_url?`<img src="${esc(t.photo_url)}" alt="" style="width:36px;height:36px;border-radius:18px;object-fit:cover;flex:none;">`:`<div style="width:36px;height:36px;border-radius:18px;background:var(--line2);flex:none;"></div>`}
             <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}${t.average_rating ? ` <span class="rating-badge">⭐ ${t.average_rating}</span>` : ''}</div>
-              <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div></div>
+              <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div>
+              ${t.active&&(t.area_name||t.weekly_slots!=null)?`<div class="meta" style="margin-top:2px;">${esc(t.area_name||'No metro set')}${t.area_unstaffed?' <span style="color:var(--amber)">(not taking online bookings yet)</span>':''}${t.weekly_slots==null?'':` · ${t.weekly_slots?esc(t.weekly_summary):'<span style="color:var(--amber)">no weekly times set, so no automatic jobs</span>'}`}</div>`:''}</div>
           </div>
           <select class="assign tstatus"><option value="available" ${t.status==='available'?'selected':''}>available</option>
             <option value="on_job" ${t.status==='on_job'?'selected':''}>on job</option>
