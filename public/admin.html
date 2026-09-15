@@ -13314,20 +13314,23 @@ function paintGreeting(){
   // that is instant and costs nothing.
   const paintProfit=(total,bySlug)=>{
     const vEl=document.getElementById('pfVal'); if(vEl) vEl.textContent=money(total);
+    // Replace the whole split block rather than patching known slots by name:
+    // which businesses have a nonzero figure can differ between "This week"
+    // and "Last 30 days"/"This year" (e.g. Mile High shows up only once it
+    // has a paid job in the window), so a fixed doms/handy-andy pair can't
+    // just be updated in place.
     const splitEl=document.getElementById('pfSplit');
-    if(splitEl){
-      const dEl=splitEl.querySelector('[data-split="doms"]'), hEl=splitEl.querySelector('[data-split="handy-andy"]');
-      if(dEl) dEl.textContent=money(Number((bySlug&&bySlug.doms)||0));
-      if(hEl) hEl.textContent=money(Number((bySlug&&bySlug['handy-andy'])||0));
-    }
+    if(splitEl) splitEl.outerHTML=bizSplitHtml(bySlug,'pfSplit');
   };
   el.querySelectorAll('[data-pv]').forEach(btn=>btn.addEventListener('click',async()=>{
     profitView=btn.dataset.pv;
     el.querySelectorAll('[data-pv]').forEach(b=>b.classList.toggle('on', b.dataset.pv===profitView));
     const pf=(greetingData&&greetingData.profit)||{};
     if(profitView==='week'){
-      const wbs=pf.week_by_slug||{};
-      return paintProfit(Number(wbs.doms||0)+Number(wbs['handy-andy']||0), wbs);
+      // pf.week_total is already every active business summed server-side —
+      // re-adding just two known slugs here under-counted the total itself
+      // (not only the split below) whenever a third business had profit.
+      return paintProfit(Number(pf.week_total||0), pf.week_by_slug||{});
     }
     const cached=profitRangeCache[profitView];
     if(cached) return paintProfit(cached.total, cached.by_slug);
@@ -13445,19 +13448,38 @@ async function avgTicketSetRange(range){
   const box=document.getElementById('avgTicketBox');
   if(box) box.outerHTML=avgTicketBoxHtml((greetingData&&greetingData.profit)||null,(greetingData&&greetingData.revenue)||null);
 }
-// Reusable Doms(blue)/Handy Andy(orange) split row for a gstat box — same visual
-// pattern as the "Revenue this week" / "Profit this week" boxes: a divider, then
-// two colored figures side by side. `id` lets a toggle (Today/Yesterday) update
-// just the numbers in place, with no re-render of the whole card.
+// Per-business color for a split row. Dom's/Handy Andy/Mile High already have
+// a hand-picked BIZ_THEME entry; any OTHER business (a lead-gen brand that
+// books its own jobs) falls back to a stable hash instead of silently
+// inheriting Handy Andy's orange via bizTheme()'s own fallback, which would
+// make a real third business unreadable next to Handy Andy's own figure.
+function bizSplitColor(slug){
+  const t=BIZ_THEME[slug];
+  return t ? t.onDark : msgBrandColor(bizShort(slug));
+}
+// Reusable split row for a gstat box — a divider, then one colored figure per
+// business that actually has a nonzero number for the period, richest first.
+// Was hardcoded to exactly Dom's + Handy Andy, which silently dropped a real
+// job's profit whenever a THIRD business (Mile High, worked by a Handy Andy
+// tech but its own business_id) had one — the combined total already
+// includes it, so the total and the split quietly disagreed. `id` names the
+// whole block (divider + row) so a toggle (Today/Yesterday, or the Profit
+// card's tabs) can replace it outright — the SET of businesses with a
+// nonzero figure can differ between periods, so patching individual numbers
+// in place by slug (the old approach) would leave a stale or missing entry.
 function bizSplitHtml(bySlug, id){
-  const d=Number((bySlug&&bySlug.doms)||0), h=Number((bySlug&&bySlug['handy-andy'])||0);
-  return `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
-    `<div${id?` id="${id}"`:''} style="display:flex;gap:16px;justify-content:center;margin-top:5px;">`+
-      `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('doms'))}</div>`+
-        `<div style="font-size:15px;font-weight:850;color:#60a5fa;line-height:1.1;" data-split="doms">${money(d)}</div></div>`+
-      `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort('handy-andy'))}</div>`+
-        `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;" data-split="handy-andy">${money(h)}</div></div>`+
-    `</div>`;
+  const entries=Object.entries(bySlug||{}).map(([slug,v])=>[slug,Number(v)||0]).filter(([,v])=>v!==0);
+  entries.sort((a,b)=>b[1]-a[1]);   // richer business first
+  const rows=entries.map(([slug,v])=>
+    `<div><div style="font-size:10px;font-weight:800;opacity:.72;text-transform:uppercase;letter-spacing:.04em;">${esc(bizShort(slug))}</div>`+
+      `<div style="font-size:15px;font-weight:850;color:${bizSplitColor(slug)};line-height:1.1;" data-split="${esc(slug)}">${money(v)}</div></div>`
+  ).join('');
+  return `<div${id?` id="${id}"`:''}>`+
+    (entries.length ? (
+      `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
+      `<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:5px;">${rows}</div>`
+    ) : '')+
+  `</div>`;
 }
 // Weekly-income line chart for the Income box: thin teal line + a dot per
 // week (peak dot/label highlighted), scaled to whatever history is given —
@@ -13568,9 +13590,10 @@ function ndpChartHtml(cached){
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
   const r=greetingData.revenue, pf=greetingData.profit;
-  const wbs=(pf&&pf.week_by_slug)||{};
-  const wDoms=Number(wbs.doms||0), wHA=Number(wbs['handy-andy']||0), wTotal=wDoms+wHA;
-  const profitVal = profitView==='week' ? wTotal : profitView==='yesterday' ? ((pf&&pf.yesterday)||0) : ((pf&&pf.today)||0);
+  // pf.week_total is every active business summed server-side — reading only
+  // doms+handy-andy here under-counted the figure itself whenever a third
+  // business (e.g. Mile High) had profit for the week, not just the split.
+  const profitVal = profitView==='week' ? Number((pf&&pf.week_total)||0) : profitView==='yesterday' ? ((pf&&pf.yesterday)||0) : ((pf&&pf.today)||0);
   // Split-by-business for whichever tab is active — 'week' reuses the same
   // week_by_slug the old standalone box used; today/yesterday reuse theirs.
   function profitSplitBySlug(pf){
