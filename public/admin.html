@@ -9943,6 +9943,15 @@ function callCard(r,handled){
   const claimBtn = !hasPhone ? '' : otherHas
     ? `<button class="rc-call disabled" data-callclaim="${esc(r.id)}" style="border:none;">${esc(r.claimed_by)} is already on this — claim anyway</button>`
     : `<button class="rc-call" data-callclaim="${esc(r.id)}" style="border:none;cursor:pointer;">Call back</button>`;
+  // Opens this exact customer's thread on the Messages screen — same number
+  // pair (grasshopper_number/caller_phone) the Call back button dials, just
+  // texting instead. Only shown when there's a real tracking number to send
+  // FROM; if that number ever guesses to a brand this viewer can't see, the
+  // Messages screen's own "could not open conversation" error handles it —
+  // this never needs its own access check.
+  const msgBtn = (hasPhone && r.grasshopper_number)
+    ? `<button class="rc-btn ghost" data-callmsg="1" data-msgour="${esc(r.grasshopper_number)}" data-msgcust="${esc(r.caller_phone)}">💬 Send a message</button>`
+    : '';
   // A live call already logged its own outcome through the wizard's resolution
   // step (or can be resolved from here if the secretary skipped it) — the
   // voicemail-oriented Done/Called back/Ignore buttons don't fit "I was just
@@ -9960,7 +9969,7 @@ function callCard(r,handled){
        <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button>
        ${hasPhone?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every tracking line">🚫 Block</button>`:''}
        ${role==='owner'?`<button class="rc-btn ghost" data-calldelete="${esc(r.id)}" title="Permanently remove this call from the log">Delete</button>`:''}</div>`
-    : `${claimBtn}
+    : `${claimBtn}${msgBtn}
        <div class="rc-btn-row">
          <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
          <button class="rc-btn amber" data-callact="called_back" data-callid="${esc(r.id)}">Called back</button>
@@ -10164,6 +10173,15 @@ function paintCalls(){
   }));
   view.querySelectorAll('[data-callclaim]').forEach(b=>b.addEventListener('click',
     ()=>claimCallback(b.dataset.callclaim, b)));
+  // "Send a message" — same number pair the Call back button dials, opened on
+  // the Messages screen instead. Setting _msgOpen before navTo('messages')
+  // is exactly what clicking a row in that screen's own list does; if there's
+  // no conversation yet, it opens empty with the reply box ready to start one.
+  view.querySelectorAll('[data-callmsg]').forEach(b=>b.addEventListener('click',()=>{
+    _msgOpen={ our:b.dataset.msgour, customer:b.dataset.msgcust };
+    _msgThread=null; _msgThreadError=null;
+    navTo('messages');
+  }));
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
