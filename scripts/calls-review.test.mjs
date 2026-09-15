@@ -11,6 +11,21 @@ const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>'
 function context(extra={}){return vm.createContext({console,Date,Set,Promise,API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
 test('admin scripts parse',()=>{for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))if(m[1].trim())new vm.Script(m[1]);});
 
+test('texts, pending calls and answered calls never produce missed-call banners',()=>{
+ const ctx=context({document:{getElementById:()=>null,createElement:()=>{throw Error('must not create banner');}},dismissedBanners:()=>[]});
+ vm.runInContext(html.slice(html.indexOf('function paintCallBanner('),html.indexOf('// Unread count on the nav button.')),ctx);
+ for(const call of [{kind:'sms',answered:false},{kind:'sms',answered:null},{kind:'inbound',answered:null},{kind:'inbound',answered:true}])assert.doesNotThrow(()=>ctx.paintCallBanner(call));
+});
+
+test('estimate detail keeps totals and distinguishes an unpriced request',()=>{
+ const ctx=context({current:{timezone:'America/Denver'},appConfig:{sms:true,email:true},liCleanLabel:s=>s});
+ vm.runInContext(html.slice(html.indexOf('const EST_STATUS ='),html.indexOf('// Convert an approved estimate into a booking:')),ctx);
+ const base={id:'e1',customer_name:'<Customer>',status:'new',customer_phone:'3035550101',customer_email:'example@example.com',sms_consent:true,line_items:[]};
+ const empty=ctx.estCard(base);assert.match(empty,/Quote not prepared/);assert.doesNotMatch(empty,/Waiting on approval/);assert.match(empty,/&lt;Customer&gt;/);
+ const quote=ctx.estCard({...base,line_items:[{description:'Mount',qty:2,unit_price:100}],tax_rate:0.1});
+ assert.match(quote,/\$220.00/);for(const action of ['edit','sms','email','convert'])assert.match(quote,new RegExp('data-est-'+action+'="e1"'));
+});
+
 test('API deadline covers a stalled response body',async()=>{
  let aborted=false;
  const ctx=context({URL,location:{origin:'https://example.com'},setTimeout,clearTimeout,AbortController,

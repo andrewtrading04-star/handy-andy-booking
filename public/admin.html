@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=5">
+<link rel="stylesheet" href="/calls-inbox.css?v=6">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -2663,7 +2663,8 @@ function navTo(s){
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   section=s;
-  document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch');
+  document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch'||s==='estimates');
+  document.getElementById('view').classList.toggle('estimates-workspace',s==='estimates');
   document.getElementById('view').classList.toggle('launch-workspace',s==='launch');
   document.getElementById('hubNavigation').hidden=true;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
@@ -10372,7 +10373,7 @@ function dismissBanner(id){
 function paintCallBanner(call){
   const existing=document.getElementById('callBanner');
   if(existing) existing.remove();
-  if(!call || dismissedBanners().includes(call.id)) return;
+  if(!call || call.kind!=='inbound' || call.answered!==false || dismissedBanners().includes(call.id)) return;
   const who=call.customer?call.customer.name:call.caller_pretty;
   let at='';
   try{
@@ -12001,18 +12002,22 @@ function estTotals(items, taxRate){
   return { subtotal, tax, total:Math.round((subtotal+tax)*100)/100 };
 }
 
+let _estRequest=0,_estRows=[],_estSelected=null,_estQuery='',_estSort='newest';
 async function renderEstimates(){
+  const request=++_estRequest;
   const view=document.getElementById('view');
   // "Website messages" is a source filter, not a status (api/admin.js handles it
   // specially). Sits before Archived so it reads as a working folder.
   const filters=Object.entries({all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
   view.innerHTML=`<div class="wrap">
+    <div class="rc-head"><div><h2 class="rc-title">Estimates</h2><p class="rc-sub">Review requests, build quotes, and turn approved estimates into jobs.</p></div></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:2px;">
       <div class="est-filters" id="estFilters">${filters}</div>
       <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
     </div>
-    <div id="estWrap"><div class="empty">Loading…</div></div>
+    <div class="ch-toolbar est-tools"><label>Find an estimate<input id="estSearch" type="search" value="${esc(_estQuery)}" placeholder="Customer, service, phone, or ZIP"></label><label>Sort<select id="estSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value">Highest value</option></select></label><span id="estCount" role="status"></span></div>
+    <div id="estWrap"><div class="empty">Loading estimates…</div></div>
   </div>`;
   document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
   // Same New Booking engine everything else uses to price an estimate -- this
@@ -12022,6 +12027,10 @@ async function renderEstimates(){
   // booking". Both buttons still work either way; nothing about how an
   // estimate actually gets priced or sent changes.
   document.getElementById('estNewBtn').addEventListener('click', ()=>openNewBooking({ _estimateOnly:true }));
+  view.querySelector('#estSort').value=_estSort;
+  view.querySelector('#estSearch').addEventListener('input',e=>{_estQuery=e.target.value;paintEstimates();});
+  view.querySelector('#estSort').addEventListener('change',e=>{_estSort=e.target.value;paintEstimates();});
+  _estRows=[];
   try{
     // A sent estimate the customer hasn't approved stays right here in "Estimate
     // sent" no matter how old it gets — there's no separate "not approved" folder
@@ -12029,11 +12038,29 @@ async function renderEstimates(){
     // get a "🚫 Not approved · no response in Nd+ days" badge on the card below,
     // via isNotApproved/NOT_APPROVED_DAYS, instead of being hidden away.
     const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
+    if(request!==_estRequest||!onScreen('estimates'))return;
     let items=d.estimates||[];
     refreshEstimateBadge();
     estCache={}; items.forEach(it=>{ estCache[it.id]=it; });
-    if(!items.length){ document.getElementById('estWrap').innerHTML=`<div class="empty">No estimate requests yet.</div>`; return; }
-    document.getElementById('estWrap').innerHTML=items.map(estCard).join('');
+    _estRows=items;
+    if(pendingEstimateId){_estQuery='';view.querySelector('#estSearch').value='';_estSelected=pendingEstimateId;}
+    paintEstimates();
+    focusPendingEstimate();
+  }catch(err){ if(request!==_estRequest||!onScreen('estimates'))return; const w=document.getElementById('estWrap'); if(w){w.innerHTML=`<div class="empty" role="alert">${esc(err.message)}</div><button class="rc-btn ghost" id="estRetry">Try again</button>`;w.querySelector('#estRetry').addEventListener('click',renderEstimates);} }
+}
+function paintEstimates(){
+    const wrap=document.getElementById('estWrap');if(!wrap||!onScreen('estimates'))return;
+    const query=_estQuery.trim().toLowerCase();
+    const items=_estRows.filter(e=>!query||[e.customer_name,e.customer_phone,e.customer_email,e.service_label,e.customer_zip].join(' ').toLowerCase().includes(query));
+    const value=e=>estTotals(e.line_items||[],Number(e.tax_rate)||0).total;
+    items.sort((a,b)=>_estSort==='value'?value(b)-value(a):(_estSort==='oldest'?1:-1)*(Date.parse(a.created_at||0)-Date.parse(b.created_at||0)));
+    document.getElementById('estCount').textContent=`${items.length} estimate${items.length===1?'':'s'}`;
+    if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
+    const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
+    const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.querySelector('.ci-list').scrollTop=scroll;
+    wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
     document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
       sel.style.color = EST_COLOR[e.target.value] || '#16181d';
@@ -12053,8 +12080,6 @@ async function renderEstimates(){
     document.querySelectorAll('#estWrap [data-est-decline]').forEach(b=>b.addEventListener('click',()=>declineEstimate(b.dataset.estDecline,b)));
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
-    focusPendingEstimate();
-  }catch(err){ const w=document.getElementById('estWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
 // Deep link from the "new estimate" text message (api/estimate.js links to
@@ -12120,7 +12145,7 @@ function estCard(e){
   const webBadge=isWeb?`<span class="est-web-badge">🌐 Website message</span>`:'';
   const _tzi=estTimezone(e);
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-  const receivedBadge=created?`<div style="display:inline-block;font-size:13px;font-weight:800;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:8px;padding:5px 11px;margin-bottom:9px;">📥 Came in ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
+  const receivedBadge=created?`<div class="est-received">Received ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
   // Priced quote summary (line items). Shown when the office has built a quote.
   const lines=Array.isArray(e.line_items)?e.line_items.filter(it=>it&&(liDesc(it)||Number(it.unit_price)!==0)):[];
   const eTax=(e.tax_rate==null)?0:Number(e.tax_rate);
@@ -12150,7 +12175,7 @@ function estCard(e){
     ? `<div class="est-approval approved">✓ Customer approved${approvedAt?` · ${esc(approvedAt)}`:''}</div>${acceptedLine}`
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
-      : `<div class="est-approval waiting">⏳ Waiting on approval</div>`);
+      : `<div class="est-approval waiting">${hasQuote?'Waiting on approval':'Quote not prepared'}</div>`);
   // Who sent this estimate to the customer, and when (email/SMS send, or the
   // status dropdown manually set to "Estimate sent") — same customer-local
   // timezone as the "Came in" badge above, for consistency on one card.
@@ -12182,13 +12207,13 @@ function estCard(e){
       <span class="meta" style="font-size:12px;">${e.sms_consent!==true?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button class="btn sm" data-est-convert="${e.id}" title="${e.approved_at?'Create a booking from this approved estimate':'Create a booking now, without waiting for the customer to approve online (e.g. they approved by phone)'}">→ Convert to job${e.approved_at?'':' (unapproved)'}</button>
-        <select class="est-status-sel" data-est-status="${e.id}" style="color:${EST_COLOR[e.status]||'#dc2626'};font-weight:700;">${opts}</select>
-        <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">🧾 ${buildLabel}</button>
-        ${(e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">💬</button>`:''}
-        ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">✉️</button>`:''}
+        <label class="est-status-label">Status<select class="est-status-sel" data-est-status="${e.id}">${opts}</select></label>
+        <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
+        ${(e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">Send text</button>`:''}
+        ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">Send email</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
         ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
-        <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">🗑</button>
+        <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>
       </span>
     </div>
   </div>`;

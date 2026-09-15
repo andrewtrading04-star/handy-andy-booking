@@ -8237,7 +8237,7 @@ async function calls(req, res, db, auth) {
   // (kind 'voicemail'/'missed', from the now-disabled call_ingest) stay in the
   // table as history but never surface anywhere again. Twilio rows are kind
   // 'inbound'; the Take a Call wizard's own rows are kind 'live'.
-  q = q.not('kind', 'in', '(voicemail,missed)');
+  q = q.not('kind', 'in', '(voicemail,missed,sms)');
   // Owner rule (2026-08-26): the WHOLE list — business names, missed calls,
   // history — is scoped to the businesses this person actually runs, not just
   // the interruption banner (which was fixed first, separately, below). Joey
@@ -8361,7 +8361,7 @@ async function calls(req, res, db, auth) {
   // the Calls tab's own open list (with Booked/Estimate/Declined to close it
   // out) — only the banner and badge, which exist to interrupt someone about a
   // WAITING CUSTOMER, exclude it.
-  const openVoicemails = open.filter(r => r.kind !== 'live');
+  const openVoicemails = open.filter(r => r.kind === 'inbound' && r.answered === false && !r.called_back_at);
   // Whether THIS viewer should be interrupted (banner/red badge) about a call,
   // layered on top of the business scoping above. Every row already belongs to
   // a business this person is allowed to see, but for a TRACKING-NUMBER call
