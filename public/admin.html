@@ -2168,6 +2168,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 // swap.
 function dismissAllOverlays(){
   const step=fn=>{ try{ fn(); }catch(_){} };
+  step(()=>cwCaptureQuote());
+  step(()=>{ if(callWiz){ callWiz._visible=false; callWiz._view++; } });
   step(()=>nbStopProgressTimer());
   step(()=>{ nbModalSession++; });   // in-flight New Booking submits must not re-hide/re-show #modal later
   ['modal','callWizModal','bkModal','availModal','custModal','custDetailModal','estModal','lightbox','viewAsPopover']
@@ -2188,7 +2190,7 @@ function logout(opts){
   // A manual sign-out is an explicit hand-off: the next person to sign in on
   // this tab must not be offered someone else's half-finished call.
   if(reason!=='expired') callWiz=null;
-  const callOpen=!!(callWiz && callWiz.id && !callWiz.resolution);
+  const callOpen=!!(callWiz && callWiz.service && !callWiz.resolution);
   // With sliding sessions every tab holds its own token. If ANOTHER tab of this
   // browser already stored a fresher one, an expiry here must not wipe it —
   // this tab just shows the sign-in screen (a reload picks the live session up).
@@ -14240,8 +14242,11 @@ document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==
 // by sending a quick estimate, or by logging a decline. Every path finishes
 // at the resolution step so nothing falls through without a recorded outcome.
 let callWiz=null;
-function callWizReset(){
-  callWiz={
+function cwNewDraft(){
+  return {
+    _visible:false, _view:0, _started:false, _startPromise:null, _ending:false,
+    _quoteVersion:0, _econRequest:0, _couponRequest:0,
+    _quote:null, zipLookup:null, estimateContact:{name:'',phone:'',email:''},
     id:null, business:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null, surcharge:0,
     optStep:0, optsLoaded:false,
@@ -14282,21 +14287,72 @@ function callWizReset(){
     resolution:null,
   };
 }
+function callWizReset(){ callWiz=cwNewDraft(); }
+function cwIsActive(draft, view){
+  return !!draft && callWiz===draft && draft._visible && !draft.resolution && (view==null || draft._view===view);
+}
+function cwBusiness(draft=callWiz){
+  return businesses.find(b=>b.slug===(draft&&draft.business)) || current;
+}
+function cwInvalidatePrice(draft=callWiz){
+  if(!draft) return;
+  draft._quoteVersion++; draft._econRequest++; draft._couponRequest++;
+  draft._couponBusy=false; draft.econ=null; draft.econCallId=null;
+}
+// The pricing engine is shared, but the caller's answers are owned by this
+// draft. Copy them only while the phone owns the form state, never from an
+// unrelated New Booking that was opened after the call was paused.
+function cwCaptureQuote(draft=callWiz){
+  if(!draft || !draft._visible) return;
+  const copy=x=>JSON.parse(JSON.stringify(x));
+  draft._quote={
+    groups:copy(nbOptionGroups), qty:copy(nbQty), notes:copy(nbOptionNotes), prices:copy(nbOptionPrices),
+    frame:{...nbFrameTvQty}, services:copy(nbServices), serviceId:nbServiceId,
+    area:nbAreaName, areaId:nbZipAreaId, convert:copy(nbConvertLines), custom:copy(nbCustomLines), source:nbSourceEstimateId,
+    travel:document.getElementById('nbTravelFee').value, autoTravel:nbAutoTravel,
+    handyman:[nbHandymanActive,nbHandymanHours,nbHandymanLabel,nbHandymanNote],
+    assurion:nbAssurionActive, assurionSel:[...nbAssurionSel], gds:nbGdsActive, noCharge:nbNoChargeActive, customTask:nbCustomTaskActive,
+  };
+  const field=id=>document.getElementById(id);
+  if(draft.step==='zip' && field('cwZip')) draft.zip=field('cwZip').value;
+  if(draft.step==='handydesc' && field('cwDesc')) draft.handymanDesc=field('cwDesc').value;
+  if(draft.step==='estimate'){
+    for(const [key,id] of [['name','cwName'],['phone','cwPhone'],['email','cwEmail']]) if(field(id)) draft.estimateContact[key]=field(id).value;
+    if(field('cwEstSmsConsent')) draft.cust.sms=field('cwEstSmsConsent').checked;
+  }
+}
+function cwRestoreQuote(draft){
+  const q=draft._quote; if(!q) return;
+  const copy=x=>JSON.parse(JSON.stringify(x));
+  const replace=(target,source)=>{ for(const k of Object.keys(target)) delete target[k]; Object.assign(target,copy(source)); };
+  nbOptionGroups=copy(q.groups); replace(nbQty,q.qty); replace(nbOptionNotes,q.notes); replace(nbOptionPrices,q.prices);
+  nbFrameTvQty={...q.frame}; nbServices=copy(q.services); nbServiceId=q.serviceId;
+  nbAreaName=q.area; nbZipAreaId=q.areaId; nbConvertLines=copy(q.convert); nbCustomLines=copy(q.custom); nbSourceEstimateId=q.source;
+  document.getElementById('nbTravelFee').value=q.travel; nbAutoTravel=q.autoTravel;
+  [nbHandymanActive,nbHandymanHours,nbHandymanLabel,nbHandymanNote]=q.handyman;
+  nbAssurionActive=q.assurion; nbAssurionSel.clear(); q.assurionSel.forEach(x=>nbAssurionSel.add(x));
+  nbGdsActive=q.gds; nbNoChargeActive=q.noCharge; nbCustomTaskActive=q.customTask;
+}
 function openTakeCall(){
   if(!current) return;
   closeSidebar();
+  // Invalidate pending form loads before restoring the phone's shared engine.
+  nbModalSession++; nbCalSeq++;
+  document.getElementById('modal').classList.add('hidden');
   // A call already in progress that was only clicked away from is RESUMED, not
   // restarted: re-running the reset would throw away the zip, options, quote and
   // discount already collected and open a SECOND app.calls row for the same
   // conversation, leaving the first one unresolved forever.
   // A saved call that belongs to a business this login cannot see (a different
   // person signed in on this tab after an expiry) is dropped, not resumed.
-  if(callWiz && callWiz.id && !callWiz.resolution && callWiz.business && !businesses.some(b=>b.slug===callWiz.business)) callWiz=null;
-  if(callWiz && callWiz.id && !callWiz.resolution){
+  if(callWiz && !callWiz.resolution && callWiz.business && !businesses.some(b=>b.slug===callWiz.business)) callWiz=null;
+  if(callWiz && !callWiz.resolution){
     // A call logged against a lead-gen brand resumes on that brand: after a
     // re-login the dashboard opens on her own company, and every wizard step
     // prices and books against `current`.
     if(callWiz.business && current.slug!==callWiz.business && businesses.some(b=>b.slug===callWiz.business)) switchToBusiness(callWiz.business);
+    if(!callWiz._visible) cwRestoreQuote(callWiz);
+    callWiz._visible=true;
     document.getElementById('callWizModal').classList.remove('hidden');
     renderCallWiz();
     return;
@@ -14326,6 +14382,8 @@ function openTakeCall(){
   nbSourceEstimateId=null;
   nbServiceId=null;
   { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=''; }
+  nbAutoTravel='';
+  callWiz._visible=true;
   document.getElementById('callWizErr').textContent='';
   document.getElementById('callWizModal').classList.remove('hidden');
   renderCallWiz();
@@ -14336,16 +14394,19 @@ function openTakeCall(){
 // where it left off. Only "Hang up" ends a call, which is what makes every call
 // carry a real outcome instead of a pile of half-finished ones nobody can
 // explain later.
-function closeCallWiz(opts){
+function closeCallWiz(opts, draft=callWiz){
+  if(!draft || callWiz!==draft) return;
+  if(draft._ending && !(opts&&opts.resolved)) return;
+  cwCaptureQuote(draft);
+  draft._visible=false; draft._view++;
   document.getElementById('callWizModal').classList.add('hidden');
-  if(!callWiz || !callWiz.id) return;
   // A RESOLVED call must be marked resolved on the local object, not just on the
   // server row. `resolution` was read in two places and assigned in none, so it
   // stayed null forever and the resume branch in openTakeCall always passed:
   // the next "Take a Call" reopened the FINISHED call and callWizReset() was
   // never reached, carrying the previous customer's discSource/discCoupon/
   // discManual/econ straight onto the next caller's quote.
-  if(opts&&opts.resolved){ callWiz.resolution='closed'; return; }
+  if(opts&&opts.resolved){ draft.resolution='closed'; return; }
   toast('Call still open — hit "Take a Call" to pick it back up.');
 }
 document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
@@ -14372,6 +14433,7 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
   const tvBtn=e.target.closest('.nb-tv-q-btn');
   if(tvBtn){
     if(tvBtn.disabled) return;
+    cwInvalidatePrice();
     const sg=nbOptionGroups.find(g=>g.key==='size');
     const sizeCount=sg?nbGroupCount(sg.id):0;
     nbFrameTvQty.frame=Math.max(0, Math.min(sizeCount, nbFrameTvQty.frame+Number(tvBtn.dataset.d)));
@@ -14388,6 +14450,7 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
     if(grp && grp.key==='size') nbFrameTvQty.regular++;
   }
   if(nbHandleOptClick(e)){
+    cwInvalidatePrice();
     cwSyncTvCounts();
     nbClampTvBound();
     nbPruneInvisibleOptions();
@@ -14403,6 +14466,7 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
   // a re-render would take focus off the box she is still typing in.
   const px=e.target.closest('.nb-other-price');
   if(px){
+    cwInvalidatePrice();
     nbOptionPrices[px.dataset.o]=px.value;
     const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
     const chip=row?row.querySelector('.nb-price'):null;
@@ -14413,7 +14477,9 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
 // step from wherever the secretary is, so however the conversation went, the
 // call ends recorded rather than trailing off into an untracked state.
 document.getElementById('callWizEndBtn').addEventListener('click', ()=>{
-  if(callWiz && callWiz.id && !callWiz.resolution){
+  if(callWiz && callWiz._ending) return;
+  if(callWiz && (callWiz.service || callWiz._startPromise) && !callWiz.resolution){
+    cwCaptureQuote(callWiz);
     // Remember where they were so "Hang up" tapped by mistake isn't the end of
     // the call — the resolution card can put them back exactly where they left.
     if(callWiz.step!=='resolution') callWiz._beforeResolution=callWiz.step;
@@ -14473,12 +14539,12 @@ function cwAmber(line){
 // row is created (call_live_start), so the wizard never has to read the
 // dashboard's `current` — which logout() nulls while a request may be in flight.
 function cwBiz(){ return (callWiz && callWiz.business) || (current && current.slug) || null; }
-function cwTrack(event, meta){
-  if(!callWiz || !callWiz.id) return;
-  const biz=cwBiz(); if(!biz) return;
+function cwTrack(event, meta, draft=callWiz){
+  if(!draft || !draft.id) return;
+  const biz=draft.business; if(!biz) return;
   api('call_event',{ method:'POST', body:{
-    business:biz, call_id:callWiz.id, event,
-    step:callWiz.step, meta:meta||{},
+    business:biz, call_id:draft.id, event,
+    step:draft.step, meta:meta||{},
   }}).catch(()=>{});
 }
 // Every write to the call record goes through here. There may be no record to
@@ -14488,9 +14554,71 @@ function cwTrack(event, meta){
 // the awaited call sites -- "customer declined", the end-of-call resolution
 // picker -- cannot surface "Could not log this call" at someone who was only
 // ever testing, and any call site added later inherits the same guard.
-function cwCallUpdate(patch){
-  if(!callWiz || !callWiz.id) return Promise.resolve(null);
-  return api('call_update',{ method:'POST', body:{ id:callWiz.id, ...patch }});
+async function cwCallUpdate(patch, draft=callWiz){
+  if(!draft) return null;
+  if(draft._startPromise) await draft._startPromise;
+  else if(!draft._started && draft.business && draft.service) await cwStartRecord(draft);
+  if(!draft.id) return null;
+  return api('call_update',{ method:'POST', body:{ id:draft.id, ...patch }});
+}
+async function cwStartRecord(draft){
+  if(draft._started) return;
+  if(!draft._startPromise){
+    draft._startPromise=api('call_live_start',{method:'POST',body:{business:draft.business}}).then(r=>{
+      if(!r || (!r.id && !r.untracked)) throw new Error('The call log did not return a saved record. Try again.');
+      draft.id=r.id; draft._started=true;
+      cwTrack('started',{},draft);
+    });
+  }
+  try{ await draft._startPromise; }finally{ draft._startPromise=null; }
+}
+async function cwFinishCall(resolution, meta={}){
+  const draft=callWiz;
+  if(!cwIsActive(draft) || draft._ending) return;
+  draft._ending=true;
+  document.getElementById('callWizErr').textContent='Saving call outcome…';
+  const body=document.getElementById('callWizBody');
+  body.querySelectorAll('button,input,select,textarea').forEach(b=>b.disabled=true);
+  document.getElementById('callWizEndBtn').disabled=true;
+  try{
+    await cwCallUpdate({resolution},draft);
+    cwTrack(resolution==='booked'?'booking_created':resolution==='estimate_sent'?'estimate_sent':'declined',{...meta,resolution},draft);
+    if(!cwIsActive(draft)){ draft.resolution=resolution; return; }
+    closeCallWiz({resolved:true},draft); toast('Call logged.');
+    if(onScreen('calllog')) renderCalls();
+  }catch(e){
+    if(!cwIsActive(draft)) return;
+    draft._ending=false;
+    renderCallWiz();
+    document.getElementById('callWizErr').textContent=e.message||'Could not save the outcome. Try again.';
+  }finally{
+    draft._ending=false;
+    if(callWiz===draft) document.getElementById('callWizEndBtn').disabled=false;
+  }
+}
+function cwLookupZip(draft,zip){
+  const business=draft.business;
+  const cached=draft.zipLookup;
+  if(cached && cached.business===business && cached.zip===zip){
+    if(cached.status==='pending') return cached.promise;
+    if(cached.status==='ready') return Promise.resolve(cached.data);
+  }
+  const lookup={business,zip,status:'pending'};
+  draft.zipLookup=lookup;
+  lookup.promise=api('zip_area',{params:{business,postal_code:zip},timeoutMs:12000}).then(data=>{
+    if(!data || typeof data.surcharge!=='number' || !Number.isFinite(data.surcharge)) throw new Error('Incomplete ZIP lookup.');
+    lookup.status='ready'; lookup.data=data; return data;
+  }).catch(error=>{ lookup.status='failed'; throw error; });
+  return lookup.promise;
+}
+function cwHoldActions(draft){
+  const controls=[...document.getElementById('callWizBody').querySelectorAll('button,input,select,textarea'),document.getElementById('callWizEndBtn')];
+  const disabled=controls.map(node=>node.disabled);
+  draft._ending=true; controls.forEach(node=>node.disabled=true);
+  return ()=>{
+    draft._ending=false;
+    if(cwIsActive(draft)) controls.forEach((node,i)=>{ if(node.isConnected) node.disabled=disabled[i]; });
+  };
 }
 // Which option groups the secretary must answer before moving on — the same
 // set New Booking validates at submit (nbValidateTvMountingRequired), asked up
@@ -14946,12 +15074,7 @@ function cwWireLadderCommon(scope){
       setTimeout(()=>{ if(btn.isConnected&&btn.dataset.armed==='1'){ btn.dataset.armed=''; btn.textContent=was; } },4000);
       return;
     }
-    try{
-      cwTrack('declined',{ after_discount_offer:cwDiscountApplied(), rung:callWiz.discRung });
-      await cwCallUpdate({ resolution:'refused' });
-      closeCallWiz({resolved:true}); toast('Call logged.');
-      if(onScreen('calllog')) renderCalls();
-    }catch(err){ const e2=document.getElementById('callWizErr'); if(e2) e2.textContent=err.message||'Could not log this call'; }
+    await cwFinishCall('refused',{after_discount_offer:cwDiscountApplied(),rung:callWiz.discRung});
   });
 }
 // Back one VISITED rung. discSeen is the source of truth, so a rung that was
@@ -14969,18 +15092,21 @@ function cwWireLadderBack(){
 // COMMIT THE MONEY, and only then guard the UI. A valid code the customer read
 // out must never be silently dropped because she tapped away mid round trip.
 async function cwCouponApplyNow(){
-  if(callWiz._couponBusy) return;
+  const draft=callWiz;
+  if(!cwIsActive(draft) || draft._couponBusy || draft._ending) return;
   const inp=document.getElementById('cwCouponInput'); if(!inp) return;
   const code=inp.value.trim().toUpperCase();
   if(!code){ callWiz.discCoupon=null; callWiz._couponDraft=null; renderCallWiz(); return; }
   const fromStep=callWiz.step, fromRung=callWiz.discRung, fromCall=callWiz.id;
+  const quoteVersion=draft._quoteVersion, request=++draft._couponRequest;
   callWiz._couponBusy=true;
   const btn=document.getElementById('cwCouponApply'); if(btn) btn.disabled=true;
   { const m=document.getElementById('cwCouponMsg'); if(m) m.textContent='Checking…'; }
   let r=null, errMsg=null;
-  try{ r=await api('quote_coupon',{ method:'POST', body:{ business:current.slug, code }}); }
+  try{ r=await api('quote_coupon',{ method:'POST', body:{ business:draft.business, code }}); }
   catch(e){ errMsg=e.message||'Could not check that code'; }
-  callWiz._couponBusy=false;
+  if(callWiz!==draft || draft.resolution || draft._quoteVersion!==quoteVersion || draft._couponRequest!==request) return;
+  draft._couponBusy=false;
   if(r) cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
   if(r&&r.ok){
     callWiz.discCoupon={code:r.code, amount:r.amount};
@@ -14991,7 +15117,7 @@ async function cwCouponApplyNow(){
   }
   // Guard only the UI, and re-query the node: the pre-await reference may be
   // detached by a repaint that happened while this was in flight.
-  if(callWiz.id!==fromCall || callWiz.step!==fromStep || callWiz.discRung!==fromRung) return;
+  if(!cwIsActive(draft) || draft.step!==fromStep || draft.discRung!==fromRung) return;
   if(r&&r.ok){ renderCallWiz(); return; }
   const msg=document.getElementById('cwCouponMsg'); if(!msg) return;
   if(btn) btn.disabled=false;
@@ -15053,6 +15179,8 @@ function cwWireManualApply(){
 // ceiling reflects the tech pay this specific job will incur — a 1-TV ticket
 // and a 4-TV ticket get very different answers rather than one flat rule.
 async function cwLoadEconomics(priced, travelFee, ahFee){
+  const draft=callWiz;
+  const quoteVersion=draft._quoteVersion, request=++draft._econRequest;
   const lines=(priced||[]).map(l=>({ name:l.label, quantity:l.quantity, line_total:l.price*l.quantity }));
   if(travelFee>0) lines.push({ name:'Travel', quantity:1, line_total:travelFee, kind:'fee' });
   if(ahFee>0) lines.push({ name:'After-hours fee', quantity:1, line_total:ahFee, kind:'fee' });
@@ -15064,7 +15192,7 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
   let result;
   try{
     result=await api('quote_economics',{ method:'POST', body:{
-      business:current.slug, line_items:lines,
+      business:draft.business, line_items:lines,
       scheduled_at: callWiz.prefDate ? new Date(callWiz.prefDate+'T12:00:00').toISOString() : undefined,
     }});
   }catch(e){
@@ -15076,10 +15204,10 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
   }
   // A projection that lands after the secretary has moved to another call must
   // not become that call's ceiling.
-  if(callWiz.id!==forCall) return;
+  if(callWiz!==draft || draft.resolution || draft._quoteVersion!==quoteVersion || draft._econRequest!==request) return;
   callWiz.econ=result;
   callWiz.econCallId=forCall;
-  if(callWiz.step==='discount') renderCallWiz();
+  if(cwIsActive(draft) && draft.step==='discount') renderCallWiz();
 }
 // Hand the whole call — answers, chosen slot, and any discount — into the real
 // New Booking form. The discount rides along as a negative custom line so it
@@ -15088,11 +15216,13 @@ async function cwGoToBooking(){
   // Neither button that lands here is disabled on click, and this awaits a
   // round-trip when a discount applies — a double-click used to log the
   // discount twice, which doubles it in the discount report.
-  if(callWiz.goBusy) return;
-  callWiz.goBusy=true;
-  try{ await cwGoToBookingInner(); } finally{ callWiz.goBusy=false; }
+  const draft=callWiz;
+  if(!cwIsActive(draft) || draft.goBusy || draft._ending) return;
+  draft.goBusy=true;
+  try{ await cwGoToBookingInner(); } finally{ draft.goBusy=false; }
 }
 async function cwGoToBookingInner(){
+  const draft=callWiz;
   const fromStep=callWiz.step;
   const applied=cwDiscountApplied();
   const bits=[];
@@ -15117,7 +15247,7 @@ async function cwGoToBookingInner(){
   // waits on the line. If the secretary moved on during the await (e.g. tapped
   // "Send an estimate instead"), respect that rather than repainting over the
   // screen they're now filling in.
-  if(callWiz.step!==fromStep) return;
+  if(!cwIsActive(draft) || draft.step!==fromStep) return;
   callWiz.step='customer';
   renderCallWiz();
 }
@@ -15128,11 +15258,13 @@ async function cwGoToBookingInner(){
 // Dom's card still tokenizes into Dom's Stripe account.
 let cwStripe=null, cwStripeCard=null, cwStripePk=null;
 function cwEnsureStripe(){
-  const pk=currentNbStripePk();
+  const draft=callWiz, view=draft&&draft._view;
+  const pk=currentNbStripePk(draft&&draft.business);
   if(!pk) return Promise.reject(new Error('Card entry needs a refresh — press Ctrl+Shift+R, then try again.'));
   return nbWithTimeout(new Promise((resolve,reject)=>{
     const init=()=>{
       try{
+        if(!cwIsActive(draft,view) || draft.step!=='customer') throw new Error('Card entry was closed.');
         if(cwStripeCard){ try{ cwStripeCard.unmount(); }catch(_){} cwStripeCard=null; }
         cwStripe=window.Stripe(pk);
         cwStripeCard=cwStripe.elements().create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
@@ -15151,6 +15283,8 @@ function cwEnsureStripe(){
 // lines, same tax) so a job booked on the phone is priced identically to one
 // keyed into the form.
 async function cwSubmitBooking(){
+  const draft=callWiz;
+  if(!cwIsActive(draft) || draft._ending) return;
   const err=document.getElementById('callWizErr'); err.textContent='';
   const val=id=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
   const name=val('cwCustName'), phone=val('cwCustPhone'), email=val('cwCustEmail');
@@ -15168,12 +15302,14 @@ async function cwSubmitBooking(){
   if(!payMethod){ err.textContent='Pick a payment method.'; return; }
 
   const btn=document.getElementById('cwBookNow');
+  const release=cwHoldActions(draft);
   btn.disabled=true; btn.textContent='Booking…';
   try{
     let paymentMethodId=null;
     if(payMethod==='card' && !skipCard){
       if(!cwStripeCard) throw new Error('Card form is not ready — reopen this step.');
       const r=await nbWithTimeout(cwStripe.createPaymentMethod({type:'card',card:cwStripeCard}),25000,'Card processor timed out.');
+      if(!cwIsActive(draft)) return;
       if(r.error) throw new Error(r.error.message||'That card could not be accepted.');
       paymentMethodId=r.paymentMethod.id;
     }
@@ -15208,7 +15344,7 @@ async function cwSubmitBooking(){
     // scheduled, customer told they were booked. Mint a fresh random key per
     // attempt (cached only so a retry of THIS submit still de-dupes), same as
     // the New Booking form does.
-    const _fp=[current.slug,callWiz.prefDate,callWiz.selectedSlot.key,phone||email||name].join('|');
+    const _fp=[draft.business,draft.prefDate,draft.selectedSlot.key,phone||email||name].join('|');
     const _key=nbKeyCache.get(_fp)||nbNewKey();
     nbKeyCache.set(_fp,_key);
     // 98"+ TVs are a two-person lift. The wizard already CHARGES for it via the
@@ -15217,7 +15353,7 @@ async function cwSubmitBooking(){
     const _mode=(typeof nbSecondTechMode==='function') ? nbSecondTechMode() : 'none';
     const _mandatoryPair = isTv && _mode==='mandatory';
     const resp=await apiConfirmUnavailable('booking_create',{
-      business: current.slug,
+      business: draft.business,
       idempotency_key: _key,
       customer:{ name, phone, email,
         address_line1: val('cwCustAddr'), city: val('cwCustCity'),
@@ -15239,16 +15375,18 @@ async function cwSubmitBooking(){
     nbKeyCache.delete(_fp);
     // Conversion is only counted once a booking genuinely exists.
     cwCallUpdate({
-      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' }).catch(()=>{});
-    cwTrack('booking_created',{ booking_id: resp&&resp.id?resp.id:null, total: totalPrice });
+      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' },draft).catch(()=>{});
+    cwTrack('booking_created',{ booking_id: resp&&resp.id?resp.id:null, total: totalPrice },draft);
+    if(!cwIsActive(draft)){ draft.resolution='booked'; return; }
     if(resp&&resp.warning) alert('⚠ '+resp.warning);
-    closeCallWiz({resolved:true});
+    closeCallWiz({resolved:true},draft);
     toast(resp&&resp.duplicate ? 'That booking already existed — no duplicate created' : 'Booked ✓');
     refreshCurrent();
   }catch(e){
+    if(!cwIsActive(draft)) return;
     err.textContent=e.message||'Could not create the booking.';
     btn.disabled=false; btn.textContent='Book it';
-  }
+  }finally{ release(); }
 }
 // After-hours fee for a slot — same rule as the booking form and the public
 // widget: an 8 PM start bills $75, or $100 on a Sunday. Handyman work is exempt,
@@ -15288,9 +15426,11 @@ function cwBackBtnHtml(label){
 // Wire the button rendered above. `to` is either a step name or a function that
 // performs the navigation itself (for steps that need to restore sub-state).
 function cwWireBack(to){
+  const draft=callWiz, view=draft&&draft._view;
   const b=document.getElementById('cwBack');
   if(!b) return;
   b.addEventListener('click', ()=>{
+    if(!cwIsActive(draft,view) || draft._ending) return;
     if(typeof to==='function'){ to(); return; }
     callWiz.step=to; renderCallWiz();
   });
@@ -15309,10 +15449,17 @@ function cwBackFromSchedule(){
   renderCallWiz();
 }
 async function renderCallWiz(){
+  const draft=callWiz;
+  if(!cwIsActive(draft)) return;
+  document.getElementById('callWizEndBtn').disabled=!!draft._ending;
+  if(draft._ending) return;
+  const view=++draft._view;
+  const isHere=()=>cwIsActive(draft,view);
   const body=document.getElementById('callWizBody');
+  body.setAttribute('aria-busy','false');
   const err=document.getElementById('callWizErr');
   err.textContent='';
-  const bizName=(current&&current.name)||'us';
+  const bizName=(cwBusiness(draft)||{}).name||'us';
   const s=callWiz.step;
 
   if(s==='greet'){
@@ -15331,7 +15478,7 @@ async function renderCallWiz(){
     const cwBizPicker = cwCanPickBiz ? `
       <div style="margin-bottom:12px;">
         <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:5px;">Which line rang</div>
-        <select class="search" id="cwBiz" style="margin-bottom:0;">${businesses.map(b=>
+        <select class="search" id="cwBiz" style="margin-bottom:0;" ${draft.business?'disabled':''}>${businesses.map(b=>
           `<option value="${esc(b.slug)}"${current&&b.slug===current.slug?' selected':''}>${esc(b.name)}</option>`).join('')}</select>
       </div>` : '';
     body.innerHTML=`${cwBizPicker}
@@ -15343,134 +15490,122 @@ async function renderCallWiz(){
     // business would price the call against the wrong brand.
     const cwBizSel=document.getElementById('cwBiz');
     if(cwBizSel) cwBizSel.addEventListener('change', ()=>{
+      if(!isHere() || draft.business || draft._startBusy) return;
       switchToBusiness(cwBizSel.value);
       renderCallWiz();
     });
-    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', async()=>{
-      body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
-      document.getElementById('cwSomethingElse').disabled=true;
-      const service=b.dataset.cwchoice;
+    const busy=on=>{
+      body.querySelectorAll('[data-cwchoice],#cwSomethingElse').forEach(x=>x.disabled=on);
+      if(cwBizSel) cwBizSel.disabled=on || !!draft.business;
+      body.setAttribute('aria-busy',String(on));
+    };
+    async function chooseService(service){
+      if(!isHere() || draft._startBusy || draft._ending) return;
+      if(draft.service && draft.service!==service){
+        const keep={id:draft.id,business:draft.business,_started:draft._started,cust:draft.cust,
+          _quoteVersion:draft._quoteVersion+1,
+          zip:draft.zip,areaName:draft.areaName,otherBiz:draft.otherBiz,surcharge:draft.surcharge,zipLookup:draft.zipLookup};
+        Object.assign(draft,cwNewDraft(),keep,{_visible:true,_view:view});
+        resetNbSteps(); nbServiceId=null; nbConvertLines=null; nbCustomLines=[]; nbSourceEstimateId=null;
+        nbAreaName=draft.areaName||''; nbZipAreaId=(draft.zipLookup&&draft.zipLookup.data&&draft.zipLookup.data.service_area_id)||null;
+        document.getElementById('nbTravelFee').value=draft.surcharge||'';
+      }
+      draft.business=draft.business||current.slug; draft.service=service; draft._startBusy=true;
+      busy(true);
       try{
-        const biz=current.slug;   // frozen on the call from here on: see cwBiz()
-        const r=await api('call_live_start',{ method:'POST', body:{ business:biz }});
-        callWiz.id=r.id; callWiz.business=biz; callWiz.service=service;
-        cwCallUpdate({ service }).catch(()=>{});
-        cwTrack('started');
-        cwTrack('service_picked',{ service });
-        callWiz.step='zip'; renderCallWiz();
-      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); document.getElementById('cwSomethingElse').disabled=false; }
-    }));
+        await cwStartRecord(draft);
+        cwCallUpdate({service},draft).catch(()=>{});
+        cwTrack('service_picked',{service},draft);
+        if(!isHere() || draft.step!=='greet') return;
+        if(service==='Other'){
+          cwCallUpdate({resolution:'other'},draft).catch(()=>{});
+          closeCallWiz({resolved:true},draft);
+          openNewBooking({_customTask:true,_linkCallId:draft.id});
+        }else{ draft.step='zip'; renderCallWiz(); }
+      }catch(e){ if(isHere()) err.textContent=e.message||'Could not start the call log. Try again.'; }
+      finally{
+        draft._startBusy=false;
+        if(isHere()) busy(false);
+        else if(cwIsActive(draft) && draft.step==='greet') renderCallWiz();
+      }
+    }
+    busy(!!draft._startBusy);
+    body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click',()=>chooseService(b.dataset.cwchoice)));
     // Off-catalog request (e.g. "conceal my wires but don't mount the TV", "come
     // look at my TV"), not TV Mounting, not Handyman. Logs the call like the
     // other two options, then hands straight to New Booking's Custom Task
     // category, where the office types the job and their own price by hand.
     // Resolution is set immediately (not left open) so the next "Take a Call"
     // starts a fresh call instead of resuming this one.
-    document.getElementById('cwSomethingElse').addEventListener('click', async()=>{
-      body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=true);
-      document.getElementById('cwSomethingElse').disabled=true;
-      try{
-        const biz=current.slug;
-        const r=await api('call_live_start',{ method:'POST', body:{ business:biz }});
-        callWiz.id=r.id; callWiz.business=biz; callWiz.service='Other';
-        cwCallUpdate({ service:'Other', resolution:'other' }).catch(()=>{});
-        cwTrack('started');
-        cwTrack('service_picked',{ service:'Other' });
-        callWiz.resolution='other';
-        document.getElementById('callWizModal').classList.add('hidden');
-        openNewBooking({ _customTask:true, _linkCallId:callWiz.id });
-      }catch(e){ err.textContent=e.message||'Could not start the call log'; body.querySelectorAll('[data-cwchoice]').forEach(x=>x.disabled=false); document.getElementById('cwSomethingElse').disabled=false; }
-    });
+    document.getElementById('cwSomethingElse').addEventListener('click',()=>chooseService('Other'));
     return;
   }
 
   if(s==='zip'){
     body.innerHTML=`${callWizScript("What's your zip code?")}
-      <input class="search" id="cwZip" style="margin:0;" placeholder="ZIP" inputmode="numeric" maxlength="5" value="${esc(callWiz.zip)}" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)">
-      <div id="cwZipResult" style="margin-top:8px;font-size:13px;color:var(--mute);"></div>
+      <input class="search" id="cwZip" aria-label="ZIP code" aria-describedby="cwZipResult" style="margin:0;" placeholder="ZIP" inputmode="numeric" maxlength="5" value="${esc(draft.zip)}">
+      <div id="cwZipResult" role="status" aria-live="polite" style="margin-top:8px;font-size:13px;color:var(--mute);"></div>
       <button type="button" class="btn" id="cwZipNext" style="margin-top:10px;">Continue</button>
       ${cwBackBtnHtml('They need a different service')}`;
-    const zipInput=document.getElementById('cwZip');
-    const result=document.getElementById('cwZipResult');
-    // cwZipDone is set only when a lookup actually COMPLETES, so a lookup merely
-    // in flight can never be mistaken for a finished one. cwZipSeq discards
-    // out-of-order responses: typing 78701, correcting to 78702, and having
-    // 78701's slower reply land last used to overwrite the area, surcharge and
-    // travel fee with the wrong zip's values while callWiz.zip held the new one.
-    let cwZipSeq=0, cwZipDone=null, cwZipPending=null, cwZipFailed=null;
-    function checkZip(){
-      const z=zipInput.value.trim();
-      if(z.length!==5 || z===cwZipDone) return Promise.resolve();
-      const seq=++cwZipSeq;
-      result.textContent='Checking…';
-      cwZipPending=(async()=>{
+    const zipInput=document.getElementById('cwZip'), result=document.getElementById('cwZipResult');
+    const nextBtn=document.getElementById('cwZipNext');
+    let continuing=false;
+    const clearPrice=()=>{
+      draft.areaName=null; draft.otherBiz=null; draft.surcharge=0;
+      nbAreaName=''; nbZipAreaId=null;
+      document.getElementById('nbTravelFee').value='';
+    };
+    async function checkZip(){
+      if(!isHere()) return false;
+      const z=zipInput.value.trim(); draft.zip=z;
+      if(!/^\d{5}$/.test(z)) return false;
+      const valid=()=>isHere() && draft.step==='zip' && draft.zip===z && zipInput.value.trim()===z;
+      result.textContent='Checking service area and travel fee…';
       try{
-        const d=await api('zip_area',{ params:{ business:current.slug, postal_code:z }});
-        if(seq!==cwZipSeq) return;   // superseded by a newer zip — drop this reply
-        cwZipDone=z; cwZipFailed=null;
-        callWiz.areaName=d.name; callWiz.otherBiz=d.other_business; callWiz.surcharge=Number(d.surcharge)||0;
-        // Drives the same Austin price overrides New Booking applies — without
-        // this an Austin caller would be quoted Denver rates on the phone while
-        // the same job booked online priced lower.
+        const d=await cwLookupZip(draft,z);
+        if(!valid()) return false;
+        if(draft.areaName!==d.name || draft.surcharge!==d.surcharge) cwInvalidatePrice(draft);
+        draft.areaName=d.name; draft.otherBiz=d.other_business; draft.surcharge=d.surcharge;
         nbAreaName=d.name||''; nbZipAreaId=d.service_area_id||null;
-        // nbCollectSelections' multi-TV FEE discount is computed from the travel
-        // fee, which it reads off the booking form's field. Left empty it reads
-        // as $0 and a 3+ TV call would get a different discount than the same
-        // job keyed into the form.
-        { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=callWiz.surcharge||''; }
-        if(d.name) result.innerHTML=`<span style="color:var(--ok,#15803d);">✓ In our ${esc(d.name)} service area.</span>`;
-        else if(d.other_business) result.innerHTML=`That zip is actually served by <b>${esc(d.other_business.name)}</b>, not ${esc(bizName)}.`;
-        else result.innerHTML=`We don't have this zip on file yet — double-check it, or continue and note it for the office.`;
+        document.getElementById('nbTravelFee').value=d.surcharge||'';
+        nextBtn.textContent='Continue';
+        if(d.name) result.textContent=`In our ${d.name} service area.`;
+        else if(d.other_business) result.textContent=`That ZIP is served by ${d.other_business.name}, not ${bizName}.`;
+        else result.textContent="We don't have this ZIP on file yet. Double-check it, or continue and note it for the office.";
+        return true;
       }catch(e){
-        if(seq!==cwZipSeq) return;
-        // Reset so the next attempt (blur or Continue) re-runs the lookup
-        // instead of silently proceeding on a failed one — the area/surcharge
-        // from a PREVIOUS zip must never ride along under a new zip. The travel
-        // fee lives in a DOM field the multi-TV discount reads directly, so it
-        // has to be cleared here too or a leftover $65 quietly knocks ~$39 off
-        // a 3-TV quote that has no travel fee at all.
-        cwZipDone=null; cwZipFailed=z;
-        callWiz.areaName=null; callWiz.otherBiz=null; callWiz.surcharge=0;
-        nbAreaName=''; nbZipAreaId=null;
-        { const tf=document.getElementById('nbTravelFee'); if(tf) tf.value=''; }
-        result.innerHTML='<span style="color:#b91c1c;">Could not check that zip — press Continue again to go on without it.</span>';
+        if(!valid()) return false;
+        clearPrice();
+        result.textContent='Could not check this ZIP. Try again to confirm the service area and travel fee.';
+        nextBtn.textContent='Try again';
+        return false;
       }
-      })();
-      return cwZipPending;
     }
-    zipInput.addEventListener('change', checkZip);
-    zipInput.addEventListener('blur', checkZip);
-    document.getElementById('cwZipNext').addEventListener('click', async()=>{
-      // The zip is load-bearing, not a formality: it resolves the service
-      // area, the travel fee, and the Austin price overrides. Skipping it
-      // quoted the wrong price for the rest of the call, so the funnel does
-      // not continue without a checked 5-digit zip.
+    zipInput.addEventListener('input',()=>{
+      if(!isHere()) return;
+      zipInput.value=zipInput.value.replace(/\D/g,'').slice(0,5);
+      cwInvalidatePrice(draft);
+      draft.zip=zipInput.value; clearPrice(); result.textContent=''; nextBtn.textContent='Continue';
+    });
+    zipInput.addEventListener('change',checkZip);
+    zipInput.addEventListener('blur',checkZip);
+    nextBtn.addEventListener('click',async()=>{
+      if(!isHere() || continuing) return;
       const z=zipInput.value.trim();
-      if(z.length!==5){
-        result.innerHTML='<span style="color:#b91c1c;">A 5-digit zip is required before continuing.</span>';
-        zipInput.focus();
-        return;
+      if(!/^\d{5}$/.test(z)){
+        result.textContent='Enter a 5-digit ZIP before continuing.'; zipInput.focus(); return;
       }
-      const nextBtn=document.getElementById('cwZipNext');
-      nextBtn.disabled=true;
-      // Clicking Continue right after typing fires blur first, which STARTS the
-      // lookup — so "a lookup exists" is not the same as "the lookup finished".
-      // Always wait for the in-flight one (or start one) before moving on, or
-      // the whole call is quoted with no area, no travel fee and no Austin
-      // price overrides.
-      if(z!==cwZipDone) checkZip();
-      if(cwZipPending) await cwZipPending;
-      nextBtn.disabled=false;
-      // Lookup genuinely failed: let them retry once, then go on knowingly
-      // rather than trapping them mid-call on a network blip.
-      if(z!==cwZipDone && cwZipFailed!==z) return;
-      callWiz.zip=z;
-      cwCallUpdate({ market:callWiz.areaName||null }).catch(()=>{});
-      cwTrack('zip_checked',{ zip:callWiz.zip, area:callWiz.areaName||null, in_area:!!callWiz.areaName, surcharge:callWiz.surcharge||0 });
-      callWiz.step = callWiz.service==='TV Mounting' ? 'tvopts' : 'handydesc';
-      renderCallWiz();
+      continuing=true; nextBtn.disabled=true;
+      try{
+        const checked=await checkZip();
+        if(!checked || !isHere() || draft.zip!==z || zipInput.value.trim()!==z) return;
+        cwCallUpdate({market:draft.areaName||null},draft).catch(()=>{});
+        cwTrack('zip_checked',{zip:draft.zip,area:draft.areaName||null,in_area:!!draft.areaName,surcharge:draft.surcharge},draft);
+        draft.step=draft.service==='TV Mounting'?'tvopts':'handydesc'; renderCallWiz();
+      }finally{ continuing=false; if(isHere()) nextBtn.disabled=false; }
     });
     cwWireBack('greet');
+    if(/^\d{5}$/.test(draft.zip)) checkZip();
     return;
   }
 
@@ -15481,26 +15616,33 @@ async function renderCallWiz(){
   // Booking step engine with a script wrapped around it.
   if(s==='tvopts'){
     if(!callWiz.optsLoaded){
-      body.innerHTML='<div class="empty">Loading…</div>';
+      body.innerHTML='<div class="empty" role="status" aria-live="polite">Loading TV questions…</div>'+cwBackBtnHtml('Back');
+      cwWireBack('zip');
       // Hang up (and the whole modal) stays clickable while the catalog loads,
       // so by the time this resolves the wizard may have moved on — or been
       // reset and restarted as a different call. Painting the question card
       // over whatever is showing then leaves dead buttons, or worse, walks a
       // whole call with callWiz.id still null and nothing logged.
-      const my=callWiz;
-      const stale=()=>callWiz!==my || callWiz.step!=='tvopts';
+      const my=draft, slug=draft.business;
+      const stale=()=>!isHere() || draft.step!=='tvopts' || draft.business!==slug;
       try{
-        const { svc } = await nbEnsureDataCached(current.slug);
+        const svc = await nbEnsureServicesCached(slug);
         if(stale()) return;
         nbServices = svc.services || [];
         const tvSvc=nbServices.find(x=>x.category==='TV Mounting');
-        if(!tvSvc) throw new Error('TV Mounting service is not set up for this business.');
-        const groups=await nbLoadTvOptions(tvSvc.id);
+        if(!tvSvc){ nbServicesCache.delete(slug); throw new Error('TV Mounting service is not set up for this business.'); }
+        const groups=await nbLoadTvOptions(tvSvc.id,slug);
         if(stale()) return;
         nbServiceId=tvSvc.id;
         nbOptionGroups=groups;
         callWiz.optsLoaded=true;
-      }catch(e){ if(stale()) return; body.innerHTML=`<div class="empty" style="color:var(--danger,#b91c1c);">${esc(e.message||'Could not load the questions')}</div>`; return; }
+      }catch(e){
+        if(stale()) return;
+        draft.optsLoaded=false;
+        body.innerHTML=`<div class="empty" role="alert">${esc(e.message||'Could not load the questions.')} Your call is still open.</div><button type="button" class="btn" id="cwOptionsRetry">Try again</button>${cwBackBtnHtml('Back')}`;
+        document.getElementById('cwOptionsRetry').addEventListener('click',()=>{ if(isHere()) renderCallWiz(); });
+        cwWireBack('zip'); return;
+      }
     }
     const cards=callWizCards();
     if(callWiz.optStep>=cards.length){ callWiz.step='schedule'; renderCallWiz(); return; }
@@ -15606,6 +15748,7 @@ async function renderCallWiz(){
       <button type="button" class="btn" id="cwDescNext" style="margin-top:10px;">Continue</button>
       ${cwBackBtnHtml('Back to the zip')}`;
     const setHrs=d=>{
+      cwInvalidatePrice();
       callWiz.handymanHours=Math.max(2, cwHandymanHours()+d);
       const h=cwHandymanHours();
       document.getElementById('cwHrsQty').textContent=h;
@@ -15662,14 +15805,14 @@ async function renderCallWiz(){
       if(callWiz.zip) params.postal_code=callWiz.zip;
       try{
         const r=await api('available_dates',{ params });
-        if(mySeq!==cwCalSeq) return;
+        if(!isHere() || mySeq!==cwCalSeq) return;
         callWiz.availDates=new Set(r.dates||[]);
         // A blank month has several very different causes and they all used to
         // look the same: a grid of grey. Keep the reason so the grid can say it.
         callWiz.calReason=(r.dates&&r.dates.length)?null:(r.reason||'none_open');
         callWiz.calArea=r.area||callWiz.areaName||null;
       }catch(e){
-        if(mySeq!==cwCalSeq) return;
+        if(!isHere() || mySeq!==cwCalSeq) return;
         callWiz.availDates=new Set();
         callWiz.calReason='error'; callWiz.calError=e.message||'';
       }
@@ -15727,7 +15870,7 @@ async function renderCallWiz(){
       if(callWiz.zip) params.postal_code=callWiz.zip;
       try{
         const r=await api('available_slots',{ params });
-        if(mySeq!==cwSlotSeq || date!==callWiz.prefDate) return;
+        if(!isHere() || mySeq!==cwSlotSeq || date!==draft.prefDate) return;
         if(!r.slots.length){ list.innerHTML='<div style="color:var(--mute);font-size:13px;">No available times for this date.</div>'; }
         // The 8 PM slot carries an after-hours fee. It is flagged right on the
         // button so the secretary quotes it on the call instead of discovering
@@ -15762,7 +15905,7 @@ async function renderCallWiz(){
           const nextBtn=document.getElementById('cwSchedNext'); if(nextBtn) nextBtn.style.display='';
         }));
         sayWhat();
-      }catch(e){ if(mySeq!==cwSlotSeq) return; list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
+      }catch(e){ if(!isHere() || mySeq!==cwSlotSeq) return; list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
     }
     document.getElementById('cwCalPrev').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()-1); loadCwCalendar(); });
     document.getElementById('cwCalNext').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()+1); loadCwCalendar(); });
@@ -16230,7 +16373,7 @@ async function renderCallWiz(){
     const syncCard=async()=>{
       const isCard=pmSel.value==='card';
       document.getElementById('cwCardWrap').style.display=isCard?'':'none';
-      if(isCard){ try{ await cwEnsureStripe(); }catch(e){ err.textContent=e.message; } }
+      if(isCard){ try{ await cwEnsureStripe(); }catch(e){ if(isHere()) err.textContent=e.message; } }
     };
     pmSel.addEventListener('change', syncCard);
     syncCard();
@@ -16252,16 +16395,21 @@ async function renderCallWiz(){
     // that's required, and it goes out on whichever they gave.
     body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. Would a text or an email be easier?")}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel">
-        <input class="search" id="cwEmail" style="margin:0;" placeholder="Email">
+        <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(draft.estimateContact.phone)}">
+        <input class="search" id="cwEmail" style="margin:0;" placeholder="Email" value="${esc(draft.estimateContact.email)}">
       </div>
       <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">Either one is enough — whichever they'd rather give.</div>
-      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)">
+      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${callWiz.cust&&callWiz.cust.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>Customer said yes to texts. Read this word for word first: “${esc(smsConsentScript(current))}”</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
+    for(const [key,id] of [['name','cwName'],['phone','cwPhone'],['email','cwEmail']]){
+      document.getElementById(id).addEventListener('input',e=>{ if(isHere()) draft.estimateContact[key]=e.target.value; });
+    }
+    document.getElementById('cwEstSmsConsent').addEventListener('change',e=>{ if(isHere()) draft.cust.sms=e.target.checked; });
     document.getElementById('cwEstSend').addEventListener('click', async()=>{
+      if(!isHere() || draft._ending) return;
       const name=document.getElementById('cwName').value.trim();
       const phone=document.getElementById('cwPhone').value.trim();
       const email=document.getElementById('cwEmail').value.trim();
@@ -16271,7 +16419,7 @@ async function renderCallWiz(){
       if(!email && !(phone && smsOk)){ err.textContent=phone?'To text it, read the text-message script next to the checkbox word for word, and tick the box only if they say yes. Otherwise take an email.':'A phone number or an email is needed to send it — whichever they prefer.'; return; }
       const unpriced=nbUnpricedOtherLabel();
       if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
-      const btn=document.getElementById('cwEstSend'); btn.disabled=true; btn.textContent='Sending…';
+      const btn=document.getElementById('cwEstSend');
       // Same priced lines the booking would carry, so the estimate the customer
       // receives matches what they were quoted on the call.
       let sels=[];
@@ -16290,19 +16438,21 @@ async function renderCallWiz(){
       if(estTravel!==0) sels.push({ label:estTravel>0?'Travel':'Travel discount', price:estTravel, quantity:1 });
       const estDisc=cwDiscountApplied();
       if(estDisc>0) sels.push({ label:callWiz.discountLabel||'Discount', price:-estDisc, quantity:1 });
+      const release=cwHoldActions(draft); btn.textContent='Sending…';
       try{
         const est=await api('estimate_create',{ method:'POST', body:{
-          business:current.slug, customer_name:name, customer_phone:phone, customer_email:email,
+          business:draft.business, customer_name:name, customer_phone:phone, customer_email:email,
           customer_zip:callWiz.zip, service_label:label,
           selections:sels,
           sms_consent: smsOk,
         }});
-        cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:cwDiscountApplied() });
+        cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:estDisc },draft);
         await cwCallUpdate({
           resolution:'estimate_sent',
-          notes:`Estimate sent (${label})${callWiz.prefDate?' · preferred '+callWiz.prefDate:''}`,
-        }).catch(()=>{});
-        closeCallWiz({resolved:true});
+          notes:`Estimate sent (${label})${draft.prefDate?' · preferred '+draft.prefDate:''}`,
+        },draft).catch(()=>{});
+        if(!cwIsActive(draft)){ draft.resolution='estimate_sent'; return; }
+        closeCallWiz({resolved:true},draft);
         // Say which channel it actually went out on, and never claim "sent"
         // when nothing left — the customer would be waiting on nothing.
         toast(est.warning ? '⚠ '+est.warning
@@ -16310,7 +16460,8 @@ async function renderCallWiz(){
           : est.emailed && est.texted ? 'Estimate sent by email and text ✓'
           : est.texted ? 'Estimate texted ✓'
           : 'Estimate emailed ✓');
-      }catch(e){ err.textContent=e.message||'Could not create the estimate'; btn.disabled=false; btn.textContent='Send estimate'; }
+      }catch(e){ if(isHere()){ err.textContent=e.message||'Could not create the estimate'; btn.textContent='Send estimate'; } }
+      finally{ release(); }
     });
     return;
   }
@@ -16325,15 +16476,10 @@ async function renderCallWiz(){
       </div>
       ${callWiz._beforeResolution?cwBackBtnHtml('Still on the call'):''}`;
     body.querySelectorAll('[data-cwres]').forEach(b=>b.addEventListener('click', async()=>{
-      try{
-        const res=b.dataset.cwres;
-        cwTrack(res==='booked'?'booking_created':res==='estimate_sent'?'estimate_sent':'declined',{ via:'end_call', resolution:res });
-        await cwCallUpdate({ resolution:res });
-        closeCallWiz({resolved:true}); toast('Call logged.');
-        if(onScreen('calllog')) renderCalls();
-      }catch(e){ err.textContent=e.message||'Could not log this call'; }
+      if(isHere()) await cwFinishCall(b.dataset.cwres,{via:'end_call'});
     }));
     cwWireBack(()=>{
+      if(draft._ending) return;
       callWiz.step=callWiz._beforeResolution||'recap';
       callWiz._beforeResolution=null;
       renderCallWiz();
@@ -16356,6 +16502,10 @@ function smsConsentScript(biz){
 }
 async function openNewBooking(prefill){
   if(!current) return;
+  if(callWiz && callWiz._visible){
+    if(callWiz._ending) return;
+    closeCallWiz();
+  }
   // The consent script names the brand being booked (smsConsentScript above).
   { const l=document.getElementById('nbSmsConsentLabel'); if(l) l.textContent=`Customer said yes to texts. Read this word for word first: “${smsConsentScript(current)}”`; }
   closeSidebar();
@@ -16388,6 +16538,8 @@ async function openNewBooking(prefill){
   nbSelectedSlot=null;
   nbServiceId=null;
   nbModalSession++;   // new modal session — in-flight attempts from a prior one must not hide it
+  const myNbSession=nbModalSession, myNbBusiness=current.slug;
+  const nbOpenStale=()=>myNbSession!==nbModalSession || current?.slug!==myNbBusiness;
   // Belt-and-braces: form.reset() does NOT restore a button's disabled state or
   // label, so explicitly revive the submit button in case a previous attempt
   // left it on "Processing…" (the old page-reload-required bug).
@@ -16439,7 +16591,8 @@ async function openNewBooking(prefill){
     // server-side at create time, so a briefly-stale roster can't mis-book.
     // nbEnsureDataCached also gets kicked off early (login, business switch)
     // so this usually resolves from cache with zero network wait.
-    const { svc, tech } = await nbEnsureDataCached(current.slug);
+    const { svc, tech } = await nbEnsureDataCached(myNbBusiness);
+    if(nbOpenStale()) return;
     nbServices = svc.services || [];
     nbSelectedSlot = null;
     // Prefetch the TV Mounting option groups NOW (fire-and-forget into the
@@ -16447,7 +16600,7 @@ async function openNewBooking(prefill){
     // warm-up the first tap paid a blocking round trip (up to 5 sequential
     // calls on a cold DB) before any option rendered.
     { const _tv=nbServices.find(s=>s.category==='TV Mounting');
-      if(_tv) nbLoadTvOptions(_tv.id).catch(()=>{}); }
+      if(_tv) nbLoadTvOptions(_tv.id,myNbBusiness).catch(()=>{}); }
     // Assurion is a Handy-Andy-only channel handled by Steve. Surface it as its
     // own category (built in JS, not from the DB service rows) and stash Steve's
     // id + the existing Asurion service row to link the booking to.
@@ -16494,7 +16647,8 @@ async function openNewBooking(prefill){
     // zip-change pass re-runs it anyway — nothing else here depends on it.
     nbPartner = null;
     if(!prefillHasZip) nbLoadPartnerTechs().catch(err=>{ const e=document.getElementById('nbErr'); if(e && !e.textContent) e.textContent=err.message||'Could not load the technician list — reopen the form.'; });
-  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+  }catch(err){ if(nbOpenStale()) return; document.getElementById('nbErr').textContent=err.message; }
+  if(nbOpenStale()) return;
   // Pre-fill an existing customer's details (from the Customers tab "Create
   // Appointment" button) so the office doesn't re-enter them.
   if(prefill){
@@ -16609,9 +16763,23 @@ const nbKeyCache=new Map();
 // 60s per-business cache of the services + technicians responses so reopening
 // the New Booking modal is instant instead of re-paying two round-trips. Staleness
 // is bounded and harmless: tech/slot choices are re-validated server-side on create.
-// Entries are either { at, svc, tech } (settled) or { promise } (in flight) —
-// the promise form de-dupes a warm-up call racing an actual modal open so they
-// never both fire the same two network requests.
+// Services have their own cache so the phone questions can use them without
+// waiting for the full technician roster. Both helpers share in-flight service
+// requests; a roster failure never discards a successful service response.
+const nbServicesCache=new Map();
+async function nbEnsureServicesCached(slug){
+  if(!slug) throw new Error('Choose a business before loading services.');
+  const cached=nbServicesCache.get(slug);
+  if(cached && cached.promise) return cached.promise;
+  if(cached && (Date.now()-cached.at)<60000) return cached.svc;
+  const p=api('services',{ params:{ business:slug }}).then(svc=>{
+    if(!svc || !Array.isArray(svc.services)) throw new Error('Could not load the service list. Please try again.');
+    nbServicesCache.set(slug,{ at:Date.now(), svc });
+    return svc;
+  }).catch(err=>{ if(nbServicesCache.get(slug)?.promise===p) nbServicesCache.delete(slug); throw err; });
+  nbServicesCache.set(slug,{ promise:p });
+  return p;
+}
 const nbDataCache=new Map();
 async function nbEnsureDataCached(slug){
   if(!slug) return { svc:{services:[]}, tech:{technicians:[]} };
@@ -16619,7 +16787,7 @@ async function nbEnsureDataCached(slug){
   if(cached && cached.promise) return cached.promise;
   if(cached && (Date.now()-cached.at)<60000) return { svc:cached.svc, tech:cached.tech };
   const p=Promise.all([
-    api('services',{ params:{ business:slug }}),
+    nbEnsureServicesCached(slug),
     // Full fetch (not techCache) so each tech carries service_area_id for
     // the zip-based metro filter on the tech dropdowns.
     api('technicians',{ params:{ business:slug }}),
@@ -16751,13 +16919,18 @@ async function nbPartnerTechLookup(slug, postal){
   return data;
 }
 async function nbLoadPartnerTechs(){
+  const mySession=nbModalSession, slug=current&&current.slug;
+  const postalCode=document.getElementById('nbZip').value.trim();
+  const stale=()=>mySession!==nbModalSession || !current || current.slug!==slug || document.getElementById('nbZip').value.trim()!==postalCode;
+  if(!slug) return;
   try{
-    const postalCode=document.getElementById('nbZip').value.trim();
-    const pt = await nbPartnerTechLookup(current.slug, postalCode);
+    const pt = await nbPartnerTechLookup(slug, postalCode);
+    if(stale()) return;
     if(pt && pt.partner && (pt.technicians||[]).length){
       nbPartner = { slug:pt.partner.slug, name:pt.partner.name, technicians:pt.technicians||[] };
     }
-  }catch(err){ /* no partner / not configured or postal code not found */ }
+  }catch(err){ if(stale()) return; /* no partner / not configured or postal code not found */ }
+  if(stale()) return;
   nbPopulateTechs();
   nbPopulateSecondTechs();
 }
@@ -16872,7 +17045,9 @@ function renderNbServices(category){
   svcDiv.innerHTML='<option value="">— Task —</option>'+
     list.map(s=>{ const showPrice=Number(s.base_price)>0; return `<option value="${s.id}" data-price="${s.base_price}">${esc(s.name)}${showPrice?` ($${s.base_price})`:''}</option>`; }).join('');
 }
+let nbCategoryRequest=0;
 document.getElementById('nbCategory').addEventListener('change',async e=>{
+  const myRequest=++nbCategoryRequest;
   const cat=e.target.value;
   renderNbServices(cat);
   resetNbSteps();
@@ -16936,11 +17111,21 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
       // newly chosen flow (it used to overwrite Assurion/GDS steps mid-entry
       // and hard-block Handyman submits on TV validation). Same token pattern
       // as the submit handler's nbModalSession check.
-      const mySession=nbModalSession;
-      const groups=await nbLoadTvOptions(tvMountService.id);
-      if(mySession!==nbModalSession || document.getElementById('nbCategory').value!=='TV Mounting') return;
-      nbOptionGroups=groups;
-      renderNbSteps();
+      const mySession=nbModalSession, myBusiness=current.slug;
+      const stale=()=>mySession!==nbModalSession || myRequest!==nbCategoryRequest || current?.slug!==myBusiness || document.getElementById('nbCategory').value!=='TV Mounting';
+      document.getElementById('nbSteps').innerHTML='<div class="nb-hint">Loading TV questions…</div>';
+      try{
+        const groups=await nbLoadTvOptions(tvMountService.id,myBusiness);
+        if(stale()) return;
+        nbOptionGroups=groups;
+        renderNbSteps();
+      }catch(err){
+        if(stale()) return;
+        document.getElementById('nbSteps').innerHTML=`<div class="nb-hint" role="alert">${esc(err.message||'Could not load TV questions.')}</div><button type="button" class="btn secondary" id="nbRetryTvOptions">Try again</button>`;
+        document.getElementById('nbRetryTvOptions').onclick=()=>{
+          if(!stale()) document.getElementById('nbCategory').dispatchEvent(new Event('change'));
+        };
+      }
     }
   }
 });
@@ -17129,32 +17314,39 @@ document.getElementById('nbSecondTech').addEventListener('change',()=>{
 // re-paying up to 5 sequential API calls. The cached value is the promise, so
 // concurrent selections share one in-flight request.
 const nbTvOptionsCache=new Map();
-function nbLoadTvOptions(serviceId){
-  const ck=current.slug+':'+serviceId;
+function nbLoadTvOptions(serviceId,slug=current?.slug){
+  if(!slug || !serviceId) return Promise.reject(new Error('Choose a business and TV service before loading questions.'));
+  const ck=slug+':'+serviceId;
   let p=nbTvOptionsCache.get(ck);
   if(!p){
-    p=nbLoadTvOptionsUncached(serviceId);
+    p=nbLoadTvOptionsUncached(serviceId,slug);
     nbTvOptionsCache.set(ck,p);
-    p.then(g=>{ if(!g||!g.length) nbTvOptionsCache.delete(ck); },()=>nbTvOptionsCache.delete(ck));
+    p.catch(()=>{ if(nbTvOptionsCache.get(ck)===p) nbTvOptionsCache.delete(ck); });
   }
   // Hand each caller its own copy — nbRelocateOneConnect and the render steps
   // mutate the group arrays, and shared mutation across opens corrupts state.
   return p.then(g=>JSON.parse(JSON.stringify(g)));
 }
-async function nbLoadTvOptionsUncached(serviceId){
-  let groups=[];
-  try{
-    const r=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
-    groups=r.groups||[];
-  }catch(err){ return []; }
+function nbValidateTvCatalog(groups){
+  if(!Array.isArray(groups)) throw new Error('Could not load the TV questions. Please try again.');
+  const missing=[...CW_REQUIRED_GROUPS].filter(key=>{
+    const group=groups.find(g=>g && g.key===key);
+    return !group || !Array.isArray(group.options) || !group.options.length;
+  });
+  if(missing.length) throw new Error('The TV questions are incomplete ('+missing.join(', ')+'). Please try again.');
+  return groups;
+}
+async function nbLoadTvOptionsUncached(serviceId,slug){
+  const r=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+  let groups=r.groups;
+  if(!Array.isArray(groups)) throw new Error('Could not load the TV questions. Please try again.');
   const hasFullSet=groups.some(g=>g.key==='bracket');
-  if(!hasFullSet && current.slug==='handy-andy'){
-    try{
-      await api('seed_tv_options',{ method:'POST', params:{ business:current.slug }});
-      const r2=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
-      groups=r2.groups||[];
-    }catch(err){ /* keep whatever loaded */ }
+  if(!hasFullSet && slug==='handy-andy'){
+    await api('seed_tv_options',{ method:'POST', params:{ business:slug }});
+    const r2=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+    groups=r2.groups;
   }
+  nbValidateTvCatalog(groups);
   // Self-heal the legacy size labels to their canonical forms on the live DB
   // (both companies): 70–84 → 70–85", 85–97 → 86–97", "98 plus" → 98"+. Fires
   // once: after the rename the stale forms are gone, so this is false on later
@@ -17168,10 +17360,10 @@ async function nbLoadTvOptionsUncached(serviceId){
   });
   if(stale){
     try{
-      await api('relabel_tv_size',{ method:'POST', params:{ business:current.slug }});
-      const r3=await api('service_options',{ params:{ business:current.slug, service_id:serviceId }});
-      groups=r3.groups||[];
-    }catch(err){ /* keep whatever loaded */ }
+      await api('relabel_tv_size',{ method:'POST', params:{ business:slug }});
+    }catch(err){ return nbRelocateOneConnect(groups); }   // valid legacy labels remain usable
+    const r3=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+    groups=nbValidateTvCatalog(r3.groups);
   }
   return nbRelocateOneConnect(groups);
 }
@@ -17206,6 +17398,9 @@ function nbTodayStr(){ return new Date().toISOString().split('T')[0]; }
 let nbCalSeq=0;
 async function loadNbCalendar(){
   const mySeq=++nbCalSeq;
+  const mySession=nbModalSession, slug=current&&current.slug;
+  const stale=()=>mySeq!==nbCalSeq || mySession!==nbModalSession || !current || current.slug!==slug;
+  if(!slug) return;
   const wrap=document.getElementById('nbCalWrap'); wrap.style.display='';
   const prim=nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' };
   document.getElementById('nbCalTitle').textContent=nbCalMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
@@ -17220,7 +17415,7 @@ async function loadNbCalendar(){
     return;
   }
   document.getElementById('nbCalGrid').innerHTML='<div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div>';
-  const params={ business:current.slug, month:nbMonthKey(nbCalMonth), technician_id:prim.id };
+  const params={ business:slug, month:nbMonthKey(nbCalMonth), technician_id:prim.id };
   if(prim.pool==='partner'||prim.pool==='cross') params.pool=prim.pool;
   // The zip scopes each roster to its own metro server-side — without it an
   // "any" side lights up days only an out-of-metro tech has open.
@@ -17230,9 +17425,9 @@ async function loadNbCalendar(){
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
   try{
     const r=await api('available_dates',{ params });
-    if(mySeq!==nbCalSeq) return;   // superseded by a newer load — discard
+    if(stale()) return;   // superseded by a newer load or a different draft
     nbAvailDates=new Set(r.dates||[]);
-  }catch(err){ if(mySeq!==nbCalSeq) return; nbAvailDates=new Set(); }
+  }catch(err){ if(stale()) return; nbAvailDates=new Set(); }
   renderNbCalendar();
 }
 function renderNbCalendar(){
@@ -17263,11 +17458,15 @@ document.getElementById('nbCalGrid').addEventListener('click',async e=>{
 // First two letters of a tech's name, uppercased — "Juan" -> "JU". Matches the
 // slot-picker circle badges; falls back to "?" for an unnamed/blank row.
 function nbInitials(name){ const n=(name||'').trim(); return n ? n.slice(0,2).toUpperCase() : '?'; }
+let nbSlotsSeq=0;
 async function loadNbSlots(date){
+  const mySeq=++nbSlotsSeq, mySession=nbModalSession, slug=current&&current.slug;
+  const stale=()=>mySeq!==nbSlotsSeq || mySession!==nbModalSession || !current || current.slug!==slug || document.getElementById('nbDate').value!==date;
+  if(!slug) return;
   nbSelectedSlot=null;
   if(!date){ document.getElementById('nbSlotsWrap').style.display='none'; return; }
   const prim=nbParseTech(document.getElementById('nbTech').value) || { id:'any', pool:'own' };
-  const params={ business:current.slug, date, technician_id:prim.id };
+  const params={ business:slug, date, technician_id:prim.id };
   if(prim.pool==='partner'||prim.pool==='cross') params.pool=prim.pool;
   const second=nbEffectiveSecondTech();
   if(second){ params.secondary_technician_id=second.id; if(second.pool==='partner') params.pool2='partner'; }
@@ -17275,6 +17474,7 @@ async function loadNbSlots(date){
   if(postalCode) params.postal_code=postalCode;
   try{
     const r=await api('available_slots',{ params });
+    if(stale()) return;
     if(!r.slots.length){ document.getElementById('nbSlots').innerHTML='<div style="color:#9fb0c3;font-size:13px;">No available times for this date.</div>'; }
     else document.getElementById('nbSlots').innerHTML=r.slots.map(s=>{
       const techs=(s.free_techs||[]).map(t=>`<span class="nb-slot-tech" style="background:${esc(t.color||'#8a94a3')};" title="${esc(t.name)}">${esc(nbInitials(t.name))}</span>`).join('');
@@ -17282,7 +17482,7 @@ async function loadNbSlots(date){
     }).join('');
     document.getElementById('nbSlotsWrap').style.display='';
     updateNbTotal();
-  }catch(err){ document.getElementById('nbErr').textContent=err.message; }
+  }catch(err){ if(stale()) return; document.getElementById('nbErr').textContent=err.message; }
 }
 document.getElementById('nbTech').addEventListener('change',()=>{
   // Tech changed — recompute the calendar and clear any prior date/slot pick.
@@ -17314,16 +17514,20 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // Postal code changed — resolve its metro so the tech dropdowns show only that
   // metro's techs, then reload partner techs (also filtered to this area).
   const postal=document.getElementById('nbZip').value.trim();
+  const mySession=nbModalSession, slug=current&&current.slug;
+  const stale=()=>mySession!==nbModalSession || !current || current.slug!==slug || document.getElementById('nbZip').value.trim()!==postal;
+  if(!slug) return;
   nbZipAreaId=null; nbAreaName=''; let surcharge=0, otherBiz=null, lookupFailed=false;
   // The metro lookup and the partner-roster reload both only depend on `postal`
   // (never on each other's result), so run them concurrently instead of one
   // after the other. nbLoadPartnerTechs is self-contained — it sets nbPartner
   // and repopulates both tech dropdowns itself once its own fetch resolves.
   const zipPromise = postal
-    ? nbZipAreaLookup(current.slug, postal).catch(()=>{ lookupFailed=true; return null; })
+    ? nbZipAreaLookup(slug, postal).catch(()=>{ lookupFailed=true; return null; })
     : Promise.resolve(null);
   const partnerPromise = nbLoadPartnerTechs();
   const a = await zipPromise;
+  if(stale()) return;
   if(a){ nbZipAreaId=a.service_area_id||null; nbAreaName=a.name||''; surcharge=Number(a.surcharge)||0; otherBiz=a.other_business||null; }
   // Show a live service-area / travel-fee readout next to the ZIP, in the same
   // assistant voice as the question above it.
@@ -17393,6 +17597,7 @@ document.getElementById('nbZip').addEventListener('change',async ()=>{
   // was about to change out from under it. (Kicked off above, concurrently
   // with the zip_area lookup — just waiting on it here, not starting it.)
   await partnerPromise;
+  if(stale()) return;
   // Clear any prior date/slot pick since service area changed
   document.getElementById('nbDate').value='';
   nbSelectedSlot=null;
@@ -18276,8 +18481,11 @@ function nbBuildGdsNotes(phone){
   return note;
 }
 document.getElementById('nbService').addEventListener('change',async e=>{
+  const mySession=nbModalSession, slug=current&&current.slug;
+  if(!slug) return;
   resetNbSteps();
   const sid=e.target.value;
+  const stale=()=>mySession!==nbModalSession || !current || current.slug!==slug || document.getElementById('nbService').value!==sid;
   nbServiceId=sid||null;
   if(!sid){ updateNbTotal(); return; }
   // Handyman tasks are billed by the hour ($85/hr) — no TV option groups.
@@ -18288,10 +18496,11 @@ document.getElementById('nbService').addEventListener('change',async e=>{
     return;
   }
   try{
-    const r=await api('service_options',{ params:{ business:current.slug, service_id:sid }});
+    const r=await api('service_options',{ params:{ business:slug, service_id:sid }});
+    if(stale()) return;
     nbOptionGroups=nbRelocateOneConnect(r.groups||[]);
     renderNbSteps();
-  }catch(err){ /* no option groups — manual quote */ }
+  }catch(err){ if(stale()) return; /* no option groups — manual quote */ }
 });
 // ── Payment method + Stripe card entry ──────────────────────────────────────
 const NB_STRIPE_KEY='pk_live_51Olvl3IqRVZvLFqu9lmppvTG7bOYTjAY30EoaDZXwKciPfGw5G24kAwVzU91FmgzypjfQfcmXFyGdc3UMBD3dOgF00DZZutNIA';
@@ -18310,8 +18519,7 @@ function nbWithTimeout(p,ms,msg){
 // (the booking itself still succeeds, so nothing looked wrong to the office).
 // `businesses[].stripe_pk` (from login()) gives the correct key per business.
 let nbStripePkUsed=null;   // which key the cached Elements instance was built with
-function currentNbStripePk(){
-  const slug=current&&current.slug;
+function currentNbStripePk(slug=current&&current.slug){
   const biz=(businesses||[]).find(b=>b.slug===slug);
   if(biz && biz.stripe_pk) return biz.stripe_pk;
   // NB_STRIPE_KEY is HANDY ANDY's key — it is only ever a safe fallback for

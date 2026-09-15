@@ -6365,16 +6365,28 @@ async function zipArea(req, res, db, auth) {
   if (!postal) return res.status(200).json({ service_area_id: null, name: null, surcharge: 0 });
   // Also return the per-zip surcharge so the manual New Booking form can auto-fill
   // the Travel Fee the same way the public widget auto-applies it. Tolerate the
-  // surcharge column being absent on older DBs (degrade to 0).
+  // surcharge column being absent on older DBs (degrade to 0), but never turn
+  // a failed price lookup into a successful zero-fee answer.
   let data = null;
-  ({ data } = await db.from('service_area_zips')
-    .select('service_area_id, surcharge, service_area:service_areas ( name )')
-    .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle()
-    .then(r => r, () => ({ data: null })));
-  if (!data) {
-    ({ data } = await db.from('service_area_zips')
+  let hasSurcharge = true;
+  try {
+    const result = await db.from('service_area_zips')
+      .select('service_area_id, surcharge, service_area:service_areas ( name )')
+      .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle();
+    if (result.error) throw result.error;
+    data = result.data;
+  } catch (error) {
+    if (!['42703', 'PGRST204'].includes(error?.code) || missingColumn(error?.message) !== 'surcharge') throw error;
+    hasSurcharge = false;
+    const result = await db.from('service_area_zips')
       .select('service_area_id, service_area:service_areas ( name )')
-      .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle());
+      .eq('business_id', biz.id).eq('postal_code', postal).maybeSingle();
+    if (result.error) throw result.error;
+    data = result.data;
+  }
+  const surcharge = data && hasSurcharge ? Number(data.surcharge) : 0;
+  if (data && hasSurcharge && (data.surcharge == null || data.surcharge === '' || !Number.isFinite(surcharge))) {
+    throw new Error('Could not verify the travel fee. Please try again.');
   }
   // Not served by THIS business? Check whether the OTHER company covers the zip
   // (e.g. a Houston zip typed while the dashboard is on Dom's, which is
@@ -6383,16 +6395,19 @@ async function zipArea(req, res, db, auth) {
   let other_business = null;
   if (!data) {
     try {
-      const { data: hit } = await db.from('service_area_zips')
-        .select('surcharge, business:businesses!inner ( slug, name, active ), service_area:service_areas ( name )')
+      const { data: hit, error } = await db.from('service_area_zips')
+        .select((hasSurcharge ? 'surcharge, ' : '') + 'business:businesses!inner ( slug, name, active ), service_area:service_areas ( name )')
         .eq('postal_code', postal).neq('business_id', biz.id)
         .eq('business.active', true).limit(1).maybeSingle();
+      if (error) throw error;
       if (hit?.business) {
+        const otherSurcharge = hasSurcharge ? Number(hit.surcharge) : 0;
+        if (hasSurcharge && (hit.surcharge == null || hit.surcharge === '' || !Number.isFinite(otherSurcharge))) throw new Error('Invalid alternate business travel fee');
         other_business = {
           slug: hit.business.slug,
           name: hit.business.name,
           area: hit.service_area?.name || null,
-          surcharge: Number(hit.surcharge) || 0,
+          surcharge: otherSurcharge,
         };
       }
     } catch (e) { /* hint only — never block the zip answer */ }
@@ -6400,7 +6415,7 @@ async function zipArea(req, res, db, auth) {
   return res.status(200).json({
     service_area_id: data?.service_area_id || null,
     name: data?.service_area?.name || null,
-    surcharge: Number(data?.surcharge) || 0,
+    surcharge,
     other_business,
   });
 }
