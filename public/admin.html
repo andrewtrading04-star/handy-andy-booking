@@ -9942,7 +9942,7 @@ function callCard(r,handled){
   const otherHas = r.claim_active && !r.claimed_by_me;
   const claimBtn = !hasPhone ? '' : otherHas
     ? `<button class="rc-call disabled" data-callclaim="${esc(r.id)}" style="border:none;">${esc(r.claimed_by)} is already on this — claim anyway</button>`
-    : `<button class="rc-call" data-callclaim="${esc(r.id)}" style="border:none;cursor:pointer;">I'm calling ${esc(r.caller_pretty)} back</button>`;
+    : `<button class="rc-call" data-callclaim="${esc(r.id)}" style="border:none;cursor:pointer;">Call back</button>`;
   // A live call already logged its own outcome through the wizard's resolution
   // step (or can be resolved from here if the secretary skipped it) — the
   // voicemail-oriented Done/Called back/Ignore buttons don't fit "I was just
