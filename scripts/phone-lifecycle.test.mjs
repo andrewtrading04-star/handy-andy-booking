@@ -2,12 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const html=fs.readFileSync(new URL('../public/admin.html',import.meta.url),'utf8').replaceAll('\r\n','\n');
 function cut(start,end){const a=html.indexOf(start),b=html.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,`Missing source boundary: ${start}`);return html.slice(a,b);}
 const entry=cut('let callWiz=null;','// A row of tappable choice buttons');
 const helpers=cut('function cwBiz(){','function cwLookupZip(');
+const requestId=cut('function cwRequestId(){','// Which option groups');
+const roundMoney=html.match(/^function cwRoundMoney\(value\).*$/m)[0];
+const displayMoney=html.match(/^function cwMoneyCents\(n\).*$/m)[0]+'\n'+html.match(/^function cwMoney\(n\).*$/m)[0];
 const pricing=cut('async function cwCouponApplyNow(){','function cwWireCouponApply(){')+
+  cut('function cwWireCouponApply(){','function cwWireManualApply(){')+
+  cut('function cwCouponDirty(){','// Claim the ladder for THIS call.')+
+  html.match(/^function cwOn\(id, ev, fn\).*$/m)[0]+'\n'+
   cut('async function cwLoadEconomics(priced, travelFee, ahFee){','// Hand the whole call — answers, chosen slot, and any discount');
 const back=cut('function cwBackBtnHtml(label){','// Step to return to from the schedule card:');
 const teardown=cut('function dismissAllOverlays(){','function logout(opts){');
@@ -22,12 +29,15 @@ const copy=value=>JSON.parse(JSON.stringify(value));
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 
 function setup(){
-  const nodes=new Map(),requests=[],toasts=[];
+  const nodes=new Map(),requests=[],toasts=[],windowHandlers=new Map(),warmups=[];
+  let deferAllUpdates=false;
   class Element{
     constructor(id='',tag='div'){Object.assign(this,{id,tag,value:'',disabled:false,checked:false,textContent:'',dataset:{},style:{},handlers:{},children:[],isConnected:true,attributes:{}});const classes=new Set();this.classList={add:k=>classes.add(k),remove:k=>classes.delete(k),contains:k=>classes.has(k)};}
     addEventListener(type,fn){(this.handlers[type]||=[]).push(fn);}
     async fire(type='click',{force=false}={}){if(this.disabled&&!force)return;await Promise.all((this.handlers[type]||[]).map(fn=>fn({target:this,currentTarget:this,preventDefault(){}})));}
     setAttribute(key,value){this.attributes[key]=value;}
+    appendChild(child){this.children.push(child);child.isConnected=true;if(child.id)nodes.set(child.id,child);return child;}
+    remove(){this.isConnected=false;if(this.id)nodes.delete(this.id);for(const child of this.children)child.remove();}
     reset(){this.value='';}
     get innerHTML(){return this.markup||'';}
     set innerHTML(markup){
@@ -46,20 +56,22 @@ function setup(){
   for(const id of ['callWizModal','callWizBody','callWizErr','callWizEndBtn','takeCallBtn','nbTravelFee','nbSteps','nbSecondTechWrap','nbSecondTech','modal'])node(id);
   const ctx=vm.createContext({
     console,Set,Date,Promise,current:{slug:'doms',name:"Dom's"},businesses:[{slug:'doms',name:"Dom's"},{slug:'austin',name:'Austin'}],scope:'doms',
-    document:{getElementById:id=>nodes.get(id)||null},nbModalSession:0,nbCalSeq:0,
+    crypto:webcrypto,window:{addEventListener:(type,fn)=>windowHandlers.set(type,fn)},
+    document:{getElementById:id=>nodes.get(id)||null,createElement:tag=>new Element('',tag),body:new Element('body')},nbModalSession:0,nbCalSeq:0,nbLinkedCallId:null,nbLinkedCallDraft:null,
     nbOptionGroups:[],nbQty:{},nbOptionNotes:{},nbOptionPrices:{},nbFrameTvQty:{regular:0,frame:0},nbServices:[],nbServiceId:null,
     nbAreaName:'',nbZipAreaId:null,nbConvertLines:null,nbCustomLines:[],nbSourceEstimateId:null,nbAutoTravel:'',
     nbHandymanActive:false,nbHandymanHours:0,nbHandymanLabel:'',nbHandymanNote:'',nbAssurionActive:false,nbAssurionSel:new Set(),nbGdsActive:false,nbNoChargeActive:false,nbCustomTaskActive:false,
     closeSidebar(){},renderNbConvertSummary(){},nbRenderCustomLines(){},onScreen(){return false;},openNewBooking(){},
+    cwWarmTvCatalog(slug){const warm={slug,...deferred()};warmups.push(warm);return warm.promise;},
     toast:s=>toasts.push(s),esc:String,callWizScript:s=>s,cwBackBtnHtml:()=>'',cwWireBack(){},
-    HANDYMAN_HOURLY:65,money:value=>'$'+value,
+    HANDYMAN_HOURLY:85,TAX_RATE:0.0825,money:value=>'$'+value,
     callWizChoiceRow:opts=>opts.map(o=>`<button data-cwchoice="${o.value}">${o.label}</button>`).join(''),
-    api(action,opts){const request={action,...opts};requests.push(request);if(['call_live_start','quote_economics','quote_coupon'].includes(action)||(action==='call_update'&&opts.body.resolution)){const d=deferred();Object.assign(request,d);return d.promise;}return Promise.resolve({ok:true});},
+    api(action,opts){const request={action,...opts};requests.push(request);if(['call_live_start','quote_economics','quote_coupon'].includes(action)||(action==='call_update'&&(deferAllUpdates||opts.body.resolution))){const d=deferred();Object.assign(request,d);return d.promise;}return Promise.resolve({ok:true});},
   });
   ctx.switchToBusiness=slug=>{ctx.current=ctx.businesses.find(b=>b.slug===slug);};
   ctx.cwHandymanHours=()=>Math.max(2,Number(ctx.draft().handymanHours)||2);
-  vm.runInContext(entry+'\n'+helpers+'\n'+pricing+'\n'+reset+'\n'+back+'\n'+teardown+'\n'+renderer+'\nglobalThis.draft=()=>callWiz;',ctx);
-  return {ctx,node,nodes,requests,toasts,
+  vm.runInContext(entry+'\n'+helpers+'\n'+requestId+'\n'+roundMoney+'\n'+displayMoney+'\n'+pricing+'\n'+reset+'\n'+back+'\n'+teardown+'\n'+renderer+'\nglobalThis.draft=()=>callWiz;',ctx);
+  return {ctx,node,nodes,requests,toasts,windowHandlers,warmups,deferUpdates:()=>{deferAllUpdates=true;},
     starts:()=>requests.filter(r=>r.action==='call_live_start'),ends:()=>requests.filter(r=>r.action==='call_update'&&r.body.resolution),
     choices:()=>node('callWizBody').querySelectorAll('[data-cwchoice]'),outcomes:()=>node('callWizBody').querySelectorAll('[data-cwres]'),
     async begin(reply={id:'call-1'}){ctx.openTakeCall();const run=this.choose();this.starts().at(-1).resolve(reply);await run;return ctx.draft();},
@@ -83,6 +95,15 @@ test('service start locks the business picker and rejects stale forced changes',
   f.starts()[0].resolve({id:'call-1'});await run;assert.equal(f.ctx.draft().business,'doms');assert.equal(f.ctx.draft().step,'zip');
 });
 
+test('TV catalog warmup runs alongside logging and cannot block or repaint the ZIP card',async()=>{
+  const f=setup();f.ctx.openTakeCall();const starting=f.choose();
+  assert.equal(f.warmups.length,1);assert.equal(f.warmups[0].slug,'doms');assert.equal(f.starts().length,1);
+  f.starts()[0].resolve({id:'call-1'});await starting;assert.equal(f.ctx.draft().step,'zip');
+  const view=f.ctx.draft()._view;f.warmups[0].reject(Error('Warmup offline'));await new Promise(r=>setImmediate(r));
+  assert.equal(f.ctx.draft().step,'zip');assert.equal(f.ctx.draft()._view,view);assert.equal(f.node('callWizErr').textContent,'');
+  f.ctx.draft().step='greet';await f.ctx.renderCallWiz();await f.choose('Handyman');assert.equal(f.warmups.length,1);
+});
+
 test('a different service keeps one call record and clears only old service answers',async()=>{
   const f=setup(),draft=await f.begin();draft.zip='78701';draft.cust.name='Test Caller';draft.discManual=15;draft.step='greet';f.ctx.nbQty.size={large:2};
   await f.ctx.renderCallWiz();await f.choose('Handyman');
@@ -94,6 +115,8 @@ test('a failed start can retry and shares one pending start across concurrent ca
   const f=setup();f.ctx.openTakeCall();let run=f.choose();f.starts()[0].reject(Error('Network unavailable'));await run;
   assert.match(f.node('callWizErr').textContent,/Network unavailable/);assert.ok(f.choices().every(b=>!b.disabled));assert.equal(f.ctx.draft()._startPromise,null);
   run=f.choose();const concurrent=f.ctx.cwStartRecord(f.ctx.draft());assert.equal(f.starts().length,2);
+  assert.match(f.starts()[0].body.call_id,/^[0-9a-f-]{36}$/i);
+  assert.equal(f.starts()[1].body.call_id,f.starts()[0].body.call_id,'a retry must reuse the original server identity even after a lost response');
   f.starts()[1].resolve({id:'retry-call'});await Promise.all([run,concurrent]);assert.equal(f.ctx.draft().id,'retry-call');assert.equal(f.ctx.draft().step,'zip');
 });
 
@@ -175,6 +198,12 @@ test('an old outcome response cannot close a replacement draft',async()=>{
   assert.equal(f.ctx.draft(),next);assert.equal(next.resolution,null);assert.equal(next._visible,true);assert.equal(f.node('callWizModal').classList.contains('hidden'),false);assert.equal(old._ending,false);
   assert.equal(f.node('callWizEndBtn').disabled,false,'a fresh call must regain its Hang up control after a session handoff');
 });
+test('Other outcomes save without being counted as customer declines',async()=>{
+  const f=setup();await f.begin();const finishing=f.ctx.cwFinishCall('other');await new Promise(resolve=>setImmediate(resolve));
+  f.ends().at(-1).resolve({ok:true});await finishing;
+  assert.equal(f.requests.filter(r=>r.action==='call_event'&&r.body.event==='declined').length,0);
+  assert.equal(f.ends().at(-1).body.resolution,'other');
+});
 
 test('a paused phone quote restores all shared pricing fields after the real New Booking reset',async()=>{
   const f=setup(),draft=await f.begin();draft.step='tvopts';draft.optsLoaded=true;
@@ -228,4 +257,91 @@ test('an older economics response cannot replace a newer projection for the same
   requests[1].resolve({max_discount:30,profit:90});await newer;assert.equal(draft.econ.max_discount,30);assert.equal(draft.preDiscountTotal,425);
   requests[0].resolve({max_discount:100,profit:150});await older;
   assert.equal(draft.econ.max_discount,30);assert.equal(draft.econ.profit,90);assert.equal(draft.preDiscountTotal,425);assert.equal(draft.econCallId,'call-1');
+});
+
+test('call detail writes finish in order and a failed older patch merges into the next save',async()=>{
+  const f=setup(),draft=await f.begin();f.deferUpdates();
+  const writes=()=>f.requests.filter(r=>r.action==='call_update'&&r.resolve);
+  const older=f.ctx.cwCallUpdate({notes:'Initial note',service:'TV Mounting'},draft);
+  const rejected=assert.rejects(older,/Temporary failure/);
+  const newer=f.ctx.cwCallUpdate({notes:'Final note',resolution:'refused'},draft);
+  assert.equal(writes().length,1,'the second write must not leave before the first settles');
+  writes()[0].reject(Error('Temporary failure'));await rejected;await new Promise(r=>setImmediate(r));
+  assert.equal(writes().length,2);
+  assert.deepEqual(copy(writes()[1].body),{id:'call-1',notes:'Final note',service:'TV Mounting',resolution:'refused'});
+  assert.match(f.node('cwLogStatus').innerHTML,/Some call details have not saved/);
+  writes()[1].resolve({ok:true});await newer;
+  assert.equal(draft._unsavedCallPatch,null);assert.equal(draft._updatePromise,null);assert.equal(f.nodes.has('cwLogStatus'),false);
+});
+
+test('failed call details stay retryable after the secretary starts a new call',async()=>{
+  const f=setup(),old=await f.begin();f.deferUpdates();
+  const saving=f.ctx.cwCallUpdate({notes:'Original caller note'},old),failure=assert.rejects(saving,/Offline/);
+  f.requests.at(-1).reject(Error('Offline'));await failure;
+  f.ctx.callWizReset();f.ctx.openTakeCall();const next=f.ctx.draft();
+  const retry=f.node('cwRetryLogs').fire(),request=f.requests.at(-1);
+  assert.equal(request.action,'call_update');assert.equal(request.body.id,'call-1');assert.equal(request.body.notes,'Original caller note');
+  request.resolve({ok:true});await retry;
+  assert.equal(f.ctx.draft(),next);assert.equal(next.id,null);assert.equal(old._unsavedCallPatch,null);
+  assert.equal(f.requests.filter(r=>r.action==='booking_create'||r.action==='estimate_create').length,0,'retrying call history cannot replay customer actions');
+});
+
+test('editing the coupon while its check is pending cannot apply the previous code',async()=>{
+  const f=setup(),draft=await f.begin();draft.step='discount';draft.discRung='coupon';
+  for(const id of ['cwCouponInput','cwCouponApply','cwCouponMsg'])f.node(id);
+  f.node('cwCouponInput').value='SAVE50';f.ctx.cwWireCouponApply();
+  const applying=f.ctx.cwCouponApplyNow(),request=f.requests.find(r=>r.action==='quote_coupon');
+  f.node('cwCouponInput').value='SAVE20';await f.node('cwCouponInput').fire('input');
+  request.resolve({ok:true,code:'SAVE50',amount:50});await applying;
+  assert.equal(draft.discCoupon,null);assert.equal(draft._couponDraft,'SAVE20');assert.equal(draft._couponBusy,false);
+  assert.equal(f.node('cwCouponApply').disabled,false);assert.match(f.node('cwCouponMsg').innerHTML,/Not applied yet/);
+  const corrected=f.ctx.cwCouponApplyNow(),retry=f.requests.filter(r=>r.action==='quote_coupon').at(-1);
+  assert.equal(retry.body.code,'SAVE20');retry.resolve({ok:true,code:'SAVE20',amount:20});await corrected;
+  assert.deepEqual(copy(draft.discCoupon),{code:'SAVE20',amount:20});
+});
+
+test('navigating away and back invalidates a pending coupon without changing the quote',async()=>{
+  const f=setup(),draft=await f.begin();draft.step='discount';draft.discRung='coupon';f.node('cwCouponInput').value='SAVE50';
+  const version=draft._quoteVersion,applying=f.ctx.cwCouponApplyNow(),request=f.requests.find(r=>r.action==='quote_coupon');
+  draft.step='recap';await f.ctx.renderCallWiz();draft.step='discount';await f.ctx.renderCallWiz();f.node('cwCouponInput').value='SAVE50';
+  request.resolve({ok:true,code:'SAVE50',amount:50});await applying;
+  assert.equal(draft._quoteVersion,version);assert.equal(draft.discCoupon,null);assert.equal(draft._couponBusy,false);
+  assert.equal(f.requests.filter(r=>r.action==='call_event'&&r.body.event==='coupon_applied').length,0);
+});
+
+test('browser close prompts only for an unfinished call or failed call details',async()=>{
+  const f=setup();let prevented=0;
+  const event=()=>({preventDefault(){prevented++;},returnValue:undefined});
+  f.windowHandlers.get('beforeunload')(event());assert.equal(prevented,0);
+  const draft=await f.begin();f.windowHandlers.get('beforeunload')(event());assert.equal(prevented,1);
+  draft.resolution='closed';f.windowHandlers.get('beforeunload')(event());assert.equal(prevented,1);
+  f.ctx.cwShowLogProblem(draft,'update',Error('Offline'));f.windowHandlers.get('beforeunload')(event());assert.equal(prevented,2);
+});
+
+test('Something else hands existing contact and ZIP to Custom Task on the same call record',async()=>{
+  const f=setup(),draft=await f.begin();let prefill;
+  draft.step='greet';draft.zip='78701';Object.assign(draft.cust,{name:'Test Caller',phone:'5125550100',email:'test@example.com',addr:'1 Main St',city:'Austin',state:'TX',sms:true});
+  f.ctx.openNewBooking=value=>{prefill=value;};await f.ctx.renderCallWiz();await f.node('cwSomethingElse').fire();
+  assert.equal(draft.service,'Other');assert.equal(draft.resolution,'closed');assert.equal(prefill._customTask,true);
+  assert.equal(prefill._linkCallId,'call-1');assert.equal(prefill._linkCallDraft,draft);assert.equal(prefill.name,'Test Caller');
+  assert.equal(prefill.address_line1,'1 Main St');assert.equal(prefill.postal_code,'78701');assert.equal(prefill.sms_consent,true);
+  assert.equal(prefill.line_items,undefined,'changing to a custom task cannot carry unrelated TV charges');
+  await new Promise(r=>setImmediate(r));f.ends().at(-1).resolve({ok:true});
+});
+
+test('a Custom Task booking corrects only its captured call and waits for its earlier Other outcome',async()=>{
+  const f=setup(),old=await f.begin();f.deferUpdates();
+  f.ctx.nbLinkedCallId=old.id;f.ctx.nbLinkedCallDraft=old;f.ctx.bookGate=deferred();
+  const capture=cut('  const mySession=nbModalSession;   // detect close-and-reopen-for-a-new-job while in flight','  try{');
+  const success=cut('      if(linkedCallDraft){','      // Only hide the modal');
+  vm.runInContext('globalThis.completeCustomBooking=async function(){'+capture+'const resp=await bookGate.promise;'+success+'};',f.ctx);
+  const handoff=f.ctx.cwCallUpdate({resolution:'other'},old),earlier=f.requests.at(-1);
+  const booking=f.ctx.completeCustomBooking();
+  const next={id:'call-2',business:'doms',_started:true};f.ctx.nbModalSession++;f.ctx.nbLinkedCallId=next.id;f.ctx.nbLinkedCallDraft=next;
+  f.ctx.bookGate.resolve({id:'booking-1'});await booking;
+  assert.equal(f.requests.at(-1),earlier,'booked correction must wait for the queued Other save');
+  assert.equal(f.ctx.nbLinkedCallId,'call-2');assert.equal(f.ctx.nbLinkedCallDraft,next);
+  earlier.resolve({ok:true});await handoff;await new Promise(r=>setImmediate(r));
+  const correction=f.requests.at(-1);assert.deepEqual(copy(correction.body),{id:'call-1',resolution:'booked',booking_id:'booking-1'});
+  correction.resolve({ok:true});await old._updatePromise;
 });

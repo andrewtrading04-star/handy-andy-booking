@@ -15,8 +15,9 @@ const houstonAreaIdCache = new Map();
 async function houstonAreaIdFor(db, businessId) {
   if (!businessId) return null;
   if (houstonAreaIdCache.has(businessId)) return houstonAreaIdCache.get(businessId);
-  const { data } = await db.from('service_areas')
+  const { data, error } = await db.from('service_areas')
     .select('id').eq('business_id', businessId).ilike('name', 'houston').maybeSingle();
+  if (error) throw error;
   const id = data?.id || null;
   houstonAreaIdCache.set(businessId, id);
   return id;

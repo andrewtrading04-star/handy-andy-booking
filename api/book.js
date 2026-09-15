@@ -439,18 +439,23 @@ function couponFallbackMap(businessSlug) {
 // { CODE: amount } for every ACTIVE, unexpired coupon this business honors.
 // Cached for a minute — this sits in the booking hot path and the list changes
 // a few times a month at most.
-export async function couponMapFor(db, businessSlug) {
+export async function couponMapFor(db, businessSlug, { strict = false } = {}) {
   const slug = String(businessSlug || '');
   const hit = _couponCache.get(slug);
-  if (hit && Date.now() - hit.at < COUPON_TTL_MS) return hit.map;
+  if (hit && Date.now() - hit.at < COUPON_TTL_MS && (!strict || hit.verified)) return hit.map;
   let map = null;
+  let verified = false;
   try {
-    const { data: biz } = await db.from('businesses').select('id').eq('slug', slug).maybeSingle();
+    const { data: biz, error: bizError } = await db.from('businesses').select('id').eq('slug', slug).maybeSingle();
+    if (bizError) throw bizError;
+    if (!biz) throw new Error('Coupon business not found');
     if (biz?.id) {
       const today = new Date().toISOString().slice(0, 10);
       const { data, error } = await db.from('coupons')
         .select('code, amount, active, expires_on').eq('business_id', biz.id).eq('active', true);
+      if (error) throw error;
       if (!error && Array.isArray(data)) {
+        verified = true;
         map = {};
         for (const c of data) {
           if (c.expires_on && String(c.expires_on) < today) continue;   // lapsed
@@ -458,9 +463,14 @@ export async function couponMapFor(db, businessSlug) {
         }
       }
     }
-  } catch { /* table not applied yet — fall through to the hardcoded map */ }
+    if (strict && !verified) throw new Error('Could not verify coupon codes. Please try again.');
+  } catch (error) {
+    // Office quotes must distinguish a failed check from a retired/invalid
+    // coupon. Public callers retain the historical fallback for compatibility.
+    if (strict) throw error;
+  }
   if (!map) map = couponFallbackMap(slug);
-  _couponCache.set(slug, { at: Date.now(), map });
+  _couponCache.set(slug, { at: Date.now(), map, verified });
   return map;
 }
 // Drop the cache so an edit in the dashboard takes effect immediately rather
@@ -475,17 +485,17 @@ export function couponCacheClear(businessSlug) {
 // codes a customer can use online — a second hand-maintained list would drift
 // the moment a code changes, and the office would be telling callers a code is
 // invalid while the website accepts it.
-export async function couponAmountFor(db, businessSlug, rawCode) {
+export async function couponAmountFor(db, businessSlug, rawCode, options) {
   const code = String(rawCode || '').trim().toUpperCase();
   if (!code) return 0;
-  const map = await couponMapFor(db, businessSlug);
+  const map = await couponMapFor(db, businessSlug, options);
   return Number(map[code]) || 0;
 }
 // Every code this business honors. Used by the phone flow to offer a "did they
 // mean…" on a near miss — a customer reading a code down the phone is one
 // dropped letter away from being told, wrongly, that their code is no good.
-export async function couponCodesFor(db, businessSlug) {
-  return Object.keys(await couponMapFor(db, businessSlug));
+export async function couponCodesFor(db, businessSlug, options) {
+  return Object.keys(await couponMapFor(db, businessSlug, options));
 }
 
 // The multi-TV discount used to be these exact numbers hardcoded three times

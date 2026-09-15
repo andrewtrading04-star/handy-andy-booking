@@ -14242,14 +14242,20 @@ document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==
 // by sending a quick estimate, or by logging a decline. Every path finishes
 // at the resolution step so nothing falls through without a recorded outcome.
 let callWiz=null;
+window.addEventListener('beforeunload',event=>{
+  if((callWiz && callWiz.service && !callWiz.resolution) || [...cwLogProblems.values()].some(x=>x.kind==='update')){
+    event.preventDefault();event.returnValue='';
+  }
+});
 function cwNewDraft(){
   return {
     _visible:false, _view:0, _started:false, _startPromise:null, _ending:false,
-    _quoteVersion:0, _econRequest:0, _couponRequest:0,
+    _quoteVersion:0, _econRequest:0, _couponRequest:0, _startId:null,
+    _acceptedQuote:null, _bookingAttempt:null, _estimateAttempt:null,
     _quote:null, zipLookup:null, estimateContact:{name:'',phone:'',email:''},
     id:null, business:null, step:'greet', service:null,
     zip:'', areaName:null, otherBiz:null, surcharge:0,
-    optStep:0, optsLoaded:false,
+    optStep:0, optsLoaded:false, wireOverlap:null, _wireOverlapKey:null,
     handymanDesc:'',
     // Hours of handyman labor. The call script used to skip this entirely and
     // push the job at $0, so the server bounced every phone-booked handyman job
@@ -14298,6 +14304,8 @@ function cwInvalidatePrice(draft=callWiz){
   if(!draft) return;
   draft._quoteVersion++; draft._econRequest++; draft._couponRequest++;
   draft._couponBusy=false; draft.econ=null; draft.econCallId=null;
+  draft._econLoadingKey=null;
+  draft._acceptedQuote=null; draft._quoteLogged=false;
 }
 // The pricing engine is shared, but the caller's answers are owned by this
 // draft. Copy them only while the phone owns the form state, never from an
@@ -14422,6 +14430,16 @@ document.getElementById('callWizModal').addEventListener('click', e=>{ if(e.targ
 // identically on both screens.
 document.getElementById('callWizBody').addEventListener('click', e=>{
   if(!callWiz || callWiz.step!=='tvopts') return;
+  const activeCard=cwOptionKey(callWizCards()[callWiz.optStep]);
+  const overlapBtn=e.target.closest('[data-cwoverlap]');
+  if(overlapBtn){
+    if(overlapBtn.disabled || activeCard!=='wire-overlap') return;
+    const overlap=cwWireOverlapState(), count=Number(overlapBtn.dataset.cwoverlap);
+    if(!overlap.required || !Number.isInteger(count) || count<overlap.min || count>overlap.max) return;
+    cwInvalidatePrice(); callWiz.wireOverlap=count;
+    nbPruneInvisibleOptions(); nbClampTvBound(); nbPruneBehindWall();
+    renderCallWiz(); return;
+  }
   // Adding a TV size is what CREATES a TV here, so the per-TV cap the shared
   // handler enforces has to be lifted first or it would refuse the very click
   // that raises the count. Everything downstream is then re-synced and
@@ -14441,6 +14459,7 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
     nbPruneInvisibleOptions();
     nbClampTvBound();
     nbPruneBehindWall();
+    cwKeepOptionCard(activeCard);
     renderCallWiz();
     return;
   }
@@ -14455,12 +14474,13 @@ document.getElementById('callWizBody').addEventListener('click', e=>{
     nbClampTvBound();
     nbPruneInvisibleOptions();
     nbPruneBehindWall();
+    cwKeepOptionCard(activeCard);
     renderCallWiz();
   }
 });
 document.getElementById('callWizBody').addEventListener('input', e=>{
   const note=e.target.closest('.nb-other-note');
-  if(note) nbOptionNotes[note.dataset.o]=note.value;
+  if(note){ nbOptionNotes[note.dataset.o]=note.value; cwRefreshOptionProblem(); }
   // Typing a price on an "Other" line has to move the quote the secretary is
   // about to read out. Only the price chip is repainted, never the whole card:
   // a re-render would take focus off the box she is still typing in.
@@ -14471,6 +14491,7 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
     const row=px.closest('.nb-opts')?.querySelector(`.nb-optq [data-o="${px.dataset.o}"]`)?.closest('.nb-optq');
     const chip=row?row.querySelector('.nb-price'):null;
     if(chip){ const v=Math.max(0,nbParsePrice(px.value)||0); chip.textContent = v?'+$'+v:'$0'; }
+    cwRefreshOptionProblem();
   }
 });
 // "Hang up" is the ONLY way a call gets an outcome. It jumps to the resolution
@@ -14478,6 +14499,9 @@ document.getElementById('callWizBody').addEventListener('input', e=>{
 // call ends recorded rather than trailing off into an untracked state.
 document.getElementById('callWizEndBtn').addEventListener('click', ()=>{
   if(callWiz && callWiz._ending) return;
+  if(callWiz && (callWiz._bookingAttempt || callWiz._estimateAttempt)){
+    document.getElementById('callWizErr').textContent='Check the pending save before ending this call. The previous booking or estimate may already exist.';return;
+  }
   if(callWiz && (callWiz.service || callWiz._startPromise) && !callWiz.resolution){
     cwCaptureQuote(callWiz);
     // Remember where they were so "Hang up" tapped by mistake isn't the end of
@@ -14539,13 +14563,35 @@ function cwAmber(line){
 // row is created (call_live_start), so the wizard never has to read the
 // dashboard's `current` — which logout() nulls while a request may be in flight.
 function cwBiz(){ return (callWiz && callWiz.business) || (current && current.slug) || null; }
+const cwLogProblems=new Map();
+function cwShowLogProblem(draft,kind,error){
+  const key=(draft.id||draft._startId)+':'+kind;
+  cwLogProblems.set(key,{draft,kind,message:error&&error.message||String(error)});
+  cwPaintLogStatus();
+}
+function cwPaintLogStatus(){
+  let box=document.getElementById('cwLogStatus');
+  if(!cwLogProblems.size){ if(box) box.remove(); return; }
+  if(!box){ box=document.createElement('div'); box.id='cwLogStatus'; box.setAttribute('role','status'); box.style.cssText='position:fixed;bottom:16px;right:16px;z-index:15000;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:12px;box-shadow:0 6px 24px #0f172a25;max-width:340px;font-size:13px;'; document.body.appendChild(box); }
+  const updates=[...cwLogProblems.values()].filter(x=>x.kind==='update');
+  box.innerHTML=`<b>Call history needs attention</b><div style="margin:6px 0;">${updates.length?'Some call details have not saved. Retry the log update. This does not repeat a booking or send a message.':'Some activity logging could not be confirmed. Check Calls → Audit if the activity is needed.'}</div>${updates.length?'<button type="button" class="btn sm" id="cwRetryLogs">Retry call details</button>':''}<button type="button" class="btn ghost sm" id="cwAcknowledgeLogs" style="margin-top:6px;">${updates.length?'Keep working':'Dismiss'}</button>`;
+  const retry=document.getElementById('cwRetryLogs');
+  if(retry) retry.addEventListener('click',async()=>{
+    retry.disabled=true;
+    await Promise.allSettled(updates.map(x=>cwCallUpdate({},x.draft)));
+    cwPaintLogStatus();
+  });
+  document.getElementById('cwAcknowledgeLogs').addEventListener('click',()=>{ box.remove(); });
+}
 function cwTrack(event, meta, draft=callWiz){
   if(!draft || !draft.id) return;
   const biz=draft.business; if(!biz) return;
   api('call_event',{ method:'POST', body:{
     business:biz, call_id:draft.id, event,
     step:draft.step, meta:meta||{},
-  }}).catch(()=>{});
+  },timeoutMs:12000}).then(result=>{
+    if(result&&result.warning) cwShowLogProblem(draft,'activity',new Error(result.warning));
+  }).catch(error=>cwShowLogProblem(draft,'activity',error));
 }
 // Every write to the call record goes through here. There may be no record to
 // write to: the owner's runs through the script are deliberately not logged
@@ -14559,12 +14605,26 @@ async function cwCallUpdate(patch, draft=callWiz){
   if(draft._startPromise) await draft._startPromise;
   else if(!draft._started && draft.business && draft.service) await cwStartRecord(draft);
   if(!draft.id) return null;
-  return api('call_update',{ method:'POST', body:{ id:draft.id, ...patch }});
+  // Ordered writes keep a slow older note from replacing a newer outcome.
+  // Failed fields are merged into the next update and remain explicitly retryable.
+  const run=async()=>{
+    draft._unsavedCallPatch={...(draft._unsavedCallPatch||{}),...patch};
+    try{
+      const result=await api('call_update',{method:'POST',body:{id:draft.id,...draft._unsavedCallPatch},timeoutMs:12000});
+      draft._unsavedCallPatch=null; cwLogProblems.delete(draft.id+':update'); cwPaintLogStatus();
+      return result;
+    }catch(error){ cwShowLogProblem(draft,'update',error); throw error; }
+  };
+  const pending=draft._updatePromise;
+  const work=pending?pending.catch(()=>{}).then(run):run();
+  draft._updatePromise=work;
+  try{return await work;}finally{if(draft._updatePromise===work) draft._updatePromise=null;}
 }
 async function cwStartRecord(draft){
   if(draft._started) return;
   if(!draft._startPromise){
-    draft._startPromise=api('call_live_start',{method:'POST',body:{business:draft.business}}).then(r=>{
+    draft._startId=draft._startId||cwRequestId();
+    draft._startPromise=api('call_live_start',{method:'POST',body:{business:draft.business,call_id:draft._startId},timeoutMs:12000}).then(r=>{
       if(!r || (!r.id && !r.untracked)) throw new Error('The call log did not return a saved record. Try again.');
       draft.id=r.id; draft._started=true;
       cwTrack('started',{},draft);
@@ -14582,7 +14642,7 @@ async function cwFinishCall(resolution, meta={}){
   document.getElementById('callWizEndBtn').disabled=true;
   try{
     await cwCallUpdate({resolution},draft);
-    cwTrack(resolution==='booked'?'booking_created':resolution==='estimate_sent'?'estimate_sent':'declined',{...meta,resolution},draft);
+    if(resolution!=='other') cwTrack(resolution==='booked'?'booking_created':resolution==='estimate_sent'?'estimate_sent':'declined',{...meta,resolution},draft);
     if(!cwIsActive(draft)){ draft.resolution=resolution; return; }
     closeCallWiz({resolved:true},draft); toast('Call logged.');
     if(onScreen('calllog')) renderCalls();
@@ -14620,6 +14680,16 @@ function cwHoldActions(draft){
     if(cwIsActive(draft)) controls.forEach((node,i)=>{ if(node.isConnected) node.disabled=disabled[i]; });
   };
 }
+// UUIDs are retained on the draft until the server confirms a saved row.
+// Retrying after a lost response must address the same call/estimate.
+function cwRequestId(){
+  if(typeof crypto!=='undefined' && crypto.randomUUID) return crypto.randomUUID();
+  const bytes=new Uint8Array(16);
+  if(typeof crypto==='undefined' || !crypto.getRandomValues) throw new Error('Secure request IDs are unavailable. Refresh this page.');
+  crypto.getRandomValues(bytes); bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
+  const h=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
 // Which option groups the secretary must answer before moving on — the same
 // set New Booking validates at submit (nbValidateTvMountingRequired), asked up
 // front here because on a phone call there is no going back later.
@@ -14638,7 +14708,13 @@ const CW_SCRIPTS={
   frame:     'Is any of them a Samsung Frame or LG Gallery TV?',
 };
 function callWizGroupScript(card){
-  if(card.kind==='frame') return CW_SCRIPTS.frame;
+  if(card.kind==='wire-overlap'){
+    const g=nbOptionGroups.find(g=>g.key==='surface');
+    const surfaces=g.options.filter(o=>(nbQty[g.id]?.[o.id]||0)>0 && !/drywall/i.test(o.label)).map(o=>o.label.toLowerCase());
+    return `Of the TVs above a fireplace, how many are mounted on ${surfaces.join(' or ')}?`;
+  }
+  if(card.kind==='frame') return nbTotalTvs()===1 ? 'Is it a Samsung Frame or LG Gallery TV?' : CW_SCRIPTS.frame;
+  if(card.g.key==='lifting' && nbSelectedSizeMaxList().some(n=>n>=86)) return 'Let me confirm the lifting help for the larger TV.';
   // Read out loud, so a two-TV job should not say "this TV".
   if(card.g.key==='bracket' && nbTotalTvs()>1) return 'Do you have brackets for these TVs?';
   if(card.g.key==='fireplace' && nbTotalTvs()>1) return 'Are any of the TVs over a fireplace?';
@@ -14648,8 +14724,8 @@ function callWizGroupScript(card){
 // "what size?" and taps + for each TV, which is how the conversation actually
 // goes. (The New Booking form asks TV type first and derives the count from
 // that; here the count flows the other way and this keeps the engine's
-// regular/frame split in step with it.) Frame TVs are asked about later, as an
-// add-on, so they are a SUBSET of the TVs already counted — never extra ones.
+// regular/frame split in step with it.) Frame TVs are a SUBSET of the TVs
+// already counted — never extra ones.
 function cwSyncTvCounts(){
   const sg=nbOptionGroups.find(g=>g.key==='size');
   const sizeCount=sg?nbGroupCount(sg.id):0;
@@ -14660,6 +14736,58 @@ function cwSyncTvCounts(){
 // conditional rules the New Booking form applies (lifting only for 70"+ TVs,
 // no bracket question on a frame-only job, bracket needs a size first) decide
 // what the secretary is asked — no separate branching logic to drift.
+function cwOptionKey(card){ return card && (card.kind==='group'?card.g.key:card.kind); }
+// Fireplace and wall counts may describe the same TV. Ask only when those
+// counts allow more than one overlap; otherwise the count is already certain.
+function cwWireOverlapState(){
+  const draft=callWiz, total=nbTotalTvs(), fireplace=nbAboveFireplaceCount(), hard=nbHardSurfaceCount();
+  const groups=['size','fireplace','surface'].map(key=>nbOptionGroups.find(g=>g.key===key));
+  const key=JSON.stringify([nbFrameTvQty.regular,nbFrameTvQty.frame,...groups.map(g=>g?[g.id,...g.options.map(o=>[o.id,nbQty[g.id]?.[o.id]||0])]:null)]);
+  if(draft._wireOverlapKey!==key){draft._wireOverlapKey=key;draft.wireOverlap=null;}
+  const min=Math.max(0,fireplace+hard-total), max=Math.min(fireplace,hard);
+  const complete=total>0 && groups.every(g=>g && nbGroupCount(g.id)===total);
+  const hasRoute=nbOptionGroups.some(g=>g.key==='wires' && g.options.some(nbIsBehindWall));
+  const required=complete && hasRoute && min<max;
+  const answer=min===max?min:(Number.isInteger(draft.wireOverlap) && draft.wireOverlap>=min && draft.wireOverlap<=max?draft.wireOverlap:null);
+  return {min,max,answer,required};
+}
+function cwWireOverlapProblem(){
+  const overlap=cwWireOverlapState();
+  return overlap.required && overlap.answer===null ? 'Choose how many TVs share both restrictions before continuing.' : null;
+}
+function cwWireOverlapOptionsHtml(){
+  const overlap=cwWireOverlapState();
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">'+
+    Array.from({length:overlap.max-overlap.min+1},(_,i)=>overlap.min+i).map(n=>
+      `<button type="button" class="btn${overlap.answer===n?'':' ghost'}" style="width:auto;flex:1;min-width:80px;" data-cwoverlap="${n}" aria-pressed="${overlap.answer===n}">${n===0?'None':`${n} TV${n===1?'':'s'}`}</button>`).join('')+'</div>';
+}
+function cwKeepOptionCard(key){
+  const index=callWizCards().findIndex(card=>cwOptionKey(card)===key);
+  if(index>=0) callWiz.optStep=index;
+}
+function cwOptionProblem(card){
+  if(card.kind==='frame') return null;
+  if(card.kind==='wire-overlap') return cwWireOverlapProblem();
+  const g=card.g, count=nbGroupCount(g.id), total=nbTotalTvs();
+  if(g.key==='wires' && cwWireOverlapProblem()) return cwWireOverlapProblem();
+  if(g.key==='size' && !count) return 'Add at least one TV to continue.';
+  if(CW_REQUIRED_GROUPS.has(g.key) && count!==total) return `Pick one for each TV (${count} of ${total}).`;
+  if(g.key==='lifting' && nbShowLifting() && !nbVisibleOptions(g).some(o=>(nbQty[g.id]?.[o.id]||0)>0)) return 'Choose the lifting help before continuing.';
+  if(g.key==='extras') return nbOtherDescriptionProblem() || (nbUnpricedOtherLabel() ? 'Enter a price for the selected Other add-on before continuing.' : null);
+  return null;
+}
+function cwRefreshOptionProblem(){
+  if(!callWiz || callWiz.step!=='tvopts') return;
+  const card=callWizCards()[callWiz.optStep]; if(!card) return;
+  const problem=cwOptionProblem(card), button=document.getElementById('cwOptNext'), hint=document.getElementById('cwOptionProblem');
+  if(button) button.disabled=!!problem;
+  if(hint){ hint.textContent=problem||''; hint.hidden=!problem; }
+}
+function cwValidateTvAnswers(){
+  if(callWiz?.service!=='TV Mounting') return null;
+  try{ nbValidateTvCatalog(nbOptionGroups); }catch(e){ return e.message; }
+  return nbValidateTvMountingRequired() || cwWireOverlapProblem() || nbOtherDescriptionProblem() || (nbUnpricedOtherLabel() ? 'Enter a price for the selected Other add-on before continuing.' : null);
+}
 function callWizCards(){
   const cards=[];
   const showLifting=nbShowLifting(), onlyFrame=nbOnlyFrame();
@@ -14667,7 +14795,6 @@ function callWizCards(){
   // the order the questions actually come up in conversation, which is NOT the
   // form's order (the form leads with the required ones for validation).
   const order={size:1,bracket:2,fireplace:3,surface:4,wires:5,lifting:6,extras:7};
-  let hasExtras=false;
   [...nbOptionGroups].sort((a,b)=>(order[a.key]||99)-(order[b.key]||99)).forEach(g=>{
     // Dismount is not asked on a call — the office handles it separately.
     if(g.key==='dismount') return;
@@ -14676,12 +14803,11 @@ function callWizCards(){
     if(g.key==='bracket' && nbSelectedSizeTiers().size===0) return;
     // Size drives the count, so it is never gated on the count existing yet.
     if(g.key!=='size' && NB_TV_BOUND.has(g.key) && nbTotalTvs()===0) return;
-    if(g.key==='extras') hasExtras=true;
     cards.push({kind:'group', g});
+    // Frame affects brackets and wire routes; always ask before those cards.
+    if(g.key==='size' && nbTotalTvs()>0) cards.push({kind:'frame'});
+    if(g.key==='surface' && cwWireOverlapState().required) cards.push({kind:'wire-overlap'});
   });
-  // Frame/Gallery rides along on the add-ons question. If this catalog has no
-  // add-ons group, it gets its own card at the end rather than going unasked.
-  if(!hasExtras && nbTotalTvs()>0) cards.push({kind:'frame'});
   return cards;
 }
 // ── Saying the price out loud ───────────────────────────────────────────────
@@ -14783,14 +14909,21 @@ function cwJobSummary(){
     if(/own/i.test(o.label)) return null;
     // "Tilting (recommended)" / "85"-100" TV Tilting Bracket" -> "tilting"
     const kind=o.label.replace(/\(.*?\)/g,'').replace(/bracket/ig,'')
-      .replace(/\d+["”]?\s*-\s*\d+["”]?/g,'').replace(/\bTV\b/ig,'').trim().toLowerCase();
+      .replace(/\d+["”]?\s*[-–—]\s*\d+["”]?/g,'').replace(/\bTV\b/ig,'').trim().toLowerCase();
     return `${ct} ${kind} bracket${ct===1?'':'s'}`.replace(/\s+/g,' ');
   });
   each('fireplace',(o,ct)=> nbIsAboveFireplace(o.label) ? `${ct} over a fireplace` : null);
   each('surface',(o,ct)=> /drywall/i.test(o.label) ? null : `${ct} on ${o.label.toLowerCase()}`);
   each('wires',(o,ct)=>{
+    if(nbIsFrameOnlyOption(o)) return `${ct} OneConnect box installation${ct===1?'':'s'}`;
     if(/behind the wall/i.test(o.label)) return `${ct} with the wires hidden behind the wall`;
     if(/outside the wall/i.test(o.label)) return `${ct} with the wires hidden outside the wall`;
+    return null;
+  });
+  each('lifting',o=>{
+    const kind=nbLiftingKind(o.label);
+    if(kind==='can') return 'the customer helping with lifting';
+    if(kind==='cannot'||kind==='big') return 'lifting assistance';
     return null;
   });
   each('extras',(o,ct)=>{
@@ -14827,8 +14960,8 @@ const CW_SOURCES = ['Facebook', 'Yelp', 'Google', 'Nextdoor', 'Friend or referra
 // a persuasive customer and a job that costs more to do than it earns.
 function cwDiscountRaw(){
   return (callWiz.discSource ? CW_SOURCE_DISCOUNT : 0)
-       + (callWiz.discCoupon ? Number(callWiz.discCoupon.amount) || 0 : 0)
-       + (Number(callWiz.discManual) || 0);
+       + (callWiz.discCoupon ? cwNonnegativeMoney(callWiz.discCoupon.amount) : 0)
+       + cwNonnegativeMoney(callWiz.discManual);
 }
 function cwDiscountMax(){
   // Handyman calls are hourly, not TV Mounting, and the "noroom" screen they
@@ -14839,10 +14972,12 @@ function cwDiscountMax(){
   // screen still says it is -- so hard-zero it here for anything that isn't a
   // TV job, matching what the secretary is told to say.
   if(callWiz.service!=='TV Mounting') return 0;
-  return callWiz.econ ? Math.max(0, Number(callWiz.econ.max_discount) || 0) : 0;
+  const ceiling=callWiz.econ ? cwNonnegativeMoney(callWiz.econ.max_discount) : 0;
+  const minimum=callWiz._minimumDiscountRoom;
+  return minimum && minimum.version===callWiz._quoteVersion ? Math.min(ceiling,minimum.amount) : ceiling;
 }
 function cwDiscountApplied(){
-  return Math.min(cwDiscountRaw(), cwDiscountMax());
+  return cwRoundMoney(Math.min(cwDiscountRaw(), cwDiscountMax()));
 }
 // ── Concession ladder ────────────────────────────────────────────────────────
 // The card hands over one lever at a time instead of showing all three at once.
@@ -14866,7 +15001,7 @@ function cwLadderSpend(){
   const face={
     source: callWiz.discSource ? CW_SOURCE_DISCOUNT : 0,
     coupon: callWiz.discCoupon ? (Number(callWiz.discCoupon.amount)||0) : 0,
-    manual: Number(callWiz.discManual)||0,
+    manual: cwNonnegativeMoney(callWiz.discManual),
   };
   let left=max; const eff={source:0,coupon:0,manual:0};
   for(const k of CW_ATTRIB_ORDER){ const t=Math.min(face[k], left); eff[k]=t; left-=t; }
@@ -14895,6 +15030,50 @@ function cwHandymanLine(){
   // (payroll pays off it) — only the redundant text moves out of the label.
   return { option_id:null, label:`Handyman Labor: ${desc}`, price:HANDYMAN_HOURLY, quantity:hrs };
 }
+function cwRoundMoney(value){ return Math.round((Number(value)+Number.EPSILON)*100)/100; }
+function cwNonnegativeMoney(value){ const n=Number(value); return Number.isFinite(n)?Math.max(0,cwRoundMoney(n)):0; }
+// The server's $139 floor includes tax. Round the required subtotal UP to a
+// cent so a displayed $139 ticket never arrives at the server as $138.99.
+function cwMinimumBeforeTax(){ return Math.ceil((NB_MINIMUM/(1+TAX_RATE)-Number.EPSILON)*100)/100; }
+// The recap, saved booking and written estimate share this exact breakdown.
+// Invalid answers or prices must stop the quote instead of becoming a $0 job.
+function cwBuildQuote(){
+  const problem=cwValidateTvAnswers(); if(problem) throw new Error(problem);
+  const priced=callWiz.service==='TV Mounting'?nbCollectSelections():[cwHandymanLine()];
+  if(!priced.length || priced.some(l=>!l || l.price==null || String(l.price).trim()==='' || !Number.isFinite(Number(l.price)) || !Number.isFinite(Number(l.quantity)) || Number(l.quantity)<=0)) throw new Error('The job has an incomplete price. Go back and check the answers.');
+  const selections=priced.map(l=>({...l,price:cwRoundMoney(l.price),quantity:Number(l.quantity)}));
+  const travelFee=nbCarriedTravelLine()?0:Number(callWiz.surcharge);
+  if(!Number.isFinite(travelFee)) throw new Error('Check the ZIP again before quoting the travel fee.');
+  if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel':'Travel discount',price:cwRoundMoney(travelFee),quantity:1});
+  const ahFee=callWiz.selectedSlot?cwAfterHoursFeeFor(callWiz.selectedSlot.key,callWiz.prefDate):0;
+  if(ahFee>0 && !selections.some(l=>/after.?hours/i.test(l.label||''))) selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:ahFee,quantity:1});
+  let preDiscount=cwRoundMoney(selections.reduce((s,l)=>s+cwRoundMoney(l.price*l.quantity),0));
+  if(preDiscount<=0) throw new Error('This job needs a positive price before it can be quoted.');
+  if(callWiz.service==='TV Mounting'){
+    const floor=cwMinimumBeforeTax(), adjustment=cwRoundMoney(Math.max(0,floor-preDiscount));
+    if(adjustment>0){
+      const line={option_id:null,label:'Service minimum adjustment',price:adjustment,quantity:1};
+      selections.push(line); priced.push({...line});
+      preDiscount=cwRoundMoney(preDiscount+adjustment);
+    }
+    // Cache only this quote's room; the discount UI reads the same cap without
+    // calling the quote builder recursively. The explicit adjustment also
+    // travels with `priced` into the server's economics check.
+    callWiz._minimumDiscountRoom={version:callWiz._quoteVersion,amount:cwRoundMoney(Math.max(0,preDiscount-floor))};
+  }
+  const discount=Math.min(preDiscount,cwDiscountApplied());
+  if(discount>0) selections.push({option_id:null,label:callWiz.discountLabel||'Discount',price:-discount,quantity:1});
+  const subtotal=cwRoundMoney(preDiscount-discount), tax=cwRoundMoney(subtotal*TAX_RATE);
+  return {priced,travelFee,ahFee,preDiscount,discount,selections,subtotal,tax,total:cwRoundMoney(subtotal+tax),version:callWiz._quoteVersion};
+}
+function cwContactProblem({name='',phone='',email='',addr='',city='',state=''},booking=false){
+  if(booking && !name.trim()) return 'Customer name is required.';
+  const digits=phone.replace(/\D/g,'');
+  if((phone || booking) && !/^(?:1)?\d{10}$/.test(digits)) return 'Enter a 10-digit US phone number, including the area code.';
+  if((email || booking) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a complete email address.';
+  if(booking && (!addr.trim() || !city.trim() || !state.trim())) return 'Enter the service street address, city and state.';
+  return null;
+}
 // Snapshot the booking card's inputs into callWiz so a Back tap or repaint
 // restores them instead of blanking the form.
 function cwSaveCust(){
@@ -14914,6 +15093,7 @@ function cwSaveCust(){
 function cwCloseDisplay(){ return Math.round(cwCloseTotal()); }
 function cwCloseHasCents(){ return Math.abs(cwCloseTotal()-cwCloseDisplay())>0.004; }
 function cwMoneyCents(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
+function cwMoney(n){return Number.isInteger(Number(n))?money(Number(n)):cwMoneyCents(n);}
 // The five fixed slot labels are always "H:MM AM/PM – H:MM AM/PM" (see SLOTS
 // in api/_lib/availability.js) and always start on the hour, so a secretary
 // reading one out loud never needs the "– H:MM AM/PM" end half or the
@@ -14944,7 +15124,8 @@ function cwDiscountBits(){
   const b=[];
   if(callWiz.discSource) b.push(`heard via ${callWiz.discSource}`);
   if(callWiz.discCoupon) b.push(`code ${callWiz.discCoupon.code}`);
-  if((Number(callWiz.discManual)||0)>0) b.push(`manual $${Number(callWiz.discManual)}`);
+  const manual=cwLadderSpend().eff.manual;
+  if(manual>0) b.push(`manual ${cwMoney(manual)}`);
   return b;
 }
 function cwSetDiscountLabel(){
@@ -15019,7 +15200,7 @@ function cwNextRung(){
 // trying to overspend" signal. The equality check is the double-tap guard.
 function cwManualCommit(){
   const inp=document.getElementById('cwManualInput'); if(!inp) return false;
-  const requested=Math.max(0,Number(inp.value)||0);
+  const requested=cwNonnegativeMoney(inp.value);
   if(requested===(Number(callWiz.discManual)||0)) return false;
   callWiz.discManual=requested;
   callWiz._manualDraft=null;
@@ -15097,16 +15278,23 @@ async function cwCouponApplyNow(){
   const inp=document.getElementById('cwCouponInput'); if(!inp) return;
   const code=inp.value.trim().toUpperCase();
   if(!code){ callWiz.discCoupon=null; callWiz._couponDraft=null; renderCallWiz(); return; }
-  const fromStep=callWiz.step, fromRung=callWiz.discRung, fromCall=callWiz.id;
+  const fromStep=callWiz.step, fromRung=callWiz.discRung, fromView=draft._view;
   const quoteVersion=draft._quoteVersion, request=++draft._couponRequest;
   callWiz._couponBusy=true;
   const btn=document.getElementById('cwCouponApply'); if(btn) btn.disabled=true;
   { const m=document.getElementById('cwCouponMsg'); if(m) m.textContent='Checking…'; }
   let r=null, errMsg=null;
-  try{ r=await api('quote_coupon',{ method:'POST', body:{ business:draft.business, code }}); }
+  try{
+    r=await api('quote_coupon',{method:'POST',body:{business:draft.business,code},timeoutMs:12000});
+    if(!r || typeof r.ok!=='boolean' || (r.ok && (!r.code || !Number.isFinite(Number(r.amount)) || Number(r.amount)<0))) throw new Error('The coupon check returned an incomplete answer. Try again.');
+  }
   catch(e){ errMsg=e.message||'Could not check that code'; }
   if(callWiz!==draft || draft.resolution || draft._quoteVersion!==quoteVersion || draft._couponRequest!==request) return;
   draft._couponBusy=false;
+  if(cwIsActive(draft) && draft.step===fromStep && draft.discRung===fromRung){ const activeBtn=document.getElementById('cwCouponApply'); if(activeBtn) activeBtn.disabled=false; }
+  // Never apply money invisibly after leaving the card or editing the code.
+  if(!cwIsActive(draft,fromView) || draft.step!==fromStep || draft.discRung!==fromRung || (document.getElementById('cwCouponInput')?.value||'').trim().toUpperCase()!==code) return;
+  if(errMsg) r=null;
   if(r) cwTrack('coupon_tried',{ code, valid:!!r.ok, amount:r.amount||0 });
   if(r&&r.ok){
     callWiz.discCoupon={code:r.code, amount:r.amount};
@@ -15120,7 +15308,7 @@ async function cwCouponApplyNow(){
   if(!cwIsActive(draft) || draft.step!==fromStep || draft.discRung!==fromRung) return;
   if(r&&r.ok){ renderCallWiz(); return; }
   const msg=document.getElementById('cwCouponMsg'); if(!msg) return;
-  if(btn) btn.disabled=false;
+  { const activeBtn=document.getElementById('cwCouponApply'); if(activeBtn) activeBtn.disabled=false; }
   if(errMsg){ msg.innerHTML=`<span style="color:#b91c1c;">${esc(errMsg)}</span>`; return; }
   // A one-character typo is the common case (BOOKONLNE for BOOKONLINE), and
   // "not valid" alone strands her mid-call against a customer who insists.
@@ -15180,11 +15368,14 @@ function cwWireManualApply(){
 // and a 4-TV ticket get very different answers rather than one flat rule.
 async function cwLoadEconomics(priced, travelFee, ahFee){
   const draft=callWiz;
-  const quoteVersion=draft._quoteVersion, request=++draft._econRequest;
+  const quoteVersion=draft._quoteVersion;
   const lines=(priced||[]).map(l=>({ name:l.label, quantity:l.quantity, line_total:l.price*l.quantity }));
-  if(travelFee>0) lines.push({ name:'Travel', quantity:1, line_total:travelFee, kind:'fee' });
+  if(travelFee!==0) lines.push({ name:travelFee>0?'Travel':'Travel discount', quantity:1, line_total:travelFee, kind:'fee' });
   if(ahFee>0) lines.push({ name:'After-hours fee', quantity:1, line_total:ahFee, kind:'fee' });
-  callWiz.preDiscountTotal=lines.reduce((t,l)=>t+l.line_total,0);
+  const key=JSON.stringify([quoteVersion,lines,draft.prefDate]);
+  if(draft._econLoadingKey===key) return;
+  const request=++draft._econRequest; draft._econLoadingKey=key;
+  callWiz.preDiscountTotal=cwRoundMoney(lines.reduce((t,l)=>t+cwRoundMoney(l.line_total),0));
   // Cached so a failed projection can be retried from the card instead of
   // stranding the secretary with no authority to discount for the rest of the call.
   callWiz._econArgs={ priced, travelFee, ahFee };
@@ -15192,9 +15383,10 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
   let result;
   try{
     result=await api('quote_economics',{ method:'POST', body:{
-      business:draft.business, line_items:lines,
+      business:draft.business, postal_code:draft.zip, tax_rate:TAX_RATE, line_items:lines,
       scheduled_at: callWiz.prefDate ? new Date(callWiz.prefDate+'T12:00:00').toISOString() : undefined,
-    }});
+    },timeoutMs:12000});
+    if(!result || typeof result.max_discount!=='number' || !Number.isFinite(result.max_discount) || result.max_discount<0) throw new Error('The pricing check returned an incomplete answer. Try again.');
   }catch(e){
     // Never let a failed projection quietly authorize an unlimited discount —
     // no answer means no room to discount. `error` is what lets the card tell a
@@ -15205,9 +15397,10 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
   // A projection that lands after the secretary has moved to another call must
   // not become that call's ceiling.
   if(callWiz!==draft || draft.resolution || draft._quoteVersion!==quoteVersion || draft._econRequest!==request) return;
+  draft._econLoadingKey=null;
   callWiz.econ=result;
   callWiz.econCallId=forCall;
-  if(cwIsActive(draft) && draft.step==='discount') renderCallWiz();
+  if(cwIsActive(draft) && (draft.step==='discount' || draft.step==='recap')) renderCallWiz();
 }
 // Hand the whole call — answers, chosen slot, and any discount — into the real
 // New Booking form. The discount rides along as a negative custom line so it
@@ -15224,11 +15417,14 @@ async function cwGoToBooking(){
 async function cwGoToBookingInner(){
   const draft=callWiz;
   const fromStep=callWiz.step;
+  if(draft._couponBusy){ document.getElementById('callWizErr').textContent='Wait for the coupon check before accepting this price.'; return; }
+  if(!draft.selectedSlot || !cwSlotIsVerified(draft)){ draft.step='schedule'; renderCallWiz(); return; }
+  if(cwDiscountRaw()>0 && ['loading','error'].includes(cwEconState())){ document.getElementById('callWizErr').textContent='Recheck the discount before accepting this price.'; renderCallWiz(); return; }
+  cwSetDiscountLabel();
+  try{ draft._acceptedQuote=cwBuildQuote(); }
+  catch(error){ document.getElementById('callWizErr').textContent=error.message; return; }
   const applied=cwDiscountApplied();
-  const bits=[];
-  if(callWiz.discSource) bits.push(`heard via ${callWiz.discSource}`);
-  if(callWiz.discCoupon) bits.push(`code ${callWiz.discCoupon.code}`);
-  if(callWiz.discManual>0) bits.push(`manual $${callWiz.discManual}`);
+  const bits=cwDiscountBits();
   cwTrack('discount_final',{ amount:applied, detail:bits.join(', ')||null,
     source:callWiz.discSource||null, coupon:callWiz.discCoupon?callWiz.discCoupon.code:null,
     manual:callWiz.discManual||0, max_allowed:cwDiscountMax() });
@@ -15238,8 +15434,8 @@ async function cwGoToBookingInner(){
     // The server replaces notes wholesale, so this has to carry the quote
     // breakdown the recap already saved or the call record loses what was
     // actually quoted and keeps only the discount line.
-    const _note=`Discount ${money(applied)} applied (${bits.join(', ')||'discount'}).`;
-    await cwCallUpdate({
+    const _note=`Discount ${cwMoney(applied)} applied (${bits.join(', ')||'discount'}).`;
+    cwCallUpdate({
       notes: callWiz.quoteNote ? `${callWiz.quoteNote} · ${_note}` : _note }).catch(()=>{});
   }
   // Stay in the script and take the details here. Bouncing to the New Booking
@@ -15256,27 +15452,34 @@ async function cwGoToBookingInner(){
 // booking modal, and re-mounting the same Element in a second place detaches it
 // from the first. Uses the same per-business publishable key resolution, so a
 // Dom's card still tokenizes into Dom's Stripe account.
-let cwStripe=null, cwStripeCard=null, cwStripePk=null;
+let cwStripe=null, cwStripeCard=null, cwStripePk=null, cwStripeLibraryPromise=null;
+function cwLoadStripeLibrary(){
+  if(window.Stripe) return Promise.resolve();
+  if(!cwStripeLibraryPromise){
+    const loader=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');script.src='https://js.stripe.com/v3/';
+      script.onload=()=>window.Stripe?resolve():reject(new Error('Card processor did not load.'));
+      script.onerror=()=>reject(new Error('Could not load the card processor.'));
+      document.head.appendChild(script);
+    });
+    cwStripeLibraryPromise=nbWithTimeout(loader,20000,'Card processor did not answer. Check the connection and retry.').catch(error=>{cwStripeLibraryPromise=null;throw error;});
+  }
+  return cwStripeLibraryPromise;
+}
 function cwEnsureStripe(){
-  const draft=callWiz, view=draft&&draft._view;
-  const pk=currentNbStripePk(draft&&draft.business);
-  if(!pk) return Promise.reject(new Error('Card entry needs a refresh — press Ctrl+Shift+R, then try again.'));
-  return nbWithTimeout(new Promise((resolve,reject)=>{
-    const init=()=>{
-      try{
-        if(!cwIsActive(draft,view) || draft.step!=='customer') throw new Error('Card entry was closed.');
-        if(cwStripeCard){ try{ cwStripeCard.unmount(); }catch(_){} cwStripeCard=null; }
-        cwStripe=window.Stripe(pk);
-        cwStripeCard=cwStripe.elements().create('card',{ style:{ base:{ fontSize:'15px', color:'#1a1a1a' } } });
-        cwStripeCard.mount('#cwStripeCard');
-        cwStripePk=pk;
-        resolve();
-      }catch(err){ reject(err); }
-    };
-    if(window.Stripe){ init(); return; }
-    const s=document.createElement('script'); s.src='https://js.stripe.com/v3/';
-    s.onload=init; s.onerror=()=>reject(new Error('Could not load Stripe.')); document.head.appendChild(s);
-  }),20000,'Could not load the card processor — check your connection and try again.');
+  const draft=callWiz,view=draft&&draft._view,pk=currentNbStripePk(draft&&draft.business);
+  if(!pk) return Promise.reject(new Error('Card entry is not configured for this business.'));
+  const cached=draft._stripeMount;
+  if(cached && cached.view===view && cached.pk===pk) return cached.promise;
+  const mount={view,pk}; draft._stripeMount=mount;
+  mount.promise=cwLoadStripeLibrary().then(()=>{
+    if(!cwIsActive(draft,view) || draft.step!=='customer' || draft._stripeMount!==mount || document.getElementById('cwPayMethod')?.value!=='card') throw new Error('Card entry was closed.');
+    if(cwStripeCard){try{cwStripeCard.destroy();}catch(_){}cwStripeCard=null;}
+    cwStripe=window.Stripe(pk);
+    cwStripeCard=cwStripe.elements().create('card',{style:{base:{fontSize:'15px',color:'#1a1a1a'}}});
+    cwStripeCard.mount('#cwStripeCard');cwStripePk=pk;mount.ready=true;
+  }).catch(error=>{if(draft._stripeMount===mount)draft._stripeMount=null;throw error;});
+  return mount.promise;
 }
 // Create the booking straight from the call. Prices are assembled the same way
 // the New Booking form assembles them (same collector, same travel/after-hours
@@ -15285,120 +15488,175 @@ function cwEnsureStripe(){
 async function cwSubmitBooking(){
   const draft=callWiz;
   if(!cwIsActive(draft) || draft._ending) return;
+  const wasRetrying=!!draft._bookingAttempt;
   const err=document.getElementById('callWizErr'); err.textContent='';
-  const val=id=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
-  const name=val('cwCustName'), phone=val('cwCustPhone'), email=val('cwCustEmail');
-  if(!name){ err.textContent='Customer name is required.'; return; }
-  if(!phone){ err.textContent='Phone number is required.'; return; }
-  if(!email){ err.textContent='Email is required — the confirmation goes there.'; return; }
-  if(!callWiz.prefDate || !callWiz.selectedSlot){ err.textContent='Go back and pick a date and time first.'; return; }
-  const unpriced=nbUnpricedOtherLabel();
-  if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before booking, it's currently $0.`; return; }
-
-  const payMethod=val('cwPayMethod');
-  const skipCard=document.getElementById('cwSkipCard') && document.getElementById('cwSkipCard').checked;
-  const isTv=callWiz.service==='TV Mounting';
-  if(isTv && payMethod!=='card'){ err.textContent='TV mounting jobs need a card on file.'; return; }
-  if(!payMethod){ err.textContent='Pick a payment method.'; return; }
-
-  const btn=document.getElementById('cwBookNow');
-  const release=cwHoldActions(draft);
-  btn.disabled=true; btn.textContent='Booking…';
+  const val=id=>(document.getElementById(id)?.value||'').trim();
+  cwSaveCust();
+  const customer={name:val('cwCustName'),phone:val('cwCustPhone'),email:val('cwCustEmail'),
+    address_line1:val('cwCustAddr'),city:val('cwCustCity'),state:val('cwCustState'),postal_code:draft.zip};
+  const isTv=draft.service==='TV Mounting', payMethod=val('cwPayMethod');
+  const skipCard=!!document.getElementById('cwSkipCard')?.checked;
+  if(!draft._bookingAttempt){
+    const problem=cwContactProblem({...customer,addr:customer.address_line1},true);
+    if(problem){err.textContent=problem;return;}
+    if(!cwSlotIsVerified(draft)){err.textContent='Go back and recheck the date and time first.';return;}
+    if(!payMethod || (isTv && payMethod!=='card')){err.textContent=isTv?'TV mounting jobs need a card on file.':'Pick a payment method.';return;}
+    try{
+      const now=cwBuildQuote(), agreed=draft._acceptedQuote;
+      if(!agreed || agreed.version!==now.version || JSON.stringify(agreed.selections)!==JSON.stringify(now.selections)){
+        err.textContent='The price changed. Go back and read the updated quote before booking.';return;
+      }
+    }catch(error){err.textContent=error.message;return;}
+  }
+  const btn=document.getElementById('cwBookNow'),release=cwHoldActions(draft);
+  btn.textContent=draft._bookingAttempt?'Checking booking…':'Booking…';
+  let failure=null;
   try{
-    let paymentMethodId=null;
-    if(payMethod==='card' && !skipCard){
-      if(!cwStripeCard) throw new Error('Card form is not ready — reopen this step.');
-      const r=await nbWithTimeout(cwStripe.createPaymentMethod({type:'card',card:cwStripeCard}),25000,'Card processor timed out.');
-      if(!cwIsActive(draft)) return;
-      if(r.error) throw new Error(r.error.message||'That card could not be accepted.');
-      paymentMethodId=r.paymentMethod.id;
+    if(!draft._bookingAttempt){
+      let paymentMethodId=null;
+      if(payMethod==='card' && !skipCard){
+        if(!cwStripe || !cwStripeCard || cwStripePk!==currentNbStripePk(draft.business)) throw new Error('Card form is not ready. Retry loading it before booking.');
+        const r=await nbWithTimeout(cwStripe.createPaymentMethod({type:'card',card:cwStripeCard}),25000,'Card processor timed out. No booking was submitted; try again.');
+        if(!cwIsActive(draft)) return;
+        if(r.error) throw new Error(r.error.message||'That card could not be accepted.');
+        if(!r.paymentMethod?.id) throw new Error('The card processor did not return a saved card. Try again.');
+        paymentMethodId=r.paymentMethod.id;
+      }
+      const quote=draft._acceptedQuote, schedule=cwScheduleParams(draft);
+      draft._bookingAttempt={body:{
+        business:draft.business,idempotency_key:cwRequestId(),customer,require_available:true,
+        service_id:isTv?(nbServiceId||null):null,
+        technician_id:'any',pool:schedule.pool||'own',secondary_technician_id:schedule.secondary_technician_id||null,
+        pool2:schedule.pool2||'own',needs_lifting:schedule.secondary_technician_id==='any',
+        tv_size_category:nbSelectedLiftingKind()||null,
+        scheduled_date:draft.prefDate,scheduled_slot:draft.selectedSlot.key,
+        selections:quote.selections,subtotal:quote.subtotal,tax:quote.tax,price:quote.total,
+        notes:`Booked on a phone call by ${userName||'the office'}.`+(!isTv&&draft.handymanDesc?` Job as described on the call: ${draft.handymanDesc}`:''),
+        payment_method:payMethod,payment_method_id:paymentMethodId,sms_consent:!!draft.cust.sms,
+      },quote};
     }
-    const selections=nbCollectSelections();
-    // A handyman call collects the job in plain words and nothing else — no
-    // option catalog, so nbCollectSelections() is empty. Without this the tech
-    // arrives at the door with a booking that says only who took the call.
-    // Priced at hours x $85 (two-hour minimum), not $0 -- a $0 line plus a
-    // travel fee landed under the $139 floor and the server refused it.
-    const hmLine=cwHandymanLine();
-    if(hmLine) selections.push(hmLine);
-    // Never stack this call's own travel fee on top of one already riding in via
-    // a converted estimate's carried lines (nbConvertLines), same guard as the
-    // New Booking form's auto-fill (see nbCarriedTravelLine()). This path had its
-    // own separate travelFee push that the guard never covered, so a Call Wizard
-    // booking from a converted estimate still double-charged the fee.
-    const travelFee=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
-    if(travelFee!==0) selections.push({option_id:null,label:travelFee>0?'Travel':'Travel discount',price:travelFee,quantity:1});
-    const ah=cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate);
-    if(ah>0 && !selections.some(s=>/after.?hours/i.test(s.label||''))){
-      selections.push({option_id:null,label:'After-Hours Service Fee (8 PM)',price:ah,quantity:1});
-    }
-    const disc=cwDiscountApplied();
-    if(disc>0) selections.push({option_id:null,label:callWiz.discountLabel||'Discount',price:-disc,quantity:1});
-    const subtotal=selections.reduce((s,x)=>s+x.price*x.quantity,0);
-    const tax=Math.round(subtotal*TAX_RATE*100)/100;
-    const totalPrice=subtotal+tax;
-
-    // A key built purely from business+date+slot+phone repeats across calls, so
-    // re-booking the same slot after a CANCELLATION matched the cancelled row
-    // and the server handed it straight back as "already exists" — nobody
-    // scheduled, customer told they were booked. Mint a fresh random key per
-    // attempt (cached only so a retry of THIS submit still de-dupes), same as
-    // the New Booking form does.
-    const _fp=[draft.business,draft.prefDate,draft.selectedSlot.key,phone||email||name].join('|');
-    const _key=nbKeyCache.get(_fp)||nbNewKey();
-    nbKeyCache.set(_fp,_key);
-    // 98"+ TVs are a two-person lift. The wizard already CHARGES for it via the
-    // shared lifting option, but sent needs_lifting:false, so the server never
-    // ran the pair assignment and the job went out one-tech.
-    const _mode=(typeof nbSecondTechMode==='function') ? nbSecondTechMode() : 'none';
-    const _mandatoryPair = isTv && _mode==='mandatory';
-    const resp=await apiConfirmUnavailable('booking_create',{
-      business: draft.business,
-      idempotency_key: _key,
-      customer:{ name, phone, email,
-        address_line1: val('cwCustAddr'), city: val('cwCustCity'),
-        state: val('cwCustState'), postal_code: callWiz.zip },
-      service_id: isTv ? (nbServiceId || null) : null,
-      technician_id: 'any', pool:'own',
-      secondary_technician_id: _mandatoryPair ? 'any' : null, pool2:'own',
-      needs_lifting: _mandatoryPair,
-      tv_size_category: (typeof nbSelectedLiftingKind==='function' ? nbSelectedLiftingKind() : null) || null,
-      scheduled_date: callWiz.prefDate,
-      scheduled_slot: callWiz.selectedSlot.key,
-      selections, subtotal, tax, price: totalPrice,
-      notes: `Booked on a phone call by ${userName||'the office'}.`+
-        ((!isTv && callWiz.handymanDesc) ? ` Job as described on the call: ${callWiz.handymanDesc}` : ''),
-      payment_method: payMethod || null,
-      payment_method_id: paymentMethodId,
-      sms_consent: !!(document.getElementById('cwSmsConsent') && document.getElementById('cwSmsConsent').checked),
-    });
-    nbKeyCache.delete(_fp);
-    // Conversion is only counted once a booking genuinely exists.
-    cwCallUpdate({
-      booking_id: resp&&resp.id?resp.id:undefined, resolution:'booked' },draft).catch(()=>{});
-    cwTrack('booking_created',{ booking_id: resp&&resp.id?resp.id:null, total: totalPrice },draft);
-    if(!cwIsActive(draft)){ draft.resolution='booked'; return; }
-    if(resp&&resp.warning) alert('⚠ '+resp.warning);
+    const attempt=draft._bookingAttempt;
+    const resp=await apiConfirmUnavailable('booking_create',attempt.body);
+    if(!resp || !resp.id) throw new Error('The booking response was incomplete. Retry to check the same booking.');
+    draft._bookingResult=resp; draft._bookingAttempt=null;
+    cwCallUpdate({booking_id:resp.id,resolution:'booked'},draft).catch(()=>{});
+    cwTrack('booking_created',{booking_id:resp.id,total:attempt.quote.total},draft);
+    if(!cwIsActive(draft)){draft.resolution='booked';return;}
+    if(resp.warning) alert(resp.warning);
     closeCallWiz({resolved:true},draft);
-    toast(resp&&resp.duplicate ? 'That booking already existed — no duplicate created' : 'Booked ✓');
+    toast(resp.duplicate?'Booking confirmed — no duplicate created':'Booked ✓');
     refreshCurrent();
-  }catch(e){
-    if(!cwIsActive(draft)) return;
-    err.textContent=e.message||'Could not create the booking.';
-    btn.disabled=false; btn.textContent='Book it';
-  }finally{ release(); }
+  }catch(error){
+    failure=error;
+    if(error.status>=400 && error.status<500 && error.status!==401) draft._bookingAttempt=null;
+    if(error.code==='slot_unavailable'){
+      draft._slotVerifiedKey=null;draft.selectedSlot=null;draft.step='schedule';cwInvalidatePrice(draft);
+    }
+  }finally{
+    release();
+    if(failure && cwIsActive(draft)){
+      // A pending-save view locks its fields. If a retry is definitively
+      // rejected, rebuild that view so the secretary can correct it and go
+      // Back; restoring the old control states would keep everything locked.
+      if(draft._bookingAttempt || draft.step==='schedule' || wasRetrying) renderCallWiz();
+      document.getElementById('callWizErr').textContent=draft._bookingAttempt
+        ? 'The save could not be confirmed. Use Check booking to retry the same request safely. '+(failure.message||'')
+        : failure.message||'Could not create the booking.';
+      const activeBtn=document.getElementById('cwBookNow'); if(activeBtn) activeBtn.textContent=draft._bookingAttempt?'Check booking':'Book it';
+    }
+  }
+}
+async function cwSubmitEstimate(){
+  const draft=callWiz;
+  if(!cwIsActive(draft) || draft._ending) return;
+  const wasRetrying=!!draft._estimateAttempt;
+  const err=document.getElementById('callWizErr'); err.textContent='';
+  cwCaptureQuote(draft);
+  const {name,phone,email}=Object.fromEntries(Object.entries(draft.estimateContact).map(([k,v])=>[k,String(v||'').trim()]));
+  const smsOk=!!draft.cust.sms;
+  if(!draft._estimateAttempt){
+    const problem=cwContactProblem({name,phone,email}); if(problem){err.textContent=problem;return;}
+    if(!email && !(phone && smsOk)){err.textContent=phone?'Get the customer’s yes to texts, or take an email address.':'A phone number or email is needed to send the estimate.';return;}
+    if(draft._couponBusy || (cwDiscountRaw()>0 && ['loading','error'].includes(cwEconState()))){err.textContent='Go back and recheck the discount before sending this price.';return;}
+    try{
+      const quote=cwBuildQuote(), count=nbTotalTvs();
+      const label=draft.service==='TV Mounting'?`TV mounting — ${count} TV${count===1?'':'s'}`:`Handyman — ${draft.handymanDesc||'see notes'}`;
+      draft._estimateAttempt={body:{
+        business:draft.business,estimate_id:cwRequestId(),customer_name:name,customer_phone:phone,customer_email:email,
+        customer_zip:draft.zip,service_label:label,selections:quote.selections,tax_rate:TAX_RATE,sms_consent:smsOk,
+      },quote};
+    }catch(error){err.textContent=error.message;return;}
+  }
+  const release=cwHoldActions(draft); document.getElementById('cwEstSend').textContent='Saving estimate…';
+  let failure=null;
+  try{
+    const attempt=draft._estimateAttempt;
+    const est=await apiConfirmUnavailable('estimate_create',attempt.body);
+    if(!est || !est.id) throw new Error('The estimate response was incomplete. Retry to check the same estimate.');
+    draft._estimateAttempt=null; draft._estimateResult=est;
+    const sent=!!(est.emailed||est.texted),resolution=sent?'estimate_sent':'other';
+    if(sent) cwTrack('estimate_sent',{estimate_id:est.id,discount:attempt.quote.discount},draft);
+    cwCallUpdate({resolution,notes:`Estimate ${est.id} ${sent?'sent':'saved; delivery unconfirmed'} (${attempt.body.service_label})${draft.prefDate?' · preferred '+draft.prefDate:''}`},draft).catch(()=>{});
+    if(!cwIsActive(draft)){draft.resolution=resolution;return;}
+    closeCallWiz({resolved:true},draft);
+    if(est.warning || !sent) alert(est.warning||'Estimate saved. Delivery was not confirmed; open Estimates to check it before resending.');
+    toast(sent?(est.emailed&&est.texted?'Estimate sent by email and text ✓':est.texted?'Estimate texted ✓':'Estimate emailed ✓'):'Estimate saved — check delivery in Estimates');
+    refreshCurrent();
+  }catch(error){
+    failure=error;
+    if(error.status>=400 && error.status<500 && error.status!==401) draft._estimateAttempt=null;
+  }finally{
+    release();
+    if(failure && cwIsActive(draft)){
+      if(draft._estimateAttempt || wasRetrying) renderCallWiz();
+      document.getElementById('callWizErr').textContent=draft._estimateAttempt?'The save could not be confirmed. Check estimate retries the same request without sending a second estimate. '+(failure.message||''):failure.message||'Could not create the estimate.';
+      const btn=document.getElementById('cwEstSend'); if(btn) btn.textContent=draft._estimateAttempt?'Check estimate':'Send estimate';
+    }
+  }
 }
 // After-hours fee for a slot — same rule as the booking form and the public
 // widget: an 8 PM start bills $75, or $100 on a Sunday. Handyman work is exempt,
 // exactly as nbAfterHoursFee() exempts it on the form — otherwise the same 8 PM
 // handyman job cost $75 more booked over the phone than typed into New Booking.
-function cwAfterHoursFeeFor(slotKey, dateStr){
-  if(callWiz && callWiz.service!=='TV Mounting') return 0;
+function cwAfterHoursFeeFor(slotKey, dateStr, draft=callWiz){
+  if(draft && draft.service!=='TV Mounting') return 0;
   if(slotKey!=='s5') return 0;
-  const isSunday = dateStr ? new Date(dateStr+'T12:00:00').getDay()===0 : false;
+  const isSunday = /^\d{4}-\d{2}-\d{2}$/.test(dateStr||'') && new Date(dateStr+'T12:00:00Z').getUTCDay()===0;
   return isSunday?100:75;
 }
-// The Frame/Gallery stepper, shown inside the add-ons card. Capped at the
+function cwScheduleTimezone(draft=callWiz){
+  if(draft.scheduleTimezone && draft._scheduleTimezoneZip===draft.zip) return draft.scheduleTimezone;
+  const area=String(draft.areaName||'').toLowerCase(), zip=String(draft.zip||'');
+  if(/austin|houston/.test(area) || /^7[78]/.test(zip)) return 'America/Chicago';
+  if(/denver/.test(area) || /^8[01]/.test(zip)) return 'America/Denver';
+  if(/los angeles/.test(area) || /^9[01]/.test(zip)) return 'America/Los_Angeles';
+  return (cwBusiness(draft)||{}).timezone||'America/Denver';
+}
+function cwScheduleToday(draft=callWiz, now=new Date()){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:cwScheduleTimezone(draft),year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
+  const get=type=>parts.find(p=>p.type===type).value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+function cwScheduleZoneLabel(draft=callWiz){
+  return ({'America/Denver':'Mountain time','America/Chicago':'Central time','America/Los_Angeles':'Pacific time','America/New_York':'Eastern time'})[cwScheduleTimezone(draft)]||'the customer’s local time';
+}
+// Availability must ask for the same pair the booking will require. A 98-inch
+// TV always needs two people; the paid "2 technicians" answer on a smaller TV
+// is also an actual staffing promise, not just an extra charge.
+function cwScheduleParams(draft=callWiz){
+  const params={business:draft.business,technician_id:'any',pool:'own'};
+  if(draft.zip) params.postal_code=draft.zip;
+  const mode=nbSecondTechMode(), lifting=nbSelectedLiftingKind();
+  if(draft.service==='TV Mounting' && (mode==='mandatory' || (mode==='optional' && (lifting==='cannot'||lifting==='big')))){
+    params.secondary_technician_id='any'; params.pool2='own'; params.needs_lifting='1';
+  }
+  return params;
+}
+function cwScheduleKey(draft=callWiz){ return JSON.stringify(cwScheduleParams(draft)); }
+function cwSlotIsVerified(draft=callWiz){
+  return !!(draft && draft.prefDate && draft.selectedSlot && draft._slotVerifiedKey===cwScheduleKey(draft)+'|'+draft.prefDate+'|'+draft.selectedSlot.key);
+}
+// The Frame/Gallery stepper, asked after size and before brackets. Capped at the
 // number of TVs on the job — a frame TV is one of those TVs, not an extra one.
 function cwFrameRowHtml(){
   const ct=nbFrameTvQty.frame||0, cap=nbTotalTvs();
@@ -15512,6 +15770,9 @@ async function renderCallWiz(){
       }
       draft.business=draft.business||current.slug; draft.service=service; draft._startBusy=true;
       busy(true);
+      // The catalog can load while the call record is saved and the caller
+      // gives their ZIP. This warms caches only; the active card owns the UI.
+      if(service==='TV Mounting') cwWarmTvCatalog(draft.business).catch(()=>{});
       try{
         await cwStartRecord(draft);
         cwCallUpdate({service},draft).catch(()=>{});
@@ -15520,7 +15781,10 @@ async function renderCallWiz(){
         if(service==='Other'){
           cwCallUpdate({resolution:'other'},draft).catch(()=>{});
           closeCallWiz({resolved:true},draft);
-          openNewBooking({_customTask:true,_linkCallId:draft.id});
+          const c=draft.cust;
+          openNewBooking({_customTask:true,_linkCallId:draft.id,_linkCallDraft:draft,
+            name:c.name,phone:c.phone,email:c.email,address_line1:c.addr,city:c.city,state:c.state,
+            postal_code:draft.zip,sms_consent:!!c.sms});
         }else{ draft.step='zip'; renderCallWiz(); }
       }catch(e){ if(isHere()) err.textContent=e.message||'Could not start the call log. Try again.'; }
       finally{
@@ -15626,12 +15890,12 @@ async function renderCallWiz(){
       const my=draft, slug=draft.business;
       const stale=()=>!isHere() || draft.step!=='tvopts' || draft.business!==slug;
       try{
-        const svc = await nbEnsureServicesCached(slug);
+        const svc = await nbEnsureServicesCached(slug,{timeoutMs:12000});
         if(stale()) return;
         nbServices = svc.services || [];
         const tvSvc=nbServices.find(x=>x.category==='TV Mounting');
         if(!tvSvc){ nbServicesCache.delete(slug); throw new Error('TV Mounting service is not set up for this business.'); }
-        const groups=await nbLoadTvOptions(tvSvc.id,slug);
+        const groups=await nbLoadTvOptions(tvSvc.id,slug,{timeoutMs:12000});
         if(stale()) return;
         nbServiceId=tvSvc.id;
         nbOptionGroups=groups;
@@ -15645,17 +15909,24 @@ async function renderCallWiz(){
       }
     }
     const cards=callWizCards();
-    if(callWiz.optStep>=cards.length){ callWiz.step='schedule'; renderCallWiz(); return; }
+    if(callWiz.optStep>=cards.length){
+      const problem=cwValidateTvAnswers();
+      if(!problem){ callWiz.step='schedule'; renderCallWiz(); return; }
+      const incomplete=cards.findIndex(card=>cwOptionProblem(card));
+      callWiz.optStep=Math.max(0,incomplete); err.textContent=problem;
+    }
     const card=cards[callWiz.optStep];
     const tvCount=nbTotalTvs();
 
     let optsHtml, blocked=null;
-    if(card.kind==='frame'){
-      optsHtml=`<div class="nb-opts">${cwFrameRowHtml()}</div>`;
+    if(card.kind==='wire-overlap'){
+      optsHtml=cwWireOverlapOptionsHtml();
+    } else if(card.kind==='frame'){
+      optsHtml=`<div class="nb-opts">${cwFrameRowHtml()}</div><div class="nb-hint">${nbFrameTvQty.frame?`${nbFrameTvQty.frame} of ${tvCount} TVs are Frame or Gallery.`:'Leave at 0 if none of the TVs are Frame or Gallery.'}</div>`;
     } else if(card.g.key==='size'){
       // Size is the count: uncapped, one + per TV on the job.
       const gCount=nbGroupCount(card.g.id);
-      optsHtml=nbGroupOptsHtml(card.g, false)+
+      optsHtml=nbGroupOptsHtml(card.g, false, true)+
         `<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${gCount} TV${gCount===1?'':'s'} on this job</div>`;
       if(gCount===0) blocked='Add at least one TV to continue.';
     } else if(card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0){
@@ -15672,9 +15943,6 @@ async function renderCallWiz(){
       const gCount=nbGroupCount(g.id);
       const atCap=tvBound && capN>0 && gCount>=capN;
       optsHtml=nbGroupOptsHtml(g, atCap);
-      // Frame/Gallery is asked here rather than as its own opening question —
-      // on a call it belongs with the other add-ons, not before the TV itself.
-      if(g.key==='extras') optsHtml=optsHtml.replace(/<\/div>$/, cwFrameRowHtml()+'</div>');
       if(tvBound && capN>0){
         optsHtml+=`<div style="margin-top:8px;font-size:12.5px;color:${gCount>=capN?'var(--ok,#15803d)':'var(--mute)'};">${gCount>=capN?'✓ ':''}${gCount} of ${capN} selected</div>`;
       }
@@ -15684,6 +15952,7 @@ async function renderCallWiz(){
         blocked=`Pick one for each TV (${gCount} of ${capN}).`;
       }
     }
+    blocked=cwOptionProblem(card);
     // The gate replaces Back/Continue with its own Yes/No — neither answer
     // needs a second tap to confirm, and Continue would be meaningless before
     // the question is even answered.
@@ -15691,13 +15960,14 @@ async function renderCallWiz(){
     const stepNo=callWiz.optStep+1;
     body.innerHTML=`${callWizScript(callWizGroupScript(card))}
       ${optsHtml}
-      ${blocked?`<div style="margin-top:8px;font-size:12.5px;color:var(--mute);">${esc(blocked)}</div>`:''}
+      <div id="cwOptionProblem" style="margin-top:8px;font-size:12.5px;color:var(--mute);" ${blocked?'':'hidden'}>${esc(blocked||'')}</div>
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button type="button" class="btn ghost" id="cwOptBack" style="width:auto;">Back</button>
         ${isExtrasGate?'':`<button type="button" class="btn" id="cwOptNext" style="flex:1;" ${blocked?'disabled':''}>Continue</button>`}
       </div>
       <div style="margin-top:8px;font-size:11.5px;color:var(--mute);text-align:center;">Question ${stepNo} of ${cards.length}</div>`;
     document.getElementById('cwOptBack').addEventListener('click', ()=>{
+      if(!isHere()) return;
       // First question backs out of the option walk entirely, to the zip step
       // that led into it — there's nothing earlier IN this walk to go to.
       if(callWiz.optStep>0) callWiz.optStep--;
@@ -15706,6 +15976,7 @@ async function renderCallWiz(){
     });
     if(isExtrasGate){
       body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
+        if(!isHere()) return;
         const yes=b.dataset.cwchoice==='yes';
         callWiz.extrasGate=yes?'yes':'no';
         if(yes){ renderCallWiz(); return; }   // reveals the add-on list, same card
@@ -15718,10 +15989,13 @@ async function renderCallWiz(){
       }));
     } else {
       document.getElementById('cwOptNext').addEventListener('click', ()=>{
+        if(!isHere()) return;
+        const problem=cwOptionProblem(card);
+        if(problem){ cwRefreshOptionProblem(); return; }
         cwTrack('question_answered',{
-          question: card.kind==='frame' ? 'frame' : card.g.key,
+          question: cwOptionKey(card),
           tv_count: nbTotalTvs(),
-          n: card.kind==='frame' ? nbFrameTvQty.frame : nbGroupCount(card.g.id),
+          n: card.kind==='frame' ? nbFrameTvQty.frame : card.kind==='wire-overlap' ? cwWireOverlapState().answer : nbGroupCount(card.g.id),
         });
         callWiz.optStep++;
         if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
@@ -15734,7 +16008,7 @@ async function renderCallWiz(){
     const hrs=cwHandymanHours();
     body.innerHTML=`${callWizScript('What do you need done?')}
       <textarea class="search" id="cwDesc" style="margin:0;min-height:70px;" placeholder="e.g. hang three shelves, fix a leaky faucet…">${esc(callWiz.handymanDesc)}</textarea>
-      ${callWizScript(`Handyman work is ${money(HANDYMAN_HOURLY)} an hour with a two hour minimum. About how long do you think that will take?`)}
+      ${callWizScript(`Handyman work is ${cwMoney(HANDYMAN_HOURLY)} an hour with a two hour minimum. About how long do you think that will take?`)}
       <div class="nb-optq on" style="margin-top:6px;">
         <span class="nb-optlabel">Hours of labor</span>
         <span class="nb-price">$${HANDYMAN_HOURLY}/hr</span>
@@ -15771,10 +16045,19 @@ async function renderCallWiz(){
   }
 
   if(s==='schedule'){
-    if(!callWiz.calMonth){ const d=new Date(); d.setDate(1); callWiz.calMonth=d; }
+    const scheduleKey=cwScheduleKey(draft);
+    if(draft._scheduleKey!==scheduleKey){
+      draft._scheduleKey=scheduleKey; draft.prefDate=''; draft.selectedSlot=null; draft.availDates=new Set();
+      cwInvalidatePrice(draft);
+    }
+    draft._slotVerifiedKey=null;
+    const firstMonth=cwScheduleToday(draft).slice(0,7);
+    if(!draft.calMonth || `${draft.calMonth.getFullYear()}-${String(draft.calMonth.getMonth()+1).padStart(2,'0')}`<firstMonth){
+      draft.calMonth=new Date(firstMonth+'-01T12:00:00');
+    }
     if(!callWiz.availDates) callWiz.availDates=new Set();
     body.innerHTML=`${callWizScript("What's a good day for you?")}
-      <div id="cwCalWrap" style="width:100%;min-width:0;background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.10), transparent 60%), #0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
+      <div id="cwCalWrap" style="width:100%;min-width:0;background:#0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
         <div class="nb-cal-head">
           <button type="button" class="nb-cal-nav" id="cwCalPrev">‹</button>
           <div class="nb-cal-title" id="cwCalTitle"></div>
@@ -15783,6 +16066,7 @@ async function renderCallWiz(){
         <div class="nb-cal-dow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
         <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
       </div>
+      <div id="cwTimeZone" style="margin-top:7px;font-size:12px;color:var(--mute);">All times are in ${esc(cwScheduleZoneLabel(draft))}.</div>
       <div id="cwCalNote" style="display:none;background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:11px 13px;margin-top:9px;font-size:12.5px;line-height:1.55;color:#9a3412;"></div>
       <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
         <div id="cwSlotAsk" style="margin-bottom:8px;">${callWizScript('Would you prefer morning or afternoon?').replace('margin-bottom:12px','margin-bottom:0')}</div>
@@ -15791,45 +16075,59 @@ async function renderCallWiz(){
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button type="button" class="btn ghost" id="cwSchedSkip" style="flex:1;">Customer not ready to choose time</button>
-        <button type="button" class="btn" id="cwSchedNext" style="flex:1;display:${callWiz.selectedSlot?'':'none'};">Customer agrees to date</button>
+        <button type="button" class="btn" id="cwSchedNext" style="flex:1;display:none;">Customer agrees to date</button>
       </div>
       ${cwBackBtnHtml(callWiz.service==='TV Mounting'?'Back':'Change what they need done')}`;
     const cwMonthKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const scheduleHere=()=>isHere() && draft.step==='schedule' && cwScheduleKey(draft)===scheduleKey;
+    const clearSlot=()=>{ draft.selectedSlot=null; draft._slotVerifiedKey=null; cwInvalidatePrice(draft); document.getElementById('cwSchedNext').style.display='none'; };
+    const readTimezone=r=>{
+      if(r.timezone){
+        try{ new Intl.DateTimeFormat('en-US',{timeZone:r.timezone}); draft.scheduleTimezone=r.timezone; draft._scheduleTimezoneZip=draft.zip; }catch(_){}
+      }
+      document.getElementById('cwTimeZone').textContent=`All times are in ${cwScheduleZoneLabel(draft)}.`;
+    };
     let cwCalSeq=0;
     async function loadCwCalendar(){
+      if(!scheduleHere()) return;
       const mySeq=++cwCalSeq;
       document.getElementById('cwCalTitle').textContent=callWiz.calMonth.toLocaleDateString('en-US',{month:'long',year:'numeric'});
-      const cur=new Date(); cur.setDate(1);
-      document.getElementById('cwCalPrev').disabled=(callWiz.calMonth.getFullYear()===cur.getFullYear()&&callWiz.calMonth.getMonth()===cur.getMonth());
-      const params={ business:cwBiz(), month:cwMonthKey(callWiz.calMonth), technician_id:'any' };
-      if(callWiz.zip) params.postal_code=callWiz.zip;
+      document.getElementById('cwCalPrev').disabled=cwMonthKey(draft.calMonth)<=cwScheduleToday(draft).slice(0,7);
+      document.getElementById('cwCalGrid').innerHTML='<div role="status" style="grid-column:1/8;text-align:center;padding:10px;">Checking available dates…</div>';
+      document.getElementById('cwCalNote').style.display='none';
+      const params={...cwScheduleParams(draft),month:cwMonthKey(draft.calMonth)};
       try{
         const r=await api('available_dates',{ params });
-        if(!isHere() || mySeq!==cwCalSeq) return;
-        callWiz.availDates=new Set(r.dates||[]);
+        if(!scheduleHere() || mySeq!==cwCalSeq) return;
+        if(!Array.isArray(r.dates)) throw new Error('The calendar returned an incomplete response. Please retry.');
+        readTimezone(r);
+        const today=cwScheduleToday(draft);
+        callWiz.availDates=new Set(r.dates.filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d) && d.startsWith(params.month+'-') && d>=today));
         // A blank month has several very different causes and they all used to
         // look the same: a grid of grey. Keep the reason so the grid can say it.
-        callWiz.calReason=(r.dates&&r.dates.length)?null:(r.reason||'none_open');
+        callWiz.calReason=callWiz.availDates.size?null:(r.reason||'none_open');
         callWiz.calArea=r.area||callWiz.areaName||null;
       }catch(e){
-        if(!isHere() || mySeq!==cwCalSeq) return;
+        if(!scheduleHere() || mySeq!==cwCalSeq) return;
         callWiz.availDates=new Set();
         callWiz.calReason='error'; callWiz.calError=e.message||'';
       }
       renderCwCalendarGrid();
     }
     function renderCwCalendarGrid(){
+      if(!scheduleHere()) return;
       const grid=document.getElementById('cwCalGrid');
       const y=callWiz.calMonth.getFullYear(), m=callWiz.calMonth.getMonth();
       const firstDow=new Date(y,m,1).getDay();
       const days=new Date(y,m+1,0).getDate();
+      const today=cwScheduleToday(draft);
       let html='';
       for(let i=0;i<firstDow;i++) html+='<div class="nb-cal-day empty"></div>';
       for(let d=1;d<=days;d++){
         const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const avail=callWiz.availDates.has(ds);
+        const avail=ds>=today && callWiz.availDates.has(ds);
         const cls=avail?(ds===callWiz.prefDate?'avail sel':'avail'):'off';
-        html+=`<div class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:''}>${d}</div>`;
+        html+=`<button type="button" class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:'disabled'} aria-label="${esc(ds)}" style="font-family:inherit;padding:0;${avail?'':'background:transparent;'}">${d}</button>`;
       }
       grid.innerHTML=html;
       // Nothing open this month: say WHY, with the line to read out loud. A
@@ -15842,12 +16140,15 @@ async function renderCallWiz(){
           R==='zip_not_covered' ? `<b>We don't cover ${esc(callWiz.zip||'that zip')} yet.</b> Take their details and send an estimate — the office can follow up if we open the area.`
           : R==='area_unstaffed' ? `<b>No technician in ${esc(area)} yet.</b> This zip is on the map but unstaffed, so there's nothing to book. Send an estimate instead.`
           : R==='no_techs_in_area' ? `<b>No technician is assigned to ${esc(area)}.</b> Nothing can be booked here until someone covers it — send an estimate and tell the office.`
-          : R==='error' ? `<b>Couldn't load the calendar.</b> ${esc(callWiz.calError||'')} Try again, or send an estimate.`
+          : R==='error' ? `<b>Couldn't load the calendar.</b> ${esc(callWiz.calError||'')} <button type="button" class="btn ghost sm" id="cwCalRetry" style="margin-top:8px;">Retry calendar</button>`
           : `<b>Nothing open in ${esc(callWiz.calMonth.toLocaleDateString('en-US',{month:'long'}))}.</b> Try the next month with ›, or send an estimate.`;
         note.style.display=R?'':'none';
+        const retry=document.getElementById('cwCalRetry'); if(retry) retry.addEventListener('click',loadCwCalendar);
       }
+      const gridSeq=cwCalSeq;
       grid.querySelectorAll('.nb-cal-day.avail').forEach(cell=>cell.addEventListener('click', async()=>{
-        callWiz.prefDate=cell.dataset.date; callWiz.selectedSlot=null;
+        if(!scheduleHere() || gridSeq!==cwCalSeq || !draft.availDates.has(cell.dataset.date)) return;
+        callWiz.prefDate=cell.dataset.date; clearSlot();
         cwTrack('date_picked',{ date:callWiz.prefDate });
         // Picking a new date clears whatever time was chosen for the old one --
         // "Customer agrees to date" has to go back into hiding until a time on
@@ -15864,13 +16165,22 @@ async function renderCallWiz(){
       // A's slower reply used to repaint B's list with A's times, so the
       // secretary read out the wrong day and could pick a slot that isn't even
       // open on the date the booking is then submitted with.
-      const mySeq=++cwSlotSeq;
+      if(!scheduleHere() || date!==draft.prefDate) return;
+      const mySeq=++cwSlotSeq, previousSlot=draft.selectedSlot;
+      clearSlot();
       const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
-      const params={ business:cwBiz(), date, technician_id:'any' };
-      if(callWiz.zip) params.postal_code=callWiz.zip;
+      wrap.style.display='';
+      list.innerHTML='<div role="status" style="color:var(--mute);font-size:13px;">Checking available times…</div>';
+      document.getElementById('cwSlotSay').innerHTML='';
+      const params={...cwScheduleParams(draft),date};
+      const slotsHere=()=>scheduleHere() && mySeq===cwSlotSeq && date===draft.prefDate;
       try{
         const r=await api('available_slots',{ params });
-        if(!isHere() || mySeq!==cwSlotSeq || date!==draft.prefDate) return;
+        if(!slotsHere()) return;
+        if(!Array.isArray(r.slots) || r.slots.some(s=>!s || typeof s.slot_key!=='string' || typeof s.label!=='string')) throw new Error('The times returned an incomplete response. Please retry.');
+        readTimezone(r);
+        const saved=previousSlot && r.slots.find(s=>s.slot_key===previousSlot.key);
+        if(saved){ draft.selectedSlot={key:saved.slot_key,label:saved.label}; draft._slotVerifiedKey=scheduleKey+'|'+date+'|'+saved.slot_key; }
         if(!r.slots.length){ list.innerHTML='<div style="color:var(--mute);font-size:13px;">No available times for this date.</div>'; }
         // The 8 PM slot carries an after-hours fee. It is flagged right on the
         // button so the secretary quotes it on the call instead of discovering
@@ -15895,7 +16205,10 @@ async function renderCallWiz(){
             ` Does that work for you?`);
         };
         list.querySelectorAll('.nb-slot').forEach(b=>b.addEventListener('click', ()=>{
+          if(!slotsHere() || !r.slots.some(s=>s.slot_key===b.dataset.key)) return;
           callWiz.selectedSlot={ key:b.dataset.key, label:b.dataset.label };
+          draft._slotVerifiedKey=scheduleKey+'|'+date+'|'+b.dataset.key;
+          cwInvalidatePrice(draft);
           cwTrack('slot_picked',{ date:callWiz.prefDate, slot:b.dataset.label, after_hours_fee:cwAfterHoursFeeFor(b.dataset.key, date) });
           list.querySelectorAll('.nb-slot').forEach(x=>x.classList.remove('on'));
           b.classList.add('on');
@@ -15904,11 +16217,25 @@ async function renderCallWiz(){
           // commits to it can appear.
           const nextBtn=document.getElementById('cwSchedNext'); if(nextBtn) nextBtn.style.display='';
         }));
+        document.getElementById('cwSchedNext').style.display=cwSlotIsVerified(draft)?'':'none';
         sayWhat();
-      }catch(e){ if(!isHere() || mySeq!==cwSlotSeq) return; list.innerHTML=`<div style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message)}</div>`; wrap.style.display=''; }
+      }catch(e){
+        if(!slotsHere()) return;
+        clearSlot();
+        list.innerHTML=`<div role="alert" style="color:var(--danger,#b91c1c);font-size:13px;">${esc(e.message||'Could not check these times.')}</div><button type="button" class="btn ghost sm" id="cwSlotsRetry" style="margin-top:8px;">Retry times</button>`;
+        wrap.style.display='';
+        document.getElementById('cwSlotsRetry').addEventListener('click',()=>loadCwSlots(date));
+      }
     }
-    document.getElementById('cwCalPrev').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()-1); loadCwCalendar(); });
-    document.getElementById('cwCalNext').addEventListener('click', ()=>{ callWiz.calMonth.setMonth(callWiz.calMonth.getMonth()+1); loadCwCalendar(); });
+    const changeMonth=delta=>{
+      if(!scheduleHere() || (delta<0 && cwMonthKey(draft.calMonth)<=cwScheduleToday(draft).slice(0,7))) return;
+      draft.calMonth.setDate(1); draft.calMonth.setMonth(draft.calMonth.getMonth()+delta);
+      draft.prefDate=''; clearSlot(); ++cwSlotSeq;
+      document.getElementById('cwSlotsWrap').style.display='none';
+      loadCwCalendar();
+    };
+    document.getElementById('cwCalPrev').addEventListener('click', ()=>changeMonth(-1));
+    document.getElementById('cwCalNext').addEventListener('click', ()=>changeMonth(1));
     loadCwCalendar();
     if(callWiz.prefDate) loadCwSlots(callWiz.prefDate);
     // Nothing past this step can get back to the calendar, and the booking is
@@ -15916,8 +16243,9 @@ async function renderCallWiz(){
     // unpicked used to strand the whole call at "go back and pick a time" with
     // no way back. Stop it here instead.
     document.getElementById('cwSchedNext').addEventListener('click', ()=>{
-      if(!callWiz.prefDate || !callWiz.selectedSlot){
-        err.textContent='Pick a date and a time first.';
+      if(!scheduleHere()) return;
+      if(!cwSlotIsVerified(draft)){
+        err.textContent='Pick an available date and time first.';
         return;
       }
       err.textContent='';
@@ -15927,6 +16255,8 @@ async function renderCallWiz(){
     // hear the price and get it in writing, so this goes to the recap without a
     // slot rather than making the secretary invent one or hang up.
     document.getElementById('cwSchedSkip').addEventListener('click', ()=>{
+      if(!scheduleHere()) return;
+      draft.prefDate=''; clearSlot();
       err.textContent='';
       callWiz.step='recap'; renderCallWiz();
     });
@@ -15938,6 +16268,12 @@ async function renderCallWiz(){
   }
 
   if(s==='recap'){
+    let quote;
+    try{quote=cwBuildQuote();}
+    catch(error){
+      body.innerHTML=`${callWizScript('Let me double-check the job details.')}<div role="alert" style="margin:12px 0;">${esc(error.message)}</div>${cwBackBtnHtml('Check the answers')}`;
+      cwWireBack(cwBackFromSchedule);return;
+    }
     // Two separate things, deliberately: `items` is the money (what the
     // customer would be read if they ask for a breakdown), `context` is the
     // job facts around it. Mixing them into one list is what made the old
@@ -15949,22 +16285,13 @@ async function renderCallWiz(){
     // The priced lines come straight from New Booking's own collector, so the
     // figure read out on the phone is the figure the booking will carry —
     // including the branch minimum and any multi-TV discount.
-    let priced=[];
-    if(callWiz.service==='TV Mounting'){
-      try{ priced=nbCollectSelections(); }catch(e){ priced=[]; }
-      priced.forEach(l=>items.push([`${l.label}${l.quantity>1?` ×${l.quantity}`:''}`, l.price*l.quantity]));
-    } else {
-      if(callWiz.handymanDesc) context.push(['Job', callWiz.handymanDesc]);
-      const hm=cwHandymanLine();
-      if(hm){ priced=[hm]; items.push([`${hm.label} ×${hm.quantity}`, hm.price*hm.quantity]); }
-    }
+    const {priced,travelFee,ahFee,preDiscount,discount,subtotal,total:afterTax}=quote;
+    draft.preDiscountTotal=preDiscount;
+    quote.selections.forEach(l=>items.push([`${l.label}${l.quantity>1?` ×${l.quantity}`:''}`,cwRoundMoney(l.price*l.quantity)]));
+    if(callWiz.handymanDesc) context.push(['Job',callWiz.handymanDesc]);
     // Travel fee and the 8 PM after-hours fee are part of what the customer
     // pays before tax, so they belong in the number read out on the call —
     // quoting the options-only figure would under-quote every out-of-area job.
-    const travelFee=Number(callWiz.surcharge)||0;
-    if(travelFee>0) items.push(['Travel', travelFee]);
-    const ahFee=callWiz.selectedSlot?cwAfterHoursFeeFor(callWiz.selectedSlot.key, callWiz.prefDate):0;
-    if(ahFee>0) items.push(['After-hours (8 PM start)', ahFee]);
     let whenTxt='';
     if(callWiz.prefDate){
       let day=callWiz.prefDate;
@@ -15972,17 +16299,12 @@ async function renderCallWiz(){
       whenTxt = callWiz.selectedSlot ? `${day} at ${cwSlotStart(callWiz.selectedSlot.label)}` : day;
       context.push(['Scheduled', whenTxt]);
     }
-    const preDiscount=priced.reduce((s,x)=>s+x.price*x.quantity,0)+travelFee+ahFee;
-    const discount=cwDiscountApplied();
-    const subtotal=Math.max(0, preDiscount-discount);
-    if(discount>0) items.push(['Discount', -discount]);
-    const afterTax=Math.round(subtotal*(1+TAX_RATE)*100)/100;
     // Flat text version, kept only for the note saved against the call.
-    const lines=[...context.map(([k,v])=>`${k}: ${v}`), ...items.map(([k,v])=>`${k} — ${money(v)}`)];
+    const lines=[...context.map(([k,v])=>`${k}: ${v}`), ...items.map(([k,v])=>`${k} — ${cwMoney(v)}`)];
     // The line the secretary reads. The amount is spoken the way it is said out
     // loud ("four fifty six"), with the digits shown underneath for their eyes.
     const summary=cwJobSummary();
-    const spoken=cwSpokenAmount(subtotal).toUpperCase();
+    const spoken=Number.isInteger(subtotal)?cwSpokenAmount(subtotal).toUpperCase():cwMoneyCents(subtotal);
     const sentence = callWiz.service==='TV Mounting' && summary
       ? `Ok, I have ${summary}${whenTxt?` for ${whenTxt}`:''}. The total before tax for this installation is ${spoken}.`
       : `${callWiz.handymanDesc?`Ok, I have ${callWiz.handymanDesc}`:'Ok'}${whenTxt?` for ${whenTxt}`:''}.${subtotal>0?` The total before tax is ${spoken}.`:''}`;
@@ -15994,7 +16316,9 @@ async function renderCallWiz(){
     // and the "read to customer" moment. Both logged once per card render
     // (the card doubles as the read-it-and-wait step, per the merged design),
     // not on every repaint.
-    if(!callWiz._quoteLogged){
+    const quoteLogKey=JSON.stringify([quote.selections,draft.prefDate,draft.selectedSlot?.key]);
+    if(callWiz._quoteLogKey!==quoteLogKey){
+      callWiz._quoteLogKey=quoteLogKey;
       callWiz._quoteLogged=true;
       cwTrack('price_quoted',{ total:subtotal, after_tax:afterTax, tv_count:nbTotalTvs(),
         travel_fee:travelFee, after_hours_fee:ahFee, service:callWiz.service });
@@ -16022,8 +16346,8 @@ async function renderCallWiz(){
         <div style="background:var(--line2);border-radius:10px;padding:10px 14px;margin-top:7px;font-size:13px;line-height:1.6;">
           ${context.map(([k,v])=>row(k,v)).join('')}
           ${items.length?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line);"></div>`:''}
-          ${items.map(([k,v])=>row(k, (v<0?'-':'')+money(Math.abs(v)), {neg:v<0})).join('')}
-          ${subtotal>0?row('Total before tax', money(subtotal), {strong:true,top:true})+row('Total after tax', money(afterTax), {strong:true}):''}
+          ${items.map(([k,v])=>row(k, (v<0?'-':'')+cwMoney(Math.abs(v)), {neg:v<0})).join('')}
+          ${subtotal>0?row('Total before tax', cwMoney(subtotal), {strong:true,top:true})+row('Total after tax', cwMoney(afterTax), {strong:true}):''}
         </div>
       </details>
       <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:14px 16px;text-align:center;margin:24px 0;">
@@ -16111,14 +16435,14 @@ async function renderCallWiz(){
       return `<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
           <span style="font-size:12.5px;color:var(--ink-2);">Price now</span>
-          <span style="font-size:26px;font-weight:800;color:#14532d;font-variant-numeric:tabular-nums;">${esc(cents?cwMoneyCents(t):money(cwCloseDisplay()))}</span>
+        <span style="font-size:26px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;">${esc(cents?cwMoneyCents(t):cwMoney(cwCloseDisplay()))}</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute);padding-bottom:11px;border-bottom:1px solid var(--line2);font-variant-numeric:tabular-nums;">
-          <span>before tax</span><span>${esc(money(Math.round(t*(1+TAX_RATE)*100)/100))} after tax</span>
+          <span>before tax</span><span>${esc(cwMoney(Math.round(t*(1+TAX_RATE)*100)/100))} after tax</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin:10px 0 5px;font-variant-numeric:tabular-nums;">
           <span>Given so far</span>
-          <span><b style="color:#b45309;">${esc(money(applied))}</b> of ${esc(money(spend.max))}</span>
+          <span><b style="color:#b45309;">${esc(cwMoney(applied))}</b> of ${esc(cwMoney(spend.max))}</span>
         </div>
         <div style="height:6px;background:var(--line2);border-radius:99px;overflow:hidden;">
           <div style="width:${spend.max>0?Math.min(100,Math.round(applied/spend.max*100)):0}%;height:100%;background:#f59e0b;"></div>
@@ -16151,7 +16475,7 @@ async function renderCallWiz(){
     const clawback=()=>{
       if(callWiz.discSpoken==null || !canQuote) return '';
       if(cwCloseTotal() <= callWiz.discSpoken + 0.5) return '';
-      return cwAmber(`You told them ${money(Math.round(callWiz.discSpoken))}. This ticket is back at ${money(cwCloseDisplay())} now. Say the new number, not the old one.`);
+      return cwAmber(`You told them ${cwMoney(Math.round(callWiz.discSpoken))}. This ticket is back at ${cwMoney(cwCloseDisplay())} now. Say the new number, not the old one.`);
     };
 
     // ── Terminal: nothing to give ──────────────────────────────────────────
@@ -16228,14 +16552,14 @@ async function renderCallWiz(){
       const moved=committed && delta>0;
       let head;
       if(moved && !cents){
-        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total is ${spokenTotal}.`, spokenTotal);
+        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total before tax is ${spokenTotal}.`, spokenTotal);
       }else if(moved && cents){
-        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total is this, read it off the screen since it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+        head=callWizScript(`Great, I can give you a discount for hearing about us on ${callWiz.discSource}. Your new total before tax is ${cwMoneyCents(cwCloseTotal())}.`);
       }else{
         head=callWizScript('I hear you. Let me see what I can do for you. How did you hear about us?');
       }
       body.innerHTML=`${clawback()}${head}
-        ${secTitle('Where they heard about us', effSource>0?'-'+money(effSource):(loading?'':'no money left on this one'))}
+        ${secTitle('Where they heard about us', effSource>0?'-'+cwMoney(effSource):(loading?'':'no money left on this one'))}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
           ${CW_SOURCES.map(src=>{const on=callWiz.discSource===src;return `<button type="button" data-cwsrc="${esc(src)}" style="font-family:inherit;display:flex;align-items:center;gap:10px;text-align:left;background:${on?'#161b22':'#fff'};border:1.5px solid ${on?'#161b22':'#d9dee6'};border-radius:10px;padding:13px;font-size:15px;font-weight:${on?700:600};color:${on?'#fff':'var(--ink)'};cursor:pointer;min-width:0;">
             <span style="flex-shrink:0;width:19px;height:19px;border-radius:50%;border:2px solid ${on?'#fff':'#d9dee6'};position:relative;display:inline-block;">${on?'<span style="position:absolute;inset:3px;border-radius:50%;background:#fff;display:block;"></span>':''}</span>
@@ -16265,7 +16589,7 @@ async function renderCallWiz(){
       if(moved && !cents){
         head=callWizScript(`Perfect, that code comes off too. The total is now ${spokenTotal} before tax.`, spokenTotal);
       }else if(moved && cents){
-        head=callWizScript(`Perfect, that code comes off too. Read this one off the screen, it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+        head=callWizScript(`Perfect, that code comes off too. The total is now ${cwMoneyCents(cwCloseTotal())} before tax.`);
       }else{
         head=callWizScript('Do you have a promo code?');
       }
@@ -16276,11 +16600,11 @@ async function renderCallWiz(){
           <button type="button" class="btn ${cwCouponDirty()?'':'ghost'}" id="cwCouponApply" style="width:auto;${cwCouponDirty()?'background:#f59e0b;color:#3a2a00;':''}">Apply</button>
         </div>
         <div id="cwCouponMsg" style="font-size:12.5px;margin-bottom:12px;color:var(--mute);">${cwCouponDirty()?'Not applied yet, tap Apply.':(callWiz.discCoupon?`&#10003; ${esc(callWiz.discCoupon.code)} applied`:'Same codes that work on the website.')}</div>
-        ${shortfall?cwAmber(`${callWiz.discCoupon.code} is a ${money(face)} code. Only ${money(spend.eff.coupon)} of it fits on this ticket.`):''}
+        ${shortfall?cwAmber(`${callWiz.discCoupon.code} is a ${cwMoney(face)} code. Only ${cwMoney(spend.eff.coupon)} of it fits on this ticket.`):''}
         ${committed&&delta<=0?cwAmber('That did not change the total. The discount already on this ticket covers it.'):''}
         ${priceCard()}
         ${moved?answers(room>0?'taking cash off':'sending the estimate','Customer agrees to price','Customer doesnt agree')
-               :`<button type="button" class="btn ghost" id="cwNoCode">They dont have a coupon</button>`}
+               :`<button type="button" class="btn ghost" id="cwNoCode">${committed?'Continue with the current discount':'They do not have a coupon'}</button>`}
         ${cwBackBtnHtml('Back')}`;
       cwWireLadderCommon(body);
       cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
@@ -16293,23 +16617,24 @@ async function renderCallWiz(){
     const committed=(Number(callWiz.discManual)||0)>0;
     const moved=committed && delta>0;
     const manualVal=callWiz._manualDraft!=null?callWiz._manualDraft:(callWiz.discManual||'');
-    const overAsk=Math.max(0,Number(manualVal)||0)>room+(Number(callWiz.discManual)||0);
+    const manualCap=cwNonnegativeMoney(spend.max-spend.eff.source-spend.eff.coupon);
+    const overAsk=cwNonnegativeMoney(manualVal)>manualCap;
     let head;
     if(moved && !cents){
       head=callWizScript(`The absolute best I can do is ${spokenTotal} before tax.`, spokenTotal);
     }else if(moved && cents){
-      head=callWizScript(`The absolute best I can do is this, and read it off the screen because it is not a round number: ${cwMoneyCents(cwCloseTotal())}.`);
+      head=callWizScript(`The absolute best I can do is ${cwMoneyCents(cwCloseTotal())} before tax.`);
     }else{
       head=callWizScript('Let me see what else I have on this one, hang on one second.');
     }
     body.innerHTML=`${clawback()}${head}
-      ${secTitle(room>0?'You can give a discount as much as '+money(room):'You are at the floor. There is nothing left to give on this job.')}
-      ${room>0?`<div style="display:flex;gap:6px;margin-bottom:6px;">
+      ${secTitle(room>0?'You can give a discount as much as '+cwMoney(room):'You are at the floor. There is nothing left to give on this job.')}
+      ${room>0||committed?`<div style="display:flex;gap:6px;margin-bottom:6px;">
         <input class="search" id="cwManualInput" type="number" min="0" step="5" style="margin:0;" placeholder="0" value="${esc(String(manualVal))}">
         <button type="button" class="btn ${cwManualDirty()?'':'ghost'}" id="cwManualApply" style="width:auto;${cwManualDirty()?'background:#f59e0b;color:#3a2a00;':''}">Apply</button>
       </div>
       <div id="cwManualCap" style="font-size:12px;color:var(--mute);margin-bottom:12px;">${cwManualDirty()?'Not applied yet, tap Apply.':'This is the total taken off by hand, not an amount added on top.'}</div>`:''}
-      ${overAsk?cwAmber(`You asked for ${money(Math.max(0,Number(manualVal)||0))}. Only ${money(room+(Number(callWiz.discManual)||0))} fits on this ticket.`):''}
+      ${overAsk?cwAmber(`You asked for ${cwMoney(cwNonnegativeMoney(manualVal))}. Only ${cwMoney(manualCap)} fits on this ticket.`):''}
       ${committed&&delta<=0?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
       ${priceCard()}
       ${(moved||room<=0)?answers('sending the estimate','Customer agrees to price','Customer doesnt agree'):cwOpNote('Next','Put a number in, then read them the new price.')}
@@ -16336,7 +16661,7 @@ async function renderCallWiz(){
       whenTxt=callWiz.selectedSlot?`${day}, ${callWiz.selectedSlot.label}`:day;
     }
     body.innerHTML=`${callWizScript('Perfect. I\'ll schedule this now. Can I get your first and last name?')}
-      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">${esc(whenTxt)}${disc>0?` · ${esc(money(disc))} off applied`:''}</div>
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">${esc(whenTxt)}${disc>0?` · ${esc(cwMoney(disc))} off applied`:''}</div>
       <input class="search" id="cwCustName" style="margin:0 0 8px;" placeholder="Full name *" value="${esc(c.name)}">
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <input class="search" id="cwCustPhone" style="margin:0;" placeholder="Phone *" inputmode="tel" value="${esc(c.phone)}">
@@ -16357,6 +16682,8 @@ async function renderCallWiz(){
       </select>
       <div id="cwCardWrap" style="display:none;margin-bottom:10px;">
         <div id="cwStripeCard" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:13px 14px;"></div>
+        <div id="cwCardStatus" role="status" style="font-size:12px;margin-top:6px;"></div>
+        <button type="button" class="btn ghost sm" id="cwCardRetry" style="display:none;margin-top:6px;">Retry card form</button>
         <div style="font-size:11px;color:var(--mute);margin-top:6px;">Card is saved and charged at time of service.</div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;">
           <input type="checkbox" id="cwSkipCard"${c.skipCard?' checked':''} style="cursor:pointer;width:16px;height:16px;">
@@ -16371,11 +16698,19 @@ async function renderCallWiz(){
       <button type="button" class="btn ghost" id="cwCustBack">Back</button>`;
     const pmSel=document.getElementById('cwPayMethod');
     const syncCard=async()=>{
+      if(!isHere()) return;
       const isCard=pmSel.value==='card';
       document.getElementById('cwCardWrap').style.display=isCard?'':'none';
-      if(isCard){ try{ await cwEnsureStripe(); }catch(e){ if(isHere()) err.textContent=e.message; } }
+      if(isCard && !draft._bookingAttempt && !document.getElementById('cwSkipCard').checked){
+        const status=document.getElementById('cwCardStatus'),retry=document.getElementById('cwCardRetry');
+        status.textContent='Loading secure card form…';retry.style.display='none';
+        try{await cwEnsureStripe();if(isHere())status.textContent='';}
+        catch(error){if(isHere() && pmSel.value==='card'){status.textContent=error.message;retry.style.display='';}}
+      }
     };
     pmSel.addEventListener('change', syncCard);
+    document.getElementById('cwCardRetry').addEventListener('click',syncCard);
+    document.getElementById('cwSkipCard').addEventListener('change',syncCard);
     syncCard();
     // Persist every keystroke so nothing typed here is lost to a Back tap, a
     // failed submit, or the modal being clicked away and resumed.
@@ -16385,10 +16720,20 @@ async function renderCallWiz(){
     });
     document.getElementById('cwBookNow').addEventListener('click', cwSubmitBooking);
     document.getElementById('cwCustBack').addEventListener('click', ()=>{ cwSaveCust(); callWiz.step='recap'; renderCallWiz(); });
+    if(draft._bookingAttempt){
+      body.querySelectorAll('input,select,textarea').forEach(node=>node.disabled=true);
+      document.getElementById('cwCustBack').disabled=true;
+      document.getElementById('cwBookNow').textContent='Check booking';
+      err.textContent='The previous booking save needs checking. This retries the same booking safely.';
+    }
     return;
   }
 
   if(s==='estimate'){
+    if(!draft._estimateContactInitialized){
+      for(const key of ['name','phone','email']) if(!draft.estimateContact[key]) draft.estimateContact[key]=draft.cust[key]||'';
+      draft._estimateContactInitialized=true;
+    }
     // This screen is reached AFTER the customer has already said no. Asking a
     // reluctant caller for a name and two contact details to hear a number is
     // how the estimate gets lost entirely — so one way to reach them is all
@@ -16408,61 +16753,13 @@ async function renderCallWiz(){
       document.getElementById(id).addEventListener('input',e=>{ if(isHere()) draft.estimateContact[key]=e.target.value; });
     }
     document.getElementById('cwEstSmsConsent').addEventListener('change',e=>{ if(isHere()) draft.cust.sms=e.target.checked; });
-    document.getElementById('cwEstSend').addEventListener('click', async()=>{
-      if(!isHere() || draft._ending) return;
-      const name=document.getElementById('cwName').value.trim();
-      const phone=document.getElementById('cwPhone').value.trim();
-      const email=document.getElementById('cwEmail').value.trim();
-      // A text needs the customer's yes to the consent question; without it the
-      // estimate can only go by email.
-      const smsOk=!!(document.getElementById('cwEstSmsConsent')||{}).checked;
-      if(!email && !(phone && smsOk)){ err.textContent=phone?'To text it, read the text-message script next to the checkbox word for word, and tick the box only if they say yes. Otherwise take an email.':'A phone number or an email is needed to send it — whichever they prefer.'; return; }
-      const unpriced=nbUnpricedOtherLabel();
-      if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
-      const btn=document.getElementById('cwEstSend');
-      // Same priced lines the booking would carry, so the estimate the customer
-      // receives matches what they were quoted on the call.
-      let sels=[];
-      if(callWiz.service==='TV Mounting'){ try{ sels=nbCollectSelections(); }catch(e){ sels=[]; } }
-      const tvCount=nbTotalTvs();
-      const label = callWiz.service==='TV Mounting'
-        ? `TV mounting — ${tvCount} TV${tvCount===1?'':'s'}`
-        : `Handyman — ${callWiz.handymanDesc||'see notes'}`;
-      if(!sels.length){ const hm=cwHandymanLine(); sels=[hm?{ label:hm.label, quantity:hm.quantity, price:hm.price }:{ label, quantity:1, price:0 }]; }
-      // A travel fee and any discount already offered out loud have to be on the
-      // estimate too, or the written number contradicts the one the customer
-      // was just read on the phone.
-      // Same nbCarriedTravelLine() guard as cwSubmitBooking() above, a written
-      // estimate must not show the fee twice either.
-      const estTravel=nbCarriedTravelLine()?0:(Number(callWiz.surcharge)||0);
-      if(estTravel!==0) sels.push({ label:estTravel>0?'Travel':'Travel discount', price:estTravel, quantity:1 });
-      const estDisc=cwDiscountApplied();
-      if(estDisc>0) sels.push({ label:callWiz.discountLabel||'Discount', price:-estDisc, quantity:1 });
-      const release=cwHoldActions(draft); btn.textContent='Sending…';
-      try{
-        const est=await api('estimate_create',{ method:'POST', body:{
-          business:draft.business, customer_name:name, customer_phone:phone, customer_email:email,
-          customer_zip:callWiz.zip, service_label:label,
-          selections:sels,
-          sms_consent: smsOk,
-        }});
-        cwTrack('estimate_sent',{ estimate_id:est.id||null, discount:estDisc },draft);
-        await cwCallUpdate({
-          resolution:'estimate_sent',
-          notes:`Estimate sent (${label})${draft.prefDate?' · preferred '+draft.prefDate:''}`,
-        },draft).catch(()=>{});
-        if(!cwIsActive(draft)){ draft.resolution='estimate_sent'; return; }
-        closeCallWiz({resolved:true},draft);
-        // Say which channel it actually went out on, and never claim "sent"
-        // when nothing left — the customer would be waiting on nothing.
-        toast(est.warning ? '⚠ '+est.warning
-          : est.warnings ? 'Estimate saved — price still needs to be set before it goes out.'
-          : est.emailed && est.texted ? 'Estimate sent by email and text ✓'
-          : est.texted ? 'Estimate texted ✓'
-          : 'Estimate emailed ✓');
-      }catch(e){ if(isHere()){ err.textContent=e.message||'Could not create the estimate'; btn.textContent='Send estimate'; } }
-      finally{ release(); }
-    });
+    document.getElementById('cwEstSend').addEventListener('click',cwSubmitEstimate);
+    if(draft._estimateAttempt){
+      body.querySelectorAll('input,select,textarea').forEach(node=>node.disabled=true);
+      document.getElementById('cwEstBack').disabled=true;
+      document.getElementById('cwEstSend').textContent='Check estimate';
+      err.textContent='The previous save needs checking. This will retry the same estimate without sending it twice.';
+    }
     return;
   }
 
@@ -16497,8 +16794,7 @@ document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpse
 function smsConsentScript(biz){
   const slug=biz&&biz.slug;
   const brand=slug==='handy-andy'?'Handy Andy TV Mounting':((biz&&biz.name)||'We');
-  const links=slug==='handy-andy'?' Our SMS Terms are at ihandyandy.com/terms-of-service and our Privacy Policy is at ihandyandy.com/privacy-policy.':'';
-  return `${brand} can text you about this job: booking confirmations, technician on-the-way and ETA updates, estimates, invoices, replies about your job, and one follow-up after the service. It’s optional and not required to book. Message frequency varies. Message and data rates may apply. Reply HELP for help or STOP to opt out.${links} Would you like to receive these text messages?`;
+  return `May ${brand} text you about this job, including booking and arrival updates, estimates, invoices, replies, and one follow-up after service? Texts are optional.`;
 }
 async function openNewBooking(prefill){
   if(!current) return;
@@ -16531,6 +16827,7 @@ async function openNewBooking(prefill){
   // resets on every open rather than inside resetNbSteps (which also fires on
   // an in-session category switch, where the link must survive).
   nbLinkedCallId = (prefill && prefill._linkCallId) || null;
+  nbLinkedCallDraft = nbLinkedCallId && prefill._linkCallDraft?.id===nbLinkedCallId ? prefill._linkCallDraft : null;
   const modal=document.getElementById('modal');
   document.getElementById('nbErr').textContent='';
   document.getElementById('nbForm').reset();
@@ -16767,18 +17064,31 @@ const nbKeyCache=new Map();
 // waiting for the full technician roster. Both helpers share in-flight service
 // requests; a roster failure never discards a successful service response.
 const nbServicesCache=new Map();
-async function nbEnsureServicesCached(slug){
+function nbCatalogWait(promise,timeoutMs,onTimeout){
+  if(!Number.isFinite(timeoutMs) || timeoutMs<=0) return promise;
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{onTimeout();reject(new Error('The phone questions took too long to load. Try again.'));},timeoutMs);
+    promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});
+  });
+}
+async function nbEnsureServicesCached(slug,{timeoutMs}={}){
   if(!slug) throw new Error('Choose a business before loading services.');
   const cached=nbServicesCache.get(slug);
-  if(cached && cached.promise) return cached.promise;
+  if(cached && cached.promise) return nbCatalogWait(cached.promise,timeoutMs,()=>{if(nbServicesCache.get(slug)===cached)nbServicesCache.delete(slug);});
   if(cached && (Date.now()-cached.at)<60000) return cached.svc;
-  const p=api('services',{ params:{ business:slug }}).then(svc=>{
+  const p=api('services',{ params:{ business:slug },timeoutMs }).then(svc=>{
     if(!svc || !Array.isArray(svc.services)) throw new Error('Could not load the service list. Please try again.');
-    nbServicesCache.set(slug,{ at:Date.now(), svc });
+    if(nbServicesCache.get(slug)?.promise===p) nbServicesCache.set(slug,{ at:Date.now(), svc });
     return svc;
   }).catch(err=>{ if(nbServicesCache.get(slug)?.promise===p) nbServicesCache.delete(slug); throw err; });
   nbServicesCache.set(slug,{ promise:p });
-  return p;
+  return nbCatalogWait(p,timeoutMs,()=>{if(nbServicesCache.get(slug)?.promise===p)nbServicesCache.delete(slug);});
+}
+async function cwWarmTvCatalog(slug){
+  const svc=await nbEnsureServicesCached(slug,{timeoutMs:12000});
+  const tv=svc.services.find(service=>service.category==='TV Mounting');
+  if(!tv){nbServicesCache.delete(slug);throw new Error('TV Mounting service is not set up for this business.');}
+  return nbLoadTvOptions(tv.id,slug,{timeoutMs:12000});
 }
 const nbDataCache=new Map();
 async function nbEnsureDataCached(slug){
@@ -17308,24 +17618,27 @@ document.getElementById('nbSecondTech').addEventListener('change',()=>{
 // (Handy Andy DBs that never received migrations 0003/0015 — the public widget
 // hardcodes these so it was never noticed), seed the full set once and re-fetch
 // so every step (Bracket, Fireplace, Wires, etc.) shows in New Booking.
-// Cached per (business, service) for the session: the groups only change via the
-// one-time seed/relabel self-heals below, which converge on first load — so
-// re-picking "TV Mounting" (or reopening the modal) renders instantly instead of
-// re-paying up to 5 sequential API calls. The cached value is the promise, so
-// concurrent selections share one in-flight request.
+// Cached per (business, service) for 60s after a successful load. Later calls
+// pick up catalog price edits instead of retaining them for the whole tab.
+// A pending load never expires, so prefetch and the question card still share
+// one request even on a slow connection.
 const nbTvOptionsCache=new Map();
-function nbLoadTvOptions(serviceId,slug=current?.slug){
+function nbLoadTvOptions(serviceId,slug=current?.slug,{timeoutMs}={}){
   if(!slug || !serviceId) return Promise.reject(new Error('Choose a business and TV service before loading questions.'));
   const ck=slug+':'+serviceId;
-  let p=nbTvOptionsCache.get(ck);
-  if(!p){
-    p=nbLoadTvOptionsUncached(serviceId,slug);
-    nbTvOptionsCache.set(ck,p);
-    p.catch(()=>{ if(nbTvOptionsCache.get(ck)===p) nbTvOptionsCache.delete(ck); });
+  let cached=nbTvOptionsCache.get(ck);
+  if(!cached || (cached.at!==null && Date.now()-cached.at>=60000)){
+    cached={at:null,promise:null};
+    const entry=cached;
+    entry.promise=nbLoadTvOptionsUncached(serviceId,slug,{timeoutMs}).then(groups=>{entry.at=Date.now();return groups;})
+      .catch(error=>{if(nbTvOptionsCache.get(ck)===entry)nbTvOptionsCache.delete(ck);throw error;});
+    nbTvOptionsCache.set(ck,entry);
   }
   // Hand each caller its own copy — nbRelocateOneConnect and the render steps
   // mutate the group arrays, and shared mutation across opens corrupts state.
-  return p.then(g=>JSON.parse(JSON.stringify(g)));
+  const entry=cached;
+  return nbCatalogWait(entry.promise,timeoutMs,()=>{if(nbTvOptionsCache.get(ck)===entry)nbTvOptionsCache.delete(ck);})
+    .then(g=>JSON.parse(JSON.stringify(g)));
 }
 function nbValidateTvCatalog(groups){
   if(!Array.isArray(groups)) throw new Error('Could not load the TV questions. Please try again.');
@@ -17336,14 +17649,14 @@ function nbValidateTvCatalog(groups){
   if(missing.length) throw new Error('The TV questions are incomplete ('+missing.join(', ')+'). Please try again.');
   return groups;
 }
-async function nbLoadTvOptionsUncached(serviceId,slug){
-  const r=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+async function nbLoadTvOptionsUncached(serviceId,slug,{timeoutMs}={}){
+  const r=await api('service_options',{ params:{ business:slug, service_id:serviceId },timeoutMs });
   let groups=r.groups;
   if(!Array.isArray(groups)) throw new Error('Could not load the TV questions. Please try again.');
   const hasFullSet=groups.some(g=>g.key==='bracket');
   if(!hasFullSet && slug==='handy-andy'){
-    await api('seed_tv_options',{ method:'POST', params:{ business:slug }});
-    const r2=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+    await api('seed_tv_options',{ method:'POST', params:{ business:slug },timeoutMs });
+    const r2=await api('service_options',{ params:{ business:slug, service_id:serviceId },timeoutMs });
     groups=r2.groups;
   }
   nbValidateTvCatalog(groups);
@@ -17360,9 +17673,9 @@ async function nbLoadTvOptionsUncached(serviceId,slug){
   });
   if(stale){
     try{
-      await api('relabel_tv_size',{ method:'POST', params:{ business:slug }});
+      await api('relabel_tv_size',{ method:'POST', params:{ business:slug },timeoutMs });
     }catch(err){ return nbRelocateOneConnect(groups); }   // valid legacy labels remain usable
-    const r3=await api('service_options',{ params:{ business:slug, service_id:serviceId }});
+    const r3=await api('service_options',{ params:{ business:slug, service_id:serviceId },timeoutMs });
     groups=nbValidateTvCatalog(r3.groups);
   }
   return nbRelocateOneConnect(groups);
@@ -17733,7 +18046,7 @@ let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false, nbCustomTask
 // handoff from the phone script). When a Custom Task booking created from that
 // session succeeds, the linked call's resolution is corrected to 'booked' and
 // stamped with the real booking id, see the booking_create success handler.
-let nbLinkedCallId=null;
+let nbLinkedCallId=null, nbLinkedCallDraft=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
 function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; for(const k in nbOptionPrices) delete nbOptionPrices[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
@@ -17791,6 +18104,14 @@ function nbUnpricedOtherLabel(){
       if(o && nbIsOtherOption(o) && nbOptPriceEff(o)===0){
         return (nbOptionNotes[oid]||'').trim() || 'Other';
       }
+    }
+  }
+  return null;
+}
+function nbOtherDescriptionProblem(){
+  for(const g of nbOptionGroups){
+    for(const o of g.options||[]){
+      if((nbQty[g.id]?.[o.id]||0)>0 && nbIsOtherOption(o) && !(nbOptionNotes[o.id]||'').trim()) return 'Describe the selected Other add-on before continuing.';
     }
   }
   return null;
@@ -17859,11 +18180,12 @@ function nbValidateTvMountingRequired(){
   // counts), so check it via the TV total rather than a group.
   if(nbTotalTvs() <= 0) return 'Please choose the TV type (how many TVs).';
   // Each of these is a required choice once it's a TV mounting job.
-  const need = (key, label) => {
+  const need = (key, label, required=nbTotalTvs()) => {
     const g = nbOptionGroups.find(x => x.key === key);
-    if(!g) return null; // group absent on this DB — don't block
-    const filled = nbQty[g.id] && Object.values(nbQty[g.id]).some(c => c > 0);
-    return filled ? null : `Please select the ${label}.`;
+    if(!g) return `The ${label} question is missing. Reload the TV questions before continuing.`;
+    const visible=nbVisibleOptions(g);
+    const filled=visible.reduce((sum,o)=>sum+(Number(nbQty[g.id]?.[o.id])||0),0);
+    return filled===required ? null : `Please select the ${label}${required>1?' for each TV':''} (${filled} of ${required}).`;
   };
   // Lifting help is REQUIRED once any 70"+ TV is on the job — the public
   // widget forces this answer, and skipping it here let big-TV bookings go
@@ -17871,7 +18193,7 @@ function nbValidateTvMountingRequired(){
   // of hands either way).
   const needLifting = () => {
     if(!nbShowLifting()) return null;
-    return need('lifting','lifting-help option (required for TVs 70" and up)');
+    return need('lifting','lifting-help option (required for TVs 70" and up)',1);
   };
   return need('size','TV size') || need('fireplace','fireplace option') || need('surface','wall surface') || needLifting();
 }
@@ -17888,6 +18210,36 @@ function nbClampTvBound(){
       nbQty[g.id][oid]--; if(nbQty[g.id][oid]<=0) delete nbQty[g.id][oid];
     }
   });
+  nbClampOptionLimits();
+}
+function nbSizeTierCount(tier){
+  const sizes=nbOptionGroups.find(g=>g.key==='size');
+  return (sizes?.options||[]).reduce((sum,o)=>sum+(nbSizeTier(o)===tier?(Number(nbQty[sizes.id]?.[o.id])||0):0),0);
+}
+function nbOptionRemaining(g,o){
+  let remaining=Infinity;
+  if(NB_TV_BOUND.has(g.key)) remaining=(g.key==='bracket'?nbFrameTvQty.regular:nbTotalTvs())-nbGroupCount(g.id);
+  const selected=match=>(g.options||[]).reduce((sum,item)=>sum+(match(item)?Number(nbQty[g.id]?.[item.id])||0:0),0);
+  if(g.key==='bracket'){
+    const tier=nbBracketForSize(o);
+    if(tier!=='any') remaining=Math.min(remaining,nbSizeTierCount(tier)-selected(item=>nbBracketForSize(item)===tier));
+  }
+  if(g.key==='wires' && nbIsFrameOnlyOption(o)) remaining=Math.min(remaining,nbFrameTvQty.frame-selected(nbIsFrameOnlyOption));
+  if(g.key==='wires' && nbIsBehindWall(o)) remaining=Math.min(remaining,nbBehindWallMax()-selected(nbIsBehindWall));
+  return Math.max(0,remaining);
+}
+function nbClampOptionLimits(){
+  for(const g of nbOptionGroups){
+    const quantities=nbQty[g.id]; if(!quantities) continue;
+    // Rebuild in stable order so a removed TV cannot leave an incompatible
+    // bracket or more OneConnect installs than Frame TVs in the quote.
+    const saved={...quantities}; Object.keys(quantities).forEach(id=>delete quantities[id]);
+    for(const o of g.options||[]){
+      const count=Math.max(0,Number(saved[o.id])||0);
+      const allowed=Math.min(count,nbOptionRemaining(g,o));
+      if(allowed>0) quantities[o.id]=allowed;
+    }
+  }
 }
 // Bracket tier a TV size needs: the 85–97" and 98"+ tiers use the XL brackets,
 // everything else (including the 70–85" tier, whose top is 85") the standard
@@ -18021,9 +18373,17 @@ function nbHardSurfaceCount(){
   Object.entries(nbQty[g.id]).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o && !/drywall/i.test(o.label)) n+=ct; } });
   return n;
 }
-// How many behind-the-wall concealments are allowed = TVs that are neither over
-// a fireplace nor on a non-drywall (brick/stone/tile/outdoor) surface.
-function nbBehindWallMax(){ return Math.max(0, nbTotalTvs() - nbAboveFireplaceCount() - nbHardSurfaceCount()); }
+// The phone asks whether fireplace and non-drywall answers describe the same
+// TVs. New Booking retains its existing conservative aggregate limit.
+function nbBehindWallMax(){
+  let overlap=0;
+  if(typeof callWiz!=='undefined' && callWiz?._visible && callWiz.service==='TV Mounting'){
+    const state=cwWireOverlapState();
+    if(state.required && state.answer===null) return 0;
+    overlap=state.answer||0;
+  }
+  return Math.max(0, nbTotalTvs() - nbAboveFireplaceCount() - nbHardSurfaceCount() + overlap);
+}
 // Trim any behind-the-wall selections that now exceed the fireplace-driven cap
 // (e.g. after marking another TV as over a fireplace).
 function nbPruneBehindWall(){
@@ -18052,7 +18412,7 @@ function nbVisibleOptions(g){
     opts=opts.filter(o=>{
       const k=nbLiftingKind(o.label);
       if(k==='under70') return false;              // never relevant once a 70"+ TV is chosen
-      if(k==='can'||k==='cannot') return has7085;  // 70-85 help options
+      if(k==='can'||k==='cannot') return has7085 && !hasBig;  // largest TV determines the job's lift
       if(k==='big') return hasBig;                 // 86"+ option
       return true;
     });
@@ -18081,13 +18441,14 @@ function nbPruneInvisibleOptions(){
     const visible=new Set(nbVisibleOptions(g).map(o=>o.id));
     Object.keys(nbQty[g.id]).forEach(oid=>{ if(!visible.has(oid)) delete nbQty[g.id][oid]; });
   });
+  nbClampOptionLimits();
 }
 // The option rows for ONE group — quantity steppers (with caps/disabled state)
 // or single-pick buttons, whichever this group uses. Shared verbatim by the New
 // Booking form and the Take a Call script so a phone-in job is priced and
 // constrained EXACTLY like one entered on the form; there is deliberately no
 // second copy of this logic to drift out of sync.
-function nbGroupOptsHtml(g, atCap){
+function nbGroupOptsHtml(g, atCap, sizeCreatesCount=false){
   const qtyMode=NB_QTY_KEYS.has(g.key);
   let html='<div class="nb-opts">';
   nbVisibleOptions(g).forEach(o=>{
@@ -18097,7 +18458,8 @@ function nbGroupOptsHtml(g, atCap){
       // Behind-the-wall wires can't go over a fireplace — cap at non-fireplace TVs.
       const bw=(g.key==='wires' && nbIsBehindWall(o));
       const bwMax=bw?nbBehindWallMax():Infinity;
-      const plusDis=(atCap || ct>=bwMax)?' disabled':'';
+      const remaining=(sizeCreatesCount && g.key==='size')?Infinity:nbOptionRemaining(g,o);
+      const plusDis=(atCap || ct>=bwMax || remaining<=0)?' disabled':'';
       html+=`<div class="nb-optq${ct>0?' on':''}">`+
             `<span class="nb-optlabel">${esc(nbDisplayLabel(g.key, o.label))}</span>`+
             `<span class="nb-price">${priceLbl}</span>`+
@@ -18192,6 +18554,9 @@ function nbHandleOptClick(e){
     if(qBtn.disabled) return true;
     const gid=qBtn.dataset.g, oid=qBtn.dataset.o, d=Number(qBtn.dataset.d);
     const grp=nbOptionGroups.find(g=>g.id===gid);
+    const option=grp?.options.find(o=>o.id===oid);
+    if(!option || !nbVisibleOptions(grp).some(o=>o.id===oid)) return true;
+    if(d>0 && nbOptionRemaining(grp,option)<=0) return true;
     // Cap TV-bound groups at the number of TVs selected — brackets at the
     // REGULAR TV count (Frame/Gallery TVs use their in-box bracket).
     if(d>0 && grp && NB_TV_BOUND.has(grp.key)){
@@ -18215,6 +18580,8 @@ function nbHandleOptClick(e){
   }
   if(pickBtn){
     const gid=pickBtn.dataset.g, oid=pickBtn.dataset.o;
+    const grp=nbOptionGroups.find(g=>g.id===gid);
+    if(pickBtn.disabled || !grp || !nbVisibleOptions(grp).some(o=>o.id===oid)) return true;
     nbQty[gid] = (nbPickGet(gid)===oid) ? {} : {[oid]:1};
     return true;
   }
@@ -18381,8 +18748,8 @@ function nbCollectSelections(){
   }
   // Record the TV type ($0) so it's visible on the job — important for
   // Frame/Gallery jobs where the bracket question is hidden.
-  if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV'+(nbFrameTvQty.regular>1?` ×${nbFrameTvQty.regular}`:''), price:0, quantity:nbFrameTvQty.regular});
-  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)'+(nbFrameTvQty.frame>1?` ×${nbFrameTvQty.frame}`:''), price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
+  if(nbFrameTvQty.regular>0) out.push({option_id:null, label:'TV Type: Regular TV', price:0, quantity:nbFrameTvQty.regular});
+  if(nbFrameTvQty.frame>0)   out.push({option_id:null, label:'TV Type: Samsung Frame / LG Gallery (in-box bracket)', price:FRAME_TV_PRICE, quantity:nbFrameTvQty.frame});
   nbOptionGroups.forEach(g=>{ const m=nbQty[g.id]; if(!m) return;
     Object.entries(m).forEach(([oid,ct])=>{ if(ct>0){ const o=g.options.find(x=>x.id===oid); if(o){
       // For "Other" and Handyman Labor, append the office's note to the label
@@ -18391,7 +18758,7 @@ function nbCollectSelections(){
       // items, so a note that stops here would never reach the job.
       const note=(nbTakesNote(o)&&nbOptionNotes[o.id])?nbOptionNotes[o.id].trim():'';
       const baseLabel=note?`${o.label}: ${note}`:o.label;
-      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`+(ct>1?` ×${ct}`:''), price:nbOptPriceEff(o), quantity:ct});
+      out.push({option_id:o.id, label:`${g.label}: ${baseLabel}`, price:nbOptPriceEff(o), quantity:ct});
     } } });
   });
   // Enforce the branch service minimum by topping up to the floor (waivable).
@@ -18925,6 +19292,12 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   const _estBtns=['nbUpsSendWith','nbUpsSendBase','nbSendEstimate'].map(id=>document.getElementById(id)).filter(Boolean);
   _estBtns.forEach(b=>b.disabled=true);
   const mySession=nbModalSession;   // detect close-and-reopen-for-a-new-job while in flight
+  // Capture the originating call before card tokenization or booking creation
+  // can yield to a different form. Keep its write queue and retry state too.
+  const linkedCallId=nbLinkedCallId;
+  const linkedCallDraft=linkedCallId
+    ? (nbLinkedCallDraft?.id===linkedCallId ? nbLinkedCallDraft : {id:linkedCallId,business:current.slug,_started:true})
+    : null;
   try{
     // Joey/Heather/Admin can book a job as "Credit Card" without having the
     // card in hand right now — checking "Skip for now" bypasses tokenizing
@@ -18995,9 +19368,9 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       // "Take a Call" doesn't resume it), but now that a real booking exists,
       // correct it to 'booked' with the real id, same correction the call
       // script's own booking path makes at its own booking_create call.
-      if(nbLinkedCallId){
-        const _cid=nbLinkedCallId; nbLinkedCallId=null;
-        api('call_update',{ method:'POST', body:{ id:_cid, resolution:'booked', booking_id: resp&&resp.id?resp.id:undefined }}).catch(()=>{});
+      if(linkedCallDraft){
+        if(mySession===nbModalSession && nbLinkedCallId===linkedCallId){nbLinkedCallId=null;nbLinkedCallDraft=null;}
+        cwCallUpdate({resolution:'booked',booking_id:resp&&resp.id?resp.id:undefined},linkedCallDraft).catch(()=>{});
       }
       // Only hide the modal if it still belongs to THIS attempt — if the office
       // closed it and reopened for a different job while this request was in

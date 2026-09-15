@@ -204,11 +204,12 @@ function zip5(postalCode) {
 }
 async function serviceAreaIdFromPostal(db, businessId, postalCode) {
   if (!postalCode) return null;
-  const { data } = await db.from('service_area_zips')
+  const { data, error } = await db.from('service_area_zips')
     .select('service_area_id')
     .eq('business_id', businessId)
     .eq('postal_code', zip5(postalCode))
     .maybeSingle();
+  if (error) throw error;
   return data?.service_area_id || null;
 }
 
@@ -265,9 +266,13 @@ async function crossMetroMismatch(db, bookingAreaId, techIds, confirmedIds) {
 async function areaTimezone(db, serviceAreaId, fallbackTz) {
   if (!serviceAreaId) return fallbackTz;
   try {
-    const { data } = await db.from('service_areas').select('timezone').eq('id', serviceAreaId).maybeSingle();
+    const { data, error } = await db.from('service_areas').select('timezone').eq('id', serviceAreaId).maybeSingle();
+    if (error) throw error;
     return data?.timezone || fallbackTz;
-  } catch { return fallbackTz; }
+  } catch (error) {
+    if (['42703', 'PGRST204'].includes(error?.code) && missingColumn(error.message) === 'timezone') return fallbackTz;
+    throw error;
+  }
 }
 
 // The fixed slot label for an instant, rendered in a given (metro) timezone and
@@ -2709,6 +2714,9 @@ async function availableSlots(req, res, db, auth) {
   // not the single business (Mountain) clock.
   const bookingAreaId = await serviceAreaIdFromPostal(db, biz.id, postalCode);
   const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
+  if (dateStr < localDateStr(tz, new Date().toISOString())) {
+    return res.status(200).json({ slots: [], date: dateStr, day_of_week: dow, timezone: tz });
+  }
   // Each technician can come from a different company pool: pool drives the
   // primary, pool2 the second tech. 'partner' scans the OTHER company's roster.
   // Every scope is pinned to that company's own metro for this zip — an "any"
@@ -2721,6 +2729,7 @@ async function availableSlots(req, res, db, auth) {
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
   const primaryAny = !techId || techId === 'any';
+  const allowOwnHelper = wantPair && primaryAny && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
 
   // The primary side's full roster + per-tech slot state, fetched ONCE. It's
   // needed to answer "is anyone free" whenever the primary is "any" tech, AND
@@ -2733,7 +2742,8 @@ async function availableSlots(req, res, db, auth) {
   const [primaryRSS, scopesSecondary] = await Promise.all([
     rosterSlotState(db, scopesPrimary, dateStr, dow, tz)
       .catch(e => { console.warn('[available_slots] roster/slot-state lookup failed:', e.message); return null; }),
-    wantPair ? rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode) : Promise.resolve(null),
+    wantPair ? ((req.query.pool2 || '') === (req.query.pool || '') ? Promise.resolve(scopesPrimary)
+      : rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode, bookingAreaId)) : Promise.resolve(null),
   ]);
 
   let keys;
@@ -2751,7 +2761,9 @@ async function availableSlots(req, res, db, auth) {
         : freeSlotTechMap(db, scopesPrimary, techId, dateStr, dow, tz),
       // Ineligible-secondary filter on the SECOND-tech side so an "Any <company>"
       // pick never offers a slot only Juan/Zach can cover.
-      freeSlotTechMap(db, scopesSecondary, techId2, dateStr, dow, tz, true),
+      primaryRSS && scopesSecondary === scopesPrimary && techId2 === 'any'
+        ? Promise.resolve(freeMapFromState({ ...primaryRSS, techs: primaryRSS.techs.filter(t => !isSecondaryIneligibleName(t.name)) }))
+        : freeSlotTechMap(db, scopesSecondary, techId2, dateStr, dow, tz, true),
     ]);
     keys = new Set();
     for (const [k, P] of pMap) {
@@ -2760,6 +2772,10 @@ async function availableSlots(req, res, db, auth) {
       // Both sides have someone free here; it's a valid pair unless that
       // "someone" is the exact same single person on both sides.
       if (new Set([...P, ...S]).size >= 2) keys.add(k);
+    }
+    if (allowOwnHelper) {
+      const ownHelperState = primaryRSS || await rosterSlotState(db, scopesPrimary, dateStr, dow, tz);
+      for (const key of freeKeysFromState({ ...ownHelperState, techs: ownHelperState.techs.filter(t => bringsOwnSecondTech(t.name)) })) keys.add(key);
     }
   }
   // Drop slots that have already started, but only for TODAY (in the same
@@ -2789,7 +2805,7 @@ async function availableSlots(req, res, db, auth) {
   const available = SLOTS.filter(s => keys.has(s.key))
     .filter(s => !isToday || s.start > nowHHMM)
     .map(s => ({ slot_key: s.key, label: s.label, start: s.start, end: s.end, free_techs: freeTechsByKey[s.key] || [] }));
-  return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow });
+  return res.status(200).json({ slots: available, date: dateStr, day_of_week: dow, timezone: tz });
 }
 
 // ── Slot occupancy (existing bookings) ───────────────────────────────────────
@@ -2843,9 +2859,9 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
   // Drop the secondary leg on databases predating migration 0019 (column absent);
   // drop extra_slots on DBs predating migration 0052 — same graceful degrade.
   let { data, error } = await run(bookingLiftCols);
-  if (error && (/secondary_technician_id/.test(error.message || '') || isExtraSlotsErr(error))) {
-    if (/secondary_technician_id/.test(error.message || '')) bookingLiftCols = false;
-    if (isExtraSlotsErr(error)) extraSlotsCol = false;
+  if (['42703', 'PGRST204'].includes(error?.code) && ['secondary_technician_id', 'extra_slots'].includes(missingColumn(error.message))) {
+    if (missingColumn(error.message) === 'secondary_technician_id') bookingLiftCols = false;
+    if (missingColumn(error.message) === 'extra_slots') extraSlotsCol = false;
     ({ data, error } = await run(bookingLiftCols));
   }
   // A genuinely unexpected error must THROW, not silently read as "this tech
@@ -2875,6 +2891,8 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
     db.from('technician_availability').select('technician_id, slot_key').in('technician_id', techIds).eq('day_of_week', dow),
     db.from('technician_availability_exceptions').select('technician_id, slot_key, is_available').in('technician_id', techIds).eq('exception_date', dateStr),
   ]);
+  if (avR.error) throw avR.error;
+  if (excR.error) throw excR.error;
   for (const r of (avR.data || [])) { const s = out.get(r.technician_id); if (s) s.keys.add(r.slot_key); }
   for (const e of (excR.data || [])) { const s = out.get(e.technician_id); if (!s) continue; if (e.is_available) s.keys.add(e.slot_key); else s.keys.delete(e.slot_key); }
   const dayStart = localDateStartUTC(tz, dateStr).toISOString();
@@ -2890,11 +2908,12 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
       : q.in('technician_id', techIds);
   };
   let { data, error } = await run(bookingLiftCols);
-  if (error && (/secondary_technician_id/.test(error.message || '') || isExtraSlotsErr(error))) {
-    if (/secondary_technician_id/.test(error.message || '')) bookingLiftCols = false;
-    if (isExtraSlotsErr(error)) extraSlotsCol = false;
+  if (['42703', 'PGRST204'].includes(error?.code) && ['secondary_technician_id', 'extra_slots'].includes(missingColumn(error.message))) {
+    if (missingColumn(error.message) === 'secondary_technician_id') bookingLiftCols = false;
+    if (missingColumn(error.message) === 'extra_slots') extraSlotsCol = false;
     ({ data, error } = await run(bookingLiftCols));
   }
+  if (error) throw error;
   for (const b of (data || [])) {
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     for (const tid of [b.technician_id, b.secondary_technician_id]) {
@@ -2987,9 +3006,10 @@ async function scopedRosterTechs(db, scopes, cols = 'id') {
     // comes back null and the job lands UNASSIGNED with a loud warning for a
     // human to place) — never "everybody in the company is a candidate".
     if (!sc.serviceAreaId) continue;
-    const { data } = await db.from('technicians').select(cols)
+    const { data, error } = await db.from('technicians').select(cols)
       .eq('business_id', sc.bizId).eq('active', true).eq('service_area_id', sc.serviceAreaId)
       .order('created_at', { ascending: true });
+    if (error) throw error;
     // Sole-technician lock (SOLE_TECH, _lib/availability.js): the four Austin
     // lead-gen brands are Zach's alone. The public widget path always applied
     // it; this office path did not, so the moment a second Handy Andy Austin
@@ -3131,6 +3151,11 @@ async function pickAvailableTechPair(db, scopesPrimary, scopesSecondary, dateStr
   return { primaryId: null, secondaryId: null };
 }
 
+async function pickOwnHelperPrimary(db, scopes, dateStr, slotKey, tz) {
+  const { techs, state } = await rosterSlotState(db, scopes, dateStr, dayOfWeekFor(dateStr), tz);
+  return techs.find(tech => bringsOwnSecondTech(tech.name) && state.get(tech.id)?.keys.has(slotKey) && !state.get(tech.id)?.booked.has(slotKey))?.id || null;
+}
+
 // Pick a SECONDARY tech who is genuinely SCHEDULED to work AND free in this exact
 // slot, trying each roster scope in priority order (roster order = created_at
 // ascending). Skips the primary and out-of-town primary-only techs (Juan/Zach).
@@ -3210,7 +3235,6 @@ async function availableDates(req, res, db, auth) {
 
   const [y, m] = month.split('-').map(Number);
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const todayStr = new Date().toISOString().split('T')[0];
 
   // Resolve each side (primary, optional second tech) to a concrete list of
   // technician ids to consider. Each side has its own company pool: pool drives
@@ -3223,41 +3247,51 @@ async function availableDates(req, res, db, auth) {
   // vs. a known metro we simply don't staff). Reused for the timezone lookup
   // further down rather than resolved twice.
   const bookingAreaIdEarly = await serviceAreaIdFromPostal(db, biz.id, postalCode);
-  const rosterIds = async (pool) => {
-    const scopes = await rosterScopes(db, biz, pool, postalCode);
-    const lists = await scopedRosterTechs(db, scopes);
-    return lists.flat().map(t => t.id);
+  const tz = await areaTimezone(db, bookingAreaIdEarly, biz.timezone || 'America/Denver');
+  const nowISO = new Date().toISOString();
+  const todayStr = localDateStr(tz, nowISO), nowHHMM = localHHMM(tz, nowISO);
+  const rosterCache = new Map();
+  const rosterList = (pool) => {
+    if (!rosterCache.has(pool)) rosterCache.set(pool, (async () => {
+      const scopes = await rosterScopes(db, biz, pool, postalCode, bookingAreaIdEarly);
+      return (await scopedRosterTechs(db, scopes, 'id, name')).flat();
+    })());
+    return rosterCache.get(pool);
   };
+  const primaryRoster = !techId || techId === 'any' ? await rosterList((req.query.pool || '').toString()) : [];
   const primaryIds = (techId && techId !== 'any')
     ? [techId]
-    : await rosterIds((req.query.pool || '').toString());
+    : primaryRoster.map(t => t.id);
   // Want a two-tech pair whenever a second tech is requested — unless it's the
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: distinctness is enforced per-slot below, not by filtering rosters.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
+  const allowOwnHelper = wantPair && (!techId || techId === 'any') && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
+  const ownHelperIds = allowOwnHelper ? primaryRoster.filter(t => bringsOwnSecondTech(t.name)).map(t => t.id) : [];
   let secondaryIds = [];
   if (wantPair) {
     secondaryIds = (techId2 && techId2 !== 'any')
       ? [techId2]
-      : await rosterIds((req.query.pool2 || '').toString());
+      : (await rosterList((req.query.pool2 || '').toString())).filter(t => !isSecondaryIneligibleName(t.name)).map(t => t.id);
   }
   // An empty roster is not "no open days" — it's "nobody covers this address",
   // and the two look identical on a greyed-out calendar. Say which, so the
   // office isn't left staring at a dead month wondering if it's a bug (it read
   // as one on the phone script: every August date greyed with no explanation).
-  if (!primaryIds.length || (wantPair && !secondaryIds.length)) {
+  if (!primaryIds.length || (wantPair && !secondaryIds.length && !ownHelperIds.length)) {
     let reason = 'no_roster', areaName = null, unstaffed = false;
     if (postalCode) {
       if (!bookingAreaIdEarly) reason = 'zip_not_covered';
       else {
-        const { data: sa } = await db.from('service_areas')
+        const { data: sa, error } = await db.from('service_areas')
           .select('name, unstaffed').eq('id', bookingAreaIdEarly).maybeSingle();
+        if (error) throw error;
         areaName = sa?.name || null;
         unstaffed = !!sa?.unstaffed;
         reason = unstaffed ? 'area_unstaffed' : 'no_techs_in_area';
       }
     }
-    return res.status(200).json({ dates: [], month, reason, area: areaName, unstaffed });
+    return res.status(200).json({ dates: [], month, reason, area: areaName, unstaffed, timezone: tz });
   }
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
 
@@ -3268,8 +3302,6 @@ async function availableDates(req, res, db, auth) {
   // the single business tz drifts a Central (Houston/Austin) evening booking
   // onto the wrong slot key (and near-midnight ones onto the wrong date),
   // which can light up a day whose only slot is actually taken.
-  const bookingAreaId = bookingAreaIdEarly;   // resolved once, up top
-  const tz = await areaTimezone(db, bookingAreaId, biz.timezone || 'America/Denver');
   const winStart = localDateStartUTC(tz, monthStart);
   const winEnd = localDateStartUTC(tz, addDaysStr(monthEnd, 1));
   // No business filter: a partner tech's jobs in their OWN company must also
@@ -3291,21 +3323,25 @@ async function availableDates(req, res, db, auth) {
   // from another — so run them concurrently instead of one-at-a-time. The
   // bookings query keeps its own retry-on-schema-error self-contained inside
   // its promise so the Promise.all still resolves once every branch is done.
-  const [{ data: av }, { data: exc }, bkResult] = await Promise.all([
+  const [avResult, excResult, bkResult] = await Promise.all([
     db.from('technician_availability').select('technician_id, day_of_week, slot_key').in('technician_id', techIds),
     db.from('technician_availability_exceptions')
       .select('technician_id, exception_date, slot_key, is_available')
       .in('technician_id', techIds).gte('exception_date', monthStart).lte('exception_date', monthEnd),
     (async () => {
       let { data: bk, error: bkErr } = await runBk(bookingLiftCols);
-      if (bkErr && (/secondary_technician_id/.test(bkErr.message || '') || isExtraSlotsErr(bkErr))) {
-        if (/secondary_technician_id/.test(bkErr.message || '')) bookingLiftCols = false;
-        if (isExtraSlotsErr(bkErr)) extraSlotsCol = false;
-        ({ data: bk } = await runBk(bookingLiftCols));
+      if (['42703', 'PGRST204'].includes(bkErr?.code) && ['secondary_technician_id', 'extra_slots'].includes(missingColumn(bkErr.message))) {
+        if (missingColumn(bkErr.message) === 'secondary_technician_id') bookingLiftCols = false;
+        if (missingColumn(bkErr.message) === 'extra_slots') extraSlotsCol = false;
+        ({ data: bk, error: bkErr } = await runBk(bookingLiftCols));
       }
+      if (bkErr) throw bkErr;
       return bk;
     })(),
   ]);
+  if (avResult.error) throw avResult.error;
+  if (excResult.error) throw excResult.error;
+  const av = avResult.data, exc = excResult.data;
   const bk = bkResult;
   const recurring = {};   // `${techId}:${dow}` -> Set(slot_key)
   for (const r of (av || [])) {
@@ -3335,6 +3371,10 @@ async function availableDates(req, res, db, auth) {
       if (e.is_available) set.add(e.slot_key); else set.delete(e.slot_key);
     }
     for (const k of (occ[`${tid}:${dateStr}`] || [])) set.delete(k);   // drop booked slots
+    for (const k of set) {
+      const slot = SLOTS.find(s => s.key === k);
+      if (!slot || (dateStr === todayStr && slot.start <= nowHHMM)) set.delete(k);
+    }
     return set;
   };
 
@@ -3370,12 +3410,12 @@ async function availableDates(req, res, db, auth) {
     if (dateStr < todayStr) continue;                       // no past dates
     const dow = dayOfWeekFor(dateStr);
     if (wantPair) {
-      if (pairHasSlot(sideSlotTechs(primaryIds, dow, dateStr), sideSlotTechs(secondaryIds, dow, dateStr))) dates.push(dateStr);
+      if (pairHasSlot(sideSlotTechs(primaryIds, dow, dateStr), sideSlotTechs(secondaryIds, dow, dateStr)) || sideSet(ownHelperIds, dow, dateStr).size) dates.push(dateStr);
     } else if (sideSet(primaryIds, dow, dateStr).size) {
       dates.push(dateStr);
     }
   }
-  return res.status(200).json({ dates, month });
+  return res.status(200).json({ dates, month, timezone: tz });
 }
 
 // Attach a tokenized payment method to a Stripe customer (card on file).
@@ -3391,7 +3431,11 @@ async function saveCardOnFile(pmId, cust, slug = null) {
   const fetchT = async (url, opts) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
-    try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+    try {
+      const response = await fetch(url, { ...opts, signal: ctrl.signal });
+      const data = await response.json();
+      return { response, data };
+    }
     catch (e) { throw e.name === 'AbortError' ? new Error('Stripe request timed out') : e; }
     finally { clearTimeout(timer); }
   };
@@ -3401,17 +3445,17 @@ async function saveCardOnFile(pmId, cust, slug = null) {
   if (cust.name) cb.set('name', cust.name);
   if (cust.phone) cb.set('phone', cust.phone);
   cb.set('description', 'Dashboard booking customer');
-  const ccr = await fetchT('https://api.stripe.com/v1/customers', { method: 'POST', headers: sAuth, body: cb });
-  const cc = await ccr.json();
+  const { response: ccr, data: cc } = await fetchT('https://api.stripe.com/v1/customers', { method: 'POST', headers: sAuth, body: cb });
   if (!ccr.ok) throw new Error(cc?.error?.message || 'Stripe customer create failed');
+  if (!cc?.id) throw new Error('Stripe did not return a customer');
   const customerId = cc.id;
   // Attach the payment method and make it the default.
   const ab = new URLSearchParams(); ab.set('customer', customerId);
-  const ar = await fetchT(`https://api.stripe.com/v1/payment_methods/${pmId}/attach`, { method: 'POST', headers: sAuth, body: ab });
-  const pm = await ar.json();
+  const { response: ar, data: pm } = await fetchT(`https://api.stripe.com/v1/payment_methods/${pmId}/attach`, { method: 'POST', headers: sAuth, body: ab });
   if (!ar.ok) throw new Error(pm?.error?.message || 'Attach failed');
   const db = new URLSearchParams(); db.set('invoice_settings[default_payment_method]', pmId);
-  await fetchT(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
+  const { response: dr, data: defaults } = await fetchT(`https://api.stripe.com/v1/customers/${customerId}`, { method: 'POST', headers: sAuth, body: db });
+  if (!dr.ok) throw new Error(defaults?.error?.message || 'Could not set the default card');
   return { customerId, pmId, brand: pm?.card?.brand || null, last4: pm?.card?.last4 || null };
 }
 
@@ -3433,6 +3477,9 @@ const PRICE_SANITY_TOTAL_CEILING = 5000;  // whole booking / estimate / charge
 // GDS, Assurion, No Charge/Callback (all $0), and Handyman Labor (hourly) are
 // exempt. Mirrors MIN_TICKET_PRICE in api/book.js (the public widget).
 const MIN_TICKET_PRICE = 139;
+function isHandymanPricedLines(lines) {
+  return Array.isArray(lines) && lines.some(line => /^Handyman Labor:/i.test((line && (line.label || line.name)) || ''));
+}
 
 // Returns null when everything is within the sane range; otherwise a short,
 // specific message naming the exact absurd number and line — reused as both
@@ -3471,18 +3518,20 @@ async function bookingCreate(req, res, db, auth, body) {
   // with this key already exists, return it instead of creating a duplicate. This
   // is the first line of defense; a partial unique index (migration 0024) is the
   // real backstop for the concurrent race (handled at insert time below). The
-  // select is best-effort: on a DB predating 0024 the column is absent and the
-  // query errors — we ignore that and fall through to a normal create.
+  // lookup must succeed before another attempt can write. An outage cannot be
+  // interpreted as "no existing booking" and bypass duplicate protection.
   const idempotencyKey = (body.idempotency_key || '').toString().trim() || null;
   if (idempotencyKey) {
     // A CANCELLED booking must never satisfy this check. Every slot-occupancy
     // query already excludes cancelled rows, so one matching here would hand the
     // caller back a dead booking as if it were live: nobody scheduled, customer
     // told they're confirmed. Re-booking is a real new booking.
-    const { data: dupe } = await db.from('bookings')
-      .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey)
-      .neq('status', 'cancelled').maybeSingle();
-    if (dupe?.id) return res.status(200).json({ id: dupe.id, duplicate: true });
+    const { data: dupe, error } = await db.from('bookings')
+      .select('id, status').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+    if (error) throw error;
+    if (dupe?.status === 'cancelled') return res.status(409).json({ error: 'This booking was cancelled. Start a new booking to schedule it again.', code: 'booking_cancelled', id: dupe.id });
+    if (dupe?.id) return res.status(200).json({ id: dupe.id, duplicate: true,
+      warning: 'Booking already exists. Check the saved job to confirm its card, line items, and notifications before making any changes.' });
   }
 
   // Reuse an existing customer (by phone, then email) or create one. Also pull
@@ -3495,11 +3544,13 @@ async function bookingCreate(req, res, db, auth, body) {
   let matchedExisting = !!c.id;
   let matchedPostalCode = null;
   if (!customer_id && c.phone) {
-    const { data } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
+    const { data, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
+    if (error) throw error;
     if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
   if (!customer_id && c.email) {
-    const { data } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
+    const { data, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
+    if (error) throw error;
     if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
   const effectivePostalCode = (c.postal_code || '').toString().trim() || matchedPostalCode || null;
@@ -3586,7 +3637,8 @@ async function bookingCreate(req, res, db, auth, body) {
         // No valid pair — still try to staff SOMEONE for the primary role
         // alone rather than losing the booking entirely; the needs_lifting
         // check further down still refuses if a second tech is mandatory.
-        technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
+        technician_id = body.needs_lifting ? await pickOwnHelperPrimary(db, scopes, body.scheduled_date, body.scheduled_slot, tz) : null;
+        if (!technician_id) technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
       }
     } else {
       // excludeTechId=secondaryConcreteId so an 'any' primary can never land
@@ -3602,6 +3654,7 @@ async function bookingCreate(req, res, db, auth, body) {
     // UNASSIGNED, and silently: the office had no idea anyone still had to be
     // assigned. Surface it as a blocking warning on the response.
     if (!technician_id) {
+      if (body.require_available === true) return res.status(409).json({ code: 'slot_unavailable', error: 'That time is no longer available. Refresh the available times and choose another slot.' });
       unassignedWarning = 'Heads up: no technician was still free for that slot, so this booking was created UNASSIGNED. Open the job and assign a tech (or move the time) — nobody is scheduled to show up yet.';
     }
   }
@@ -3615,7 +3668,8 @@ async function bookingCreate(req, res, db, auth, body) {
   // "Meet your tech" block further down — one query serves both purposes.
   let primaryTechInfo = null;
   if (technician_id) {
-    const { data: pt } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+    const { data: pt, error } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+    if (error) throw error;
     primaryBringsOwnSecond = bringsOwnSecondTech(pt?.name);
     primaryTechInfo = pt || null;
   }
@@ -3640,7 +3694,8 @@ async function bookingCreate(req, res, db, auth, body) {
   // Backstop: a concrete second tech (or one that slipped through) must never be
   // an out-of-town, primary-only tech (Juan/Zach). Verify by name before saving.
   if (secondary_technician_id) {
-    const { data: secTech } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
+    const { data: secTech, error } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
+    if (error) throw error;
     if (secTech && isSecondaryIneligibleName(secTech.name)) {
       return res.status(400).json({ error: `${secTech.name} can't be booked as a second technician. Pick another second tech or another time.` });
     }
@@ -3650,7 +3705,7 @@ async function bookingCreate(req, res, db, auth, body) {
   // primary brings their own second person (Juan/Zach), who covers the job
   // without a roster second tech.
   if (body.needs_lifting && !secondary_technician_id && !primaryBringsOwnSecond) {
-    return res.status(400).json({ error: 'This job requires a second technician, but no one from the chosen team is free for that time. Pick a specific second tech or another time.' });
+    return res.status(body.require_available === true ? 409 : 400).json({ code: 'slot_unavailable', error: 'This job requires a second technician, but no one from the chosen team is free for that time. Pick a specific second tech or another time.' });
   }
   if (secondary_technician_id && secondary_technician_id === technician_id) {
     return res.status(400).json({ error: 'The two technicians must be different.' });
@@ -3705,7 +3760,7 @@ async function bookingCreate(req, res, db, auth, body) {
       if (technician_id) {
         const taken = await bookedSlotKeysForTech(db, biz.id, technician_id, conflictDate, tz);
         if (taken.has(conflictSlot)) {
-          return res.status(409).json({ error: 'That technician is already booked for this time slot. Choose another time or technician.' });
+          return res.status(409).json({ code: 'slot_unavailable', error: 'That technician is already booked for this time slot. Choose another time or technician.' });
         }
         if (!forcedIds.has(String(technician_id))) {
           const keys = await singleTechSlotKeys(db, technician_id, conflictDate, dow);
@@ -3718,7 +3773,7 @@ async function bookingCreate(req, res, db, auth, body) {
       if (secondary_technician_id) {
         const taken2 = await bookedSlotKeysForTech(db, biz.id, secondary_technician_id, conflictDate, tz);
         if (taken2.has(conflictSlot)) {
-          return res.status(409).json({ error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
+          return res.status(409).json({ code: 'slot_unavailable', error: 'The second technician is already booked for this time slot. Choose another time or technician.' });
         }
         if (!forcedIds.has(String(secondary_technician_id))) {
           const keys2 = await singleTechSlotKeys(db, secondary_technician_id, conflictDate, dow);
@@ -3789,7 +3844,7 @@ async function bookingCreate(req, res, db, auth, body) {
   // not a topup: the office must add more service or the booking doesn't happen.
   {
     const _price = Number(body.price) || 0;
-    const _isHandyman = Array.isArray(body.selections) && body.selections.some(s => /^Handyman Labor:/i.test((s && s.label) || ''));
+    const _isHandyman = isHandymanPricedLines(body.selections);
     if (_price > 0 && _price < MIN_TICKET_PRICE && !_isHandyman) {
       return res.status(400).json({ error: `Jobs must total at least $${MIN_TICKET_PRICE}. Add another service or add-on before saving.`, below_minimum: true });
     }
@@ -3847,20 +3902,23 @@ async function bookingCreate(req, res, db, auth, body) {
     // with a 23505 — return the winner's booking instead of erroring, so a
     // double-submit is a no-op rather than a phantom job.
     if (idempotencyKey && (bErr.code === '23505' || /idempotency/i.test(bErr.message || '') || /duplicate key/i.test(bErr.message || ''))) {
-      const { data: winner } = await db.from('bookings')
-        .select('id').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey)
-        .neq('status', 'cancelled').maybeSingle();   // a cancelled row is not a winner
-      if (winner?.id) return res.status(200).json({ id: winner.id, duplicate: true });
+      const { data: winner, error } = await db.from('bookings')
+        .select('id, status').eq('business_id', biz.id).eq('idempotency_key', idempotencyKey).maybeSingle();
+      if (error) throw error;
+      if (winner?.status === 'cancelled') return res.status(409).json({ error: 'This booking was cancelled. Start a new booking to schedule it again.', code: 'booking_cancelled', id: winner.id });
+      if (winner?.id) return res.status(200).json({ id: winner.id, duplicate: true,
+        warning: 'Booking already exists. Check the saved job to confirm its card, line items, and notifications before making any changes.' });
     }
     // Tech/slot race lost at the DB (bookings_tech_slot_unique, migration 0073):
     // two offices passed the pre-insert conflict check simultaneously and the
     // other one's insert won. This surfaced as a raw 500 ("duplicate key…")
     // instead of the same friendly 409 the pre-check gives.
     if (bErr.code === '23505' && /bookings_tech_slot_unique/.test(bErr.message || '')) {
-      return res.status(409).json({ error: 'That technician was just booked for this exact time slot by someone else. Refresh the available times and pick another slot or technician.' });
+      return res.status(409).json({ code: 'slot_unavailable', error: 'That technician was just booked for this exact time slot by someone else. Refresh the available times and pick another slot or technician.' });
     }
-    const missing = OPTIONAL_INSERT_COLS.find(c => (bErr.message || '').includes(c) && c in insertObj);
+    const missing = ['42703', 'PGRST204'].includes(bErr.code) && OPTIONAL_INSERT_COLS.find(c => missingColumn(bErr.message) === c && c in insertObj);
     if (!missing) break;                       // not an optional-column problem — give up
+    if (missing === 'idempotency_key' && idempotencyKey) break; // never silently remove retry protection
     if (missing === 'secondary_technician_id' && wantedSecondTech) {
       return res.status(503).json({ error: 'This database can\'t store a second technician yet (missing the two-technician upgrade). Apply migration 0019_secondary_technician.sql in Supabase, then rebook. The booking was not created so the second tech isn\'t silently lost.' });
     }
@@ -3869,7 +3927,10 @@ async function bookingCreate(req, res, db, auth, body) {
   }
 
   if (bErr) throw bErr;
+  if (!bRow?.id) throw new Error('The booking record was not returned. Retry using the same booking attempt.');
 
+  let postInsertWarning = unassignedWarning;
+  try {
   // Generate the review-link token now that we have the booking id.
   await ensureReviewToken(db, { id: bRow.id });
 
@@ -3878,7 +3939,6 @@ async function bookingCreate(req, res, db, auth, body) {
   // that EXISTS, and the natural retry double-books. Failures here are
   // collected as a warning on the (still-200) response instead. Seeded with
   // the unassigned-race warning from the tech pick above, if any.
-  let postInsertWarning = unassignedWarning;
 
   // Save a tokenized card on file in Stripe so it can be charged at service time.
   // A failure here used to be silently swallowed (console.warn only) — the
@@ -3889,9 +3949,11 @@ async function bookingCreate(req, res, db, auth, body) {
   if (paymentMethod === 'card' && body.payment_method_id) {
     try {
       const ids = await saveCardOnFile(body.payment_method_id, { name: c.name, email: c.email, phone: c.phone }, biz.slug);
-      if (ids) await db.from('bookings').update({
+      if (!ids) throw new Error('Card storage is not configured for this business');
+      const { error } = await db.from('bookings').update({
         stripe_customer_id: ids.customerId, stripe_payment_method_id: ids.pmId,
       }).eq('id', bRow.id);
+      if (error) throw error;
     } catch (e) {
       console.warn('[admin] card-on-file save failed:', e.message);
       // Compose (don't clobber) — the unassigned-race warning may already be
@@ -3950,10 +4012,11 @@ async function bookingCreate(req, res, db, auth, body) {
     }
   }
 
-  await db.from('booking_status_events').insert({
+  const { error: statusEventError } = await db.from('booking_status_events').insert({
     booking_id: bRow.id, business_id: biz.id, technician_id: technician_id || null,
     status, note: `Created by ${auth.role} (dashboard)`,
   });
+  if (statusEventError) postInsertWarning = [postInsertWarning, 'Booking was created, but its status history could not be saved.'].filter(Boolean).join('\n\n');
 
   // Send booking confirmation SMS to customer (if they opted in). Same test as
   // the insert above (`=== true`), so the stored row and the text always agree.
@@ -4153,6 +4216,11 @@ async function bookingCreate(req, res, db, auth, body) {
   await Promise.all([confirmationEmailP, ownerAlertP]);
 
   return res.status(200).json({ ok: true, id: bRow.id, ...(postInsertWarning ? { warning: postInsertWarning } : {}) });
+  } catch (error) {
+    console.error('[admin] booking exists but setup did not finish:', error.message);
+    return res.status(200).json({ ok: true, id: bRow.id,
+      warning: [postInsertWarning, 'Booking was created, but setup did not finish. Open the saved job and verify its card, line items, and notifications before the appointment.'].filter(Boolean).join('\n\n') });
+  }
 }
 
 // ── Booking update: confirm | cancel | reschedule | assign | status ──────────
@@ -8474,6 +8542,7 @@ async function callClaim(req, res, db, auth, body) {
 // for free at ingest — service/market/caller_phone as the secretary learns
 // them, then a resolution once the call is over.
 const CALL_RESOLUTIONS = ['booked', 'estimate_sent', 'refused', 'other'];
+const PHONE_REQUEST_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function callUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id;
@@ -8508,7 +8577,7 @@ async function callUpdate(req, res, db, auth, body) {
   if (body.notes !== undefined) patch.notes = String(body.notes || '').slice(0, 2000) || null;
   if (body.service !== undefined) patch.service = String(body.service || '').slice(0, 60) || null;
   if (body.market !== undefined) patch.market = String(body.market || '').slice(0, 60) || null;
-  if (body.caller_phone !== undefined) patch.caller_phone = String(body.caller_phone || '').replace(/\D/g, '').slice(0, 10) || null;
+  if (body.caller_phone !== undefined) patch.caller_phone = String(body.caller_phone || '').replace(/\D/g, '').slice(-10) || null;
   if (body.customer_id !== undefined) patch.customer_id = body.customer_id || null;
   if (body.booking_id !== undefined) patch.booking_id = body.booking_id || null;
   // Resolution ends the call: "how did it end" IS the terminal status, so
@@ -8524,8 +8593,9 @@ async function callUpdate(req, res, db, auth, body) {
       patch.handled_at = new Date().toISOString();
     }
   }
-  const { error } = await db.from('calls').update(patch).eq('id', id);
+  const { data, error } = await db.from('calls').update(patch).eq('id', id).select('id').maybeSingle();
   if (error) throw error;
+  if (!data) return res.status(404).json({ error: 'Call not found. The change was not saved.' });
   return res.status(200).json({ ok: true });
 }
 
@@ -8583,15 +8653,28 @@ async function callLiveStart(req, res, db, auth, body) {
   if (auth.role === 'owner') {
     return res.status(200).json({ ok: true, id: null, untracked: true });
   }
+  const callId = body.call_id == null ? null : String(body.call_id);
+  if (callId && !PHONE_REQUEST_UUID.test(callId)) return res.status(400).json({ error: 'call_id must be a UUID' });
   const now = new Date().toISOString();
   const { data, error } = await db.from('calls').insert({
+    ...(callId ? { id: callId } : {}),
     business_id: biz.id,
     kind: 'live',
     occurred_at: now,
     status: 'new',
     handled_by: auth.name || auth.role || 'office',
   }).select('id').single();
+  // The client keeps this UUID for the entire call. A retry after a lost
+  // response must recover the original row without resetting its outcome.
+  if (error?.code === '23505' && callId) {
+    const { data: existing, error: readError } = await db.from('calls')
+      .select('id').eq('id', callId).eq('business_id', biz.id).eq('kind', 'live').maybeSingle();
+    if (readError) throw readError;
+    if (existing) return res.status(200).json({ ok: true, id: existing.id, duplicate: true });
+    return res.status(409).json({ error: 'This call identifier is already in use. Start a new call.' });
+  }
   if (error) throw error;
+  if (!data?.id) throw new Error('The call record was not returned. Retry with the same call identifier.');
   return res.status(200).json({ ok: true, id: data.id });
 }
 
@@ -10010,13 +10093,13 @@ function quoteTotals(items, taxRate) {
 
 // Insert an estimate, tolerating a column the local schema doesn't have yet
 // (e.g. line_items before migration 0028 is applied) by dropping it and retrying.
-async function insertEstimateResilient(db, row) {
+async function insertEstimateResilient(db, row, requiredColumns = []) {
   const payload = { ...row };
   for (let i = 0; i < 6; i++) {
     const { data, error } = await db.from('estimates').insert(payload).select('id').maybeSingle();
     if (!error) return { data, error: null };
     const col = missingColumn(error.message);
-    if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
+    if (['42703', 'PGRST204'].includes(error.code) && col && !requiredColumns.includes(col) && Object.prototype.hasOwnProperty.call(payload, col)) {
       console.warn(`[estimate_create] '${col}' column missing, retrying without it`);
       delete payload[col];
       continue;
@@ -10059,6 +10142,9 @@ async function markEstimateContacted(db, businessId, id, sentBy) {
 async function estimateCreate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const estimateId = body.estimate_id == null ? null : String(body.estimate_id);
+  if (estimateId && !PHONE_REQUEST_UUID.test(estimateId)) return res.status(400).json({ error: 'estimate_id must be a UUID' });
+  const taxRate = body.tax_rate === undefined ? DEFAULT_EST_TAX_RATE : normalizeTaxRate(body.tax_rate);
 
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
   // One way to reach them is all that's required. A customer who has already
@@ -10104,6 +10190,7 @@ async function estimateCreate(req, res, db, auth, body) {
   // being absent (line_items before 0028, upsells before 0048) by dropping it
   // and retrying, so an estimate is never lost to schema drift.
   const { data: est, error: createErr } = await insertEstimateResilient(db, {
+    ...(estimateId ? { id: estimateId } : {}),
     business_id: biz.id,
     // No name given: label the row by whichever contact detail they did give,
     // so the estimates list still has something recognisable to show.
@@ -10118,17 +10205,28 @@ async function estimateCreate(req, res, db, auth, body) {
     // Store the rate the email/SMS totals were computed with, so the estimate
     // card and the customer approve page show the SAME tax the customer was
     // quoted (previously left null — the card showed no tax at all).
-    tax_rate: DEFAULT_EST_TAX_RATE,
+    tax_rate: taxRate,
     status: 'new',
     // Explicit opt-in only (A2P): the New Booking box starts unchecked and is
     // ticked only after the customer's verbal yes.
     sms_consent: body.sms_consent === true,
     source: 'manual',
-  });
+  }, estimateId ? ['id', 'line_items', 'tax_rate'] : []);
 
+  if (createErr?.code === '23505' && estimateId) {
+    const { data: existing, error } = await db.from('estimates').select('id')
+      .eq('id', estimateId).eq('business_id', biz.id).maybeSingle();
+    if (error) throw error;
+    if (existing) return res.status(200).json({ id: existing.id, ok: true, duplicate: true, delivery_unknown: true,
+      warning: 'Estimate already exists. Delivery may still be processing; check it before resending.' });
+    return res.status(409).json({ error: 'This estimate identifier is already in use. Start a new estimate.' });
+  }
   if (createErr) throw createErr;
-  if (!est) return res.status(500).json({ error: 'Failed to create estimate' });
+  if (!est?.id) return res.status(500).json({ error: 'The estimate record was not returned. Retry using the same estimate attempt.' });
 
+  // After insertion, even a delivery/setup exception must return the saved ID.
+  // A customer-facing retry reuses that ID and never creates or sends twice.
+  try {
   // Email is no longer mandatory, so its unavailability can't short-circuit the
   // whole send — a phone-only customer still gets their estimate by text below.
   const emailOff = !emailNotificationsOn() ? 'Email notifications are turned off'
@@ -10147,7 +10245,7 @@ async function estimateCreate(req, res, db, auth, body) {
   let emailed = false, emailWarning = emailOff;
   if (estEmail && !emailOff) {
     const { subject, html } = estimateEmail(
-      { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate: DEFAULT_EST_TAX_RATE, approveUrl, upsells: publicUpsells(upsells) },
+      { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate, approveUrl, upsells: publicUpsells(upsells) },
       brandFor(biz.slug)
     );
     try {
@@ -10165,7 +10263,8 @@ async function estimateCreate(req, res, db, auth, body) {
   // first thing the customer receives. Awaited so it goes out ahead of it.
   // Best-effort: a failure never blocks the estimate.
   if (estPhone && body.sms_consent === true) {
-    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create', db, businessId: biz.id });
+    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create', db, businessId: biz.id })
+      .catch(e => console.warn('[estimate_create] opt-in confirmation failed:', e.message));
   }
 
   // Text the customer the estimate + a link to view/approve it. For a customer
@@ -10173,7 +10272,7 @@ async function estimateCreate(req, res, db, auth, body) {
   let texted = false;
   if (estPhone && body.sms_consent === true && approveUrl) {
     try {
-      const { total } = quoteTotals(line_items, DEFAULT_EST_TAX_RATE);
+      const { total } = quoteTotals(line_items, taxRate);
       // Brand first (A2P 10DLC), then the greeting.
       const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
       const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
@@ -10201,6 +10300,11 @@ async function estimateCreate(req, res, db, auth, body) {
     warning = `Sent by text. Email did not go out (${emailWarning}).`;
   }
   return res.status(201).json({ id: est.id, ok: true, texted, emailed, warning });
+  } catch (error) {
+    console.error('[estimate_create] saved estimate delivery failed:', error.message);
+    return res.status(201).json({ id: est.id, ok: true, delivery_unknown: true,
+      warning: 'Estimate was saved, but delivery could not be confirmed. Open the estimate before sending again.' });
+  }
 }
 
 // Send quote SMS to customer
@@ -10692,7 +10796,12 @@ async function quoteEconomics(req, res, db, auth, body) {
   const profit = Math.round(price - payout - bracketCost);
   const floorRoom = Math.max(0, profit - QUOTE_PROFIT_FLOOR);
   const pctRoom = Math.floor(price * QUOTE_MAX_DISCOUNT_PCT);
-  const maxDiscount = Math.min(floorRoom, pctRoom);
+  const taxRate = body.tax_rate === undefined ? DEFAULT_EST_TAX_RATE : normalizeTaxRate(body.tax_rate);
+  // booking_create compares the final tax-inclusive ticket against $139.
+  // Leave enough before-tax price that an authorized discount still books.
+  const minimumRoom = price > 0 && !isHandymanPricedLines(lines)
+    ? Math.max(0, Math.floor((price - MIN_TICKET_PRICE / (1 + taxRate)) * 100) / 100) : Infinity;
+  const maxDiscount = Math.min(floorRoom, pctRoom, minimumRoom);
 
   return res.status(200).json({
     price,
@@ -10708,6 +10817,7 @@ async function quoteEconomics(req, res, db, auth, body) {
     // secretary as "limit: ...", so a literal would silently lie the next time
     // the percentage moves.
     capped_by: maxDiscount <= 0 ? 'nothing to give'
+      : minimumRoom <= Math.min(floorRoom, pctRoom) ? 'minimum ticket'
       : (pctRoom < floorRoom ? `${(QUOTE_MAX_DISCOUNT_PCT * 100).toFixed(2).replace(/\.?0+$/, '')}% of the ticket` : 'profit floor'),
   });
 }
@@ -10734,14 +10844,20 @@ async function callEvent(req, res, db, auth, body) {
 
   const meta = (body.meta && typeof body.meta === 'object') ? body.meta : {};
   const actor = auth.name || adminAuthorName(auth) || auth.role || 'office';
+  const { data: call, error: callError } = await db.from('calls').select('id')
+    .eq('id', body.call_id).eq('business_id', biz.id).maybeSingle();
+  if (callError) throw callError;
+  if (!call) return res.status(404).json({ error: 'Call not found. The event was not saved.' });
 
-  // Best-effort: analytics must never break the call the secretary is on.
-  try {
-    await db.from('call_events').insert({
+  // The frontend keeps analytics off the conversation's critical path, but
+  // callers still need an honest result when persistence fails.
+  {
+    const { error } = await db.from('call_events').insert({
       call_id: body.call_id, business_id: biz.id, actor,
       event, step: body.step ? String(body.step).slice(0, 40) : null, meta,
     });
-  } catch (e) { console.warn('[call_event] insert failed:', e.message); }
+    if (error) throw error;
+  }
 
   // Roll the interesting values onto the call row so reports don't have to dig
   // through jsonb for the numbers they show on every line.
@@ -10765,10 +10881,16 @@ async function callEvent(req, res, db, auth, body) {
   }
   Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
   if (Object.keys(patch).length) {
-    try { await db.from('calls').update(patch).eq('id', body.call_id); }
-    catch (e) { console.warn('[call_event] call patch failed:', e.message); }
+    try {
+      const { data, error } = await db.from('calls').update(patch).eq('id', body.call_id).eq('business_id', biz.id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('Call no longer exists');
+    } catch (e) {
+      console.warn('[call_event] call patch failed:', e.message);
+      return res.status(200).json({ ok: true, recorded: true, warning: 'Call event saved, but its report summary could not be updated.' });
+    }
   }
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, recorded: true });
 }
 
 // Daily + weekly rollups for the phone script. The headline number the owner
@@ -11489,13 +11611,13 @@ async function quoteCoupon(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const code = String(body.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'code required' });
-  const amount = await couponAmountFor(db, biz.slug, code);
+  const amount = await couponAmountFor(db, biz.slug, code, { strict: true });
   if (!amount) {
     // Offer the closest real code when it's within one or two characters — a
     // code read aloud over the phone is easy to mistype, and a bare "not valid"
     // strands the secretary mid-call against a customer who is actually right.
     let suggest = null, best = 3;
-    for (const c of await couponCodesFor(db, biz.slug)) {
+    for (const c of await couponCodesFor(db, biz.slug, { strict: true })) {
       const d = editDistance(code, c);
       if (d > 0 && d < best) { best = d; suggest = c; }
     }

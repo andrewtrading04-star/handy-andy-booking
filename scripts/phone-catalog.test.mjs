@@ -20,7 +20,7 @@ const healthy=()=>[
 const deferred=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(api,extra={}){
-  const c=vm.createContext({api,current:{slug:'doms'},CW_REQUIRED_GROUPS:new Set(['size','fireplace','surface']),...extra});
+  const c=vm.createContext({api,setTimeout,clearTimeout,current:{slug:'doms'},CW_REQUIRED_GROUPS:new Set(['size','fireplace','surface']),...extra});
   vm.runInContext(helpers,c);
   return c;
 }
@@ -109,6 +109,106 @@ test('catalog cache deduplicates in-flight requests and gives each caller isolat
   first[0].options[0].price=999;first.push({key:'new'});
   assert.equal(second[0].options[0].price,109);assert.equal(second.length,4);
   assert.equal(attempts,1);
+});
+
+test('catalog expiry starts on successful completion, shares slow loads and refreshes later calls',async()=>{
+  let now=0,attempts=0;const first=deferred();
+  const c=harness(async()=>{attempts++;return attempts===1?first.promise:{groups:healthy().map(g=>({...g,options:g.options.map(o=>({...o,price:o.price+1}))}))};},{Date:{now:()=>now}});
+  const initial=c.nbLoadTvOptions('tv','doms');now=90000;
+  const pending=c.nbLoadTvOptions('tv','doms');assert.equal(attempts,1,'a slow pending load cannot expire into a duplicate');
+  first.resolve({groups:healthy()});await Promise.all([initial,pending]);
+  now=149999;assert.equal((await c.nbLoadTvOptions('tv','doms'))[0].options[0].price,109);assert.equal(attempts,1);
+  now=150000;const [a,b]=await Promise.all([c.nbLoadTvOptions('tv','doms'),c.nbLoadTvOptions('tv','doms')]);
+  assert.equal(attempts,2);assert.equal(a[0].options[0].price,110);a[0].options[0].price=999;assert.equal(b[0].options[0].price,110);
+});
+
+test('an expired catalog failure is never replaced by stale prices and the next attempt retries',async()=>{
+  let now=0,attempts=0;
+  const c=harness(async()=>{if(++attempts===2)throw Error('Updated catalog unavailable');return {groups:healthy()};},{Date:{now:()=>now}});
+  await c.nbLoadTvOptions('tv','doms');now=60000;
+  await assert.rejects(c.nbLoadTvOptions('tv','doms'),/Updated catalog unavailable/);
+  await c.nbLoadTvOptions('tv','doms');assert.equal(attempts,3);
+});
+
+test('phone prefetch shares services and options with the visible card without fetching a roster or mutating UI data',async()=>{
+  const services=deferred(),options=deferred(),calls=[];
+  const c=harness((action,opts)=>{calls.push({action,...opts.params});return action==='services'?services.promise:options.promise;},
+    {nbServices:[{id:'active-service'}],nbOptionGroups:[{key:'active-group'}]});
+  const warming=c.cwWarmTvCatalog('doms');c.current={slug:'handy-andy'};
+  const serviceForCard=c.nbEnsureServicesCached('doms');services.resolve({services:[{id:'tv',category:'TV Mounting'}]});
+  const svc=await serviceForCard,visible=c.nbLoadTvOptions(svc.services[0].id,'doms');
+  options.resolve({groups:healthy()});await Promise.all([warming,visible]);
+  assert.deepEqual(calls.map(r=>r.action),['services','service_options']);assert(calls.every(r=>r.business==='doms'));
+  assert.equal(c.nbServices[0].id,'active-service');assert.equal(c.nbOptionGroups[0].key,'active-group');
+});
+
+test('missing TV service and failed prefetch leave the visible card able to retry',async()=>{
+  for(const failure of ['missing','options']){
+    let services=0,options=0;
+    const c=harness(async action=>{
+      if(action==='services')return {services:++services===1&&failure==='missing'?[]:[{id:'tv',category:'TV Mounting'}]};
+      if(++options===1&&failure==='options')throw Error('Options offline');return {groups:healthy()};
+    });
+    await assert.rejects(c.cwWarmTvCatalog('doms'));
+    const svc=await c.nbEnsureServicesCached('doms');assert.equal((await c.nbLoadTvOptions(svc.services[0].id,'doms')).length,4);
+    assert.equal(failure==='missing'?services:options,2);
+  }
+});
+
+function manualTimers(){
+  const pending=new Set();
+  return {pending,setTimeout(fn,ms){const timer={fn,ms};pending.add(timer);return timer;},clearTimeout(timer){pending.delete(timer);},
+    expire(){for(const timer of [...pending]){pending.delete(timer);timer.fn();}}};
+}
+
+test('phone service timeout detaches a stalled background request and late data cannot replace the retried cache',async()=>{
+  const timers=manualTimers(),old=deferred(),calls=[];
+  const c=harness((action,opts)=>{
+    calls.push({action,...opts});
+    if(action==='services')return calls.filter(r=>r.action==='services').length===1?old.promise:Promise.resolve({services:[{id:'fresh-tv',category:'TV Mounting'}]});
+    return Promise.resolve({groups:healthy()});
+  },timers);
+  const background=c.nbEnsureServicesCached('doms'),phone=c.cwWarmTvCatalog('doms');
+  assert.equal(calls.length,1);assert.equal(calls[0].timeoutMs,undefined,'ordinary New Booking keeps its default request limit');
+  assert.deepEqual([...timers.pending].map(t=>t.ms),[12000]);
+  const timedOut=assert.rejects(phone,/too long/);timers.expire();await timedOut;
+  await c.cwWarmTvCatalog('doms');assert.equal(calls[1].timeoutMs,12000);assert.equal(calls[2].timeoutMs,12000);
+  old.resolve({services:[{id:'old-tv',category:'TV Mounting'}]});await background;
+  assert.equal((await c.nbEnsureServicesCached('doms')).services[0].id,'fresh-tv');
+  assert.equal(calls.filter(r=>r.action==='technicians').length,0);assert.equal(timers.pending.size,0);
+});
+
+test('phone catalog timeout is retryable while an earlier New Booking load can finish for its original caller',async()=>{
+  const timers=manualTimers(),old=deferred(),calls=[];
+  const c=harness((action,opts)=>{
+    calls.push({action,...opts});
+    if(action==='services')return Promise.resolve({services:[{id:'tv',category:'TV Mounting'}]});
+    if(calls.filter(r=>r.action==='service_options').length===1)return old.promise;
+    const groups=healthy();groups[0].options[0].price=125;return Promise.resolve({groups});
+  },timers);
+  const booking=c.nbLoadTvOptions('tv','doms'),phone=c.cwWarmTvCatalog('doms');await tick();
+  assert.deepEqual([...timers.pending].map(t=>t.ms),[12000]);
+  const timedOut=assert.rejects(phone,/too long/);timers.expire();await timedOut;
+  assert.equal((await c.cwWarmTvCatalog('doms'))[0].options[0].price,125);
+  old.resolve({groups:healthy()});assert.equal((await booking)[0].options[0].price,109);
+  assert.equal((await c.nbLoadTvOptions('tv','doms'))[0].options[0].price,125,'a late old result cannot restore stale shared prices');
+  assert.equal(calls.filter(r=>r.action==='service_options').length,2);assert.equal(timers.pending.size,0);
+});
+
+test('every phone catalog request including legacy repairs has a 12-second limit',async()=>{
+  const calls=[],legacy=healthy();legacy[0].options[0].label='70–84';let reads=0;
+  const c=harness(async(action,opts)=>{
+    calls.push({action,...opts});
+    if(action==='services')return {services:[{id:'tv',category:'TV Mounting'}]};
+    if(action==='service_options')return {groups:++reads===1?[healthy()[0]]:reads===2?legacy:healthy()};
+    return {ok:true};
+  });
+  await c.cwWarmTvCatalog('handy-andy');
+  assert.deepEqual(calls.map(r=>r.action),['services','service_options','seed_tv_options','service_options','relabel_tv_size','service_options']);
+  assert(calls.every(r=>r.timeoutMs===12000));assert(calls.every(r=>r.params.business==='handy-andy'));
+  const card=cut("  if(s==='tvopts'){", "    const cards=callWizCards();");
+  assert.match(card,/nbEnsureServicesCached\(slug,\{timeoutMs:12000\}\)/);
+  assert.match(card,/nbLoadTvOptions\(tvSvc\.id,slug,\{timeoutMs:12000\}\)/);
 });
 
 test('business changes cannot redirect catalog seed or relabel requests',async()=>{
