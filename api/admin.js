@@ -14155,7 +14155,7 @@ const MESSAGES_SCAN_LIMIT = 1000;
 
 // Which business owns one of our numbers, with the caller's access enforced.
 // Throws the same {status} shape resolveBusiness does, so callers bail() it.
-async function businessForOurPhone(db, auth, ourPhoneRaw) {
+async function businessForOurPhone(db, auth, ourPhoneRaw, customerPhoneRaw) {
   const ourPhone = digitsOf(ourPhoneRaw);
   if (!ourPhone) { const e = new Error('our number is required'); e.status = 400; throw e; }
   const { data: line } = await db.from('tracking_numbers')
@@ -14168,13 +14168,25 @@ async function businessForOurPhone(db, auth, ourPhoneRaw) {
     // here. That is probably the most common inbound text we get.
     //
     // handleSmsInbound already stores it (with business_id null), so the thread
-    // exists; it just belongs to no brand. The owner must be able to read it,
-    // or the one conversation nobody can answer is the one from the number we
-    // text customers from. A secretary still cannot — there is no business to
-    // check her against, and guessing one would show her another brand's
-    // customers.
-    if (allowedSlugsFor(auth) !== null) {
-      const e = new Error('That number is not one of ours'); e.status = 404; throw e;
+    // exists; it just belongs to no brand. The owner reads all of these. A
+    // secretary can open ONE too, but only when the SAME brand guess the
+    // Messages list already labels it with (brandForUnmappedTexters — their
+    // latest booking/estimate/call) lands inside her own allow-list — e.g.
+    // Heather couldn't open a Mile High customer's reply to their "on the way"
+    // text just because it happened to arrive on the shared number. Guessing
+    // wrong and showing her someone else's customer would be the real
+    // mistake, so a guess that isn't hers (or no guess at all) still blocks.
+    const viewerSlugs = allowedSlugsFor(auth);
+    if (viewerSlugs !== null) {
+      const customerPhone = digitsOf(customerPhoneRaw);
+      const guess = customerPhone && (await brandForUnmappedTexters(db, [customerPhone], await businessesById(db))).get(customerPhone);
+      if (!guess || !viewerSlugs.includes(guess.slug)) {
+        const e = new Error('That number is not one of ours'); e.status = 404; throw e;
+      }
+      // resolveBusiness re-runs mayUseBusiness() — belt and braces alongside
+      // the allow-list check just above.
+      const biz = await resolveBusiness(db, auth, guess.slug);
+      return { biz, ourPhone, label: (line && line.label) || null, guessed: true };
     }
     return { biz: null, ourPhone, label: (line && line.label) || null };
   }
@@ -14285,12 +14297,23 @@ async function messagesList(req, res, db, auth) {
     .order('created_at', { ascending: false })
     .limit(MESSAGES_SCAN_LIMIT);
 
+  let viewerBizIds = [];
   if (viewerSlugs) {
     const { data: viewerBiz } = await db.from('businesses').select('id').in('slug', viewerSlugs);
-    const ids = (viewerBiz || []).map(b => b.id);
-    // Same sentinel the calls list uses: an empty allow-list must match nothing,
-    // not everything.
-    q = q.in('business_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+    viewerBizIds = (viewerBiz || []).map(b => b.id);
+    if (!viewerBizIds.length) {
+      // Same sentinel the calls list uses: an empty allow-list must match
+      // nothing, not everything.
+      q = q.in('business_id', ['00000000-0000-0000-0000-000000000000']);
+    } else {
+      // ALSO fetch business_id IS NULL rows — threads on the shared
+      // toll-free/notification number. A scoped viewer keeps one of THOSE
+      // only if the brand guess below (the same one that labels it for the
+      // owner) lands inside her own businesses; the filter for that runs
+      // further down, once every thread has been guessed. Nothing here
+      // leaves this function un-narrowed.
+      q = q.or(`business_id.in.(${viewerBizIds.join(',')}),business_id.is.null`);
+    }
   }
   const { data: rows, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
@@ -14376,9 +14399,21 @@ async function messagesList(req, res, db, auth) {
     t.brand_others = g.others;
     if (!t.customer_name) t.customer_name = g.customer_name;
   }
+  // A scoped viewer keeps a MAPPED thread only if it's actually one of her
+  // own business ids (checked again here, not just trusted from the .or()
+  // query above — the SQL filter already restricts this, but an access
+  // boundary that only holds because one query stayed correct is exactly the
+  // kind of thing a later edit accidentally breaks), and keeps an UNMAPPED
+  // (business_id null) thread only once the guess just above puts it inside
+  // her own allow-list. Anything guessed to someone else's brand, or guessed
+  // to nothing at all, never reaches her — it was fetched only so it could be
+  // guessed, never to be shown blind.
+  const visible = viewerSlugs
+    ? list.filter(t => (t.business_id ? viewerBizIds.includes(t.business_id) : (t.business_slug && viewerSlugs.includes(t.business_slug))))
+    : list;
   return res.status(200).json({
-    threads: list,
-    unread_total: list.reduce((n, t) => n + t.unread, 0),
+    threads: visible,
+    unread_total: visible.reduce((n, t) => n + t.unread, 0),
     // True when the scan cap may have hidden older conversations — better to
     // say so than to silently look complete.
     truncated: (rows || []).length >= MESSAGES_SCAN_LIMIT,
@@ -14387,9 +14422,11 @@ async function messagesList(req, res, db, auth) {
 
 // GET ?action=messages_thread&our=...&customer=... — one full conversation.
 async function messagesThread(req, res, db, auth) {
-  let ctx; try { ctx = await businessForOurPhone(db, auth, req.query.our); } catch (e) { return bail(res, e); }
   const customer = digitsOf(req.query.customer);
   if (!customer) return res.status(400).json({ error: 'customer is required' });
+  // customer goes in so a scoped viewer opening an unmapped-line thread can be
+  // checked against the SAME brand guess for THIS customer, not just the number.
+  let ctx; try { ctx = await businessForOurPhone(db, auth, req.query.our, customer); } catch (e) { return bail(res, e); }
 
   const { data: rows, error } = await db.from('messages')
     .select('id, direction, body, created_at, status, error, sent_by, read_at')
@@ -14435,10 +14472,12 @@ async function messagesThread(req, res, db, auth) {
 // POST ?action=messages_send — reply in a conversation.
 async function messagesSend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  let ctx; try { ctx = await businessForOurPhone(db, auth, body.our); } catch (e) { return bail(res, e); }
   const customer = digitsOf(body.customer);
   const text = (body.text || '').toString().trim();
   if (!customer) return res.status(400).json({ error: 'customer is required' });
+  // customer goes in so a scoped viewer replying on an unmapped-line thread
+  // can be checked against the SAME brand guess for THIS customer.
+  let ctx; try { ctx = await businessForOurPhone(db, auth, body.our, customer); } catch (e) { return bail(res, e); }
   if (!text) return res.status(400).json({ error: 'Message is empty' });
   // One SMS segment is 160 chars and Twilio bills per segment. 1200 is generous
   // for a service reply and stops a paste accident becoming an 8-segment text.
