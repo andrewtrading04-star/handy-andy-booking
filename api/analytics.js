@@ -103,7 +103,7 @@ function round1(n) { return Math.round(n * 10) / 10; }
 // callers in admin.js/tech.js) rather than trusting request headers for host/
 // proto, which a proxy could rewrite — verification shouldn't depend on how
 // the request physically arrived.
-function verifyTwilioSignature(url, params, signature) {
+export function verifyTwilioSignature(url, params, signature) {
   if (!signature || !process.env.TWILIO_AUTH_TOKEN) return false;
   let data = url;
   for (const k of Object.keys(params).sort()) data += k + params[k];
@@ -306,11 +306,11 @@ async function handleResendWebhook(req, res) {
 // Each one answers 200 with TwiML even on an internal error: a non-2xx makes
 // Twilio play its own "application error" recording to a live customer, which
 // is a far worse outcome than a missing analytics row.
-function xml(res, twiml) {
+export function xml(res, twiml) {
   res.setHeader('Content-Type', 'text/xml');
   return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>${twiml}`);
 }
-function xmlEsc(s) {
+export function xmlEsc(s) {
   return String(s == null ? '' : s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 }
 function publicBase() {

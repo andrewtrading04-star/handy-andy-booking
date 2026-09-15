@@ -15,6 +15,7 @@
 // ============================================================================
 import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual, refreshToken, ADMIN_SESSION_MAX } from './_lib/auth.js';
+import { verifyTwilioSignature, xml, xmlEsc } from './analytics.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
@@ -345,6 +346,11 @@ export default async function handler(req, res) {
     // Posted by the Gmail forwarder script, which has no dashboard session —
     // authenticates with GRASSHOPPER_INGEST_SECRET instead of a login token.
     if (action === 'call_ingest') return await callIngest(req, res, body);
+    // Twilio POSTs here the instant the staff leg of a click-to-call bridge
+    // is answered (the link is minted in callStart below) — no dashboard
+    // session either; it's authenticated by Twilio's own request signature
+    // plus a short-TTL signed token instead, both checked inside callConnect.
+    if (action === 'call_connect') return await callConnect(req, res);
 
     // Everything below requires a valid admin token. call_recording is the one
     // exception to "Bearer header only": it's loaded by a plain <audio src>,
@@ -455,6 +461,7 @@ export default async function handler(req, res) {
       case 'call_recording':    return await callRecording(req, res, db, auth);
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
+      case 'call_start':        return await callStart(req, res, db, auth, body);
       case 'call_block':        return await callBlock(req, res, db, auth, body);
       case 'call_delete':       return await callDelete(req, res, db, auth, body);
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
@@ -8572,6 +8579,239 @@ async function callLiveStart(req, res, db, auth, body) {
   }).select('id').single();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data.id });
+}
+
+// ── Click-to-call bridge (owner-approved, 2026-09-15) ────────────────────────────
+// Real click-to-call for the two "Call" surfaces that used to be either a
+// plain tel: link (dials from whoever CLICKED it, on their own phone/line —
+// the customer saw the clicking staff member's own number) or, on the Needs
+// callback queue, a claim that never actually dialed. Two-leg bridge via
+// Twilio's REST Calls API, the standard small-business click-to-call pattern:
+//   1. callStart (below) creates a Twilio Call: To the LOGGED-IN staff
+//      member's own phone, From the tracking number for this conversation.
+//   2. Once she answers, Twilio fetches callConnect (below) for TwiML that
+//      Dials the customer with that SAME tracking number as callerId — the
+//      part the customer's phone actually shows.
+// No voicemail/retry for v1 — if she never picks up her own phone, the call
+// just ends. Confirmed acceptable to the owner: two real billed PSTN legs
+// instead of free tel: dialing, and a brief "her phone rings, then it dials
+// out" delay before the customer's phone starts ringing.
+const CALL_START_TTL_S = 120;        // the connect token is consumed within seconds of her picking up
+const CALL_START_TIMEOUT_MS = 15000; // just OUR request to Twilio's REST API, not the ring itself
+function callStartTimeoutSignal() {
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), CALL_START_TIMEOUT_MS);
+  if (typeof t.unref === 'function') t.unref();
+  return c.signal;
+}
+
+// A plausible US number, E.164-shaped. This is THE security boundary for
+// callConnect: everything else about that request (who signed the token,
+// whether it has expired) is already checked by the time this runs, but a
+// value riding inside a token is still just a string until it is shape-
+// checked before it touches TwiML or a Twilio API call.
+function isPlausibleUsE164(s) {
+  return typeof s === 'string' && /^\+1\d{10}$/.test(s);
+}
+
+// Which phone rings for whoever is actually logged in and clicking the
+// button right now — Heather, Joey, or the owner, whichever session this is
+// — NOT a fixed per-business number (that's the different lookup
+// api/_lib/tech-late.js already keeps, keyed by business slug rather than by
+// person: it rings whoever owns a brand's escalations, not whoever happens
+// to be signed in). Looked up by display name on staff_users, the same table
+// calls() already reads to put a name on forwarded_to (matched the same way:
+// exact name, active only). Falls back to the existing secretary/owner phone
+// constants — never a new fallback convention — when that row is missing,
+// inactive, or has no phone on file.
+async function staffOwnPhoneFor(db, auth) {
+  const me = (auth.name || '').trim();
+  if (me) {
+    try {
+      const { data } = await db.from('staff_users').select('phone').eq('name', me).eq('active', true).maybeSingle();
+      if (data && data.phone) return toE164(data.phone);
+    } catch { /* fall through to the constant fallback */ }
+  }
+  return toE164(secretaryPhoneFor(auth.scope) || process.env.OWNER_PHONE_NUMBER || '');
+}
+
+// Cheap loop guards. Nothing else in this codebase rate-limits (confirmed by
+// reading through it), and these deliberately stay that simple: plain
+// in-memory maps are enough to stop a broken/looping client — or a leaked
+// staff bearer token — from spamming real, billed Twilio calls, without
+// building a whole new rate-limiting system for one new action. Not exact
+// across cold starts or multiple server instances — they don't need to be;
+// they only need to catch a double-click, a stuck retry loop, or a script
+// that varies the destination number to dodge a same-number check.
+//
+// Two separate guards, because they catch two different failure shapes:
+//   - _recentCallStarts: refuses a second call to the SAME customer number
+//     within CALL_START_DEDUPE_MS (a double-click, a stuck retry).
+//   - _staffCallStarts: caps how many calls ANY ONE staff identity can start
+//     per rolling window, regardless of which customer number each one
+//     targets — the same secretary calling many DIFFERENT numbers in a tight
+//     loop costs exactly as much as looping the same number, and the
+//     per-number map alone never sees it.
+const _recentCallStarts = new Map(); // customerPhone (E.164) -> ms timestamp
+const CALL_START_DEDUPE_MS = 15000;
+const _staffCallStarts = new Map(); // staff key -> array of ms timestamps within the window
+const STAFF_CALL_WINDOW_MS = 60000;
+const STAFF_CALL_MAX_PER_WINDOW = 6; // generous for a real run of callbacks; tight enough to stop a loop
+
+function staffCallBudgetKey(auth) {
+  return (auth && (auth.name || auth.role)) || 'unknown';
+}
+
+// True (and records this attempt) if this staff identity still has budget
+// left in the current rolling window; false if she's already used it up.
+function checkStaffCallBudget(auth) {
+  const key = staffCallBudgetKey(auth);
+  const now = Date.now();
+  const hits = (_staffCallStarts.get(key) || []).filter((ts) => (now - ts) < STAFF_CALL_WINDOW_MS);
+  if (hits.length >= STAFF_CALL_MAX_PER_WINDOW) {
+    _staffCallStarts.set(key, hits);
+    return false;
+  }
+  hits.push(now);
+  _staffCallStarts.set(key, hits);
+  return true;
+}
+
+// POST ?action=call_start — places the bridge call described above.
+// `source` names which screen this came from and IS the access-control
+// boundary: the caller never gets to hand this action an arbitrary phone
+// number and tracking number of her choosing (that would place a free, to
+// her, call to anywhere, cloaked in a business's caller ID) — every number
+// that ends up on the call is re-derived here from a database row she is
+// already allowed to see, the same way every other business-scoped action in
+// this file (messagesSend, callClaim) scopes itself.
+async function callStart(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const source = (body.source || '').toString();
+
+  let customerPhone, trackingNumber;
+  if (source === 'message_thread') {
+    // The Messages thread's Call pill: dial the customer this open thread is
+    // with, From the tracking number this conversation is actually on.
+    const customer = digitsOf(body.customer);
+    if (!customer) return res.status(400).json({ error: 'customer is required' });
+    // Same gate messagesSend already goes through for this exact thread — a
+    // secretary can dial only a conversation she's allowed to open.
+    let ctx; try { ctx = await businessForOurPhone(db, auth, body.our, customer); } catch (e) { return bail(res, e); }
+    // Must be a conversation that actually exists — otherwise a secretary
+    // with access to a real tracking number could hand this action any
+    // made-up "customer" number and place a free call anywhere, cloaked in
+    // that business's caller ID. Any row (in or out) counts: a customer who
+    // has only ever received an automated confirmation text is still a real
+    // customer worth calling back.
+    const { data: existing, error: existErr } = await db.from('messages').select('id')
+      .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer).limit(1);
+    if (existErr) return res.status(503).json({ error: "Couldn't verify this conversation. Try again in a moment." });
+    if (!(existing || []).length) return res.status(404).json({ error: 'No conversation found for this number.' });
+    customerPhone = toE164(customer);
+    trackingNumber = toE164(ctx.ourPhone);
+  } else if (source === 'call_claim') {
+    // The Needs callback queue's big green button — dials only AFTER the
+    // claim itself already succeeded (the client sequences this; see
+    // claimCallback() in admin.html), so this never re-litigates the claim.
+    const id = (body.call_id || '').toString();
+    if (!id) return res.status(400).json({ error: 'call_id is required' });
+    const { data: call, error } = await db.from('calls')
+      .select('caller_phone, grasshopper_number, business:businesses ( slug )')
+      .eq('id', id).single();
+    if (error || !call) return res.status(404).json({ error: 'Call not found' });
+    const slug = call.business && call.business.slug;
+    if (!mayUseBusiness(auth, slug)) return res.status(403).json({ error: 'Forbidden for this business' });
+    if (!call.caller_phone) return res.status(400).json({ error: 'This call has no customer number on file' });
+    if (!call.grasshopper_number) return res.status(400).json({ error: 'This call has no tracking number on file' });
+    customerPhone = toE164(call.caller_phone);
+    trackingNumber = toE164(call.grasshopper_number);
+  } else {
+    return res.status(400).json({ error: 'Unknown source' });
+  }
+
+  if (!customerPhone) return res.status(400).json({ error: 'Bad customer phone number' });
+  if (!trackingNumber) return res.status(400).json({ error: 'Bad tracking number' });
+
+  // Rate/loop guards — cheapest checks first, before any DB lookup or Twilio call.
+  if (!checkStaffCallBudget(auth)) {
+    return res.status(429).json({ error: 'Too many calls placed in the last minute — give it a moment and try again.' });
+  }
+  const lastAt = _recentCallStarts.get(customerPhone);
+  if (lastAt && (Date.now() - lastAt) < CALL_START_DEDUPE_MS) {
+    return res.status(429).json({ error: 'Already placing a call to this number — give it a few seconds.' });
+  }
+
+  const staffPhone = await staffOwnPhoneFor(db, auth);
+  if (!staffPhone) return res.status(500).json({ error: 'No phone on file for you to ring — ask the owner to add one to staff_users.' });
+
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    return res.status(500).json({ error: 'Calling is not configured (Twilio credentials missing).' });
+  }
+
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const connectToken = signToken({ kind: 'ctc_connect', customerPhone, trackingNumber }, CALL_START_TTL_S);
+  const connectUrl = `${base}/api/admin?action=call_connect&token=${encodeURIComponent(connectToken)}`;
+
+  const formData = new URLSearchParams();
+  formData.append('To', staffPhone);
+  formData.append('From', trackingNumber);
+  formData.append('Url', connectUrl);
+  // 25s: long enough for a real ring, short enough that a genuinely-missed
+  // first leg doesn't sit open forever — there's no voicemail/retry in v1,
+  // so past this the call just ends.
+  formData.append('Timeout', '25');
+  const authHeader = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+  _recentCallStarts.set(customerPhone, Date.now());
+  let twilioRes;
+  try {
+    twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls.json`, {
+      method: 'POST',
+      signal: callStartTimeoutSignal(),
+      headers: { Authorization: `Basic ${authHeader}` },
+      body: formData,
+    });
+  } catch (e) {
+    return res.status(502).json({ error: e.name === 'AbortError' ? 'Twilio did not respond in time.' : (e.message || 'Could not reach Twilio.') });
+  }
+  if (!twilioRes.ok) {
+    const t = await twilioRes.text().catch(() => '');
+    console.error('[call_start] Twilio error', twilioRes.status, t.slice(0, 300));
+    return res.status(502).json({ error: `Twilio ${twilioRes.status}: ${t.slice(0, 200)}` });
+  }
+  let sid = null;
+  try { sid = (await twilioRes.json())?.sid || null; } catch { /* placed regardless */ }
+  return res.status(200).json({ ok: true, sid, ringing: staffPhone });
+}
+
+// POST ?action=call_connect — Twilio fetches this the instant the staff leg
+// above is answered. PUBLIC (no dashboard session — Twilio has none), but
+// gated two ways: Twilio's own request signature (this really is Twilio, not
+// a forged POST), and the signed, single-purpose, short-TTL token callStart
+// minted a moment earlier (this really is OUR bridge, not a replay or a token
+// borrowed from some other verifyToken() caller in this file).
+async function callConnect(req, res) {
+  const token = (req.query.token || '').toString();
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const url = `${base}/api/admin?action=call_connect&token=${encodeURIComponent(token)}`;
+  const params = (req.body && typeof req.body === 'object') ? req.body : {};
+  if (!verifyTwilioSignature(url, params, req.headers['x-twilio-signature'])) {
+    console.warn('[call_connect] signature verification failed');
+    return xml(res, '<Response><Reject/></Response>');
+  }
+  const claims = verifyToken(token);
+  if (!claims || claims.kind !== 'ctc_connect') {
+    return xml(res, '<Response><Say voice="Polly.Joanna-Generative">This call link has expired.</Say><Hangup/></Response>');
+  }
+  // Nothing about the customer number is trusted from the request itself —
+  // only from this token, which this server signed moments ago in callStart.
+  // Still shape-checked before it goes anywhere near TwiML: a token proves WHO
+  // signed it, not that what's inside is well-formed.
+  if (!isPlausibleUsE164(claims.customerPhone) || !isPlausibleUsE164(claims.trackingNumber)) {
+    console.error('[call_connect] token carried a malformed number', claims);
+    return xml(res, '<Response><Say voice="Polly.Joanna-Generative">Sorry, something went wrong placing this call.</Say><Hangup/></Response>');
+  }
+  return xml(res, `<Response><Dial callerId="${xmlEsc(claims.trackingNumber)}"><Number>${xmlEsc(claims.customerPhone)}</Number></Dial></Response>`);
 }
 
 // ── Inbound calls: Grasshopper ingestion — RETIRED 2026-08-26 ───────────────

@@ -10163,7 +10163,7 @@ function paintCalls(){
     }catch(e){ toast(e.message||'Could not update'); b.disabled=false; }
   }));
   view.querySelectorAll('[data-callclaim]').forEach(b=>b.addEventListener('click',
-    ()=>claimCallback(b.dataset.callclaim)));
+    ()=>claimCallback(b.dataset.callclaim, b)));
   view.querySelectorAll('[data-callcust]').forEach(a=>a.addEventListener('click',ev=>{
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
@@ -10208,25 +10208,39 @@ function focusPendingCall(view){
   catch(_){ target.scrollIntoView(); }
   setTimeout(()=>target.classList.remove('rc-focus'), 2600);
 }
-// Claims the callback -- marks it as "being handled by me" without placing
-// any call. The CRM only ever tracks calls; the office dials from their own
-// phone. This is what stops two people ringing the same customer: the moment
+// Claims the callback ("being handled by me") and, once the claim actually
+// succeeds, places the same click-to-call bridge as the Messages Call pill —
+// rings YOUR phone, then bridges you to the customer with the tracking
+// number they called as caller ID (see api/admin.js callStart/callConnect).
+// This is what stops two people ringing the same customer: the moment
 // Heather claims one, Joey's screen shows it as hers. If someone else already
 // holds it the server answers 409 and we ask rather than block — there are
-// good reasons to double up, but it must be a decision, not an accident.
-async function claimCallback(id){
+// good reasons to double up, but it must be a decision, not an accident. The
+// dial NEVER happens on a declined "claim anyway?" or a refused claim — that
+// would reintroduce the exact double-call race this claim system exists to
+// prevent. The button is disabled for the WHOLE claim+dial sequence (not just
+// the dial half) so a fast double-click can't fire two overlapping claims.
+async function claimCallback(id, btn){
+  const prevLabel=btn?btn.textContent:null;
+  if(btn){ btn.disabled=true; btn.textContent='Calling…'; }
   try{
     await api('call_claim',{ method:'POST', body:{ id }});
   }catch(e){
     const msg=e.message||'';
     if(/claimed this/i.test(msg)){
-      if(!confirm(`${msg}\n\nClaim it anyway?`)) return;
+      if(!confirm(`${msg}\n\nClaim it anyway?`)){ if(btn){ btn.disabled=false; btn.textContent=prevLabel; } return; }
       try{ await api('call_claim',{ method:'POST', body:{ id, force:true }}); }
-      catch(e2){ toast(e2.message||'Could not claim this'); return; }
+      catch(e2){ toast(e2.message||'Could not claim this'); if(btn){ btn.disabled=false; btn.textContent=prevLabel; } return; }
     }else{
       toast(msg||'Could not claim this');
+      if(btn){ btn.disabled=false; btn.textContent=prevLabel; }
       return;
     }
+  }
+  try{
+    await api('call_start',{ method:'POST', body:{ source:'call_claim', call_id:id }});
+  }catch(e){
+    toast(e.message||'Claimed, but could not place the call — call them directly.');
   }
   renderCalls();
 }
@@ -10565,6 +10579,24 @@ function paintMessages(){
         btn.disabled=false; btn.textContent=prev;
       }
     });
+    // Real click-to-call (2026-09-15): rings YOUR phone first, then bridges
+    // you to the customer with this thread's tracking number as caller ID —
+    // see api/admin.js callStart/callConnect. Replaces the old plain tel:
+    // link, which dialed from whoever clicked it, on their own line.
+    const callBtn=view.querySelector('[data-msgcall]');
+    if(callBtn) callBtn.addEventListener('click',async(ev)=>{
+      const btn=ev.currentTarget;
+      const t=_msgThread;
+      btn.disabled=true; const prev=btn.textContent; btn.textContent='Calling…';
+      try{
+        await api('call_start',{ method:'POST', body:{ source:'message_thread', our:t.our_phone, customer:t.customer_phone }});
+        toast('Calling your phone — answer it to be connected.');
+      }catch(e){
+        toast(e.message||'Could not place the call');
+      }finally{
+        btn.disabled=false; btn.textContent=prev;
+      }
+    });
   }
 }
 
@@ -10641,7 +10673,7 @@ function msgDetailHtml(t){
     // built, so this just hands off to the secretary's own phone/browser.
     // Smaller and green (.rc-btn.green, the existing "good" pill style) so it
     // reads as the secondary action next to the full-width black Send.
-    +'<a class="rc-btn green" href="tel:+1'+esc(t.customer_phone)+'" style="text-decoration:none;">📞 Call</a>'
+    +'<button class="rc-btn green" data-msgcall="1" style="border:none;cursor:pointer;">📞 Call</button>'
     +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)
     +(t.notify_line?' — their phone shows no company name, so start with "This is '+esc(t.business_name||'[company]')+'…"':'')+'</span>'
     +'</div></div>';
