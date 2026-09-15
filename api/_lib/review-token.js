@@ -57,16 +57,49 @@ export async function ensureReviewToken(db, booking) {
   }
 }
 
+// Every brand's OWN short link domain for a review request text. Carriers
+// want a message link to sit on the sender's own domain (not a third-party
+// booking-app URL), and a bare "brandname.com/r/<token>" reads as a real
+// business, short enough to not get flagged, and doesn't leak "handy-andy"
+// into a Dom's or a lead-gen customer's text the way the raw booking-app URL
+// (…handy-andy-booking.vercel.app/api/book?action=review_click&token=<huge
+// blob>&ch=sms) did until 2026-09-15. Each domain runs a tiny /r/[token]
+// route (same file in every site repo) that 302s to the booking app's own
+// review_click endpoint, which does the actual click-tracking and hands the
+// customer on to review.html.
+//
+// 'precision' has no entry on purpose: precisiontvinstallation.com is not a
+// Next.js site this repo can add a route to, so it falls back to `clickUrl`
+// (the booking app's own /r/<token> — shorter than the old query string, but
+// still on the booking-app domain) until that site gets a real /r/ route.
+const REVIEW_LINK_DOMAIN = {
+  'handy-andy': 'www.ihandyandy.com',
+  'doms': 'www.domstvmounting.com',
+  'mile-high': 'www.milehightvmounting.com',
+  'austin': 'www.austinmounting.com',
+  'tvmountingdenver': 'www.tvmountingdenver.com',
+  'houstonmounting': 'houstonmounting.com',
+  'houstontvinstallation': 'houstontvinstallation.com',
+  'tvhanginghouston': 'tvhanginghouston.com',
+  'htvmounting': 'htvmounting.com',
+  'houstontvmountingpros': 'www.houstontvmountingpros.com',
+  'houstonperfectviewtvmounting': 'houstonperfectviewtvmounting.com',
+  'atxmountpros': 'atxmountpros.com',
+  'atxtvmount': 'atxtvmount.com',
+  'austinmountingpros': 'austinmountingpros.com',
+  'austintvinstall': 'austintvinstall.com',
+};
+
 // The customer-facing review-request text. One template for all three
 // senders (tech app completion in api/tech.js; dashboard completion and the
 // Reviews-tab resend in api/admin.js), so the A2P campaign sample can't drift
-// from what actually goes out. Handy Andy's link is on its own domain
-// (www.ihandyandy.com/r/<token>, which redirects to the same review_click
-// endpoint with ch=sms) because carriers want message links to identify the
-// sender; every other brand keeps the booking-app click URL it already uses.
+// from what actually goes out. No STOP line: the campaign was approved
+// 2026-09-15 and every automated text already carries the brand name plus
+// opt-out instructions elsewhere (site footer, the widget's own consent
+// text), so this reads as a live two-way exchange rather than a cold blast —
+// same call already made for staff Messages replies.
 export function reviewRequestSms({ slug, name, token, clickUrl }) {
-  const link = slug === 'handy-andy' && token
-    ? `https://www.ihandyandy.com/r/${encodeURIComponent(token)}`
-    : clickUrl;
-  return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link} Reply STOP to opt out.`;
+  const domain = REVIEW_LINK_DOMAIN[slug];
+  const link = domain && token ? `https://${domain}/r/${encodeURIComponent(token)}` : clickUrl;
+  return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link}`;
 }

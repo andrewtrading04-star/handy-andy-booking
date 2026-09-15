@@ -14,7 +14,8 @@
     { "source": "/heather", "destination": "/admin.html" },
     { "source": "/doms", "destination": "/admin.html" },
     { "source": "/joey", "destination": "/admin.html" },
-    { "source": "/join", "destination": "/join.html" }
+    { "source": "/join", "destination": "/join.html" },
+    { "source": "/r/:token", "destination": "/api/book?action=review_click&token=:token&ch=sms" }
   ],
   "headers": [
     {

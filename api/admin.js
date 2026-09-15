@@ -14683,6 +14683,15 @@ async function messagesList(req, res, db, auth) {
     t.notify_line = isNotifyLine(t.our_phone);
     const b = (t.business_id && bizById.get(t.business_id)) || (t.business_slug && bizBySlug.get(t.business_slug));
     t.business_name = b ? b.name : null;
+    // Backfill/overwrite business_slug from the RESOLVED business, not just the
+    // tracking_numbers lookup above. That lookup only covers per-brand lines —
+    // it misses the shared toll-free number, which automated texts now log
+    // against with business_id set directly (2026-09-14, logAutomatedMessage).
+    // Left as null there, msgBrandKey (admin.html) falls back to keying by the
+    // brand NAME string instead of its slug, splitting one brand into two rail
+    // entries whenever it has both a dedicated line and toll-free traffic —
+    // e.g. Dom's showing twice. b.slug is authoritative whenever b exists.
+    if (b) t.business_slug = b.slug;
     t.brand_source = b ? 'line' : null;
   }
   // Unmapped line (the 888 notification number): work out the brand from
