@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=2">
+<link rel="stylesheet" href="/calls-inbox.css?v=3">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -2662,6 +2662,7 @@ function navTo(s){
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   section=s;
+  document.getElementById('view').classList.toggle('calls-workspace',s==='callhub');
   document.getElementById('hubNavigation').hidden=true;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -9091,6 +9092,8 @@ const ANALYTICS_TABS=[
 // the first thing worth seeing, before drilling into any one business's own
 // funnel (see analyticsOverview() in api/admin.js, migration 0106).
 let callHubTab=null, analyticsHubTab='overview';
+let _callPageRequest=0;
+let _hubScrollKey='';
 // `section` is now the hub, so a bare section==='calls' silently stops matching
 // and anything hanging off it (auto-refresh polls, "am I looking at this list
 // right now" checks) quietly dies. onScreen() asks the question that is actually
@@ -9113,10 +9116,17 @@ function hubBackBar(){
 }
 async function renderHub(tabs, activeId, onPick){
   const view=document.getElementById('view');
+  view.classList.toggle('calls-workspace',tabs===CALL_TABS);
   const navigation=document.getElementById('hubNavigation');
   const vis=tabs.filter(t=>t.show());
   if(!vis.length){ navigation.hidden=true; view.innerHTML='<div class="wrap"><div class="empty">Nothing here for this login.</div></div>'; return null; }
   const cur=vis.find(t=>t.id===activeId) || vis[0];
+  const scrollKey=(tabs===CALL_TABS?'calls:':'analytics:')+cur.id;
+  if(_hubScrollKey!==scrollKey){
+    _hubScrollKey=scrollKey;
+    const scroller=view.closest('.view-scroll');
+    if(scroller)scroller.scrollTop=0;
+  }
   if(tabs===CALL_TABS) callHubTab=cur.id;
   else if(tabs===ANALYTICS_TABS) analyticsHubTab=cur.id;
   // One screen is just that screen -- no tab row, and no "back" either: with
@@ -9157,11 +9167,13 @@ const CAU_RANGES={
 let _cauRange='30';
 async function renderCallAudit(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  const request=++_callPageRequest;
+  view.innerHTML='<div class="wrap ch-page"><div class="empty">Loading…</div></div>';
   let d;
   const rc=CAU_RANGES[_cauRange]||CAU_RANGES['30'];
   try{ d=await api('audit_report',{ params:{ business:current.slug, days:rc.days, offset:rc.offset }}); }
-  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  catch(e){ if(request!==_callPageRequest || !onScreen('callaudit')) return; view.innerHTML=`<div class="wrap ch-page"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  if(request!==_callPageRequest || !onScreen('callaudit')) return;
 
   const v=d.volume||{};
   const rangeBtns=Object.entries(CAU_RANGES).map(([x,r])=>
@@ -9169,18 +9181,18 @@ async function renderCallAudit(){
   // White stat tiles, same family as the auditor's own portal, instead of the
   // dark-hero .gstat styling that washes out on this white page.
   const tile=(label,value,sub,color,alert)=>`
-    <div style="background:${alert?'#fff7f7':'#fff'};border:1px solid ${alert?'#f3c2c2':'var(--line)'};border-radius:12px;padding:13px 14px;text-align:center;">
+    <div class="ch-stat" style="background:${alert?'#fff7f7':'#fff'};border:1px solid ${alert?'#f3c2c2':'var(--line)'};border-radius:12px;padding:13px 14px;text-align:center;">
       <div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);">${esc(label)}</div>
       <div style="font-size:26px;font-weight:800;line-height:1.15;margin-top:2px;${color?`color:${color};`:''}">${esc(value)}</div>
       <div style="font-size:11.5px;color:var(--mute);">${esc(sub||'')}</div>
     </div>`;
   // Green when solid, neutral when middling, red when broken. Deliberately no
   // amber tier.
-  const scoreColor=p=>p==null?'var(--mute)':p>=85?'#15803d':p>=70?'var(--ink-2)':'#b91c1c';
+  const scoreColor=p=>p==null?'var(--mute)':p>=85?'var(--ch-accent)':p>=70?'var(--ink-2)':'var(--ch-danger)';
 
   if(!d.audited && !v.counted){
-    view.innerHTML=`<div class="wrap">
-      <div class="rc-head"><div><h2 class="rc-title">🎧 Call Audit</h2>
+    view.innerHTML=`<div class="wrap ch-page">
+      <div class="rc-head"><div><h2 class="rc-title">Audit</h2>
         <div class="rc-sub">Nothing logged yet for this range. Once the auditor saves a day, it shows up here.</div></div></div>
       <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
     view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
@@ -9195,20 +9207,20 @@ async function renderCallAudit(){
   // Calls handled without the script, because it is the cheapest read on
   // "are they doing what I told them to do" and it needs no grading at all.
   const offPct = v.counted ? Math.round(100*(v.off_script||0)/v.counted) : 0;
-  const offColor = offPct<=10 ? '#15803d' : offPct<=30 ? 'var(--ink-2)' : '#b91c1c';
+  const offColor = offPct<=10 ? 'var(--ch-accent)' : offPct<=30 ? 'var(--ink-2)' : 'var(--ch-danger)';
 
   const top=Math.max(1,...(d.daily||[]).map(x=>Math.max(x.counted||0,x.scripted||0)));
   const dailyRows=(d.daily||[]).filter(x=>x.counted!=null||x.scripted).map(x=>{
     const label=x.date.slice(5).replace('-','/');
     const cw=Math.round(((x.counted||0)/top)*100), sw=Math.round(((x.scripted||0)/top)*100);
     const skipped=x.counted==null;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
+    return `<div class="ch-bar-row" style="display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;">
       <div style="width:46px;flex-shrink:0;color:var(--mute);">${esc(label)}</div>
       <div style="flex:1;">
         <div style="background:var(--line2);border-radius:5px;height:11px;overflow:hidden;margin-bottom:2px;">
-          <div style="height:100%;width:${cw}%;background:#60a5fa;"></div></div>
+          <div style="height:100%;width:${cw}%;background:var(--ch-chart-secondary);"></div></div>
         <div style="background:var(--line2);border-radius:5px;height:11px;overflow:hidden;">
-          <div style="height:100%;width:${sw}%;background:#15803d;"></div></div>
+          <div style="height:100%;width:${sw}%;background:var(--ch-accent);"></div></div>
       </div>
       <div style="width:96px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
         ${skipped?'<span style="color:var(--mute);">not audited</span>':`<b>${x.counted}</b> in · ${x.scripted} scripted`}</div>
@@ -9217,10 +9229,10 @@ async function renderCallAudit(){
 
   const lineRows=(v.by_line||[]).map(l=>{
     const w=Math.round((l.calls/Math.max(1,...(v.by_line||[]).map(z=>z.calls)))*100);
-    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+    return `<div class="ch-bar-row" style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
       <div style="width:118px;flex-shrink:0;font-family:ui-monospace,Menlo,monospace;">${esc(prettyNum(l.number))}</div>
       <div style="flex:1;background:var(--line2);border-radius:6px;height:16px;overflow:hidden;">
-        <div style="height:100%;width:${w}%;background:#60a5fa;"></div></div>
+        <div style="height:100%;width:${w}%;background:var(--ch-chart-secondary);"></div></div>
       <div style="width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${l.calls}</div>
     </div>`;
   }).join('') || '<div class="empty">No counts saved yet.</div>';
@@ -9234,24 +9246,24 @@ async function renderCallAudit(){
     return `<div style="padding:6px 0;border-top:1px solid var(--line2);font-size:12.5px;">
       <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:3px;">
         <span style="color:var(--ink-2);">${esc(AUDIT_LABELS[q.key]||q.key)}</span>
-        <span style="flex-shrink:0;font-variant-numeric:tabular-nums;color:var(--mute);"><b style="color:#b91c1c;">${q.no}</b>/${q.asked}</span>
+        <span style="flex-shrink:0;font-variant-numeric:tabular-nums;color:var(--mute);"><b style="color:var(--ch-danger);">${q.no}</b>/${q.asked}</span>
       </div>
       <div style="background:var(--line2);border-radius:4px;height:8px;overflow:hidden;">
-        <div style="height:100%;width:${q.fail_rate}%;background:#ef4444;"></div></div>
+        <div style="height:100%;width:${q.fail_rate}%;background:var(--ch-danger);"></div></div>
     </div>`;
   }).join('');
 
   const peopleCards=(d.people||[]).filter(p=>p.name!=='Nobody').map(p=>{
     const c=scoreColor(p.pct);
     const misses=qRowsHtml(p.questions,5);
-    return `<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;">
+    return `<div class="ch-coaching-card" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
         <div style="font-weight:800;font-size:15px;">${esc(p.name)}</div>
         <div style="font-weight:800;font-size:24px;color:${c};">${p.pct==null?'&mdash;':p.pct+'%'}</div>
       </div>
       <div style="font-size:12.5px;color:var(--mute);margin:2px 0 10px;">
         ${p.audited} graded &middot; ${p.no} missed &middot; ${p.flagged||0} flagged</div>
-      ${misses||'<div style="font-size:12.5px;color:#15803d;padding-top:6px;border-top:1px solid var(--line2);">Nothing missed in this range.</div>'}
+      ${misses||'<div style="font-size:12.5px;color:var(--ch-accent);padding-top:6px;border-top:1px solid var(--line2);">Nothing missed in this range.</div>'}
     </div>`;
   }).join('') || '<div class="empty">No calls graded yet.</div>';
 
@@ -9267,7 +9279,7 @@ async function renderCallAudit(){
         ${(d.daily||[]).map(x=>{
           const has=x.avg_pct!=null;
           const h=has?Math.max(4,x.avg_pct):0;
-          const col=has?(x.avg_pct>=85?'#15803d':x.avg_pct>=70?'#93a6bd':'#ef4444'):'transparent';
+          const col=has?(x.avg_pct>=85?'var(--ch-accent)':x.avg_pct>=70?'var(--ch-muted)':'var(--ch-danger)'):'transparent';
           return `<div title="${esc(x.date)}: ${has?x.avg_pct+'% across '+x.graded+' graded':'nothing graded'}"
             style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0;">
             ${has?`<div style="height:${h}%;background:${col};border-radius:4px 4px 1px 1px;"></div>`:`<div style="height:3px;background:var(--line2);border-radius:2px;"></div>`}
@@ -9276,7 +9288,7 @@ async function renderCallAudit(){
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mute);margin-top:6px;">
         <span>${esc((d.daily[0]||{}).date||'')}</span>
-        <span style="color:#15803d;">&#9632; 85%+</span><span style="color:#93a6bd;">&#9632; 70-84%</span><span style="color:#ef4444;">&#9632; under 70%</span>
+        <span style="color:var(--ch-accent);">&#9632; 85%+</span><span style="color:var(--ch-muted);">&#9632; 70-84%</span><span style="color:var(--ch-danger);">&#9632; under 70%</span>
         <span>${esc((d.daily[d.daily.length-1]||{}).date||'')}</span>
       </div>
     </div>`:'';
@@ -9293,7 +9305,7 @@ async function renderCallAudit(){
         <b>${esc(f.handled_by||'Unknown')}</b>
         <span style="color:var(--mute);">${esc(t)}</span>
         <span style="font-family:ui-monospace,Menlo,monospace;color:var(--mute);">${esc(prettyNum(f.grasshopper_number))}</span>
-        ${f.pct!=null?`<span style="margin-left:auto;font-weight:800;color:#b91c1c;">${f.pct}%</span>`:''}
+        ${f.pct!=null?`<span style="margin-left:auto;font-weight:800;color:var(--ch-danger);">${f.pct}%</span>`:''}
       </div>
       ${(f.caller_name||f.caller_phone)?`<div style="font-size:12.5px;margin-top:6px;">
         ${f.caller_name?`<span style="font-weight:700;">${esc(f.caller_name)}</span> `:''}
@@ -9310,9 +9322,9 @@ async function renderCallAudit(){
   // (tiles), then what needs his ears (flagged), then who to coach and on
   // what (cards), then whether it is trending the right way, then the raw
   // volume and the auditor's own coverage at the bottom.
-  view.innerHTML=`<div class="wrap">
+  view.innerHTML=`<div class="wrap ch-page">
     <div class="rc-head"><div>
-      <h2 class="rc-title">🎧 Call Audit</h2>
+      <h2 class="rc-title">Audit</h2>
       <div class="rc-sub">What the auditor found listening to real recordings, graded against the phone script. Counts come from Grasshopper by hand, so they cover calls the script never saw.</div>
     </div></div>
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
@@ -9321,7 +9333,7 @@ async function renderCallAudit(){
       ${tile('Script score', overallPct==null?'n/a':overallPct+'%', 'across '+(d.audited||0)+' graded '+((d.audited||0)===1?'call':'calls'), scoreColor(overallPct))}
       ${tile('Calls came in', String(v.counted||0), missing?missing+' day'+(missing===1?'':'s')+' not audited':'every day audited')}
       ${tile('Off script', String(v.off_script||0), offPct+'% of all calls', offColor)}
-      ${tile('Flagged for you', String(flaggedN), flaggedN?'worth a listen':'nothing waiting', flaggedN?'#b91c1c':'#15803d', flaggedN>0)}
+      ${tile('Flagged for you', String(flaggedN), flaggedN?'worth a listen':'nothing waiting', flaggedN?'var(--ch-danger)':'var(--ch-accent)', flaggedN>0)}
     </div>
 
     <div class="rc-count">Calls flagged for you to hear</div>
@@ -9335,8 +9347,8 @@ async function renderCallAudit(){
     <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(came in vs went through the script)</span></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
     <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">
-      <span style="display:inline-block;width:10px;height:10px;background:#60a5fa;border-radius:2px;"></span> calls that came in
-      &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:#15803d;border-radius:2px;"></span> went through the script
+      <span style="display:inline-block;width:10px;height:10px;background:var(--ch-chart-secondary);border-radius:2px;"></span> calls that came in
+      &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:var(--ch-accent);border-radius:2px;"></span> went through the script
     </div>
 
     <div class="rc-count">Where the calls came from</div>
@@ -9355,58 +9367,69 @@ function friendlyForward(e164){
   if(!e164) return 'Voicemail only';
   return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));
 }
+let _numberData=null, _numberSelected=null, _numberQuery='', _numberStatus='all';
 async function renderCallNumbers(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
-  let d;
-  try{ d=await api('call_numbers'); }
-  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
-
-  const rows=(d.numbers||[]).slice().sort((a,b)=>
-    (a.business_name||'').localeCompare(b.business_name||'') || (a.market||'').localeCompare(b.market||''));
-
-  const tr=rows.map(n=>{
-    const hours = n.hours_start!=null
-      ? `${n.hours_start}:00–${n.hours_end}:00 ${esc(n.hours_timezone||'')}`
-      : 'Always';
-    return `<tr style="${n.active?'':'opacity:.5;'}">
-      <td style="padding:9px 10px;white-space:nowrap;">${esc(fmtPhone(n.phone))}</td>
-      <td style="padding:9px 10px;">${n.business_url
-        ? `<a href="${esc(n.business_url)}" target="_blank" rel="noopener">${esc(n.business_name)}</a>`
-        : esc(n.business_name)}</td>
-      <td style="padding:9px 10px;">${esc(n.market||'')}</td>
-      <td style="padding:9px 10px;">${esc(friendlyForward(n.forward_to))}</td>
-      <td style="padding:9px 10px;">${esc(friendlyForward(n.after_hours_forward_to))}</td>
-      <td style="padding:9px 10px;">${hours}</td>
-      <td style="padding:9px 10px;">${n.active?'Active':'Retired'}</td>
-      <td style="padding:9px 10px;">${aiVoiceBadge(n.ai_voice_status)}</td>
-      <td style="padding:9px 10px;white-space:nowrap;">${textingBadge(n.texting_status)}</td>
-    </tr>`;
-  }).join('');
-
-  view.innerHTML=`<div class="wrap">
-    <div class="rc-head"><div>
-      <h2 class="rc-title">📇 Numbers</h2>
-      <div class="rc-sub">Every tracking number across the portfolio — which business it belongs to and where a call actually rings.</div>
-      <div class="rc-sub" style="margin-top:6px;">${a2pLine(d.a2p)}</div>
-    </div></div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr style="background:var(--line2);text-align:left;">
-          <th style="padding:9px 10px;">Number</th>
-          <th style="padding:9px 10px;">Business</th>
-          <th style="padding:9px 10px;">Market</th>
-          <th style="padding:9px 10px;">Rings to</th>
-          <th style="padding:9px 10px;">After hours</th>
-          <th style="padding:9px 10px;">Hours</th>
-          <th style="padding:9px 10px;">Status</th>
-          <th style="padding:9px 10px;">AI voice</th>
-          <th style="padding:9px 10px;">Texting</th>
-        </tr></thead>
-        <tbody>${tr}</tbody>
-      </table>
-    </div>
-  </div>`;
+  const request=++_callPageRequest;
+  view.innerHTML='<div class="wrap ch-page"><div class="empty">Loading numbers…</div></div>';
+  try{
+    const d=await api('call_numbers');
+    if(request!==_callPageRequest || !onScreen('callnumbers')) return;
+    _numberData=d;
+    view.innerHTML=`<div class="wrap ch-page"><div class="rc-head"><div>
+      <h2 class="rc-title">Numbers</h2><div class="rc-sub">Find a tracking line and check its routing, hours, and texting status.</div>
+    </div><button type="button" class="rc-btn ghost" id="numbersRefresh">Refresh status</button></div>
+    <div class="ch-notice">${a2pLine(d.a2p)}</div>
+    <div class="ch-toolbar"><label>Find a number<input type="search" id="numberSearch" value="${esc(_numberQuery)}" placeholder="Number, business, market, or person"></label>
+      <label>Line status<select id="numberStatus"><option value="all">All lines</option><option value="active">Active</option><option value="retired">Retired</option></select></label>
+      <span id="numberCount" class="ch-result-count" role="status"></span>
+    </div><div id="numberDirectory"></div></div>`;
+    view.querySelector('#numberStatus').value=_numberStatus;
+    view.querySelector('#numberSearch').addEventListener('input',e=>{_numberQuery=e.target.value;paintNumberDirectory();});
+    view.querySelector('#numberStatus').addEventListener('change',e=>{_numberStatus=e.target.value;paintNumberDirectory();});
+    view.querySelector('#numbersRefresh').addEventListener('click',renderCallNumbers);
+    paintNumberDirectory();
+  }catch(e){
+    if(request!==_callPageRequest || !onScreen('callnumbers')) return;
+    view.innerHTML=`<div class="wrap ch-page"><div class="empty">${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="numbersRetry">Retry</button></div>`;
+    view.querySelector('#numbersRetry').addEventListener('click',renderCallNumbers);
+  }
+}
+function matchingNumbers(numbers,query,status){
+  const term=query.trim().toLowerCase(), digits=term.replace(/\D/g,'');
+  return numbers.filter(n=>(status==='all'||(status==='active'?n.active:!n.active)) &&
+    (!term || [n.phone,fmtPhone(n.phone),n.business_name,n.market,friendlyForward(n.forward_to),friendlyForward(n.after_hours_forward_to)].join(' ').toLowerCase().includes(term) ||
+      (digits.length>=3 && !/[a-z]/i.test(term) && String(n.phone).replace(/\D/g,'').includes(digits))))
+    .sort((a,b)=>(a.business_name||'').localeCompare(b.business_name||'') || String(a.phone).localeCompare(String(b.phone)));
+}
+function paintNumberDirectory(){
+  const view=document.getElementById('view'), directory=view.querySelector('#numberDirectory');
+  if(!directory || !_numberData)return;
+  const all=_numberData.numbers||[], rows=matchingNumbers(all,_numberQuery,_numberStatus);
+  view.querySelector('#numberCount').textContent=`${rows.length} of ${all.length} lines`;
+  if(!rows.length){directory.innerHTML='<div class="empty">No matching lines. Try a different search or status.</div>';return;}
+  const selected=rows.find(n=>n.phone===_numberSelected)||rows[0];_numberSelected=selected.phone;
+  const hours=selected.hours_start!=null?`${selected.hours_start}:00–${selected.hours_end}:00 ${selected.hours_timezone||''}`:'Always';
+  const detail=(label,value)=>`<dt>${label}</dt><dd>${esc(value||'Not available')}</dd>`;
+  const listScroll=directory.querySelector('.ci-list')?.scrollTop||0;
+  directory.innerHTML=`<div class="ch-number-inbox"><div class="ci-list" role="group" aria-label="Select a tracking number">
+    ${rows.map(n=>`<button type="button" class="ci-item" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
+      <strong>${esc(prettyNum(n.phone))}</strong><span>${esc(n.business_name)}</span><span>${esc(n.market||'No market')} · ${n.active?'Active':'Retired'}</span>
+      <span class="ci-status">Rings to ${esc(friendlyForward(n.forward_to))}</span>
+    </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
+      <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.business_name)}</p>
+      <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to))}${detail('After hours',friendlyForward(selected.after_hours_forward_to))}${detail('Hours',hours)}</dl>
+      <div class="ch-section-label">Connection status</div><div class="ch-connections">
+        <div><span>AI voice</span>${aiVoiceBadge(selected.ai_voice_status)}</div><div><span>Texting</span>${textingBadge(selected.texting_status)}</div>
+      </div>
+      ${selected.business_url && /^https?:\/\//i.test(selected.business_url)?`<a class="rc-btn ghost ch-website" href="${esc(selected.business_url)}" target="_blank" rel="noopener">Open business website ↗</a>`:''}
+    </section></div>`;
+  directory.querySelector('.ci-list').scrollTop=listScroll;
+  directory.querySelectorAll('[data-number-select]').forEach(b=>b.addEventListener('click',()=>{
+    _numberSelected=b.dataset.numberSelect;paintNumberDirectory();
+    [...directory.querySelectorAll('[data-number-select]')].find(el=>el.dataset.numberSelect===_numberSelected)?.focus({preventScroll:true});
+    if(window.innerWidth<760)directory.querySelector('.ch-number-detail')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }));
 }
 // Read straight from Twilio's own configured voice webhook (see callNumbers
 // in api/admin.js) -- Vapi rewrites that URL the moment a number is imported,
@@ -9421,25 +9444,25 @@ async function renderCallNumbers(){
 // 'unknown' = the Twilio lookup itself failed, shown distinctly so it is never
 // read as "not activated".
 function textingBadge(status){
-  if(status==='active')            return '<span style="color:#15803d;font-weight:600;">● Active</span>';
+  if(status==='active')            return '<span style="color:#315ad7;font-weight:600;">● Active</span>';
   if(status==='pending')           return '<span style="color:#b45309;font-weight:600;">◐ Pending approval</span>';
   if(status==='not_in_pool')       return '<span style="color:#b91c1c;">✕ Not in sender pool</span>';
   if(status==='no_sms_capability') return '<span style="color:#b91c1c;">✕ No SMS on this number</span>';
-  if(status==='unknown')           return '<span style="color:#9ca3af;">Unknown</span>';
+  if(status==='unknown')           return '<span style="color:#536277;">Unknown</span>';
   return '<span style="color:#6b7280;">Not set up</span>';
 }
 function a2pLine(a){
   if(!a) return '';
   if(a.error) return `Texting registration: <span style="color:#9ca3af;">could not read from Twilio (${esc(a.error)})</span>`;
   const st=(a.campaign_status||'').toUpperCase();
-  const word = st==='VERIFIED' ? '<span style="color:#15803d;font-weight:600;">Approved</span>'
+  const word = st==='VERIFIED' ? '<span style="color:#315ad7;font-weight:600;">Approved</span>'
              : st ? `<span style="color:#b45309;font-weight:600;">${esc(st.replace(/_/g,' ').toLowerCase())}</span>`
              : '<span style="color:#9ca3af;">no campaign found</span>';
   return `Texting registration (A2P campaign): ${word}${a.service_name?` · pool: ${esc(a.service_name)} (${a.pool_size} numbers)`:''}`;
 }
 function aiVoiceBadge(status){
-  if(status==='connected') return '<span style="color:#15803d;font-weight:600;">● Connected</span>';
-  if(status==='unknown') return '<span style="color:#9ca3af;">Unknown</span>';
+  if(status==='connected') return '<span style="color:#315ad7;font-weight:600;">● Connected</span>';
+  if(status==='unknown') return '<span style="color:#536277;">Unknown</span>';
   return '<span style="color:#6b7280;">Not connected</span>';
 }
 
@@ -9573,15 +9596,18 @@ async function openCallDayDetail(dateStr,label,person){
 }
 function closeCallDayDetail(){ if(window._cddModal){ window._cddModal.remove(); window._cddModal=null; } }
 function prettyNum(n){
-  const d=String(n||'').replace(/\D/g,'');
+  const raw=String(n||'').replace(/\D/g,'');
+  const d=raw.length===11 && raw[0]==='1' ? raw.slice(1) : raw;
   return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : String(n||'');
 }
 async function renderCallAnalytics(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  const request=++_callPageRequest;
+  view.innerHTML='<div class="wrap ch-page"><div class="empty">Loading…</div></div>';
   let d;
   try{ d=await api('call_analytics',{ params:{ business:current.slug, range:_caRange }}); }
-  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  catch(e){ if(request!==_callPageRequest || !onScreen('callanalytics')) return; view.innerHTML=`<div class="wrap ch-page"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  if(request!==_callPageRequest || !onScreen('callanalytics')) return;
   const t=d.totals||{};
   const disc=d.discounts||{};
   const dl=disc.lever||{};
@@ -9590,18 +9616,18 @@ async function renderCallAnalytics(){
   const rangeBtns=[['today','Today'],['yesterday','Yesterday'],['7','Last 7 days'],['30','Last 30 days'],['90','90 days']].map(([v,l])=>
     `<button type="button" class="seg-btn ${_caRange===v?'on':''}" data-cad="${v}">${l}</button>`).join('');
 
-  const stat=(label,value,sub,color)=>`<div class="gstat" style="align-items:center;text-align:center;">
+  const stat=(label,value,sub,color)=>`<div class="gstat ch-stat" style="align-items:center;text-align:center;">
       <span class="gstat-l">${esc(label)}</span>
       <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
       ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
 
   // Conversion is the number the owner asked for, so it leads and is colored
   // by how it's doing rather than being one grey figure among many.
-  const convColor = t.conversion>=50 ? '#4ade80' : t.conversion>=30 ? '#fbbf24' : '#f87171';
+  const convColor = t.conversion>=50 ? 'var(--ch-accent)' : t.conversion>=30 ? 'var(--ch-warning)' : 'var(--ch-danger)';
 
   const peopleRows=(d.people||[]).length
     ? d.people.map(p=>{
-        const c=p.conversion>=50?'#15803d':p.conversion>=30?'#b45309':'#b91c1c';
+        const c=p.conversion>=50?'var(--ch-accent)':p.conversion>=30?'var(--ch-warning)':'var(--ch-danger)';
         return `<tr>
           <td style="padding:9px 8px;font-weight:700;">${esc(p.person)}</td>
           <td style="padding:9px 8px;text-align:center;">${p.calls}</td>
@@ -9611,7 +9637,7 @@ async function renderCallAnalytics(){
           <td style="padding:9px 8px;text-align:center;" title="Estimates sent instead of booking on the call">${p.estimates}</td>
           <td style="padding:9px 8px;text-align:center;">${esc(money(p.avg_quote))}</td>
           <td style="padding:9px 8px;text-align:center;font-weight:700;">${esc(money(p.booked_value))}</td>
-          <td style="padding:9px 8px;text-align:center;color:${p.discount_given>0?'#b45309':'var(--mute)'};">${p.discounted_calls?`${esc(money(p.discount_given))} <span style="font-size:11px;opacity:.7;">(${p.discounted_calls}×, avg ${esc(money(p.avg_discount))})</span>`:'—'}</td>
+          <td style="padding:9px 8px;text-align:center;color:${p.discount_given>0?'var(--ch-warning)':'var(--mute)'};">${p.discounted_calls?`${esc(money(p.discount_given))} <span style="font-size:11px;opacity:.7;">(${p.discounted_calls}×, avg ${esc(money(p.avg_discount))})</span>`:'—'}</td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="9" style="padding:18px;text-align:center;color:var(--mute);">No calls taken in this period.</td></tr>`;
@@ -9621,41 +9647,41 @@ async function renderCallAnalytics(){
     const w=Math.round((x.calls/maxDay)*100);
     const bw=x.calls?Math.round((x.booked/x.calls)*100):0;
     let lbl=x.date; try{ lbl=new Date(x.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }catch(_){}
-    return `<div data-cdd-date="${esc(x.date)}" data-cdd-label="${esc(lbl)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;cursor:pointer;">
+    return `<button type="button" class="ch-day-row" data-cdd-date="${esc(x.date)}" data-cdd-label="${esc(lbl)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;cursor:pointer;">
       <div style="width:120px;flex-shrink:0;color:var(--ink-2);">${esc(lbl)}</div>
       <div style="flex:1;background:var(--line2);border-radius:6px;height:20px;position:relative;overflow:hidden;">
-        <div style="position:absolute;inset:0 auto 0 0;width:${w}%;background:#cbd5e1;"></div>
-        <div style="position:absolute;inset:0 auto 0 0;width:${Math.round(w*bw/100)}%;background:#15803d;"></div>
+        <div style="position:absolute;inset:0 auto 0 0;width:${w}%;background:var(--ch-chart-track);"></div>
+        <div style="position:absolute;inset:0 auto 0 0;width:${Math.round(w*bw/100)}%;background:var(--ch-accent);"></div>
       </div>
       <div style="width:118px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;">
         <b>${x.booked}</b>/${x.calls} · ${pct(x.conversion)}</div>
-    </div>`;
+    </button>`;
   }).join('') || `<div class="empty">Nothing yet.</div>`;
 
   const FUNNEL_LABEL={greet:'Answered',zip:'Gave a zip',tvopts:'Answered questions',schedule:'Picked a time',recap:'Heard the price',discount:'Asked for a discount',customer:'Gave their details',booked:'Booked'};
   const fTop=Math.max(1,...(d.funnel||[]).map(f=>f.reached));
   const funnelRows=(d.funnel||[]).map(f=>{
     const w=Math.round((f.reached/fTop)*100);
-    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
+    return `<div class="ch-bar-row" style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;">
       <div style="width:150px;flex-shrink:0;color:var(--ink-2);">${esc(FUNNEL_LABEL[f.step]||f.step)}</div>
       <div style="flex:1;background:var(--line2);border-radius:6px;height:18px;overflow:hidden;">
-        <div style="height:100%;width:${w}%;background:${f.step==='booked'?'#15803d':'#60a5fa'};"></div></div>
+        <div style="height:100%;width:${w}%;background:${f.step==='booked'?'var(--ch-accent)':'var(--ch-chart-secondary)'};"></div></div>
       <div style="width:52px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${f.reached}</div>
     </div>`;
   }).join('');
 
   const chips=arr=>arr.length?arr.map(x=>`<span class="rc-badge gray">${esc(x.source||x.code||x.event)} · ${x.count}</span>`).join(''):'<span style="color:var(--mute);font-size:13px;">None yet.</span>';
 
-  view.innerHTML=`<div class="wrap">
+  view.innerHTML=`<div class="wrap ch-page">
     <div class="rc-head"><div>
-      <h2 class="rc-title">📈 Call Performance</h2>
+      <h2 class="rc-title">Performance</h2>
       <div class="rc-sub">Every call taken through the phone script. Booked means a real booking was created from that call, not just that the script reached the end.</div>
     </div></div>
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
 
     <div class="greet-stats" style="margin-bottom:18px;">
       ${stat('Calls taken', String(t.calls||0), `${t.not_booked||0} did not book`)}
-      ${stat('Booked', String(t.booked||0), `${t.estimates||0} estimate${(t.estimates||0)===1?'':'s'} sent`,'#4ade80')}
+      ${stat('Booked', String(t.booked||0), `${t.estimates||0} estimate${(t.estimates||0)===1?'':'s'} sent`,'var(--ch-accent)')}
       ${stat('Conversion', pct(t.conversion), 'calls that became jobs', convColor)}
       ${stat('Booked value', money(t.booked_value||0), `${esc(money(t.discount_given||0))} discounted`)}
     </div>
@@ -9674,13 +9700,13 @@ async function renderCallAnalytics(){
       </table>
     </div>
 
-    <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(click a day to see the calls)</span></div>
+    <div class="ch-report-grid"><section><div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(click a day to see the calls)</span></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${dailyRows}</div>
 
-    <div class="rc-count">Where calls drop off</div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${funnelRows}</div>
+    </section><section><div class="rc-count">Where calls drop off</div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${funnelRows}</div></section></div>
 
-    <div class="rc-count">Discounts</div>
+    <details class="ch-discounts"><summary>Discounts and booking impact</summary><div class="ch-discount-body">
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:22px;">
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
         ${[['Referral source',dl.source],['Coupon code',dl.coupon],['Manual',dl.manual]].map(([lbl,v])=>`
@@ -9698,7 +9724,7 @@ async function renderCallAnalytics(){
         <tbody>${disc.by_source.map(s=>`<tr style="border-top:1px solid var(--line2);">
           <td style="padding:6px;font-weight:600;">${esc(s.source)}</td>
           <td style="padding:6px;text-align:right;">${s.count}</td>
-          <td style="padding:6px;text-align:right;color:#15803d;font-weight:700;">${s.booked}</td>
+          <td style="padding:6px;text-align:right;color:var(--ch-accent);font-weight:700;">${s.booked}</td>
           <td style="padding:6px;text-align:right;">${esc(money(s.amount))}</td></tr>`).join('')}</tbody></table>`
         : '<div style="font-size:13px;color:var(--mute);margin-bottom:16px;">Nobody has claimed a referral source yet.</div>'}
 
@@ -9709,17 +9735,17 @@ async function renderCallAnalytics(){
         <tbody>${disc.by_coupon.map(c=>`<tr style="border-top:1px solid var(--line2);">
           <td style="padding:6px;font-weight:700;font-family:ui-monospace,monospace;">${esc(c.code)}</td>
           <td style="padding:6px;text-align:right;">${c.count}</td>
-          <td style="padding:6px;text-align:right;color:#15803d;font-weight:700;">${c.booked}</td>
+          <td style="padding:6px;text-align:right;color:var(--ch-accent);font-weight:700;">${c.booked}</td>
           <td style="padding:6px;text-align:right;">${esc(money(c.amount))}</td></tr>`).join('')}</tbody></table>`
         : '<div style="font-size:13px;color:var(--mute);margin-bottom:10px;">No coupon codes used yet.</div>'}
-      ${(disc.rejected_coupons||[]).length?`<div style="font-size:12.5px;color:#b45309;margin-bottom:14px;">
+      ${(disc.rejected_coupons||[]).length?`<div style="font-size:12.5px;color:var(--ch-warning);margin-bottom:14px;">
         ⚠ Customers read out codes that don't exist: ${disc.rejected_coupons.map(c=>`<b>${esc(c.code)}</b> (${c.count}×)`).join(', ')} — worth checking whether an old ad is still running.</div>`:''}
 
       <div style="border-top:1px solid var(--line);padding-top:12px;font-size:13px;color:var(--ink-2);line-height:1.8;">
         <div><b>${t.discounted_calls||0}</b> of ${t.calls||0} calls got a discount, totalling <b>${esc(money(t.discount_given||0))}</b> (avg ${esc(money(t.avg_discount||0))}).</div>
-        <div>Booking rate <b>with</b> a discount: <b style="color:#15803d;">${pct(eff.discounted_conversion)}</b> (${eff.discounted_booked}/${eff.discounted_calls}) ·
+        <div>Booking rate <b>with</b> a discount: <b style="color:var(--ch-accent);">${pct(eff.discounted_conversion)}</b> (${eff.discounted_booked}/${eff.discounted_calls}) ·
              <b>without</b>: <b>${pct(eff.plain_conversion)}</b> (${eff.plain_booked}/${eff.plain_calls})</div>
-        ${disc.capped_attempts>0?`<div style="color:#b45309;">${disc.capped_attempts} time${disc.capped_attempts===1?'':'s'} someone tried to give away more than the rules allow.</div>`:''}
+        ${disc.capped_attempts>0?`<div style="color:var(--ch-warning);">${disc.capped_attempts} time${disc.capped_attempts===1?'':'s'} someone tried to give away more than the rules allow.</div>`:''}
       </div>
     </div>
 
@@ -9738,15 +9764,15 @@ async function renderCallAnalytics(){
             <td style="padding:8px;font-weight:600;">${esc(l.person)}</td>
             <td style="padding:8px;">${l.levers.length?l.levers.map(x=>`<span class="rc-badge gray">${esc(x)}</span>`).join(' '):'<span style="color:var(--mute);">—</span>'}</td>
             <td style="padding:8px;text-align:right;">${l.quoted!=null?esc(money(l.quoted)):'—'}</td>
-            <td style="padding:8px;text-align:right;font-weight:800;color:#b45309;">-${esc(money(l.amount))}</td>
+            <td style="padding:8px;text-align:right;font-weight:800;color:var(--ch-warning);">-${esc(money(l.amount))}</td>
             <td style="padding:8px;text-align:right;color:var(--mute);">${l.max_allowed!=null?esc(money(l.max_allowed)):'—'}</td>
-            <td style="padding:8px;text-align:right;">${l.booked?'<b style="color:#15803d;">Yes</b>':'<span style="color:var(--mute);">No</span>'}</td>
+            <td style="padding:8px;text-align:right;">${l.booked?'<b style="color:var(--ch-accent);">Yes</b>':'<span style="color:var(--mute);">No</span>'}</td>
           </tr>`;
         }).join('') : '<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--mute);">No discounts given in this period.</td></tr>'}</tbody>
       </table>
     </div>
 
-    <details style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;">
+    </div></details><details style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;">
       <summary style="cursor:pointer;font-weight:700;font-size:13.5px;">Every action recorded</summary>
       <div class="rc-badges" style="margin-top:10px;">${chips(d.event_counts||[])}</div>
     </details>
@@ -10832,7 +10858,8 @@ setInterval(()=>{
 // This answers the only questions he has: were the calls made, by whom, how
 // did they go, and what did customers say. Pulled from the same review_call_*
 // columns the queue writes, so nothing here can drift from what Joey logged.
-let _rcrDays=7, _rcOwnerQueue=false, _rcrFilter='all';
+let _rcrDays=7, _rcOwnerQueue=true, _rcrFilter='all';
+let _rcSelected=null;
 const RCR_STATUS={
   promised_review:{ label:'Went great',     cls:'green' },
   called:         { label:'Spoke',          cls:'green' },
@@ -10849,14 +10876,16 @@ function rcrWhen(iso){
 }
 async function renderReviewCallReport(){
   const view=document.getElementById('view');
-  view.innerHTML='<div class="wrap"><div class="empty">Loading call log…</div></div>';
+  const request=++_callPageRequest;
+  view.innerHTML='<div class="wrap ch-page"><div class="empty">Loading call log…</div></div>';
   let d;
   try{ d=await api('review_call_report',{ params:{ days:_rcrDays }}); }
-  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  catch(e){ if(request!==_callPageRequest || !onScreen('reviewcalls')) return; view.innerHTML=`<div class="wrap ch-page"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  if(request!==_callPageRequest || !onScreen('reviewcalls')) return;
   const sm=d.summary||{}, calls=d.calls||[], people=d.by_person||[], daily=d.daily||[], tags=d.tags||[];
   const pct=(a,b)=>b?Math.round((a/b)*100)+'%':'n/a';
   const tile=(label,value,sub,color,alert)=>`
-    <div style="background:${alert?'#fff7f7':'#fff'};border:1px solid ${alert?'#f3c2c2':'var(--line)'};border-radius:12px;padding:13px 14px;text-align:center;">
+    <div class="ch-stat" style="background:${alert?'#fff7f7':'#fff'};border:1px solid ${alert?'#f3c2c2':'var(--line)'};border-radius:12px;padding:13px 14px;text-align:center;">
       <div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);">${esc(label)}</div>
       <div style="font-size:26px;font-weight:800;line-height:1.15;margin-top:2px;${color?`color:${color};`:''}">${esc(value)}</div>
       <div style="font-size:11.5px;color:var(--mute);">${esc(sub||'')}</div>
@@ -10867,10 +10896,10 @@ async function renderReviewCallReport(){
   const backlog=d.backlog||0;
   const tiles=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px;">
     ${tile('Calls logged', String(sm.logged||0), `last ${d.days} days`)}
-    ${tile('Still not called', String(backlog), 'jobs from the last 7 days', backlog>0?'#b91c1c':'#15803d', backlog>0)}
+    ${tile('Still not called', String(backlog), 'jobs from the last 7 days', backlog>0?'var(--ch-danger)':'var(--ch-accent)', backlog>0)}
     ${tile('Reached', String(sm.reached||0), `${sm.voicemail||0} no answer`)}
-    ${tile('Went well', pct(sm.good,sm.reached), `${sm.good||0} of ${sm.reached||0} reached`, '#15803d')}
-    ${tile('Complaints', String(sm.complaints||0), 'need follow-up', sm.complaints?'#b91c1c':undefined, !!sm.complaints)}
+    ${tile('Went well', pct(sm.good,sm.reached), `${sm.good||0} of ${sm.reached||0} reached`, 'var(--ch-accent)')}
+    ${tile('Complaints', String(sm.complaints||0), 'need follow-up', sm.complaints?'var(--ch-danger)':undefined, !!sm.complaints)}
     ${tile('Review asked', String(sm.promised||0), 'link sent after the call')}
   </div>`;
 
@@ -10879,8 +10908,8 @@ async function renderReviewCallReport(){
       <td style="padding:9px 8px;font-weight:700;">${esc(p.name)}</td>
       <td style="padding:9px 8px;text-align:center;">${p.logged}</td>
       <td style="padding:9px 8px;text-align:center;">${p.reached}</td>
-      <td style="padding:9px 8px;text-align:center;color:#15803d;font-weight:700;">${pct(p.good,p.reached)}</td>
-      <td style="padding:9px 8px;text-align:center;color:${p.complaints?'#b91c1c':'var(--mute)'};">${p.complaints}</td>
+      <td style="padding:9px 8px;text-align:center;color:var(--ch-accent);font-weight:700;">${pct(p.good,p.reached)}</td>
+      <td style="padding:9px 8px;text-align:center;color:${p.complaints?'var(--ch-danger)':'var(--mute)'};">${p.complaints}</td>
       <td style="padding:9px 8px;color:var(--mute);white-space:nowrap;">${esc(rcrWhen(p.last_at))}</td>
     </tr>`).join('') || `<tr><td colspan="6" style="padding:18px;text-align:center;color:var(--mute);">Nobody has logged a review call in this range.</td></tr>`;
   const peopleTable=`<div class="rc-count">Who made the calls</div>
@@ -10896,13 +10925,13 @@ async function renderReviewCallReport(){
     const w=Math.round(((x.logged||0)/top)*100), rw=x.logged?Math.round((x.reached/x.logged)*100):0;
     return `<div style="display:flex;align-items:center;gap:10px;margin:5px 0;font-size:12.5px;">
       <div style="width:96px;color:var(--mute);white-space:nowrap;">${esc(x.label)}</div>
-      <div style="flex:1;height:14px;background:var(--line2);border-radius:7px;overflow:hidden;"><div style="width:${w}%;height:100%;background:#cbd5e1;"><div style="width:${rw}%;height:100%;background:#60a5fa;"></div></div></div>
-      <div style="width:140px;text-align:right;white-space:nowrap;">${x.logged?`<b>${x.reached}</b> reached / ${x.logged}${x.complaints?` · <span style="color:#b91c1c;">${x.complaints} ⚠</span>`:''}`:'<span style="color:var(--mute);">no calls</span>'}</div>
+      <div style="flex:1;height:14px;background:var(--line2);border-radius:7px;overflow:hidden;"><div style="width:${w}%;height:100%;background:var(--ch-chart-track);"><div style="width:${rw}%;height:100%;background:var(--ch-chart-secondary);"></div></div></div>
+      <div style="width:140px;text-align:right;white-space:nowrap;">${x.logged?`<b>${x.reached}</b> reached / ${x.logged}${x.complaints?` · <span style="color:var(--ch-danger);">${x.complaints} ⚠</span>`:''}`:'<span style="color:var(--mute);">no calls</span>'}</div>
     </div>`;
   }).join('');
   const dayBlock=`<div class="rc-count">Day by day</div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;">${dayRows}
-      <div style="font-size:11.5px;color:var(--mute);margin-top:8px;"><span style="display:inline-block;width:10px;height:10px;background:#60a5fa;border-radius:2px;"></span> reached &nbsp;<span style="display:inline-block;width:10px;height:10px;background:#cbd5e1;border-radius:2px;"></span> logged</div>
+      <div style="font-size:11.5px;color:var(--mute);margin-top:8px;"><span style="display:inline-block;width:10px;height:10px;background:var(--ch-chart-secondary);border-radius:2px;"></span> reached &nbsp;<span style="display:inline-block;width:10px;height:10px;background:var(--ch-chart-track);border-radius:2px;"></span> logged</div>
     </div>`;
 
   // What customers complained about, counted.
@@ -10928,9 +10957,9 @@ async function renderReviewCallReport(){
     </div>`;
   }).join('') || '<div class="empty">No calls match this filter.</div>';
 
-  view.innerHTML=`<div class="wrap">
+  view.innerHTML=`<div class="wrap ch-page">
     <div class="rc-head">
-      <div><h2 class="rc-title">📞 Review Call Log</h2>
+      <div><h2 class="rc-title">Review call activity</h2>
         <div class="rc-sub">Every review call Joey logged, what the customer said, and whether anyone is being missed. Pulled straight from what she records on each card.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -10953,10 +10982,12 @@ async function renderReviewCallReport(){
 
 async function renderReviewCalls(){
   const view=document.getElementById('view');
+  const request=++_callPageRequest;
   view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
   try{
     const params = _rcFolder==='to_call' ? { days:_rcDays } : { folder:_rcFolder, week_offset:_rcWeekOffset };
     const d=await api('review_calls',{ params });
+    if(request!==_callPageRequest || !onScreen('reviewcalls')) return;
     _rcData=d.calls||[];
     // Half-finished capture belongs to the queue it was started on: keeping it
     // across a reload would re-attach an outcome to whatever row now holds that
@@ -10970,10 +11001,11 @@ async function renderReviewCalls(){
     // on incrementing this on top of the real baseline for instant feedback.
     if(d.today_stats){ _rcStats=d.today_stats; _rcStatsDay=rcTodayKey(); }
     paintReviewCalls();
-  }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+  }catch(e){ if(request!==_callPageRequest || !onScreen('reviewcalls')) return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 function paintReviewCalls(){
   const view=document.getElementById('view'); if(!view) return;
+  if(!onScreen('reviewcalls')) return;
   const rows=_rcData||[];
   const isToCall=_rcFolder==='to_call';
   const toCall=rows.filter(r=>!r.call_status).length;
@@ -10983,7 +11015,15 @@ function paintReviewCalls(){
     const n=(!isToCall && _rcFolderCounts[key]!=null) ? ` <span style="opacity:.6;">${_rcFolderCounts[key]}</span>` : '';
     return `<button class="rc-seg-btn${_rcFolder===key?' on':''}" data-rcfolder="${key}">${label}${n}</button>`;
   };
-  const cards=rows.length ? rows.map(isToCall?rcCard:rcFolderCard).join('')
+  const selected=rows.find(r=>r.id===_rcSelected)||rows[0];
+  _rcSelected=selected?.id||null;
+  const cards=rows.length ? `<div class="ch-review-inbox"><div class="ci-list" role="group" aria-label="Select a review customer">${rows.map(r=>`
+    <button type="button" class="ci-item" data-rc-select="${esc(r.id)}" aria-pressed="${r.id===_rcSelected}">
+      <strong>${esc(r.customer_name)}</strong><span>${esc(bizShort(r.business_slug))} · ${esc(r.phone||'No phone on file')}</span>
+      <span>${esc(r.service_name)} · ${esc(r.technician_name)}</span>
+      <span>${esc(rcRel(r.when,r.business_timezone))}</span>
+      <span class="ci-status">${esc(r.call_status?rcStatusLabel(r.call_status):'Ready to call')}</span>
+    </button>`).join('')}</div><section class="ch-review-detail" aria-label="Selected customer review call">${(isToCall?rcCard:rcFolderCard)(selected)}</section></div>`
     : `<div class="empty" style="padding:34px 12px;">${isToCall?'🎉 Nobody to call for this window — everyone has left a review or been handled.':'Nothing logged in this folder that week.'}</div>`;
   const rangeControl = isToCall
     ? `<div class="rc-seg">${seg(1,'Yesterday')}${seg(3,'Last 3 days')}${seg(7,'Last 7 days')}</div>`
@@ -10994,20 +11034,17 @@ function paintReviewCalls(){
        </div>`;
   view.innerHTML=`<div class="wrap">
     <div class="rc-head">
-      <div><h2 class="rc-title">📞 Review Calls</h2>
-        <div class="rc-sub">Customers from <b>both companies</b> who finished a job and haven't left us a review yet (Google <i>or</i> a CRM star rating). Call, thank them, invite a review — anyone who rates us drops off automatically.</div>
+      <div><h2 class="rc-title">Review calls to make</h2>
+        <div class="rc-sub">Select a customer, follow the call guide, and record the outcome.</div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${role==='owner'?`<button class="rc-btn ghost" data-rc-backlog="1">Back to call log</button>`:''}${rangeControl}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${role==='owner'?`<button class="rc-btn ghost" data-rc-backlog="1">View call activity</button>`:''}${rangeControl}</div>
     </div>
     <div class="rc-seg" style="margin-bottom:14px;">
       ${folderTab('to_call','To call')}${folderTab('complaint','Complaints')}${folderTab('promised_review','Promised review')}${folderTab('declined','No thanks')}${folderTab('voicemail','Voicemail')}${folderTab('do_not_contact','Do not contact')}
     </div>
-    <div class="rc-legend"><b>Call times, in the customer's own timezone:</b>
-      🔴 Do not contact 12am-9am and 8pm-12am &nbsp; 🟢 Best 2pm-5pm &nbsp; 🟡 OK the rest of the day</div>
-    ${isToCall?`<div class="rc-hero">
-      <div class="rc-hero-hi">${esc(rcGreeting())}</div>
-      <div class="rc-hero-sub">Customers from both companies who finished a job and have not left a review yet. The opener on each card is already filled in.</div>
-      <div class="greet-stats" style="margin-top:14px;">
+    <div class="rc-legend">Customer local time: <b>Call only 9am–8pm.</b> Best window: 2pm–5pm.</div>
+    ${isToCall?`<div class="ch-review-summary">
+      <div class="greet-stats">
         ${rcStat('To call', String(toCall), 'both companies')}
         ${rcStat('Logged today', String(_rcStats.today||0), `${_rcStats.reached||0} reached`, '#5ef0a0')}
         ${rcStat('Went well', _rcStats.reached?Math.round((_rcStats.good/_rcStats.reached)*100)+'%':'n/a', `${_rcStats.good||0} of ${_rcStats.reached||0} reached`, '#5ef0a0')}
@@ -11018,6 +11055,13 @@ function paintReviewCalls(){
     <div class="rc-count">${isToCall?`${toCall} to call${inProg?` · <span style="color:var(--mute);">${inProg} in progress</span>`:''}`:`${rows.length} logged · week of ${esc(_rcWeekLabel)}`}</div>
     <div id="rcList">${cards}</div>
   </div>`;
+  view.querySelectorAll('[data-rc-select]').forEach(b=>b.addEventListener('click',()=>{
+    const scroll=view.querySelector('.ci-list')?.scrollTop||0;
+    _rcSelected=b.dataset.rcSelect;paintReviewCalls();
+    const list=view.querySelector('.ci-list');if(list)list.scrollTop=scroll;
+    [...view.querySelectorAll('[data-rc-select]')].find(el=>el.dataset.rcSelect===_rcSelected)?.focus({preventScroll:true});
+    if(window.innerWidth<760)view.querySelector('.ch-review-detail')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }));
   view.querySelectorAll('[data-rcdays]').forEach(b=>b.addEventListener('click',()=>{ _rcDays=+b.dataset.rcdays; renderReviewCalls(); }));
   view.querySelectorAll('[data-rc-backlog]').forEach(b=>b.addEventListener('click',()=>{ _rcOwnerQueue=false; renderCallHub(); }));
   view.querySelectorAll('[data-rcfolder]').forEach(b=>b.addEventListener('click',()=>{ if(_rcFolder===b.dataset.rcfolder) return; _rcFolder=b.dataset.rcfolder; _rcWeekOffset=0; renderReviewCalls(); }));

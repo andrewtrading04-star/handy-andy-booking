@@ -9,10 +9,30 @@ const source=html.slice(html.indexOf('let _callsData='),html.indexOf('// Scroll 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function context(extra={}){return vm.createContext({console,Date,Set,Promise,API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
 test('admin scripts parse',()=>{for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))if(m[1].trim())new vm.Script(m[1]);});
+test('number directory searches formatted phones, businesses, people and status',()=>{
+ const ctx=context({friendlyForward:p=>p==='staff'?'Heather':'Voicemail only'});
+ vm.runInContext(html.slice(html.indexOf('function prettyNum('),html.indexOf('async function renderCallAnalytics(){')),ctx);
+ assert.equal(ctx.prettyNum('+13035550101'),'(303) 555-0101');
+ vm.runInContext(html.slice(html.indexOf('function matchingNumbers('),html.indexOf('function paintNumberDirectory(')),ctx);
+ const rows=[{phone:'+13035550101',business_name:'Handy Andy',market:'Denver',active:true,forward_to:'staff'},{phone:'+15125550102',business_name:'Austin Mounting',active:false}];
+ assert.equal(ctx.matchingNumbers(rows,'(303) 555','all').length,1);
+ assert.equal(ctx.matchingNumbers(rows,'Heather','active')[0].phone,rows[0].phone);
+ assert.equal(ctx.matchingNumbers(rows,'Austin','active').length,0);
+ assert.equal(ctx.matchingNumbers(rows,'','retired')[0].phone,rows[1].phone);
+ assert.equal(ctx.matchingNumbers(rows,'not found','all').length,0);
+});
+test('late report responses cannot replace another tab',async()=>{
+ for(const [start,end,screen] of [['async function renderCallAnalytics(){','// ── Calls (Grasshopper','callanalytics'],['async function renderCallAudit(){','// Every tracking number across','callaudit'],['async function renderReviewCallReport(){','async function renderReviewCalls(){','reviewcalls']]){
+  let resolve;const view={innerHTML:''};const ctx=context({_callPageRequest:0,_caRange:'7',_cauRange:'7',_rcrDays:7,CAU_RANGES:{'7':{days:7,offset:0}},document:{getElementById:()=>view},onScreen:()=>false,api:()=>new Promise(r=>resolve=r)});
+  vm.runInContext(html.slice(html.indexOf(start),html.indexOf(end,html.indexOf(start))),ctx);
+  const run=vm.runInContext(start.replace('async function ','').replace('{',''),ctx);
+  view.innerHTML='Another tab';resolve({});await run;assert.equal(view.innerHTML,'Another tab',screen);
+ }
+});
 test('hub navigation survives child repaint and stays separate from content',async()=>{
- const view={innerHTML:''},navigation={hidden:true,innerHTML:'',querySelectorAll:()=>[],querySelector:()=>({addEventListener(){}})};
+ const view={innerHTML:'',classList:{toggle(){}},closest:()=>null},navigation={hidden:true,innerHTML:'',querySelectorAll:()=>[],querySelector:()=>({addEventListener(){}})};
  const tabs=[{id:'log',label:'Incoming Calls',show:()=>true,render:async()=>{view.innerHTML='Calls loaded';}},{id:'review',label:'Review Calls',show:()=>true,render:async()=>{view.innerHTML='Reviews loaded';}}];
- const ctx=vm.createContext({document:{getElementById:id=>id==='view'?view:navigation},CALL_TABS:tabs,ANALYTICS_TABS:[],callHubTab:'log',esc:escape,hubBackBar:()=>'<button id="hubBack">Back</button>'});
+ const ctx=vm.createContext({document:{getElementById:id=>id==='view'?view:navigation},CALL_TABS:tabs,ANALYTICS_TABS:[],callHubTab:'log',_hubScrollKey:'',esc:escape,hubBackBar:()=>'<button id="hubBack">Back</button>'});
  vm.runInContext(html.slice(html.indexOf('async function renderHub('),html.indexOf('async function renderCallHub(')),ctx);
  await ctx.renderHub(tabs,'log',()=>{});const before=navigation.innerHTML;
  view.innerHTML='Calls repainted after filter or poll';assert.equal(navigation.innerHTML,before);assert.equal(navigation.hidden,false);assert.match(before,/Incoming Calls/);
