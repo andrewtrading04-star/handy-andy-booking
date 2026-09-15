@@ -1,3 +1,4 @@
+import { numberVolumes } from './_lib/number-volume.js';
 // ============================================================================
 // Admin dashboard API (consolidated router to stay under Vercel's function cap).
 // Dispatch on ?action=... — every action except `login` requires a Bearer token.
@@ -8932,7 +8933,8 @@ async function reviewCalls(req, res, db, auth) {
   // Joey's (Doms) outreach tool — not part of Heather's (Handy Andy) platform.
   if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
   const folder = (req.query.folder || 'to_call').toString();
-  const { data: bizs } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+  const { data: bizs, error: businessError } = await db.from('businesses').select('id, slug, name, timezone').eq('active', true);
+  if (businessError) throw businessError;
   const warnings = [];
   // One zipTimezoneMap() per business for the whole request, not per row; both
   // branches below (folder browsing and the to_call queue) share it.
@@ -8961,12 +8963,12 @@ async function reviewCalls(req, res, db, auth) {
 
     const out = [];
     const folderCounts = { complaint: 0, promised_review: 0, voicemail: 0, do_not_contact: 0, declined: 0 };
-    for (const b of (bizs || [])) {
+    await Promise.all((bizs || []).map(async b => {
       const { data, error } = await db.from('bookings').select(rcSelFor(RC_CALL_COLS))
         .eq('business_id', b.id)
         .gte('review_call_at', weekStart.toISOString()).lt('review_call_at', weekEnd.toISOString())
         .order('review_call_at', { ascending: false }).limit(500);
-      if (error) { console.warn('[review_calls:folder]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
+      if (error) { console.warn('[review_calls:folder]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); return; }
       const tzMap = await zipTzFor(b);
       for (const row of (data || [])) {
         const fkey = RC_STATUS_TO_FOLDER[row.review_call_status];
@@ -8974,7 +8976,7 @@ async function reviewCalls(req, res, db, auth) {
         folderCounts[fkey]++;
         if (fkey === folder) out.push(rcMapRow(row, b, tzMap));
       }
-    }
+    }));
     out.sort((a, c) => new Date(c.call_at || 0) - new Date(a.call_at || 0));
     const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: RC_TZ, month: 'short', day: 'numeric' }).format(d);
     const weekLastDay = new Date(weekEnd.getTime() - 86400000);
@@ -8990,7 +8992,7 @@ async function reviewCalls(req, res, db, auth) {
 
   const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
   const out = [];
-  for (const b of (bizs || [])) {
+  await Promise.all((bizs || []).map(async b => {
     const tz = b.timezone || RC_TZ;
     const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
     const winEnd = localDayStartUTC(tz, 0);          // start of today — give them the day of the job to review first
@@ -9005,7 +9007,7 @@ async function reviewCalls(req, res, db, auth) {
       .order('scheduled_at', { ascending: false }).limit(500);
     let { data, error } = await run(RC_CALL_COLS);
     if (error && /review_call_/.test(error.message || '')) ({ data, error } = await run(''));   // migration 0049 not applied yet
-    if (error) { console.warn('[review_calls]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); continue; }
+    if (error) { console.warn('[review_calls]', b.slug, error.message); warnings.push(`${b.name}: ${error.message}`); return; }
     const tzMap = await zipTzFor(b);
     for (const row of (data || [])) {
       // Skip anyone who already left us a rating through our review filter:
@@ -9017,7 +9019,7 @@ async function reviewCalls(req, res, db, auth) {
       if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey — find it under its folder tab now
       out.push(rcMapRow(row, b, tzMap));
     }
-  }
+  }));
   // Not-yet-called first, then most-recently-completed first.
   out.sort((a, c) => {
     const au = a.call_status ? 1 : 0, cu = c.call_status ? 1 : 0;
@@ -11063,6 +11065,9 @@ async function callNumbers(req, res, db, auth) {
   // Filled by fetchTwilioVoiceUrls() above (already awaited), so safe to read.
   const smsCapByPhone = (_twilioNumbersCache && _twilioNumbersCache.smsCap) || new Map();
   const campaignApproved = (sms.campaign_status || '').toUpperCase() === 'VERIFIED';
+  let volumes = {}, volumeError = null;
+  try { volumes = await numberVolumes(db, numbers || []); }
+  catch (e) { console.warn('[call_numbers:volume]', e.message); volumeError = 'Call history is temporarily unavailable. Refresh to try again.'; }
 
   const bizBySlug = {};
   for (const b of (businesses || [])) bizBySlug[b.slug] = b;
@@ -11074,6 +11079,7 @@ async function callNumbers(req, res, db, auth) {
       ...n,
       business_name: biz.name || n.business_slug,
       business_url: biz.url || null,
+      volume: volumes[n.phone] || null,
       ai_voice_status: aiVoiceStatusFor(hasVoiceUrl ? voiceUrlByPhone.get(n.phone) : null),
       texting_status: !sms.ok ? 'unknown'
         : smsCapByPhone.has(n.phone) && !smsCapByPhone.get(n.phone) ? 'no_sms_capability'
@@ -11085,6 +11091,7 @@ async function callNumbers(req, res, db, auth) {
 
   return res.status(200).json({
     numbers: rows,
+    volume_error: volumeError,
     a2p: {
       error: sms.ok ? null : sms.error,
       campaign_status: sms.campaign_status,

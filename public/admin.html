@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=3">
+<link rel="stylesheet" href="/calls-inbox.css?v=4">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -1899,7 +1899,7 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const sent=token;   // the session this request goes out with (see the 401 branch)
-  let res;
+  let res, data;
   try {
     res = await fetch(url, {
       method,
@@ -1907,6 +1907,8 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
+    // Keep the deadline active while downloading the body as well as headers.
+    data = await res.json().catch(e=>{ if(e.name==='AbortError') throw e; return {}; });
   } catch (e) {
     throw e.name === 'AbortError' ? new Error('Request timed out — check your connection and try again.') : e;
   } finally {
@@ -1923,7 +1925,6 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
     if (token && token===sent) logout({ reason:'expired' });   // only the session THIS request went out with
     throw new Error('Session expired — please sign in again');
   }
-  const data = await res.json().catch(()=>({}));
   // tech_id has to ride along too: apiConfirmUnavailable's "book them anyway?"
   // override is gated on it, so without this every tech_unavailable conflict
   // was a dead end even though both sides were built to offer the override.
@@ -2662,7 +2663,8 @@ function navTo(s){
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   section=s;
-  document.getElementById('view').classList.toggle('calls-workspace',s==='callhub');
+  document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch');
+  document.getElementById('view').classList.toggle('launch-workspace',s==='launch');
   document.getElementById('hubNavigation').hidden=true;
   document.querySelectorAll('#sideNav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===s));
   const sched = s==='schedule';
@@ -6833,17 +6835,7 @@ function launchActionHref(b){
   return null;
 }
 function launchRingHtml(passed, total, blocked){
-  const pct = total ? Math.round((passed/total)*360) : 0;
-  const color = passed===total ? 'var(--green)' : (blocked ? 'var(--red)' : 'var(--amber)');
-  const track = passed===total ? 'var(--green)' : (blocked ? '#fde3e3' : '#fdecc8');
-  if(passed===total){
-    return `<div style="width:38px;height:38px;border-radius:50%;flex:none;background:var(--green);display:flex;align-items:center;justify-content:center;">
-      <span style="color:#fff;font-size:18px;line-height:1;">✓</span>
-    </div>`;
-  }
-  return `<div style="width:38px;height:38px;border-radius:50%;flex:none;background:conic-gradient(${color} 0deg ${pct}deg, ${track} ${pct}deg 360deg);display:flex;align-items:center;justify-content:center;">
-    <div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:${color};">${passed}/${total}</div>
-  </div>`;
+  return `<span class="launch-score ${blocked?'blocked':''}" aria-label="${passed} of ${total} checks complete${blocked?', blocked':''}">${passed}/${total}</span>`;
 }
 // The expanded detail shown when a card is clicked — full breakdown + the
 // persistable checklist. site.hasWidget is shown ONLY as a positive bonus
@@ -7002,6 +6994,7 @@ function launchCardHtml(b, items){
       </div>
     </div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${nextInner}</p>
+    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
@@ -7074,15 +7067,19 @@ function launchMarketCardHtml(m, items){
       </div>
     </div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchMarketNextAction(m, items))}</p>
+    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
+let _launchRequest=0;
 async function renderLaunch(){
   const view=document.getElementById('view');
+  const request=++_launchRequest;
   view.innerHTML=`<div class="wrap"><div class="empty">Checking every business — this hits each live site, give it a few seconds…</div></div>`;
   let data;
   try{ data=await api('launch_status',{timeoutMs:30000}); }
-  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  catch(e){ if(request!==_launchRequest||!onScreen('launch'))return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="launchRetry">Try again</button></div>`;view.querySelector('#launchRetry').addEventListener('click',renderLaunch); return; }
+  if(request!==_launchRequest||!onScreen('launch'))return;
 
   const items=data.items||[];
   const businesses=data.businesses||[];
@@ -7116,11 +7113,8 @@ async function renderLaunch(){
   const completedByCity=groupByCity(completed);
   const incompleteByCity=groupByCity(incomplete);
 
-  const statTile=(label,value,color)=>`<div style="background:#12151c;border-radius:10px;padding:12px 16px;min-width:110px;">
-    <div style="font-size:22px;font-weight:800;color:${color};line-height:1.1;">${value}</div>
-    <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#8b93a7;margin-top:3px;">${esc(label)}</div>
-  </div>`;
-  const grid=(html)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">${html}</div>`;
+  const statTile=(label,value)=>`<div class="ch-stat"><span>${esc(label)}</span><strong>${value}</strong></div>`;
+  const grid=(html)=>`<div class="launch-grid">${html}</div>`;
 
   const section=(byCity)=>{
     const cities=LAUNCH_CITY_ORDER.filter(c=>byCity[c] && byCity[c].length);
@@ -7134,26 +7128,23 @@ async function renderLaunch(){
   };
 
   view.innerHTML=`<div class="wrap">
-    <div style="background:#0b0d12;border-radius:14px;padding:16px 18px;margin-bottom:18px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-right:8px;">
-        <span style="width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(21,128,61,.18);"></span>
-        <span style="color:#fff;font-weight:800;font-size:13px;">Launch Monitor</span>
-      </div>
+    <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Check each business, clear blockers, and keep launch details in one place.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
+    <div class="launch-stats">
       ${statTile('Live',readyCount,'var(--green)')}
       ${statTile('In progress',progressCount,'#f2b84b')}
       ${statTile('Blocked',blockedCount,'#ff6b6b')}
       ${statTile('Total',all.length,'#9aa4bd')}
     </div>
     <p style="color:var(--mute);font-size:12.5px;margin:0 0 16px;">
-      Completed businesses first, grouped by city; everything still incomplete sits below, grouped by city too. Blocked means Stripe, email, or the site itself is down — that outranks the score, so a 7/8 can still be Blocked.
-      Click a card for the full breakdown and to tick the checklist.
+      Open a business to review checks and notes. Blocked means a payment, email, or booking check needs attention.
     </p>
-    <p style="font-size:12px;font-weight:800;color:#15803d;margin:0 0 8px;">Completed &middot; ${completed.length}</p>
+    <h3 class="ch-section-label">Completed &middot; ${completed.length}</h3>
     ${completed.length ? section(completedByCity) : '<p style="font-size:12px;color:var(--mute);margin:0 0 22px;">None yet.</p>'}
-    <p style="font-size:12px;font-weight:800;color:#b45309;margin:22px 0 8px;">Incomplete &middot; ${incomplete.length}</p>
+    <h3 class="ch-section-label">Needs attention &middot; ${incomplete.length}</h3>
     ${incomplete.length ? section(incompleteByCity) : '<p style="font-size:12px;color:var(--mute);">None.</p>'}
   </div>`;
 
+  view.querySelector('#launchRefresh').addEventListener('click',renderLaunch);
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
     card.addEventListener('click', (e)=>{
       if(e.target.closest('[data-launch-key]')) return;
@@ -7162,6 +7153,8 @@ async function renderLaunch(){
       const detail=card.querySelector('.launch-detail');
       const open=detail.style.display!=='none';
       view.querySelectorAll('.launch-detail').forEach(d=>{ d.style.display='none'; d.innerHTML=''; });
+      view.querySelectorAll('.launch-open').forEach(b=>b.setAttribute('aria-expanded','false'));
+      card.querySelector('.launch-open').setAttribute('aria-expanded',String(!open));
       if(!open){
         // Re-rendered after every save, not patched in place: ticking one of
         // the stripe/email/website rows changes the "live check disagrees"
@@ -7206,6 +7199,8 @@ async function renderLaunch(){
       const detail=card.querySelector('.launch-detail');
       const open=detail.style.display!=='none';
       view.querySelectorAll('.launch-detail').forEach(d=>{ d.style.display='none'; d.innerHTML=''; });
+      view.querySelectorAll('.launch-open').forEach(b=>b.setAttribute('aria-expanded','false'));
+      card.querySelector('.launch-open').setAttribute('aria-expanded',String(!open));
       if(!open){
         detail.innerHTML=launchMarketDetailHtml(m, marketItems);
         detail.style.display='block';
@@ -9379,7 +9374,6 @@ async function renderCallNumbers(){
     view.innerHTML=`<div class="wrap ch-page"><div class="rc-head"><div>
       <h2 class="rc-title">Numbers</h2><div class="rc-sub">Find a tracking line and check its routing, hours, and texting status.</div>
     </div><button type="button" class="rc-btn ghost" id="numbersRefresh">Refresh status</button></div>
-    <div class="ch-notice">${a2pLine(d.a2p)}</div>
     <div class="ch-toolbar"><label>Find a number<input type="search" id="numberSearch" value="${esc(_numberQuery)}" placeholder="Number, business, market, or person"></label>
       <label>Line status<select id="numberStatus"><option value="all">All lines</option><option value="active">Active</option><option value="retired">Retired</option></select></label>
       <span id="numberCount" class="ch-result-count" role="status"></span>
@@ -9402,6 +9396,22 @@ function matchingNumbers(numbers,query,status){
       (digits.length>=3 && !/[a-z]/i.test(term) && String(n.phone).replace(/\D/g,'').includes(digits))))
     .sort((a,b)=>(a.business_name||'').localeCompare(b.business_name||'') || String(a.phone).localeCompare(String(b.phone)));
 }
+function numberVolumeHtml(volume){
+  if(!volume)return '<div class="ch-notice">Call history is temporarily unavailable. Refresh to try again.</div>';
+  const stat=(label,value)=>`<div class="ch-stat"><span>${label}</span><strong>${value}</strong></div>`;
+  const daily=volume.daily||[], weeks=[];
+  for(let i=0;i<daily.length;i+=7){const group=daily.slice(i,i+7);weeks.push({from:group[0].date,to:group.at(-1).date,calls:group.reduce((sum,d)=>sum+d.calls,0)});}
+  const max=Math.max(1,...weeks.map(w=>w.calls));
+  return `<section class="number-volume" aria-label="Call history">
+    <h4 class="ch-section-label">Call volume · last 90 complete days</h4>
+    <p class="rc-sub">${esc(volume.from)} – ${esc(volume.to)} · UTC · incoming calls</p>
+    <div class="number-stats">${stat('Total calls',volume.total)}${stat('Average / day',volume.average_daily)}${stat('Missed calls',volume.missed)}${stat('Answer rate',volume.answer_rate==null?'—':volume.answer_rate+'%')}</div>
+    <div class="number-chart" role="img" aria-label="Weekly calls over 90 days. ${weeks.map(w=>`${w.from} to ${w.to}: ${w.calls}`).join('; ')}">
+      ${weeks.map(w=>`<div class="number-week"><span>${w.calls}</span><div class="number-track"><i style="height:${w.calls/max*100}%"></i></div><small>${esc(w.from.slice(5).replace('-','/'))}</small></div>`).join('')}
+    </div><p class="rc-sub">Weekly totals · final bar covers ${daily.length%7||7} days.${volume.unknown?` ${volume.unknown} calls have no answer status and are excluded from the answer rate.`:''}</p>
+    <p class="number-latest">Latest call in this period: <strong>${volume.latest?esc(fmtDateTime(volume.latest)):'No calls recorded'}</strong></p>
+  </section>`;
+}
 function paintNumberDirectory(){
   const view=document.getElementById('view'), directory=view.querySelector('#numberDirectory');
   if(!directory || !_numberData)return;
@@ -9416,8 +9426,10 @@ function paintNumberDirectory(){
     ${rows.map(n=>`<button type="button" class="ci-item" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
       <strong>${esc(prettyNum(n.phone))}</strong><span>${esc(n.business_name)}</span><span>${esc(n.market||'No market')} · ${n.active?'Active':'Retired'}</span>
       <span class="ci-status">Rings to ${esc(friendlyForward(n.forward_to))}</span>
+      <span>${n.volume?`${n.volume.total} calls / 90 days · ${n.volume.average_daily} per day`:'Call volume unavailable'}</span>
     </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
       <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.business_name)}</p>
+      ${numberVolumeHtml(selected.volume)}
       <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to))}${detail('After hours',friendlyForward(selected.after_hours_forward_to))}${detail('Hours',hours)}</dl>
       <div class="ch-section-label">Connection status</div><div class="ch-connections">
         <div><span>AI voice</span>${aiVoiceBadge(selected.ai_voice_status)}</div><div><span>Texting</span>${textingBadge(selected.texting_status)}</div>
@@ -10986,7 +10998,7 @@ async function renderReviewCalls(){
   view.innerHTML='<div class="wrap"><div class="empty">Loading call list…</div></div>';
   try{
     const params = _rcFolder==='to_call' ? { days:_rcDays } : { folder:_rcFolder, week_offset:_rcWeekOffset };
-    const d=await api('review_calls',{ params });
+    const d=await api('review_calls',{ params, timeoutMs:25000 });
     if(request!==_callPageRequest || !onScreen('reviewcalls')) return;
     _rcData=d.calls||[];
     // Half-finished capture belongs to the queue it was started on: keeping it
@@ -11001,7 +11013,11 @@ async function renderReviewCalls(){
     // on incrementing this on top of the real baseline for instant feedback.
     if(d.today_stats){ _rcStats=d.today_stats; _rcStatsDay=rcTodayKey(); }
     paintReviewCalls();
-  }catch(e){ if(request!==_callPageRequest || !onScreen('reviewcalls')) return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+  }catch(e){
+    if(request!==_callPageRequest || !onScreen('reviewcalls')) return;
+    view.innerHTML=`<div class="wrap ch-page"><h2>Review calls to make</h2><div class="empty" role="alert">Could not load the call list. ${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="reviewCallsRetry">Try again</button></div>`;
+    view.querySelector('#reviewCallsRetry').addEventListener('click',renderReviewCalls);
+  }
 }
 function paintReviewCalls(){
   const view=document.getElementById('view'); if(!view) return;

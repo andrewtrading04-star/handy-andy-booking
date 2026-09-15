@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {numberVolumes} from '../api/_lib/number-volume.js';
 import {ensureReviewToken,mintReviewToken,reviewRequestSms} from '../api/_lib/review-token.js';
 import {signToken,verifyToken} from '../api/_lib/auth.js';
 const html=fs.readFileSync(new URL('../public/admin.html',import.meta.url),'utf8');
@@ -9,6 +10,31 @@ const source=html.slice(html.indexOf('let _callsData='),html.indexOf('// Scroll 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function context(extra={}){return vm.createContext({console,Date,Set,Promise,API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
 test('admin scripts parse',()=>{for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))if(m[1].trim())new vm.Script(m[1]);});
+
+test('API deadline covers a stalled response body',async()=>{
+ let aborted=false;
+ const ctx=context({URL,location:{origin:'https://example.com'},setTimeout,clearTimeout,AbortController,
+  fetch:async(url,{signal})=>({ok:true,status:200,json:()=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>{aborted=true;const e=new Error('aborted');e.name='AbortError';reject(e);}))})});
+ vm.runInContext(html.slice(html.indexOf('async function api('),html.indexOf('// Finances hits its own')),ctx);
+ await assert.rejects(ctx.api('review_calls',{timeoutMs:10}),/timed out/);assert.equal(aborted,true);
+});
+
+test('review queue shows retry after failure and paints on successful retry',async()=>{
+ let retry,painted=false,fail=true;
+ const view={innerHTML:'',querySelector:()=>({addEventListener:(event,fn)=>retry=fn})};
+ const ctx=context({_callPageRequest:0,_rcFolder:'to_call',_rcDays:1,document:{getElementById:()=>view},onScreen:()=>true,
+  api:async()=>{if(fail)throw Error('Timed out');return {calls:[]};},paintReviewCalls:()=>painted=true});
+ vm.runInContext(html.slice(html.indexOf('async function renderReviewCalls(){'),html.indexOf('function paintReviewCalls(){')),ctx);
+ await ctx.renderReviewCalls();assert.match(view.innerHTML,/Try again/);assert.equal(typeof retry,'function');
+ fail=false;await retry();assert.equal(painted,true);
+});
+
+test('number volume paginates, normalizes phones and keeps unknown answers separate',async()=>{
+ let pages=0;const rows=Array.from({length:1001},(_,id)=>({id,grasshopper_number:id%2?'(303) 555-0101':'+13035550101',occurred_at:'2026-09-14T12:00:00Z',answered:id===1000?null:id%2===0}));
+ const db={from:()=>{const q={select:()=>q,eq:()=>q,gte:()=>q,lt:()=>q,order:()=>q,range:async(a,b)=>{pages++;return {data:rows.slice(a,b+1)};}};return q;}};
+ const result=await numberVolumes(db,[{phone:'+13035550101'},{phone:'5125550102'}],new Date('2026-09-15T18:00:00Z'));
+ const v=result['+13035550101'];assert.equal(pages,2);assert.equal(v.total,1001);assert.equal(v.missed,500);assert.equal(v.unknown,1);assert.equal(v.answer_rate,50);assert.equal(v.average_daily,11.1);assert.equal(v.daily.length,90);assert.equal(v.to,'2026-09-14');assert.equal(result['5125550102'].answer_rate,null);
+});
 test('number directory searches formatted phones, businesses, people and status',()=>{
  const ctx=context({friendlyForward:p=>p==='staff'?'Heather':'Voicemail only'});
  vm.runInContext(html.slice(html.indexOf('function prettyNum('),html.indexOf('async function renderCallAnalytics(){')),ctx);

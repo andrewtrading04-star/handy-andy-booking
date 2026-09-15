@@ -1,4 +1,26 @@
-/* Scoped to Calls: the rest of the admin workspace keeps its existing layout. */
+/* Shared Calls and Launch workspace. */
+.launch-workspace{--green:#315ad7;--amber:#8a5b13;--red:#b53343;--grad:#315ad7}
+.launch-stats,.number-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.launch-stats .ch-stat,.number-stats .ch-stat{display:flex;flex-direction:column;gap:8px;padding:16px;background:#fff;border:1px solid #dce2ec;border-radius:10px;min-width:0}
+.launch-stats .ch-stat span,.number-stats .ch-stat span{font-size:12px;color:#536277}
+.launch-stats .ch-stat strong,.number-stats .ch-stat strong{font-size:24px;color:#202c43}
+.launch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:16px;align-items:start}
+.launch-workspace .launch-card{margin:0!important;padding:20px!important;box-shadow:0 2px 5px #202c4308;transition:box-shadow 160ms,transform 160ms}
+.launch-workspace .launch-card:hover{transform:translateY(-2px);box-shadow:0 9px 20px #202c431c}
+.launch-workspace .launch-card:has(.launch-detail[style*="display: block"]){border-color:#315ad7!important;box-shadow:inset 4px 0 #315ad7,0 9px 22px #202c4320}
+.launch-score{display:inline-flex;align-items:center;justify-content:center;min-width:48px;min-height:40px;border-radius:8px;background:#eef2fc;color:#315ad7;font-weight:700;font-size:14px;flex:none}
+.launch-score.blocked{color:#b53343;background:#fceff1}
+.launch-workspace .launch-detail input,.launch-workspace .launch-detail textarea{min-width:0;accent-color:#315ad7}
+.launch-workspace .launch-detail label{min-height:40px}
+.number-volume{margin:24px 0;padding-bottom:16px;border-bottom:1px solid #dce2ec}
+.number-chart{display:flex;gap:6px;align-items:flex-end;margin:24px 0 12px}
+.number-week{flex:1;min-width:0;text-align:center;color:#536277;font-size:12px}
+.number-track{height:125px;display:flex;align-items:flex-end;margin:8px 0;border-bottom:1px solid #dce2ec}
+.number-track i{display:block;width:100%;background:#315ad7;border-radius:3px 3px 0 0}
+.number-week small{font-size:11px;white-space:nowrap}
+.number-latest{font-size:13px;color:#536277}
+@media(max-width:759px){.launch-stats,.number-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.number-week:nth-child(even) small{visibility:hidden}.number-chart{gap:3px}.launch-workspace .launch-detail label{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.launch-workspace .launch-card{transition:none}.launch-workspace .launch-card:hover{transform:none}}
 .calls-workspace{--ch-accent:#315ad7;--ch-accent-soft:#eef2fc;--ch-ink:#202c43;--ch-muted:#536277;--ch-line:#dce2ec;--ch-surface:#fff;--ch-chart-secondary:#8fa5d8;--ch-chart-track:#d9e0ed;--ch-danger:#b53343;--ch-warning:#8a5b13;--accent:var(--ch-accent);--accent-soft:var(--ch-accent-soft);--mute:var(--ch-muted);--line:var(--ch-line);--line2:#f0f3f8;color:var(--ch-ink)}
 .calls-workspace .wrap{max-width:1440px}
 .calls-workspace .rc-title{font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-.5px}
