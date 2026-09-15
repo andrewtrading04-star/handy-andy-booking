@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=4">
+<link rel="stylesheet" href="/calls-inbox.css?v=5">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -10182,7 +10182,7 @@ function paintCalls(){
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
   ].filter(r=> r.source==='twilio')
    .sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
-  const whoNames=role==='owner' ? [...new Set([...periodRows,...open].map(r=>r.routed_to_name).filter(Boolean))].sort() : [];
+  const whoNames=role==='owner' ? [...new Set(['Andrew','Heather','Joey',...[...periodRows,...open].map(r=>r.routed_to_name).filter(Boolean)])].sort() : [];
   if(whoNames.length>1){
     if(_callsWho!=='all' && !whoNames.includes(_callsWho)) _callsWho='all';
     if(_callsWho!=='all'){
@@ -10211,10 +10211,10 @@ function paintCalls(){
     : _callsView==='recorded' ? 'No recorded calls in this period.' : 'No calls in this period.';
   const viewSeg=VIEWS.map(v=>
     `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" aria-pressed="${_callsView===v.id}" data-callview="${v.id}">${v.label}</button>`).join('');
-  const periodSeg=['today','yesterday','7d'].map(p=>
-    `<button type="button" class="rc-seg-btn ${_callsPeriod===p?'on':''}" data-callperiod="${p}">${esc(CALL_PERIOD_LABEL[p])}</button>`).join('');
-  const whoSeg=whoNames.length>1 ? `<div class="rc-seg">${['all',...whoNames].map(w=>
-    `<button type="button" class="rc-seg-btn ${_callsWho===w?'on':''}" data-callwho="${esc(w)}">${w==='all'?'Everyone':esc(w)}</button>`).join('')}</div>` : '';
+  const periodSeg=`<label>Date<select id="callPeriod">${['today','yesterday','7d'].map(p=>
+    `<option value="${p}" ${_callsPeriod===p?'selected':''}>${esc(CALL_PERIOD_LABEL[p])}</option>`).join('')}</select></label>`;
+  const whoSeg=whoNames.length>1 ? `<label>Person<select id="callPerson">${['all',...whoNames].map(w=>
+    `<option value="${esc(w)}" ${_callsWho===w?'selected':''}>${w==='all'?'Everyone':esc(w)}</option>`).join('')}</select></label>` : '';
   const listScroll=view.querySelector('.ci-list')?.scrollTop||0;
   const detailScroll=view.querySelector('.ci-detail')?.scrollTop||0;
   view.innerHTML=`<div class="wrap ci-wrap">
@@ -10222,10 +10222,9 @@ function paintCalls(){
       <h2 class="rc-title">Calls</h2>
       <div class="rc-sub">Select a call to read its message, listen to a recording, or follow up.${_callsView==='callback'?' This queue includes older calls outside the selected period.':''}</div>
     </div></div>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-      <div class="rc-seg">${viewSeg}</div>
-      ${_callsView==='callback'?'':`<div class="rc-seg">${periodSeg}</div>`}
-      ${whoSeg}
+    <div class="call-filter-bar">
+      <div class="call-status-tabs" role="group" aria-label="Call status">${viewSeg}</div>
+      <div class="call-filter-fields">${_callsView==='callback'?'':periodSeg}${whoSeg}</div>
     </div>
     ${shown.length ? callInbox(shown) : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
   </div>`;
@@ -10243,12 +10242,12 @@ function paintCalls(){
   view.querySelectorAll('[data-callview]').forEach(b=>b.addEventListener('click',()=>{
     _callsView=b.dataset.callview; paintCalls();
   }));
-  view.querySelectorAll('[data-callperiod]').forEach(b=>b.addEventListener('click',()=>{
-    _callsPeriod=b.dataset.callperiod; renderCalls();
-  }));
-  view.querySelectorAll('[data-callwho]').forEach(b=>b.addEventListener('click',()=>{
-    _callsWho=b.dataset.callwho; paintCalls();
-  }));
+  view.querySelector('#callPeriod')?.addEventListener('change',e=>{
+    _callsPeriod=e.target.value; renderCalls();
+  });
+  view.querySelector('#callPerson')?.addEventListener('change',e=>{
+    _callsWho=e.target.value; paintCalls();
+  });
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
     try{
@@ -10592,7 +10591,6 @@ function paintMessages(){
         +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
         +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+msgLineNote(t)+'</div>'
         +'</div>'
-        +'<button class="rc-btn red" data-msgblock="1" data-msgblockour="'+esc(t.our_phone)+'" data-msgblockcust="'+esc(t.customer_phone)+'" data-msgblockpretty="'+esc(t.customer_phone_pretty||t.customer_phone)+'" title="Block this number — no more calls or texts" style="flex:none;">🚫</button>'
         +'</div>';
     }
   }
@@ -10796,10 +10794,10 @@ function msgDetailHtml(t){
 // from what we last sent them, because they replied to the 888 notification
 // line, which belongs to no brand.
 function msgBrandChip(t){
-  if(!t.business_name) return '<span class="rc-badge gray" title="Could not tell which company this is about">🏢 Company unknown</span>';
+  if(!t.business_name) return '<span class="msg-brand-name" title="Could not tell which company this is about">Company unknown</span>';
   const guessed=t.brand_source && t.brand_source!=='line';
-  return '<span class="rc-badge '+(guessed?'amber':'blue')+'" style="font-size:12.5px;"'
-    +(guessed?' title="Worked out from '+esc(t.brand_source_label||'')+'"':'')+'>🏢 '+esc(t.business_name)+'</span>';
+  return '<span class="msg-brand-name"'
+    +(guessed?' title="Worked out from '+esc(t.brand_source_label||'')+'"':'')+'>'+esc(t.business_name)+'</span>';
 }
 function msgLineNote(t){
   // The shared 888 line belongs to no brand, so show it by name rather than

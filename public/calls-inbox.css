@@ -1,4 +1,14 @@
 /* Shared Calls and Launch workspace. */
+.msg-brand-name{font-size:13px;font-weight:600;color:#536277}
+.call-filter-bar{margin-bottom:20px}
+.call-status-tabs{display:flex;flex-wrap:wrap;gap:12px;border-bottom:1px solid #dce2ec;margin-bottom:16px}
+.calls-workspace .call-status-tabs .rc-seg-btn{border-radius:4px 4px 0 0;padding:10px 8px;border-bottom:3px solid transparent;background:transparent;box-shadow:none;min-height:44px}
+.calls-workspace .call-status-tabs .rc-seg-btn.on{color:#315ad7;border-bottom-color:#315ad7;background:transparent;box-shadow:none}
+.calls-workspace .call-status-tabs .rc-seg-btn:hover{background:#eef2fc}
+.call-filter-fields{display:flex;flex-wrap:wrap;gap:16px}
+.call-filter-fields label{display:flex;flex-direction:column;gap:6px;color:#536277;font-size:12px;min-width:160px}
+.call-filter-fields select{font:inherit;font-size:14px;min-height:44px;padding:8px 12px;border:1px solid #dce2ec;border-radius:7px;background:#fff;color:#202c43}
+@media(max-width:480px){.call-filter-fields label{min-width:0;flex:1}.call-filter-fields select{width:100%;font-size:16px}.call-status-tabs{gap:4px}}
 .launch-workspace{--green:#315ad7;--amber:#8a5b13;--red:#b53343;--grad:#315ad7}
 .launch-stats,.number-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
 .launch-stats .ch-stat,.number-stats .ch-stat{display:flex;flex-direction:column;gap:8px;padding:16px;background:#fff;border:1px solid #dce2ec;border-radius:10px;min-width:0}
