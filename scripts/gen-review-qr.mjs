@@ -16,6 +16,7 @@ const LISTINGS = [
   { key: 'ha-austin',    url: 'https://g.page/r/CYE7aX6tVMnkEBM/review' },
   { key: 'ha-denver-1',  url: 'https://g.page/r/Ccj-ZjdeLtzfEBM/review' },
   { key: 'ha-denver-2',  url: 'https://g.page/r/CWcIi45TvszbEBM/review' },
+  { key: 'ha-los-angeles', url: 'https://g.page/r/CfCMbSKempPwEBM/review' },
   { key: 'doms',         url: 'https://g.page/r/Cffr7Tp2DSNOEBM/review' },
 ];
 

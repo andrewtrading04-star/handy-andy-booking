@@ -6560,7 +6560,7 @@ async function technicians(req, res, db, auth) {
   // Dom's was pulled must not inflate the count), matching the same rule the
   // award itself uses in api/tech.js. Best-effort: on any error the roster
   // still renders, just without progress.
-  const REVIEW_PROGRAM_KEYS = ['ha-houston-1', 'ha-houston-2', 'ha-austin', 'ha-denver-1', 'ha-denver-2'];
+  const REVIEW_PROGRAM_KEYS = ['ha-houston-1', 'ha-houston-2', 'ha-austin', 'ha-denver-1', 'ha-denver-2', 'ha-los-angeles'];
   for (const t of techs) { t.review_done = 0; t.review_total = REVIEW_PROGRAM_KEYS.length; t.review_bonus_at = null; }
   try {
     const ids = techs.map(t => t.id);

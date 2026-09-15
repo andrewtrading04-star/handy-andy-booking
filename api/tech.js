@@ -2437,15 +2437,22 @@ async function techGoogleReviewDismiss(req, res, db, auth, body) {
 // REMOVED for now, owner wants the $100 program to be the 5 Handy Andy pages
 // only and will add Dom's back later; any old 'doms' checkins stay in the
 // table and simply are not listed or counted.
+// Los Angeles (key 'ha-los-angeles', the same key scripts/lib/gmb-locations.mjs
+// uses) was added Sep 2026. The $100 is still ONE-TIME: a tech who already
+// earned it on the original five just sees LA on its own (the tech app lists
+// only the pages a tech hasn't checked off) with no second bonus promised, and
+// everyone else now needs all six. The bonus row is insert-once on
+// technician_id, so nobody can be paid twice however the list grows.
 const REVIEW_LISTINGS = [
   { key: 'ha-houston-1', label: 'Handy Andy, Houston (1)', url: 'https://g.page/r/CdizxHwpwcE0EBM/review' },
   { key: 'ha-houston-2', label: 'Handy Andy, Houston (2)', url: 'https://g.page/r/CeA7fWzbLgO8EBM/review' },
   { key: 'ha-austin',    label: 'Handy Andy, Austin',      url: 'https://g.page/r/CYE7aX6tVMnkEBM/review' },
   { key: 'ha-denver-1',  label: 'Handy Andy, Denver (1)',  url: 'https://g.page/r/Ccj-ZjdeLtzfEBM/review' },
   { key: 'ha-denver-2',  label: 'Handy Andy, Denver (2)',  url: 'https://g.page/r/CWcIi45TvszbEBM/review' },
+  { key: 'ha-los-angeles', label: 'Handy Andy, Los Angeles', url: 'https://g.page/r/CfCMbSKempPwEBM/review' },
 ];
 const REVIEW_LISTING_KEYS = new Set(REVIEW_LISTINGS.map(l => l.key));
-const REVIEW_BONUS_AMOUNT = 100;   // dollars, added to payroll when all 5 are checked
+const REVIEW_BONUS_AMOUNT = 100;   // dollars, added to payroll ONCE, when every listing is checked
 
 // Every listing, each with this tech's own checked/confirmed state, plus the
 // tech's $100 bonus record if they've completed the program. Auth-scoped
