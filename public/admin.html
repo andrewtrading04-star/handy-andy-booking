@@ -477,7 +477,13 @@
   .msg-row-top{display:flex;align-items:baseline;gap:6px;}
   .msg-row-time{margin-left:auto;font-size:11px;color:var(--mute);white-space:nowrap;}
   .msg-detail{flex:1;display:flex;flex-direction:column;min-width:0;overflow-y:auto;}
-  .msg-back{display:none;}
+  /* Android Messages-style: an arrow right next to the contact's name, always
+     visible (not just on a narrow screen) — clicking it clears the open
+     thread, which shows the list again in both layouts (the list is already
+     visible beside it on a wide screen; on narrow it's what .detail-open
+     below is toggling back from). */
+  .msg-back-arrow{border:none;background:transparent;font-size:19px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:8px;color:var(--ink-2);flex:none;}
+  .msg-back-arrow:hover{background:var(--line2);}
   .msg-dhead{padding:14px 16px;border-bottom:1px solid var(--line);}
   .msg-thread{flex:1;overflow-y:auto;padding:14px 16px;}
   .msg-auto-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:3px;}
@@ -491,7 +497,6 @@
     .msg-rail-item{flex:none;margin-bottom:0;margin-right:4px;}
     .msg-list{width:100%;border-right:none;max-height:none;}
     .msg-detail{max-height:none;}
-    .msg-back{display:inline-block;margin-bottom:8px;}
     .msg-shell.detail-open .msg-rail,.msg-shell.detail-open .msg-list{display:none;}
     .msg-shell:not(.detail-open) .msg-detail{display:none;}
   }
@@ -10571,11 +10576,13 @@ function msgDetailHtml(t){
   const who=t.customer_name || t.customer_phone_pretty;
   const key=msgKey(t.our_phone, t.customer_phone);
   let html='<div class="msg-dhead">'
-    +'<button class="btn msg-back" data-msgback="1">← All messages</button>'
     +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
     +'<div style="min-width:0;">'
     +'<div style="margin-bottom:6px;">'+msgBrandChip(t)+'</div>'
-    +'<h2 class="rc-title" style="font-size:18px;">'+esc(who)+'</h2>'
+    +'<div style="display:flex;align-items:center;gap:4px;">'
+    +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">←</button>'
+    +'<h2 class="rc-title" style="font-size:18px;margin:0;">'+esc(who)+'</h2>'
+    +'</div>'
     +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · '+msgLineNote(t)
     +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
     +'</div></div>'
@@ -10626,8 +10633,14 @@ function msgDetailHtml(t){
 
   html+='<div class="msg-reply">'
     +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
-    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;">'
+    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
     +'<button class="btn" data-msgsend="1">Send</button>'
+    // Dials from whoever clicks it, same as every other 📞 tel: link in the
+    // dashboard (e.g. the Calls tab) — there is no server-initiated calling
+    // built, so this just hands off to the secretary's own phone/browser.
+    // Smaller and green (.rc-btn.green, the existing "good" pill style) so it
+    // reads as the secondary action next to the full-width black Send.
+    +'<a class="rc-btn green" href="tel:+1'+esc(t.customer_phone)+'" style="text-decoration:none;">📞 Call</a>'
     +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)
     +(t.notify_line?' — their phone shows no company name, so start with "This is '+esc(t.business_name||'[company]')+'…"':'')+'</span>'
     +'</div></div>';
