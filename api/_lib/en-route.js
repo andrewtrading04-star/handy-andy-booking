@@ -27,7 +27,7 @@ function baseUrl() {
 export function enRouteMessage(techName, bizName, etaMinutes, bizSlug) {
   const who = (techName && String(techName).trim().split(/\s+/)[0]) || 'Your tech';
   const biz = smsBrandName(bizSlug, bizName);
-  return `${biz}: Heads up! ${who} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival. Reply STOP to opt out.`;
+  return `${biz}: Heads up! ${who} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival.`;
 }
 
 // Send the customer their en-route text and record delivery status on the

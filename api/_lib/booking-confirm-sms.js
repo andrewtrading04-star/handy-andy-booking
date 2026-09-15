@@ -22,11 +22,8 @@ import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
 // The window ("12pm - 3pm") is what the customer actually picked and what the
 // confirmation email shows, so prefer it over a precise start time.
 //
-// A2P 10DLC: this is the FIRST text a customer gets after opting in, so it
-// carries what carriers require of an opt-in confirmation: the brand name
-// first, message frequency, the exact "Message and data rates may apply"
-// phrase, HELP and STOP. It is quoted word for word as a campaign sample, so
-// change the sample if you change this.
+// Keep outgoing copy focused on the booking. Consent and keyword handling
+// are maintained separately from the message template.
 export function bookingConfirmMessage({ bizName, bizSlug, dateStr, timeWindow, techName }) {
   const biz = smsBrandName(bizSlug, bizName);
   const when = timeWindow ? `${dateStr} between ${timeWindow}` : dateStr;
@@ -35,18 +32,15 @@ export function bookingConfirmMessage({ bizName, bizSlug, dateStr, timeWindow, t
   const techLine = techName
     ? `${String(techName).trim().split(/\s+/)[0]} will text you when he's on the way.`
     : `We'll text you when your tech is on the way.`;
-  return `${biz}: You're booked for ${when}. ${techLine} Msg frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.`;
+  return `${biz}: You're booked for ${when}. ${techLine}`;
 }
 
-// The opt-in confirmation (A2P 10DLC / CTIA): every opt-in gets ONE immediate
-// text naming the brand, the message frequency, "Message and data rates may
-// apply", HELP and STOP. A booking confirmation (above) already carries all of
-// that, so this is only for opt-ins that don't produce one: the estimate
+// Send one confirmation for opt-ins that don't produce a booking: the estimate
 // request form (api/estimate.js), the office's "Mark opted in" (booking_update
 // in api/admin.js) and an office estimate sent after the customer's verbal yes
 // (estimateCreate). Never add it to a booking path: the booker would get two.
 export function optInConfirmMessage(bizSlug, bizName) {
-  return `${smsBrandName(bizSlug, bizName)}: You're signed up for appointment and customer-care texts about your job. Msg frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.`;
+  return `${smsBrandName(bizSlug, bizName)}: You're signed up for appointment and customer-care texts about your job.`;
 }
 
 // Best-effort and never throws, same as sendBookingConfirmSms below: the

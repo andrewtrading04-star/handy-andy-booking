@@ -76,13 +76,12 @@ export function fmtExpiry(iso, tz) {
 
 // Plain ASCII on purpose (no curly quotes or dashes) so each text stays GSM-7.
 // The invite is first contact from the 888 line with someone who is neither a
-// tech nor a customer yet, so it carries the brand and a STOP line.
+// tech nor a customer yet, so it carries the brand.
 export function inviteSmsText({ brand, name, metro, link, expiresLabel }) {
   const who = firstName(name) ? `Hi ${firstName(name)}, you're` : "You're";
   return `${brand}: ${who} invited to join our technician team in ${metro}. `
     + `Create your login and pick the times you can work (about 2 min): ${link} `
-    + (expiresLabel ? `Link expires ${expiresLabel}. ` : '')
-    + 'Reply STOP to opt out.';
+    + (expiresLabel ? `Link expires ${expiresLabel}.` : '');
 }
 
 // Sent the moment they tap Start. Deliberately no STOP line: a reflexive STOP

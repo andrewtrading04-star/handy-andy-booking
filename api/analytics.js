@@ -1736,7 +1736,7 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
       : (ld.length === 10 ? `call or text (${ld.slice(0, 3)}) ${ld.slice(3, 6)}-${ld.slice(6)}` : 'reply here and a team member will help you');
     await relayInboundText(line, from, body, business_name, ' (auto: HELP reply sent)');
     console.log(`[sms_inbound] HELP from ...${String(from || '').slice(-4)}: answered with support contact, relayed to staff`);
-    const helpText = `${brand}: For help ${contact}. Msg frequency varies. Message and data rates may apply. Reply STOP to opt out.`;
+    const helpText = `${brand}: For help ${contact}.`;
     await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: helpText, result: { ok: true } });
     return xml(res, `<Response><Message>${xmlEsc(helpText)}</Message></Response>`);
   }
@@ -1754,7 +1754,7 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
   // when this thread already had a text either way in the last 12 hours, and
   // for anyone who opted out ("Stop." isn't blocked by Twilio, so we check).
   if (!(await shouldAutoAck(from, to))) return xml(res, '<Response/>');
-  const ackText = `${brand}: Thanks for your text! A team member will reply shortly. Reply HELP for help, STOP to opt out.`;
+  const ackText = `${brand}: Thanks for your text! A team member will reply shortly.`;
   await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: ackText, result: { ok: true } });
   return xml(res, `<Response><Message>${xmlEsc(ackText)}</Message></Response>`);
 }

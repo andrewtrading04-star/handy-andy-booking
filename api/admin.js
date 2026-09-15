@@ -6956,8 +6956,8 @@ async function invoiceSend(req, res, db, auth, body) {
     // Brand first and a STOP line, like every customer text (A2P 10DLC).
     const smsBrand = smsBrandName(biz.slug, biz.name);
     const text = payUrl
-      ? `${smsBrand}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl} Reply STOP to opt out.`
-      : `${smsBrand}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay. Reply STOP to opt out.`;
+      ? `${smsBrand}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl}`
+      : `${smsBrand}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay.`;
     smsResult = await sendSMSResult(b.customer.phone, text);
     await logAutomatedMessage(db, { businessId: biz.id, customerPhone: b.customer.phone, body: text, result: smsResult });
   }
@@ -10171,7 +10171,7 @@ async function estimateCreate(req, res, db, auth, body) {
       const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
       const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
       const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
-      const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
+      const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions.`;
       const r = await sendSMSResult(estPhone, msg);
       await logAutomatedMessage(db, { businessId: biz.id, customerPhone: estPhone, body: msg, result: r });
       texted = !!r.ok;
@@ -10220,7 +10220,7 @@ async function estimateSendSms(req, res, db, auth, body) {
     : (est.description || 'Your estimate request');
   // Brand first and a STOP line (A2P 10DLC). This is campaign sample 3 word for
   // word, so change the sample if you change this.
-  const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} the estimate you requested. ${svcTxt}${body_txt}. Reply or call us to get scheduled. Reply STOP to opt out.`;
+  const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} the estimate you requested. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
   await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: r });
@@ -10595,7 +10595,7 @@ async function estimateDecline(req, res, db, auth, body) {
     // STOP line like every customer text.
     const smsBrand = smsBrandName(biz.slug, biz.name);
     const opener = firstName ? `Hi ${firstName}, we're` : "We're";
-    const msg = `${smsBrand}: ${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl} Reply STOP to opt out.`;
+    const msg = `${smsBrand}: ${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl}`;
     smsResult = await sendSMSResult(est.customer_phone, msg);
     await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: smsResult });
   }
