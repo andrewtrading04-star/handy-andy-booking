@@ -300,10 +300,13 @@ function fail(id,msg){
   $('accErr').textContent=msg; try{ el&&el.focus(); }catch{}
   return false;
 }
-function nameVal(){ return $('fName').value.replace(/\s+/g,' ').trim(); }
+// Same rule as the server (api/tech.js join_complete): letters in any script,
+// spaces, periods, hyphens and apostrophes, with a straight apostrophe stored
+// as the curly one (O'Brien -> O’Brien).
+function nameVal(){ return $('fName').value.replace(/'/g,'’').replace(/\s+/g,' ').trim(); }
 function checkAccount(){
   const name=nameVal(), p10=phone10($('fPhone').value), pin=$('fPin').value, pin2=$('fPin2').value;
-  if(name.length<2 || !/[A-Za-zÀ-ɏ]/.test(name)) return fail('fName','Enter your full name.');
+  if(name.length<2 || name.length>60 || !/^[\p{L}\p{M}][\p{L}\p{M} .’-]*$/u.test(name)) return fail('fName','Use letters only for your name (spaces, hyphens and apostrophes are fine).');
   if(!p10) return fail('fPhone','Enter your 10-digit cell number.');
   if(info.phone_locked && p10.slice(-4)!==info.phone_last4) return fail('fPhone',`This invite was sent to the number ending in ${info.phone_last4}. Use that number.`);
   if(!/^\d{4}$/.test(pin)) return fail('fPin','Your PIN must be exactly 4 digits.');

@@ -2597,11 +2597,14 @@ async function joinInfo(req, res) {
   if (!code) return res.status(404).json({ state: 'invalid', error: JOIN_BAD_LINK });
   const db = serviceClient();
   const { data: inv, error } = await db.from('tech_invites')
-    .select('id, status, expires_at, invitee_name, invitee_phone, opened_at, open_count, business:businesses ( slug, name ), area:service_areas ( name, unstaffed )')
+    .select('id, status, expires_at, invitee_name, invitee_phone, opened_at, open_count, business:businesses ( slug, name ), area:service_areas ( name, unstaffed, active )')
     .eq('code', code).maybeSingle();
   if (error) throw error;
   if (!inv) return res.status(404).json({ state: 'invalid', error: JOIN_BAD_LINK });
-  const state = inviteState(inv);
+  // A metro switched off after the invite went out kills the invite (the
+  // sign-up itself refuses it as area_inactive); say so up front instead of
+  // letting them fill in the whole form first.
+  const state = (inviteState(inv) === 'open' && inv.area?.active === false) ? 'revoked' : inviteState(inv);
   const slug = inv.business?.slug || '';
   const out = {
     state,
@@ -2650,8 +2653,17 @@ async function joinComplete(req, res, body) {
   if (!code) return res.status(404).json({ code: 'INVITE_NOT_FOUND', error: JOIN_BAD_LINK });
   const nonce = String(body.nonce || '');
   if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) return res.status(400).json({ error: 'Reload the page and try again.' });
-  const name = String(body.name || '').replace(/[\x00-\x1f\x7f<>]/g, '').replace(/\s+/g, ' ').trim();
-  if (name.length < 2 || name.length > 60 || !/\p{L}/u.test(name)) return res.status(400).json({ field: 'name', error: 'Enter your full name.' });
+  // The name shows up across the owner's dashboard, and some older Bracket
+  // Inventory buttons build inline JS strings from tech names with esc(),
+  // which does not escape quotes. Before 0111 every name was typed by staff;
+  // this is the first path where whoever holds an invite link chooses it. So
+  // a self-registered name is letters (any script), spaces, periods, hyphens
+  // and apostrophes only, with a straight apostrophe stored as the curly one
+  // (O'Brien -> O’Brien): it can never close a quoted string or call anything.
+  const name = String(body.name || '').replace(/'/g, '’').replace(/\s+/g, ' ').trim();
+  if (name.length < 2 || name.length > 60 || !/^[\p{L}\p{M}][\p{L}\p{M} .’-]*$/u.test(name)) {
+    return res.status(400).json({ field: 'name', error: 'Use letters only for your name (spaces, hyphens and apostrophes are fine).' });
+  }
   const phone = toE164(body.phone);
   if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter your 10-digit US cell number.' });
   const pin = String(body.pin ?? '');
@@ -2681,10 +2693,29 @@ async function joinComplete(req, res, body) {
   }
 
   const { data: t, error: tErr } = await db.from('technicians')
-    .select('id, name, status, phone, service_area_id, businesses ( slug, name, timezone )').eq('id', row.tech_id).single();
+    .select('id, name, status, active, phone, service_area_id, businesses ( slug, name, timezone )').eq('id', row.tech_id).single();
   if (tErr || !t) {
     console.error('[join] new tech lookup failed:', tErr?.message);
     return res.status(500).json({ error: 'Your account was created. Open the tech app and sign in with your phone number and PIN.' });
+  }
+  // A replay (same device, same nonce, response lost) is the ONLY way this
+  // public endpoint hands out a session without a fresh claim, so it gets the
+  // checks a login would: the tech must still be active (Deactivate has to end
+  // access, not be undone by replaying an old request), the PIN and phone in
+  // this retry must match the account, and only within 30 minutes of joining.
+  // Anything else is "already used": sign in with phone + PIN instead.
+  let slotCount = slots.length;
+  if (outcome === 'replay') {
+    const used = () => res.status(409).json({ code: 'INVITE_USED', error: JOIN_OUTCOME.used[2] });
+    if (!t.active || digits10(t.phone) !== digits10(phone)) return used();
+    const { data: invRow } = await db.from('tech_invites').select('joined_at').eq('code', code).maybeSingle();
+    if (!invRow?.joined_at || Date.now() - new Date(invRow.joined_at).getTime() > 30 * 60 * 1000) return used();
+    const { data: pinHit } = await db.rpc('verify_technician_pin', { p_phone: t.phone, p_pin: pin });
+    const hit = Array.isArray(pinHit) ? pinHit[0] : pinHit;
+    if (!hit || hit.id !== t.id) return used();
+    // Report what the account actually holds, not this retry's edits.
+    const { count } = await db.from('technician_availability').select('id', { count: 'exact', head: true }).eq('technician_id', t.id);
+    if (typeof count === 'number') slotCount = count;
   }
   let area = null;
   try { ({ data: area } = await db.from('service_areas').select('name, unstaffed').eq('id', t.service_area_id).maybeSingle()); }
@@ -2723,7 +2754,7 @@ async function joinComplete(req, res, body) {
     } catch (e) { console.warn('[join] owner alert failed:', e.message); }
     console.log(`[join] new tech ${t.id} ${slug}/${metro} ..${String(t.phone).slice(-4)} slots=${slots.length}`);
   }
-  return res.status(200).json({ ok: true, token, technician, metro, unstaffed, slot_count: slots.length });
+  return res.status(200).json({ ok: true, token, technician, metro, unstaffed, slot_count: slotCount });
 }
 
 // computeJobPay picks rates by the tech's NAME (_lib/payroll.js isJuan /

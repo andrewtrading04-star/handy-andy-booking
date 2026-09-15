@@ -2170,6 +2170,7 @@ function dismissAllOverlays(){
   step(()=>closeCallDayDetail());
   step(()=>closeAssignModal());
   step(()=>closeBracketModal());
+  step(()=>{ if(window._tinvModal){ window._tinvModal.remove(); window._tinvModal=null; } });   // technician invite sheet
   step(()=>{ document.querySelectorAll('.addr-ac,.charge-ov').forEach(el=>el.remove()); });
   step(()=>closeSidebar());
 }
@@ -8034,8 +8035,14 @@ function openTechInviteModal(){
     <div id="tinvDone" style="display:none;"></div>
   </div>`;
   document.body.appendChild(modal);
+  // Tracked like the other body-appended sheets so dismissAllOverlays (logout,
+  // session expiry) removes it instead of leaving it over the sign-in screen.
+  window._tinvModal=modal;
   const q=sel=>modal.querySelector(sel);
-  const close=()=>{ modal.remove(); if(created) renderTechnicians(); };
+  // busy: while tech_invite_create is in flight, a backdrop click or Cancel
+  // must not throw away the link the owner is about to be shown.
+  let busy=false;
+  const close=()=>{ if(busy) return; modal.remove(); if(window._tinvModal===modal) window._tinvModal=null; if(created) renderTechnicians(); };
   modal.addEventListener('click',e=>{ if(e.target===modal) close(); });
   q('#tinvCancel').addEventListener('click',close);
   const paintNote=()=>{ q('#tinvNote').textContent=techInviteMetroNote(metros.find(m=>m.id===q('#tinvArea').value)); };
@@ -8053,9 +8060,11 @@ function openTechInviteModal(){
       if(!confirm(`Text this to ${tinvPhone(d10)}?\n\n"${preview}"`)) return;
     }
     const btns=modal.querySelectorAll('#tinvForm button'); btns.forEach(b=>b.disabled=true);
+    busy=true;
     try{
       const d=await api('tech_invite_create',{ method:'POST', body:{ business:current.slug, service_area_id:areaId, name, phone:phoneRaw, max_jobs_per_day:cap, send_sms:sendSms }});
-      created=true;
+      busy=false; created=true;
+      if(!modal.isConnected) return;   // signed out mid-request: dismissAllOverlays already removed the sheet
       try{ localStorage.setItem('tinv_area_'+current.slug, areaId); }catch{}
       const failed=sendSms&&!(d.sms&&d.sms.ok);
       const status=!sendSms ? 'Link ready. Send it to them however you like (text, WhatsApp, email).'
@@ -8073,7 +8082,7 @@ function openTechInviteModal(){
       q('#tinvCopy').addEventListener('click',()=>tinvCopy(d.link,'Sign-up link copied'));
       const sh=q('#tinvShare'); if(sh) sh.addEventListener('click',()=>navigator.share({ title:'Technician sign-up', text:`Here's your link to join our technician team in ${m.name}:`, url:d.link }).catch(()=>{}));
       q('#tinvClose').addEventListener('click',close);
-    }catch(e){ err.textContent=e.message||'Could not create the invite'; btns.forEach(b=>b.disabled=false); }
+    }catch(e){ busy=false; if(!modal.isConnected) return; err.textContent=e.message||'Could not create the invite'; btns.forEach(b=>b.disabled=false); }
   };
   q('#tinvText').addEventListener('click',()=>submit(true));
   q('#tinvLink').addEventListener('click',()=>submit(false));

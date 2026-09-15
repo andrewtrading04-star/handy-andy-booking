@@ -7020,12 +7020,16 @@ async function techInvites(req, res, db, auth) {
     }
   } catch { /* cosmetic */ }
   const areaName = new Map((areas || []).map(a => [a.id, a.name]));
+  const areaOff = new Set((areas || []).filter(a => !a.active).map(a => a.id));
 
   const invites = recent.map(r => {
     const log = r.last_sms_log_id ? logById.get(r.last_sms_log_id) : null;
     const t = r.technician_id ? techById.get(r.technician_id) : null;
+    // An open invite into a metro that has since been switched off can never
+    // be used (claim_tech_invite refuses it), so list it as canceled.
+    const st = inviteState(r);
     return {
-      id: r.id, state: inviteState(r), link: inviteLink(r.code),
+      id: r.id, state: (st === 'open' && areaOff.has(r.service_area_id)) ? 'revoked' : st, link: inviteLink(r.code),
       name: r.invitee_name, phone: r.invitee_phone, metro: areaName.get(r.service_area_id) || '',
       max_jobs_per_day: r.max_jobs_per_day, expires_at: r.expires_at, created_at: r.created_at,
       sent_at: r.sent_at, send_count: r.send_count, opened_at: r.opened_at, open_count: r.open_count,
@@ -7144,8 +7148,12 @@ async function techInviteSend(req, res, db, auth, body) {
   if (error) throw error;
   if (!inv) return res.status(404).json({ error: 'Invite not found' });
   if (inv.status !== 'pending') return res.status(409).json({ error: inv.status === 'joined' ? 'They already signed up.' : 'This invite was canceled.' });
-  // A cap so a stuck button or a mis-tap loop can't spam a stranger.
-  if (inv.invitee_phone && (inv.send_count || 0) >= 5) return res.status(429).json({ error: 'Already texted 5 times. Copy the link and send it yourself.' });
+  const { data: area } = await db.from('service_areas').select('name, timezone, active').eq('id', inv.service_area_id).maybeSingle();
+  // claim_tech_invite refuses a switched-off metro, so don't revive or re-text
+  // a link that can never be used.
+  if (area && area.active === false) return res.status(409).json({ error: 'That metro is switched off, so this link can never be used. Cancel it.' });
+  // Extend FIRST, so Copy link always hands out a working link, even when the
+  // text below is refused by the cap.
   const { data: upd, error: uErr } = await db.from('tech_invites')
     .update({ expires_at: new Date(Date.now() + INVITE_TTL_DAYS * 864e5).toISOString() })
     .eq('id', inv.id).eq('status', 'pending')
@@ -7153,7 +7161,10 @@ async function techInviteSend(req, res, db, auth, body) {
   if (uErr) throw uErr;
   if (!upd) return res.status(409).json({ error: 'This invite was just used or canceled.' });
   if (!upd.invitee_phone) return res.status(200).json({ ok: true, sms: null, expires_at: upd.expires_at, link: inviteLink(upd.code) });
-  const { data: area } = await db.from('service_areas').select('name, timezone').eq('id', inv.service_area_id).maybeSingle();
+  // A cap so a stuck button or a mis-tap loop can't spam a stranger.
+  if ((upd.send_count || 0) >= 5) {
+    return res.status(200).json({ ok: false, sms: { ok: false, reason: 'already texted 5 times' }, expires_at: upd.expires_at, link: inviteLink(upd.code) });
+  }
   const sms = await textTechInvite(db, biz, area || { name: 'your area', timezone: null }, upd);
   return res.status(200).json({ ok: sms.ok, sms, expires_at: upd.expires_at, link: inviteLink(upd.code) });
 }
@@ -7207,7 +7218,14 @@ async function technicianUpdate(req, res, db, auth, body) {
     // uq_technicians_active_phone10 (0111): one ACTIVE tech per phone number,
     // because login matches a phone in any business. Hit by Set phone or
     // Activate on a number someone else now holds; say so instead of a raw 500.
-    if (error && error.code === '23505') return res.status(409).json({ error: 'That phone number is already on another active technician.' });
+    if (error && error.code === '23505') {
+      // Two unique rules can fire here: the active-phone index above, or the
+      // original (business_id, phone), which also covers INACTIVE profiles.
+      const activeClash = /uq_technicians_active_phone10/.test(`${error.message || ''} ${error.details || ''}`);
+      return res.status(409).json({ error: activeClash
+        ? 'That phone number is already on another active technician.'
+        : 'That phone number is already on another technician in this business (it may be inactive: tap "Show inactive techs" and clear it there first).' });
+    }
     if (error) throw error;
   }
 
