@@ -14210,14 +14210,16 @@ async function messagesSend(req, res, db, auth, body) {
   if (inErr) return res.status(503).json({ error: "Couldn't check this conversation. Try again in a moment." });
   if (!(inbound || []).length) return res.status(409).json({ error: 'You can only reply to a customer who has texted this number. Call them instead.' });
 
-  // A2P 10DLC: the FIRST text we send in a conversation must say who we are
-  // and how to opt out. Staff type naturally ("Hi Mark, yes we can..."), so
-  // the brand of the line texted goes in front and a STOP line at the end,
-  // once, and only if the typed text doesn't already have them. Later replies
-  // in the same thread go out exactly as typed. "First" = no earlier outbound
-  // text in this thread that could have reached them (a failed send doesn't
-  // count). If that lookup fails, treat it as first: an extra brand prefix is
-  // harmless, a missing one isn't.
+  // A2P 10DLC: the FIRST text we send in a conversation must say who we are.
+  // Staff type naturally ("Hi Mark, yes we can..."), so the brand of the line
+  // texted goes in front, once, and only if the typed text doesn't already
+  // have it. Later replies in the same thread go out exactly as typed. No
+  // STOP line here — this is a live two-way reply, not an automated send; the
+  // customer already has STOP instructions from the automated texts and the
+  // registered opt-out keywords still work on this number regardless. "First"
+  // = no earlier outbound text in this thread that could have reached them (a
+  // failed send doesn't count). If that lookup fails, treat it as first: an
+  // extra brand prefix is harmless, a missing one isn't.
   let outText = text;
   let firstInThread = true;
   try {
@@ -14238,7 +14240,6 @@ async function messagesSend(req, res, db, auth, body) {
       if (!brand) brand = smsBrandName(null, null);
     }
     if (!outText.toLowerCase().startsWith(brand.toLowerCase())) outText = `${brand}: ${outText}`;
-    if (!/stop to opt[\s-]?out/i.test(outText)) outText = `${outText} Reply STOP to opt out.`;
   }
 
   // Insert BEFORE sending so the row id can ride along in the status callback.
