@@ -3989,15 +3989,7 @@ async function bookingCreate(req, res, db, auth, body) {
     await sendOptInConfirmSms({ customerPhone: c.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_create', db, businessId: biz.id }).catch(console.error);
   }
 
-  // Consent is a compliance record: note who recorded the yes. The office box
-  // is ticked only after the customer says yes to the phone script.
-  if (body.sms_consent === true) {
-    await db.from('booking_notes').insert({
-      business_id: biz.id, booking_id: bRow.id,
-      author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
-      body: 'SMS consent recorded as YES when this booking was created (customer agreed to texts).',
-    }).then(({ error }) => { if (error) console.warn('[booking_create] consent note failed:', error.message); });
-  }
+  // SMS consent is stored on the booking; do not duplicate it in staff notes.
 
   // Notify the technician if one was assigned at creation time (job-local tz).
   // AWAITED: unawaited, Vercel can freeze the lambda when the response goes out
