@@ -450,6 +450,50 @@
   .rc-card.rc-focus{outline:2px solid var(--accent);outline-offset:2px;animation:rcFocusFade 2.4s ease-out 1;}
   @keyframes rcFocusFade{0%,60%{background:#fff7ed;}100%{background:inherit;}}
   @media(max-width:640px){ .rc-card{flex-direction:column;align-items:stretch;} .rc-actions{min-width:0;} }
+
+  /* ── Messages: brand-rail 3-column layout (2026-09-15 redesign) ───────────
+     Rail (brand filter) + list (threads for that brand) + detail (open
+     thread) shown together, replacing the old list<->detail swap-with-a-
+     back-button. Built entirely from the dashboard's own tokens (--line,
+     --line2, --mute, --accent, --accent-soft, --bg, --ink-2) and existing
+     component classes (.rc-title/.rc-sub/.rc-badge/.rc-btn/.rc-meta/.btn/
+     .search/.empty) — no new palette, no dark mode. */
+  .msg-shell{display:flex;height:calc(100vh - 250px);min-height:480px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;}
+  .msg-rail{width:200px;flex:none;border-right:1px solid var(--line);background:var(--bg);padding:10px 8px;overflow-y:auto;}
+  .msg-rail-hd{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);padding:6px 8px 8px;}
+  .msg-rail-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:2px;}
+  .msg-rail-item:hover{background:var(--line2);}
+  .msg-rail-item.sel{background:var(--accent-soft);color:var(--accent);}
+  .msg-rail-dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .msg-rail-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .msg-rail-cnt{font-size:11px;color:var(--mute);font-weight:700;}
+  .msg-rail-cnt.unread{color:#b91c1c;}
+  .msg-rail-item.sel .msg-rail-cnt{color:var(--accent);}
+  .msg-list{width:300px;flex:none;border-right:1px solid var(--line);overflow-y:auto;}
+  .msg-row{display:flex;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line2);cursor:pointer;}
+  .msg-row:hover{background:var(--bg);}
+  .msg-row.sel{background:var(--accent-soft);}
+  .msg-row-main{flex:1;min-width:0;}
+  .msg-row-top{display:flex;align-items:baseline;gap:6px;}
+  .msg-row-time{margin-left:auto;font-size:11px;color:var(--mute);white-space:nowrap;}
+  .msg-detail{flex:1;display:flex;flex-direction:column;min-width:0;overflow-y:auto;}
+  .msg-back{display:none;}
+  .msg-dhead{padding:14px 16px;border-bottom:1px solid var(--line);}
+  .msg-thread{flex:1;overflow-y:auto;padding:14px 16px;}
+  .msg-auto-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:3px;}
+  .msg-reply{border-top:1px solid var(--line);padding:12px 16px;}
+
+  @media(max-width:880px){
+    .msg-shell{flex-direction:column;height:auto;border:none;border-radius:0;}
+    .msg-rail{width:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:visible;border-right:none;border-bottom:1px solid var(--line);white-space:nowrap;}
+    .msg-rail-hd{display:none;}
+    .msg-rail-item{flex:none;margin-bottom:0;margin-right:4px;}
+    .msg-list{width:100%;border-right:none;max-height:none;}
+    .msg-detail{max-height:none;}
+    .msg-back{display:inline-block;margin-bottom:8px;}
+    .msg-shell.detail-open .msg-rail,.msg-shell.detail-open .msg-list{display:none;}
+    .msg-shell:not(.detail-open) .msg-detail{display:none;}
+  }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
   .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
@@ -10104,9 +10148,26 @@ let _msgOpen=null;         // {our, customer} of the open thread, null = list
 let _msgThread=null;       // the open thread's messages
 let _msgDraft={};          // un-sent reply text, keyed "our|customer"
 let _msgLoading=false;
+let _msgFilter='all';        // brand-rail selection: 'all', a msgBrandKey(), or '__unk'
+let _msgThreadLoading=false; // true while _msgOpen's thread is being fetched
+let _msgThreadError=null;    // set when that fetch fails, cleared on the next attempt
 
 function msgKey(our,customer){ return our+'|'+customer; }
 function msgOpenKey(){ return _msgOpen ? msgKey(_msgOpen.our,_msgOpen.customer) : ''; }
+// Stable per-thread brand-grouping key for the rail: the business slug when
+// known, else the name (brandForUnmappedTexters can set a name+slug with no
+// tracking-number row backing it), else a fixed bucket for "couldn't tell".
+function msgBrandKey(t){ return t.business_name ? (t.business_slug||t.business_name) : '__unk'; }
+// A stable color per brand for the rail dots. The dashboard's own BIZ_THEME
+// (see bizTheme()) only covers the 3 businesses a SECRETARY can be logged in
+// as, with two of those sharing the same near-black accent — not distinct
+// enough for a legend of every brand shown here at once, and not meant for
+// that job. Hashing the name instead means a new brand needs no palette
+// update to get its own dot.
+function msgBrandColor(name){
+  let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))|0;
+  return 'hsl('+(Math.abs(h)%360)+',58%,40%)';
+}
 
 // messages.created_at is a real UTC timestamp written by Postgres now(), NOT a
 // provider-stamped Central time, so it needs none of the CALL_TZ correction the
@@ -10156,52 +10217,100 @@ async function renderMessages(){
 
 function paintMessages(){
   const view=document.getElementById('view');
-  if(_msgOpen && _msgThread) return paintMsgThread(view);
-
   const rows=(_msgThreads||[]);
-  const unread=rows.reduce((n,t)=>n+(t.unread||0),0);
-  let html='<div class="wrap" data-msgview>'
+  const totalUnread=rows.reduce((n,t)=>n+(t.unread||0),0);
+
+  // Group threads by brand for the rail. msgBrandKey buckets a thread whose
+  // brand couldn't be worked out at all under '__unk' — msgBrandChip's gray
+  // "Company unknown" case — so the rail always accounts for every thread.
+  const groups=new Map();
+  for(const t of rows){
+    const key=msgBrandKey(t);
+    let g=groups.get(key);
+    if(!g){ g={ key, name:t.business_name||'Company unknown', unk:!t.business_name, threads:0, unread:0 }; groups.set(key,g); }
+    g.threads++; g.unread+=(t.unread||0);
+  }
+  const brands=[...groups.values()].sort((a,b)=> a.unk===b.unk ? a.name.localeCompare(b.name) : (a.unk?1:-1));
+
+  const filtered = _msgFilter==='all' ? rows : rows.filter(t=>msgBrandKey(t)===_msgFilter);
+
+  let railHtml='<div class="msg-rail">'
+    +'<div class="msg-rail-hd">Brands</div>'
+    +'<div class="msg-rail-item'+(_msgFilter==='all'?' sel':'')+'" data-msgfilter="all">'
+      +'<span class="msg-rail-dot" style="background:var(--accent)"></span>'
+      +'<span class="msg-rail-name">All threads</span>'
+      +'<span class="msg-rail-cnt'+(totalUnread?' unread':'')+'">'+(totalUnread?totalUnread+' new':rows.length)+'</span>'
+    +'</div>'
+    +brands.map(g=>{
+      const dot=g.unk?'var(--mute)':msgBrandColor(g.name);
+      return '<div class="msg-rail-item'+(_msgFilter===g.key?' sel':'')+'" data-msgfilter="'+esc(g.key)+'">'
+        +'<span class="msg-rail-dot" style="background:'+dot+'"></span>'
+        +'<span class="msg-rail-name">'+esc(g.name)+'</span>'
+        +'<span class="msg-rail-cnt'+(g.unread?' unread':'')+'">'+(g.unread?g.unread+' new':g.threads)+'</span>'
+      +'</div>';
+    }).join('')
+  +'</div>';
+
+  let listHtml='<div class="msg-list">';
+  if(!filtered.length){
+    listHtml+='<div class="empty">'+(rows.length?'No conversations for this brand.':'No text messages yet. When someone texts one of your numbers it will show up here.')+'</div>';
+  } else {
+    for(const t of filtered){
+      const who=t.customer_name || t.customer_phone_pretty || t.customer_phone;
+      const preview=(t.last_body||'').slice(0,120);
+      const dir=t.last_direction==='out' ? 'You: ' : '';
+      const isSel=!!(_msgOpen && _msgOpen.our===t.our_phone && _msgOpen.customer===t.customer_phone);
+      listHtml+='<div class="msg-row'+(isSel?' sel':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
+        +'<div class="msg-row-main">'
+        +'<div class="msg-row-top"><strong style="font-size:13.5px;">'+esc(who)+'</strong>'
+        +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
+        +'<span class="msg-row-time">'+esc(msgWhen(t.last_at))+'</span>'
+        +'</div>'
+        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
+        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+msgLineNote(t)+'</div>'
+        +'</div>'
+        +'<button class="rc-btn red" data-msgblock="1" data-msgblockour="'+esc(t.our_phone)+'" data-msgblockcust="'+esc(t.customer_phone)+'" data-msgblockpretty="'+esc(t.customer_phone_pretty||t.customer_phone)+'" title="Block this number — no more calls or texts" style="flex:none;">🚫</button>'
+        +'</div>';
+    }
+  }
+  listHtml+='</div>';
+
+  let detailInner;
+  if(_msgOpen && _msgThreadLoading){
+    detailInner='<div class="empty">Loading conversation…</div>';
+  } else if(_msgOpen && _msgThreadError){
+    detailInner='<div class="empty">Could not open conversation: '+esc(_msgThreadError)+'</div>';
+  } else if(_msgOpen && _msgThread){
+    detailInner=msgDetailHtml(_msgThread);
+  } else {
+    detailInner='<div class="empty">Select a conversation to view it here.</div>';
+  }
+
+  let html='<div class="wrap msg-wrap" data-msgview>'
     +'<div class="rc-head"><div>'
     +'<h2 class="rc-title">💬 Messages</h2>'
     +'<div class="rc-sub">Texts customers sent to your business numbers. Reply and it goes back from the same number they texted.</div>'
     +'</div></div>';
-
-  if(!rows.length){
-    html+='<div class="empty">No text messages yet. When someone texts one of your numbers it will show up here.</div>';
-  } else {
-    if(unread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+unread+' unread</span></div>';
-    for(const t of rows){
-      const who=t.customer_name || t.customer_phone_pretty || t.customer_phone;
-      const preview=(t.last_body||'').slice(0,120);
-      const dir=t.last_direction==='out' ? 'You: ' : '';
-      html+='<div class="rc-card" style="cursor:pointer;" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
-        +'<div style="flex:1;min-width:0;">'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-        +'<strong>'+esc(who)+'</strong>'
-        +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
-        +'</div>'
-        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
-        +'<div class="rc-meta">'+msgLineNote(t)+'</div>'
-        +'</div>'
-        +'<div style="display:flex;align-items:center;gap:10px;">'
-        +'<div class="rc-meta" style="white-space:nowrap;">'+esc(msgWhen(t.last_at))+'</div>'
-        +'<button class="rc-btn red" data-msgblock="1" data-msgblockour="'+esc(t.our_phone)+'" data-msgblockcust="'+esc(t.customer_phone)+'" data-msgblockpretty="'+esc(t.customer_phone_pretty||t.customer_phone)+'" title="Block this number — no more calls or texts">🚫 Block</button>'
-        +'</div>'
-        +'</div>';
-    }
-  }
+  if(totalUnread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+totalUnread+' unread</span></div>';
+  html+='<div class="msg-shell'+(_msgOpen?' detail-open':'')+'">'+railHtml+listHtml+'<div class="msg-detail">'+detailInner+'</div></div>';
   html+='</div>';
   view.innerHTML=html;
 
-  view.querySelectorAll('[data-msgopen]').forEach(el=>el.addEventListener('click',()=>{
-    _msgOpen={ our:el.dataset.msgour, customer:el.dataset.msgcust };
-    _msgThread=null;
+  view.querySelectorAll('[data-msgfilter]').forEach(el=>el.addEventListener('click',()=>{
+    _msgFilter=el.dataset.msgfilter; paintMessages();
+  }));
+
+  view.querySelectorAll('.msg-list [data-msgopen]').forEach(el=>el.addEventListener('click',()=>{
+    const our=el.dataset.msgour, customer=el.dataset.msgcust;
+    if(_msgOpen && _msgOpen.our===our && _msgOpen.customer===customer) return;
+    _msgOpen={ our, customer };
+    _msgThread=null; _msgThreadError=null;
     openMsgThread();
   }));
 
   // Block right from the list — stopPropagation so it doesn't also open the
-  // thread underneath it (the button sits inside the same clickable card).
-  view.querySelectorAll('[data-msgblock]').forEach(btn=>btn.addEventListener('click',async(ev)=>{
+  // thread underneath it (the button sits inside the same clickable row).
+  view.querySelectorAll('.msg-list [data-msgblock]').forEach(btn=>btn.addEventListener('click',async(ev)=>{
     ev.stopPropagation();
     const our=btn.dataset.msgblockour, customer=btn.dataset.msgblockcust, pretty=btn.dataset.msgblockpretty;
     if(!confirm(`Block ${pretty}? They will be rejected on every tracking line — no more calls or texts — before anyone sees them.`)) return;
@@ -10215,6 +10324,106 @@ function paintMessages(){
       btn.disabled=false;
     }
   }));
+
+  const backBtn=view.querySelector('[data-msgback]');
+  if(backBtn) backBtn.addEventListener('click',()=>{ _msgOpen=null; _msgThread=null; _msgThreadError=null; paintMessages(); });
+
+  const threadBlockBtn=view.querySelector('.msg-dhead [data-msgblock]');
+  if(threadBlockBtn) threadBlockBtn.addEventListener('click',async(ev)=>{
+    const t=_msgThread; if(!t) return;
+    if(!confirm(`Block ${t.customer_phone_pretty}? They will be rejected on every tracking line — no more calls or texts — before anyone sees them.`)) return;
+    const btn=ev.currentTarget;
+    btn.disabled=true;
+    try{
+      await api('messages_block',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone }});
+      toast('Blocked');
+      _msgOpen=null; _msgThread=null; paintMessages();
+    }catch(e){
+      toast(e.message||'Could not block');
+      btn.disabled=false;
+    }
+  });
+
+  const ta=view.querySelector('[data-msgreply]');
+  if(ta && _msgThread){
+    const key=msgKey(_msgThread.our_phone, _msgThread.customer_phone);
+    ta.addEventListener('input',()=>{ _msgDraft[key]=ta.value; });
+    const sendBtn=view.querySelector('[data-msgsend]');
+    sendBtn.addEventListener('click',async(ev)=>{
+      const btn=ev.currentTarget;
+      const text=(ta.value||'').trim();
+      if(!text){ toast('Type a message first'); return; }
+      btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
+      const t=_msgThread;
+      try{
+        await api('messages_send',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone, text }});
+        _msgDraft[key]='';
+        ta.value='';
+        _msgThread=null;
+        await openMsgThread();
+      }catch(e){
+        toast(e.message||'Could not send');
+        btn.disabled=false; btn.textContent=prev;
+      }
+    });
+  }
+}
+
+// The open thread's header, bubble history and reply box — the right-hand
+// column of the brand-rail layout. Was paintMsgThread's own view.innerHTML
+// before the 2026-09-15 redesign made list+detail two panels shown at once
+// instead of swapping; paintMessages() above wraps this in .msg-detail and
+// wires up its listeners alongside the rail/list ones.
+function msgDetailHtml(t){
+  const who=t.customer_name || t.customer_phone_pretty;
+  const key=msgKey(t.our_phone, t.customer_phone);
+  let html='<div class="msg-dhead">'
+    +'<button class="btn msg-back" data-msgback="1">← All messages</button>'
+    +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
+    +'<div style="min-width:0;">'
+    +'<div style="margin-bottom:6px;">'+msgBrandChip(t)+'</div>'
+    +'<h2 class="rc-title" style="font-size:18px;">'+esc(who)+'</h2>'
+    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · '+msgLineNote(t)
+    +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
+    +'</div></div>'
+    +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
+    +'</div></div>';
+
+  html+='<div class="msg-thread">';
+  if(!t.messages.length){
+    html+='<div class="empty">No messages in this conversation.</div>';
+  } else {
+    for(const m of t.messages){
+      const mine=m.direction==='out';
+      const automated=mine && m.sent_by==='automated';
+      const bg = automated ? 'var(--line2)' : (mine ? 'var(--accent-soft)' : 'var(--panel)');
+      const align = mine ? 'margin-left:auto;' : '';
+      let meta=msgWhen(m.created_at);
+      if(mine){
+        if(m.status==='failed'||m.status==='undelivered') meta+=' · NOT DELIVERED'+(m.error?' ('+m.error+')':'');
+        else if(m.status==='delivered') meta+=' · delivered';
+        else if(m.status==='queued') meta+=' · sending…';
+        if(m.sent_by && m.sent_by!=='automated') meta+=' · '+m.sent_by;
+      }
+      const failed=(m.status==='failed'||m.status==='undelivered');
+      html+='<div style="max-width:78%;'+align+'margin-bottom:10px;">'
+        +(automated?'<div class="msg-auto-label">Automated</div>':'')
+        +'<div style="background:'+bg+';border:1px solid '+(failed?'var(--red)':'var(--line)')+';border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;'+(automated?'border-style:dashed;':'')+'">'
+        +esc(m.body||'')+'</div>'
+        +'<div class="rc-meta" style="'+(mine?'text-align:right;':'')+'">'+esc(meta)+'</div>'
+        +'</div>';
+    }
+  }
+  html+='</div>';
+
+  html+='<div class="msg-reply">'
+    +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
+    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;">'
+    +'<button class="btn" data-msgsend="1">Send</button>'
+    +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)
+    +(t.notify_line?' — their phone shows no company name, so start with "This is '+esc(t.business_name||'[company]')+'…"':'')+'</span>'
+    +'</div></div>';
+  return html;
 }
 
 // Which COMPANY this conversation is with. Several brands sell the same service
@@ -10238,120 +10447,33 @@ function msgLineNote(t){
   return s;
 }
 
-function paintMsgThread(view){
-  const t=_msgThread;
-  const who=t.customer_name || t.customer_phone_pretty;
-  const key=msgOpenKey();
-  let html='<div class="wrap" data-msgview>'
-    +'<div class="rc-head"><div>'
-    +'<button class="btn" data-msgback="1" style="margin-bottom:8px;">← All messages</button>'
-    +'<div style="margin-bottom:6px;">'+msgBrandChip(t)+'</div>'
-    +'<h2 class="rc-title">'+esc(who)+'</h2>'
-    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · '+msgLineNote(t)
-    +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
-    +'</div></div>'
-    +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
-    +'</div>';
-
-  html+='<div class="rc-card guided" style="max-height:52vh;overflow-y:auto;">';
-  if(!t.messages.length){
-    html+='<div class="empty">No messages in this conversation.</div>';
-  } else {
-    for(const m of t.messages){
-      const mine=m.direction==='out';
-      const bg = mine ? 'var(--accent-soft)' : 'var(--panel)';
-      const align = mine ? 'margin-left:auto;' : '';
-      let meta=msgWhen(m.created_at);
-      if(mine){
-        if(m.status==='failed'||m.status==='undelivered') meta+=' · NOT DELIVERED'+(m.error?' ('+m.error+')':'');
-        else if(m.status==='delivered') meta+=' · delivered';
-        else if(m.status==='queued') meta+=' · sending…';
-        if(m.sent_by) meta+=' · '+m.sent_by;
-      }
-      const failed=(m.status==='failed'||m.status==='undelivered');
-      html+='<div style="max-width:78%;'+align+'margin-bottom:10px;">'
-        +'<div style="background:'+bg+';border:1px solid '+(failed?'var(--red)':'var(--line)')+';border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;">'
-        +esc(m.body||'')+'</div>'
-        +'<div class="rc-meta" style="'+(mine?'text-align:right;':'')+'">'+esc(meta)+'</div>'
-        +'</div>';
-    }
-  }
-  html+='</div>';
-
-  html+='<div style="margin-top:12px;">'
-    +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
-    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;">'
-    +'<button class="btn" data-msgsend="1">Send</button>'
-    +'<span class="rc-meta">Goes out from '+esc(t.our_phone_pretty)
-    // The 888 shows no company name on the customer's phone — say who we are.
-    +(t.notify_line?' — their phone shows no company name, so start with "This is '+esc(t.business_name||'[company]')+'…"':'')+'</span>'
-    +'</div></div>';
-  html+='</div>';
-  view.innerHTML=html;
-
-  view.querySelector('[data-msgback]').addEventListener('click',()=>{
-    _msgOpen=null; _msgThread=null; paintMessages();
-  });
-
-  view.querySelector('[data-msgblock]').addEventListener('click',async(ev)=>{
-    if(!confirm(`Block ${t.customer_phone_pretty}? They will be rejected on every tracking line — no more calls or texts — before anyone sees them.`)) return;
-    const btn=ev.currentTarget;
-    btn.disabled=true;
-    try{
-      await api('messages_block',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone }});
-      toast('Blocked');
-      _msgOpen=null; _msgThread=null; paintMessages();
-    }catch(e){
-      toast(e.message||'Could not block');
-      btn.disabled=false;
-    }
-  });
-
-  const ta=view.querySelector('[data-msgreply]');
-  // Held in _msgDraft rather than re-rendered per keystroke — re-rendering
-  // would steal focus mid-sentence, and the poll checks this map before it
-  // repaints anything.
-  ta.addEventListener('input',()=>{ _msgDraft[key]=ta.value; });
-
-  view.querySelector('[data-msgsend]').addEventListener('click',async(ev)=>{
-    const btn=ev.currentTarget;
-    const text=(ta.value||'').trim();
-    if(!text){ toast('Type a message first'); return; }
-    // Disabled BEFORE the await so a double-click cannot send the text twice.
-    btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
-    try{
-      await api('messages_send',{ method:'POST', body:{ our:t.our_phone, customer:t.customer_phone, text }});
-      _msgDraft[key]='';
-      ta.value='';
-      _msgThread=null;
-      await openMsgThread();
-    }catch(e){
-      toast(e.message||'Could not send');
-      btn.disabled=false; btn.textContent=prev;
-    }
-  });
-}
-
 // Open (or reopen) the thread in _msgOpen: load it, clear its unread badge,
 // paint. Marking read is best-effort — failing to clear a badge must never
 // stop the conversation from opening.
 async function openMsgThread(){
-  const view=document.getElementById('view');
   if(!_msgOpen) return;
-  view.innerHTML='<div class="wrap" data-msgview><div class="empty">Loading conversation…</div></div>';
+  // Repaint the whole 3-column view (not just swap in a loading string) so
+  // the rail and list stay visible while the detail column shows its own
+  // loading/error state — see paintMessages()'s _msgThreadLoading/_msgThreadError.
+  _msgThreadLoading=true; _msgThreadError=null;
+  paintMessages();
   try{
     const t=await api('messages_thread',{params:{ our:_msgOpen.our, customer:_msgOpen.customer }});
     if(!onScreen('messages')) return;
     _msgThread=t;
-    paintMsgThread(view);
+    _msgThreadLoading=false;
+    paintMessages();
     try{
       await api('messages_read',{ method:'POST', body:{ our:_msgOpen.our, customer:_msgOpen.customer }});
       const row=(_msgThreads||[]).find(x=>x.our_phone===_msgOpen.our&&x.customer_phone===_msgOpen.customer);
       if(row) row.unread=0;
       refreshMessagesBadge();
+      paintMessages();
     }catch(_){ /* badge only — the conversation is already open and readable */ }
   }catch(e){
-    view.innerHTML='<div class="wrap" data-msgview><div class="empty">Could not open conversation: '+esc(e.message||'')+'</div></div>';
+    _msgThreadLoading=false;
+    _msgThreadError=e.message||'';
+    paintMessages();
   }
 }
 

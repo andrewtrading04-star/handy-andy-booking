@@ -16,7 +16,7 @@ import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS, sendSMSResult } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.js';
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
@@ -1146,6 +1146,7 @@ async function status(req, res, db, auth, body) {
           // lives in _lib/review-token.js, shared with both admin.js senders.
           const msg = reviewRequestSms({ slug, name: existing.business?.name, token: existing.review_token, clickUrl: smsClickUrl });
           const r = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
+          await logAutomatedMessage(db, { businessId: existing.business_id, customerPhone: existing.customer.phone, body: msg, result: r });
           if (r.ok) {
             const nowIso = new Date().toISOString();
             // Re-read metadata (same reason as the email stamp above) and mark

@@ -308,7 +308,7 @@ async function submit(req, res, db) {
   // stored (insertResilient can strip a missing column). Best-effort and
   // awaited with the rest below, so it can never fail the request.
   if (inserted && inserted.sms_consent === true && phone) {
-    notifications.push(sendOptInConfirmSms({ customerPhone: phone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate' }));
+    notifications.push(sendOptInConfirmSms({ customerPhone: phone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate', db, businessId: biz.id }));
   }
 
   // Notify staff (owner + secretary) per business settings, PLUS the

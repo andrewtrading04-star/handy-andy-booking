@@ -8,6 +8,7 @@
 import { smsNotificationsOn } from './notify.js';
 import { demoMode } from './demo.js';
 import { NATIVE_BUSINESS } from './native-businesses.js';
+import { digitsOf } from './grasshopper.js';
 
 // The name every CUSTOMER-facing text starts with ("<Brand>: ..."). The A2P
 // 10DLC campaign is registered as "Handy Andy TV Mounting" and carriers match
@@ -155,4 +156,42 @@ export async function sendSMS(phoneNumber, message) {
   if (r.ok) return;
   if (r.error) console.error('[SMS]', r.error);
   else console.warn(`[SMS] not sent (${r.skipped}):`, message);
+}
+
+// Log an AUTOMATED (non-staff-typed) customer send into app.messages
+// (migration 0109), so the Messages screen's thread shows the full text
+// history with a customer — booking confirmations, on-the-way, review
+// requests, invoices, estimates, the inbound webhook's own auto-replies —
+// not just their own inbound texts and a staff reply (messagesSend in
+// api/admin.js logs those separately, with sent_by set to the staff name).
+//
+// Every automated send in this app leaves from the account-wide default
+// sender (none of them pass sendSMSResult a `from`), which is also what
+// our_phone must be for the row to land in the right (our_phone,
+// customer_phone) thread — see admin.js's isNotifyLine, which reads the same
+// env var the same way.
+//
+// `db` is optional so a caller that hasn't been wired up yet keeps working
+// exactly as before; it just leaves that one send out of the thread.
+// Best-effort: a logging failure must never turn an SMS that already went
+// out into a reported failure.
+export async function logAutomatedMessage(db, { businessId, customerPhone, body, result }) {
+  if (!db) return;
+  try {
+    const phone = digitsOf(customerPhone);
+    if (!phone) return;
+    await db.from('messages').insert({
+      business_id: businessId || null,
+      customer_phone: phone,
+      our_phone: digitsOf(process.env.TWILIO_PHONE_NUMBER || ''),
+      direction: 'out',
+      body,
+      twilio_sid: (result && result.sid) || null,
+      status: (result && result.ok) ? 'sent' : 'failed',
+      error: (result && !result.ok) ? (result.error || result.skipped || null) : null,
+      sent_by: 'automated',
+    });
+  } catch (e) {
+    console.error('[sms] automated messages log failed:', e.message);
+  }
 }

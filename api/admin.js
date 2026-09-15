@@ -18,7 +18,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual, refreshToken, 
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
 import { readState as readBracketSyncState, readDispatch as readBracketSyncDispatch, summarizeForDashboard as bracketSyncSummary, dispatchBracketScan } from './_lib/bracket-sync-health.js';
@@ -3952,12 +3952,19 @@ async function bookingCreate(req, res, db, auth, body) {
       techName: primaryTechInfo?.name || null,
     });
     // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
-    await sendSMS(c.phone, msg).catch(console.error);
+    try {
+      const _confirmResult = await sendSMSResult(c.phone, msg);
+      if (!_confirmResult.ok) {
+        if (_confirmResult.error) console.error('[SMS]', _confirmResult.error);
+        else console.warn(`[SMS] not sent (${_confirmResult.skipped}):`, msg);
+      }
+      await logAutomatedMessage(db, { businessId: biz.id, customerPhone: c.phone, body: msg, result: _confirmResult });
+    } catch (e) { console.error(e); }
   } else if (c.phone && body.sms_consent === true) {
     // No appointment time yet, so there is no booking confirmation to send. The
     // opt-in still gets its one immediate confirmation text (A2P 10DLC / CTIA),
     // the same one "Mark opted in" sends.
-    await sendOptInConfirmSms({ customerPhone: c.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_create' }).catch(console.error);
+    await sendOptInConfirmSms({ customerPhone: c.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_create', db, businessId: biz.id }).catch(console.error);
   }
 
   // Consent is a compliance record: note who recorded the yes. The office box
@@ -4421,7 +4428,7 @@ async function bookingUpdate(req, res, db, auth, body) {
     let optInNote = '';
     if (patch.sms_consent === true && existing.sms_consent !== true) {
       if (existing.customer?.phone) {
-        const r = await sendOptInConfirmSms({ customerPhone: existing.customer.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_update' });
+        const r = await sendOptInConfirmSms({ customerPhone: existing.customer.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_update', db, businessId: biz.id });
         optInNote = r.ok ? ' Opt-in confirmation text sent.'
           : ` Opt-in confirmation text not sent (${String(r.skipped || r.error || 'unknown error').slice(0, 120)}).`;
       } else {
@@ -4494,6 +4501,7 @@ async function bookingUpdate(req, res, db, auth, body) {
           // Wording lives in _lib/review-token.js, shared with api/tech.js and the Reviews-tab resend.
           const msg = reviewRequestSms({ slug: biz.slug, name: biz.name, token: existing.review_token, clickUrl: smsClickUrl });
           const smsResult = await sendSMSResult(existing.customer.phone, msg, { statusCallback: smsStatusCallback });
+          await logAutomatedMessage(db, { businessId: biz.id, customerPhone: existing.customer.phone, body: msg, result: smsResult });
           if (smsResult.ok) {
             const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
             await db.from('bookings').update({ metadata: { ...(cur?.metadata || existing.metadata || {}), review_sms_sent_at: now } }).eq('id', id);
@@ -6885,6 +6893,7 @@ async function invoiceSend(req, res, db, auth, body) {
       ? `${smsBrand}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl} Reply STOP to opt out.`
       : `${smsBrand}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay. Reply STOP to opt out.`;
     smsResult = await sendSMSResult(b.customer.phone, text);
+    await logAutomatedMessage(db, { businessId: biz.id, customerPhone: b.customer.phone, body: text, result: smsResult });
   }
 
   // Best-effort audit note, same pattern as receipt_send — a financial
@@ -7753,6 +7762,7 @@ async function reviewResend(req, res, db, auth, body) {
     // Wording lives in _lib/review-token.js, shared with both completion senders.
     const msg = reviewRequestSms({ slug: biz.slug, name: biz.name, token: b.review_token, clickUrl: smsClickUrl });
     const r = await sendSMSResult(b.customer.phone, msg, { statusCallback: smsStatusCallback });
+    await logAutomatedMessage(db, { businessId: biz.id, customerPhone: b.customer.phone, body: msg, result: r });
     if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
 
     const now = new Date().toISOString();
@@ -9612,7 +9622,7 @@ async function estimateCreate(req, res, db, auth, body) {
   // first thing the customer receives. Awaited so it goes out ahead of it.
   // Best-effort: a failure never blocks the estimate.
   if (estPhone && body.sms_consent === true) {
-    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create' });
+    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create', db, businessId: biz.id });
   }
 
   // Text the customer the estimate + a link to view/approve it. For a customer
@@ -9627,6 +9637,7 @@ async function estimateCreate(req, res, db, auth, body) {
       const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
       const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions. Reply STOP to opt out.`;
       const r = await sendSMSResult(estPhone, msg);
+      await logAutomatedMessage(db, { businessId: biz.id, customerPhone: estPhone, body: msg, result: r });
       texted = !!r.ok;
       if (texted && !emailed) await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
       if (!r.ok) console.warn(`[estimate_create] estimate SMS not sent:`, r.skipped || r.error);
@@ -9676,6 +9687,7 @@ async function estimateSendSms(req, res, db, auth, body) {
   const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} the estimate you requested. ${svcTxt}${body_txt}. Reply or call us to get scheduled. Reply STOP to opt out.`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
+  await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: r });
   if (!r.ok) {
     if (r.skipped === 'notifications_off') return res.status(503).json({ error: 'Texting is turned off until the account is approved.' });
     if (r.skipped === 'not_configured')   return res.status(503).json({ error: 'SMS service (Twilio) is not configured.' });
@@ -10049,6 +10061,7 @@ async function estimateDecline(req, res, db, auth, body) {
     const opener = firstName ? `Hi ${firstName}, we're` : "We're";
     const msg = `${smsBrand}: ${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl} Reply STOP to opt out.`;
     smsResult = await sendSMSResult(est.customer_phone, msg);
+    await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: smsResult });
   }
 
   if (est.customer_email) {
@@ -11851,7 +11864,14 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
       dateStr, timeWindow: slotDef.label, techName: techInfo?.name || null,
     });
     // Awaited: an un-awaited send is killed when Vercel freezes the lambda on response.
-    await sendSMS(cust.phone, msg).catch(console.error);
+    try {
+      const _confirmResult = await sendSMSResult(cust.phone, msg);
+      if (!_confirmResult.ok) {
+        if (_confirmResult.error) console.error('[SMS]', _confirmResult.error);
+        else console.warn(`[SMS] not sent (${_confirmResult.skipped}):`, msg);
+      }
+      await logAutomatedMessage(db, { businessId: biz.id, customerPhone: cust.phone, body: msg, result: _confirmResult });
+    } catch (e) { console.error(e); }
   }
 
   if (cust.email) {

@@ -17,7 +17,7 @@
 // can't drift into telling customers different things. Every one names the
 // JOB's business, because a Mile High / Precision / Austin customer must not be
 // greeted by whichever company the tech works for.
-import { sendSMSResult, smsBrandName } from './sms.js';
+import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
 
 // The window ("12pm - 3pm") is what the customer actually picked and what the
 // confirmation email shows, so prefer it over a precise start time.
@@ -53,11 +53,13 @@ export function optInConfirmMessage(bizSlug, bizName) {
 // opt-in is already saved, so a Twilio hiccup must never fail the request that
 // recorded it. Default From, like every other automated text. The CALLER
 // checks consent. AWAIT it: an un-awaited send dies when the lambda freezes.
-export async function sendOptInConfirmSms({ customerPhone, bizSlug, bizName, tag = 'opt-in' }) {
+export async function sendOptInConfirmSms({ customerPhone, bizSlug, bizName, tag = 'opt-in', db = null, businessId = null }) {
   if (!customerPhone) return { ok: false, skipped: 'no_customer_phone' };
+  const msg = optInConfirmMessage(bizSlug, bizName);
   try {
-    const r = await sendSMSResult(customerPhone, optInConfirmMessage(bizSlug, bizName));
+    const r = await sendSMSResult(customerPhone, msg);
     if (!r.ok) console.warn(`[${tag}] opt-in confirmation SMS not sent:`, r.skipped || r.error);
+    await logAutomatedMessage(db, { businessId, customerPhone, body: msg, result: r });
     return r;
   } catch (e) {
     console.error(`[${tag}] opt-in confirmation SMS error:`, e.message);
@@ -74,6 +76,7 @@ export async function sendOptInConfirmSms({ customerPhone, bizSlug, bizName, tag
 // _lib/en-route.js.
 export async function sendBookingConfirmSms({
   customerPhone, smsConsent, bizName, bizSlug, techName, startUTC, tz, timeWindow, tag = 'book',
+  db = null, businessId = null,
 }) {
   if (!customerPhone) return { ok: false, skipped: 'no_customer_phone' };
   // Opt-in checkbox from the widget. Only an explicit true sends: a missing
@@ -96,6 +99,7 @@ export async function sendBookingConfirmSms({
   try {
     const r = await sendSMSResult(customerPhone, msg);
     if (!r.ok) console.warn(`[${tag}] confirmation SMS not sent:`, r.skipped || r.error);
+    await logAutomatedMessage(db, { businessId, customerPhone, body: msg, result: r });
     return r;
   } catch (e) {
     console.error(`[${tag}] confirmation SMS error:`, e.message);

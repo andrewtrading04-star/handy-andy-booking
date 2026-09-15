@@ -1101,6 +1101,7 @@ async function bookDoms(req, res) {
     startUTC, tz,
     timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',
     tag: 'book-doms',
+    db, businessId: biz.id,
   });
 
   return res.status(200).json({
@@ -1506,6 +1507,7 @@ async function bookNative(req, res, slug) {
     startUTC, tz,
     timeWindow: sum.timeWindow || (SLOTS.find(s => s.key === slotKey) || {}).label || '',
     tag: 'book-ha',
+    db, businessId: biz.id,
   });
 
   return res.status(200).json({

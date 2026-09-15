@@ -1,6 +1,6 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
-import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState } from './_lib/sms.js';
+import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 
@@ -130,6 +130,21 @@ async function handleTwilioStatus(req, res) {
       return res.status(200).send('ok');
     }
     const t = verifyToken(token);
+    // Independent of which token `kind` matches below (or whether the token
+    // even verifies): any automated send logged into app.messages carries
+    // this callback's MessageSid as its twilio_sid (see _lib/sms.js's
+    // logAutomatedMessage, and messagesSend's own insert in this file), so
+    // the Messages screen picks up the same delivered/failed lifecycle the
+    // booking-column branches below already give their own tables. A no-op
+    // when no messages row has this SID — every staff/tech send that isn't
+    // logged into this table.
+    try {
+      const sid = (params.MessageSid || '').toString();
+      const mstatus = (params.MessageStatus || '').toLowerCase();
+      if (sid && (mstatus === 'delivered' || mstatus === 'failed' || mstatus === 'undelivered')) {
+        await serviceClient().from('messages').update({ status: mstatus }).eq('twilio_sid', sid);
+      }
+    } catch (e) { console.warn('[sms_status] messages-table status update failed:', e.message); }
     // Same dual-shape acceptance as api/book.js review_click: legacy review
     // tokens from mirror.js carry NO kind (every widget booking until Jul
     // 2026), so requiring kind === 'review' silently dropped their delivery
@@ -1463,7 +1478,11 @@ async function handleSmsInbound(req, res) {
   // Declared out here, not inside the try: the relay-and-ack call after the
   // catch below names the brand with it. Declared inside the try, that call
   // threw a ReferenceError on every inbound text (no reply, no staff relay).
+  // business_id is declared alongside it for the exact same reason: the
+  // automated-message logging plumbed into finishSmsInbound needs it at the
+  // post-try/catch call site below too.
   let business_name = null;
+  let business_id = null;
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
@@ -1480,7 +1499,10 @@ async function handleSmsInbound(req, res) {
       blocked = !!b;
     }
 
-    let business_id = null;
+    // No `let` here — this assigns the business_id declared above the try
+    // block (see the comment by that declaration) rather than shadowing it
+    // with a new binding that would go out of scope when the try/catch closes.
+    business_id = null;
     // An INACTIVE tracking number still belongs to a brand: name that brand in
     // any reply (never fall back to Handy Andy on another company's number),
     // but keep queue attribution to active lines only, exactly as before.
@@ -1531,7 +1553,7 @@ async function handleSmsInbound(req, res) {
     }
 
     // Same rule as the voice path: the text still relays, it just isn't logged.
-    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name, to);
+    if (await isSilentNumber(db, from)) return finishSmsInbound(res, line, from, body, blocked, business_name, to, business_id);
 
     // A bare STOP/HELP/START keyword gets its automatic handling in
     // finishSmsInbound, but it is still relayed and queued like any other
@@ -1566,7 +1588,7 @@ async function handleSmsInbound(req, res) {
     console.error('[sms_inbound] log failed:', e.message);
   }
 
-  return finishSmsInbound(res, line, from, body, blocked, business_name, to);
+  return finishSmsInbound(res, line, from, body, blocked, business_name, to, business_id);
 }
 
 // A2P 10DLC keywords, matched against the WHOLE text only ("can you stop by
@@ -1654,7 +1676,8 @@ async function relayInboundText(line, from, body, business_name, note = '') {
 
 // The relay-and-ack tail of sms_inbound, split out so a silent number can skip
 // the row without skipping the relay.
-async function finishSmsInbound(res, line, from, body, blocked, business_name, to) {
+async function finishSmsInbound(res, line, from, body, blocked, business_name, to, business_id) {
+  const db = serviceClient();
   const keyword = smsKeyword(body);
   // An opt-out is honored even from a blocked number (Twilio has already
   // stopped sends; the CRM should agree). Either way we send no reply of ours:
@@ -1674,6 +1697,10 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
       const optText = optBrand === HANDY_ANDY_SMS_BRAND
         ? `${optBrand}: You are unsubscribed and will receive no further messages. Questions? Email contact@ihandyandy.com or call (713) 876-9032.`
         : `${optBrand}: You are unsubscribed and will receive no further messages.`;
+      // Twilio sends this itself (no send-result to inspect), so it's logged
+      // as a plain "sent" the moment the TwiML is built, same as the HELP
+      // reply and the default auto-ack below.
+      await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: optText, result: { ok: true } });
       return xml(res, `<Response><Message>${xmlEsc(optText)}</Message></Response>`);
     }
     return xml(res, '<Response/>');
@@ -1709,7 +1736,9 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
       : (ld.length === 10 ? `call or text (${ld.slice(0, 3)}) ${ld.slice(3, 6)}-${ld.slice(6)}` : 'reply here and a team member will help you');
     await relayInboundText(line, from, body, business_name, ' (auto: HELP reply sent)');
     console.log(`[sms_inbound] HELP from ...${String(from || '').slice(-4)}: answered with support contact, relayed to staff`);
-    return xml(res, `<Response><Message>${xmlEsc(`${brand}: For help ${contact}. Msg frequency varies. Message and data rates may apply. Reply STOP to opt out.`)}</Message></Response>`);
+    const helpText = `${brand}: For help ${contact}. Msg frequency varies. Message and data rates may apply. Reply STOP to opt out.`;
+    await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: helpText, result: { ok: true } });
+    return xml(res, `<Response><Message>${xmlEsc(helpText)}</Message></Response>`);
   }
 
   // START/UNSTOP: Twilio sends its own resubscribe confirmation, so no reply
@@ -1725,7 +1754,9 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
   // when this thread already had a text either way in the last 12 hours, and
   // for anyone who opted out ("Stop." isn't blocked by Twilio, so we check).
   if (!(await shouldAutoAck(from, to))) return xml(res, '<Response/>');
-  return xml(res, `<Response><Message>${xmlEsc(`${brand}: Thanks for your text! A team member will reply shortly. Reply HELP for help, STOP to opt out.`)}</Message></Response>`);
+  const ackText = `${brand}: Thanks for your text! A team member will reply shortly. Reply HELP for help, STOP to opt out.`;
+  await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: ackText, result: { ok: true } });
+  return xml(res, `<Response><Message>${xmlEsc(ackText)}</Message></Response>`);
 }
 
 // Whether the auto-ack above goes out. Any failed lookup means no ack: a

@@ -8,7 +8,7 @@
 //                    (see _lib/tech-late.js). No app login required.
 // The wording and the Twilio status-callback wiring live here precisely so the
 // two paths can't drift into saying different things to the customer.
-import { sendSMSResult, smsBrandName } from './sms.js';
+import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
 import { signToken } from './auth.js';
 
 // Matches the tech app's existing default (api/tech.js passed 30 when the tech
@@ -78,15 +78,21 @@ export async function sendEnRouteSms(db, opts = {}) {
   let techName = null;
   let bizName = opts.bizName || null;
   let bizSlug = opts.bizSlug || null;
+  // Always looked up now (previously skipped when a caller already passed
+  // bizName) so there is a business_id for the messages row below even on
+  // that path. Runs in parallel with the technician lookup, so it costs
+  // nothing extra today — neither current caller (api/tech.js's "On My Way",
+  // api/book.js's one-tap nudge link) passes bizName.
+  let businessId = null;
   try {
     const [techRes, bookRes] = await Promise.all([
       db.from('technicians').select('name').eq('id', technicianId).maybeSingle(),
-      bizName ? Promise.resolve({ data: null })
-              : db.from('bookings').select('business:businesses ( name, slug )').eq('id', bookingId).maybeSingle(),
+      db.from('bookings').select('business_id, business:businesses ( name, slug )').eq('id', bookingId).maybeSingle(),
     ]);
     if (techRes?.data?.name) techName = techRes.data.name;
     if (!bizName && bookRes?.data?.business?.name) bizName = bookRes.data.business.name;
     if (!bizSlug && bookRes?.data?.business?.slug) bizSlug = bookRes.data.business.slug;
+    businessId = bookRes?.data?.business_id || null;
   } catch { /* best-effort: fall back to generic wording */ }
 
   const msg = enRouteMessage(techName, bizName, etaMinutes, bizSlug);
@@ -104,6 +110,7 @@ export async function sendEnRouteSms(db, opts = {}) {
       on_the_way_sms_status: r.ok ? 'pending' : 'failed',
       on_the_way_sms_sent_at: new Date().toISOString(),
     }).eq('id', bookingId);
+    await logAutomatedMessage(db, { businessId, customerPhone, body: msg, result: r });
     return r;
   } catch (e) {
     console.error('[en-route sms]', e.message);
