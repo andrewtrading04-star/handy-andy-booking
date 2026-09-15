@@ -535,3 +535,26 @@ export async function sendReviewBonusEarnedAlert({ techName, amount }) {
     await sendSMS(phone, msg).catch(e => console.warn('[review-bonus] alert SMS failed:', e.message));
   } catch (e) { console.warn('[review-bonus] alert error:', e.message); }
 }
+
+// ── New technician joined through an invite link (migration 0111) ───────────
+// A tech who taps Start on the join page is LIVE for jobs that instant, with no
+// second approval step, so the owner hears about every one right away. This is
+// the "not who you invited?" safety net; Deactivate on the Technicians tab is
+// the off switch. payrollNote flags a name the name-keyed payroll rules
+// (_lib/payroll.js isJuan / isRetired) would mis-pay. welcomeFailed carries the
+// reason our welcome text didn't go out, because the same failure (e.g. they
+// once replied STOP to the 888 line) will also swallow their job texts.
+export async function sendTechJoinedAlert({ techName, company, metro, slotCount, unstaffed, payrollNote, welcomeFailed }) {
+  try {
+    const phone = process.env.OWNER_PHONE_NUMBER;
+    if (!phone) return;
+    let msg = `New tech joined: ${techName}, ${company} - ${metro}. `;
+    msg += unstaffed
+      ? `${metro} isn't taking online bookings yet, so no automatic jobs reach them until you open it. `
+      : `LIVE for jobs now, ${slotCount} time slot${slotCount === 1 ? '' : 's'} a week. `;
+    msg += 'Not who you invited? Deactivate them on the Technicians tab.';
+    if (payrollNote) msg += ` PAYROLL: ${payrollNote}`;
+    if (welcomeFailed) msg += ` Heads up: our welcome text to them failed (${welcomeFailed}), so job texts may not reach them either.`;
+    await sendSMS(phone, msg).catch(e => console.warn('[tech-join] alert SMS failed:', e.message));
+  } catch (e) { console.warn('[tech-join] alert error:', e.message); }
+}

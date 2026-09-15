@@ -170,7 +170,9 @@ const SOLE_TECH = {
 
 // Apply the lock to a technician list. Returns the list unchanged for any
 // business without a lock, so the other nine brands are entirely unaffected.
-function applySoleTech(businessSlug, techs) {
+// Exported for the office auto-pick (api/admin.js scopedRosterTechs), which
+// builds its own roster and would otherwise never see this lock.
+export function applySoleTech(businessSlug, techs) {
   const only = SOLE_TECH[businessSlug];
   if (!only) return techs || [];
   return (techs || []).filter(t => t.id === only);

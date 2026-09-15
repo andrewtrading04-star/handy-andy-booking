@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0A1628">
+<title>Technician sign-up</title>
+<meta property="og:title" content="Technician sign-up">
+<meta property="og:description" content="Create your login and pick the times you can work.">
+<link rel="icon" type="image/svg+xml" href="/favicon-tech.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Technician sign-up (migration 0111). The owner texts a would-be tech a
+  /join?c=<code> link from the dashboard's Technicians tab. This page walks
+  them through: create a login (name, phone, 4-digit PIN) -> pick the weekly
+  times they can work -> Start. NOTHING is saved until Start, which commits the
+  whole account in one database transaction (api/tech.js join_complete ->
+  app.claim_tech_invite) and then signs them straight into the tech app by
+  writing the same localStorage session tech.html's own login writes.
+  Styling mirrors tech.html's tokens so it reads as the app they're about to
+  use; a Dom's invite switches to Dom's blue, like tech.html's body.doms.
+-->
+<style>
+  :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
+    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;--blue:#4aa3ff;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
+  body.doms{--orange:#0047AB;--orange-d:#003580;--grad:linear-gradient(120deg,#4d8dff 0%,#2563eb 55%,#0047AB 100%);}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{background:var(--navy);}
+  body{font-family:var(--font-sans);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
+  button{font-family:inherit;cursor:pointer;}
+  .hidden{display:none !important;}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;padding:calc(22px + env(safe-area-inset-top,0px)) 20px calc(28px + env(safe-area-inset-bottom,0px));}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
+  .brand{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.07em;margin-bottom:22px;}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none;}
+  h1{font-size:clamp(26px,7.2vw,32px);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin-bottom:10px;}
+  h2{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;}
+  .lead{color:var(--mute);font-size:15px;line-height:1.55;margin-bottom:22px;}
+  .step{font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
+  .steps{list-style:none;display:flex;flex-direction:column;gap:10px;margin:0 0 24px;}
+  .steps li{display:flex;gap:12px;align-items:flex-start;background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:14px;}
+  .steps .n{width:28px;height:28px;border-radius:50%;background:var(--orange);color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;flex:none;}
+  .steps b{display:block;font-size:15px;margin-bottom:2px;}
+  .steps span.t{color:var(--mute);font-size:13.5px;line-height:1.45;}
+  .note{background:rgba(74,163,255,.1);border:1px solid rgba(74,163,255,.35);color:#cfe4ff;border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.5;margin-bottom:20px;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700;}
+  .field .help{color:var(--mute);font-size:12.5px;margin-top:6px;line-height:1.45;}
+  input[type=text],input[type=tel]{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:15px 16px;font-size:17px;font-family:inherit;}
+  input:focus{outline:none;border-color:var(--orange);}
+  input.bad{border-color:var(--red);}
+  .pin{letter-spacing:12px;text-align:center;font-size:24px;font-weight:700;}
+  .pinrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .consent{display:flex;gap:12px;align-items:flex-start;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:14px;margin:2px 0 4px;cursor:pointer;}
+  .consent input{width:22px;height:22px;flex:none;margin-top:1px;accent-color:var(--orange);}
+  .consent span{font-size:13.5px;line-height:1.5;}
+  .consent.bad{border-color:var(--red);}
+  .btn{display:block;background:var(--orange);color:#fff;border:none;border-radius:12px;padding:17px;font-size:17px;font-weight:800;width:100%;text-align:center;text-decoration:none;}
+  .btn:active{background:var(--orange-d);} .btn:disabled{opacity:.45;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:700;margin-top:10px;}
+  .link{display:block;margin:4px auto 0;background:none;border:none;color:var(--mute);font-size:14px;font-weight:600;padding:12px;text-decoration:underline;}
+  .err{color:var(--red);font-size:14px;margin:10px 0 0;min-height:20px;text-align:center;line-height:1.4;}
+  .quick{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px;}
+  .quick button{background:var(--navy-2);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-size:13.5px;font-weight:700;}
+  .day{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .day h3{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;justify-content:space-between;}
+  .day h3 .cnt{color:var(--orange);text-transform:none;letter-spacing:0;}
+  .chips{display:flex;flex-direction:column;gap:8px;}
+  .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px;}
+  .slotchip .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;}
+  .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip.on .box{border-color:#fff;background:#fff;color:var(--orange);}
+  .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
+  .sticky{position:sticky;bottom:0;background:linear-gradient(to top,var(--navy) 72%,rgba(10,22,40,0));padding:18px 0 calc(4px + env(safe-area-inset-bottom,0px));margin-top:6px;}
+  .count{text-align:center;color:var(--mute);font-size:13.5px;margin-bottom:10px;font-weight:600;}
+  .count b{color:var(--ink);}
+  .card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:2px 16px;margin-bottom:16px;}
+  .kv{display:flex;justify-content:space-between;gap:14px;padding:13px 0;border-bottom:1px solid var(--line);font-size:14.5px;}
+  .kv:last-child{border-bottom:0;}
+  .kv .k{color:var(--mute);flex:none;}
+  .kv .v{text-align:right;font-weight:600;line-height:1.45;}
+  .kv .v small{display:block;color:var(--mute);font-weight:500;font-size:12.5px;}
+  .edit{background:none;border:none;color:var(--orange);font-weight:700;font-size:13px;padding:0 0 0 6px;}
+  .next{background:var(--navy-2);border-left:3px solid var(--orange);border-radius:10px;padding:13px 14px;font-size:14px;line-height:1.55;margin-bottom:18px;}
+  .done-ic{width:64px;height:64px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:900;color:#fff;margin:10px 0 18px;}
+  .pill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:7px 13px;font-size:13px;font-weight:800;margin-bottom:18px;}
+  .pill.live{background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.45);}
+  .pill.soon{background:rgba(74,163,255,.12);color:#9ccaff;border:1px solid rgba(74,163,255,.4);}
+  .pill .d{width:8px;height:8px;border-radius:50%;background:currentColor;}
+  .info{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:12px;}
+  .info b.h{display:block;font-size:12.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .info p{font-size:14.5px;line-height:1.55;}
+  .dead{padding-top:12vh;text-align:center;}
+  .dead .ic{font-size:44px;margin-bottom:14px;}
+  .dead p{color:var(--mute);font-size:15px;line-height:1.55;margin:8px 0 22px;}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite;margin:30vh auto 0;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media(prefers-reduced-motion:reduce){.spinner{animation:none;}}
+  .desk{color:var(--mute);font-size:12.5px;text-align:center;margin-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="vLoading"><div class="spinner" role="status" aria-label="Loading"></div></div>
+
+  <div id="vDead" class="dead hidden">
+    <div class="ic" id="deadIc">🔗</div>
+    <h2 id="deadT">This link isn't valid</h2>
+    <p id="deadP"></p>
+    <a class="btn hidden" id="deadApp" href="/tech.html">Open the tech app</a>
+    <button class="btn ghost hidden" id="deadRetry" type="button">Try again</button>
+  </div>
+
+  <div id="vWelcome" class="hidden">
+    <div class="brand"><span class="dot"></span><span data-brand></span></div>
+    <div class="step" id="wHi">Welcome!</div>
+    <h1>Join our <span class="hl" data-metro></span> technician team</h1>
+    <p class="lead">We send you TV mounting jobs by text. Setting up takes about 2 minutes:</p>
+    <ol class="steps">
+      <li><span class="n">1</span><div><b>Create your login</b><span class="t">Your phone number and a 4-digit PIN.</span></div></li>
+      <li><span class="n">2</span><div><b>Pick when you can work</b><span class="t">Tap the times you're free each week. You can change them anytime.</span></div></li>
+      <li><span class="n">3</span><div><b>Start</b><span class="t">We text you every time you're booked. The address and details are in the tech app.</span></div></li>
+    </ol>
+    <div class="note hidden" id="wUnstaffed"><span data-metro></span> isn't open for online bookings yet. Sign up now and we'll text you as soon as jobs start.</div>
+    <button class="btn" type="button" id="btnGo">Get started</button>
+    <div class="desk hidden" id="deskHint">Best done on the phone you'll use for jobs.</div>
+  </div>
+
+  <form id="vAccount" class="hidden" novalidate>
+    <div class="step">Step 1 of 3</div>
+    <h2>Create your login</h2>
+    <p class="lead">This is how you'll sign in to the tech app.</p>
+    <div class="field"><label for="fName">Full name</label>
+      <input type="text" id="fName" autocomplete="name" placeholder="First and last name" maxlength="60"></div>
+    <div class="field"><label for="fPhone">Mobile number</label>
+      <input type="tel" id="fPhone" autocomplete="tel" inputmode="tel" placeholder="(555) 123-4567">
+      <div class="help" id="phHelp"></div></div>
+    <div class="pinrow">
+      <div class="field"><label for="fPin">4-digit PIN</label>
+        <input type="tel" id="fPin" class="pin" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••"></div>
+      <div class="field"><label for="fPin2">Type it again</label>
+        <input type="tel" id="fPin2" class="pin" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••"></div>
+    </div>
+    <label class="consent" id="consentBox" for="fConsent"><input type="checkbox" id="fConsent">
+      <span>Text me job alerts and schedule updates at this number. Msg &amp; data rates may apply. Reply STOP to opt out.</span></label>
+    <div class="err" id="accErr"></div>
+    <button class="btn" type="submit">Next: my times</button>
+    <button class="link" type="button" data-go="vWelcome">Back</button>
+  </form>
+
+  <div id="vTimes" class="hidden">
+    <div class="step">Step 2 of 3</div>
+    <h2>When can you work?</h2>
+    <p class="lead" id="tzHelp"></p>
+    <div class="quick">
+      <button type="button" data-q="weekdays">+ Weekdays</button>
+      <button type="button" data-q="weekends">+ Weekends</button>
+      <button type="button" data-q="mornings">+ Mornings</button>
+      <button type="button" data-q="evenings">+ Evenings</button>
+      <button type="button" data-q="clear">Clear</button>
+    </div>
+    <div id="days"></div>
+    <div class="sticky">
+      <div class="count" id="cnt"></div>
+      <div class="err" id="timesErr" style="margin:0 0 8px;min-height:0;"></div>
+      <button class="btn" type="button" id="toReview" disabled>Next: review</button>
+      <button class="link" type="button" data-go="vAccount">Back</button>
+    </div>
+  </div>
+
+  <div id="vReview" class="hidden">
+    <div class="step">Step 3 of 3</div>
+    <h2>Ready to start</h2>
+    <p class="lead">Check everything looks right.</p>
+    <div class="card">
+      <div class="kv"><span class="k">Name</span><span class="v" id="rName"></span></div>
+      <div class="kv"><span class="k">Login<button class="edit" type="button" data-go="vAccount">Edit</button></span><span class="v" id="rLogin"></span></div>
+      <div class="kv"><span class="k">Metro</span><span class="v" id="rMetro"></span></div>
+      <div class="kv"><span class="k">Times<button class="edit" type="button" data-go="vTimes">Edit</button></span><span class="v" id="rTimes"></span></div>
+    </div>
+    <div class="next" id="rNext"></div>
+    <button class="btn" type="button" id="btnStart">Start getting jobs</button>
+    <div class="err" id="revErr"></div>
+  </div>
+
+  <div id="vDone" class="hidden">
+    <div class="done-ic">✓</div>
+    <h1 id="dHi">You're in!</h1>
+    <div class="pill live" id="dPill"><span class="d"></span><span id="dPillT"></span></div>
+    <div class="info"><b class="h">How jobs reach you</b><p id="dJobs"></p></div>
+    <div class="info"><b class="h">Your times</b><p id="dTimes"></p></div>
+    <div class="info"><b class="h">Your login</b><p id="dLogin"></p></div>
+    <a class="btn" id="dApp" href="/tech.html" style="margin-top:8px;">Open the tech app</a>
+  </div>
+
+</div>
+<script>
+const API='/api/tech';
+const code=(new URLSearchParams(location.search).get('c')||'').trim().toUpperCase();
+const $=id=>document.getElementById(id);
+const SCREENS=['vLoading','vDead','vWelcome','vAccount','vTimes','vReview','vDone'];
+const ORDER=[1,2,3,4,5,6,0];            // Monday-first on screen; DAYS from the API is Sunday-first (0=Sun)
+const sel=new Set();                     // "dow:slotKey"
+let info=null;                           // the join_info answer
+
+// Storage can throw (iOS private mode, blocked cookies); never let that halt the page.
+function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch{ return false; } }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch{} }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function show(id){ SCREENS.forEach(s=>$(s).classList.toggle('hidden', s!==id)); window.scrollTo(0,0); }
+
+// One retry key per device per invite: if Start's response is lost (bad signal)
+// and they tap again, the server hands back the account it already made instead
+// of "this invite was already used".
+const NONCE_KEY='join_nonce_'+code, DRAFT_KEY='join_draft_'+code;
+function newNonce(){
+  try{ if(crypto.randomUUID) return crypto.randomUUID(); }catch{}
+  const a=new Uint8Array(16); crypto.getRandomValues(a);
+  return Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');
+}
+let nonce=lsGet(NONCE_KEY); if(!nonce){ nonce=newNonce(); lsSet(NONCE_KEY,nonce); }
+
+async function call(action,{method='GET',params={},body=null}={}){
+  const url=new URL(API,location.origin); url.searchParams.set('action',action);
+  for(const [k,v] of Object.entries(params)) url.searchParams.set(k,v);
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),30000);
+  try{
+    const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
+    const data=await res.json().catch(()=>({}));
+    return { ok:res.ok, status:res.status, data };
+  } finally { clearTimeout(t); }
+}
+
+const DEAD={
+  invalid:{ic:'🔗',t:"This link isn't valid",p:"Make sure you opened the whole link from the text. If it still doesn't work, ask whoever sent it for a new one."},
+  expired:{ic:'⏰',t:'This invite expired',p:'Ask whoever sent it to resend it. It takes them one tap.'},
+  revoked:{ic:'🚫',t:'This invite was canceled',p:"If you think that's a mistake, ask whoever sent it for a new link."},
+  joined:{ic:'✅',t:"You're already signed up",p:'This invite has been used. Open the tech app and sign in with your phone number and 4-digit PIN.',app:true},
+  phone_in_use:{ic:'📱',t:'This number already has an account',p:'Open the tech app and sign in with your phone number and PIN instead.',app:true},
+  past_profile:{ic:'🗂️',t:"You're already in our system",p:"This number is on an older technician profile. Text the office and they'll switch it back on for you."},
+  offline:{ic:'📶',t:"Couldn't load your invite",p:'Check your signal and try again.',retry:true},
+};
+function dead(kind){
+  const d=DEAD[kind]||DEAD.invalid;
+  $('deadIc').textContent=d.ic; $('deadT').textContent=d.t; $('deadP').textContent=d.p;
+  $('deadApp').classList.toggle('hidden',!d.app); $('deadRetry').classList.toggle('hidden',!d.retry);
+  show('vDead');
+}
+$('deadRetry').addEventListener('click',()=>location.reload());
+
+function digits(s){ return String(s||'').replace(/\D/g,''); }
+function phone10(s){ let d=digits(s); if(d.length===11&&d[0]==='1') d=d.slice(1); return d.length===10?d:null; }
+function fmtPhone(p){ return p&&p.length===10?`(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}`:p; }
+function firstOf(n){ return String(n||'').trim().split(/\s+/)[0]||''; }
+function hm(t){ let [h,m]=String(t).split(':').map(Number); const ap=h>=12?'p':'a'; h=h%12||12; return h+(m?':'+String(m).padStart(2,'0'):'')+ap; }
+function shortSlot(s){ return hm(s.start)+'-'+hm(s.end); }
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+(async function boot(){
+  if(!code){ dead('invalid'); return; }
+  let r;
+  try{ r=await call('join_info',{params:{c:code}}); }catch{ dead('offline'); return; }
+  if(!r.ok || !r.data || !r.data.state){ dead(r.status>=500?'offline':'invalid'); return; }
+  info=r.data;
+  if(info.business_slug==='doms') document.body.classList.add('doms');
+  if(info.state!=='open'){ dead(info.state==='joined'?'joined':info.state); return; }
+  document.querySelectorAll('[data-brand]').forEach(e=>e.textContent=info.brand);
+  document.querySelectorAll('[data-metro]').forEach(e=>e.textContent=info.metro);
+  $('wHi').textContent=info.first_name?`Hi ${info.first_name}!`:'Welcome!';
+  $('wUnstaffed').classList.toggle('hidden',!info.unstaffed);
+  $('deskHint').classList.toggle('hidden',!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches));
+  $('phHelp').textContent=info.phone_locked
+    ? `Use the number this invite was sent to (ends in ${info.phone_last4}). Jobs are texted here, and it's also your login.`
+    : "Jobs are texted here, and it's also your login.";
+  $('tzHelp').textContent=`Tap every time you can take jobs each week (${info.metro} time). You can change this anytime in the tech app.`;
+  $('btnStart').textContent=info.unstaffed?'Finish sign-up':'Start getting jobs';
+  renderDays(); restoreDraft();
+  show('vWelcome');
+})();
+
+document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.go)));
+$('btnGo').addEventListener('click',()=>{ show('vAccount'); });
+
+// ── Step 1: login ───────────────────────────────────────────────────────────
+// Mirrors the server's checks (api/tech.js join_complete) for instant feedback;
+// the server still decides.
+const WEAK=new Set(['0000','1111','2222','3333','4444','5555','6666','7777','8888','9999','0123','1234','2345','3456','4567','5678','6789','4321','9876','1212','2580']);
+function clearBad(){ document.querySelectorAll('.bad').forEach(e=>e.classList.remove('bad')); $('accErr').textContent=''; }
+function fail(id,msg){
+  clearBad(); const el=$(id);
+  if(id==='fConsent') $('consentBox').classList.add('bad'); else if(el) el.classList.add('bad');
+  $('accErr').textContent=msg; try{ el&&el.focus(); }catch{}
+  return false;
+}
+function nameVal(){ return $('fName').value.replace(/\s+/g,' ').trim(); }
+function checkAccount(){
+  const name=nameVal(), p10=phone10($('fPhone').value), pin=$('fPin').value, pin2=$('fPin2').value;
+  if(name.length<2 || !/[A-Za-zÀ-ɏ]/.test(name)) return fail('fName','Enter your full name.');
+  if(!p10) return fail('fPhone','Enter your 10-digit cell number.');
+  if(info.phone_locked && p10.slice(-4)!==info.phone_last4) return fail('fPhone',`This invite was sent to the number ending in ${info.phone_last4}. Use that number.`);
+  if(!/^\d{4}$/.test(pin)) return fail('fPin','Your PIN must be exactly 4 digits.');
+  if(WEAK.has(pin)) return fail('fPin','That PIN is too easy to guess. Pick different digits.');
+  if(pin!==pin2) return fail('fPin2',"The two PINs don't match.");
+  if(!$('fConsent').checked) return fail('fConsent','Tick the box so we can text you your jobs.');
+  clearBad(); return true;
+}
+['fPin','fPin2'].forEach(id=>$(id).addEventListener('input',e=>{ const v=digits(e.target.value).slice(0,4); if(v!==e.target.value) e.target.value=v; }));
+['fName','fPhone'].forEach(id=>$(id).addEventListener('input',()=>{ $(id).classList.remove('bad'); saveDraft(); }));
+$('fConsent').addEventListener('change',()=>$('consentBox').classList.remove('bad'));
+$('vAccount').addEventListener('submit',e=>{ e.preventDefault(); if(checkAccount()){ saveDraft(); show('vTimes'); } });
+
+// ── Step 2: weekly times (the same 5 fixed slots as the tech app) ───────────
+function renderDays(){
+  $('days').innerHTML=ORDER.map(d=>`<div class="day"><h3><span>${esc(info.days[d])}</span><span class="cnt" data-cnt="${d}"></span></h3>
+    <div class="chips">${info.slots.map(s=>`<button type="button" class="slotchip" data-k="${d}:${esc(s.key)}"><span class="box"></span><span>${esc(s.label)}</span>${s.bonus?`<span class="slotbonus">+$${esc(s.bonus)} bonus</span>`:''}</button>`).join('')}</div></div>`).join('');
+  $('days').querySelectorAll('.slotchip').forEach(b=>b.addEventListener('click',()=>{
+    const k=b.dataset.k; if(sel.has(k)) sel.delete(k); else sel.add(k);
+    paintSel(); saveDraft();
+  }));
+  paintSel();
+}
+function paintSel(){
+  $('days').querySelectorAll('.slotchip').forEach(b=>{ const on=sel.has(b.dataset.k); b.classList.toggle('on',on); b.querySelector('.box').textContent=on?'✓':''; });
+  ORDER.forEach(d=>{ const n=info.slots.filter(s=>sel.has(d+':'+s.key)).length; const c=$('days').querySelector(`[data-cnt="${d}"]`); if(c) c.textContent=n?`${n} picked`:''; });
+  const n=sel.size;
+  $('cnt').innerHTML=n?`<b>${n}</b> time${n===1?'':'s'} a week`:'Pick at least one time';
+  $('toReview').disabled=!n; $('timesErr').textContent='';
+}
+const QUICK={
+  weekdays:{days:[1,2,3,4,5],slots:['s1','s2','s3','s4']},
+  weekends:{days:[0,6],slots:['s1','s2','s3','s4']},
+  mornings:{days:[0,1,2,3,4,5,6],slots:['s1','s2']},
+  evenings:{days:[0,1,2,3,4,5,6],slots:['s4','s5']},
+};
+document.querySelectorAll('[data-q]').forEach(b=>b.addEventListener('click',()=>{
+  const q=b.dataset.q;
+  if(q==='clear') sel.clear();
+  else { const p=QUICK[q]; p.days.forEach(d=>p.slots.forEach(k=>{ if(info.slots.some(s=>s.key===k)) sel.add(d+':'+k); })); }
+  paintSel(); saveDraft();
+}));
+$('toReview').addEventListener('click',()=>{ if(!sel.size) return; renderReview(); show('vReview'); });
+
+// Draft survives a closed tab or a reload. The PIN is never stored.
+function saveDraft(){ lsSet(DRAFT_KEY,JSON.stringify({ name:$('fName').value, phone:$('fPhone').value, slots:[...sel] })); }
+function restoreDraft(){
+  let d=null; try{ d=JSON.parse(lsGet(DRAFT_KEY)||'null'); }catch{}
+  if(!d) return;
+  if(d.name) $('fName').value=d.name;
+  if(d.phone) $('fPhone').value=d.phone;
+  (d.slots||[]).forEach(k=>{ if(/^[0-6]:s[1-5]$/.test(k) && info.slots.some(s=>s.key===k.split(':')[1])) sel.add(k); });
+  paintSel();
+}
+
+// ── Step 3: review + Start ──────────────────────────────────────────────────
+function renderReview(){
+  $('rName').textContent=nameVal();
+  $('rLogin').innerHTML=`${esc(fmtPhone(phone10($('fPhone').value)))}<small>+ the 4-digit PIN you picked</small>`;
+  $('rMetro').textContent=info.metro;
+  const lines=ORDER.map(d=>{ const ks=info.slots.filter(s=>sel.has(d+':'+s.key)); return ks.length?`${info.days[d].slice(0,3)}: ${ks.map(shortSlot).join(', ')}`:null; }).filter(Boolean);
+  $('rTimes').innerHTML=`${sel.size} a week<small>${lines.map(esc).join('<br>')}</small>`;
+  $('rNext').textContent=info.unstaffed
+    ? `${info.metro} isn't open for online bookings yet. Your account and times are saved when you tap the button, and we'll text you as soon as jobs start.`
+    : `When you tap Start you're on the ${info.metro} schedule. Customers can book you in any of the times you picked, and we text you every job. The address and details are in the tech app.`;
+  $('revErr').textContent='';
+}
+
+$('btnStart').addEventListener('click',async()=>{
+  const btn=$('btnStart'), label=btn.textContent;
+  btn.disabled=true; btn.textContent='Setting you up…'; $('revErr').textContent='';
+  const body={
+    c:code, nonce, name:nameVal(), phone:$('fPhone').value, pin:$('fPin').value, sms_consent:$('fConsent').checked,
+    slots:[...sel].map(k=>{ const [d,key]=k.split(':'); return { day_of_week:Number(d), slot_key:key }; }),
+  };
+  let r;
+  try{ r=await call('join_complete',{method:'POST',body}); }
+  catch{ btn.disabled=false; btn.textContent=label; $('revErr').textContent='No connection. Check your signal and tap the button again.'; return; }
+  if(r.ok && r.data && r.data.token){ finish(r.data); return; }
+  btn.disabled=false; btn.textContent=label;
+  const c=r.data&&r.data.code, f=r.data&&r.data.field, msg=(r.data&&r.data.error)||'Something went wrong. Tap the button again.';
+  if(c==='INVITE_USED') return dead('joined');
+  if(c==='INVITE_EXPIRED') return dead('expired');
+  if(c==='INVITE_REVOKED') return dead('revoked');
+  if(c==='INVITE_NOT_FOUND') return dead('invalid');
+  if(c==='PHONE_IN_USE') return dead('phone_in_use');
+  if(c==='PAST_PROFILE') return dead('past_profile');
+  if(c==='PHONE_MISMATCH'||f==='phone'){ show('vAccount'); fail('fPhone',msg); return; }
+  if(f==='name'||f==='pin'||f==='consent'){ show('vAccount'); fail(f==='name'?'fName':f==='pin'?'fPin':'fConsent',msg); return; }
+  if(f==='slots'){ show('vTimes'); $('timesErr').textContent=msg; return; }
+  $('revErr').textContent=msg;
+});
+
+// Signed in: write the exact session tech.html's own login writes
+// (ha_tech_token + ha_tech_info), so "Open the tech app" lands on Jobs with no
+// second sign-in. If storage is blocked, fall back to the existing ?login=
+// magic-link hand-off, which tech.html validates and strips from the URL.
+function finish(d){
+  const stored=lsSet('ha_tech_token',d.token) && lsSet('ha_tech_info',JSON.stringify(d.technician)) && lsGet('ha_tech_token')===d.token;
+  $('dApp').href=stored?'/tech.html':'/tech.html?login='+encodeURIComponent(d.token);
+  lsDel(DRAFT_KEY); lsDel(NONCE_KEY);
+  const p10=phone10($('fPhone').value);
+  $('dHi').textContent=`You're in, ${firstOf(nameVal())||'welcome'}!`;
+  $('dPill').className='pill '+(d.unstaffed?'soon':'live');
+  $('dPillT').textContent=d.unstaffed?`${d.metro||info.metro} opens for online bookings soon`:`Live for jobs in ${d.metro||info.metro}`;
+  $('dJobs').innerHTML=d.unstaffed
+    ? `We'll text <b>${esc(fmtPhone(p10))}</b> as soon as ${esc(d.metro||info.metro)} opens. After that you get a "You got a job!" text every time you're booked.`
+    : `Every time you're booked we text <b>${esc(fmtPhone(p10))}</b> "You got a job!". Open the tech app to see the address and details.`;
+  $('dTimes').textContent=`${d.slot_count||sel.size} time${(d.slot_count||sel.size)===1?'':'s'} a week. Change them anytime under My Availability in the tech app.`;
+  $('dLogin').textContent='Your phone number + your 4-digit PIN. Tip: add the tech app to your home screen. iPhone: Share, then Add to Home Screen. Android: the ⋮ menu, then Add to Home screen.';
+  show('vDone');
+}
+</script>
+</body>
+</html>

@@ -20,7 +20,8 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
-import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert } from './_lib/owner-notify.js';
+import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
+import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { readState as readBracketSyncState, readDispatch as readBracketSyncDispatch, summarizeForDashboard as bracketSyncSummary, dispatchBracketScan } from './_lib/bracket-sync-health.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
@@ -28,7 +29,7 @@ import { bookingConfirmMessage, sendOptInConfirmSms } from './_lib/booking-confi
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
-import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -168,12 +169,14 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   const hostArea = hostAreaOverride !== undefined
     ? hostAreaOverride
     : (zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null);
-  const host = { bizId: hostBiz.id, serviceAreaId: hostArea };
+  // soleTechOf = the BOOKING's brand, so scopedRosterTechs can apply the
+  // SOLE_TECH lock to whichever roster (own or partner) it ends up reading.
+  const host = { bizId: hostBiz.id, serviceAreaId: hostArea, soleTechOf: hostBiz.slug };
   if (pool !== 'cross' && pool !== 'partner') return [host];
   const p = await partnerBusiness(db, hostBiz.slug);
   if (!p) return [host];
   const partnerArea = zip ? await serviceAreaIdFromPostal(db, p.id, zip) : null;
-  const partnerScope = { bizId: p.id, serviceAreaId: partnerArea };
+  const partnerScope = { bizId: p.id, serviceAreaId: partnerArea, soleTechOf: hostBiz.slug };
   if (pool === 'partner') return [partnerScope];
   return [host, partnerScope];
 }
@@ -434,6 +437,10 @@ export default async function handler(req, res) {
       case 'partner_technicians': return await partnerTechnicians(req, res, db, auth);
       case 'technician_update': return await technicianUpdate(req, res, db, auth, body);
       case 'review_invite_send': return await reviewInviteSend(req, res, db, auth, body);
+      case 'tech_invites':       return await techInvites(req, res, db, auth);
+      case 'tech_invite_create': return await techInviteCreate(req, res, db, auth, body);
+      case 'tech_invite_send':   return await techInviteSend(req, res, db, auth, body);
+      case 'tech_invite_revoke': return await techInviteRevoke(req, res, db, auth, body);
       case 'technician_photo_upload': return await technicianPhotoUpload(req, res, db, auth, body);
       case 'tech_availability':     return await techAvailability(req, res, db, auth);
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
@@ -2975,7 +2982,14 @@ async function scopedRosterTechs(db, scopes, cols = 'id') {
     const { data } = await db.from('technicians').select(cols)
       .eq('business_id', sc.bizId).eq('active', true).eq('service_area_id', sc.serviceAreaId)
       .order('created_at', { ascending: true });
-    lists.push(data || []);
+    // Sole-technician lock (SOLE_TECH, _lib/availability.js): the four Austin
+    // lead-gen brands are Zach's alone. The public widget path always applied
+    // it; this office path did not, so the moment a second Handy Andy Austin
+    // tech existed (one invite link away since 0111) an office "any tech"
+    // booking on those brands could auto-pick them. A no-op for every other
+    // brand, and for callers that pass bare business ids (no soleTechOf).
+    // Every caller's cols include `id`, which the lock filters on.
+    lists.push(sc.soleTechOf ? applySoleTech(sc.soleTechOf, data || []) : (data || []));
   }
   return lists;
 }
@@ -6952,6 +6966,214 @@ async function reviewInviteSend(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, sent_at: sentAt });
 }
 
+// ── Technician sign-up invites (migration 0111) ──────────────────────────────
+// Owner-only, like the $100 review invite above: an invite decides who gets
+// paid work. "+ Invite a technician" on the Technicians tab creates a
+// single-use /join?c=<code> link for ONE metro of Handy Andy or Dom's and
+// optionally texts it. The tech opens it, creates their login, picks their
+// weekly times and taps Start (api/tech.js join_complete ->
+// app.claim_tech_invite), which makes them an active tech with availability,
+// so the booking engine starts handing them jobs.
+// Lead-gen brands are refused: they have no techs of their own and borrow
+// Handy Andy's roster by metro (PARTNER_SLUG, _lib/availability.js), so a tech
+// created under one would become that brand's host pool and never see Handy
+// Andy's own jobs.
+async function techInvites(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can manage technician invites' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const { data: areas, error: aErr } = await db.from('service_areas')
+    .select('id, name, unstaffed, active').eq('business_id', biz.id).order('name');
+  if (aErr) throw aErr;
+  const { data: techs } = await db.from('technicians')
+    .select('name, service_area_id').eq('business_id', biz.id).eq('active', true);
+  // Metros for the invite picker, with who already works each one, so the
+  // owner sees who a newcomer will share automatic jobs with.
+  const metros = (areas || []).filter(a => a.active).map(a => ({
+    id: a.id, name: a.name, unstaffed: !!a.unstaffed,
+    techs: (techs || []).filter(t => t.service_area_id === a.id).map(t => t.name),
+  }));
+
+  const { data: rows, error } = await db.from('tech_invites')
+    .select('id, code, status, expires_at, invitee_name, invitee_phone, max_jobs_per_day, service_area_id, created_at, sent_at, send_count, last_sms_log_id, opened_at, open_count, joined_at, technician_id')
+    .eq('business_id', biz.id).order('created_at', { ascending: false }).limit(60);
+  if (error) throw error;
+  // Every live invite, plus finished ones from the last 30 days.
+  const cutoff = Date.now() - 30 * 864e5;
+  const recent = (rows || []).filter(r => r.status === 'pending' || new Date(r.created_at).getTime() >= cutoff);
+
+  // Delivery status of each invite's latest text (the Twilio status callback
+  // writes it, api/analytics.js sms_status kind 'tech_sms') and who joined.
+  // Best-effort annotations: a failed lookup blanks a field, never the list.
+  const logById = new Map(), techById = new Map();
+  try {
+    const ids = recent.map(r => r.last_sms_log_id).filter(Boolean);
+    if (ids.length) {
+      const { data } = await db.from('tech_sms_log').select('id, status, error, skip_reason').in('id', ids);
+      for (const l of data || []) logById.set(l.id, l);
+    }
+  } catch { /* cosmetic */ }
+  try {
+    const ids = recent.map(r => r.technician_id).filter(Boolean);
+    if (ids.length) {
+      const { data } = await db.from('technicians').select('id, name, active').in('id', ids);
+      for (const t of data || []) techById.set(t.id, t);
+    }
+  } catch { /* cosmetic */ }
+  const areaName = new Map((areas || []).map(a => [a.id, a.name]));
+
+  const invites = recent.map(r => {
+    const log = r.last_sms_log_id ? logById.get(r.last_sms_log_id) : null;
+    const t = r.technician_id ? techById.get(r.technician_id) : null;
+    return {
+      id: r.id, state: inviteState(r), link: inviteLink(r.code),
+      name: r.invitee_name, phone: r.invitee_phone, metro: areaName.get(r.service_area_id) || '',
+      max_jobs_per_day: r.max_jobs_per_day, expires_at: r.expires_at, created_at: r.created_at,
+      sent_at: r.sent_at, send_count: r.send_count, opened_at: r.opened_at, open_count: r.open_count,
+      joined_at: r.joined_at,
+      // A skip reason is a code ("notifications_off"); show the owner words.
+      sms: log ? { status: log.status, error: log.error || (log.skip_reason ? smsFailReason({ skipped: log.skip_reason }) : null) } : null,
+      technician: t ? { id: t.id, name: t.name, active: t.active } : null,
+    };
+  });
+  return res.status(200).json({ invites, metros });
+}
+
+// Text an invite and record the send on its row. Returns { ok } or
+// { ok:false, reason } in words the owner can act on. A failed text never
+// fails the invite: the link is still good and the owner can paste it himself.
+async function textTechInvite(db, biz, area, inv) {
+  const message = inviteSmsText({
+    brand: inviteBrand(biz.slug, biz.name), name: inv.invitee_name, metro: area.name,
+    link: inviteLink(inv.code), expiresLabel: fmtExpiry(inv.expires_at, area.timezone),
+  });
+  const r = await sendTechSms(db, { kind: 'tech_invite', businessId: biz.id, phone: inv.invitee_phone, message });
+  const patch = { last_sms_log_id: r.logId || null };
+  if (r.ok) { patch.sent_at = new Date().toISOString(); patch.send_count = (inv.send_count || 0) + 1; }
+  try { await db.from('tech_invites').update(patch).eq('id', inv.id); } catch { /* bookkeeping */ }
+  return r.ok ? { ok: true } : { ok: false, reason: smsFailReason(r) };
+}
+
+async function techInviteCreate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can invite technicians' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (isLeadGenSlug(biz.slug)) {
+    return res.status(400).json({ error: `${biz.name} uses Handy Andy's technicians. Switch to Handy Andy or Dom's to invite someone.` });
+  }
+  const areaId = String(body.service_area_id || '');
+  const { data: area } = areaId
+    ? await db.from('service_areas').select('id, name, timezone, active').eq('id', areaId).eq('business_id', biz.id).maybeSingle()
+    : { data: null };
+  if (!area || !area.active) return res.status(400).json({ field: 'metro', error: 'Pick the metro they will work.' });
+
+  const name = String(body.name || '').replace(/[\x00-\x1f\x7f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || null;
+  let phone = null;
+  if (String(body.phone || '').trim()) {
+    phone = toE164(body.phone);
+    if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter a 10-digit US cell number, or leave it blank and just copy the link.' });
+  }
+  const sendSms = body.send_sms === true;
+  if (sendSms && !phone) return res.status(400).json({ field: 'phone', error: 'Add their cell number to text the invite.' });
+  let cap = null;
+  if (body.max_jobs_per_day != null && String(body.max_jobs_per_day).trim() !== '') {
+    cap = Math.max(0, Math.floor(Number(body.max_jobs_per_day)) || 0);
+  }
+
+  // Catch a number that can't become a new login BEFORE a useless link goes
+  // out. claim_tech_invite re-checks at sign-up, since this can change within
+  // the week the link is live.
+  if (phone) {
+    const d10 = digits10(phone);
+    const { data: owners, error: oErr } = await db.from('technicians')
+      .select('name, active, business_id, phone, businesses ( name )').not('phone', 'is', null);
+    if (oErr) throw oErr;
+    const hits = (owners || []).filter(t => digits10(t.phone) === d10);
+    const live = hits.find(t => t.active);
+    if (live) return res.status(409).json({ code: 'PHONE_IN_USE', error: `That number already belongs to ${live.name} (${live.businesses?.name || 'an active tech'}). They can already sign in to the tech app.` });
+    const old = hits.find(t => !t.active && t.business_id === biz.id);
+    if (old) return res.status(409).json({ code: 'PAST_PROFILE', error: `That number is on ${old.name}'s old profile. Tap "Show inactive techs", then Activate and Set PIN on their card instead of sending an invite.` });
+  }
+
+  const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 864e5).toISOString();
+  let inv = null;
+  // Re-inviting someone who already has a pending invite here updates that
+  // invite (new metro / cap, a fresh 7 days) and keeps its link, instead of
+  // stacking a second live link for the same person (uq_tech_invites_pending_phone).
+  if (phone) {
+    const { data: pend, error: pErr } = await db.from('tech_invites')
+      .select('id, invitee_phone').eq('business_id', biz.id).eq('status', 'pending').not('invitee_phone', 'is', null);
+    if (pErr) throw pErr;
+    const same = (pend || []).find(p => digits10(p.invitee_phone) === digits10(phone));
+    if (same) {
+      const { data, error } = await db.from('tech_invites')
+        .update({ service_area_id: area.id, invitee_name: name, invitee_phone: phone, max_jobs_per_day: cap, expires_at: expiresAt })
+        .eq('id', same.id).eq('status', 'pending').select('*').maybeSingle();
+      if (error) throw error;
+      inv = data;
+    }
+  }
+  if (!inv) {
+    const { data, error } = await db.from('tech_invites').insert({
+      business_id: biz.id, service_area_id: area.id, code: newInviteCode(),
+      invitee_name: name, invitee_phone: phone, max_jobs_per_day: cap,
+      expires_at: expiresAt, created_by: adminAuthorName(auth),
+    }).select('*').single();
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ code: 'INVITE_EXISTS', error: 'An invite for that number was just created. Close this and check the invite list.' });
+      throw error;
+    }
+    inv = data;
+  }
+
+  const sms = sendSms ? await textTechInvite(db, biz, area, inv) : null;
+  console.log(`[tech-invite] ${biz.slug}/${area.name} ${phone ? '..' + phone.slice(-4) : 'link-only'} sms=${sms ? (sms.ok ? 'sent' : sms.reason) : 'not requested'}`);
+  return res.status(200).json({ ok: true, invite: { id: inv.id, expires_at: inv.expires_at }, link: inviteLink(inv.code), sms });
+}
+
+// Re-text a pending invite (they lost the text), or just extend a link-only
+// one. Either way the SAME link gets a fresh 7 days, so an old text they
+// still have starts working again too.
+async function techInviteSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can send technician invites' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+  const { data: inv, error } = await db.from('tech_invites')
+    .select('id, status, invitee_phone, service_area_id, send_count')
+    .eq('id', String(body.id)).eq('business_id', biz.id).maybeSingle();
+  if (error) throw error;
+  if (!inv) return res.status(404).json({ error: 'Invite not found' });
+  if (inv.status !== 'pending') return res.status(409).json({ error: inv.status === 'joined' ? 'They already signed up.' : 'This invite was canceled.' });
+  // A cap so a stuck button or a mis-tap loop can't spam a stranger.
+  if (inv.invitee_phone && (inv.send_count || 0) >= 5) return res.status(429).json({ error: 'Already texted 5 times. Copy the link and send it yourself.' });
+  const { data: upd, error: uErr } = await db.from('tech_invites')
+    .update({ expires_at: new Date(Date.now() + INVITE_TTL_DAYS * 864e5).toISOString() })
+    .eq('id', inv.id).eq('status', 'pending')
+    .select('id, code, invitee_name, invitee_phone, expires_at, send_count').maybeSingle();
+  if (uErr) throw uErr;
+  if (!upd) return res.status(409).json({ error: 'This invite was just used or canceled.' });
+  if (!upd.invitee_phone) return res.status(200).json({ ok: true, sms: null, expires_at: upd.expires_at, link: inviteLink(upd.code) });
+  const { data: area } = await db.from('service_areas').select('name, timezone').eq('id', inv.service_area_id).maybeSingle();
+  const sms = await textTechInvite(db, biz, area || { name: 'your area', timezone: null }, upd);
+  return res.status(200).json({ ok: sms.ok, sms, expires_at: upd.expires_at, link: inviteLink(upd.code) });
+}
+
+async function techInviteRevoke(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can cancel technician invites' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+  // Conditional on still-pending. claim_tech_invite holds this row's lock while
+  // it runs, so a cancel racing a sign-up either wins cleanly or finds the
+  // invite already joined; it can never undo an account that was created.
+  const { data, error } = await db.from('tech_invites')
+    .update({ status: 'revoked', revoked_at: new Date().toISOString(), revoked_by: adminAuthorName(auth) })
+    .eq('id', String(body.id)).eq('business_id', biz.id).eq('status', 'pending').select('id');
+  if (error) throw error;
+  if (!data || !data.length) return res.status(409).json({ error: 'That invite was already used or canceled. To stop a tech who joined, Deactivate them.' });
+  return res.status(200).json({ ok: true });
+}
+
 async function technicianUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -6982,6 +7204,10 @@ async function technicianUpdate(req, res, db, auth, body) {
   if (body.bio_blurb !== undefined) patch.bio_blurb = (body.bio_blurb || '').toString().trim().slice(0, 400) || null;
   if (Object.keys(patch).length) {
     const { error } = await db.from('technicians').update(patch).eq('id', id).eq('business_id', biz.id);
+    // uq_technicians_active_phone10 (0111): one ACTIVE tech per phone number,
+    // because login matches a phone in any business. Hit by Set phone or
+    // Activate on a number someone else now holds; say so instead of a raw 500.
+    if (error && error.code === '23505') return res.status(409).json({ error: 'That phone number is already on another active technician.' });
     if (error) throw error;
   }
 

@@ -7903,6 +7903,181 @@ async function sendReviewInvite(id, card, btn){
     renderTechnicians();
   }catch(e){ toast(e.message||'Could not send'); btn.disabled=false; btn.textContent=prev; }
 }
+// ── Technician sign-up invites (migration 0111) ─────────────────────────────
+// Owner-only. "+ Invite a technician" makes a single-use sign-up link
+// (/join?c=...) for one metro of Handy Andy or Dom's and optionally texts it.
+// The tech opens it on their phone, creates a login, picks their weekly times
+// and taps Start, which makes them an active tech the booking engine starts
+// giving jobs to (and texts the owner). Lead-gen brands are skipped: their
+// jobs come from Handy Andy's roster by metro. The list under the button shows
+// every live invite plus the last 30 days of finished ones.
+const TECH_INVITE_SLUGS=['handy-andy','doms'];
+let techInviteData=null;
+function tinvPhone(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d.length===10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:String(p||''); }
+function tinvCopy(text,msg){
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>toast(msg||'Link copied')).catch(()=>prompt('Copy this link:',text));
+  else prompt('Copy this link:',text);
+}
+// What inviting into this metro actually does, in the owner's terms: the
+// booking engine gives ties to whoever has the FEWEST jobs this week
+// (pickFairest, api/_lib/availability.js), so a newcomer takes work from the
+// metro's existing techs until they catch up.
+function techInviteMetroNote(m){
+  if(!m) return '';
+  if(m.unstaffed) return `${m.name} isn't taking online bookings yet. They can sign up now; automatic jobs start once you open ${m.name}.`;
+  if(m.techs.length) return `${m.name} already has ${m.techs.join(', ')}. A new tech gets first pick of automatic bookings until their weekly job count catches up, so some of those jobs will go to them. A max jobs per day eases them in.`;
+  return `Nobody works ${m.name} yet, so once they sign up, online bookings there go to them.`;
+}
+function techInviteStateChip(i){
+  const map={ open:['Waiting','#475569','#f1f5f9'], expired:['Expired','#92400e','#fef3c7'], joined:['Joined','#166534','#dcfce7'], revoked:['Canceled','#64748b','#f1f5f9'] };
+  const [label,fg,bg]=map[i.state]||map.open;
+  return `<span style="display:inline-block;font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:${fg};background:${bg};padding:3px 9px;border-radius:999px;">${label}</span>`;
+}
+function techInviteTimeline(i){
+  const parts=[i.sent_at?`Texted ${shortDateBiz(i.sent_at)}`:`Link made ${shortDateBiz(i.created_at)}`];
+  if(i.sms){
+    if(i.sms.status==='delivered') parts.push('Delivered ✓');
+    else if(i.sms.status==='failed'||i.sms.status==='undelivered') parts.push(`<span style="color:#b91c1c;font-weight:700;">Text failed${i.sms.error?` (${esc(i.sms.error)})`:''}</span>`);
+    else if(i.sms.status==='skipped') parts.push(`<span style="color:#b45309;font-weight:700;">Not texted (${esc(i.sms.error||'skipped')})</span>`);
+  }
+  if(i.state==='joined'&&i.joined_at) parts.push(`Signed up ${shortDateBiz(i.joined_at)}${i.technician?` as ${esc(i.technician.name)}${i.technician.active?'':' (now inactive)'}`:''}`);
+  else if(i.opened_at) parts.push(`Opened ${shortDateBiz(i.opened_at)}`);
+  if(i.state==='open') parts.push(`Expires ${shortDateBiz(i.expires_at)}`);
+  return parts.join(' · ');
+}
+function techInviteBlockHtml(inv){
+  if(role!=='owner') return '';
+  if(!TECH_INVITE_SLUGS.includes(current.slug)){
+    return `<div class="meta" style="margin:0 0 12px;font-size:13px;">New technicians are invited from Handy Andy or Dom's. ${esc(current.name||'This brand')} books Handy Andy's techs.</div>`;
+  }
+  if(!inv||inv.error){
+    return `<div class="job" style="margin-bottom:14px;"><div class="meta">Technician invites couldn't load${inv&&inv.error?`: ${esc(inv.error)}`:''}.</div></div>`;
+  }
+  const rows=(inv.invites||[]).map(i=>{
+    const live=i.state==='open'||i.state==='expired';
+    const acts=[];
+    if(live) acts.push(`<button class="btn ghost sm" type="button" data-tinv="copy" data-id="${esc(i.id)}">Copy link</button>`);
+    if(live&&i.phone) acts.push(`<button class="btn ghost sm" type="button" data-tinv="resend" data-id="${esc(i.id)}">${i.state==='expired'?'Resend (7 more days)':'Resend text'}</button>`);
+    if(i.state==='expired'&&!i.phone) acts.push(`<button class="btn ghost sm" type="button" data-tinv="extend" data-id="${esc(i.id)}">Extend 7 days</button>`);
+    if(live) acts.push(`<button class="btn ghost sm" type="button" data-tinv="cancel" data-id="${esc(i.id)}">Cancel</button>`);
+    return `<div style="border-top:1px solid var(--line);padding:10px 0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${techInviteStateChip(i)}<b style="font-size:14px;">${esc(i.name||(i.phone?tinvPhone(i.phone):'Link only'))}</b><span class="meta">${esc(i.metro)}${i.phone&&i.name?` · ${esc(tinvPhone(i.phone))}`:''}</span></div>
+      <div class="meta" style="font-size:12.5px;margin-top:4px;">${techInviteTimeline(i)}</div>
+      ${acts.length?`<div class="actions" style="margin-top:6px;">${acts.join('')}</div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="job" id="techInviteCard" style="margin-bottom:14px;">
+    <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;"><div class="name">Invite a technician</div>
+        <div class="meta">Send someone a sign-up link. They create a login, pick their weekly times, and start getting jobs.</div></div>
+      <button class="btn sm" type="button" id="techInviteNew" style="width:auto;">+ Invite a technician</button>
+    </div>
+    ${rows?`<div style="margin-top:10px;">${rows}</div>`:''}
+  </div>`;
+}
+function wireTechInviteBlock(){
+  const nb=document.getElementById('techInviteNew'); if(nb) nb.addEventListener('click',openTechInviteModal);
+  document.querySelectorAll('#techInviteCard [data-tinv]').forEach(b=>b.addEventListener('click',()=>techInviteAct(b.dataset.id,b.dataset.tinv,b)));
+}
+async function techInviteAct(id,act,btn){
+  const i=((techInviteData&&techInviteData.invites)||[]).find(x=>x.id===id); if(!i) return;
+  if(act==='copy'){ tinvCopy(i.link,'Sign-up link copied'); return; }
+  if(act==='cancel'&&!confirm(`Cancel the invite for ${i.name||(i.phone?tinvPhone(i.phone):'this link')}? The link stops working.`)) return;
+  if(act==='resend'&&!confirm(`Text the sign-up link to ${tinvPhone(i.phone)} again?${i.state==='expired'?' It gets 7 more days.':''}`)) return;
+  btn.disabled=true;
+  try{
+    if(act==='cancel'){
+      await api('tech_invite_revoke',{ method:'POST', body:{ business:current.slug, id }});
+      toast('Invite canceled');
+    }else{
+      // resend and extend are the same call: fresh 7 days on the SAME link,
+      // plus a text when the invite has a number.
+      const d=await api('tech_invite_send',{ method:'POST', body:{ business:current.slug, id }});
+      if(!d.sms) toast('Link extended 7 days ✓');
+      else toast(d.sms.ok?'Invite texted ✓':`Text did not send: ${d.sms.reason||'unknown'}. Copy the link instead.`);
+    }
+    renderTechnicians();
+  }catch(e){ toast(e.message||'Could not update the invite'); btn.disabled=false; }
+}
+function openTechInviteModal(){
+  const metros=(techInviteData&&techInviteData.metros)||[];
+  if(!metros.length){ toast('This business has no active metros to invite into'); return; }
+  const brand=current.slug==='doms'?"Dom's TV Mounting":'Handy Andy TV Mounting';
+  let lastArea=''; try{ lastArea=localStorage.getItem('tinv_area_'+current.slug)||''; }catch{}
+  const pick=metros.find(m=>m.id===lastArea)||metros[0];
+  const inputCss='width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin-bottom:10px;';
+  let created=false;
+  const modal=document.createElement('div'); modal.className='modal';
+  modal.innerHTML=`<div class="sheet" style="max-width:480px;">
+    <h2>Invite a technician</h2>
+    <p style="color:var(--mute);font-size:13px;margin:-6px 0 14px;line-height:1.5;">They get a link to create their login and pick the times they can work (about 2 minutes). When they tap Start they're live for jobs, and you get a text.</p>
+    <div id="tinvForm">
+      <div${metros.length===1?' style="display:none;"':''}>
+        <label class="fld">Metro</label>
+        <select id="tinvArea" style="${inputCss}">${metros.map(m=>`<option value="${esc(m.id)}"${m.id===pick.id?' selected':''}>${esc(m.name)}${m.unstaffed?' (not taking online bookings yet)':m.techs.length?` (${m.techs.length} tech${m.techs.length===1?'':'s'})`:' (no techs yet)'}</option>`).join('')}</select>
+      </div>
+      <div id="tinvNote" style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:-4px 0 12px;"></div>
+      <label class="fld">Their first name <span style="font-weight:400;color:var(--mute);">(optional, for "Hi Maria" in the text)</span></label>
+      <input id="tinvName" type="text" maxlength="60" style="${inputCss}">
+      <label class="fld">Their cell number</label>
+      <input id="tinvPhone" type="tel" placeholder="(555) 123-4567" style="${inputCss}">
+      <div style="font-size:12px;color:var(--mute);margin:-4px 0 12px;line-height:1.45;">Needed to text the invite, and the account will be locked to this number. Leave blank to just copy the link and send it yourself.</div>
+      <label class="fld">Max jobs per day <span style="font-weight:400;color:var(--mute);">(optional)</span></label>
+      <input id="tinvCap" type="number" min="0" inputmode="numeric" placeholder="No limit" style="${inputCss}width:140px;">
+      <div id="tinvErr" style="color:#b91c1c;font-size:13px;min-height:18px;margin:2px 0 8px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" type="button" id="tinvText" style="flex:1;min-width:150px;">Text invite</button>
+        <button class="btn ghost" type="button" id="tinvLink" style="flex:1;min-width:150px;">Just give me the link</button>
+      </div>
+      <button class="btn ghost" type="button" id="tinvCancel" style="width:100%;margin-top:8px;">Cancel</button>
+    </div>
+    <div id="tinvDone" style="display:none;"></div>
+  </div>`;
+  document.body.appendChild(modal);
+  const q=sel=>modal.querySelector(sel);
+  const close=()=>{ modal.remove(); if(created) renderTechnicians(); };
+  modal.addEventListener('click',e=>{ if(e.target===modal) close(); });
+  q('#tinvCancel').addEventListener('click',close);
+  const paintNote=()=>{ q('#tinvNote').textContent=techInviteMetroNote(metros.find(m=>m.id===q('#tinvArea').value)); };
+  q('#tinvArea').addEventListener('change',paintNote); paintNote();
+  const submit=async(sendSms)=>{
+    const err=q('#tinvErr'); err.textContent='';
+    const areaId=q('#tinvArea').value, m=metros.find(x=>x.id===areaId)||pick;
+    const name=q('#tinvName').value.trim(), phoneRaw=q('#tinvPhone').value.trim(), cap=q('#tinvCap').value.trim();
+    const d10=phoneRaw.replace(/\D/g,'').replace(/^1(?=\d{10}$)/,'');
+    if(phoneRaw&&d10.length!==10){ err.textContent='Enter a 10-digit US cell number, or leave it blank.'; return; }
+    if(sendSms&&!phoneRaw){ err.textContent='Add their cell number to text the invite, or use "Just give me the link".'; return; }
+    if(sendSms){
+      const first=name.split(/\s+/)[0];
+      const preview=`${brand}: ${first?`Hi ${first}, you're`:"You're"} invited to join our technician team in ${m.name}. Create your login and pick the times you can work (about 2 min): <their sign-up link> Link expires <in 7 days>. Reply STOP to opt out.`;
+      if(!confirm(`Text this to ${tinvPhone(d10)}?\n\n"${preview}"`)) return;
+    }
+    const btns=modal.querySelectorAll('#tinvForm button'); btns.forEach(b=>b.disabled=true);
+    try{
+      const d=await api('tech_invite_create',{ method:'POST', body:{ business:current.slug, service_area_id:areaId, name, phone:phoneRaw, max_jobs_per_day:cap, send_sms:sendSms }});
+      created=true;
+      try{ localStorage.setItem('tinv_area_'+current.slug, areaId); }catch{}
+      const failed=sendSms&&!(d.sms&&d.sms.ok);
+      const status=!sendSms ? 'Link ready. Send it to them however you like (text, WhatsApp, email).'
+        : failed ? `The text did not send${d.sms&&d.sms.reason?` (${d.sms.reason})`:''}. Copy the link and send it yourself.`
+        : `Texted to ${tinvPhone(d10)} ✓`;
+      q('#tinvDone').innerHTML=`<div style="font-size:14px;font-weight:700;margin-bottom:12px;${failed?'color:#b91c1c;':''}">${esc(status)}</div>
+        <label class="fld">Sign-up link <span style="font-weight:400;color:var(--mute);">(works once, expires ${esc(shortDateBiz(d.invite.expires_at))})</span></label>
+        <input id="tinvOut" type="text" readonly value="${esc(d.link)}" style="${inputCss}font-family:monospace;font-size:13px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" type="button" id="tinvCopy" style="flex:1;min-width:120px;">Copy link</button>
+          ${navigator.share?'<button class="btn ghost" type="button" id="tinvShare" style="flex:1;min-width:120px;">Share…</button>':''}
+          <button class="btn ghost" type="button" id="tinvClose" style="flex:1;min-width:120px;">Done</button>
+        </div>`;
+      q('#tinvForm').style.display='none'; q('#tinvDone').style.display='';
+      q('#tinvCopy').addEventListener('click',()=>tinvCopy(d.link,'Sign-up link copied'));
+      const sh=q('#tinvShare'); if(sh) sh.addEventListener('click',()=>navigator.share({ title:'Technician sign-up', text:`Here's your link to join our technician team in ${m.name}:`, url:d.link }).catch(()=>{}));
+      q('#tinvClose').addEventListener('click',close);
+    }catch(e){ err.textContent=e.message||'Could not create the invite'; btns.forEach(b=>b.disabled=false); }
+  };
+  q('#tinvText').addEventListener('click',()=>submit(true));
+  q('#tinvLink').addEventListener('click',()=>submit(false));
+}
 // The Technicians screen shows ACTIVE techs only by default. The July 2026
 // Zenbooker history import created ~20 inactive placeholder techs per business
 // ("Denver Tech 1 (2022-2025)", "Former Austin Tech", ...) purely so imported
@@ -7915,7 +8090,14 @@ async function renderTechnicians(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
   try{
-    const d=await api('technicians',{ params:{ business:current.slug }});
+    // Invites load beside the roster (owner, Handy Andy / Dom's only) and can
+    // never take the roster down with them: a failure just shows in their card.
+    const wantInvites=role==='owner' && TECH_INVITE_SLUGS.includes(current.slug);
+    const [d,inv]=await Promise.all([
+      api('technicians',{ params:{ business:current.slug }}),
+      wantInvites ? api('tech_invites',{ params:{ business:current.slug }}).catch(e=>({ error:e.message })) : Promise.resolve(null),
+    ]);
+    techInviteData=inv;
     techRoster=d.technicians||[];
     const activeTechs=techRoster.filter(t=>t.active);
     const inactiveTechs=techRoster.filter(t=>!t.active);
@@ -7923,7 +8105,7 @@ async function renderTechnicians(){
     const inactiveToggle=inactiveTechs.length
       ? `<button type="button" id="toggleInactiveTechs" class="btn ghost sm" style="width:auto;margin-top:6px;">${showInactiveTechs?'Hide':'Show'} ${inactiveTechs.length} inactive tech${inactiveTechs.length===1?'':'s'} (former techs and imported history)</button>`
       : '';
-    document.getElementById('techWrap').innerHTML = shown.map(t=>`
+    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + (shown.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
           <div style="display:flex;align-items:center;gap:10px;">
@@ -7972,9 +8154,10 @@ async function renderTechnicians(){
           <input type="number" min="0" inputmode="numeric" class="maxjobs" value="${t.max_jobs_per_day!=null?t.max_jobs_per_day:''}" placeholder="No limit" style="width:110px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
           <span class="meta" style="font-size:12px;color:var(--mute);">leave blank for no limit</span>
         </div>`:''}
-      </div>`).join('') + inactiveToggle || '<div class="empty">No technicians.</div>';
+      </div>`).join('') + inactiveToggle || '<div class="empty">No technicians.</div>');
     const tgl=document.getElementById('toggleInactiveTechs');
     if(tgl) tgl.addEventListener('click',()=>{ showInactiveTechs=!showInactiveTechs; renderTechnicians(); });
+    wireTechInviteBlock();
 
     document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
       const id=card.dataset.id;

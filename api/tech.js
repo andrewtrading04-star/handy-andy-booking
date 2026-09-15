@@ -19,7 +19,8 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.js';
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_lib/email.js';
-import { sendReviewBonusEarnedAlert } from './_lib/owner-notify.js';
+import { sendReviewBonusEarnedAlert, sendTechJoinedAlert } from './_lib/owner-notify.js';
+import { normalizeInviteCode, inviteState, inviteBrand, digits10, firstName, weakPin, welcomeSmsText, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
@@ -35,7 +36,7 @@ function jobStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
-import { computeJobPay, PAY_DATE_OFFSET_DAYS } from './_lib/payroll.js';
+import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan, isRetired } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 
@@ -129,6 +130,10 @@ export default async function handler(req, res) {
   try {
     if (action === 'login') return await login(req, res, body);
     if (action === 'diagnostic') return await diagnostic(req, res);
+    // Technician sign-up (migration 0111): public/join.html's two calls. No
+    // session exists yet; the single-use invite code is the only credential.
+    if (action === 'join_info') return await joinInfo(req, res);
+    if (action === 'join_complete') return await joinComplete(req, res, body);
 
     const auth = verifyToken(getBearer(req));
     if (!auth || auth.kind !== 'tech') return res.status(401).json({ error: 'Unauthorized' });
@@ -2575,6 +2580,160 @@ async function me(req, res, db, auth) {
       demo: demoMode(),
     },
   });
+}
+
+// ── Technician sign-up (migration 0111) ──────────────────────────────────────
+// The two calls public/join.html makes. Both run BEFORE the auth gate, like
+// login: no session exists yet, and the single-use invite code is the only
+// credential. Business, metro and daily cap come from the invite row inside
+// app.claim_tech_invite, never from this request, and the new tech's id comes
+// back from that function, so a caller can only ever create the one account
+// the owner's invite describes. The owner creates invites in api/admin.js
+// (tech_invite_create).
+const JOIN_BAD_LINK = "This link isn't valid. Ask whoever sent it for a new one.";
+
+async function joinInfo(req, res) {
+  const code = normalizeInviteCode(req.query.c);
+  if (!code) return res.status(404).json({ state: 'invalid', error: JOIN_BAD_LINK });
+  const db = serviceClient();
+  const { data: inv, error } = await db.from('tech_invites')
+    .select('id, status, expires_at, invitee_name, invitee_phone, opened_at, open_count, business:businesses ( slug, name ), area:service_areas ( name, unstaffed )')
+    .eq('code', code).maybeSingle();
+  if (error) throw error;
+  if (!inv) return res.status(404).json({ state: 'invalid', error: JOIN_BAD_LINK });
+  const state = inviteState(inv);
+  const slug = inv.business?.slug || '';
+  const out = {
+    state,
+    brand: inviteBrand(slug, inv.business?.name),
+    business_slug: slug,
+    metro: inv.area?.name || '',
+    unstaffed: !!inv.area?.unstaffed,
+    expires_at: inv.expires_at,
+  };
+  if (state !== 'open') return res.status(200).json(out);
+  // "Opened" on the owner's invite list. Stamped here rather than on page load
+  // because SMS link-preview bots fetch the HTML but never run its script.
+  // Cosmetic: a failed stamp never blocks the page.
+  try {
+    await db.from('tech_invites')
+      .update({ opened_at: inv.opened_at || new Date().toISOString(), open_count: (inv.open_count || 0) + 1 })
+      .eq('id', inv.id);
+  } catch { /* cosmetic */ }
+  // Never the full invited number: a forwarded link must not leak it. The page
+  // shows "ends in 4521" and the tech types it.
+  return res.status(200).json({
+    ...out,
+    first_name: firstName(inv.invitee_name) || null,
+    phone_locked: !!inv.invitee_phone,
+    phone_last4: inv.invitee_phone ? digits10(inv.invitee_phone).slice(-4) : null,
+    slots: SLOTS, days: DAYS,
+  });
+}
+
+// claim_tech_invite outcome -> [HTTP status, code join.html switches on, message].
+const JOIN_OUTCOME = {
+  not_found:      [404, 'INVITE_NOT_FOUND', JOIN_BAD_LINK],
+  expired:        [410, 'INVITE_EXPIRED', 'This invite expired. Ask whoever sent it to resend it.'],
+  revoked:        [410, 'INVITE_REVOKED', 'This invite was canceled.'],
+  area_inactive:  [410, 'INVITE_REVOKED', 'This invite is no longer valid. Ask for a new one.'],
+  used:           [409, 'INVITE_USED', 'This invite was already used. If that was you, open the tech app and sign in with your phone number and PIN.'],
+  phone_mismatch: [409, 'PHONE_MISMATCH', 'This invite was sent to a different number. Use the number the text came to.'],
+  phone_in_use:   [409, 'PHONE_IN_USE', 'This number already has a technician account. Open the tech app and sign in instead.'],
+  past_profile:   [409, 'PAST_PROFILE', "This number is on an older technician profile with us. Text the office and they'll switch it back on."],
+  bad_input:      [400, 'BAD_INPUT', 'Something in the form is not right. Check it and try again.'],
+};
+
+async function joinComplete(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const code = normalizeInviteCode(body.c);
+  if (!code) return res.status(404).json({ code: 'INVITE_NOT_FOUND', error: JOIN_BAD_LINK });
+  const nonce = String(body.nonce || '');
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) return res.status(400).json({ error: 'Reload the page and try again.' });
+  const name = String(body.name || '').replace(/[\x00-\x1f\x7f<>]/g, '').replace(/\s+/g, ' ').trim();
+  if (name.length < 2 || name.length > 60 || !/\p{L}/u.test(name)) return res.status(400).json({ field: 'name', error: 'Enter your full name.' });
+  const phone = toE164(body.phone);
+  if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter your 10-digit US cell number.' });
+  const pin = String(body.pin ?? '');
+  if (!/^\d{4}$/.test(pin)) return res.status(400).json({ field: 'pin', error: 'Your PIN must be exactly 4 digits.' });
+  if (weakPin(pin)) return res.status(400).json({ field: 'pin', error: 'That PIN is too easy to guess. Pick different digits.' });
+  if (body.sms_consent !== true) return res.status(400).json({ field: 'consent', error: 'Tick the box so we can text you your jobs.' });
+  let slots;
+  try { slots = normalizeSlots(body.slots); } catch (e) { return res.status(400).json({ field: 'slots', error: e.message }); }
+  if (!slots.length) return res.status(400).json({ field: 'slots', error: 'Pick at least one time you can work.' });
+
+  const db = serviceClient();
+  const { data, error } = await db.rpc('claim_tech_invite', {
+    p_code: code, p_nonce: nonce, p_name: name, p_phone: phone, p_pin: pin, p_slots: slots,
+  });
+  // Log the reason, never the body (it holds the PIN), and never echo a raw
+  // database error to a public caller.
+  if (error) {
+    console.error('[join] claim_tech_invite failed:', error.code, error.message);
+    return res.status(500).json({ error: 'Could not finish sign-up. Tap the button again.' });
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  const outcome = row?.outcome;
+  if (outcome !== 'joined' && outcome !== 'replay') {
+    const [status, codeOut, msg] = JOIN_OUTCOME[outcome] || [500, 'UNKNOWN', 'Could not finish sign-up. Tap the button again.'];
+    console.log(`[join] invite ..${code.slice(-4)} -> ${outcome}`);
+    return res.status(status).json({ code: codeOut, error: msg });
+  }
+
+  const { data: t, error: tErr } = await db.from('technicians')
+    .select('id, name, status, phone, service_area_id, businesses ( slug, name, timezone )').eq('id', row.tech_id).single();
+  if (tErr || !t) {
+    console.error('[join] new tech lookup failed:', tErr?.message);
+    return res.status(500).json({ error: 'Your account was created. Open the tech app and sign in with your phone number and PIN.' });
+  }
+  let area = null;
+  try { ({ data: area } = await db.from('service_areas').select('name, unstaffed').eq('id', t.service_area_id).maybeSingle()); }
+  catch { /* cosmetic */ }
+  const slug = t.businesses?.slug || '';
+  const metro = area?.name || '';
+  const unstaffed = !!area?.unstaffed;
+
+  // The same session login() mints (identity from the database, sliding 12h,
+  // capped at TECH_SESSION_MAX by me()) and the same technician shape, so
+  // tech.html treats this exactly like a phone + PIN sign-in.
+  const token = signToken({ kind: 'tech', tech_id: t.id, business_id: row.biz_id, sess: 1 });
+  const technician = {
+    id: t.id, name: t.name, status: t.status, slug, tz: t.businesses?.timezone || 'America/Denver',
+    demo: demoMode(), company_name: brandName(slug, null),
+  };
+
+  // Texts only on the FIRST success, never on a replay. Awaited (Vercel can
+  // freeze the lambda once the response is out), and neither may fail the
+  // sign-up: the account already exists.
+  if (outcome === 'joined') {
+    const brand = inviteBrand(slug, t.businesses?.name);
+    let welcome = null;
+    try {
+      welcome = await sendTechSms(db, {
+        kind: 'tech_welcome', technicianId: t.id, businessId: row.biz_id, phone: t.phone,
+        message: welcomeSmsText({ brand, name: t.name, metro, unstaffed }),
+      });
+    } catch (e) { console.warn('[join] welcome text failed:', e.message); }
+    try {
+      await sendTechJoinedAlert({
+        techName: t.name, company: brand, metro, slotCount: slots.length, unstaffed,
+        payrollNote: payrollNameNote(t.name),
+        welcomeFailed: welcome && !welcome.ok ? smsFailReason(welcome) : null,
+      });
+    } catch (e) { console.warn('[join] owner alert failed:', e.message); }
+    console.log(`[join] new tech ${t.id} ${slug}/${metro} ..${String(t.phone).slice(-4)} slots=${slots.length}`);
+  }
+  return res.status(200).json({ ok: true, token, technician, metro, unstaffed, slot_count: slots.length });
+}
+
+// computeJobPay picks rates by the tech's NAME (_lib/payroll.js isJuan /
+// isRetired), and a self-typed name can trip those rules. The sign-up still
+// goes through (it's their real name); the owner is told so payroll can be
+// checked before payday.
+function payrollNameNote(name) {
+  if (isJuan(name)) return 'their name contains "Juan", so payroll will compute their pay at Juan\'s rates. Check it before payday.';
+  if (isRetired(name)) return 'their name matches the retired-tech rule (Evan/Israel), so payroll will compute $0 for them. Check it before payday.';
+  return null;
 }
 
 // ── Bracket inventory (read-only) ────────────────────────────────────────────
