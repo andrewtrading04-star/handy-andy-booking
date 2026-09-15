@@ -13480,10 +13480,22 @@ async function renderGreeting(){
       reqs.push(api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}).catch(()=>({purchases:[]})));
       reqs.push(api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})));
     }
+    // Secretary conversion gauge (Handy Andy / Doms only -- my_call_performance
+    // 403s any other scope, see api/admin.js). Two non-overlapping trailing
+    // 7-day windows off the SAME endpoint the "My Call Performance" screen
+    // already uses, so this reads exactly the same calls with exactly the
+    // same booked/worked-the-script rules -- no second definition of
+    // "conversion" to drift out of sync with that screen or the owner's ranking.
+    const wantsCallPerf = role==='secretary' && ['handy-andy','doms'].includes(scope);
+    if(wantsCallPerf){
+      reqs.push(api('my_call_performance',{ params:{ days:7, offset:0 }}).catch(()=>null));
+      reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
+    }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
     if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
+    const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
@@ -13499,6 +13511,7 @@ async function renderGreeting(){
       estimateAlerts: s.estimate_alerts || [],
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
       lowStockTechs: lowStockCount(bracketInv),
+      callPerf,
     };
     paintGreeting();
     { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
@@ -13659,11 +13672,23 @@ function paintGreeting(){
   // second dash so it cannot be misread as part of the trend clause.
   const ownerRiskTxt = riskParts.length ? ` · ${riskParts.join(', ')}` : '';
   const ownerSentence = `Profit <b class="gm-big">${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}`;
+  // Handy Andy / Doms secretaries get the conversion gauge below instead of
+  // the routine "N jobs today" count -- same "only speak up when something
+  // needs attention" rule the owner's line already follows above. The
+  // routine job count is dropped; estimates and review calls stay since
+  // those are actions she still has to take, not just a status readout.
+  const hasCallPerf = !!(greetingData.callPerf && greetingData.callPerf.thisWeek);
+  const quietParts=[];
+  if(est>0) quietParts.push(estPart);
+  if(calls>0) quietParts.push(callsPart);
+  const secretaryQuietSentence = quietParts.length ? `You have ${quietParts.join(' and ')}.` : '';
   const summarySentence = role==='owner'
     ? ownerSentence
-    : scope==='handy-andy'
-      ? `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today and ${estPart}.`
-      : `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
+    : hasCallPerf
+      ? secretaryQuietSentence
+      : scope==='handy-andy'
+        ? `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today and ${estPart}.`
+        : `There ${jobs===1?'is':'are'} ${jobsPart} on the schedule today, ${estPart} and ${callsPart}.`;
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
@@ -13673,6 +13698,7 @@ function paintGreeting(){
     // phrasing were dropped at the owner's request; he reads this many times
     // a day and wanted the facts, not the pleasantries.
     `<div class="greet-line greet-main">${esc(dateStr)}. <b class="gm-big">${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`+
+    secretaryConversionHtml()+
     greetStatsHtml()+
     greetNoteHtml();
   // Net Daily Profit's trend chart tab toggle: Last 7 days / Last 30 days.
@@ -13997,6 +14023,47 @@ function ndpChartHtml(cached){
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
   const svg=incomeChartSvg(history, 1500, 'week', 'days', 44);
   return `<div class="ndp-scroll">${svg}</div>`;
+}
+// Secretary conversion gauge: a needle dial + calls/booked score, re-anchored
+// to a rolling 7-day average (one slow morning can't swing it) with an arrow
+// against the PRIOR 7-day window, same pattern as the owner's profit trend
+// above. Reuses my_call_performance's own booked/conversion math (see
+// renderGreeting) so this can never disagree with the My Call Performance
+// screen or the owner's ranking about the same week.
+function secretaryConversionHtml(){
+  const cp=greetingData && greetingData.callPerf;
+  if(!cp || !cp.thisWeek) return '';
+  const tw=cp.thisWeek, lw=cp.lastWeek;
+  const pct=Number(tw.conversion)||0;
+  const lastPct=lw ? (Number(lw.conversion)||0) : null;
+  const angle=-90 + (Math.min(100,Math.max(0,pct))/100)*180;
+  const trendHtml = lastPct==null ? '' : (()=>{
+    const delta=Math.round((pct-lastPct)*10)/10;
+    const up=delta>=0;
+    return `<div class="gstat-s ${up?'up':'down'}">${up?'&#8593;':'&#8595;'} ${Math.abs(delta)} pts vs last week's ${lastPct}%</div>`;
+  })();
+  return `<div class="greet-stats" style="grid-template-columns:1fr;margin-top:14px;">
+    <div class="gstat" style="flex-direction:row;align-items:center;gap:18px;text-align:left;">
+      <svg width="104" height="60" viewBox="0 0 132 76" role="img" aria-label="Seven-day conversion rate ${pct}%">
+        <path d="M10,70 A56,56 0 0,1 33.7,26.3" fill="none" stroke="#ff8a8a" stroke-width="10" stroke-linecap="round"/>
+        <path d="M33.7,26.3 A56,56 0 0,1 66,14" fill="none" stroke="#ffc85e" stroke-width="10" stroke-linecap="round"/>
+        <path d="M66,14 A56,56 0 0,1 122,70" fill="none" stroke="#5ef0a0" stroke-width="10" stroke-linecap="round"/>
+        <line x1="66" y1="14" x2="66" y2="4" stroke="rgba(255,255,255,.5)" stroke-width="2"/>
+        <g style="transform:rotate(${angle}deg);transform-origin:66px 70px;">
+          <line x1="66" y1="70" x2="66" y2="22" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="66" cy="70" r="5" fill="#fff"/>
+        </g>
+      </svg>
+      <div style="min-width:0;">
+        <span class="gstat-l">Conversion, 7-day average</span>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-top:2px;flex-wrap:wrap;">
+          <span class="gstat-v" style="font-size:26px;">${pct}%</span>
+          <span style="font-size:12px;opacity:.8;">${tw.calls} call${tw.calls===1?'':'s'} &middot; ${tw.booked} booked, 7 days</span>
+        </div>
+        ${trendHtml}
+      </div>
+    </div>
+  </div>`;
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
