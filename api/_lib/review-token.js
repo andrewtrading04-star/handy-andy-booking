@@ -57,37 +57,44 @@ export async function ensureReviewToken(db, booking) {
   }
 }
 
-// Every brand's OWN short link domain for a review request text. Carriers
-// want a message link to sit on the sender's own domain (not a third-party
-// booking-app URL), and a bare "brandname.com/r/<token>" reads as a real
-// business, short enough to not get flagged, and doesn't leak "handy-andy"
-// into a Dom's or a lead-gen customer's text the way the raw booking-app URL
-// (…handy-andy-booking.vercel.app/api/book?action=review_click&token=<huge
-// blob>&ch=sms) did until 2026-09-15. Each domain runs a tiny /r/[token]
-// route (same file in every site repo) that 302s to the booking app's own
-// review_click endpoint, which does the actual click-tracking and hands the
-// customer on to review.html.
+// Every brand's OWN short link for a review request text, as a URL prefix —
+// the token is appended directly, no encoding surprises to remember at the
+// call site. Carriers want a message link to sit on the sender's own domain
+// (not a third-party booking-app URL), and a bare "brandname.com/r/<token>"
+// reads as a real business, short enough to not get flagged, and doesn't
+// leak "handy-andy" into a Dom's or a lead-gen customer's text the way the
+// raw booking-app URL (…handy-andy-booking.vercel.app/api/book?action=
+// review_click&token=<huge blob>&ch=sms) did until 2026-09-15.
 //
-// 'precision' has no entry on purpose: precisiontvinstallation.com is not a
-// Next.js site this repo can add a route to, so it falls back to `clickUrl`
-// (the booking app's own /r/<token> — shorter than the old query string, but
-// still on the booking-app domain) until that site gets a real /r/ route.
-const REVIEW_LINK_DOMAIN = {
-  'handy-andy': 'www.ihandyandy.com',
-  'doms': 'www.domstvmounting.com',
-  'mile-high': 'www.milehightvmounting.com',
-  'austin': 'www.austinmounting.com',
-  'tvmountingdenver': 'www.tvmountingdenver.com',
-  'houstonmounting': 'houstonmounting.com',
-  'houstontvinstallation': 'houstontvinstallation.com',
-  'tvhanginghouston': 'tvhanginghouston.com',
-  'htvmounting': 'htvmounting.com',
-  'houstontvmountingpros': 'www.houstontvmountingpros.com',
-  'houstonperfectviewtvmounting': 'houstonperfectviewtvmounting.com',
-  'atxmountpros': 'atxmountpros.com',
-  'atxtvmount': 'atxtvmount.com',
-  'austinmountingpros': 'austinmountingpros.com',
-  'austintvinstall': 'austintvinstall.com',
+// Every prefix ends up pointing at a tiny redirect that 302s to the booking
+// app's own review_click endpoint (which does the actual click-tracking and
+// hands the customer on to review.html):
+//   - 14 brands run a /r/[token] route inside their own Next.js site repo
+//     (same file in every one).
+//   - 'precision': precisiontvinstallation.com is a static export, not a
+//     Next.js app this codebase can add a route to. Its DNS is on Vercel's
+//     own nameservers, so instead of touching that deployment at all, a
+//     dedicated subdomain (r.precisiontvinstallation.com) points at its own
+//     tiny standalone Vercel project (precision-review-link) doing the exact
+//     same redirect at its root path — no /r/ prefix needed since the
+//     subdomain itself is the "r".
+const REVIEW_LINK_PREFIX = {
+  'handy-andy': 'https://www.ihandyandy.com/r/',
+  'doms': 'https://www.domstvmounting.com/r/',
+  'mile-high': 'https://www.milehightvmounting.com/r/',
+  'austin': 'https://www.austinmounting.com/r/',
+  'tvmountingdenver': 'https://www.tvmountingdenver.com/r/',
+  'houstonmounting': 'https://houstonmounting.com/r/',
+  'houstontvinstallation': 'https://houstontvinstallation.com/r/',
+  'tvhanginghouston': 'https://tvhanginghouston.com/r/',
+  'htvmounting': 'https://htvmounting.com/r/',
+  'houstontvmountingpros': 'https://www.houstontvmountingpros.com/r/',
+  'houstonperfectviewtvmounting': 'https://houstonperfectviewtvmounting.com/r/',
+  'atxmountpros': 'https://atxmountpros.com/r/',
+  'atxtvmount': 'https://atxtvmount.com/r/',
+  'austinmountingpros': 'https://austinmountingpros.com/r/',
+  'austintvinstall': 'https://austintvinstall.com/r/',
+  'precision': 'https://r.precisiontvinstallation.com/',
 };
 
 // The customer-facing review-request text. One template for all three
@@ -99,7 +106,7 @@ const REVIEW_LINK_DOMAIN = {
 // text), so this reads as a live two-way exchange rather than a cold blast —
 // same call already made for staff Messages replies.
 export function reviewRequestSms({ slug, name, token, clickUrl }) {
-  const domain = REVIEW_LINK_DOMAIN[slug];
-  const link = domain && token ? `https://${domain}/r/${encodeURIComponent(token)}` : clickUrl;
+  const prefix = REVIEW_LINK_PREFIX[slug];
+  const link = prefix && token ? `${prefix}${encodeURIComponent(token)}` : clickUrl;
   return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link}`;
 }
