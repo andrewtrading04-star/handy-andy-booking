@@ -8448,10 +8448,16 @@ async function callClaim(req, res, db, auth, body) {
   }
 
   const now = new Date().toISOString();
-  const { error } = await db.from('calls')
+  // Compare the snapshot as part of the write: two simultaneous readers must
+  // not both claim successfully and then each dial the same customer.
+  let claim = db.from('calls')
     .update({ claimed_by: me, claimed_at: now, status: 'calling', updated_at: now })
-    .eq('id', id);
+    .eq('id', id).eq('status', cur.status);
+  claim = cur.claimed_at == null ? claim.is('claimed_at', null) : claim.eq('claimed_at', cur.claimed_at);
+  claim = cur.claimed_by == null ? claim.is('claimed_by', null) : claim.eq('claimed_by', cur.claimed_by);
+  const { data: claimed, error } = await claim.select('id').maybeSingle();
   if (error) throw error;
+  if (!claimed) return res.status(409).json({ error: 'This call changed while you were claiming it. Refresh the call and try again.' });
   return res.status(200).json({ ok: true, claimed_by: me });
 }
 

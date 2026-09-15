@@ -16,6 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
+<link rel="stylesheet" href="/calls-inbox.css?v=1">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -9757,7 +9758,9 @@ async function renderCallAnalytics(){
 // Grasshopper has no API, so these arrive by email: a script on the owner's
 // Gmail forwards each voicemail to api/admin.js?action=call_ingest. Cross-
 // business on purpose — the phone system is shared between both companies.
-let _callsData={open:[],handled:[]};
+let _callsData=null;
+let _callsRequest=0;
+let _callsSelected=null;
 // The Today/Yesterday/Last 7 days segment for the "organized by number"
 // section below the callback queue. Its own fetch, its own state — the queue
 // above is deliberately NOT date-scoped (an overdue voicemail from 10 days
@@ -9778,6 +9781,7 @@ function callPeriodRange(period){
   return { from:startOfDay(now).toISOString(), to:now.toISOString() };   // today
 }
 async function renderCalls(){
+  const request=++_callsRequest;
   const view=document.getElementById('view');
   // Only the FIRST load blanks the screen. This runs again every 20s from the
   // poll below, and blanking-then-fetching meant the whole view went white for
@@ -9810,18 +9814,22 @@ async function renderCalls(){
     if(!firstLoad && [...view.querySelectorAll('audio')].some(a=>!a.paused&&!a.ended)) return;
     // The user may have navigated away mid-fetch — repainting #view now would
     // stomp whatever screen they moved to.
-    if(!firstLoad && !onScreen('calllog')) return;
+    if(request!==_callsRequest || !onScreen('calllog')) return;
     _callsData=base;
     _callsPeriodData=period;
     paintCalls();
     refreshCallsBadge();
-  }catch(e){ if(firstLoad) view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; }
+  }catch(e){ if(request===_callsRequest && onScreen('calllog')){
+    if(firstLoad) view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div><button class="btn" id="calls-retry">Retry</button></div>`;
+    else toast('Could not refresh calls. Showing the last loaded results.');
+    view.querySelector('#calls-retry')?.addEventListener('click',renderCalls);
+  } }
 }
 // Times are shown in the market's own zone, NOT the raw value Grasshopper sent:
 // it stamps every notification in Central regardless of where the call came in,
 // so a Denver voicemail would otherwise read an hour late and someone would
 // call back thinking they had more time than they do.
-const CALL_TZ={ Denver:'America/Denver', Houston:'America/Chicago', Austin:'America/Chicago' };
+const CALL_TZ={ Denver:'America/Denver', Houston:'America/Chicago', Austin:'America/Chicago', 'Los Angeles':'America/Los_Angeles' };
 function callWhen(r){
   const tz=CALL_TZ[r.market]||'America/Denver';
   try{
@@ -9876,12 +9884,12 @@ function callCard(r,handled){
   // are computed server-side (api/admin.js calls()) so every reader agrees on
   // the same definition; Location is just the market, always shown as a
   // label rather than a toggle since there's no "off" state for a place.
-  const statusBoxes = isLive ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
-    ${cwStatusBox('📨','Left a voicemail',r.left_voicemail)}
-    ${cwStatusBox('✅','Contacted',r.contacted)}
-    ${cwStatusBox('📍', r.market || 'Unrouted', true, true)}
-    ${cwStatusBox('🎙️','Recorded a message',r.recorded_message)}
-  </div>`;
+  const statusBoxes = `<dl class="ci-facts">
+    <dt>Call outcome</dt><dd>${esc(callOutcome(r))}</dd>
+    <dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>
+    <dt>Location</dt><dd>${esc(r.market || 'Unrouted')}</dd>
+    <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
+  </dl>`;
 
   // Live-wizard outcome and a not-yet-booked callback marker don't fit the 4
   // boxes (they're not properties of an inbound tracking call), but dropping
@@ -9971,9 +9979,9 @@ function callCard(r,handled){
        ${role==='owner'?`<button class="rc-btn ghost" data-calldelete="${esc(r.id)}" title="Permanently remove this call from the log">Delete</button>`:''}</div>`
     : `${claimBtn}${msgBtn}
        <div class="rc-btn-row">
-         <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Done</button>
-         <button class="rc-btn amber" data-callact="called_back" data-callid="${esc(r.id)}">Called back</button>
-         <button class="rc-btn red" data-callact="ignored" data-callid="${esc(r.id)}">Ignore</button>
+         <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Mark resolved</button>
+         <button class="rc-btn ghost" data-callact="called_back" data-callid="${esc(r.id)}">Log callback</button>
+         <button class="rc-btn ghost" data-callact="ignored" data-callid="${esc(r.id)}">Ignore</button>
        </div>`;
 
   // The list spans multiple businesses but customer_detail is scoped to the
@@ -10079,8 +10087,37 @@ const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'}
 // computed server-side from forwarded_to -> staff_users), so "Joey" here is
 // exactly the same person the interruption banner would name.
 let _callsWho='all';
+function callOutcome(r){
+  if(r.kind==='live') return 'Live intake';
+  if(r.answered===true) return 'Answered';
+  if(r.left_voicemail) return 'Missed · Voicemail';
+  return r.answered===false ? 'Missed' : 'Outcome unavailable';
+}
+function callFollowUp(r){
+  if(r.status==='resolved') return r.booking ? 'Resolved · Booked' : 'Resolved';
+  if(r.status==='ignored') return 'Ignored';
+  if(r.claim_active) return r.claimed_by_me ? 'You are handling this' : `Being handled by ${r.claimed_by || 'a teammate'}`;
+  if(r.status==='called_back') return 'Called back · Follow-up open';
+  return 'Needs callback';
+}
+function callInbox(rows){
+  if(_callFocusId && rows.some(r=>r.id===_callFocusId)) _callsSelected=_callFocusId;
+  const selected=rows.find(r=>r.id===_callsSelected)||rows[0];
+  _callsSelected=selected.id;
+  return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a call">
+    ${rows.map(r=>`<button type="button" class="ci-item" data-callselect="${esc(r.id)}" aria-pressed="${r.id===selected.id}">
+      <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
+      ${r.customer?`<span>${esc(r.caller_pretty || '')}</span>`:''}
+      <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
+      <span>${esc(callWhen(r))}</span><span class="ci-outcome">${esc(callOutcome(r))}</span>
+      <span class="ci-status">${esc(callFollowUp(r))}</span>
+      ${r.transcript?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
+    </button>`).join('')}
+  </div><section class="ci-detail" aria-label="Selected call details">${callCard(selected,selected._handled)}</section></div>`;
+}
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
+  if(!_callsData) return;
   let open=(_callsData.open||[]).map(r=>({ ...r, _handled:false }));
   // One flat list, newest first. Rows are tagged with the bucket they came
   // back in so open calls keep their real action buttons (Done/Called back/
@@ -10113,15 +10150,15 @@ function paintCalls(){
   // tab and the badge can never disagree about the same call. Live rows are
   // always contacted (the secretary is/was on the phone by definition), so
   // this naturally excludes them without a separate kind check.
-  const missedRows=periodRows.filter(r=> !r.contacted);
+  const missedRows=periodRows.filter(r=> r.answered===false);
   // Same recorded_message boolean the card's own box uses (recording_url on
   // the row), so the tab and the badge can never disagree about a call.
   const recordedRows=periodRows.filter(r=> r.recorded_message);
   const VIEWS=[
-    { id:'recorded', label:`🎙️ Has a recording (${recordedRows.length})` },
     { id:'all',      label:`All (${periodRows.length})` },
-    { id:'missed',   label:`📵 Missed (${missedRows.length})` },
     { id:'callback', label:`Needs callback (${open.length})` },
+    { id:'missed',   label:`Missed (${missedRows.length})` },
+    { id:'recorded', label:`Recordings (${recordedRows.length})` },
   ];
   const shown = _callsView==='missed' ? missedRows : _callsView==='callback' ? open
     : _callsView==='recorded' ? recordedRows : periodRows;
@@ -10129,23 +10166,34 @@ function paintCalls(){
     : _callsView==='missed' ? 'No missed calls in this period.'
     : _callsView==='recorded' ? 'No recorded calls in this period.' : 'No calls in this period.';
   const viewSeg=VIEWS.map(v=>
-    `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" data-callview="${v.id}">${v.label}</button>`).join('');
+    `<button type="button" class="rc-seg-btn ${_callsView===v.id?'on':''}" aria-pressed="${_callsView===v.id}" data-callview="${v.id}">${v.label}</button>`).join('');
   const periodSeg=['today','yesterday','7d'].map(p=>
     `<button type="button" class="rc-seg-btn ${_callsPeriod===p?'on':''}" data-callperiod="${p}">${esc(CALL_PERIOD_LABEL[p])}</button>`).join('');
   const whoSeg=whoNames.length>1 ? `<div class="rc-seg">${['all',...whoNames].map(w=>
     `<button type="button" class="rc-seg-btn ${_callsWho===w?'on':''}" data-callwho="${esc(w)}">${w==='all'?'Everyone':esc(w)}</button>`).join('')}</div>` : '';
-  view.innerHTML=`<div class="wrap">
+  const listScroll=view.querySelector('.ci-list')?.scrollTop||0;
+  const detailScroll=view.querySelector('.ci-detail')?.scrollTop||0;
+  view.innerHTML=`<div class="wrap ci-wrap">
     <div class="rc-head"><div>
-      <h2 class="rc-title">📨 Incoming Calls</h2>
-      <div class="rc-sub">Every call that came in on a tracking number. Anyone who already exists as a customer is linked, and a job booked within two weeks of their call is shown against it.</div>
+      <h2 class="rc-title">Calls</h2>
+      <div class="rc-sub">Select a call to read its message, listen to a recording, or follow up.${_callsView==='callback'?' This queue includes older calls outside the selected period.':''}</div>
     </div></div>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
       <div class="rc-seg">${viewSeg}</div>
       ${_callsView==='callback'?'':`<div class="rc-seg">${periodSeg}</div>`}
       ${whoSeg}
     </div>
-    ${shown.length ? renderCallRows(shown, _callsView!=='callback' && _callsPeriod==='7d') : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
+    ${shown.length ? callInbox(shown) : `<div class="empty" style="padding:22px 12px;">${emptyMsg}</div>`}
   </div>`;
+  if(view.querySelector('.ci-list')) view.querySelector('.ci-list').scrollTop=listScroll;
+  if(view.querySelector('.ci-detail')) view.querySelector('.ci-detail').scrollTop=detailScroll;
+  view.querySelectorAll('[data-callselect]').forEach(b=>b.addEventListener('click',()=>{
+    _callsSelected=b.dataset.callselect; paintCalls();
+    const selectedButton=[...view.querySelectorAll('[data-callselect]')].find(el=>el.dataset.callselect===_callsSelected);
+    selectedButton?.focus({preventScroll:true});
+    const detail=view.querySelector('.ci-detail');
+    if(detail) { detail.scrollTop=0; if(window.innerWidth<760) detail.scrollIntoView({behavior:'smooth',block:'start'}); }
+  }));
 
   // Tab switch is a repaint of data already in hand — no refetch, no flash.
   view.querySelectorAll('[data-callview]').forEach(b=>b.addEventListener('click',()=>{
@@ -10336,7 +10384,7 @@ function paintCallBanner(call){
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
   try{
-    const d=(onScreen('calllog')&&_callsData.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
+    const d=(onScreen('calllog')&&_callsData?.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }

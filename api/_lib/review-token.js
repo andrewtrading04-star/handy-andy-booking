@@ -25,9 +25,12 @@ export function mintReviewToken(bookingId) {
 // BOOKING time but the link is only used at COMPLETION, so a job booked 31+
 // days out (estimate approval offers 45) reaches completion holding a token
 // that already 401s on review.html. Treat that the same as missing.
-function tokenUsable(token) {
+function tokenUsable(token, bookingId) {
   if (!token) return false;
-  try { return !!verifyToken(token); } catch { return false; }
+  try {
+    const payload = verifyToken(token);
+    return !!(payload && payload.booking_id === bookingId && (!payload.kind || payload.kind === 'review'));
+  } catch { return false; }
 }
 
 // Returns a usable review_token for the booking, minting and persisting a
@@ -42,7 +45,7 @@ function tokenUsable(token) {
 // failing the status change itself.
 export async function ensureReviewToken(db, booking) {
   if (!booking || !booking.id) return null;
-  if (tokenUsable(booking.review_token)) return booking.review_token;
+  if (tokenUsable(booking.review_token, booking.id)) return booking.review_token;
   const why = booking.review_token ? 'expired' : 'missing';
   try {
     const token = mintReviewToken(booking.id);
@@ -52,6 +55,9 @@ export async function ensureReviewToken(db, booking) {
     console.log(`[review] minted ${why} review_token for booking ${booking.id}`);
     return token;
   } catch (e) {
+    // Senders inspect the mutated booking. Do not leave an unusable token in
+    // place when persistence fails, or they will send a broken review link.
+    booking.review_token = null;
     console.error(`[review] could not mint review_token for booking ${booking.id}:`, e.message);
     return null;
   }
