@@ -9842,7 +9842,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -10127,19 +10127,33 @@ function lineItemsTotal(items) {
 // Estimates tab can show "Sent by Heather · Fri, Jul 17, 9:02 AM" instead of
 // just a status label. Degrades to a status-only update if that migration
 // isn't applied yet on some environment.
-async function markEstimateContacted(db, businessId, id, sentBy) {
+//
+// `channel` ('sms' | 'email') additionally stamps texted_at/texted_by or
+// emailed_at/emailed_by (migration 0112) alongside the combined
+// contacted_at/contacted_by -- so a quote sent by BOTH text and email shows
+// both confirmations on the card instead of the most recent one clobbering
+// the other. Returns the patch actually applied (after any missing-column
+// degrade) so the caller can update the client without a full re-fetch.
+async function markEstimateContacted(db, businessId, id, sentBy, channel) {
+  const now = new Date().toISOString();
+  const patch = { status: 'contacted', contacted_at: now, contacted_by: sentBy || null };
+  if (channel === 'sms')   { patch.texted_at = now;  patch.texted_by = sentBy || null; }
+  if (channel === 'email') { patch.emailed_at = now; patch.emailed_by = sentBy || null; }
   try {
-    const { error } = await db.from('estimates')
-      .update({ status: 'contacted', contacted_at: new Date().toISOString(), contacted_by: sentBy || null })
-      .eq('id', id).eq('business_id', businessId);
-    if (error && missingColumn(error.message)) {
-      const { error: e2 } = await db.from('estimates').update({ status: 'contacted' }).eq('id', id).eq('business_id', businessId);
-      if (e2) console.warn('[estimate] could not mark contacted:', e2.message);
-      return;
+    let { error } = await db.from('estimates').update(patch).eq('id', id).eq('business_id', businessId);
+    for (let i = 0; error && i < 4; i++) {
+      const col = missingColumn(error.message);
+      if (!col || !(col in patch)) break;
+      console.warn(`[estimate] '${col}' column missing, retrying without it`);
+      delete patch[col];
+      if (!Object.keys(patch).length) return {};
+      ({ error } = await db.from('estimates').update(patch).eq('id', id).eq('business_id', businessId));
     }
-    if (error) console.warn('[estimate] could not mark contacted:', error.message);
+    if (error) { console.warn('[estimate] could not mark contacted:', error.message); return {}; }
+    return patch;
   } catch (e) {
     console.warn('[estimate] mark contacted threw:', e.message);
+    return {};
   }
 }
 
@@ -10256,7 +10270,7 @@ async function estimateCreate(req, res, db, auth, body) {
     try {
       await sendEmail({ slug: biz.slug, to: estEmail, subject, html, throwOnError: true });
       emailed = true;
-      await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
+      await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth), 'email');
     } catch (e) {
       console.warn('[estimate_create] email send failed, but estimate created:', e.message);
       emailWarning = `email failed: ${e.message}`;
@@ -10286,7 +10300,10 @@ async function estimateCreate(req, res, db, auth, body) {
       const r = await sendSMSResult(estPhone, msg);
       await logAutomatedMessage(db, { businessId: biz.id, customerPhone: estPhone, body: msg, result: r });
       texted = !!r.ok;
-      if (texted && !emailed) await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth));
+      // Stamped independently of the email branch above -- both can succeed on
+      // the same create, and each needs its own confirmation on the card (see
+      // markEstimateContacted).
+      if (texted) await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth), 'sms');
       if (!r.ok) console.warn(`[estimate_create] estimate SMS not sent:`, r.skipped || r.error);
     } catch (e) {
       console.warn('[estimate_create] estimate SMS threw:', e.message);
@@ -10347,8 +10364,8 @@ async function estimateSendSms(req, res, db, auth, body) {
     return res.status(502).json({ error: r.error || 'Text message failed to send.' });
   }
 
-  await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth));
-  return res.status(200).json({ ok: true });
+  const patch = await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth), 'sms');
+  return res.status(200).json({ ok: true, estimate: patch });
 }
 
 // Send quote email to customer
@@ -10385,8 +10402,8 @@ async function estimateSendEmail(req, res, db, auth, body) {
     return res.status(502).json({ error: `Email failed to send: ${e.message}` });
   }
 
-  await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth));
-  return res.status(200).json({ ok: true });
+  const patch = await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth), 'email');
+  return res.status(200).json({ ok: true, estimate: patch });
 }
 
 // Decline an estimate as outside what the business does (a request for work
@@ -10733,6 +10750,7 @@ async function estimateDecline(req, res, db, auth, body) {
     ok: true,
     sms_sent: !!(smsResult && smsResult.ok),
     email_sent: !!(emailResult && emailResult.sent),
+    estimate: patch,
   });
 }
 

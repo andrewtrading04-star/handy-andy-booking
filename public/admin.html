@@ -506,7 +506,6 @@
   .est-chip{font-size:12px;font-weight:600;background:var(--line2);color:var(--ink-2);padding:4px 9px;border-radius:7px;}
   .est-thumb{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;}
   .est-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);align-items:center;}
-  .est-status-sel{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 9px;font-size:13px;font-weight:600;}
   /* Estimate line-item editor */
   .est-quote{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
   .est-quote-line{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--ink-2);padding:2px 0;}
@@ -12269,10 +12268,6 @@ function paintEstimates(){
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
-    document.querySelectorAll('#estWrap [data-est-status]').forEach(sel=>sel.addEventListener('change',e=>{
-      sel.style.color = EST_COLOR[e.target.value] || '#16181d';
-      setEstimate(sel.dataset.estStatus,{ status:e.target.value });
-    }));
     document.querySelectorAll('#estWrap [data-est-edit]').forEach(b=>b.addEventListener('click',()=>openEstimateEdit(b.dataset.estEdit)));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
       sendEstimateMessage(b.dataset.estSms,'sms',b);
@@ -12341,7 +12336,6 @@ function estCard(e){
   const slotChips=slots.length?`<div class="est-slots"><span class="est-slots-lbl">🗓 Customer's preferred times:</span>${slots.map(s=>
     `<span class="est-chip">${esc(fmtSlotDate(s.date))} · ${esc(s.label||s.slot_key||'')}</span>`).join('')}</div>`:'';
   const photo=e.photo_url?`<img data-full="${esc(e.photo_url)}" src="${esc(e.photo_url)}" class="est-thumb" alt="attached photo">`:'';
-  const opts=Object.entries(EST_STATUS).map(([k,v])=>`<option value="${k}" ${e.status===k?'selected':''} style="color:${EST_COLOR[k]};">${v}</option>`).join('');
   // When the estimate came in, in the CUSTOMER's local time (Denver vs Houston),
   // shown as a prominent badge at the top so the office sees it at a glance.
   // A website contact-form lead (LandingSite -> Gmail -> api/migrate
@@ -12365,6 +12359,12 @@ function estCard(e){
     return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
   }).join('')}${taxLines}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(t.total)}</span></div></div>`:'';
   const hasQuote=lines.length>0;
+  // Drives which action is the primary (blue) button vs. a secondary (ghost)
+  // one, per the office workflow: build the quote, THEN send it, THEN (once
+  // the customer approves) convert it. Nothing to send/convert before a
+  // quote exists, and nothing to do at all once declined.
+  const canSend=hasQuote&&e.status!=='declined';
+  const isApproved=!!e.approved_at;
   const buildLabel=hasQuote?'Edit quote':'Build quote';
   const approvedAt=e.approved_at?new Date(e.approved_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   // Add-ons the customer accepted on the interactive estimate — enumerated on the
@@ -12383,11 +12383,18 @@ function estCard(e){
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
       : `<div class="est-approval waiting">${hasQuote?'Waiting on approval':'Quote not prepared'}</div>`);
-  // Who sent this estimate to the customer, and when (email/SMS send, or the
-  // status dropdown manually set to "Estimate sent") — same customer-local
-  // timezone as the "Came in" badge above, for consistency on one card.
-  const sentAt=e.contacted_at?new Date(e.contacted_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-  const sentLine=sentAt?`<div class="est-sent-line">✓ Sent to customer by <b>${esc(e.contacted_by||'Office')}</b> · ${esc(sentAt)}</div>`:'';
+  // Who sent this estimate to the customer, and when — shown per channel
+  // (texted_at/emailed_at, migration 0112) so a quote sent BOTH ways shows
+  // both confirmations instead of the more recent one hiding the other. Same
+  // customer-local timezone as the "Came in" badge above, for consistency on
+  // one card.
+  const fmtSentAt=iso=>iso?new Date(iso).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  const textedLine=e.texted_at?`<div class="est-sent-line">✓ Texted by <b>${esc(e.texted_by||'Office')}</b> · ${esc(fmtSentAt(e.texted_at))}</div>`:'';
+  const emailedLine=e.emailed_at?`<div class="est-sent-line">✓ Emailed by <b>${esc(e.emailed_by||'Office')}</b> · ${esc(fmtSentAt(e.emailed_at))}</div>`:'';
+  // Estimates sent before migration 0112 only have the combined contacted_at —
+  // fall back to that single line so old rows still show something.
+  const legacySentLine=(!e.texted_at&&!e.emailed_at&&e.contacted_at)?`<div class="est-sent-line">✓ Sent to customer by <b>${esc(e.contacted_by||'Office')}</b> · ${esc(fmtSentAt(e.contacted_at))}</div>`:'';
+  const sentLine=textedLine+emailedLine+legacySentLine;
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);
@@ -12413,11 +12420,11 @@ function estCard(e){
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${e.sms_consent!==true?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button class="btn sm" data-est-convert="${e.id}" title="${e.approved_at?'Create a booking from this approved estimate':'Create a booking now, without waiting for the customer to approve online (e.g. they approved by phone)'}">→ Convert to job${e.approved_at?'':' (unapproved)'}</button>
-        <label class="est-status-label">Status<select class="est-status-sel" data-est-status="${e.id}">${opts}</select></label>
+        <span class="est-status-badge" style="font-size:13px;font-weight:600;color:${EST_COLOR[e.status]||'#16181d'};">${esc(EST_STATUS[e.status]||e.status)}</span>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
-        ${(e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ghost sm" data-est-sms="${e.id}" title="Send SMS quote">Send text</button>`:''}
-        ${(e.customer_email&&appConfig.email)?`<button class="btn ghost sm" data-est-email="${e.id}" title="Send email quote">Send email</button>`:''}
+        ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${isApproved?'ghost':''} sm" data-est-sms="${e.id}" title="Send SMS quote">Send text</button>`:''}
+        ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${isApproved?'ghost':''} sm" data-est-email="${e.id}" title="Send email quote">Send email</button>`:''}
+        ${canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
         ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
         <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>
@@ -12430,8 +12437,25 @@ function estCard(e){
 // the customer details + the estimate's priced lines pre-loaded, so the office
 // just picks a date/time slot and a tech, then books.
 let nbSourceEstimateId=null;   // estimate this new-booking was converted from (archived on save)
-function convertEstimateToJob(id){
+async function convertEstimateToJob(id){
   const e=estCache[id]; if(!e){ toast('Estimate not found — refresh and try again.'); return; }
+  // The customer normally approves via the link in the emailed/texted quote
+  // (estimate_approve stamps approved_at). Converting one that hasn't been
+  // approved online is the office's manual override for a verbal approval —
+  // require it to be said out loud here, and stamp approved_at the same way
+  // the online approval does, so the card correctly shows it as approved
+  // ("by phone") instead of silently skipping straight to a job with no
+  // record of how it was authorized.
+  if(!e.approved_at){
+    if(!confirm(`${e.customer_name||'This customer'} has not approved this quote online. Confirm they approved it by phone before converting to a job?`)) return;
+    try{
+      await api('estimate_update',{ method:'POST', body:{ business:current.slug, id, status:'scheduled' }});
+      e.approved_at=new Date().toISOString();
+      e.status='scheduled';
+      paintEstimates(); // so the card behind the modal is already correct if it's cancelled
+      refreshEstimateBadge();
+    }catch(err){ toast(err.message||'Could not mark this estimate approved.'); return; }
+  }
   // Normalize to the canonical { description, qty, unit_price } shape on the way
   // into the booking modal — see liDesc()/liQty() above.
   const lines=(Array.isArray(e.line_items)?e.line_items:[]).filter(it=>it&&(liDesc(it)||Number(it.unit_price)!==0))
@@ -12624,9 +12648,17 @@ async function sendEstimateMessage(estimateId, type, btn){
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
   try{
     const action = type === 'sms' ? 'estimate_send_sms' : 'estimate_send_email';
-    await api(action,{ method:'POST', body:{ business:current.slug, id:estimateId }});
+    const r = await api(action,{ method:'POST', body:{ business:current.slug, id:estimateId }});
     toast(type === 'sms' ? 'Estimate texted to customer ✓' : 'Estimate emailed to customer ✓');
-    renderEstimates();
+    // Patch the row in place and repaint from local state rather than
+    // renderEstimates(): sending flips status to "Estimate sent", and a full
+    // re-fetch re-applies the CURRENT tab's status filter -- on "Needs
+    // Response" the estimate the office just worked would no longer match
+    // and would vanish out from under them mid-workflow.
+    const e=estCache[estimateId];
+    if(e && r && r.estimate) Object.assign(e, r.estimate);
+    paintEstimates();
+    refreshEstimateBadge();
   }catch(err){
     if(btn){ btn.disabled = false; btn.textContent = prev; }
     toast(err.message || `Could not send ${label}.`);
@@ -12937,7 +12969,10 @@ async function declineEstimate(estimateId, btn){
   try{
     const r = await api('estimate_decline',{ method:'POST', body:{ business:current.slug, id:estimateId }});
     toast(r.sms_sent||r.email_sent ? 'Customer notified ✓' : 'Marked declined — no phone/email on file to notify them.');
-    renderEstimates();
+    const e=estCache[estimateId];
+    if(e && r && r.estimate) Object.assign(e, r.estimate);
+    paintEstimates();
+    refreshEstimateBadge();
   }catch(err){
     if(btn){ btn.disabled = false; btn.textContent = prev; }
     toast(err.message || 'Could not decline this estimate.');
