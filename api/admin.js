@@ -12589,6 +12589,28 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   await notifyTechAssigned(db, biz, technician_id, scheduled_at, areaTz, { bookingId: bRow.id })
     .catch(e => console.error('[tech-notify]', e.message));
 
+  // Office alert — this auto-booked without any staffer touching it, so the
+  // ONLY way Heather/Joey/the owner find out is this alert. Every OTHER
+  // booking-creation path (bookingCreate, the public widget) already sends
+  // this; it was missing here, meaning a successful self-serve approval
+  // produced zero proactive notice to the office (found 2026-09-17). Awaited,
+  // same reasoning as the customer SMS below: an un-awaited send can be
+  // killed when Vercel freezes the lambda on response. sendOwnerBookingAlert
+  // swallows its own errors (never throws), so no try/catch needed here.
+  const [alertEndH, alertEndM] = slotDef.end.split(':').map(Number);
+  const scheduledEnd = new Date(midnight.getTime() + (alertEndH * 60 + alertEndM) * 60000).toISOString();
+  const alertLineItems = combinedItems.map(it => ({ name: it.description || 'Item', quantity: Number(it.qty) || 1, line_total: (Number(it.qty) || 1) * (Number(it.unit_price) || 0) }));
+  if (totals.tax > 0) alertLineItems.push({ name: 'Tax', quantity: 1, line_total: totals.tax });
+  await sendOwnerBookingAlert({
+    slug: biz.slug, businessName: biz.name, timezone: areaTz,
+    bookedBy: 'Customer (online approval)',
+    customer: { name: cust.name, phone: cust.phone, email: cust.email },
+    address: { line1: cust.line1, city: cust.city, state: cust.state, zip: cust.zip },
+    scheduledAt: scheduled_at, scheduledEnd,
+    technicianName: techInfo?.name || null, price: Number(totals.total) || 0,
+    lineItems: alertLineItems, customerNotes: est.description || null, bookingId: bRow.id,
+  });
+
   if (cust.phone && est.sms_consent === true) {
     const _d = new Date(scheduled_at);
     const dateStr = _d.toLocaleDateString('en-US', { timeZone: areaTz, weekday: 'short', month: 'short', day: 'numeric' });
