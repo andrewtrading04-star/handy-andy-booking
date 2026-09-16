@@ -246,11 +246,30 @@
     return 'direct';
   }
   const TRAFFIC_SOURCE = trafficSource();
-  // The exact page the widget is embedded on (e.g. /houston-tv-mounting vs
-  // /houston-tv-mounting-greenwayplz) — captured once at boot so a booking can
-  // be traced back to which landing page sent it, instead of guessing from
-  // whichever tech happened to do the job.
-  const LANDING_PAGE = (() => { try { return window.location.pathname; } catch (e) { return null; } })();
+  // Which market page sent this booking (e.g. /houston-tv-mounting vs
+  // /houston-tv-mounting-greenwayplz), so it can be traced back instead of
+  // guessing from whichever tech happened to do the job.
+  //
+  // window.location.pathname alone is wrong for Handy Andy's real flow: every
+  // market page links out to one shared /book page that hosts this same
+  // script, so pathname is always "/book" — that page landed 55/55 bookings
+  // as "/book" before this fix, hiding which market page actually sent them.
+  // Prefer the same-origin referrer (the page they clicked "book now" from)
+  // when it differs from the current page; fall back to pathname for the
+  // businesses whose widget is embedded inline on the market page itself,
+  // where referrer is an external site or empty.
+  const LANDING_PAGE = (() => {
+    try {
+      if (document.referrer) {
+        const ref = new URL(document.referrer);
+        if (ref.hostname.replace(/^www\./, '') === location.hostname.replace(/^www\./, '')
+          && ref.pathname && ref.pathname !== window.location.pathname) {
+          return ref.pathname;
+        }
+      }
+    } catch (e) {}
+    try { return window.location.pathname; } catch (e) { return null; }
+  })();
   async function logEvent(event_type, step_name, value = null, error_message = null) {
     try {
       const loc = resolveLocation();

@@ -5949,7 +5949,7 @@ async function analyticsOverview(req, res, db, auth) {
   const bookingsByBiz = new Map(); // business_id -> [{ city, created_at, cancelled, internal }]
   {
     const { data: bkRows, error: bkErr } = await db.from('bookings')
-      .select('business_id, created_at, status, city, landing_page, customer:customers ( email, phone )')
+      .select('business_id, created_at, status, city, metadata, customer:customers ( email, phone )')
       .eq('source', 'widget')
       .gte('created_at', since);
     if (bkErr) throw bkErr;
@@ -5958,8 +5958,11 @@ async function analyticsOverview(req, res, db, auth) {
       if (!e) { e = { kept: 0, cancelled: 0, internal: 0, byDay: new Map() }; bookedByBiz.set(bk.business_id, e); }
       const internal = isInternalContact(bk.customer);
       const cancelled = bk.status === 'cancelled';
+      // landing_page lives inside metadata jsonb, not a top-level column — see
+      // mirror.js bookingRow.metadata.landing_page.
+      const landing_page = (bk.metadata && bk.metadata.landing_page) || null;
       if (!bookingsByBiz.has(bk.business_id)) bookingsByBiz.set(bk.business_id, []);
-      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page: bk.landing_page, created_at: bk.created_at, cancelled, internal });
+      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page, created_at: bk.created_at, cancelled, internal });
       if (internal) { e.internal++; continue; }
       if (cancelled) { e.cancelled++; continue; }
       e.kept++;
