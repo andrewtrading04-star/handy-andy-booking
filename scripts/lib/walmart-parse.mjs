@@ -1,211 +1,159 @@
-// ============================================================================
-// scripts/lib/walmart-parse.mjs  —  Parse a Walmart order email into a payload
-// ============================================================================
-// Pure functions (no I/O) so they can be unit-tested against real email text.
-// Built against the ACTUAL Walmart "Thanks for your delivery order" email, whose
-// line items appear as image alt-text:
-//   "quantity 3 item onn Tilting TV Wall Mount for 50 to 86 ..."
-// Walmart bracket type words: "Fixed" (= flat), "Tilting", "Full Motion".
-// Order number format: 7 digits, dash, 8 digits (often "Order number: #…").
-// ============================================================================
+// Supplier messages are durable evidence, never instructions to change stock.
+// Unknown products, quantities, provenance and partial receipts require review.
+import { createHash } from 'node:crypto';
 
-// Minimal HTML → text, used only when an email has no text/plain part. Keeping
-// image alt-text (Walmart lists line items there) is essential, so we convert
-// <img alt="…"> to its alt text before stripping tags.
-export function stripHtml(html) {
-  if (!html) return '';
-  return html
-    .replace(/<img[^>]*\balt=["']([^"']*)["'][^>]*>/gi, ' $1 ')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'")
-    .replace(/[ \t]{2,}/g, ' ');
+export function stripHtml(html = '') {
+  return String(html).replace(/<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<img\b[^>]*\balt=(["'])([\s\S]*?)\1[^>]*>/gi, '\n$2\n')
+    .replace(/<\/?(?:br|p|div|tr|li|h[1-6])\b[^>]*>/gi, '\n').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;|&#34;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/[ \t]+/g, ' ');
+}
+const walmartDomain = domain => /^(?:[a-z0-9-]+\.)*walmart\.com$/i.test(domain || '');
+const addressDomain = address => String(address || '').trim().toLowerCase().split('@')[1] || '';
+export function extractOrderNum(text = '') { return (String(text).match(/\b(\d{7}-\d{8})\b/) || [])[1] || null; }
+export function extractOrderUrl(text = '') {
+  for (const m of String(text).matchAll(/https:\/\/[^\s<>"')]+/gi)) {
+    try { const u = new URL(m[0].replace(/&amp;/g, '&'));
+      if ((walmartDomain(u.hostname) && /^\/orders(?:\/|$)/i.test(u.pathname)) || u.hostname === 'w-mt.co') return u.href;
+    } catch (_) {}
+  }
+  return null;
 }
 
-// Walmart order number: 7 digits - 8 digits, optionally prefixed with '#'
-// and an "Order number:" label.
-export function extractOrderNum(text) {
-  if (!text) return null;
-  const m = text.match(/order\s*(?:number|#)\s*:?\s*#?(\d{7}-\d{8})/i)
-         || text.match(/#?\b(\d{7}-\d{8})\b/);
-  return m ? m[1] : null;
+// The scanner passes only Gmail's own Authentication-Results header. Forwarded
+// evidence additionally requires an explicitly configured forwarding account.
+export function walmartProvenance({ from = '', text = '', html = '', authenticationResults = '', trustedForwarders = [] } = {}) {
+  const passed = [...String(authenticationResults).matchAll(/dkim=pass\b[^;\r\n]*?header\.(?:d|i)=@?([a-z0-9.-]+)/gi)].map(m => m[1]);
+  const senderDomain = addressDomain(from);
+  if (walmartDomain(senderDomain) && passed.some(walmartDomain)) return { trusted: true, kind: 'authenticated_supplier' };
+  const allowed = trustedForwarders.map(v => String(v).toLowerCase()).includes(String(from).toLowerCase());
+  const forwardAuth = passed.some(d => d === senderDomain);
+  const content = text + '\n' + stripHtml(html);
+  const originalFrom = /(?:^|\n)\s*(?:>\s*)?from:\s*[^\n]*[<\s]([a-z0-9._%+-]+@(?:[a-z0-9-]+\.)*walmart\.com)>?/im.test(content);
+  if (allowed && forwardAuth && originalFrom && extractOrderUrl(text + '\n' + html)) return { trusted: true, kind: 'authenticated_forwarder' };
+  return { trusted: false, kind: 'unverified_supplier' };
 }
 
-// Bracket type + quantity from the line-item alt-text. Anchor the type word to
-// the "quantity N item … <type>" structure and take the FIRST type token after
-// "item" (a Full Motion item's description also contains the word "Tilting"
-// further along, so a naive contains() would misclassify it).
-export function extractBrackets(text) {
-  let flat = 0, tilting = 0, fullMotion = 0;
-  const add = (typeWord, qty) => {
-    const t = typeWord.toLowerCase().replace(/[\s-]/g, '');
-    if (t === 'fullmotion') fullMotion += qty;
-    else if (t === 'tilting') tilting += qty;
-    else if (t === 'fixed' || t === 'flat') flat += qty;
+function productType(title) {
+  // New products require catalog confirmation. No generic word such as "flat"
+  // can turn unrelated purchases into brackets.
+  if (!/\bonn\b/i.test(title) || !/\btv\b/i.test(title) || !/\bwall\s+mount\b/i.test(title)) return null;
+  const type = (title.match(/\b(full[\s-]?motion|tilting|fixed|flat)\b/i) || [])[1];
+  return type ? (/full/i.test(type) ? 'full_motion' : /tilting/i.test(type) ? 'tilting' : 'flat') : null;
+}
+export function extractBracketEvidence(text = '') {
+  const quantities = { flat: 0, tilting: 0, full_motion: 0 }, items = [], issues = [];
+  const add = (title, rawQty) => {
+    const qty = Number(rawQty), type = productType(title);
+    if (!type || !Number.isInteger(qty) || qty < 1 || qty > 100) { issues.push('unrecognized_item_or_quantity'); return; }
+    const label = title.replace(/\s+/g, ' ').trim().slice(0,250);
+    if (items.some(i => i.label === label)) { issues.push('duplicate_item_line'); return; }
+    items.push({ type, quantity:qty, label }); quantities[type] += qty;
   };
-
-  // Primary: "quantity N item … <type>"  (real Walmart confirmation format)
-  const re = /quantity\s+(\d+)\s+item\b[\s\S]{0,80}?\b(full[\s-]?motion|tilting|fixed|flat)\b/gi;
-  let m, hits = 0;
-  while ((m = re.exec(text))) { add(m[2], parseInt(m[1], 10) || 1); hits++; }
-  if (hits) return { flat, tilting, fullMotion };
-
-  // Fallback: "<type> … Wall Mount" with no quantity structure → count one each.
-  const re2 = /\b(full[\s-]?motion|tilting|fixed|flat)\b[^\n]{0,40}?\bwall mount\b/gi;
-  while ((m = re2.exec(text))) add(m[1], 1);
-  return { flat, tilting, fullMotion };
+  // Each quantity applies only to its own product block. A second item with a
+  // different format remains visible and makes the evidence incomplete.
+  const blocks = String(text).split(/(?=\bquantity\s+\d+\s+item\b)/i);
+  for (const block of blocks) {
+    const primary = block.match(/^quantity\s+(\d+)\s+item\b\s*([^\n]*(?:\n(?!\s*(?:onn|quantity|order total|subtotal|shipping|delivery address|payment|view order|includes all fees))[^\n]*)?)/i);
+    let remainder = block;
+    if (primary) { add(primary[2],primary[1]); remainder = block.slice(primary[0].length); }
+    for (const line of remainder.split(/\r?\n/)) {
+      if (!/\bwall\s+mount\b/i.test(line)) continue;
+      const quantity = line.match(/\bqty\s*:?\s*(\d+)\b/i);
+      if (!quantity) { issues.push('quantity_missing'); continue; }
+      add(line.slice(0,quantity.index),quantity[1]);
+    }
+  }
+  return { quantities, items, confidence:items.length && !issues.length ? 'explicit' : 'unknown', issues:[...new Set(issues)] };
 }
+export function extractBrackets(text) { const q = extractBracketEvidence(text).quantities; return { flat:q.flat, tilting:q.tilting, fullMotion:q.full_motion }; }
 
-// Order status from subject + body. Three states the office cares about:
-//   in_route  — placed / preparing / shipped / "arrives" / on its way
-//   delivered — actually delivered
-//   canceled  — order canceled
-// "delivery order" (the confirmation subject) must NOT read as "delivered".
-export function detectStatus(subject, text) {
-  const s = ((subject || '') + ' ' + (text || '')).toLowerCase();
-  if (/cancel(?:l?ed|lation)?\b/i.test(s)) return 'canceled';
-  // Walmart's delivery email: subject "Your package arrived", body "<driver>
-  // completed your delivery from store at …". Note "delivery order" (the
-  // confirmation) and "arrives" (an ETA) must NOT read as delivered.
-  if (/\bdelivered\b|has been delivered|was delivered|delivery complete|package (?:has )?arrived|completed your delivery/i.test(s)) return 'delivered';
+export function detectStatus(subject = '', text = '') {
+  const s = subject.replace(/^(?:(?:re|fwd?):\s*)+/gi, '').trim();
+  const lead = String(text).split(/\n\s*(?:-{2,}\s*(?:forwarded|original)|on .+wrote:)/i)[0].slice(0,1800);
+  if (/\b(?:not|never|hasn't|wasn't)\s+(?:been\s+)?delivered\b/i.test(s + '\n' + lead)) return 'in_route';
+  if (/^(?:your\s+)?order\b.{0,60}\b(?:was |has been |is )?cancel[le]*d\b/i.test(s) || /\b(?:your|this) order (?:has been |was |is )cancel[le]*d\b/i.test(lead)) return 'canceled';
+  if (/^your (?:package (?:has )?arrived|(?:entire )?order (?:has been |was |is )?delivered)\b/i.test(s) || /\b(?:completed your delivery|your (?:entire |whole )?order (?:has been |was )delivered|all (?:your )?items (?:have been |were )delivered)\b/i.test(lead)) return 'delivered';
   return 'in_route';
 }
-
-// Clickable Walmart order/tracking link (walmart.com/orders or the w-mt.co
-// tracking shortlink Walmart uses in emails).
-export function extractOrderUrl(text) {
-  if (!text) return null;
-  const urls = [...text.matchAll(/https?:\/\/[^\s<>"')]+/gi)].map(m => m[0]);
-  return urls.find(u => /walmart\.com\/orders/i.test(u))
-      || urls.find(u => /w-mt\.co/i.test(u))
-      || null;
+function receiptScope(subject, text) {
+  const value = subject.replace(/^(?:(?:re|fwd?):\s*)+/gi, '').trim() + '\n' + text.slice(0,1800);
+  if (/\b(?:partial|some items|part of your order|remaining items|another package)\b/i.test(value)) return 'unknown';
+  return /^your (?:entire )?order (?:has been |was |is )?delivered\b/i.test(value) || /\b(?:your (?:entire|whole) order|all (?:your )?items) (?:has been |have been |was |were )?delivered\b/i.test(value) ? 'complete' : 'unknown';
 }
-
-// Delivery address from the order email — the line carrying street, city, ST,
-// ZIP (e.g. "10507 Vaughn St, Commerce City, CO, 80022, USA"). Bracket orders
-// ship to a tech's home, so this is how we auto-assign the order to that tech.
-// Loose on formatting on purpose: the downstream match is strict (street number
-// AND ZIP must equal a known tech), so a stray/incorrect capture simply doesn't
-// match anyone and the order stays unassigned — never mis-assigned.
-export function extractDeliveryAddress(text) {
-  if (!text) return null;
-  // Street number, then a name that STARTS with a letter (so a stray number at
-  // the end of the previous line — "Arrives Jul 7" — can't become the number),
-  // then an OPTIONAL apartment/unit field the email sometimes splits into its own
-  // comma section ("…Ave, Apt 8T, Denver…"). The apt part must contain a digit so
-  // it can never swallow the city (which has none), then city, ST, ZIP.
-  const m = text.match(/(\d{1,6}\s+[A-Za-z][A-Za-z0-9.\-#/ ]{1,49}?(?:,\s*(?:[A-Za-z]{1,8}\.?\s*)?#?\d[A-Za-z0-9\- ]{0,8})?,\s*[A-Za-z .'\-]{2,40}?,\s*[A-Z]{2}\.?,?\s*\d{5}(?:-\d{4})?)/);
+export function extractDeliveryAddress(text = '') {
+  const m = String(text).match(/(\d{1,6}\s+[A-Za-z][A-Za-z0-9.\-#/ ]{1,69}?(?:,\s*(?:[A-Za-z]{1,10}\.?\s*)?#?[A-Za-z0-9-]{1,12})?,\s*[A-Za-z .'\-]{2,40}?,\s*[A-Z]{2}\.?,?\s*\d{5}(?:-\d{4})?)/);
+  return m ? m[1].replace(/\s+/g,' ').trim() : null;
+}
+export function extractOrderTotal(text = '') {
+  const m = String(text).match(/(?:includes all fees|order\s*total)[^$]{0,100}\$\s*([\d,]+\.\d{2})/i), value = m ? Number(m[1].replace(/,/g,'')) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+export function extractOrderDate(text = '', sourceDate) {
+  const m = String(text).match(/order\s*date\s*:?\s*((?:[A-Za-z]{3,9},?\s+)?[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  if (m && Number.isFinite(Date.parse(m[1]))) return new Date(m[1]).toISOString().slice(0,10);
+  return sourceDate && Number.isFinite(Date.parse(sourceDate)) ? new Date(sourceDate).toISOString().slice(0,10) : null;
+}
+export function extractArrivesDate(text = '', baseISO) {
+  const m = String(text).match(/(?:arriv(?:es|ing)|estimated\s+delivery|expected\s+delivery|delivery\s+(?:by|date))\b[^A-Za-z0-9]{0,6}(?:[A-Za-z]{3,9}\.?,?\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/i);
   if (!m) return null;
-  return m[1].replace(/\s+/g, ' ').trim().replace(/,\s*$/, '');
+  const month = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[1].slice(0,3).toLowerCase());
+  if (month < 0 || !baseISO || !Number.isFinite(Date.parse(baseISO))) return null;
+  const base = new Date(baseISO), day = +m[2]; let year = m[3] ? +m[3] : base.getUTCFullYear();
+  if (!m[3] && month < base.getUTCMonth() - 1) year++;
+  const date = new Date(Date.UTC(year,month,day));
+  return date.getUTCMonth() === month && date.getUTCDate() === day ? date.toISOString().slice(0,10) : null;
 }
 
-// Order total (what we paid) from the email — "Order total … $178.61" or
-// "Includes all fees, taxes and discounts $178.61". Anchored to those labels so
-// it doesn't grab a per-item price; returns null if no labeled total is found.
-export function extractOrderTotal(text) {
-  if (!text) return null;
-  const m = text.match(/includes all fees[^$]*\$\s*([\d,]+\.\d{2})/i)
-         || text.match(/order\s*total[^$]{0,60}?\$\s*([\d,]+\.\d{2})/i);
-  if (!m) return null;
-  const v = parseFloat(m[1].replace(/,/g, ''));
-  return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
-}
-
-// Estimated arrival → YYYY-MM-DD. Walmart order/shipping emails carry an
-// "Arrives <Mon DD>" (sometimes "Arriving …" / "Estimated delivery …") line —
-// often with a weekday name first ("Arrives Thu, Jul 9"), which the optional
-// group below skips over so it isn't mistaken for the month itself.
-// The year is usually omitted, so we anchor to the order date's year and roll to
-// next year if the month already passed (a late-Dec order arriving in Jan).
-// Returns null when no arrival line is present.
-export function extractArrivesDate(text, orderISO) {
-  if (!text) return null;
-  const m = text.match(/(?:arriv(?:es|ing)|estimated\s+delivery|expected\s+delivery|delivery\s+(?:by|date))\b[^A-Za-z0-9]{0,6}(?:[A-Za-z]{3,9}\.?,?\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/i);
-  if (!m) return null;
-  const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-  const mon = months[m[1].slice(0, 3).toLowerCase()];
-  if (mon == null) return null;
-  const day = parseInt(m[2], 10);
-  if (!(day >= 1 && day <= 31)) return null;
-  const base = orderISO && /^\d{4}-\d{2}-\d{2}$/.test(orderISO) ? orderISO : new Date().toISOString().slice(0, 10);
-  let year = m[3] ? parseInt(m[3], 10) : parseInt(base.slice(0, 4), 10);
-  if (!m[3]) {
-    const orderMon = parseInt(base.slice(5, 7), 10) - 1;
-    if (mon < orderMon - 1) year += 1; // arrival month well before order month → next year
-  }
-  const d = new Date(Date.UTC(year, mon, day));
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
-}
-
-// Order date → YYYY-MM-DD. "Order date: Sun, Jun 28, 2026" or m/d/Y; today if absent.
-export function extractOrderDate(text, todayISO) {
-  const today = todayISO || new Date().toISOString().slice(0, 10);
-  if (!text) return today;
-  const m = text.match(/order\s*date\s*:?\s*([A-Za-z]{3,9},?\s+[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i)
-         || text.match(/order\s*date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-  if (m) {
-    const d = new Date(m[1]);
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  }
-  return today;
-}
-
-// Parse a whole email (subject + body text) into a bracket-sync payload, or null
-// if it isn't an identifiable Walmart order email.
-// Parse a whole email into an ARRAY of order payloads. A forwarded Walmart
-// "conversation" can bundle several orders in one message; each order has its
-// own "Order number:" marker followed by its own item list. We segment the body
-// at those markers and parse each segment independently, so items never bleed
-// from one order into another. Returns [] if no Walmart order is found.
-export function parseWalmartEmails({ subject = '', text = '', html = '', todayISO } = {}) {
-  // Use ONE body representation. An email carries the same items in both
-  // text/plain and text/html — concatenating them would double-count every
-  // line. Prefer plaintext; fall back to stripped HTML only when absent.
-  const body = (text && text.trim()) ? text : stripHtml(html);
-  const today = todayISO || new Date().toISOString().slice(0, 10);
-
-  // Every "Order number: #XXXXXXX-XXXXXXXX" marker and where it starts.
-  const markerRe = /order\s*(?:number|#)\s*:?\s*#?(\d{7}-\d{8})/gi;
-  const markers = [];
-  let m;
-  while ((m = markerRe.exec(body))) markers.push({ num: m[1], index: m.index });
-
-  // No labeled marker — fall back to a single bare order number anywhere.
-  if (!markers.length) {
-    const num = extractOrderNum(subject + '\n' + body);
-    if (!num) return [];
-    markers.push({ num, index: 0 });
-  }
-
-  const out = [];
-  for (let i = 0; i < markers.length; i++) {
-    // An order's items live between its marker and the next order's marker.
-    const seg = body.slice(markers[i].index, (i + 1 < markers.length) ? markers[i + 1].index : body.length);
-    const { flat, tilting, fullMotion } = extractBrackets(seg);
-    const status = detectStatus(subject, seg);
-    const orderDate = extractOrderDate(seg, today);
-    out.push({
-      walmart_order_num: markers[i].num,
-      flat_qty: flat,
-      tilting_qty: tilting,
-      full_motion_qty: fullMotion,
-      status,
-      order_date: orderDate,
-      estimated_delivery: extractArrivesDate(seg, orderDate) || extractArrivesDate(body, orderDate),
-      delivered_date: status === 'delivered' ? today : null,
-      order_url: extractOrderUrl(seg) || extractOrderUrl(html),
-      delivery_address: extractDeliveryAddress(seg) || extractDeliveryAddress(body),
-      order_total: extractOrderTotal(seg) || extractOrderTotal(body),
+export function parseWalmartEmails(input = {}) {
+  const { subject = '', text = '', html = '', messageId = '', emailDateISO = null } = input;
+  const bodies = [text,stripHtml(html)].filter(Boolean);
+  const nums = [...new Set((subject + '\n' + bodies.join('\n')).match(/\b\d{7}-\d{8}\b/g) || [])];
+  if (!nums.length) return [];
+  const provenance = walmartProvenance(input);
+  if (!provenance.trusted && !walmartDomain(addressDomain(input.from)) && !/\bwalmart\b/i.test(subject + '\n' + text + '\n' + html)) return [];
+  return nums.map(orderNum => {
+    const issues = [];
+    if (!provenance.trusted) issues.push('supplier_unverified');
+    if (nums.length > 1) issues.push('multiple_orders_in_message');
+    const representations = bodies.map(body => {
+      if (nums.length === 1) return body;
+      const start = body.indexOf(orderNum); if (start < 0) return '';
+      const tail = body.slice(start + orderNum.length), next = tail.search(/\b\d{7}-\d{8}\b/);
+      return body.slice(start,next < 0 ? undefined : start + orderNum.length + next);
     });
-  }
-  return out;
+    const evidence = representations.map(extractBracketEvidence), explicit = evidence.filter(e => e.confidence === 'explicit');
+    if (explicit.length > 1 && explicit.some(e => JSON.stringify(e.quantities) !== JSON.stringify(explicit[0].quantities))) issues.push('body_quantity_conflict');
+    const best = explicit[0] || evidence.find(e => e.items.length) || evidence[0] || { quantities:{flat:0,tilting:0,full_motion:0},items:[],confidence:'unknown',issues:[] };
+    if (best.confidence !== 'explicit') issues.push(...best.issues);
+    const body = representations.find((_,i) => evidence[i] === best) || representations[0] || '';
+    const status = detectStatus(subject,body), scope = status === 'delivered' ? receiptScope(subject,body) : 'unknown';
+    const confirmation = /(?:thanks for (?:your )?(?:delivery )?order|order confirmation|we(?:'ve| have) received your order)/i.test(subject);
+    const eventKind = status === 'delivered' ? 'receipt' : status === 'canceled' ? 'cancellation' : confirmation ? 'confirmation' : /\b(?:shipped|on its way|arrives|arriving|preparing)\b/i.test(subject) ? 'shipment' : 'unknown';
+    // Forwarding today does not turn an old receipt into a new physical event.
+    const originalDate = provenance.kind === 'authenticated_forwarder' ? (body.match(/(?:^|\n)\s*(?:>\s*)?date:\s*([^\n]+)/i) || [])[1] : emailDateISO;
+    const occurredAt = originalDate && Number.isFinite(Date.parse(originalDate)) ? new Date(originalDate).toISOString() : null;
+    if (!occurredAt) issues.push('source_date_missing');
+    if (status === 'delivered' && scope === 'unknown') issues.push('receipt_scope_unconfirmed');
+    if (confirmation && best.confidence !== 'explicit') issues.push('order_quantities_unconfirmed');
+    if (eventKind === 'unknown') issues.push('supplier_event_unrecognized');
+    const authoritative = provenance.trusted && nums.length === 1 && best.confidence === 'explicit' && !issues.includes('body_quantity_conflict');
+    const sourceKey = messageId.trim() || createHash('sha256').update(subject + '\n' + text + '\n' + html).digest('hex');
+    return {
+      walmart_order_num:orderNum, event_id:'walmart-mail:' + createHash('sha256').update(sourceKey + ':' + orderNum).digest('hex'),
+      occurred_at:occurredAt, source:'walmart_email', provenance,
+      ordered:confirmation && authoritative ? best.quantities : null,
+      received:status === 'delivered' && scope === 'complete' && authoritative ? best.quantities : null,
+      receipt_scope:scope, receipt_verified:provenance.trusted && nums.length === 1 && scope === 'complete' && !issues.includes('body_quantity_conflict'),
+      quantities_confidence:authoritative ? 'explicit' : 'unknown', status,event_kind:eventKind,
+      order_date:confirmation ? extractOrderDate(body,occurredAt) : extractOrderDate(body,null),
+      delivered_date:status === 'delivered' && occurredAt ? occurredAt.slice(0,10) : null,
+      estimated_delivery:extractArrivesDate(body,occurredAt), order_url:extractOrderUrl(body) || (nums.length === 1 ? extractOrderUrl(html) : null),
+      delivery_address:extractDeliveryAddress(body), order_total:extractOrderTotal(body),
+      evidence:{ message_id:messageId || null, subject:subject.slice(0,300), provenance:provenance.kind, items:best.items, issues:[...new Set(issues)] },
+      review_reason:issues.length ? [...new Set(issues)].join(', ') : null,
+    };
+  });
 }
-
-// Back-compat single-order helper: first order found, or null.
-export function parseWalmartEmail(input) {
-  const all = parseWalmartEmails(input);
-  return all.length ? all[0] : null;
-}
+export function parseWalmartEmail(input) { return parseWalmartEmails(input)[0] || null; }

@@ -1,145 +1,49 @@
-// Single JS entry point onto the bracket_moves ledger (migration 0088).
-//
-// Every place in this codebase that used to hand-roll "read the count, add a
-// delta, write it back" now calls one of the functions below instead. They all
-// go through the bracket_move() Postgres function, which is the ONLY thing
-// allowed to change bracket_inventory.flat_qty/tilting_qty/full_motion_qty:
-// it writes the signed delta to an append-only ledger AND updates the counter
-// in one transaction, keyed by an idempotency_key so calling the same event
-// twice (a re-run backfill, a double-click, a re-parsed email) is a no-op.
-//
-// This does NOT cover wire_plate_qty or appletv_bracket_qty yet -- those still
-// go through the old direct-write helpers. Same bug class, follow-up work.
+import { requireBracketQuantities } from './bracket-materials.js';
 
-export function bracketTotal(q) { return Math.abs(q.flat || 0) + Math.abs(q.tilting || 0) + Math.abs(q.full_motion || 0); }
-
-async function callBracketMove(db, { businessId, technicianId, kind, flat, tilting, fullMotion, idempotencyKey, bookingId, purchaseId, orderNum, reason, actor }) {
-  // A tech carries ONE physical stock of brackets in their truck, regardless of
-  // which company's customer they're serving that day. Stock therefore lives on
-  // the row keyed by the tech's OWN home business -- never the job's or the
-  // purchase row's, which differ on a cross-hire job. Resolving it here (rather
-  // than trusting each caller) is deliberate: this is the single choke point
-  // every bracket movement goes through, so no future caller can get it wrong.
-  // Passing the job's business instead would silently create an all-zero
-  // phantom row under the other company and clamp the deduction to nothing --
-  // the bug commit 5199678 fixed on 2026-07-16, reintroduced and re-fixed here.
-  let homeBizId = businessId;
-  if (technicianId) {
-    const { data: techRow } = await db.from('technicians')
-      .select('business_id').eq('id', technicianId).maybeSingle();
-    if (techRow?.business_id) homeBizId = techRow.business_id;
-  }
-  const { data, error } = await db.rpc('bracket_move', {
-    p_business_id: homeBizId,
-    p_technician_id: technicianId,
-    p_kind: kind,
-    // An explicit null must survive to SQL: for a recount it means "leave this
-    // field alone" and the function coalesces it to the current count. Turning
-    // it into 0 (which `|| 0` and `?? 0` both do) would instead ZERO the field.
-    // undefined still becomes 0, for non-recount callers that omit a field.
-    p_flat: flat === null ? null : (flat ?? 0),
-    p_tilting: tilting === null ? null : (tilting ?? 0),
-    p_full_motion: fullMotion === null ? null : (fullMotion ?? 0),
-    p_idempotency_key: idempotencyKey,
-    p_booking_id: bookingId || null,
-    p_purchase_id: purchaseId || null,
-    p_order_num: orderNum || null,
-    p_reason: reason || null,
-    p_actor: actor || null,
-  });
+export function bracketTotal(q = {}) { return Object.values(requireBracketQuantities(q, { signed: true })).reduce((a, n) => a + Math.abs(n), 0); }
+async function rpc(db, name, args) {
+  const { data, error } = await db.rpc(name, args);
   if (error) throw error;
-  return Array.isArray(data) ? data[0] : data;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row == null) throw new Error(`${name} did not confirm the inventory operation.`);
+  return row;
 }
-
-// A job consumed brackets. idempotencyKey defaults to job:<bookingId> so a
-// backfill, a retry, or a re-completion of the same job can never double-debit
-// -- calling this twice for the same booking just returns the first result.
-export async function debitForJob(db, { businessId, technicianId, qtys, bookingId, reason, actor }) {
-  if (!technicianId || !bookingId || bracketTotal(qtys) <= 0) return null;
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'job_use',
-    flat: -(qtys.flat || 0), tilting: -(qtys.tilting || 0), fullMotion: -(qtys.full_motion || 0),
-    idempotencyKey: `job:${bookingId}`, bookingId, reason: reason || 'job completion', actor,
-  });
+function eventId(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 300) throw new Error('A stable inventory request ID is required.');
+  return value;
 }
-
-// Reverse a job's debit (reopened/cancelled/reassigned). Keyed off the ORIGINAL
-// job move so it can only ever reverse that one event once.
-export async function reverseJobDebit(db, { businessId, technicianId, qtys, bookingId, reason, actor }) {
-  if (!technicianId || !bookingId || bracketTotal(qtys) <= 0) return null;
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'job_reversal',
-    flat: qtys.flat || 0, tilting: qtys.tilting || 0, fullMotion: qtys.full_motion || 0,
-    idempotencyKey: `job-rev:${bookingId}`, bookingId, reason: reason || 'job reopened/reassigned', actor,
-  });
+export async function saveJobInventory(db, { bookingId, businessId, expectedLiRev, expectedUpdatedAt = null, patch = {}, lineItems = null,
+  materials, requestId, actor, actorTechnicianId = null, confirmUse = false, requestFingerprint = null }) {
+  if (!bookingId || !businessId || !Number.isInteger(expectedLiRev) || expectedLiRev < 0 || !materials?.source_lines) throw new Error('The job must be refreshed before updating inventory.');
+  requireBracketQuantities(materials.qtys);
+  return rpc(db, 'inventory_job_write', { p_booking_id: bookingId, p_business_id: businessId, p_expected_li_rev: expectedLiRev,
+    p_expected_updated_at: expectedUpdatedAt, p_patch: patch, p_line_items: lineItems, p_materials: materials,
+    p_request_id: eventId(requestId), p_actor: actor || 'office', p_actor_technician_id: actorTechnicianId, p_confirm_use: confirmUse, p_request_fingerprint: requestFingerprint });
 }
-
-// A job's bracket quantities changed after completion (line-item edit). Keyed
-// per li_rev so each distinct edit reconciles exactly once, in either direction.
-export async function reconcileJobEdit(db, { businessId, technicianId, oldQtys, newQtys, bookingId, liRev, reason, actor }) {
-  const flat = (oldQtys.flat || 0) - (newQtys.flat || 0);
-  const tilting = (oldQtys.tilting || 0) - (newQtys.tilting || 0);
-  const fullMotion = (oldQtys.full_motion || 0) - (newQtys.full_motion || 0);
-  if (!technicianId || !bookingId || (!flat && !tilting && !fullMotion)) return null;
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'adjust',
-    flat, tilting, fullMotion,
-    idempotencyKey: `job-edit:${bookingId}:${liRev != null ? liRev : Date.now()}`,
-    bookingId, reason: reason || 'line items edited after completion', actor,
-  });
+export async function syncBracketOrder(db, { orderNum, ...payload }) {
+  eventId(payload.event_id);
+  if (!orderNum || typeof orderNum !== 'string') throw new Error('An order number is required.');
+  if (payload.ordered) payload.ordered = requireBracketQuantities(payload.ordered);
+  if (payload.received) payload.received = requireBracketQuantities(payload.received);
+  return rpc(db, 'ingest_bracket_order', { p_order_num: orderNum.trim(), p_payload: payload });
 }
-
-// A Walmart delivery credited a tech's stock. Keyed on the order number so the
-// same delivery (re-parsed email, re-run sync, double-click Assign) can only
-// ever credit once.
-export async function creditDelivery(db, { businessId, technicianId, qtys, purchaseId, orderNum, actor }) {
-  if (!technicianId || !orderNum || bracketTotal(qtys) <= 0) return null;
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'delivery',
-    flat: qtys.flat || 0, tilting: qtys.tilting || 0, fullMotion: qtys.full_motion || 0,
-    idempotencyKey: `delivery:${orderNum}`, purchaseId, orderNum, reason: 'Walmart delivery', actor,
-  });
+export async function recount(db, { technicianId, flat, tilting, fullMotion, reason, actor, expectedUpdatedAt, requestId, at }) {
+  if (!technicianId || !reason?.trim() || !expectedUpdatedAt) throw new Error('A recount requires the technician, reason, and current inventory version.');
+  const counts = requireBracketQuantities({ flat, tilting, full_motion: fullMotion }, { partial: true });
+  if (!Object.keys(counts).length) throw new Error('Enter at least one physical count.');
+  return rpc(db, 'inventory_recount', { p_technician_id: technicianId, p_counts: counts, p_expected_updated_at: expectedUpdatedAt === 'uninitialized' ? null : expectedUpdatedAt,
+    p_request_id: eventId(requestId || at), p_reason: reason, p_actor: actor || 'office' });
 }
-
-// A delivery's quantities were corrected by a follow-up email, or the order
-// was cancelled after being credited. Keyed so each distinct correction only
-// ever applies once.
-export async function adjustDelivery(db, { businessId, technicianId, deltaQtys, purchaseId, orderNum, tag, reason, actor }) {
-  if (!technicianId || !orderNum || bracketTotal(deltaQtys) <= 0) return null;
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'delivery_reversal',
-    flat: deltaQtys.flat || 0, tilting: deltaQtys.tilting || 0, fullMotion: deltaQtys.full_motion || 0,
-    idempotencyKey: `delivery-adj:${orderNum}:${tag}`, purchaseId, orderNum, reason: reason || 'delivery correction', actor,
-  });
+export async function adjust(db, { businessId, technicianId, deltaQtys, bookingId, reason, actor, idempotencyKey, requestId }) {
+  if (!technicianId || !reason?.trim()) throw new Error('An adjustment requires a technician and reason.');
+  const q = requireBracketQuantities(deltaQtys, { signed: true });
+  return rpc(db, 'bracket_move', { p_business_id: businessId || null, p_technician_id: technicianId, p_kind: 'adjust',
+    p_flat: q.flat, p_tilting: q.tilting, p_full_motion: q.full_motion, p_idempotency_key: eventId(idempotencyKey || requestId),
+    p_booking_id: bookingId || null, p_purchase_id: null, p_order_num: null, p_reason: reason, p_actor: actor || 'office' });
 }
-
-// A physical recount ("I counted the truck"). Pass the ABSOLUTE counts
-// observed for each field you're recounting (omit a field to leave it
-// untouched) -- the database computes the signed delta itself, so the ledger
-// always records what actually moved. reason is REQUIRED. Idempotency key
-// includes the timestamp so it never collides across recounts, but each call
-// is still one atomic, logged event.
-export async function recount(db, { businessId, technicianId, flat, tilting, fullMotion, reason, actor, at }) {
-  if (!technicianId || !reason) throw new Error('recount requires technicianId and reason');
-  const ts = at || new Date().toISOString();
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'recount',
-    flat: flat == null ? null : flat, tilting: tilting == null ? null : tilting, fullMotion: fullMotion == null ? null : fullMotion,
-    idempotencyKey: `recount:${technicianId}:${ts}`, reason, actor,
-  });
-}
-
-// A free-form correction with a signed delta and a mandatory reason (replaces
-// the old "manual adjust" action). Pass idempotencyKey explicitly for an event
-// that can be retried (e.g. keyed on a booking id) so a retry can't double-
-// apply; otherwise a timestamp-based key is generated (fine for one-off admin
-// clicks, where "retry = a new correction" is the right behavior).
-export async function adjust(db, { businessId, technicianId, deltaQtys, bookingId, reason, actor, at, idempotencyKey }) {
-  if (!technicianId || !reason || bracketTotal(deltaQtys) <= 0) return null;
-  const ts = at || new Date().toISOString();
-  return callBracketMove(db, {
-    businessId, technicianId, kind: 'adjust',
-    flat: deltaQtys.flat || 0, tilting: deltaQtys.tilting || 0, fullMotion: deltaQtys.full_motion || 0,
-    idempotencyKey: idempotencyKey || `adjust:${technicianId}:${ts}`, bookingId, reason, actor,
-  });
-}
+// Legacy mutation APIs fail closed; deploy migration and all callers together.
+export async function debitForJob() { throw new Error('Job inventory requires inventory_job_write (migration 0112).'); }
+export async function reverseJobDebit() { throw new Error('Record a reviewed material correction through inventory_job_write.'); }
+export async function reconcileJobEdit() { throw new Error('Job edits require inventory_job_write (migration 0112).'); }
+export async function creditDelivery() { throw new Error('Receipts require ingest_bracket_order and verified delivered quantities.'); }
+export async function adjustDelivery() { throw new Error('Receipt corrections require ingest_bracket_order and verified cumulative quantities.'); }

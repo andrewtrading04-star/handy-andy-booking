@@ -1,3 +1,5 @@
+import { writeInventoryJob, inventoryError } from './_lib/inventory-job.js';
+import { classifyBracketMaterials } from './_lib/bracket-materials.js';
 // ============================================================================
 // Technician app API (consolidated router).
 //
@@ -13,7 +15,6 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, refreshToken, TECH_SESSION_MAX } from './_lib/auth.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
-import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.js';
@@ -25,7 +26,7 @@ import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from 
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization } from './_lib/authorization.js';
-import { canonicalizeLineItems, isTaxLine, BOOKING_TAX_RATE, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
+import { canonicalizeLineItems, recalcTaxLine, isTaxLine, BOOKING_TAX_RATE, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 
 // Publishable (client-side) Stripe key the tech app uses to tokenize a new card.
 // Handy Andy's account is the main account; Doms has its own. Publishable keys
@@ -146,6 +147,7 @@ export default async function handler(req, res) {
       case 'job_line_items_save': return await jobLineItemsSave(req, res, db, auth, body);
       case 'job_payment':      return await jobPayment(req, res, db, auth, body);
       case 'job_card_update':  return await jobCardUpdate(req, res, db, auth, body);
+      case 'inventory_job_use': return await inventoryJobUse(req, res, db, auth, body);
       case 'job_bracket_supplier': return await jobBracketSetSupplier(req, res, db, auth, body);
       case 'job_slots':        return await jobSlots(req, res, db, auth, body);
       case 'job_photos':       return await jobPhotos(req, res, db, auth);
@@ -172,6 +174,7 @@ export default async function handler(req, res) {
       default:                 return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
+    if (action === 'job_line_items_save') return inventoryError(res,err);
     console.error('[tech]', action, err);
     return res.status(500).json({ error: err.message || 'Server error' });
   }
@@ -463,7 +466,7 @@ async function job(req, res, db, auth) {
              technician:technicians!technician_id ( name ),${techHasSecondCol ? `
              secondary_technician_id,
              secondary_technician:technicians!secondary_technician_id ( name ),` : ''}
-             line_items:booking_line_items ( name, quantity, unit_price, line_total, kind${withSortCol ? ', sort_order' : ''} )`), auth)
+             line_items:booking_line_items ( name, quantity, unit_price, line_total, material_type, material_owner, kind${withSortCol ? ', sort_order' : ''} )`), auth)
     .eq('id', id)
     .maybeSingle();
   let { data, error } = await fetchMine(build(true));
@@ -504,7 +507,7 @@ async function job(req, res, db, auth) {
   // the assigned tech is obviously the supplier, so no card and no completion gate.
   shaped.bracket = null;
   const need = detectBracketQtys(data.line_items || []);
-  if (data.secondary_technician_id && bracketTotal(need) > 0) {
+  if (bracketTotal(need) > 0) {
     try {
       const { data: bs, error: bsErr } = await db.from('bookings').select('bracket_supplied_by').eq('id', id).maybeSingle();
       if (!bsErr) {
@@ -601,6 +604,19 @@ async function job(req, res, db, auth) {
     } catch (e) { shaped.slots = null; }
   }
 
+  const materials = classifyBracketMaterials(data.line_items || []);
+  shaped.li_rev = Number(data.metadata?.li_rev) || 0;
+  shaped.inventory_materials = materials.qtys;
+  shaped.inventory_issues = materials.issues.map(i => i.message);
+  shaped.inventory_supplier_id = shaped.bracket?.supplied_by || (!data.secondary_technician_id ? data.technician_id : null);
+  const allocation = await db.from('bracket_job_allocations').select('status,technician_id').eq('booking_id',id).maybeSingle();
+  const inventoryState = data.metadata?.inventory_status === 'review' ? 'review' : allocation.data?.status || 'unrecorded';
+  shaped.inventory_status = allocation.error || inventoryState === 'shortfall' ? 'review' : inventoryState === 'not_used' ? 'unrecorded' : inventoryState;
+  if (allocation.error) shaped.inventory_issues.push('Inventory records could not be loaded. Refresh before recording use.');
+  if (allocation.data?.technician_id) shaped.inventory_supplier_id = allocation.data.technician_id;
+  const issues = await db.from('inventory_exceptions').select('message').eq('entity_type','job').eq('entity_id',id).eq('status','open');
+  if (issues.error) { shaped.inventory_status='review'; shaped.inventory_issues.push('Inventory review records could not be loaded.'); }
+  else shaped.inventory_issues.push(...(issues.data || []).map(i => i.message));
   return res.status(200).json({ job: shaped });
 }
 
@@ -678,13 +694,14 @@ async function jobSlots(req, res, db, auth, body) {
 function sanitizeWorkLineItems(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map(it => {
+    if (it?.quantity != null && (it.quantity === '' || typeof it.quantity === 'boolean' || !Number.isInteger(Number(it.quantity)) || Number(it.quantity)<1 || Number(it.quantity)>99)) throw new Error('Item quantity must be a whole number from 1 to 99.');
     const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
     const qty = Math.max(1, Math.min(99, Math.round(Number(it && it.quantity) || 1)));
     // Per-unit price: prefer an explicit unit_price; older clients send a flat
     // `price`/`line_total` with no quantity, which we treat as the unit (qty 1).
     const unit = Math.round((Number(it && (it.unit_price != null ? it.unit_price : (it.price != null ? it.price : it.line_total))) || 0) * 100) / 100;
     const line_total = Math.round(unit * qty * 100) / 100;
-    return { name, quantity: qty, unit_price: unit, line_total };
+    return { name, quantity: qty, unit_price: unit, line_total, material_type: it.material_type || null, material_owner: it.material_owner || null };
   }).filter(it => it.name || it.unit_price);
 }
 
@@ -703,7 +720,7 @@ async function jobLineItemsSave(req, res, db, auth, body) {
   // Job must belong to this tech. Pull the current line items (with ids + kind)
   // so we know which are hidden (keep) vs visible work (replace).
   const build = () => scopeMine(db.from('bookings')
-    .select('id, business_id, metadata, line_items:booking_line_items ( id, kind, name, quantity, unit_price, line_total, taxable )'), auth)
+    .select('id, business_id, metadata, line_items:booking_line_items ( id, kind, name, quantity, unit_price, line_total, taxable, material_type, material_owner )'), auth)
     .eq('id', id).maybeSingle();
   const { data: bk, error } = await fetchMine(build);
   if (error || !bk) return res.status(404).json({ error: 'Job not found' });
@@ -735,160 +752,15 @@ async function jobLineItemsSave(req, res, db, auth, body) {
       code: LI_CONFLICT_CODE,
     });
   }
-  if (Number(body.li_rev) !== curRev) {
-    return res.status(409).json({
-      error: 'The office changed this ticket after you opened it. The job will reload — check the items, then redo your change.',
-      code: LI_CONFLICT_CODE,
-    });
-  }
 
-  // Claim the ticket with a compare-and-swap on li_rev, folding the snapshot
-  // (ring buffer of 5 — the recover-a-bad-save trail) into the same metadata
-  // write. If another save slipped in since the check above, zero rows match
-  // and this save is refused instead of blindly replacing rows it never saw.
-  const backups = Array.isArray(bk.metadata?.li_backups) ? bk.metadata.li_backups.slice() : [];
-  backups.push({
-    at: new Date().toISOString(), by: `tech:${auth.tech_id || auth.name || '?'}`,
-    items: existing.map(r => ({ kind: r.kind, name: r.name, quantity: r.quantity, unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable })),
-  });
-  let newRev;
+  const fullItems = canonicalizeLineItems(recalcTaxLine([
+    ...existing.filter(isHiddenLi), ...items.map(it => ({ ...it, kind: 'service', taxable: true }))
+  ]));
   try {
-    const cas = await casBumpLiRev(db, id, bk.metadata, { li_backups: backups.slice(-5) });
-    if (!cas.ok) {
-      return res.status(409).json({
-        error: 'The office saved this ticket at the same moment. The job will reload — check the items, then redo your change.',
-        code: LI_CONFLICT_CODE,
-      });
-    }
-    newRev = cas.rev;
-  } catch (e) {
-    // The lock write failed (transient DB error) — never fall through to an
-    // unguarded replace; that's the exact path this lock closes. Let the tech
-    // simply retry.
-    console.error(`[tech line_items] li_rev CAS failed for booking ${id}:`, e.message);
-    return res.status(500).json({ error: 'Could not save right now — try again in a moment.' });
-  }
-  console.log(`[tech line_items] save booking=${id} by=tech:${auth.tech_id || '?'} visibleBefore=${visibleIds.length} after=${items.length}`);
-
-  // INSERT the replacement rows FIRST, then delete the old visible rows BY ID.
-  // Two separate transactions, so this order makes failure non-destructive: an
-  // insert failure leaves the old ticket untouched; a delete failure leaves
-  // visible duplicates — annoying but recoverable, unlike the old delete-first
-  // order where an insert failure had already destroyed the work lines.
-  if (items.length) {
-    // sort_order = 1000+i: keeps the tech's entered order deterministic (the
-    // re-read below orders by sort_order, and Postgres tie order at the column
-    // default 0 is unspecified) and lands the new rows AFTER every existing
-    // row, so the canonical rewrite that follows sees a stable input.
-    const rows = items.map((it, i) => ({
-      booking_id: id, business_id: bizId,
-      kind: 'service', name: it.name,
-      quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
-      taxable: true, sort_order: 1000 + i,
-    }));
-    let { error: insErr } = await db.from('booking_line_items').insert(rows);
-    if (insErr && /sort_order/.test(insErr.message || '')) {
-      ({ error: insErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
-    }
-    if (insErr) throw insErr;
-  }
-
-  if (visibleIds.length) {
-    const { error: delErr } = await db.from('booking_line_items').delete().in('id', visibleIds);
-    if (delErr) {
-      console.error(`[tech line_items] delete-after-insert failed for booking ${id} — duplicate rows visible, resave to fix:`, delErr.message);
-      throw delErr;
-    }
-  }
-
-  // Re-read the FULL remaining set (preserved hidden rows + the new work rows)
-  // — everything from here works off what's actually stored now.
-  // Ordered read: canonicalizeLineItems is only stable relative to its INPUT
-  // order, so without .order() the within-band order would be whatever the DB
-  // happened to return — and the sort_order rewrite below would persist that
-  // scramble as the ticket's new order.
-  let sortOrderOk = true;
-  let { data: all, error: sumErr } = await db.from('booking_line_items')
-    .select('id, kind, name, quantity, unit_price, line_total, taxable, sort_order')
-    .eq('booking_id', id).order('sort_order', { ascending: true });
-  if (sumErr && /sort_order/.test(sumErr.message || '')) {
-    sortOrderOk = false;
-    ({ data: all, error: sumErr } = await db.from('booking_line_items')
-      .select('id, kind, name, quantity, unit_price, line_total, taxable')
-      .eq('booking_id', id).order('created_at', { ascending: true }));
-  }
-  if (sumErr) throw sumErr;
-  let rowsNow = all || [];
-
-  // Recompute the tax line (when one exists) from the lines it now sits on.
-  // The office save has done this since the Boohaker/Bland stale-tax bugs; the
-  // tech save leaving tax frozen was the third leg of Throckmorton — the
-  // stored tax matched NEITHER of the two item sets that fought over the
-  // ticket. Same rule as the office: an existing tax line is recomputed,
-  // strays are collapsed, and a ticket with no tax line never grows one.
-  const taxRows = rowsNow.filter(isTaxLine);
-  if (taxRows.length) {
-    const base = rowsNow.filter(r => !isTaxLine(r))
-      .reduce((t, r) => t + (r.taxable === false ? 0 : (Number(r.line_total) || 0)), 0);
-    const tax = Math.round(base * BOOKING_TAX_RATE * 100) / 100;
-    // Prefer the rate-carrying row ("Tax (8.25%)") as the survivor so a
-    // stray hand-typed tax note is what gets collapsed, not the real line.
-    const keep = taxRows.find(r => /\(/.test(String(r.name || ''))) || taxRows[0];
-    if (Math.abs((Number(keep.line_total) || 0) - tax) >= 0.005) {
-      const { error: taxErr } = await db.from('booking_line_items')
-        .update({ unit_price: tax, line_total: tax }).eq('id', keep.id);
-      if (taxErr) console.error(`[tech line_items] tax recalc failed for booking ${id}:`, taxErr.message);
-      else { keep.unit_price = tax; keep.line_total = tax; }
-    }
-    if (taxRows.length > 1) {
-      const extra = taxRows.filter(r => r.id !== keep.id).map(r => r.id);
-      const { error: delTaxErr } = await db.from('booking_line_items').delete().in('id', extra);
-      if (!delTaxErr) rowsNow = rowsNow.filter(r => !extra.includes(r.id));
-    }
-  }
-
-  // Rewrite sort_order into the canonical ticket order (owner rule 2026-08-24:
-  // TVs smallest-first, then work, then travel fee, discounts, tax last) —
-  // this is also what puts the tech's replacement rows back in their place
-  // instead of jumping above the office's fee/discount rows (their default
-  // sort_order 0 used to shuffle the whole ticket on every tech edit).
-  const ordered = canonicalizeLineItems(rowsNow);
-  if (sortOrderOk) {
-    for (let i = 0; i < ordered.length; i++) {
-      if (Number(ordered[i].sort_order) === i) continue;   // already in place
-      const { error: soErr } = await db.from('booking_line_items')
-        .update({ sort_order: i }).eq('id', ordered[i].id);
-      if (soErr) { console.error(`[tech line_items] sort_order write failed for booking ${id}:`, soErr.message); break; }
-    }
-  }
-
-  // Recompute the booking total from every remaining line so it can never
-  // drift from the items it's made of; subtotal is the pre-tax total, same
-  // meaning it carries everywhere else that writes it.
-  const price = Math.round(ordered.reduce((t, r) => t + (Number(r.line_total) || 0), 0) * 100) / 100;
-  const subtotal = Math.round(ordered.reduce((t, r) => t + (isTaxLine(r) ? 0 : (Number(r.line_total) || 0)), 0) * 100) / 100;
-  const { error: upErr } = await db.from('bookings').update({ price, subtotal }).eq('id', id);
-  if (upErr) throw upErr;
-
-  // SEAL the rewrite with a second CAS bump (same reason as the office save:
-  // the claim above lands before the row rewrite does, so a fetch in that
-  // window could capture the claimed rev over stale/duplicated rows — this
-  // bump invalidates any such snapshot). If the seal fails we return no
-  // li_rev, so a client that kept editing would fail closed on its next save.
-  let sealedRev = null;
-  try {
-    // FRESH read, never the claim-time copy — the claim-to-seal window here
-    // spans the re-read, tax fix, sort_order writes and price update, and any
-    // completion stamp landing in it would be silently reverted by a stale
-    // whole-object write (see the office save's identical seal for details).
-    const { data: freshRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-    if (Number(freshRow?.metadata?.li_rev) === newRev) {
-      const seal = await casBumpLiRev(db, id, freshRow.metadata);
-      if (seal.ok) sealedRev = seal.rev;
-    }
-  } catch (e) { console.warn(`[tech line_items] seal bump failed for booking ${id}:`, e.message); }
-
-  return res.status(200).json({ ok: true, price, ...(sealedRev != null && { li_rev: sealedRev }) });
+    const result = await writeInventoryJob(db, { booking: bk, businessId: bizId, body, action: 'tech-line-items',
+      actor: 'tech:' + auth.tech_id, actorTechnicianId: auth.tech_id, lineItems: fullItems });
+    return res.status(200).json(result);
+  } catch (error) { return inventoryError(res, error); }
 }
 
 async function status(req, res, db, auth, body) {
@@ -903,12 +775,15 @@ async function status(req, res, db, auth, body) {
   // advance it too. All downstream writes use the job's OWN business_id, not the
   // tech's home business.
   const build = () => scopeMine(db.from('bookings')
-    .select(`id, status, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug, name ), customer:customers ( name, phone, email )`), auth)
+    .select(`id, updated_at, status, scheduled_at, review_token, sms_consent, metadata, business_id, price, payment_status, business:businesses ( slug, name ), customer:customers ( name, phone, email )`), auth)
     .eq('id', id).maybeSingle();
   const { data: existing } = await fetchMine(build);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
   const jobBizId = existing.business_id;
 
+  if (next === existing.status) {
+    return res.status(200).json({ok:true,status:next,inventory_status:existing.metadata?.inventory_status || 'unrecorded',issues:existing.metadata?.inventory_issues || []});
+  }
   if (TERMINAL_STATUS.has(existing.status)) {
     return res.status(409).json({ error: `This job is already ${existing.status.replace(/_/g, ' ')} — its status can't be changed from here. Refresh the job list if this doesn't look right.` });
   }
@@ -948,13 +823,12 @@ async function status(req, res, db, auth, body) {
   const patch = { status: next };
   if (map.stamp) patch[map.stamp] = new Date().toISOString();
 
-  const { error: e1 } = await db.from('bookings').update(patch).eq('id', id);
-  if (e1) throw e1;
+  let inventoryResult;
+  try { inventoryResult = await writeInventoryJob(db, { booking: existing, businessId: jobBizId, body,
+    action: 'tech-status', actor: 'tech:' + auth.tech_id, actorTechnicianId: auth.tech_id, patch }); }
+  catch (error) { return inventoryError(res, error); }
 
-  await db.from('booking_status_events').insert({
-    booking_id: id, business_id: jobBizId, technician_id: auth.tech_id,
-    status: next, note: body.note || 'Updated by technician',
-  });
+  if (inventoryResult.duplicate) return res.status(200).json({ ...inventoryResult, status: next });
 
   // On completion: auto-decrement wire concealment plates for "behind the wall"
   // jobs (one plate per line unit). Stamped in metadata so re-completing the same
@@ -984,43 +858,6 @@ async function status(req, res, db, auth, body) {
       }
     } catch (e) {
       console.error(`[wireplate] decrement failed for booking ${id}:`, e.message);
-    }
-  }
-
-  // On completion: auto-decrement the company BRACKETS this job used (Flat /
-  // Tilting / Full Motion) from the supplier's on-hand inventory — for EVERY job,
-  // solo OR two-tech. (Previously only two-tech jobs ever decremented, via the
-  // supplier picker, so a solo tech's count never went down — the TK/Greg bug.)
-  // The supplier is the recorded bracket_supplied_by (two-tech), else the job's
-  // assigned tech, else the completing tech. Stamped so re-completing never
-  // double-deducts; customer-supplied/own brackets are skipped by detectBracketQtys.
-  if (next === 'completed' && !existing.metadata?.bracket_deducted_at) {
-    try {
-      const { data: liRows } = await db.from('booking_line_items')
-        .select('name, quantity').eq('booking_id', id);
-      const need = detectBracketQtys(liRows || []);
-      if (bracketTotal(need) > 0) {
-        let supplier = auth.tech_id;
-        try {
-          const { data: sup } = await db.from('bookings')
-            .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
-          supplier = sup?.bracket_supplied_by || sup?.technician_id || auth.tech_id;
-        } catch (_) { /* pre-0035: fall back to the completing tech */ }
-        // Keyed on job:<id> (migration 0088) -- shared with the office
-        // completion path in admin.js, so whichever side completes the job
-        // first performs the real deduction and the other is a harmless no-op.
-        await debitForJob(db, {
-          businessId: jobBizId, technicianId: supplier, qtys: need, bookingId: id,
-          reason: 'job completion', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
-        });
-        // Re-read metadata so we preserve the wire-plate stamp set just above.
-        const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-        await db.from('bookings').update({
-          metadata: { ...(fresh?.metadata || existing.metadata || {}), bracket_deducted_at: new Date().toISOString() },
-        }).eq('id', id);
-      }
-    } catch (e) {
-      console.error(`[bracket] decrement failed for booking ${id}:`, e.message);
     }
   }
 
@@ -1185,7 +1022,7 @@ async function status(req, res, db, auth, body) {
   // The app shows the tech whether the customer was actually texted; a skip
   // (no consent / no phone) used to be indistinguishable from a send.
   return res.status(200).json({
-    ok: true, status: next,
+    ok: true, status: next, ...inventoryResult,
     ...(enRoute ? { sms: { sent: !!enRoute.ok, skipped: enRoute.skipped || null } } : {}),
   });
 }
@@ -1249,62 +1086,27 @@ async function jobCardUpdate(req, res, db, auth, body) {
 // On a two-person job only one tech supplies the bracket; that tech's stock is
 // the one counted. Either tech on the job can record it. Re-recording to a
 // different tech gives the count back to the previous supplier first.
-async function jobBracketSetSupplier(req, res, db, auth, body) {
+async function inventoryJobMutation(req, res, db, auth, body, confirmUse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const id = (body.id || '').toString();
-  const supplierId = (body.technician_id || '').toString();
-  if (!id || !supplierId) return res.status(400).json({ error: 'id and technician_id required' });
-
-  const build = () => scopeMine(db.from('bookings')
-    .select(`id, business_id, technician_id, ${techHasSecondCol ? 'secondary_technician_id, ' : ''}bracket_supplied_by, line_items:booking_line_items ( name, quantity )`), auth)
-    .eq('id', id).maybeSingle();
-  let { data: b, error } = await fetchMine(build);
-  if (error && /bracket_supplied_by/.test(error.message || '')) {
-    return res.status(400).json({ error: "Bracket tracking isn't set up yet (run migration 0035)." });
-  }
-  if (error || !b) return res.status(404).json({ error: 'Job not found' });
-
-  const jobTechs = [b.technician_id, b.secondary_technician_id].filter(Boolean);
-  if (!jobTechs.includes(supplierId)) return res.status(400).json({ error: 'Pick a technician who is on this job.' });
-
-  const qtys = detectBracketQtys(b.line_items || []);
-  if (bracketTotal(qtys) <= 0) return res.status(400).json({ error: 'This job has no company-supplied bracket.' });
-
-  const prev = b.bracket_supplied_by || null;
-  if (prev === supplierId) return res.status(200).json({ ok: true, supplied_by: supplierId });
-
-  // The actual inventory deduction happens ONCE, at job completion (see status()).
-  // So here we only RECORD who supplied it — UNLESS the job was already completed
-  // and deducted, in which case changing the supplier must MOVE the count from the
-  // old supplier to the new one (give it back, take from the new).
-  const { data: metaRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-  if (metaRow?.metadata?.bracket_deducted_at) {
-    // Keyed on (booking, prev->new) so re-submitting the SAME supplier change
-    // is a no-op, while a genuinely different change on the same job (rare,
-    // but possible if the supplier is corrected twice) still records its own
-    // move.
-    const changeTag = `${prev || 'none'}-to-${supplierId}`;
-    if (prev) {
-      await ledgerAdjust(db, {
-        businessId: b.business_id, technicianId: prev, deltaQtys: qtys, bookingId: id,
-        reason: 'supplier change: returned to previous supplier', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
-        idempotencyKey: `job-supplier-return:${id}:${changeTag}`,
-      });
-    }
-    await ledgerAdjust(db, {
-      businessId: b.business_id, technicianId: supplierId,
-      deltaQtys: { flat: -(qtys.flat || 0), tilting: -(qtys.tilting || 0), full_motion: -(qtys.full_motion || 0) },
-      bookingId: id, reason: 'supplier change: new supplier charged', actor: `tech:${auth.tech_id || auth.name || 'tech'}`,
-      idempotencyKey: `job-supplier-charge:${id}:${changeTag}`,
-    });
-  }
-
-  const { error: upErr } = await db.from('bookings')
-    .update({ bracket_supplied_by: supplierId, bracket_supplied_at: new Date().toISOString() })
-    .eq('id', id);
-  if (upErr) throw upErr;
-  return res.status(200).json({ ok: true, supplied_by: supplierId });
+  const id = String(body.id || '');
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const build = () => scopeMine(db.from('bookings').select('id,business_id,metadata,updated_at,technician_id,secondary_technician_id'),auth).eq('id',id).maybeSingle();
+  const { data: booking, error } = await fetchMine(build);
+  if (error) throw error;
+  if (!booking) return res.status(404).json({ error: 'Job not found' });
+  const supplier = confirmUse ? body.bracket_supplied_by : body.technician_id;
+  if (supplier && ![booking.technician_id,booking.secondary_technician_id].includes(supplier)) return res.status(400).json({ error: 'Pick a technician assigned to this job.' });
+  if (!confirmUse && !supplier) return res.status(400).json({ error: 'Supplier required.' });
+  if (body.li_rev == null || !body.operation_id) return res.status(409).json({ error: 'Refresh this job before recording materials or their supplier.',code: LI_CONFLICT_CODE });
+  try {
+    const result = await writeInventoryJob(db, { booking, businessId: booking.business_id, body,
+      action: confirmUse ? 'tech-material-use' : 'tech-supplier', actor: 'tech:'+auth.tech_id, actorTechnicianId: auth.tech_id,
+      confirmUse, patch: supplier ? { bracket_supplied_by: supplier, bracket_supplied_at: new Date().toISOString() } : {} });
+    return res.status(200).json({ ...result, supplied_by: supplier || booking.technician_id });
+  } catch (error) { return inventoryError(res,error); }
 }
+async function jobBracketSetSupplier(req,res,db,auth,body) { return inventoryJobMutation(req,res,db,auth,body,false); }
+async function inventoryJobUse(req,res,db,auth,body) { return inventoryJobMutation(req,res,db,auth,body,true); }
 
 // ── Payment (techs can charge or mark-paid at service time) ────────────────────
 async function jobPayment(req, res, db, auth, body) {
@@ -1832,23 +1634,7 @@ function isHiddenLi(li) {
 
 // Count the COMPANY-supplied brackets on a job by type, from its line items.
 // "Customer supplied" brackets don't draw from inventory and are ignored.
-function detectBracketQtys(lineItems) {
-  const out = { flat: 0, tilting: 0, full_motion: 0 };
-  for (const li of lineItems || []) {
-    const name = (li.name || '').toLowerCase();
-    const qty = Number(li.quantity) || 1;
-    if (/customer.?supplied/.test(name)) continue;
-    if (/full.?motion/.test(name)) out.full_motion += qty;
-    else if (/tilt/.test(name)) out.tilting += qty;
-    else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
-  }
-  // A job can't use more brackets than it has TVs. A ticket carrying BOTH a
-  // bracket option line and a hand-typed hardware line ("Tilting Mounts")
-  // otherwise double-counts (Throckmorton, 2026-08-21: 6 tilting deducted from
-  // a 4-TV / 3-bracket job). Keep in sync with api/admin.js's copy.
-  clampBracketQtysToTvCount(out, lineItems);
-  return out;
-}
+function detectBracketQtys(lineItems) { return classifyBracketMaterials(lineItems || []).qtys; }
 function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }
 // Human label for the brackets on a job, e.g. "1× Full Motion".
 function bracketLabel(q) {
@@ -1976,18 +1762,13 @@ async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookin
 // Best-effort: if the bracket_supplied_by column (0035) isn't applied yet, never
 // block completion.
 async function jobNeedsBracketSupplier(db, bookingId) {
-  // The supplier question only exists for two-person jobs. Without 0019's second
-  // tech column there's no such thing, so never gate.
-  if (!techHasSecondCol) return false;
-  try {
-    const { data: b, error } = await db.from('bookings')
-      .select('bracket_supplied_by, secondary_technician_id, line_items:booking_line_items ( name, quantity )')
-      .eq('id', bookingId).maybeSingle();
-    if (error || !b) return false;
-    if (!b.secondary_technician_id) return false;   // solo job: assigned tech is the supplier
-    if (b.bracket_supplied_by) return false;
-    return bracketTotal(detectBracketQtys(b.line_items || [])) > 0;
-  } catch (e) { return false; }
+  const { data: b, error } = await db.from('bookings')
+    .select('bracket_supplied_by,technician_id,secondary_technician_id,line_items:booking_line_items(name,quantity,material_type,material_owner)')
+    .eq('id',bookingId).maybeSingle();
+  if (error) throw error;
+  if (!b) throw new Error('Job not found');
+  return !!b.secondary_technician_id && bracketTotal(detectBracketQtys(b.line_items || [])) > 0 &&
+    ![b.technician_id,b.secondary_technician_id].includes(b.bracket_supplied_by);
 }
 
 // Collapse the linked service into the category the tech should see: "TV
@@ -2823,30 +2604,23 @@ async function bracketInventory(req, res, db, auth) {
   const tilting = inv?.tilting_qty || 0;
   const full_motion = inv?.full_motion_qty || 0;
 
-  // In-route orders assigned to this tech — brackets on the way but not yet
-  // delivered, so the tech knows what's coming and roughly when. Best-effort:
-  // if the query fails for any reason we just return an empty list (the on-hand
-  // counts above must never be blocked by this extra lookup).
-  let in_route = [];
-  try {
-    const irCols = (withEst) =>
-      `id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, order_date, created_at${withEst ? ', estimated_delivery' : ''}`;
-    let { data: rows, error: irErr } = await db.from('bracket_purchases')
-      .select(irCols(true))
+  // Received units already count on hand. Only the outstanding part of an
+  // open order belongs here; read every page and surface lookup failures so
+  // an unavailable shipment list cannot look like no brackets are coming.
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data: batch, error: irErr } = await db.from('bracket_purchases')
+      .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, received_flat_qty, received_tilting_qty, received_full_motion_qty, order_date, created_at, estimated_delivery, inventory_status')
       .eq('technician_id', auth.tech_id)
       .eq('business_id', auth.business_id)
-      .eq('status', 'in_route')
-      .order('created_at', { ascending: true });
-    // estimated_delivery arrives with its migration; degrade gracefully if absent.
-    if (irErr && /estimated_delivery/.test(irErr.message || '')) {
-      ({ data: rows } = await db.from('bracket_purchases')
-        .select(irCols(false))
-        .eq('technician_id', auth.tech_id)
-        .eq('business_id', auth.business_id)
-        .eq('status', 'in_route')
-        .order('created_at', { ascending: true }));
-    }
-    in_route = (rows || []).map((r) => {
+      .in('status', ['ordered', 'in_route'])
+      .order('created_at', { ascending: true }).order('id')
+      .range(offset, offset + 999);
+    if (irErr) throw irErr;
+    rows.push(...(batch || []));
+    if (!batch || batch.length < 1000) break;
+  }
+  const in_route = rows.map((r) => {
       // Estimated arrival: the parsed "Arrives …" date if we have it, otherwise
       // ~7 days after the order date (Walmart's typical bracket shipping window).
       let est = r.estimated_delivery || null;
@@ -2859,13 +2633,13 @@ async function bracketInventory(req, res, db, auth) {
       }
       return {
         order_num: r.walmart_order_num || null,
-        flat: r.flat_qty || 0,
-        tilting: r.tilting_qty || 0,
-        full_motion: r.full_motion_qty || 0,
+        flat: Math.max(0, (r.flat_qty || 0) - (r.received_flat_qty || 0)),
+        tilting: Math.max(0, (r.tilting_qty || 0) - (r.received_tilting_qty || 0)),
+        full_motion: Math.max(0, (r.full_motion_qty || 0) - (r.received_full_motion_qty || 0)),
+        inventory_status: r.inventory_status,
         estimated_delivery: est,
       };
     }).filter((o) => (o.flat + o.tilting + o.full_motion) > 0);
-  } catch (e) { in_route = []; }
 
   return res.status(200).json({
     flat,

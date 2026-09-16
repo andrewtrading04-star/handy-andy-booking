@@ -14,8 +14,8 @@ import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { enRouteMessage } from './_lib/en-route.js';
 import { reviewRequestSms } from './_lib/review-token.js';
-import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
-import { ingestBracketSyncReport, bracketSyncWatchdog } from './_lib/bracket-sync-health.js';
+import { ingestWalmartOrder } from './_lib/bracket-order-ingest.js';
+import { ingestBracketSyncReport, bracketSyncWatchdog, readState as readBracketSyncState } from './_lib/bracket-sync-health.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -80,240 +80,17 @@ async function applyMigration(filename) {
   }
 }
 
-// Status ladder for bracket purchases — sync only ever upgrades a row's status
-// (in_route → delivered), never moves it backwards. 'ordered' is the legacy
-// alias of 'in_route' (rank 0) so old rows compare correctly.
+// Retained for the separate wire-plate integration.
 const BRACKET_STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
-// Bracket_inventory moves ONLY through ledgerCreditDelivery / ledgerAdjustDelivery
-// now (migration 0088, api/_lib/bracket-moves.js) -- both keyed on the Walmart
-// order number, so a re-parsed email or an overlapping cron run credits or
-// corrects the same order exactly once instead of every time this endpoint fires.
-
-// Sync one Walmart order into bracket_purchases. Auth/method checked by caller.
-//   • Unassigned everywhere → mirror the order to every active business as an
-//     unassigned delivery (so it can be assigned from either platform).
-//   • Already assigned to a tech in some business → that business OWNS it:
-//     update only that row, self-heal its quantities from the email (moving the
-//     tech's inventory by the difference), and drop leftover unassigned twins in
-//     other businesses so the same delivery isn't shown or counted twice.
-// Tech home addresses — bracket orders ship to a tech's house, so the delivery
-// address in the Walmart email tells us which tech the order is for. Keyed by
-// street number + ZIP (unique per tech). Add a line when a tech moves or joins.
-const TECH_HOME_ADDRESSES = [
-  { num: '5809',  zip: '80128', name: 'steve', slug: 'handy-andy' },  // Steve Burns — Littleton, CO
-  { num: '10507', zip: '80022', name: 'tk',    slug: 'doms' },        // Tk Adeshewo — Commerce City, CO
-  { num: '7350',  zip: '77011', name: 'juan',  slug: 'handy-andy' },  // Juan Beltran — Houston, TX
-  { num: '3749',  zip: '80205', name: 'kregg', slug: 'handy-andy' },  // Kregg G — Denver, CO
-  { num: '16113', zip: '78728', name: 'zach',  slug: 'handy-andy' },  // Zach Benaya — Austin, TX
-  { num: '9600',  zip: '80231', name: 'greg',  slug: 'doms' },        // Gregory Gadlin — Denver, CO
-];
-
-// Match a delivery address to the tech it ships to. STRICT: the street number
-// AND the ZIP must both equal a known tech's home. Returns {id, business_id,
-// name} or null — an unknown address leaves the order unassigned, never guessed.
-async function matchTechByAddress(db, businesses, address) {
-  if (!address) return null;
-  const num = (String(address).match(/\b(\d{1,6})\b/) || [])[1];
-  const zips = [...String(address).matchAll(/\b(\d{5})(?:-\d{4})?\b/g)].map(m => m[1]);
-  const zip = zips.length ? zips[zips.length - 1] : null;
-  if (!num || !zip) return null;
-  const entry = TECH_HOME_ADDRESSES.find(e => e.num === num && e.zip === zip);
-  if (!entry) return null;
-  const biz = (businesses || []).find(b => b.slug === entry.slug);
-  if (!biz) return null;
-  const { data: techs } = await db.from('technicians')
-    .select('id, name, business_id').eq('business_id', biz.id).ilike('name', entry.name + '%').limit(1);
-  const tech = (techs || [])[0];
-  return tech ? { id: tech.id, business_id: tech.business_id, name: tech.name } : null;
-}
-
-// Status only ever upgrades (in_route → delivered), never downgrades.
 async function bracketSync(req, res) {
-  const body = req.body || {};
-  const walmart_order_num = (body.walmart_order_num || '').toString().trim();
-  if (!walmart_order_num) return res.status(400).json({ error: 'walmart_order_num required' });
-
-  const flat_qty        = Math.max(0, parseInt(body.flat_qty)        || 0);
-  const tilting_qty     = Math.max(0, parseInt(body.tilting_qty)     || 0);
-  const full_motion_qty = Math.max(0, parseInt(body.full_motion_qty) || 0);
-  const totalQty        = flat_qty + tilting_qty + full_motion_qty;
-  const rawStatus       = (body.status || 'in_route').toString();
-  const status          = Object.prototype.hasOwnProperty.call(BRACKET_STATUS_RANK, rawStatus) ? rawStatus : 'in_route';
-  const order_date      = body.order_date     || null;
-  const delivered_date  = body.delivered_date || null;
-  const order_url       = body.order_url      || null;
-
-  const db = serviceClient();
-  const { data: businesses, error: bizErr } = await db.from('businesses').select('id, slug').eq('active', true);
-  if (bizErr) return res.status(500).json({ error: bizErr.message });
-  const slugOf = (id) => (businesses || []).find(b => b.id === id)?.slug || id;
-
-  // Every row for this order across all businesses.
-  const { data: rows, error: rowsErr } = await db.from('bracket_purchases')
-    .select('id, business_id, status, flat_qty, tilting_qty, full_motion_qty, order_url, technician_id')
-    .eq('walmart_order_num', walmart_order_num);
-  if (rowsErr) return res.status(500).json({ error: rowsErr.message });
-
-  const results = [];
-  const upgrades = (fromStatus) => (BRACKET_STATUS_RANK[status] ?? 0) > (BRACKET_STATUS_RANK[fromStatus] ?? 0);
-  const statusPatch = () => {
-    const p = {};
-    if (status === 'delivered' && delivered_date) p.delivered_date = delivered_date;
-    p.status = status;
-    return p;
-  };
-
-  const assignedRow = (rows || []).find(r => r.technician_id);
-  // No tech on it yet? Auto-assign by the delivery address in the email.
-  const matched = assignedRow ? null : await matchTechByAddress(db, businesses, body.delivery_address);
-  if (assignedRow) {
-    // The assigned tech's business owns this order.
-    const patch = {};
-    const wasDelivered = assignedRow.status === 'delivered';
-    const nowDelivered = status === 'delivered';
-    if (upgrades(assignedRow.status)) Object.assign(patch, statusPatch());
-    if (order_url && !assignedRow.order_url) patch.order_url = order_url;
-    const qtyChanged = totalQty > 0 && (assignedRow.flat_qty !== flat_qty || assignedRow.tilting_qty !== tilting_qty || assignedRow.full_motion_qty !== full_motion_qty);
-    if (qtyChanged) { patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty; }
-    // Inventory moves ONLY on delivery — never while an order is in route.
-    // Credit the full order the first time it flips to delivered; after that,
-    // self-heal by any later quantity correction from a follow-up email.
-    // Keyed on walmart_order_num (migration 0088) so a re-parsed email or an
-    // overlapping cron run can only ever credit this order once. Resolve the
-    // tech's REAL home business rather than trusting assignedRow.business_id
-    // -- that's just whichever business tab the order happened to be assigned
-    // from, which can differ from the tech's own stock (the exact phantom-row
-    // bug fixed for bracketAssign in commit 5199678, 2026-07-16).
-    if ((!wasDelivered && nowDelivered && totalQty > 0) || (wasDelivered && qtyChanged)) {
-      const { data: tech } = await db.from('technicians').select('business_id').eq('id', assignedRow.technician_id).maybeSingle();
-      const homeBizId = tech?.business_id || assignedRow.business_id;
-      if (!wasDelivered && nowDelivered && totalQty > 0) {
-        await ledgerCreditDelivery(db, {
-          businessId: homeBizId, technicianId: assignedRow.technician_id,
-          qtys: { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty },
-          purchaseId: assignedRow.id, orderNum: walmart_order_num, actor: 'system:bracket-sync',
-        });
-      } else {
-        await ledgerAdjustDelivery(db, {
-          businessId: homeBizId, technicianId: assignedRow.technician_id,
-          deltaQtys: {
-            flat:        flat_qty        - (assignedRow.flat_qty || 0),
-            tilting:     tilting_qty     - (assignedRow.tilting_qty || 0),
-            full_motion: full_motion_qty - (assignedRow.full_motion_qty || 0),
-          },
-          purchaseId: assignedRow.id, orderNum: walmart_order_num,
-          tag: `qty-${flat_qty}-${tilting_qty}-${full_motion_qty}`,
-          reason: 'quantity corrected by a follow-up delivery email', actor: 'system:bracket-sync',
-        });
-      }
-    }
-    if (Object.keys(patch).length) {
-      const { error } = await db.from('bracket_purchases').update(patch).eq('id', assignedRow.id);
-      results.push({ business: slugOf(assignedRow.business_id), action: error ? 'update_failed' : 'updated_assigned', patch, error: error?.message });
-    } else {
-      results.push({ business: slugOf(assignedRow.business_id), action: 'unchanged' });
-    }
-    // Drop leftover unassigned twins of the same order anywhere else.
-    for (const r of (rows || [])) {
-      if (r.id === assignedRow.id || r.technician_id) continue;
-      await db.from('bracket_purchases').delete().eq('id', r.id);
-      results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
-    }
-  } else if (matched) {
-    // Auto-assign to the tech the order ships to. This only RESERVES the order to
-    // the tech — it does NOT touch on-hand inventory. Brackets are added to the
-    // count only when the order is delivered (below). Own the row for the tech's
-    // business (update the existing unassigned twin there, or insert), drop twins.
-    const own = (rows || []).find(r => r.business_id === matched.business_id) || null;
-    const patch = { technician_id: matched.id };
-    if (order_url) patch.order_url = order_url;
-    if (own) {
-      if (upgrades(own.status)) Object.assign(patch, statusPatch());
-      if (totalQty > 0) { patch.flat_qty = flat_qty; patch.tilting_qty = tilting_qty; patch.full_motion_qty = full_motion_qty; }
-      const { error } = await db.from('bracket_purchases').update(patch).eq('id', own.id);
-      results.push({ business: slugOf(matched.business_id), action: error ? 'assign_failed' : 'auto_assigned', tech: matched.name, error: error?.message });
-    } else if (totalQty === 0) {
-      results.push({ business: slugOf(matched.business_id), action: 'skipped', reason: 'no_qty_for_new_order' });
-    } else {
-      const { error } = await db.from('bracket_purchases').insert({
-        business_id: matched.business_id, technician_id: matched.id, walmart_order_num,
-        flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
-      });
-      results.push({ business: slugOf(matched.business_id), action: error ? 'assign_insert_failed' : 'auto_assigned_new', tech: matched.name, error: error?.message });
-    }
-    // Credit inventory ONLY if this order is already delivered at the moment we
-    // auto-assign it (e.g. the first email we saw was the delivery notice). An
-    // in-route order adds nothing until its delivery email arrives. Keyed on
-    // walmart_order_num so this can never double-credit alongside the
-    // assignedRow branch above or a re-parsed email.
-    if (status === 'delivered' && totalQty > 0) {
-      await ledgerCreditDelivery(db, {
-        businessId: matched.business_id, technicianId: matched.id,
-        qtys: { flat: flat_qty, tilting: tilting_qty, full_motion: full_motion_qty },
-        purchaseId: (own || {}).id || null, orderNum: walmart_order_num, actor: 'system:bracket-sync',
-      });
-    }
-    // Remove the still-unassigned twin(s) of this order in other businesses.
-    for (const r of (rows || [])) {
-      if (r.business_id === matched.business_id || r.technician_id) continue;
-      await db.from('bracket_purchases').delete().eq('id', r.id);
-      results.push({ business: slugOf(r.business_id), action: 'twin_removed' });
-    }
-  } else {
-    // Unassigned everywhere — mirror to every active business.
-    const byBiz = new Map((rows || []).map(r => [r.business_id, r]));
-    for (const biz of (businesses || [])) {
-      const existing = byBiz.get(biz.id);
-      if (existing) {
-        const patch = {};
-        if (upgrades(existing.status)) Object.assign(patch, statusPatch());
-        if (order_url && !existing.order_url) patch.order_url = order_url;
-        if (totalQty > 0) {
-          if (existing.flat_qty        !== flat_qty)        patch.flat_qty        = flat_qty;
-          if (existing.tilting_qty     !== tilting_qty)     patch.tilting_qty     = tilting_qty;
-          if (existing.full_motion_qty !== full_motion_qty) patch.full_motion_qty = full_motion_qty;
-        }
-        if (Object.keys(patch).length === 0) { results.push({ business: biz.slug, action: 'unchanged' }); continue; }
-        const { error } = await db.from('bracket_purchases').update(patch).eq('id', existing.id);
-        results.push({ business: biz.slug, action: error ? 'update_failed' : 'updated', patch, error: error?.message });
-      } else {
-        if (totalQty === 0) { results.push({ business: biz.slug, action: 'skipped', reason: 'no_qty_for_new_order' }); continue; }
-        const { error } = await db.from('bracket_purchases').insert({
-          business_id: biz.id, technician_id: null, walmart_order_num,
-          flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url,
-        });
-        results.push({ business: biz.slug, action: error ? 'insert_failed' : 'created', error: error?.message });
-      }
-    }
+  try {
+    return res.status(200).json(await ingestWalmartOrder(serviceClient(), req.body || {}));
+  } catch (error) {
+    console.error('[bracket_sync]', error.message);
+    return res.status(error.status || 500).json({ok:false,error:error.message || 'Supplier event could not be saved'});
   }
-
-  // Record what we PAID (the order total from the email) on the order's row(s),
-  // once. Best-effort: silently skipped if the order_total column isn't applied
-  // yet, and only fills a null so a corrected total is never clobbered.
-  if (body.order_total != null && isFinite(Number(body.order_total))) {
-    try {
-      await db.from('bracket_purchases')
-        .update({ order_total: Math.round(Number(body.order_total) * 100) / 100 })
-        .eq('walmart_order_num', walmart_order_num).is('order_total', null);
-    } catch (e) { /* order_total column not present yet — ignore */ }
-  }
-
-  // Record the parsed "Arrives …" date so the tech app can show an estimated
-  // delivery for in-route orders. Best-effort + fills only a null, same as
-  // order_total: silently skipped if the column isn't applied yet.
-  if (body.estimated_delivery && /^\d{4}-\d{2}-\d{2}$/.test(String(body.estimated_delivery))) {
-    try {
-      await db.from('bracket_purchases')
-        .update({ estimated_delivery: body.estimated_delivery })
-        .eq('walmart_order_num', walmart_order_num).is('estimated_delivery', null);
-    } catch (e) { /* estimated_delivery column not present yet — ignore */ }
-  }
-
-  console.log('[bracket_sync]', walmart_order_num, results.map(r => `${r.business}:${r.action}`).join(', '));
-  return res.status(200).json({ ok: true, order: walmart_order_num, results });
 }
-
 // One Amazon unit yields this many wire concealment plates (owner: "each 1
 // purchased supplies 5"). Authoritative server-side, so a stale client can't
 // inflate the count.
@@ -985,6 +762,16 @@ export default async function handler(req, res) {
   // purpose — it is the one case where the CRM could not have alerted anyone.
   // Every "how stale is it" timestamp is stamped with THIS server's clock; the
   // report's own times are display-only. Secured by CRON_SECRET.
+  if (action === 'bracket_sync_checkpoint') {
+    if (req.method !== 'POST') return res.status(405).json({error:'Method not allowed'});
+    const secret=process.env.CRON_SECRET;
+    const bearer=(req.headers.authorization || '').replace(/^Bearer\s+/i,'');
+    if (!secret || bearer !== secret) return res.status(401).json({error:'Unauthorized'});
+    try {
+      const state=await readBracketSyncState(serviceClient());
+      return res.status(200).json({ok:true,mailboxes:Object.values(state.mailboxes || {}).map(m=>({user:m.user,walmart_scanned_through:m.walmart_scanned_through || null}))});
+    } catch(error) {return res.status(500).json({ok:false,error:error.message});}
+  }
   if (action === 'bracket_sync_health') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const secret = process.env.CRON_SECRET;

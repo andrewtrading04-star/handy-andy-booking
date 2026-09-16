@@ -41,14 +41,12 @@
 import fs from 'node:fs';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { parseWalmartEmails } from './lib/walmart-parse.mjs';
-import { parseAmazonPlateEmail, PLATE_MATCH } from './lib/amazon-parse.mjs';
-import { parseGoogleReviewEmail } from './lib/google-review-parse.mjs';
-import { parseWebsiteLeadEmail } from './lib/website-lead-parse.mjs';
+import { scanInventoryMailbox } from './lib/inventory-mailbox.mjs';
+import { orderedWalmartEvents } from './lib/walmart-sync.mjs';
 
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const VERCEL_URL  = (process.env.VERCEL_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '');
-const LOOKBACK_DAYS = parseInt(process.env.LOOKBACK_DAYS) || 45;
+const LOOKBACK_DAYS = Math.max(1,Math.min(3650,parseInt(process.env.LOOKBACK_DAYS) || 45));
 
 const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 
@@ -73,7 +71,6 @@ const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 // category, e.g. "2 Electrical & Heating items"), so PLATE_MATCH can miss a
 // real order. Since nothing else is ever bought through this account, any
 // real Amazon order-flow email seen here is trusted as a plate order.
-const PLATE_DEDICATED_MAILBOX_IDX = 3;
 const EXPECTED_MAILBOX_COUNT = 7;
 const MAILBOX_ROLE = {
   1: 'Walmart orders forwarder', 2: "Dom's reviews + Walmart", 3: 'Amazon wire plates',
@@ -90,10 +87,13 @@ function mailboxes() {
   for (let i = 1; i <= 12; i++) {
     const userName = i === 1 ? 'GMAIL_USER' : `GMAIL_USER_${i}`;
     const passName = i === 1 ? 'GMAIL_APP_PASSWORD' : `GMAIL_APP_PASSWORD_${i}`;
-    const user = process.env[userName], pass = process.env[passName];
+    const user = process.env[userName]?.trim().toLowerCase(), pass = process.env[passName]?.replace(/\s+/g,'');
     if (user && pass) boxes.push({ user, pass, idx: i });
     else if (user || pass) misconfigured.push({ idx: i, missing: user ? passName : userName });
     else if (i <= EXPECTED_MAILBOX_COUNT) misconfigured.push({ idx: i, missing: 'both' });
+  }
+  if (!boxes.some(b => b.user.trim().toLowerCase() === 'andrewtrading04@gmail.com')) {
+    misconfigured.push({idx:1,missing:'required_order_inbox:andrewtrading04@gmail.com'});
   }
   return { boxes, misconfigured };
 }
@@ -160,26 +160,6 @@ function mergePlatesByOrder(payloads) {
   return [...byOrder.values()];
 }
 
-// Merge multiple parsed emails for the SAME order (e.g. a confirmation plus a
-// later delivery email, or the same order forwarded twice). Keep the highest
-// status, the largest seen quantities, and the first non-null url/date.
-function mergeByOrder(payloads) {
-  const byOrder = new Map();
-  for (const p of payloads) {
-    const cur = byOrder.get(p.walmart_order_num);
-    if (!cur) { byOrder.set(p.walmart_order_num, { ...p }); continue; }
-    cur.flat_qty        = Math.max(cur.flat_qty, p.flat_qty);
-    cur.tilting_qty     = Math.max(cur.tilting_qty, p.tilting_qty);
-    cur.full_motion_qty = Math.max(cur.full_motion_qty, p.full_motion_qty);
-    if ((STATUS_RANK[p.status] ?? 0) > (STATUS_RANK[cur.status] ?? 0)) cur.status = p.status;
-    cur.order_url      = cur.order_url || p.order_url;
-    cur.delivered_date = cur.delivered_date || p.delivered_date;
-    cur.estimated_delivery = cur.estimated_delivery || p.estimated_delivery;
-    if (p.order_date && (!cur.order_date || p.order_date < cur.order_date)) cur.order_date = p.order_date;
-  }
-  return [...byOrder.values()];
-}
-
 // POST one order to a sync endpoint (bracket_sync or wire_plate_sync).
 // Throws with `.status` on a non-2xx (0 / undefined for a network failure or
 // the 30-s timeout) so the health report can tell a CRM rejection from an outage.
@@ -191,153 +171,12 @@ async function syncTo(action, payload) {
     signal:  AbortSignal.timeout(CRM_FETCH_TIMEOUT_MS),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(`${res.status} ${JSON.stringify(json)}`), { status: res.status });
+  if (!res.ok || json.ok === false || (json.results || []).some(r => r.error || /failed/.test(r.action || ''))) {
+    throw Object.assign(new Error(`${res.status} ${JSON.stringify(json)}`), { status: res.ok ? 500 : res.status });
+  }
   return json;
 }
 const syncOrder = (payload) => syncTo('bracket_sync', payload);
-
-// Scan one mailbox, returning every parsed Walmart order AND Amazon plate order
-// payload found: { walmart: [...], amazon: [...] }.
-// Each criterion is run as its OWN small IMAP SEARCH and the UIDs are unioned.
-// A single 8-way nested-OR search fails ("Command failed"/BAD) on some large
-// mailboxes; per-term searches are simple and far more reliable, and a failure
-// of one term still lets the others through.
-const SEARCH_TERMS = [
-  { from: 'walmart.com' }, { body: 'walmart' },
-  { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
-  { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
-  // Google Business Profile review notifications.
-  { from: 'businessprofile-noreply@google.com' }, { body: 'left a review for' },
-  // Website contact-form leads (LandingSite).
-  { from: 'landingsite.ai' }, { body: 'New customer message from' },
-];
-
-async function searchUids(client, since) {
-  const all = new Set();
-  let failed = 0, lastMsg = '';
-  for (const term of SEARCH_TERMS) {
-    try {
-      const uids = await client.search({ since, ...term }, { uid: true });
-      if (Array.isArray(uids)) for (const u of uids) all.add(u);
-    } catch (e) {
-      failed++; lastMsg = e.message;
-      console.warn(`[bracket-sync] search ${JSON.stringify(term)} failed: ${e.message}`);
-    }
-  }
-  // One failed term is noise; every term failing means the mailbox was not
-  // really scanned and must be reported as such, not as "no candidates".
-  if (failed === SEARCH_TERMS.length) throw Object.assign(new Error(`every IMAP SEARCH failed: ${lastMsg}`), { code: 'SEARCH_FAILED' });
-  return { uids: [...all], failed_terms: failed };
-}
-
-// A real Amazon order-flow email, as opposed to a promo/marketing message.
-const AMAZON_ORDER_SENDER_RE = /^(auto-confirm|ship-confirm|order-update)@amazon\.com$/i;
-
-async function scanMailbox({ user, pass, idx }, todayISO) {
-  const client = new ImapFlow({
-    host: 'imap.gmail.com', port: 993, secure: true,
-    auth: { user, pass }, logger: false,
-    // Don't let one slow/bad mailbox hang the whole run.
-    socketTimeout: 60000, greetingTimeout: 15000, connectionTimeout: 15000,
-  });
-  // A dropped/timed-out socket emits an 'error' event; without a listener Node
-  // crashes the whole process. Swallow it — per-mailbox failures are handled below.
-  client.on('error', (e) => console.warn(`[bracket-sync] ${user} imap error: ${e.message}`));
-  const walmart = [], amazon = [], reviews = [], leads = [];
-  const t0 = Date.now();
-  let stage = 'connect', candidates = 0, failedTerms = 0;
-  const meta = () => ({ ms: Date.now() - t0, candidates, search_terms_failed: failedTerms });
-  // connect() sits outside the try/finally below: shut the socket a failed
-  // login leaves open, and tag the error with the stage it died in.
-  try { await client.connect(); }
-  catch (e) { try { client.close(); } catch (_) {} e.stage = 'connect'; throw e; }
-  console.log(`[bracket-sync] Connected: ${user}`);
-  try {
-    stage = 'open';
-    // Scan the INBOX only. (Scanning Gmail "All Mail" was tried to catch archived
-    // order confirmations, but it surfaced unrelated Amazon emails — recommendation
-    // / "buy it again" sections that mention the plate product — and the parser
-    // false-matched them into phantom orders. INBOX + a reliable, frequent schedule
-    // is the safe combination: a real order email is in the inbox long enough to be
-    // caught before it's archived.)
-    await client.mailboxOpen('INBOX');
-    const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-    // Targeted candidate search — keep the set SMALL so a busy business inbox
-    // doesn't pull hundreds of messages every run:
-    //   • Walmart: vendor sender OR "walmart" in the body (forwarded copies).
-    //   • Amazon:  only the order-flow senders (auto-confirm / ship-confirm /
-    //     order-update), NOT every email that mentions "amazon" (promos, etc.).
-    //     Plus the distinctive plate product phrases, so a FORWARDED order whose
-    //     From: isn't amazon.com is still caught. Each parser then requires a
-    //     real order number (and, for Amazon, a product match) to qualify.
-    stage = 'search';
-    const found = await searchUids(client, since);
-    const uids = found.uids;
-    candidates = uids.length; failedTerms = found.failed_terms;
-    if (!uids.length) { console.log(`[bracket-sync] ${user}: no candidate emails`); return { walmart, amazon, reviews, leads, meta: meta() }; }
-    console.log(`[bracket-sync] ${user}: ${uids.length} candidate email(s)`);
-
-    stage = 'fetch';
-    for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
-      let parsed;
-      try { parsed = await simpleParser(msg.source); }
-      catch (e) { console.warn(`[bracket-sync] parse fail uid=${msg.uid}: ${e.message}`); continue; }
-      const email = { subject: parsed.subject || '', text: parsed.text || '', html: parsed.html || '', todayISO };
-      const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address || '').toLowerCase();
-
-      // Google Business Profile review notification. `mailbox` matters: for
-      // every listing but the two Houston ones it is what identifies WHICH
-      // listing the review was left on (migration 0108).
-      const review = parseGoogleReviewEmail({ ...email, emailDateISO: parsed.date ? new Date(parsed.date).toISOString() : undefined, mailbox: user });
-      if (review) {
-        console.log(`[bracket-sync] ${user}: google review ${review.business} ${review.rating}★ by ${review.reviewer_name} → ${review.location_key || 'UNATTRIBUTED'}`);
-        reviews.push(review);
-      }
-
-      // Walmart: one email can bundle several orders (a forwarded "conversation").
-      for (const payload of parseWalmartEmails(email)) {
-        console.log(
-          `[bracket-sync] ${user}: walmart order=${payload.walmart_order_num} status=${payload.status} ` +
-          `flat=${payload.flat_qty} tilt=${payload.tilting_qty} fm=${payload.full_motion_qty}`
-        );
-        walmart.push(payload);
-      }
-      // Amazon: strict everywhere — order # + product-phrase match — EXCEPT in
-      // the dedicated plate-ordering mailbox, where a real Amazon order-flow
-      // sender is trusted even if the email only shows the generic category
-      // (Amazon doesn't always print the product title in "Ordered:" emails).
-      const trustSender = idx === PLATE_DEDICATED_MAILBOX_IDX && AMAZON_ORDER_SENDER_RE.test(fromAddr);
-      const plate = parseAmazonPlateEmail({ ...email, trustSender });
-      if (plate) {
-        console.log(
-          `[bracket-sync] ${user}: amazon order=${plate.amazon_order_num} status=${plate.status} ` +
-          `units=${plate.units} plates=${plate.plates}${trustSender && !PLATE_MATCH.test(email.subject + '\n' + email.text) ? ' (trusted sender — no product phrase in email)' : ''}`
-        );
-        amazon.push(plate);
-      }
-      // Website contact-form lead. Keyed on the email's Message-ID so a re-scan
-      // of the same message never creates a second estimate.
-      const lead = parseWebsiteLeadEmail({
-        from: fromAddr, subject: email.subject, text: email.text, html: email.html,
-        messageId: parsed.messageId || '',
-        receivedISO: parsed.date ? new Date(parsed.date).toISOString() : '',
-      });
-      if (lead) {
-        console.log(`[bracket-sync] ${user}: website lead from ${lead.name} <${lead.email || lead.phone}>`);
-        leads.push(lead);
-      }
-    }
-    stage = 'done';
-  } catch (e) {
-    e.stage = e.stage || stage;
-    throw e;
-  } finally {
-    // Close cleanly; if logout hangs/fails (e.g. after a failed command), force
-    // the socket shut so it can't linger and fire a fatal timeout later.
-    await client.logout().catch(() => { try { client.close(); } catch (_) {} });
-  }
-  return { walmart, amazon, reviews, leads, meta: meta() };
-}
 
 async function main() {
   report = newReport();
@@ -388,6 +227,10 @@ async function main() {
   }
 
   const todayISO = new Date().toISOString().slice(0, 10);
+  // Persisted successful scan boundaries extend recovery beyond the rolling
+  // lookback after an outage. A failed checkpoint read must not silently skip it.
+  const checkpoints = await syncTo('bracket_sync_checkpoint', {});
+  const trustedForwarders = boxes.map(b => b.user.trim().toLowerCase());
 
   // Gather from every configured mailbox. A failed inbox goes into the health
   // report (finish() posts it; the CRM texts the owner) and the scan carries on
@@ -397,14 +240,15 @@ async function main() {
     const role = MAILBOX_ROLE[box.idx] || '';
     const t0 = Date.now();
     try {
-      const { walmart, amazon, reviews, leads, meta } = await scanMailbox(box, todayISO);
+      const checkpoint = (checkpoints.mailboxes || []).find(m => m.user === box.user)?.walmart_scanned_through;
+      const { walmart, amazon, reviews, leads, meta } = await scanInventoryMailbox({box,checkpoint,todayISO,lookbackDays:LOOKBACK_DAYS,trustedForwarders,ImapFlow,simpleParser});
       allWalmart = allWalmart.concat(walmart);
       allAmazon = allAmazon.concat(amazon);
       allReviews = allReviews.concat(reviews || []);
       allLeads = allLeads.concat(leads || []);
       report.mailboxes.push({
         idx: box.idx, user: box.user, role, ok: true, stage: 'done',
-        ms: meta.ms, candidates: meta.candidates, search_terms_failed: meta.search_terms_failed,
+        ...meta,
         parsed: { walmart: walmart.length, amazon: amazon.length, reviews: reviews.length, leads: leads.length },
       });
     } catch (e) {
@@ -423,23 +267,16 @@ async function main() {
   }
 
   // ── Walmart brackets ──
-  const orders = mergeByOrder(allWalmart);
+  const orders = orderedWalmartEvents(allWalmart);
   if (!orders.length) { console.log('[bracket-sync] No Walmart orders found.'); }
   else console.log(`[bracket-sync] ${orders.length} distinct Walmart order(s) to sync`);
-  let synced = 0, skippedNoQty = 0;
+  let synced = 0, reviewRequired = 0;
   for (const order of orders) {
-    // A brand-new order with no parsed quantities can't be created — skip it
-    // (a later confirmation email with quantities will create it).
-    const qty = order.flat_qty + order.tilting_qty + order.full_motion_qty;
-    if (qty === 0 && order.status === 'in_route') {
-      console.log(`[bracket-sync] ${order.walmart_order_num}: no quantities, skipping`);
-      skippedNoQty++;
-      continue;
-    }
     try {
       const r = await syncOrder(order);
-      console.log(`[bracket-sync] ${order.walmart_order_num}: ${JSON.stringify(r.results)}`);
-      synced++;
+      if (!['synced','review','duplicate'].includes(r.status)) throw new Error('Supplier event was not acknowledged');
+      console.log(`[bracket-sync] ${order.walmart_order_num}: ${r.status}`);
+      if (r.status === 'review' && r.review_pending !== false) reviewRequired++; else synced++;
     } catch (e) {
       console.error(`[bracket-sync] ${order.walmart_order_num}: sync failed — ${e.message}`);
       pushSyncError('bracket_sync', order.walmart_order_num, e);
@@ -510,7 +347,7 @@ async function main() {
   report.totals = {
     mailboxes_configured: boxes.length,
     mailboxes_ok: report.mailboxes.filter(m => m.ok).length,
-    walmart: { distinct: orders.length, synced, failed: orders.length - synced - skippedNoQty, skipped_no_qty: skippedNoQty },
+    walmart: { distinct: new Set(orders.map(o=>o.walmart_order_num)).size, events:orders.length, synced, review_required:reviewRequired, failed:orders.length-synced-reviewRequired, skipped_no_qty:0 },
     plates: { distinct: plateOrders.length, synced: platesSynced, failed: plateOrders.length - platesSynced - platesSkipped, skipped_no_qty: platesSkipped },
     leads: { distinct: leadList.length, created: leadsSynced },
     reviews: { distinct: reviewList.length, synced: reviewsSynced, failed: reviewList.length - reviewsSynced },

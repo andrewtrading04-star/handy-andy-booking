@@ -1,0 +1,24 @@
+name: Inventory regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, fix/inventory-reliability]
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:inventory
+      - run: node scripts/build-inventory-release.mjs
+      - run: node --check api/admin.js && node --check api/tech.js && node --check api/migrate.js

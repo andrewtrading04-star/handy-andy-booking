@@ -1108,6 +1108,57 @@ function maybePromptComplete(id){
   }
 }
 
+function inventoryMaterialFields(line){return {...(line.material_type?{material_type:line.material_type}:{}),...(line.material_owner?{material_owner:line.material_owner}:{})};}
+function inventorySaveFeedback(result,label){
+  const issues=result?.issues||result?.inventory_issues||[];
+  if(['review','shortfall','pending'].includes(result?.inventory_status)||result?.review_reason||issues.length){
+    const detail=[...issues.map(i=>typeof i==='string'?i:(i.message||i.code||'')),result?.review_reason].filter(Boolean).join('; ').replace(/_/g,' ');
+    const message=`${label}. Bracket stock needs office review${detail?': '+detail:'. Check the stock status on this job.'}`;
+    toast(message);alert(message);return false;
+  }
+  toast(label);return true;
+}
+const techInventoryOperations=new Map();
+const techSupplierOperations=new Map();
+function bindBracketSupplier(j,id){
+  const change=document.getElementById('bracketChange');if(change)change.onclick=()=>{const pick=document.getElementById('bracketPick');if(pick)pick.classList.remove('hidden');};
+  const button=document.getElementById('bracketSave'),select=document.getElementById('bracketTech');if(!button||!select)return;
+  const revision=Number(j.li_rev)||0,key=`${id}:${revision}`;
+  select.onchange=()=>{const prior=techSupplierOperations.get(key);if(prior&&prior.technician_id!==select.value)techSupplierOperations.delete(key);};
+  button.onclick=async()=>{
+    const supplier=select.value;if(!supplier){toast('Select which technician supplied the bracket');return;}
+    let operation=techSupplierOperations.get(key);
+    if(!operation||operation.technician_id!==supplier){operation={technician_id:supplier,operation_id:crypto.randomUUID()};techSupplierOperations.set(key,operation);}
+    button.disabled=true;select.disabled=true;
+    try{const result=await api('job_bracket_supplier',{method:'POST',body:{id,technician_id:supplier,li_rev:revision,operation_id:operation.operation_id}});inventorySaveFeedback(result,'Bracket supplier saved');await showDetail(id);}
+    catch(e){toast(e.message);button.disabled=false;}
+    finally{select.disabled=false;}
+  };
+}
+function inventoryUseCard(j){
+  const materials=j.inventory_materials||{};
+  const parts=[['flat','flat'],['tilting','tilting'],['full_motion','full motion']].filter(([key])=>Number(materials[key])>0).map(([key,label])=>`${Number(materials[key])} ${label}`);
+  const issues=(j.inventory_issues||[]).map(i=>typeof i==='string'?i:(i.message||i.type||'Office review needed'));
+  if(!parts.length&&!issues.length)return '';
+  const recorded=j.inventory_status==='recorded',blocked=['canceled','cancelled','deleted'].includes(j.status);
+  const suppliers=j.bracket?.techs||[];
+  const supplier=j.inventory_supplier_id||j.bracket?.supplied_by||(suppliers.length===1?suppliers[0].id:'');
+  return `<div class="card"><h3>Bracket stock used</h3><p>${esc(parts.join(', ')||'Materials need review')}</p><p class="sub" style="line-height:1.5;">Record company brackets when you actually use them. You can do this before payment and photos. Job completion will not charge the same use again.</p>${recorded?'<p style="color:var(--green);font-weight:700;">Stock use recorded</p>':''}${issues.length?`<div role="status" style="color:var(--amber,#f59e0b);line-height:1.5;">${issues.map(i=>`<p>${esc(i)}</p>`).join('')}</div>`:''}${j.inventory_status==='pending'?'<p role="status">Stock recording is pending. Retry or ask the office to review it.</p>':''}${!recorded&&!blocked&&parts.length?`<label for="inventoryUseSupplier" style="display:block;margin:12px 0 6px;">Technician who supplied these brackets</label><select id="inventoryUseSupplier" style="width:100%;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:12px;border-radius:10px;font-size:15px;"><option value="">Select supplier…</option>${suppliers.map(t=>`<option value="${esc(t.id)}" ${t.id===supplier?'selected':''}>${esc(t.name)}</option>`).join('')}</select><div id="inventoryUseError" role="alert" style="margin-top:10px;color:var(--amber,#f59e0b);" hidden></div><button class="btn" id="inventoryUseSave" style="margin-top:12px;width:100%;min-height:44px;">Confirm brackets actually used</button>`:''}</div>`;
+}
+function bindInventoryUse(j,id){
+  const button=document.getElementById('inventoryUseSave');if(!button)return;
+  button.onclick=async()=>{
+    const error=document.getElementById('inventoryUseError'),supplier=document.getElementById('inventoryUseSupplier').value;
+    error.hidden=true;if(!supplier){error.textContent='Choose the technician whose stock was used.';error.hidden=false;document.getElementById('inventoryUseSupplier').focus();return;}
+    if(!confirm('Have these company brackets actually been used on this job? Confirming updates the supplying technician’s stock.'))return;
+    const key=`${id}:${Number(j.li_rev)||0}:${supplier}`;
+    if(!techInventoryOperations.has(key))techInventoryOperations.set(key,crypto.randomUUID());
+    button.disabled=true;
+    try{const result=await api('inventory_job_use',{method:'POST',body:{id,li_rev:Number(j.li_rev)||0,operation_id:techInventoryOperations.get(key),bracket_supplied_by:supplier}});toast(result.inventory_status==='recorded'?'Bracket use recorded':'Bracket use submitted; check stock status');await showDetail(id);}
+    catch(e){error.textContent=e.message||'Stock use could not be recorded. Retry the same action or ask the office to review.';error.hidden=false;button.disabled=false;}
+  };
+}
+
 async function showDetail(id){
   show('detailView');
   const v=document.getElementById('detailView'); v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
@@ -1183,6 +1234,8 @@ async function showDetail(id){
       </div>
 
       ${slotsCardHtml(j)}
+
+      ${inventoryUseCard(j)}
 
       ${j.bracket&&j.bracket.needed?`<div class="card"><h3>📦 Bracket</h3>
         <div class="kv">${esc(j.bracket.label)}</div>
@@ -1267,7 +1320,7 @@ async function showDetail(id){
           document.getElementById('etaModal').classList.remove('hidden');
         }
       } else {
-        try{ await api('status',{method:'POST',body:{id,status:next.to}}); toast(next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
+        try{ const result=await api('status',{method:'POST',body:{id,status:next.to}}); inventorySaveFeedback(result,next.label+' ✓'); syncJobStatus(id,next.to); showDetail(id); }
         catch(e){ toast(e.message); adv.disabled=false; }
       }
     });
@@ -1295,16 +1348,10 @@ async function showDetail(id){
     // Line-item editor (text + price). Techs only edit the visible work lines;
     // fees/tips are preserved server-side and the total is recomputed there.
     mountTechLineItems(j, id);
+    bindInventoryUse(j,id);
 
     // Bracket supplier: record which tech supplied the bracket (required to complete).
-    const bch=document.getElementById('bracketChange'); if(bch) bch.onclick=()=>{ const p=document.getElementById('bracketPick'); if(p) p.classList.remove('hidden'); };
-    const bsave=document.getElementById('bracketSave'); if(bsave) bsave.onclick=async()=>{
-      const tid=document.getElementById('bracketTech').value;
-      if(!tid){ toast('Select which technician supplied the bracket'); return; }
-      bsave.disabled=true;
-      try{ await api('job_bracket_supplier',{method:'POST',body:{id,technician_id:tid}}); toast('Bracket supplier saved ✓'); showDetail(id); }
-      catch(e){ toast(e.message); bsave.disabled=false; }
-    };
+    bindBracketSupplier(j,id);
 
     // Extra time slots ("block my next slot" — big jobs that run long).
     bindSlots(id, j);
@@ -1417,7 +1464,7 @@ function mountTechLineItems(j, id){
   // booked before the fee-word was dropped in 2026-08.
   const notHidden=li=>{ const raw=String(li&&li.name||''); if(/^\s*tv\s*type\s*:\s*regular\b/i.test(raw)) return false; if(/\btv removal\b/i.test(raw)) return false; if(/not\s+above\s+a?\s*fireplace/i.test(raw)) return false; const n=String(liName(li.name)||'').trim(); if(/^drywall$/i.test(n)) return false; return !/^coupon\b/i.test(n) && !/^tax\b/i.test(n) && !/service area surcharge|after[\s-]?hours|\btravel\b|service\s*minimum/i.test(n) && !/guarante\w*\s+dismount|dismount\s+service/i.test(n); };
   // Row model: { name, unit (per-item price), qty, existing }. line total = unit×qty.
-  const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true }; };
+  const mkRow=li=>{ const lt=Number(li.line_total!=null?li.line_total:li.unit_price)||0; const q=liDisplayQty(li); return { name:liName(li.name)||'', unit:(q>0?lt/q:lt), qty:q, existing:true,...inventoryMaterialFields(li) }; };
   const seeded=(j.line_items&&j.line_items.length) ? j.line_items.filter(notHidden).map(mkRow) : [];
   let rows=seeded.length ? seeded
     : [{ name:j.service||'Service', unit:Math.max(0,(Number(j.price)||0)-hiddenTotal), qty:1, existing:true }];
@@ -1439,7 +1486,7 @@ function mountTechLineItems(j, id){
       <button type="button" class="btn ghost" data-del="${i}" title="Remove" aria-label="Remove line item" style="flex:0 0 auto;width:42px;height:42px;padding:0;border-radius:8px;font-size:20px;line-height:1;display:flex;align-items:center;justify-content:center;">×</button>
     </div>`;
     }).join('')||'<div class="sub" style="font-size:13px;color:var(--mute);">No line items. Add one below.</div>';
-    wrap.querySelectorAll('input[data-f]').forEach(inp=>inp.addEventListener('input',()=>{ rows[+inp.dataset.i][inp.dataset.f]=inp.value; recalc(); }));
+    wrap.querySelectorAll('input[data-f]').forEach(inp=>inp.addEventListener('input',()=>{ rows[+inp.dataset.i][inp.dataset.f]=inp.value;if(inp.dataset.f==='name'){delete rows[+inp.dataset.i].material_type;delete rows[+inp.dataset.i].material_owner;}recalc(); }));
     wrap.querySelectorAll('button[data-del]').forEach(btn=>btn.addEventListener('click',()=>{ rows.splice(+btn.dataset.del,1); render(); }));
     wrap.querySelectorAll('button[data-qd]').forEach(b=>b.addEventListener('click',()=>{ const i=+b.dataset.qd; rows[i].qty=Math.max(1,(Math.round(Number(rows[i].qty)||1))-1); render(); }));
     wrap.querySelectorAll('button[data-qi]').forEach(b=>b.addEventListener('click',()=>{ const i=+b.dataset.qi; rows[i].qty=Math.min(99,(Math.round(Number(rows[i].qty)||1))+1); render(); }));
@@ -1448,9 +1495,9 @@ function mountTechLineItems(j, id){
   render();
   const add=document.getElementById('liAdd'); if(add) add.onclick=()=>{ rows.push({ name:'', unit:0, qty:1, existing:false }); render(); };
   const save=document.getElementById('liSave'); if(save) save.onclick=async()=>{
-    const items=rows.map(r=>({ name:(r.name||'').trim(), quantity:Math.max(1,Math.round(Number(r.qty)||1)), unit_price:Number(r.unit)||0 })).filter(r=>r.name||r.unit_price);
+    const items=rows.map(r=>({ name:(r.name||'').trim(), quantity:Math.max(1,Math.round(Number(r.qty)||1)), unit_price:Number(r.unit)||0,...inventoryMaterialFields(r) })).filter(r=>r.name||r.unit_price);
     save.disabled=true;
-    try{ await api('job_line_items_save',{method:'POST',body:{id,items,li_rev:(Number(j.li_rev)||0)}}); toast('Line items saved'); showDetail(id); }
+    try{ const result=await api('job_line_items_save',{method:'POST',body:{id,items,li_rev:(Number(j.li_rev)||0)}}); inventorySaveFeedback(result,'Line items saved'); showDetail(id); }
     catch(e){
       toast(e.message);
       // The office changed this ticket after the app loaded it — reload the
@@ -2723,8 +2770,8 @@ document.getElementById('completeYes').addEventListener('click',async()=>{
   const pending=completePending; if(!pending) return;
   closeCompleteModal(); completePending=null;
   try{
-    await api('status',{method:'POST',body:{id:pending.id,status:'completed'}});
-    toast('Mark Complete ✓'); syncJobStatus(pending.id,'completed'); showDetail(pending.id);
+    const result=await api('status',{method:'POST',body:{id:pending.id,status:'completed'}});
+    inventorySaveFeedback(result,'Job marked complete'); syncJobStatus(pending.id,'completed'); showDetail(pending.id);
   }catch(e){ toast(e.message||'Could not mark complete'); }
 });
 document.getElementById('completeNo').addEventListener('click',()=>{

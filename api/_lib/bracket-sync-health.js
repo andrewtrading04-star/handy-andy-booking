@@ -58,7 +58,7 @@ const APP_PASSWORDS_URL = 'https://myaccount.google.com/apppasswords';
 const PAT_URL = 'https://github.com/settings/personal-access-tokens/new';
 const VERCEL_ENV_URL = 'https://vercel.com/andrew-c-projects/handy-andy-booking/settings/environment-variables';
 const DASHBOARD_URL = 'https://handy-andy-booking.vercel.app/admin.html';
-export const INGEST_SCOPE = /^(mailbox:|config:|no_mailboxes$|sync_errors$|sync_rejected$|fatal_run$|tick_stale$|no_walmart_mail$)/;
+export const INGEST_SCOPE = /^(mailbox:|config:|coverage:|data_|no_mailboxes$|sync_errors$|sync_rejected$|fatal_run$|tick_stale$|no_walmart_mail$)/;
 export const WATCHDOG_SCOPE = /^(stale_run$|dispatch:)/;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -150,6 +150,11 @@ export function sanitizeReport(body) {
     mailboxes: arr(body.mailboxes, 20).map(m => ({
       idx: int(m.idx), user: str(m.user, 120) || '', role: str(m.role, 60) || '', ok: !!m.ok, stage: str(m.stage, 20) || 'connect',
       ms: int(m.ms), candidates: int(m.candidates), search_terms_failed: int(m.search_terms_failed), parsed: numbersOnly(m.parsed) || {},
+      parse_failures:int(m.parse_failures), unparsed_walmart:int(m.unparsed_walmart),
+      walmart_complete:m.walmart_complete === true,
+      walmart_archive_coverage:m.walmart_archive_coverage === true,
+      walmart_scanned_through:iso(m.walmart_scanned_through),
+      coverage_issues:Array.isArray(m.coverage_issues) ? m.coverage_issues.slice(0,20).map(v=>str(v,100)) : [],
       error: m.ok ? null : (sanitizeError(m.error) || { kind: 'other', message: 'unknown error', code: null, serverResponseCode: null, responseText: null, authenticationFailed: false }),
     })),
     misconfigured: arr(body.misconfigured, 12).map(x => ({ idx: int(x.idx), missing: str(x.missing, 40) || 'both' })),
@@ -171,6 +176,7 @@ export async function ingestBracketSyncReport(db, body, now = new Date()) {
   // last_run_at (stale_run keeps counting through a crash loop) and must not
   // prune mailbox history.
   const complete = !r.fatal && !r.skipped && r.mailboxes.length > 0;
+  const walmartSaveFailed = r.sync_errors.some(e=>e.action === 'bracket_sync') || (r.totals?.walmart?.failed || 0)>0;
   const seen = new Set();
   for (const m of r.mailboxes) {
     const k = String(m.idx);
@@ -180,6 +186,11 @@ export async function ingestBracketSyncReport(db, body, now = new Date()) {
     state.mailboxes[k] = m.ok
       ? { ...prev, idx: m.idx, user: m.user, role: m.role, last_seen_at: nowISO, last_ok_at: nowISO, first_fail_at: null, consecutive_failures: 0, stage: 'done', error: null, seen_ok_ever: true }
       : { ...prev, idx: m.idx, user: m.user, role: m.role, last_seen_at: nowISO, last_fail_at: nowISO, first_fail_at: prev.first_fail_at || nowISO, consecutive_failures: (prev.consecutive_failures || 0) + 1, stage: m.stage, error: m.error };
+    // Advance only after every discovered Walmart event was durably saved or
+    // queued for review. The overlap can therefore recover through long outages.
+    if (complete && m.ok && m.walmart_complete && m.walmart_archive_coverage && !walmartSaveFailed && m.walmart_scanned_through && Date.parse(m.walmart_scanned_through)<=now.getTime()) {
+      state.mailboxes[k].walmart_scanned_through=m.walmart_scanned_through;
+    }
   }
   if (complete) {
     // A slot that went blank keeps its history and is reported by config:<idx>,
@@ -190,8 +201,9 @@ export async function ingestBracketSyncReport(db, body, now = new Date()) {
   if (complete || (r.totals && r.totals.mailboxes_configured === 0)) state.misconfigured = r.misconfigured;
   state.last_run = r;
   if (complete) state.last_run_at = nowISO;
-  const hardSyncErr = r.sync_errors.some(e => e.status === 0 || e.status >= 500);
-  if (complete && r.mailboxes.every(m => m.ok) && !hardSyncErr) state.last_ok_at = nowISO;
+  const dataIncomplete = r.mailboxes.some(m=>!m.walmart_complete || !m.walmart_archive_coverage || m.search_terms_failed || m.parse_failures || m.unparsed_walmart || m.coverage_issues.length)
+    || (r.totals?.walmart?.review_required || 0)>0 || (r.totals?.walmart?.skipped_no_qty || 0)>0;
+  if (complete && r.mailboxes.every(m => m.ok) && !r.sync_errors.length && !r.misconfigured.length && !dataIncomplete) state.last_ok_at = nowISO;
   if (complete) state.last_walmart_distinct = ((r.totals || {}).walmart || {}).distinct || 0;
 
   const dispatch = await readDispatch(db);
@@ -262,7 +274,12 @@ export function evaluateBracketSyncHealth({ state, dispatch }, now = new Date())
 
   // Secret pairs.
   for (const x of state.misconfigured || []) {
-    if (x.missing === 'both') push({
+    if (String(x.missing).startsWith('required_order_inbox:')) push({
+      key:'config:required_order_inbox',title:'The required Walmart confirmation inbox is not configured',
+      detail:'No configured mailbox matches andrewtrading04@gmail.com.',fix:'Restore that Gmail account in the scanner configuration and verify its sign-in.',
+      links:[{label:'GitHub secrets',url:SECRETS_URL}],
+    });
+    else if (x.missing === 'both') push({
       key: `config:${x.idx}`, level: 'amber', title: `Inbox ${x.idx} is not configured`,
       detail: 'The scan expects 7 inboxes and this slot is blank',
       fix: `Set GitHub secrets ${userSecretFor(x.idx)} + ${passSecretFor(x.idx)}, or ignore if this inbox was retired on purpose`,
@@ -277,6 +294,17 @@ export function evaluateBracketSyncHealth({ state, dispatch }, now = new Date())
 
   // Last run's own findings.
   const lr = state.last_run || null;
+  for (const m of (lr?.mailboxes || [])) {
+    if (m.ok && (!m.walmart_complete || !m.walmart_archive_coverage || m.search_terms_failed || m.parse_failures || m.unparsed_walmart || (m.coverage_issues || []).length)) push({
+      key:`coverage:${m.idx}`, title:`Order intake is incomplete for inbox ${m.idx}`,
+      detail:`${m.search_terms_failed || 0} search failures; ${m.parse_failures || 0} unreadable messages; ${m.unparsed_walmart || 0} unrecognized order messages. ${!m.walmart_archive_coverage?'Archived mail coverage is unavailable. ':''}${(m.coverage_issues || []).join(', ')}`,
+      fix:'Check the latest scan log and Gmail All Mail access. Resolve unreadable messages before advancing the scan checkpoint.',since:state.last_run_at,
+    });
+  }
+  const wt=lr?.totals?.walmart || {};
+  if (wt.review_required>0) push({key:'data_review',level:'amber',title:`${wt.review_required} supplier event(s) need inventory review`,detail:'Messages were saved, but ambiguous quantities, receipts, addresses or historical baselines need confirmation.',fix:'Open Bracket Inventory and review the affected orders.',since:state.last_run_at});
+  if (wt.skipped_no_qty>0) push({key:'data_skipped',title:`${wt.skipped_no_qty} Walmart order(s) were skipped`,detail:'Missing quantities must be reviewed; the stock counts are not verified by this scan.',fix:'Open Bracket Inventory and inspect missing supplier order evidence.',since:state.last_run_at});
+  if (wt.events>0 && (wt.synced || 0)+(wt.review_required || 0)+(wt.failed || 0)<wt.events) push({key:'data_unaccounted',title:'Some supplier messages have no saved outcome',detail:'Parsed events do not reconcile to saved, review or failed outcomes.',fix:'Inspect the latest scanner and receipt-operation logs.',since:state.last_run_at});
   if (lr && lr.totals && lr.totals.mailboxes_configured === 0) push({
     key: 'no_mailboxes', title: 'The email scan found NO configured inbox',
     detail: 'GMAIL_USER / GMAIL_APP_PASSWORD are not reaching the workflow', fix: 'Check the GMAIL_* secrets on GitHub',
@@ -291,8 +319,8 @@ export function evaluateBracketSyncHealth({ state, dispatch }, now = new Date())
     detail: list(hard), fix: 'Check Vercel > Logs for /api/migrate', since: state.last_run_at,
   });
   if (rejected.length) push({
-    key: 'sync_rejected', level: 'amber', title: `${rejected.length} item(s) rejected by the CRM (will not retry)`,
-    detail: list(rejected), fix: 'Usually an inactive business slug or a malformed e-mail; worth a look at the keys', since: state.last_run_at,
+    key: 'sync_rejected', title: `${rejected.length} item(s) rejected by the CRM`,
+    detail: list(rejected), fix: 'Review authorization or validation failures. The next scan retries from the last successful checkpoint.', since: state.last_run_at,
   });
   if (lr && lr.fatal) push({
     key: 'fatal_run', title: 'The email scan crashed before finishing', detail: lr.fatal.message || '',
@@ -534,7 +562,7 @@ export function summarizeForDashboard({ state, dispatch }, now = new Date()) {
   const lr = state.last_run || null;
   const flapping = (k) => !!((state.problems || {})[k] || {}).flapping || !!((dispatch.problems || {})[k] || {}).flapping;
   return {
-    ok: problems.every(p => p.level !== 'red'),
+    ok: problems.length === 0,
     last_ok_at: state.last_ok_at || null,
     last_run_at: state.last_run_at || null,
     last_run_url: (lr && lr.run && lr.run.run_url) || null,

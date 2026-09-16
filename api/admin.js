@@ -1,3 +1,6 @@
+import { inventoryAdmin } from './_lib/inventory-admin.js';
+import { writeInventoryJob, inventoryError } from './_lib/inventory-job.js';
+import { classifyBracketMaterials } from './_lib/bracket-materials.js';
 import { numberVolumes } from './_lib/number-volume.js';
 // ============================================================================
 // Admin dashboard API (consolidated router to stay under Vercel's function cap).
@@ -42,7 +45,6 @@ import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCust
 import { digitsOf, prettyPhone } from './_lib/grasshopper.js';
 import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
-import { bracketTotal as bracketMoveTotal, debitForJob, reconcileJobEdit, creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, recount as ledgerRecount, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 
 // Search Console domain per business — the free "what did people search to
 // find us" data source (see api/_lib/gsc.js).
@@ -499,6 +501,14 @@ export default async function handler(req, res) {
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
+      case 'bracket_record_order': return await inventoryRoute(req,res,db,auth,body,'bracket_record_order');
+      case 'bracket_receive': return await inventoryRoute(req,res,db,auth,body,'bracket_receive');
+      case 'bracket_transfer': return await inventoryRoute(req,res,db,auth,body,'bracket_transfer');
+      case 'bracket_reassign': return await inventoryRoute(req,res,db,auth,body,'bracket_reassign');
+      case 'bracket_movements': return await inventoryRoute(req,res,db,auth,body,'bracket_movements');
+      case 'bracket_exceptions': return await inventoryRoute(req,res,db,auth,body,'bracket_exceptions');
+      case 'bracket_shipping_addresses': return await inventoryRoute(req,res,db,auth,body,'bracket_shipping_addresses');
+      case 'bracket_shipping_address_save': return await inventoryRoute(req,res,db,auth,body,'bracket_shipping_address_save');
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
       case 'bracket_update': return await bracketUpdate(req, res, db, auth, body);
@@ -536,6 +546,7 @@ export default async function handler(req, res) {
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
+    if (action === 'booking_line_items_save') return inventoryError(res,err);
     console.error('[admin]', action, err);
     return res.status(500).json({ error: err.message || 'Server error' });
   }
@@ -4233,7 +4244,7 @@ async function bookingUpdate(req, res, db, auth, body) {
   // Confirm the booking belongs to this business before touching it. The 0019
   // column (secondary_technician_id) may not exist yet — fall back without it so
   // confirm/cancel/status/assign keep working until the migration is applied.
-  const existingSel = () => `id, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, postal_code, review_token, sms_consent, metadata, customer:customers ( phone, email, name )`;
+  const existingSel = () => `id, updated_at, status, technician_id, ${bookingLiftCols ? 'secondary_technician_id, ' : ''}scheduled_at, postal_code, review_token, sms_consent, metadata, customer:customers ( phone, email, name )`;
   let { data: existing, error: e0 } = await db.from('bookings')
     .select(existingSel()).eq('id', id).eq('business_id', biz.id).single();
   if (e0 && /secondary_technician_id/.test(e0.message || '')) {
@@ -4256,25 +4267,6 @@ async function bookingUpdate(req, res, db, auth, body) {
       // visible under "Include canceled". Every slot-occupancy query excludes
       // cancelled bookings, so the slot is freed exactly as the old delete did.
       patch.status = newStatus = 'cancelled'; patch.cancelled_at = now;
-      // Notify the assigned tech their job was canceled (internal, no consent
-      // needed). Fire-and-forget + best-effort so it can never block the cancel.
-      if (existing.technician_id) {
-        (async () => {
-          try {
-            const { data: _t } = await db.from('technicians').select('phone').eq('id', existing.technician_id).maybeSingle();
-            if (!_t?.phone) return;
-            const _tz = biz.timezone || 'America/Denver';
-            let when = 'your job';
-            if (existing.scheduled_at) {
-              const _d = new Date(existing.scheduled_at);
-              when = _d.toLocaleDateString('en-US', { timeZone: _tz, weekday: 'short', month: 'short', day: 'numeric' }) +
-                     ' ' + _d.toLocaleTimeString('en-US', { timeZone: _tz, hour: 'numeric', minute: '2-digit' });
-            }
-            const msg = `❌ Job canceled: ${when} (${existing.customer?.name || 'customer'}). No action needed — your calendar's updated.`;
-            sendSMS(_t.phone, msg).catch(console.error);
-          } catch (e) { console.warn('[cancel] tech SMS failed:', e.message); }
-        })();
-      }
       break;
     case 'reschedule': {
       // Preferred path: a calendar date + one of the fixed slots. Convert it to a
@@ -4499,8 +4491,31 @@ async function bookingUpdate(req, res, db, auth, body) {
     }
   }
 
-  const { error: e1 } = await db.from('bookings').update(patch).eq('id', id).eq('business_id', biz.id);
-  if (e1) throw e1;
+  let inventoryResult;
+  try { inventoryResult = await writeInventoryJob(db, { booking: existing, businessId: biz.id, body,
+    action: 'office-booking-update', actor: auth.name || auth.role || 'office', patch }); }
+  catch (error) { return inventoryError(res, error); }
+  if (inventoryResult.duplicate) return res.status(200).json(inventoryResult);
+      // Notify the assigned tech their job was canceled (internal, no consent
+      // needed). Fire-and-forget + best-effort so it can never block the cancel.
+      if (body.action === 'cancel' && existing.technician_id) {
+        (async () => {
+          try {
+            const { data: _t } = await db.from('technicians').select('phone').eq('id', existing.technician_id).maybeSingle();
+            if (!_t?.phone) return;
+            const _tz = biz.timezone || 'America/Denver';
+            let when = 'your job';
+            if (existing.scheduled_at) {
+              const _d = new Date(existing.scheduled_at);
+              when = _d.toLocaleDateString('en-US', { timeZone: _tz, weekday: 'short', month: 'short', day: 'numeric' }) +
+                     ' ' + _d.toLocaleTimeString('en-US', { timeZone: _tz, hour: 'numeric', minute: '2-digit' });
+            }
+            const msg = `❌ Job canceled: ${when} (${existing.customer?.name || 'customer'}). No action needed — your calendar's updated.`;
+            sendSMS(_t.phone, msg).catch(console.error);
+          } catch (e) { console.warn('[cancel] tech SMS failed:', e.message); }
+        })();
+      }
+
 
   if (body.action === 'sms_consent') {
     // A2P 10DLC / CTIA: a phone opt-in gets ONE immediate confirmation text
@@ -4526,10 +4541,6 @@ async function bookingUpdate(req, res, db, auth, body) {
   }
 
   if (newStatus) {
-    await db.from('booking_status_events').insert({
-      booking_id: id, business_id: biz.id, technician_id: patch.technician_id ?? existing.technician_id,
-      status: newStatus, note: `Set by ${auth.role} (dashboard)`,
-    });
 
     // Send review email and SMS when job is completed. Heal a missing review
     // link first (estimate-approved bookings were created without one, so
@@ -4635,58 +4646,6 @@ async function bookingUpdate(req, res, db, auth, body) {
       }
     }
 
-    // Auto-decrement the company BRACKETS this job used from the supplier's
-    // inventory — same rule as the tech app, for solo AND two-tech jobs. Stamped
-    // (bracket_deducted_at) so completing/reopening never double-deducts.
-    if (newStatus === 'completed' && !existing.metadata?.bracket_deducted_at) {
-      try {
-        const { data: liRows } = await db.from('booking_line_items')
-          .select('name, quantity').eq('booking_id', id);
-        const need = detectBracketQtys(liRows || []);
-        if (bracketTotal(need) > 0) {
-          let supplier = existing.technician_id || null;
-          try {
-            const { data: sup } = await db.from('bookings')
-              .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
-            supplier = sup?.bracket_supplied_by || sup?.technician_id || existing.technician_id || null;
-          } catch (_) { /* pre-0035: fall back to assigned tech */ }
-          if (supplier) {
-            // debitForJob is keyed on the booking id (migration 0088's
-            // bracket_moves ledger) — calling it twice for the same job is a
-            // no-op, so this is now safe even if the metadata stamp below is
-            // ever lost or raced. The stamp stays as a fast bailout only.
-            await debitForJob(db, {
-              businessId: biz.id, technicianId: supplier, qtys: need, bookingId: id,
-              reason: 'job completion (office)', actor: auth.name || auth.role || 'office',
-            });
-            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-            await db.from('bookings').update({
-              metadata: { ...(cur?.metadata || existing.metadata || {}), bracket_deducted_at: now },
-            }).eq('id', id);
-          } else {
-            // No technician/supplier on file at completion — can't charge a
-            // specific truck's stock, but the brackets really were used and
-            // must not vanish silently (found 2026-09-02 auditing bracket
-            // inventory drift). Log it unattributed and deliberately leave
-            // bracket_deducted_at UNSET, so once a technician/supplier IS on
-            // file, a future reopen->recomplete (or the line-item-edit
-            // reconciliation in bookingLineItemsSave) still performs the
-            // real deduction instead of skipping it forever.
-            try {
-              await db.from('bracket_usage_logs').insert({
-                business_id: biz.id, booking_id: id, technician_id: null,
-                flat_used: need.flat || 0, tilting_used: need.tilting || 0, full_motion_used: need.full_motion || 0,
-                logged_by_kind: 'system',
-                notes: 'job completion (office) — no supplier on file at completion; inventory NOT deducted, needs manual attribution',
-              });
-            } catch (e2) { console.error(`[bracket] unattributed log failed for booking ${id}:`, e2.message); }
-          }
-        }
-      } catch (e) {
-        console.error(`[bracket] decrement failed for booking ${id}:`, e.message);
-      }
-    }
-
     // Auto-decrement Apple TV brackets when this job used one -- same rule as
     // the tech app. Stamped (appletv_bracket_deducted_at) so completing/
     // reopening never double-deducts.
@@ -4767,7 +4726,7 @@ async function bookingUpdate(req, res, db, auth, body) {
       }
     }
   }
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, ...inventoryResult });
 }
 
 // Normalize editor line items into storable booking_line_items rows. Each
@@ -4778,6 +4737,7 @@ async function bookingUpdate(req, res, db, auth, body) {
 function sanitizeBookingLineItems(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map(it => {
+    if (it?.quantity != null && (it.quantity === '' || typeof it.quantity === 'boolean' || !Number.isInteger(Number(it.quantity)) || Number(it.quantity)<1 || Number(it.quantity)>99)) throw new Error('Item quantity must be a whole number from 1 to 99.');
     const name = ((it && (it.name != null ? it.name : it.label)) || '').toString().trim().slice(0, 300);
     const qty = Math.min(99, Math.max(1, Math.round(Number(it && it.quantity) || 1)));
     // Prefer an explicit per-item unit_price; otherwise derive it from a total
@@ -4794,7 +4754,7 @@ function sanitizeBookingLineItems(arr) {
     const line_total = Math.round(unit * qty * 100) / 100;
     const kind = (it && it.kind) || 'service';
     const taxable = !(it && it.taxable === false);
-    return { name, quantity: qty, unit_price: unit, line_total, kind, taxable };
+    return { name, quantity: qty, unit_price: unit, line_total, kind, taxable, material_type: it.material_type || null, material_owner: it.material_owner || null };
   }).filter(it => it.name || it.unit_price);
 }
 
@@ -4831,12 +4791,6 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
       code: LI_CONFLICT_CODE,
     });
   }
-  if (Number(body.li_rev) !== curRev) {
-    return res.status(409).json({
-      error: 'This ticket was changed by someone else (another office member or the tech) after you opened it. Close the job, reopen it to see the latest items, then redo your edit.',
-      code: LI_CONFLICT_CODE,
-    });
-  }
 
   // Tax is re-derived from the submitted lines on every save, so changing a
   // quantity can no longer leave the ticket taxed on a stale amount — and the
@@ -4869,144 +4823,11 @@ async function bookingLineItemsSave(req, res, db, auth, body) {
     });
   }
 
-  console.log(`[line_items] save booking=${id} by=${auth.name || auth.role || 'office'} before=${(oldRows || []).length} after=${items.length}`);
-
-  // Claim the ticket with a compare-and-swap on li_rev, folding the snapshot
-  // (ring buffer of the last 5 item sets — the Lucinda Simpson undo trail)
-  // into the SAME metadata write. If another save slipped in between our rev
-  // check above and this write, the CAS matches zero rows and we refuse —
-  // that's the whole point: two blind full-replaces can never both land.
-  const backups = Array.isArray(existing.metadata?.li_backups) ? existing.metadata.li_backups.slice() : [];
-  backups.push({
-    at: new Date().toISOString(), by: `office:${auth.name || auth.role || '?'}`,
-    items: (oldRows || []).map(r => ({
-      kind: r.kind, name: r.name, quantity: r.quantity,
-      unit_price: r.unit_price, line_total: r.line_total, taxable: r.taxable,
-    })),
-  });
-  let newRev;
   try {
-    const cas = await casBumpLiRev(db, id, existing.metadata, { li_backups: backups.slice(-5) });
-    if (!cas.ok) {
-      return res.status(409).json({
-        error: 'Someone else saved this ticket at the same moment. Close the job, reopen it to see the latest items, then redo your edit.',
-        code: LI_CONFLICT_CODE,
-      });
-    }
-    newRev = cas.rev;
-  } catch (e) {
-    // The lock write itself failed (transient DB error) — do NOT proceed to a
-    // blind replace without it; that's the unguarded path this lock exists to
-    // close. Surface the error so the office just retries.
-    console.error(`[line_items] li_rev CAS failed for booking ${id}:`, e.message);
-    return res.status(500).json({ error: 'Could not lock the ticket for saving — try again in a moment.' });
-  }
-
-  // INSERT the new rows FIRST, then delete the old ones BY ID. The two steps
-  // are separate transactions (PostgREST), so this order is what makes failure
-  // non-destructive: if the insert dies, the old ticket is untouched; if the
-  // delete dies, the ticket briefly shows duplicates — annoying, visible, and
-  // fixable, unlike the old delete-first order where an insert failure had
-  // already destroyed every row with nothing to recover from.
-  if (items.length) {
-    // sort_order = the array's index, so however the office dragged the rows
-    // into order on save is exactly how they read back next time (migration
-    // 0071 — without it, a delete-and-reinsert has no reliable original order:
-    // created_at is identical for every row in one insert, id is a random uuid).
-    const rows = items.map((it, i) => ({
-      booking_id: id, business_id: biz.id,
-      kind: it.kind, name: it.name,
-      quantity: it.quantity, unit_price: it.unit_price, line_total: it.line_total,
-      taxable: it.taxable, sort_order: i,
-    }));
-    let { error: insErr } = await db.from('booking_line_items').insert(rows);
-    if (insErr && /sort_order/.test(insErr.message || '')) {
-      ({ error: insErr } = await db.from('booking_line_items').insert(rows.map(({ sort_order, ...r }) => r)));
-    }
-    if (insErr) throw insErr;
-  }
-
-  const oldIds = (oldRows || []).map(r => r.id);
-  if (oldIds.length) {
-    const { error: delErr } = await db.from('booking_line_items').delete().in('id', oldIds);
-    if (delErr) {
-      console.error(`[line_items] delete-after-insert failed for booking ${id} — ticket has duplicate rows, resave to fix:`, delErr.message);
-      throw delErr;
-    }
-  }
-
-  const price = Math.round(items.reduce((t, it) => t + it.line_total, 0) * 100) / 100;
-  // subtotal is the PRE-TAX total (same meaning it carries everywhere else that
-  // writes it, e.g. the estimate->booking path). It used to be left untouched by
-  // an edit, so it drifted away from the lines the moment a quantity changed.
-  const subtotal = Math.round(items.reduce((t, it) => t + (isTaxLine(it) ? 0 : it.line_total), 0) * 100) / 100;
-  const { error: upErr } = await db.from('bookings')
-    .update({ price, subtotal }).eq('id', id).eq('business_id', biz.id);
-  if (upErr) throw upErr;
-
-  // If real company brackets were already deducted for this booking
-  // (bracket_deducted_at stamped — the job completed and the deduction ran),
-  // an edit that changes which/how-many bracket-type lines are on the ticket
-  // must reconcile the supplier's physical stock too, or the inventory and
-  // ledger silently diverge from what the ticket now actually says (found
-  // 2026-09-02 auditing bracket inventory — this was the one LIVE gap behind
-  // an otherwise-historical drift, since bookingLineItemsSave never touched
-  // bracket accounting at all). Mirrors the "restore old supplier, charge new
-  // supplier" pattern in api/tech.js's jobBracketSetSupplier — same idea, just
-  // keyed on a QUANTITY change instead of a supplier change.
-  if (existing.metadata?.bracket_deducted_at) {
-    try {
-      const oldQtys = detectBracketQtys(oldRows || []);
-      const newQtys = detectBracketQtys(items);
-      if (oldQtys.flat !== newQtys.flat || oldQtys.tilting !== newQtys.tilting || oldQtys.full_motion !== newQtys.full_motion) {
-        let supplier = null;
-        try {
-          const { data: sup } = await db.from('bookings')
-            .select('bracket_supplied_by, technician_id').eq('id', id).maybeSingle();
-          supplier = sup?.bracket_supplied_by || sup?.technician_id || null;
-        } catch (_) { /* pre-0035: bracket_supplied_by column absent */ }
-        if (supplier) {
-          // Keyed per li_rev (migration 0088) so this exact edit reconciles
-          // exactly once — a retry or a race with another save is a no-op
-          // instead of re-applying the same restore-and-recharge twice.
-          await reconcileJobEdit(db, {
-            businessId: biz.id, technicianId: supplier, oldQtys, newQtys, bookingId: id, liRev: newRev,
-            reason: 'line items edited after completion', actor: auth.name || auth.role || 'office',
-          });
-        } else {
-          console.warn(`[bracket] line-item edit changed bracket qty on completed booking ${id} but no supplier on file — inventory NOT reconciled`);
-        }
-      }
-    } catch (e) {
-      console.error(`[bracket] reconcile-on-edit failed for booking ${id}:`, e.message);
-    }
-  }
-
-  // SEAL the rewrite with a second CAS bump. The claim above happens BEFORE
-  // the insert/delete land (separate PostgREST transactions), so a fetch in
-  // that window can capture the claimed rev alongside stale or duplicated
-  // rows — and a save built minutes later from that poisoned snapshot would
-  // pass the lock. Bumping again once the rows are final invalidates every
-  // snapshot taken mid-rewrite. The still-open modal gets THIS rev back; if
-  // the seal fails we return no li_rev at all, so that modal's next save
-  // fails closed (409) instead of trusting a rev the DB may not hold.
-  let sealedRev = null;
-  try {
-    // FRESH read, never the claim-time copy: the claim-to-seal window spans
-    // the whole rewrite, and completion stamps (bracket_deducted_at etc.)
-    // written in it don't touch li_rev — sealing with the stale object would
-    // silently revert them (and re-completing would double-deduct inventory).
-    // If li_rev moved off our claim, someone else already invalidated the
-    // ticket — skip the seal and fail closed (no li_rev in the response).
-    const { data: freshRow } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-    if (Number(freshRow?.metadata?.li_rev) === newRev) {
-      const seal = await casBumpLiRev(db, id, freshRow.metadata);
-      if (seal.ok) sealedRev = seal.rev;
-    }
-  } catch (e) { console.warn(`[line_items] seal bump failed for booking ${id}:`, e.message); }
-
-  return res.status(200).json({ ok: true, price, subtotal, count: items.length,
-    ...(sealedRev != null && { li_rev: sealedRev }) });
+    const result = await writeInventoryJob(db, { booking: existing, businessId: biz.id, body,
+      action: 'office-line-items', actor: auth.name || auth.role || 'office', lineItems: items });
+    return res.status(200).json({ ...result, count: items.length });
+  } catch (error) { return inventoryError(res, error); }
 }
 
 // Rewrite a booking's stored line items into the canonical ticket order (TVs
@@ -7514,7 +7335,7 @@ function bookingSelect() {
           service:services ( id, name ),
           photos:booking_photos ( count ),
           notes_list:booking_notes ( count ),
-          line_items:booking_line_items ( option_id, name, kind, quantity, unit_price, line_total )`;
+          line_items:booking_line_items ( option_id, name, kind, quantity, unit_price, line_total, material_type, material_owner )`;
   return bookingLiftCols
     ? `${base}, secondary_technician_id, needs_lifting, tv_size_category,
           secondary_technician:technicians!secondary_technician_id ( id, name, status, color, business_id, business:businesses ( name ) )`
@@ -7672,6 +7493,7 @@ function shapeBooking(b) {
     // the dashboard renders. line_total is the per-line subtotal (unit × qty).
     line_items: Array.isArray(b.line_items) ? b.line_items.map(li => ({
       option_id: li.option_id || null,
+      material_type: li.material_type || null, material_owner: li.material_owner || null,
       label: li.name,
       kind: li.kind,
       quantity: Number(li.quantity) || 1,
@@ -13550,165 +13372,13 @@ async function secretariesList(req, res, db, auth) {
 
 // ── Bracket Inventory ────────────────────────────────────────────────────────
 // Get current bracket inventory for all technicians in the business
-async function bracketInventory(req, res, db, auth) {
-  // A tech carries ONE physical stock of brackets in their truck regardless of
-  // which company's customer they're serving that day (see the matching
-  // comment on adjustBracketInventory) — same "shared resource" reasoning
-  // bracketPurchases already uses. So this reads across EVERY active
-  // business's technicians, not just the one currently loaded in the
-  // dashboard (found 2026-09-02: the Inventory tab only ever showed whoever
-  // belonged to the currently-viewed company, silently hiding the other
-  // company's techs entirely). resolveBusiness still runs first, purely to
-  // enforce the caller's own auth/scope.
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-
-  const { data: bizes } = await db.from('businesses').select('id, slug').eq('active', true);
-  const slugById = new Map((bizes || []).map(b => [b.id, b.slug]));
-  const bizIds = (bizes || []).map(b => b.id);
-
-  let { data: inv, error } = await db.from('bracket_inventory')
-    .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, appletv_bracket_qty, updated_at,
-             technician:technicians ( id, name )`)
-    .in('business_id', bizIds);
-  // appletv_bracket_qty arrives with migration 0087; degrade to the pre-0087
-  // select, then the pre-0039 select, so this endpoint never breaks on an
-  // environment that hasn't run every migration yet.
-  if (error && /appletv_bracket_qty/.test(error.message || '')) {
-    ({ data: inv, error } = await db.from('bracket_inventory')
-      .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, updated_at,
-               technician:technicians ( id, name )`)
-      .in('business_id', bizIds));
-  }
-  // wire_plate_qty arrives with migration 0039; degrade gracefully if not applied yet.
-  if (error && /wire_plate_qty/.test(error.message || '')) {
-    ({ data: inv, error } = await db.from('bracket_inventory')
-      .select(`id, business_id, technician_id, flat_qty, tilting_qty, full_motion_qty, updated_at,
-               technician:technicians ( id, name )`)
-      .in('business_id', bizIds));
-  }
-  if (error) throw error;
-
-  // Ensure every active tech (on ANY business) has an inventory row (create if missing)
-  const { data: techs } = await db.from('technicians')
-    .select('id, name, business_id').in('business_id', bizIds).eq('active', true).order('name');
-
-  const invByTech = new Map((inv || []).map(i => [i.technician_id, i]));
-  const missing = (techs || []).filter(t => !invByTech.has(t.id));
-
-  if (missing.length) {
-    const toInsert = missing.map(t => ({
-      business_id: t.business_id,
-      technician_id: t.id,
-      flat_qty: 0,
-      tilting_qty: 0,
-      full_motion_qty: 0,
-    }));
-    await db.from('bracket_inventory').insert(toInsert);
-  }
-
-  const final = (inv || []).concat(
-    missing.map(t => ({
-      id: null,
-      business_id: t.business_id,
-      technician_id: t.id,
-      flat_qty: 0,
-      tilting_qty: 0,
-      full_motion_qty: 0,
-      updated_at: new Date().toISOString(),
-      technician: { id: t.id, name: t.name },
-    }))
-  );
-
-  // Which BUSINESSES actually stock wire-concealment plates? The wire_plate_qty
-  // column is `not null default 0`, so a 0 can mean either "ran out" or "never
-  // tracked". Businesses that don't do behind-the-wall wire concealment (e.g.
-  // Handy Andy) sit at 0 forever, so a blanket "0 <= 3 = low" fires a permanent
-  // false alarm. Distinguish via purchase history: a business is plate-tracked
-  // if it has ever ordered plates; a tech is plate-tracked if THEIR business is
-  // OR they currently hold >0. Untracked techs are excluded from plate low-stock
-  // warnings; a tracked tech who genuinely burns to 0 STILL warns (real shortage).
-  // Computed per business now (was a single bool for just the loaded business).
-  const plateTrackedBizIds = new Set();
-  try {
-    const { data: plateRows } = await db.from('wire_plate_purchases')
-      .select('business_id').in('business_id', bizIds);
-    for (const r of (plateRows || [])) plateTrackedBizIds.add(r.business_id);
-  } catch { /* table missing on older deploys → treat as untracked (no false alarms) */ }
-
-  return res.status(200).json({
-    inventory: final.map(i => ({
-      technician_id: i.technician_id,
-      technician_name: i.technician?.name || 'Unknown',
-      business: slugById.get(i.business_id) || null,
-      flat: i.flat_qty || 0,
-      tilting: i.tilting_qty || 0,
-      full_motion: i.full_motion_qty || 0,
-      total: (i.flat_qty || 0) + (i.tilting_qty || 0) + (i.full_motion_qty || 0),
-      wire_plate: i.wire_plate_qty || 0,
-      wire_plate_tracked: plateTrackedBizIds.has(i.business_id) || (i.wire_plate_qty || 0) > 0,
-      appletv_bracket: i.appletv_bracket_qty || 0,
-      updated_at: i.updated_at,
-    })).sort((a, b) => a.technician_name.localeCompare(b.technician_name)),
-  });
+async function bracketInventory(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_inventory');
 }
 
 // Get purchase history (Walmart orders)
-async function bracketPurchases(req, res, db, auth) {
-  // Brackets are a SHARED resource — every order is shown on BOTH platforms.
-  // Resolve the requested business only to enforce the token scope, then read
-  // across all active businesses and dedupe by Walmart order number (the sync
-  // mirrors each order to both businesses).
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
-
-  const { data: bizes } = await db.from('businesses').select('id, slug').eq('active', true);
-  const slugById = new Map((bizes || []).map(b => [b.id, b.slug]));
-  const ids = (bizes || []).map(b => b.id);
-
-  const baseCols = `id, business_id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, {TOTAL}created_at,
-             technician:technicians ( id, name )`;
-  let { data: purch, error } = await db.from('bracket_purchases')
-    .select(baseCols.replace('{TOTAL}', 'order_total, '))
-    .in('business_id', ids).order('created_at', { ascending: false }).limit(limit * 2);
-  // order_total arrives with its migration; degrade gracefully if not applied yet.
-  if (error && /order_total/.test(error.message || '')) {
-    ({ data: purch, error } = await db.from('bracket_purchases')
-      .select(baseCols.replace('{TOTAL}', ''))
-      .in('business_id', ids).order('created_at', { ascending: false }).limit(limit * 2));
-  }
-  if (error) throw error;
-
-  // Dedupe by order number. Prefer the ASSIGNED row (shows who has it); among
-  // unassigned rows prefer THIS platform's business so its Assign button works.
-  const score = (r) => (r.technician ? 2 : 0) + (r.business_id === biz.id ? 1 : 0);
-  const byOrder = new Map();
-  for (const p of (purch || [])) {
-    const key = p.walmart_order_num || p.id;
-    const cur = byOrder.get(key);
-    if (!cur || score(p) > score(cur)) byOrder.set(key, p);
-  }
-  const rows = [...byOrder.values()].slice(0, limit);
-
-  return res.status(200).json({
-    purchases: rows.map(p => ({
-      id: p.id,
-      walmart_order_num: p.walmart_order_num,
-      technician_name: p.technician?.name || 'Unassigned',
-      business: slugById.get(p.business_id) || null,
-      flat_qty: p.flat_qty || 0,
-      tilting_qty: p.tilting_qty || 0,
-      full_motion_qty: p.full_motion_qty || 0,
-      total_qty: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
-      status: p.status,
-      order_date: p.order_date,
-      delivered_date: p.delivered_date,
-      order_url: p.order_url || null,
-      // Owner-only: what brackets cost stays private from secretaries (same
-      // rule as bracket_cost in computeJobEconomics).
-      order_total: (auth.role === 'owner' && p.order_total != null) ? Number(p.order_total) : null,
-      created_at: p.created_at,
-    })),
-  });
+async function bracketPurchases(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_purchases');
 }
 
 // Manually set an order's delivery status (in_route | delivered | canceled).
@@ -13794,223 +13464,14 @@ async function wirePlateSetStatus(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, status, credited });
 }
 
-async function bracketSetStatus(req, res, db, auth, body) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can change bracket status.' });
-  const orderNum = (body.walmart_order_num || '').toString().trim();
-  const id = (body.id || '').toString().trim();
-  const status = (body.status || '').toString().trim();
-  if (!['in_route', 'delivered', 'canceled'].includes(status)) {
-    return res.status(400).json({ error: 'status must be in_route, delivered, or canceled' });
-  }
-  if (!orderNum && !id) return res.status(400).json({ error: 'walmart_order_num or id required' });
-
-  // The owner's dropdown looked like a stock control but used to be JUST a
-  // label — flipping it to "Delivered" never moved inventory (found in the
-  // 2026-09-03 audit: an auto-assigned order marked delivered this way was
-  // NEVER credited, and the cron would never credit it either since its status
-  // already read 'delivered'). Fetch the row(s) first so a status change here
-  // can credit/reverse through the ledger exactly like the automated sync does.
-  let sel = db.from('bracket_purchases')
-    .select('id, business_id, technician_id, status, walmart_order_num, flat_qty, tilting_qty, full_motion_qty');
-  sel = orderNum ? sel.eq('walmart_order_num', orderNum) : sel.eq('id', id);
-  const { data: rows, error: selErr } = await sel;
-  if (selErr) throw selErr;
-  if (!rows || !rows.length) return res.status(404).json({ error: 'Order not found' });
-
-  const patch = { status, delivered_date: status === 'delivered' ? new Date().toISOString().slice(0, 10) : null };
-  for (const row of rows) {
-    if (row.technician_id) {
-      const key = row.walmart_order_num || row.id;
-      const qtys = { flat: row.flat_qty || 0, tilting: row.tilting_qty || 0, full_motion: row.full_motion_qty || 0 };
-      if (status === 'delivered' && row.status !== 'delivered' && bracketMoveTotal(qtys) > 0) {
-        const { data: tech } = await db.from('technicians').select('business_id').eq('id', row.technician_id).maybeSingle();
-        await ledgerCreditDelivery(db, {
-          businessId: tech?.business_id || row.business_id, technicianId: row.technician_id,
-          qtys, purchaseId: row.id, orderNum: key, actor: auth.name || auth.role || 'owner',
-        });
-      } else if (status === 'canceled' && row.status === 'delivered' && bracketMoveTotal(qtys) > 0) {
-        // Keyed on (orderNum, 'canceled') so clicking Cancel twice on the same
-        // order claws the credit back exactly once, not once per click.
-        const { data: tech } = await db.from('technicians').select('business_id').eq('id', row.technician_id).maybeSingle();
-        await ledgerAdjustDelivery(db, {
-          businessId: tech?.business_id || row.business_id, technicianId: row.technician_id,
-          deltaQtys: { flat: -qtys.flat, tilting: -qtys.tilting, full_motion: -qtys.full_motion },
-          purchaseId: row.id, orderNum: key, tag: 'canceled',
-          reason: 'order canceled after delivery credit — clawing back', actor: auth.name || auth.role || 'owner',
-        });
-      }
-    }
-  }
-
-  let q = db.from('bracket_purchases').update(patch);
-  q = orderNum ? q.eq('walmart_order_num', orderNum) : q.eq('id', id);
-  const { error } = await q;
-  if (error) throw error;
-  return res.status(200).json({ ok: true, status });
+async function bracketSetStatus(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_set_status');
 }
 
 // Update bracket inventory (manual adjustment or usage logging)
 // Owner-only: secretaries (Heather/Joey) get read-only access to inventory.
-async function bracketUpdate(req, res, db, auth, body) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can edit bracket inventory.' });
-  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
-
-  const techId = (body.technician_id || '').toString();
-  const action = (body.action || 'adjust').toString(); // 'adjust' | 'set' | 'usage'
-
-  if (!techId) return res.status(400).json({ error: 'technician_id required' });
-
-  // Brackets are shared across companies (same reasoning as bracket_inventory
-  // and bracketAssign) — the Inventory tab now lists every business's techs
-  // together, so this edits the tech's OWN home business row, not whichever
-  // business tab happened to be loaded when the office opened the modal.
-  const { data: tech } = await db.from('technicians').select('id, business_id').eq('id', techId).single();
-  if (!tech) return res.status(404).json({ error: 'Technician not found' });
-  const techBizId = tech.business_id;
-
-  // Get or create inventory row
-  let { data: inv } = await db.from('bracket_inventory')
-    .select('*').eq('technician_id', techId).eq('business_id', techBizId).maybeSingle();
-
-  if (!inv) {
-    await db.from('bracket_inventory').insert({
-      business_id: techBizId,
-      technician_id: techId,
-      flat_qty: 0,
-      tilting_qty: 0,
-      full_motion_qty: 0,
-    });
-    inv = { flat_qty: 0, tilting_qty: 0, full_motion_qty: 0 };
-  }
-
-  // Calculate new quantities. 'set' writes the EXACT counts the owner typed (can
-  // go up or down); 'adjust'/'usage' apply a +/- delta to the current count.
-  const isSet = action === 'set';
-  const flat = isSet ? Math.max(0, Math.round(Number(body.flat) || 0)) : (inv.flat_qty || 0) + (body.flat_delta || 0);
-  const tilting = isSet ? Math.max(0, Math.round(Number(body.tilting) || 0)) : (inv.tilting_qty || 0) + (body.tilting_delta || 0);
-  const fullMotion = isSet ? Math.max(0, Math.round(Number(body.full_motion) || 0)) : (inv.full_motion_qty || 0) + (body.full_motion_delta || 0);
-  // Wire concealment plates (migration 0039). Only touch the column when a
-  // delta is supplied AND the column exists, so the action still works on a DB
-  // where 0039 hasn't run yet.
-  const wantsWirePlate = body.wire_plate_delta != null && body.wire_plate_delta !== 0;
-  const hasWirePlateCol = Object.prototype.hasOwnProperty.call(inv, 'wire_plate_qty');
-  const wirePlate = (inv.wire_plate_qty || 0) + (body.wire_plate_delta || 0);
-
-  // Apple TV brackets (migration 0087). No email pipeline for these -- Amazon's
-  // order-confirmation email for this product carries no distinguishing text,
-  // so a tech's stock is credited by typing the new total here, same as wire
-  // plates, just always by hand instead of usually by the Amazon sync.
-  const wantsAppleTv = body.appletv_bracket_delta != null && body.appletv_bracket_delta !== 0;
-  const hasAppleTvCol = Object.prototype.hasOwnProperty.call(inv, 'appletv_bracket_qty');
-  const appleTv = (inv.appletv_bracket_qty || 0) + (body.appletv_bracket_delta || 0);
-
-  // Ensure no negative inventory
-  if (flat < 0 || tilting < 0 || fullMotion < 0 || (wantsWirePlate && wirePlate < 0) || (wantsAppleTv && appleTv < 0)) {
-    return res.status(400).json({ error: 'Insufficient inventory for this operation' });
-  }
-
-  // flat/tilting/full_motion go ONLY through bracket_move (migration 0088) —
-  // it is the sole writer of those three columns and it always logs a signed
-  // ledger row with a reason, which is exactly what was missing when TK/Greg/
-  // Juan/Steve's manual resets left no trace for the 2026-09-02 backfill to
-  // check against. wire_plate/appletv_bracket are not on the ledger yet and
-  // still go through the direct update below.
-  const actor = auth.name || auth.role || 'owner';
-  if (isSet) {
-    await ledgerRecount(db, {
-      businessId: techBizId, technicianId: techId,
-      flat, tilting, fullMotion,
-      reason: body.notes || 'manual recount by office', actor,
-    });
-  } else {
-    await ledgerAdjust(db, {
-      businessId: techBizId, technicianId: techId,
-      deltaQtys: { flat: body.flat_delta || 0, tilting: body.tilting_delta || 0, full_motion: body.full_motion_delta || 0 },
-      bookingId: body.booking_id || null,
-      reason: body.notes || (action === 'usage' ? 'manual usage log by office' : 'manual adjustment by office'),
-      actor,
-    });
-  }
-
-  // wire_plate / appletv_bracket: still a direct update (not yet on the ledger).
-  const patch = {};
-  if (wantsWirePlate && hasWirePlateCol) patch.wire_plate_qty = wirePlate;
-  if (wantsAppleTv && hasAppleTvCol) patch.appletv_bracket_qty = appleTv;
-  if (Object.keys(patch).length) {
-    const { error: e1 } = await db.from('bracket_inventory').update(patch)
-      .eq('technician_id', techId).eq('business_id', techBizId);
-    if (e1) throw e1;
-  }
-
-  // Log wire_plate/appletv manual corrections the old way — flat/tilting/
-  // full_motion are now logged by bracket_move itself, so only mention those
-  // two columns here to avoid a duplicate/contradictory ledger entry.
-  if ((action === 'set' || action === 'adjust') && ((wantsWirePlate && hasWirePlateCol && (inv.wire_plate_qty || 0) !== wirePlate) || (wantsAppleTv && hasAppleTvCol && (inv.appletv_bracket_qty || 0) !== appleTv))) {
-    try {
-      const changes = [];
-      if (wantsWirePlate && hasWirePlateCol && (inv.wire_plate_qty || 0) !== wirePlate) changes.push(`wire_plate ${inv.wire_plate_qty || 0}→${wirePlate}`);
-      if (wantsAppleTv && hasAppleTvCol && (inv.appletv_bracket_qty || 0) !== appleTv) changes.push(`appletv ${inv.appletv_bracket_qty || 0}→${appleTv}`);
-      await db.from('bracket_usage_logs').insert({
-        business_id: techBizId, booking_id: body.booking_id || null, technician_id: techId,
-        logged_by_kind: 'admin',
-        notes: `manual ${action} by office: ${changes.join(', ')}${body.notes ? ` — ${body.notes}` : ''}`,
-      });
-    } catch (e) { console.error('[bracket] manual-change log failed:', e.message); }
-  }
-
-  // Log wire_plate/appletv usage the old way (flat/tilting/full_motion usage
-  // is now logged by bracket_move itself).
-  if (action === 'usage' && (wantsWirePlate || wantsAppleTv)) {
-    const log = {
-      business_id: techBizId,
-      booking_id: body.booking_id || null,
-      technician_id: techId,
-      flat_used: 0, tilting_used: 0, full_motion_used: 0,
-      logged_by_kind: 'admin',
-      notes: body.notes || null,
-    };
-    if (wantsWirePlate && hasWirePlateCol) log.wire_plate_used = Math.abs(body.wire_plate_delta || 0);
-    if (wantsAppleTv && hasAppleTvCol) log.appletv_bracket_used = Math.abs(body.appletv_bracket_delta || 0);
-    await db.from('bracket_usage_logs').insert(log);
-  }
-
-  // A positive Apple TV delta from a non-usage action is a manual "these
-  // arrived" entry -- log it for a future history view even though nothing
-  // reads this table yet. Best-effort: never blocks the inventory write above,
-  // which already succeeded by this point.
-  if (wantsAppleTv && hasAppleTvCol && action !== 'usage' && body.appletv_bracket_delta > 0) {
-    try {
-      await db.from('appletv_bracket_log').insert({
-        business_id: techBizId, technician_id: techId,
-        qty: body.appletv_bracket_delta, added_by: auth.name || auth.role || 'owner',
-        notes: body.notes || null,
-      });
-    } catch (e) { console.error('[appletv_bracket] arrival log failed:', e.message); }
-  }
-
-  // Re-read after bracket_move's atomic write — flat/tilting/full_motion may
-  // differ from the locally-computed values above if another mover (a job
-  // completing, a delivery landing) raced this request.
-  const { data: freshInv } = await db.from('bracket_inventory')
-    .select('flat_qty, tilting_qty, full_motion_qty, wire_plate_qty, appletv_bracket_qty')
-    .eq('technician_id', techId).eq('business_id', techBizId).maybeSingle();
-  const outFlat = freshInv ? (freshInv.flat_qty || 0) : flat;
-  const outTilting = freshInv ? (freshInv.tilting_qty || 0) : tilting;
-  const outFullMotion = freshInv ? (freshInv.full_motion_qty || 0) : fullMotion;
-  return res.status(200).json({
-    ok: true,
-    inventory: {
-      flat_qty: outFlat,
-      tilting_qty: outTilting,
-      full_motion_qty: outFullMotion,
-      wire_plate_qty: hasWirePlateCol ? (freshInv ? (freshInv.wire_plate_qty || 0) : wirePlate) : 0,
-      appletv_bracket_qty: hasAppleTvCol ? (freshInv ? (freshInv.appletv_bracket_qty || 0) : appleTv) : 0,
-      total: outFlat + outTilting + outFullMotion,
-    },
-  });
+async function bracketUpdate(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_update');
 }
 
 // Wire concealment plates used on a job: one per unit of the "Hide wires BEHIND
@@ -14034,23 +13495,7 @@ function detectWirePlateQty(lineItems) {
 // Company BRACKETS a job uses, by type (skips customer-supplied / own brackets).
 // Mirror of tech.js detectBracketQtys so the dashboard completion path deducts
 // the same way the tech app does.
-function detectBracketQtys(lineItems) {
-  const out = { flat: 0, tilting: 0, full_motion: 0 };
-  for (const li of lineItems || []) {
-    const name = (li.name || '').toLowerCase();
-    const qty = Number(li.quantity) || 1;
-    if (/customer.?supplied/.test(name)) continue;
-    if (/full.?motion/.test(name)) out.full_motion += qty;
-    else if (/tilt/.test(name)) out.tilting += qty;
-    else if (/\bflat\b|fixed/.test(name)) out.flat += qty;
-  }
-  // A job can't use more brackets than it has TVs. A ticket carrying BOTH a
-  // bracket option line and a hand-typed hardware line ("Tilting Mounts")
-  // otherwise double-counts (Throckmorton, 2026-08-21: 6 tilting deducted from
-  // a 4-TV / 3-bracket job). Keep in sync with api/tech.js's copy.
-  clampBracketQtysToTvCount(out, lineItems);
-  return out;
-}
+function detectBracketQtys(lineItems) { return classifyBracketMaterials(lineItems || []).qtys; }
 function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_motion || 0); }
 
 // flat/tilting/full_motion brackets moved off this direct read-modify-write
@@ -14145,214 +13590,21 @@ async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookin
 
 // Parse Walmart email to create bracket purchase record
 // Called by: scheduled email watcher or manual submission
-async function bracketParseEmail(req, res, db, auth, body) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can record bracket orders.' });
-  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
-
-  const emailBody = (body.email_body || '').toString().trim();
-  const techName = (body.technician_name || '').toString().trim();
-  const walmartOrderNum = (body.walmart_order_num || '').toString().trim();
-  const flatQty = parseInt(body.flat_qty) || 0;
-  const tiltingQty = parseInt(body.tilting_qty) || 0;
-  const fullMotionQty = parseInt(body.full_motion_qty) || 0;
-
-  if (!techName) return res.status(400).json({ error: 'technician_name required' });
-  if (!walmartOrderNum && !emailBody) return res.status(400).json({ error: 'walmart_order_num or email_body required' });
-
-  // Find technician by name (case-insensitive, partial match)
-  const { data: techs } = await db.from('technicians')
-    .select('id, name').eq('business_id', bizId).eq('active', true);
-
-  const tech = (techs || []).find(t => t.name.toLowerCase().includes(techName.toLowerCase()));
-  if (!tech) return res.status(404).json({ error: `Technician "${techName}" not found` });
-
-  // Check if we already have this order
-  let existing = null;
-  if (walmartOrderNum) {
-    const { data: e } = await db.from('bracket_purchases')
-      .select('id, status').eq('walmart_order_num', walmartOrderNum).eq('business_id', bizId).maybeSingle();
-    existing = e;
-  }
-
-  // Extract order date from email or use today
-  let orderDate = new Date().toISOString().slice(0, 10);
-  const dateMatch = emailBody.match(/order\s+(?:number|#|date)?[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
-  if (dateMatch) {
-    const parts = dateMatch[1].split(/[\/\-]/);
-    const m = parseInt(parts[0]);
-    const d = parseInt(parts[1]);
-    const y = parts[2].length === 4 ? parts[2] : `20${parts[2]}`;
-    orderDate = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  }
-
-  const totalQty = flatQty + tiltingQty + fullMotionQty;
-  if (totalQty <= 0) return res.status(400).json({ error: 'At least one bracket qty required' });
-
-  let result;
-  if (existing) {
-    // Update existing order
-    const { error: e } = await db.from('bracket_purchases').update({
-      flat_qty: flatQty,
-      tilting_qty: tiltingQty,
-      full_motion_qty: fullMotionQty,
-    }).eq('id', existing.id);
-    if (e) throw e;
-    result = { id: existing.id, action: 'updated' };
-  } else {
-    // Create new purchase record
-    const { data: p, error: e } = await db.from('bracket_purchases').insert({
-      business_id: bizId,
-      technician_id: tech.id,
-      walmart_order_num: walmartOrderNum || `manual-${Date.now()}`,
-      flat_qty: flatQty,
-      tilting_qty: tiltingQty,
-      full_motion_qty: fullMotionQty,
-      order_date: orderDate,
-    }).select('id').single();
-    if (e) throw e;
-    result = { id: p.id, action: 'created' };
-  }
-
-  // Inventory is deliberately NOT credited here. This endpoint records that an
-  // order EXISTS; brackets are credited only when that order is DELIVERED, by
-  // the email sync (api/migrate.js bracketSync), the Assign button, or the
-  // status dropdown -- all of which go through bracket_move() keyed on the
-  // order number, so an order can only ever be credited once no matter how
-  // many of those paths see it.
-  //
-  // It used to credit right here, with a read-then-write and no idempotency
-  // key: re-submitting the same order credited it again every time, it
-  // credited at ORDER time (a rule superseded 2026-07-07 by commit 3e13303,
-  // which moved every other path to credit-on-delivery), and it wrote to the
-  // currently-loaded business rather than the tech's home business, spawning
-  // the phantom-row bug. Found in the 2026-09-03 post-implementation review.
-  return res.status(200).json({
-    ok: true,
-    purchase: result,
-    inventory_updated: null,
-    note: 'Order recorded. Brackets are credited when the order is marked delivered.',
-    ordered: {
-      flat: flatQty,
-      tilting: tiltingQty,
-      full_motion: fullMotionQty,
-      total: totalQty,
-    },
-  });
+async function bracketParseEmail(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_parse_email');
 }
 
 // ── Pending deliveries: brackets that arrived but aren't assigned to a tech yet
 // A bracket_purchases row with technician_id IS NULL is a "just delivered, not
 // yet assigned" delivery (recorded by the email watcher or seeded manually).
-async function bracketPending(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
-
-  const { data: pending, error } = await db.from('bracket_purchases')
-    .select('id, walmart_order_num, flat_qty, tilting_qty, full_motion_qty, status, order_date, delivered_date, order_url, created_at')
-    .eq('business_id', bizId)
-    .is('technician_id', null)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-
-  return res.status(200).json({
-    pending: (pending || []).map(p => ({
-      id: p.id,
-      walmart_order_num: p.walmart_order_num,
-      flat: p.flat_qty || 0,
-      tilting: p.tilting_qty || 0,
-      full_motion: p.full_motion_qty || 0,
-      total: (p.flat_qty || 0) + (p.tilting_qty || 0) + (p.full_motion_qty || 0),
-      status: p.status || 'in_route',
-      order_date: p.order_date,
-      delivered_date: p.delivered_date,
-      order_url: p.order_url || null,
-      created_at: p.created_at,
-    })),
-  });
+async function bracketPending(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_pending');
 }
 
 // Assign a pending delivery to a technician: stamp the purchase with the tech
 // and add the delivered quantities to that tech's bracket_inventory. Owner-only.
-async function bracketAssign(req, res, db, auth, body) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can assign brackets.' });
-  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
-  const bizId = biz.id;
-
-  const purchaseId = (body.purchase_id || '').toString().trim();
-  const techId = (body.technician_id || '').toString().trim();
-  if (!purchaseId || !techId) return res.status(400).json({ error: 'purchase_id and technician_id required' });
-
-  // Fetch the pending purchase (must belong to this business and be unassigned).
-  const { data: purchase } = await db.from('bracket_purchases')
-    .select('id, flat_qty, tilting_qty, full_motion_qty, technician_id, walmart_order_num, status')
-    .eq('id', purchaseId).eq('business_id', bizId).maybeSingle();
-  if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
-  if (purchase.technician_id) return res.status(400).json({ error: 'This delivery is already assigned.' });
-
-  // Brackets are shared across companies (same "one truck stock" reasoning as
-  // bracket_inventory/bracketPurchases) — the delivery is a real physical
-  // package, and the tech who actually receives it may belong to either
-  // business, not just the one whose purchase-row copy is loaded here. So this
-  // does NOT filter by bizId, unlike the purchase lookup above (which legitimately
-  // is one specific business's mirrored copy of the order).
-  const { data: tech } = await db.from('technicians')
-    .select('id, name, business_id').eq('id', techId).eq('active', true).maybeSingle();
-  if (!tech) return res.status(404).json({ error: 'Technician not found' });
-  // The tech's OWN home business, not the purchase-row's bizId — a Handy Andy
-  // tech assigned from the Dom's tab must still credit HIS bracket_inventory
-  // row, or this creates a phantom duplicate stock row under the wrong
-  // business (the exact bug class just fixed in bracket_inventory itself).
-  const techBizId = tech.business_id;
-
-  const flat = purchase.flat_qty || 0;
-  const tilting = purchase.tilting_qty || 0;
-  const full_motion = purchase.full_motion_qty || 0;
-
-  // Stamp the order with the tech. Do NOT touch status — an order can be
-  // assigned while it's still in route; its delivery status updates on its own
-  // when the delivery email arrives.
-  const { error: stampErr } = await db.from('bracket_purchases')
-    .update({ technician_id: techId })
-    .eq('id', purchaseId);
-  if (stampErr) throw stampErr;
-
-  // The sync mirrors every Walmart order to BOTH businesses as unassigned
-  // twins. Now that this one is assigned to a specific tech, drop the still-
-  // unassigned duplicate(s) of the same order in other businesses so the same
-  // physical delivery isn't shown or counted twice.
-  if (purchase.walmart_order_num) {
-    await db.from('bracket_purchases')
-      .delete()
-      .eq('walmart_order_num', purchase.walmart_order_num)
-      .is('technician_id', null)
-      .neq('business_id', bizId);
-  }
-
-  // Inventory moves ONLY on delivery. If the owner assigns an order that's still
-  // in route, we just reserve it to the tech — the brackets are added to the
-  // count when the delivery email arrives. Assigning an already-delivered order
-  // credits it now. Keyed on walmart_order_num (migration 0088) so a double-
-  // click on Assign, or the sync crediting the same order moments later,
-  // credits exactly once instead of twice.
-  const credited = purchase.status === 'delivered';
-  if (credited) {
-    await ledgerCreditDelivery(db, {
-      businessId: techBizId, technicianId: techId,
-      qtys: { flat, tilting, full_motion },
-      purchaseId: purchaseId, orderNum: purchase.walmart_order_num || purchaseId,
-      actor: auth.name || auth.role || 'owner',
-    });
-  }
-
-  return res.status(200).json({
-    ok: true,
-    technician_name: tech.name,
-    reserved: !credited,
-    assigned: { flat, tilting, full_motion, total: flat + tilting + full_motion },
-  });
+async function bracketAssign(req,res,db,auth,body={}) {
+  return inventoryRoute(req,res,db,auth,body,'bracket_assign');
 }
 
 // Unassigned Amazon plate deliveries for this business (mirror of bracketPending).
@@ -15063,4 +14315,10 @@ async function messagesBlock(req, res, db, auth, body) {
   }, { onConflict: 'phone', ignoreDuplicates: false });
   if (error) throw error;
   return res.status(200).json({ ok: true, phone: customer });
+}
+
+async function inventoryRoute(req,res,db,auth,body,action) {
+  let biz; try { biz=await resolveBusiness(db,auth,req.method==='POST'?body.business:req.query.business); }
+  catch(error) { return bail(res,error); }
+  return inventoryAdmin(req,res,db,auth,body,action,biz);
 }

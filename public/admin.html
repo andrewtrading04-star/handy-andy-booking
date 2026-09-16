@@ -617,6 +617,21 @@
   .bracket-table th{background:var(--line2);padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.02em;}
   .bracket-table td{padding:12px;border-bottom:1px solid var(--line2);font-size:13px;}
   .bracket-table tr:hover{background:var(--line2);}
+  .inventory-tools,.inventory-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .inventory-tools{margin:12px 0 18px;}
+  .inventory-tools button,.inventory-actions button,.inventory-dialog button{min-height:40px;}
+  .inventory-note{display:block;font-size:12px;line-height:1.5;color:var(--mute);margin-top:5px;white-space:normal;}
+  .inventory-note.warn{color:#92400e;}
+  .inventory-error{color:#991b1b;background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:8px;margin:10px 0;}
+  .inventory-dialog label{display:block;margin:12px 0 5px;font-weight:600;font-size:13px;}
+  .inventory-dialog input:not([type=checkbox]),.inventory-dialog select,.inventory-dialog textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit;color:var(--ink);background:var(--card,#fff);}
+  .inventory-dialog input[type=checkbox]{margin-right:7px;}
+  .inventory-dialog .inventory-count-row{display:grid;grid-template-columns:1fr 100px;gap:12px;align-items:center;margin:10px 0;}
+  .inventory-dialog .inventory-count-row label{margin:0;}
+  .inventory-dialog input:disabled{opacity:.55;}
+  .inventory-dialog .sheet{max-height:90vh;overflow-y:auto;}
+  .inventory-table-wrap{overflow-x:auto;max-width:100%;}
+  @media(max-width:640px){.inventory-actions button,.inventory-tools button,.inventory-dialog button{min-height:44px;}.inventory-dialog .sheet{padding:18px;}.bracket-section{overflow-x:auto;}.inventory-dialog .inventory-count-row{grid-template-columns:1fr 82px;}}
   .bracket-qty{font-weight:600;color:var(--ink);text-align:center;}
   .bracket-qty.low,.bracket-qty .low{color:#dc2626;}
   .bracket-qty.warn,.bracket-qty .warn{color:#b45309;}
@@ -2405,7 +2420,7 @@ async function loadBadAlerts(){
     const d=await api('bad_reviews'); renderBadAlerts(d.alerts||[]);
     // Email-scan health rides along (owner only). A missing field is itself a
     // problem worth showing — never silently hide the card on a bad read.
-    if(role==='owner'){ _syncHealth=d.sync_health||{error:'no data'}; _syncHealthAt=Date.now(); renderSyncAlerts(_syncHealth,false); if(section==='brackets') refreshSyncStat(); }
+    if(role==='owner'){ const priorRun=_syncHealth?.last_run_at; _syncHealth=d.sync_health||{error:'no data'}; _syncHealthAt=Date.now(); renderSyncAlerts(_syncHealth,false); if(section==='brackets'){refreshSyncStat();if(priorRun&&_syncHealth.last_run_at!==priorRun)refreshInventorySnapshot();} }
   }
   catch(e){ if(role==='owner'&&_syncHealth) renderSyncAlerts(_syncHealth,true); /* review banner: leave as-is */ }
   loadGoodAlerts();
@@ -2486,7 +2501,7 @@ async function scanNow(btn){
     else toast('Could not start the scan: GitHub HTTP '+(r.status||'?')+(r.error?' — '+r.error:''));
   }catch(e){ toast('Could not start the scan: '+e.message); }
   finally{ btn.disabled=false; btn.textContent=was; }
-  setTimeout(loadBadAlerts,150000);
+  setTimeout(()=>{loadBadAlerts();refreshInventorySnapshot();},150000);
 }
 document.addEventListener('click',e=>{ const b=e.target&&e.target.closest&&e.target.closest('#scanNowBtn'); if(b) scanNow(b); });
 // New Google reviews → a dismissible green banner at the top of the dashboard.
@@ -3302,6 +3317,17 @@ function hasTwoPersonFee(b){
   const re=/second\s*technician|two[\s-]?person|lifting\s*help|cannot\s*(?:help\s*)?lift|8[56]\s*inch(?:es)?\s*or\s*larger/i;
   return (Array.isArray(b.line_items)?b.line_items:[]).some(li=>re.test(String((li&&(li.label||li.name))||'')));
 }
+function inventoryMaterialFields(line){return {...(line.material_type?{material_type:line.material_type}:{}),...(line.material_owner?{material_owner:line.material_owner}:{})};}
+function inventorySaveFeedback(result,label){
+  const state=result?.inventory_status;
+  const issues=result?.issues||result?.inventory_issues||[];
+  if(['review','shortfall','pending'].includes(state)||result?.review_reason||issues.length){
+    const detail=[...issues.map(i=>typeof i==='string'?i:(i.message||i.code||'')),result?.review_reason].filter(Boolean).join('; ').replace(/_/g,' ');
+    const message=`${label}. Bracket stock needs review${detail?': '+detail:'. Open the inventory review queue.'}`;
+    toast(message);alert(message);return false;
+  }
+  toast(label);return true;
+}
 // Add the $70 two-person fee to a booking's ticket and re-figure the tax, so the
 // customer is charged for the second tech and BOTH techs are paid correctly (the
 // "Second Technician" line is what triggers the payroll bonus). Tax is only
@@ -3315,6 +3341,7 @@ async function addTwoPersonFee(b,_retried){
     quantity: Math.max(1,Math.round(Number(li.quantity)||1)),
     unit_price: Number(li.price)||0,   // shaped 'price' is the per-item price
     kind: li.kind||'service',
+    ...inventoryMaterialFields(li),
   }));
   items.push({ name:'Second Technician', quantity:1, unit_price:70, kind:'fee' });
   if(hadTax){
@@ -3345,7 +3372,8 @@ async function addTwoPersonFee(b,_retried){
   }
   if(resp&&resp.price!=null) b.price=resp.price;
   if(resp&&resp.li_rev!=null) b.li_rev=resp.li_rev;
-  b.line_items=items.map(it=>({ label:it.name, kind:it.kind, quantity:it.quantity, price:it.unit_price, line_total:Math.round(it.unit_price*it.quantity*100)/100 }));
+  b.line_items=items.map(it=>({ label:it.name, kind:it.kind, quantity:it.quantity, price:it.unit_price, line_total:Math.round(it.unit_price*it.quantity*100)/100,...inventoryMaterialFields(it) }));
+  if(resp?.inventory_status)inventorySaveFeedback(resp,'Second-technician fee saved');
 }
 // ── Booking detail modal ───────────────────────────────────────────────────
 // ── Extra time slots for a big job (add/remove) ─────────────────────────────
@@ -3892,8 +3920,8 @@ function mountLineItemsEditor(b){
         if(qty<1) qty=1;
         if(!unit) unit=qty>0?Math.round((lt/qty)*100)/100:lt;   // derive per-item price if missing
         const name=li.label||'';
-        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
-        acc.push({ name, display:liCleanLabel(name), unit, qty, kind:li.kind||'service' });
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service',...inventoryMaterialFields(li) }); return acc; }
+        acc.push({ name, display:liCleanLabel(name), unit, qty, kind:li.kind||'service',...inventoryMaterialFields(li) });
         return acc;
       },[])
     : [{ name:(b.service?.name)||'Service', display:(b.service?.name)||'Service', unit:Number(b.price)||0, qty:1, kind:'service' }];
@@ -3964,7 +3992,7 @@ function mountLineItemsEditor(b){
         const i=+inp.dataset.i, f=inp.dataset.f;
         // Editing the name takes over the row: the typed text becomes both the
         // display AND what's saved (no longer a tidy-display of an original).
-        if(f==='name'){ rows[i].name=inp.value; rows[i].display=inp.value; }
+        if(f==='name'){ rows[i].name=inp.value; rows[i].display=inp.value;delete rows[i].material_type;delete rows[i].material_owner; }
         else rows[i][f]=inp.value;   // unit kept raw while typing; clamped on use + save
         recalc();
       });
@@ -4029,7 +4057,7 @@ function mountLineItemsEditor(b){
     // Save the original (untidied) names + the hidden default-type lines, so the
     // stored ticket keeps its full labels (payroll/receipts) even though the
     // editor shows the short display versions.
-    const visible=rows.map(r=>({ name:(r.name||'').trim(), quantity:qOf(r), unit_price:Number(r.unit)||0, kind:r.kind||'service' }))
+    const visible=rows.map(r=>({ name:(r.name||'').trim(), quantity:qOf(r), unit_price:Number(r.unit)||0, kind:r.kind||'service',...inventoryMaterialFields(r) }))
                       .filter(r=>r.name||r.unit_price);
     const items=[...visible, ...hiddenItems];
     // Emptying a ticket that had items is almost never intentional — the server
@@ -4069,19 +4097,19 @@ function mountLineItemsEditor(b){
       b.line_items=items.map(it=>{
         const unit=it.unit_price!=null?Number(it.unit_price):(Number(it.price)||0);
         const qty=Math.max(1,Math.round(Number(it.quantity)||1));
-        return { label:it.name, price:unit, line_total:Math.round(unit*qty*100)/100, quantity:qty, kind:it.kind };
+        return { label:it.name, price:unit, line_total:Math.round(unit*qty*100)/100, quantity:qty, kind:it.kind,...inventoryMaterialFields(it) };
       });
       b.price=resp&&resp.price!=null?resp.price:b.price;
       if(resp&&resp.li_rev!=null) b.li_rev=resp.li_rev;   // stay saveable without a reload
       hiddenItems=[];
       rows=b.line_items.reduce((acc,li)=>{
         const name=li.label||'';
-        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
-        acc.push({ name, display:liCleanLabel(name), unit:Number(li.price)||0, qty:Math.max(1,Math.round(Number(li.quantity)||1)), kind:li.kind });
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind,...inventoryMaterialFields(li) }); return acc; }
+        acc.push({ name, display:liCleanLabel(name), unit:Number(li.price)||0, qty:Math.max(1,Math.round(Number(li.quantity)||1)), kind:li.kind,...inventoryMaterialFields(li) });
         return acc;
       },[]);
       render();
-      toast('Line items saved');
+      inventorySaveFeedback(resp,'Line items saved');
       refreshCurrent();
     }catch(err){ toast(err.message); }
     finally{ btn.disabled=false; }
@@ -4379,7 +4407,7 @@ async function apiConfirmUnavailable(action, body){
   throw new Error('Could not save after multiple availability conflicts — please try again.');
 }
 async function updateBooking(payload){
-  try{ await apiConfirmUnavailable('booking_update',{ business:current.slug, ...payload }); toast('Updated'); refreshCurrent(); }
+  try{ const result=await apiConfirmUnavailable('booking_update',{ business:current.slug, ...payload }); inventorySaveFeedback(result,'Updated'); refreshCurrent(); }
   catch(err){ toast(err.message); }
 }
 // Show the signed authorization captured at charge time (signature image, tip,
@@ -12776,12 +12804,98 @@ async function refreshEstimateBadge(){
 }
 
 // ── Bracket Inventory ──────────────────────────────────────────────────────────
+let inventoryHistoryPage=0, inventoryLoading=false, inventoryRefreshPending=false, inventoryRefreshTimer=null;
+const INVENTORY_LABELS={flat:'Flat',tilting:'Tilting',full_motion:'Full motion'};
+function inventoryOperationId(){return crypto.randomUUID();}
+function inventoryDate(value){const d=new Date(value);return value&&!isNaN(d)?d.toLocaleString():'Not verified';}
+function inventoryTech(id){return (window._bracketInv||[]).find(t=>t.technician_id===id);}
+function inventoryTechOptions(selected=''){return (window._bracketInv||[]).map(t=>`<option value="${esc(t.technician_id)}" ${t.technician_id===selected?'selected':''}>${esc(t.technician_name)}</option>`).join('');}
+function inventoryOrder(id){return (window._bracketOrders||[]).find(p=>p.id===id);}
+function inventoryReceived(p,type){return Number(p[`received_${type}`]??p[`received_${type}_qty`]??0);}
+function inventoryPendingRows(rows){return (rows||[]).map(p=>({...p,flat:p.flat??p.flat_qty??0,tilting:p.tilting??p.tilting_qty??0,full_motion:p.full_motion??p.full_motion_qty??0,total:p.total??p.total_qty??(Number(p.flat_qty||0)+Number(p.tilting_qty||0)+Number(p.full_motion_qty||0))})).filter(p=>!['canceled','cancelled','returned'].includes(String(p.status||'').toLowerCase())&&p.total>0);}
+function inventoryRemaining(p,type){return Math.max(0,Number(p[`remaining_${type}_qty`]??(Number(p[`${type}_qty`]||0)-inventoryReceived(p,type))));}
+function inventoryIsOpen(p){return ['in_route','ordered','partially_delivered','needs_review','shipped'].includes(String(p.status||'in_route').toLowerCase());}
+function inventoryQtyInputs(prefix,values={},required=true){return Object.entries(INVENTORY_LABELS).map(([type,label])=>`<label for="${prefix}_${type}">${label}</label><input id="${prefix}_${type}" name="${type}" type="number" min="0" step="1" ${required?'required':''} value="${Number(values[type]??0)}" inputmode="numeric">`).join('');}
+function inventoryReadQty(form,prefix){const out={};for(const type of Object.keys(INVENTORY_LABELS)){const input=form.querySelector(`#${prefix}_${type}`),raw=input.value.trim(),n=Number(raw);if(!raw||!Number.isSafeInteger(n)||n<0){input.setAttribute('aria-invalid','true');input.focus();throw new Error(`Enter a whole number of ${INVENTORY_LABELS[type].toLowerCase()} brackets, including zero.`);}input.removeAttribute('aria-invalid');out[type]=n;}return out;}
+function inventoryReason(form){const input=form.querySelector('[name=notes]');const reason=(input?.value||'').trim();if(reason.length<8){input?.focus();throw new Error('Explain what happened in at least 8 characters.');}return reason;}
+function inventoryReasonField(label='Reason'){return `<label for="inventoryNotes">${label}</label><textarea id="inventoryNotes" name="notes" required minlength="8" rows="2" placeholder="Explain the receipt, correction, or transfer"></textarea>`;}
+function inventoryCloseDialog(){const modal=window.inventoryModal;if(!modal)return;modal.remove();window.inventoryModal=null;modal.returnFocus?.focus();if(inventoryRefreshPending){inventoryRefreshPending=false;refreshInventorySnapshot();}}
+function inventoryDialog(title,body,submitLabel,onSubmit){
+  if(window.inventoryModal)inventoryCloseDialog();
+  const modal=document.createElement('div');modal.className='modal inventory-dialog';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','inventoryDialogTitle');modal.returnFocus=document.activeElement;
+  modal.innerHTML=`<div class="sheet"><form><h2 id="inventoryDialogTitle">${esc(title)}</h2><div class="inventory-error" id="inventoryFormError" role="alert" tabindex="-1" hidden></div>${body}<div class="inventory-actions" style="margin-top:18px;"><button type="button" class="btn ghost" data-close>Close</button>${submitLabel?`<button type="submit" class="btn">${esc(submitLabel)}</button>`:''}</div></form></div>`;
+  const form=modal.querySelector('form');form.dataset.operationId=inventoryOperationId();
+  modal.querySelector('[data-close]').onclick=()=>{if(!form.dataset.saving)inventoryCloseDialog();};
+  modal.addEventListener('click',e=>{if(e.target===modal&&!form.dataset.saving)inventoryCloseDialog();});
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape'&&!form.dataset.saving){e.preventDefault();inventoryCloseDialog();}if(e.key==='Tab'){const items=[...modal.querySelectorAll('button,input,select,textarea,[tabindex="0"]')].filter(el=>!el.disabled&&!el.hidden);const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
+  form.onsubmit=async e=>{e.preventDefault();if(form.dataset.saving||!onSubmit)return;const error=form.querySelector('#inventoryFormError');error.hidden=true;if(!form.reportValidity())return;const button=form.querySelector('[type=submit]');try{form.dataset.saving='1';button.disabled=true;await onSubmit(form);inventoryCloseDialog();await renderBrackets();}catch(err){error.textContent=err.message||'Could not save. Check the details and retry.';error.hidden=false;error.focus();}finally{delete form.dataset.saving;if(button)button.disabled=false;}};
+  document.body.appendChild(modal);window.inventoryModal=modal;(modal.querySelector('input:not([disabled]),select,textarea,button')||modal).focus();return form;
+}
+async function inventoryPost(action,body,form){
+  // Keep the request identity and payload together across a network-error retry.
+  const serialized=JSON.stringify(body);
+  if(form.inventoryPayload&&form.inventoryPayload!==serialized)throw new Error('A save was already attempted with different details. Close this form, refresh and check history before starting a new correction.');
+  form.inventoryPayload=serialized;
+  const result=await api(action,{method:'POST',body:{business:current.slug,...body,operation_id:form.dataset.operationId}});
+  if(['review','shortfall','pending'].includes(result.inventory_status)||result.status==='review'){
+    inventoryRefreshPending=true;
+    throw new Error(`This operation needs review before stock can be confirmed. ${String(result.message||result.review_reason||'See the inventory review queue.').replace(/_/g,' ')}. Close this form to refresh the review queue.`);
+  }
+  return result;
+}
+function openInventoryOrder(techId=''){
+  inventoryDialog('Record a Walmart order',`<p>Enter an order you have already placed. This records incoming stock; it does not buy brackets or increase stock on hand.</p><label for="inventoryOrderNum">Walmart order number</label><input id="inventoryOrderNum" name="order_num" required pattern="[0-9]{7}-[0-9]{8}" placeholder="Order number from Walmart"><label for="inventoryOrderTech">Receiving technician</label><select id="inventoryOrderTech" name="technician_id" required><option value="">Select technician…</option>${inventoryTechOptions(techId)}</select>${inventoryQtyInputs('order')}<label for="inventoryETA">Expected arrival (if known)</label><input id="inventoryETA" name="estimated_delivery" type="date">${inventoryReasonField('Order note')}`,'Record incoming order',async form=>{
+    const qty=inventoryReadQty(form,'order');if(!Object.values(qty).some(n=>n>0))throw new Error('Enter at least one ordered bracket.');
+    await inventoryPost('bracket_record_order',{order_num:form.elements.order_num.value.trim(),technician_id:form.elements.technician_id.value,flat_qty:qty.flat,tilting_qty:qty.tilting,full_motion_qty:qty.full_motion,estimated_delivery:form.elements.estimated_delivery.value||null,notes:inventoryReason(form)},form);toast('Incoming order recorded');
+  });
+}
+function openInventoryReceive(id){
+  const order=inventoryOrder(id);if(!order)return;
+  if(!order.technician_id){toast('Assign the receiving technician first.');return;}
+  inventoryDialog('Record brackets actually received',`<p>Order ${esc(order.walmart_order_num||'')} for ${esc(order.technician_name||'the assigned technician')}.</p><p>Enter the <strong>total received so far for this order</strong>, including earlier deliveries. For a split shipment, count only the units that arrived. These quantities are cumulative.</p>${inventoryQtyInputs('receive',Object.fromEntries(Object.keys(INVENTORY_LABELS).map(t=>[t,inventoryReceived(order,t)])))}${inventoryReasonField('Receipt evidence')}`,'Save received totals',async form=>{
+    const qty=inventoryReadQty(form,'receive');for(const type of Object.keys(qty)){if(qty[type]<inventoryReceived(order,type))throw new Error('Received totals cannot be reduced here. Use an explained correction or physical return.');if(qty[type]>Number(order[`${type}_qty`]||0))throw new Error(`${INVENTORY_LABELS[type]} received exceeds the recorded order. Correct the order evidence first.`);}
+    await inventoryPost('bracket_receive',{purchase_id:id,expected_updated_at:order.updated_at||null,received_flat:qty.flat,received_tilting:qty.tilting,received_full_motion:qty.full_motion,notes:inventoryReason(form)},form);toast('Receipt recorded');
+  });
+}
+function openInventoryTransfer(fromId=''){
+  inventoryDialog('Record a physical transfer',`<p>Use this when brackets actually move between technicians. Both balances update together.</p><label for="inventoryFrom">From technician</label><select id="inventoryFrom" name="from_technician_id" required>${inventoryTechOptions(fromId)}</select><label for="inventoryTo">To technician</label><select id="inventoryTo" name="to_technician_id" required><option value="">Select technician…</option>${inventoryTechOptions()}</select>${inventoryQtyInputs('transfer')}${inventoryReasonField()}`,'Record transfer',async form=>{
+    const qty=inventoryReadQty(form,'transfer'),from=form.elements.from_technician_id.value,to=form.elements.to_technician_id.value;if(from===to)throw new Error('Choose two different technicians.');if(!Object.values(qty).some(n=>n>0))throw new Error('Enter at least one transferred bracket.');await inventoryPost('bracket_transfer',{from_technician_id:from,to_technician_id:to,...qty,notes:inventoryReason(form)},form);toast('Transfer recorded');
+  });
+}
+function openInventoryReassign(id){
+  const order=inventoryOrder(id);if(!order)return;
+  inventoryDialog('Correct order recipient',`<p>Correct who received order ${esc(order.walmart_order_num||'')}. Any recorded receipt must be moved with this correction. Use Physical transfer when the original recipient was correct and stock moved later.</p><label for="inventoryRecipient">Actual recipient</label><select id="inventoryRecipient" name="technician_id" required><option value="">Select technician…</option>${inventoryTechOptions(order.technician_id)}</select>${inventoryReasonField()}`,'Correct recipient',async form=>{const technicianId=form.elements.technician_id.value;if(technicianId===order.technician_id)throw new Error('Choose the actual corrected recipient.');await inventoryPost('bracket_reassign',{purchase_id:id,technician_id:technicianId,expected_updated_at:order.updated_at||null,notes:inventoryReason(form)},form);toast('Recipient corrected');});
+}
+async function openInventoryHistory(techId,page=0){
+  const tech=inventoryTech(techId);if(!tech)return;
+  const form=inventoryDialog(`Stock history: ${tech.technician_name}`,'<p role="status">Loading movements…</p>',null,null);
+  try{const data=await api('bracket_movements',{params:{business:current.slug,technician_id:techId,page:String(page),limit:'30'}});if(!form.isConnected)return;const signed=n=>Number(n)>0?'+'+Number(n):String(Number(n)||0);const rows=(data.movements||[]).map(m=>`<tr><td>${esc(inventoryDate(m.created_at))}</td><td>${esc(String(m.kind||'').replace(/_/g,' '))}<span class="inventory-note">${esc(m.reason||m.notes||'')}${m.actor?' · '+esc(m.actor):''}${m.order_num?' · Order '+esc(m.order_num):''}${m.booking_id?' · Job '+esc(m.booking_id):''}</span></td><td>${signed(m.flat_delta??m.flat)}</td><td>${signed(m.tilting_delta??m.tilting)}</td><td>${signed(m.full_motion_delta??m.full_motion)}</td></tr>`).join('');form.querySelector('[role=status]').outerHTML=`<div class="inventory-table-wrap"><table class="bracket-table"><thead><tr><th>When</th><th>Movement / reason</th><th>Flat</th><th>Tilting</th><th>Full motion</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No recorded movements on this page.</td></tr>'}</tbody></table></div><div class="inventory-actions">${page>0?'<button type="button" data-previous>Previous</button>':''}${data.has_more?'<button type="button" data-next>Next</button>':''}</div>`;const previous=form.querySelector('[data-previous]'),next=form.querySelector('[data-next]');if(previous)previous.onclick=()=>openInventoryHistory(techId,page-1);if(next)next.onclick=()=>openInventoryHistory(techId,page+1);
+  }catch(e){const status=form.querySelector('[role=status]');if(status)status.textContent='Could not load history: '+e.message;}
+}
+async function openInventoryAddresses(){
+  const form=inventoryDialog('Technician shipping addresses','<p role="status">Loading saved addresses…</p>',null,null);
+  try{const data=await api('bracket_shipping_addresses',{params:{business:current.slug}});if(!form.isConnected)return;window._inventoryAddresses=data.addresses||[];form.querySelector('[role=status]').outerHTML=`<p>Save the full delivery address from Walmart, including street, apartment/unit, city, state and ZIP. Only verified active addresses are used for automatic assignment.</p><div>${window._inventoryAddresses.map(a=>`<div style="border-bottom:1px solid var(--line);padding:12px 0;"><strong>${esc(inventoryTech(a.technician_id)?.technician_name||'Unknown technician')}</strong>${a.active?'':' — inactive'}<p style="white-space:pre-line;">${esc(a.address)}</p><button type="button" class="seg-btn" data-edit-address="${esc(a.id)}">Edit address</button></div>`).join('')||'<p>No verified shipping addresses saved.</p>'}</div><button type="button" class="btn" data-add-address style="margin-top:12px;">Add address</button>`;form.querySelector('[data-add-address]').onclick=()=>openInventoryAddressEdit();for(const b of form.querySelectorAll('[data-edit-address]'))b.onclick=()=>openInventoryAddressEdit(b.dataset.editAddress);
+  }catch(e){form.querySelector('[role=status]').textContent='Could not load addresses: '+e.message;}
+}
+function openInventoryAddressEdit(id){
+  const address=(window._inventoryAddresses||[]).find(a=>a.id===id)||{};
+  inventoryDialog(id?'Edit shipping address':'Add verified shipping address',`<label for="inventoryAddressTech">Technician</label><select id="inventoryAddressTech" name="technician_id" required><option value="">Select technician…</option>${inventoryTechOptions(address.technician_id)}</select><label for="inventoryAddress">Full address, including unit, city, state and ZIP</label><textarea id="inventoryAddress" name="address" required minlength="15" rows="4">${esc(address.address||'')}</textarea><label><input type="checkbox" name="active" ${address.active!==false?'checked':''}>Verified current shipping address</label>`,'Save address',async form=>{await inventoryPost('bracket_shipping_address_save',{...(id?{id}:{}),expected_updated_at:address.updated_at||null,technician_id:form.elements.technician_id.value,address:form.elements.address.value.trim(),active:form.elements.active.checked},form);toast('Shipping address saved');});
+}
+function inventoryExceptionHtml(data){
+  if(data.error)return `<div class="inventory-error">Inventory review queue is unavailable: ${esc(data.error)}. Balances may still need review.</div>`;
+  const items=data.exceptions||[];return `<details class="bracket-section" ${items.length?'open':''}><summary style="font-weight:700;cursor:pointer;">Inventory review queue (${items.length})</summary>${items.length?items.map(e=>`<div style="padding:12px 0;border-bottom:1px solid var(--line);"><strong>${esc(e.message||e.type||'Needs review')}</strong><span class="inventory-note">${esc(e.technician_name||'')}${e.order_num?' · Order '+esc(e.order_num):''}${e.booking_id?' · Job '+esc(e.booking_id):''}${e.created_at?' · '+esc(inventoryDate(e.created_at)):''}</span></div>`).join(''):'<p>No unresolved issues reported. Physical counts still need verification.</p>'}</details>`;
+}
+function refreshInventorySnapshot(){if(section!=='brackets'||!current||document.hidden)return;if(window.inventoryModal||window.bracketModal||window._assignModal){inventoryRefreshPending=true;return;}return renderBrackets({quiet:true});}
+function startInventoryRefresh(){if(inventoryRefreshTimer)clearInterval(inventoryRefreshTimer);inventoryRefreshTimer=setInterval(refreshInventorySnapshot,45000);}
+function inventoryChangeHistory(page){inventoryHistoryPage=Math.max(0,page);renderBrackets();}
 // Friendly status pill for a Walmart bracket order: In route / Delivered / Canceled.
 // 'ordered' is the legacy alias of 'in_route'.
 function bracketStatusBadge(status){
   const s=(status||'in_route').toLowerCase();
   const base='display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;';
   if(s==='delivered') return `<span style="${base}background:#dcfce7;color:#15803d;">✓ Delivered</span>`;
+  if(s==='partially_delivered') return `<span style="${base}background:#fef3c7;color:#92400e;">Part received</span>`;
+  if(s==='needs_review') return `<span style="${base}background:#fef2f2;color:#991b1b;">Needs review</span>`;
   if(s==='canceled'||s==='cancelled') return `<span style="${base}background:#f3f4f6;color:#6b7280;text-decoration:line-through;">Canceled</span>`;
   return `<span style="${base}background:#fef3c7;color:#b45309;">🚚 In route</span>`;
 }
@@ -12836,22 +12950,32 @@ async function confirmAssign(purchaseId){
   }catch(e){ toast('Error: '+e.message); }
 }
 
-async function renderBrackets(){
+async function renderBrackets({quiet=false}={}){
   const view=document.getElementById('view');
-  if(!current) return;
+  if(!current||inventoryLoading) return;
+  inventoryLoading=true;
+  const business=current.slug, scrollY=window.scrollY;
   try{
-    const [inv, purch, pend, wpPend]=await Promise.all([
+    const [inv, purch, pend, wpPend, exceptions]=await Promise.all([
       api('bracket_inventory',{ params:{ business:current.slug }}),
-      api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}),
+      api('bracket_purchases',{ params:{ business:current.slug, limit:'20', history_page:String(inventoryHistoryPage) }}),
       api('bracket_pending',{ params:{ business:current.slug }}),
       api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})),
+      role==='owner'?api('bracket_exceptions',{params:{business:current.slug}}).catch(e=>({error:e.message})):Promise.resolve({exceptions:[]}),
     ]);
+    if(!current||current.slug!==business||section!=='brackets')return;
+    if(quiet&&(window.inventoryModal||window.bracketModal||window._assignModal)){inventoryRefreshPending=true;return;}
     window._bracketInv=inv.inventory||[];   // tech list for the Assign modal
-    attachIncomingStock(inv.inventory, purch.purchases, wpPend.orders);
+    const openOrders=purch.open_orders||[];
+    window._bracketOrders=[...openOrders,...(purch.purchases||[]),...(pend.pending||[]).map(p=>({...p,flat_qty:p.flat_qty??p.flat,tilting_qty:p.tilting_qty??p.tilting,full_motion_qty:p.full_motion_qty??p.full_motion}))];
+    attachIncomingStock(inv.inventory, openOrders, wpPend.orders);
 
     let html=`<div class="wrap">${syncStatHtml()}
+      <div class="inventory-tools"><span class="inventory-note" style="margin:0;">Inventory refreshed: ${esc(inventoryDate(inv.snapshot_at||new Date().toISOString()))}</span><button class="seg-btn" onclick="refreshInventorySnapshot()">Refresh inventory</button>${role==='owner'?'<button class="seg-btn" onclick="openInventoryOrder()">Record order</button><button class="seg-btn" onclick="openInventoryTransfer()">Physical transfer</button><button class="seg-btn" onclick="openInventoryAddresses()">Shipping addresses</button>':''}</div>
+      ${role==='owner'?inventoryExceptionHtml(exceptions):''}
       <div class="bracket-section">
         <h3>Current Inventory by Technician</h3>
+        <p class="inventory-note">On-hand balances are recorded stock. A physical count is needed to verify them. Each bracket type is low at 2 or fewer, including when a restock is on its way.</p>
         <table class="bracket-table">
           <thead>
             <tr>
@@ -12877,17 +13001,15 @@ async function renderBrackets(){
       const bLow=lowTypes.length>0;
       const TYPE_LABEL={flat:'Flat',tilting:'Tilting',full_motion:'Full Motion'};
       const lowLabel=lowTypes.map(t=>TYPE_LABEL[t]).join(', ');
-      const bChip=bLow?(role==='owner'
-        ? `<span class="inv-chip" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})" title="Low on ${esc(lowLabel)} — add stock for ${esc(tech.technician_name)}">⚠ Reorder ${esc(lowLabel)}</span>`
-        : `<span class="inv-chip static" title="Low on ${esc(lowLabel)}">⚠ Low: ${esc(lowLabel)}</span>`):'';
+      const bChip=bLow?`<span class="inv-chip static">Low: ${esc(lowLabel)}</span>`:'';
       const bizTag=tech.business?`<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--mute);background:var(--line2);padding:2px 6px;border-radius:6px;vertical-align:middle;">${esc(BIZ_LABEL[tech.business]||tech.business)}</span>`:'';
       html+=`<tr>
-        <td>${esc(tech.technician_name)}${bizTag}</td>
-        <td class="bracket-qty"><span class="${invLowType(tech,'flat')?'low':''}">${tech.flat}</span></td>
-        <td class="bracket-qty"><span class="${invLowType(tech,'tilting')?'low':''}">${tech.tilting}</span></td>
-        <td class="bracket-qty"><span class="${invLowType(tech,'full_motion')?'low':''}">${tech.full_motion}</span></td>
+        <td>${esc(tech.technician_name)}${bizTag}<span class="inventory-note">Physical count: ${tech.last_verified_at?esc(inventoryDate(tech.last_verified_at)):'not verified'}</span></td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'flat')?'low':''}">${tech.flat}</span>${inventoryRestockHtml(tech,'flat')}</td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'tilting')?'low':''}">${tech.tilting}</span>${inventoryRestockHtml(tech,'tilting')}</td>
+        <td class="bracket-qty"><span class="${invLowType(tech,'full_motion')?'low':''}">${tech.full_motion}</span>${inventoryRestockHtml(tech,'full_motion')}</td>
         <td class="bracket-qty"><strong>${total}</strong>${bChip}</td>
-        ${role==='owner'?`<td><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}','${esc(tech.technician_name)}',${tech.flat||0},${tech.tilting||0},${tech.full_motion||0})">Edit</button></td>`:''}
+        ${role==='owner'?`<td><div class="inventory-actions"><button class="seg-btn" onclick="openInventoryOrder('${tech.technician_id}')">Order more</button><button class="seg-btn" onclick="openBracketEdit('${tech.technician_id}')">Physical count</button><button class="seg-btn" onclick="openInventoryHistory('${tech.technician_id}')">History</button></div></td>`:''}
       </tr>`;
     }
     html+=`</tbody></table></div>`;
@@ -12899,12 +13021,12 @@ async function renderBrackets(){
     // an order auto-assigned to a tech still shows here while it's in route; it
     // moves into that tech's on-hand count only when it's delivered.
     {
-      const inRoute=((purch&&purch.purchases)||[]).filter(p=>{ const s=(p.status||'in_route').toLowerCase(); return s==='in_route'||s==='ordered'; });
+      const inRoute=openOrders.filter(inventoryIsOpen);
       const byTech={};
       for(const p of inRoute){
-        const k=p.technician_name||'Unassigned';
-        if(!byTech[k]) byTech[k]={flat:0,tilting:0,full_motion:0};
-        byTech[k].flat+=p.flat_qty||0; byTech[k].tilting+=p.tilting_qty||0; byTech[k].full_motion+=p.full_motion_qty||0;
+        const k=p.technician_id||'unassigned';
+        if(!byTech[k]) byTech[k]={name:p.technician_name||'Unassigned',flat:0,tilting:0,full_motion:0};
+        byTech[k].flat+=inventoryRemaining(p,'flat'); byTech[k].tilting+=inventoryRemaining(p,'tilting'); byTech[k].full_motion+=inventoryRemaining(p,'full_motion');
       }
       const rows=Object.entries(byTech).filter(([,q])=>q.flat||q.tilting||q.full_motion);
       html+=`<div class="bracket-section">
@@ -12915,10 +13037,10 @@ async function renderBrackets(){
       if(!rows.length){
         html+=`<tr><td colspan="5" style="text-align:center;color:var(--mute);">No brackets in route</td></tr>`;
       } else {
-        for(const [name,q] of rows){
+        for(const [,q] of rows){
           const total=q.flat+q.tilting+q.full_motion;
           html+=`<tr>
-            <td>${esc(name)}</td>
+            <td>${esc(q.name)}</td>
             <td class="bracket-qty">${q.flat}</td>
             <td class="bracket-qty">${q.tilting}</td>
             <td class="bracket-qty">${q.full_motion}</td>
@@ -13050,70 +13172,20 @@ async function renderBrackets(){
     }
     html+=`</tbody></table></div>`;
 
-    // Orders split: active (incoming) shown up top; DELIVERED ones tucked into
-    // a collapsed "archived" section below — findable but out of the way.
-    const allOrders = purch.purchases || [];
-    const isDelivered = p => (p.status||'').toLowerCase()==='delivered';
-    const activeOrders = allOrders.filter(p=>!isDelivered(p));
-    const archivedOrders = allOrders.filter(isDelivered);
-
-    const orderHead = `<thead><tr>
-      <th>Technician</th><th>Order #</th><th>Flat</th><th>Tilting</th><th>Full Motion</th><th>Price</th><th>Status</th><th>Date</th>
-    </tr></thead>`;
-
-    const bracketRow = (p) => {
-      // Order # + a "View ↗" that opens the Walmart account orders page. We do NOT
-      // link p.order_url — Walmart's email "View order" links are one-time,
-      // session-bound tokens that 400 when opened later from here. The account
-      // orders list always opens; find this order by its number.
-      const orderCell=p.walmart_order_num
-        ? `${esc(p.walmart_order_num)} <a href="https://www.walmart.com/orders" target="_blank" rel="noopener" title="Opens your Walmart orders — find #${esc(p.walmart_order_num)}" style="font-size:11px;white-space:nowrap;margin-left:4px;">View ↗</a>`
-        : '-';
-      const assigned=p.technician_name && p.technician_name!=='Unassigned';
-      const techCell=assigned
-        ? `<strong>${esc(p.technician_name)}</strong>${p.business?` <span style="color:var(--mute);font-size:11px;">(${esc(p.business)})</span>`:''}`
-        : (role==='owner'
-            ? `<button class="seg-btn" onclick="openAssignModal('${esc(p.id)}','${esc(p.walmart_order_num||'')}')">Assign tech ▾</button>`
-            : `<span style="color:var(--mute);">Unassigned</span>`);
-      const st=(p.status||'in_route').toLowerCase();
-      const statusCell=role==='owner'
-        ? `<select onchange="setBracketStatus('${esc(p.walmart_order_num||'')}','${esc(p.id)}',this.value)" title="Change delivery status" style="padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:#fff;">
-             <option value="in_route" ${(st==='in_route'||st==='ordered')?'selected':''}>🚚 In route</option>
-             <option value="delivered" ${st==='delivered'?'selected':''}>✓ Delivered</option>
-             <option value="canceled" ${(st==='canceled'||st==='cancelled')?'selected':''}>Canceled</option>
-           </select>`
-        : bracketStatusBadge(p.status);
-      return `<tr>
-        <td>${techCell}</td>
-        <td>${orderCell}</td>
-        <td class="bracket-qty">${p.flat_qty}</td>
-        <td class="bracket-qty">${p.tilting_qty}</td>
-        <td class="bracket-qty">${p.full_motion_qty}</td>
-        <td class="bracket-qty">${(role==='owner' && p.order_total!=null)?'$'+Number(p.order_total).toFixed(2):'<span style="color:var(--mute);">—</span>'}</td>
-        <td>${statusCell}</td>
-        <td>${p.order_date||'-'}</td>
-      </tr>`;
+    const orderHead=`<thead><tr><th>Technician</th><th>Order #</th><th>Flat</th><th>Tilting</th><th>Full motion</th><th>Status / arrival</th><th>Action</th></tr></thead>`;
+    const bracketRow=p=>{
+      const canceled=['canceled','cancelled','returned'].includes(String(p.status||'').toLowerCase());
+      const eta=p.estimated_delivery;
+      const qtyCell=type=>`<td class="bracket-qty">${Number(p[`${type}_qty`]||0)}<span class="inventory-note">${inventoryReceived(p,type)} received</span></td>`;
+      return `<tr><td>${esc(p.technician_name||'Unassigned')}</td><td>${esc(p.walmart_order_num||'—')} <a href="https://www.walmart.com/orders" target="_blank" rel="noopener">View Walmart</a><span class="inventory-note">Ordered ${esc(p.order_date||'date unknown')}</span></td>${qtyCell('flat')}${qtyCell('tilting')}${qtyCell('full_motion')}<td>${bracketStatusBadge(p.status)}${['review','unverified'].includes(p.inventory_status)?'<span class="inventory-note warn">Stock '+esc(p.inventory_status)+'</span>':''}<span class="inventory-note">Expected: ${eta?esc(eta):'not recorded'}</span></td><td>${role==='owner'?`<div class="inventory-actions">${!canceled&&p.technician_id?`<button class="seg-btn" onclick="openInventoryReceive('${esc(p.id)}')">Record receipt</button>`:''}${!canceled?`<button class="seg-btn" onclick="openInventoryReassign('${esc(p.id)}')">${p.technician_id?'Correct recipient':'Assign recipient'}</button>`:''}${!canceled&&inventoryIsOpen(p)?`<button class="seg-btn" onclick="openInventoryCancel('${esc(p.id)}')">Cancel remainder</button>`:''}</div>`:'—'}</td></tr>`;
     };
-
-    const totalSpent=(allOrders||[]).reduce((s,p)=>s+(Number(p.order_total)||0),0);
-    html+=`<div class="bracket-section">
-      <h3>Recent Walmart Orders ${(role==='owner' && totalSpent>0)?`<span style="font-weight:400;font-size:12px;color:var(--mute);">— $${totalSpent.toFixed(2)} tracked</span>`:''}</h3>
-      <table class="bracket-table">${orderHead}<tbody>${
-        activeOrders.length ? activeOrders.map(bracketRow).join('')
-        : `<tr><td colspan="8" style="text-align:center;color:var(--mute);">No active orders</td></tr>`
-      }</tbody></table>
-    </div>`;
-
-    if(archivedOrders.length){
-      html+=`<details class="bracket-section">
-        <summary style="cursor:pointer;font-weight:700;color:var(--mute);padding:4px 0;">✓ Delivered — archived (${archivedOrders.length}) <span style="font-weight:400;font-size:12px;">— click to view</span></summary>
-        <table class="bracket-table" style="margin-top:10px;">${orderHead}<tbody>${archivedOrders.map(bracketRow).join('')}</tbody></table>
-      </details>`;
-    }
+    html+=`<div class="bracket-section"><h3>Open Walmart orders — shipments and review</h3><p class="inventory-note">Ordered and received quantities are shown separately. A status label alone is not proof of a stock credit.</p><table class="bracket-table">${orderHead}<tbody>${openOrders.length?openOrders.map(bracketRow).join(''):'<tr><td colspan="7">No open shipments.</td></tr>'}</tbody></table></div>`;
+    const history=purch.purchases||[];
+    html+=`<details class="bracket-section" ${inventoryHistoryPage?'open':''}><summary style="cursor:pointer;font-weight:700;">Delivered and canceled order history — page ${inventoryHistoryPage+1}</summary><table class="bracket-table">${orderHead}<tbody>${history.length?history.map(bracketRow).join(''):'<tr><td colspan="7">No historical orders on this page.</td></tr>'}</tbody></table><div class="inventory-actions">${inventoryHistoryPage>0?`<button class="seg-btn" onclick="inventoryChangeHistory(${inventoryHistoryPage-1})">Previous page</button>`:''}${purch.has_more?`<button class="seg-btn" onclick="inventoryChangeHistory(${inventoryHistoryPage+1})">Next page</button>`:''}</div></details>`;
 
     // ── Just Delivered: brackets that arrived but aren't assigned to a tech yet.
     // Shown at the bottom as a highlighted alert with a one-click assign control.
-    const pending=(pend&&pend.pending)||[];
+    const pending=inventoryPendingRows(pend?.pending);
     if(pending.length){
       const techOpts=(inv.inventory||[]).map(t=>`<option value="${esc(t.technician_id)}">${esc(t.technician_name)}</option>`).join('');
       html+=`<div class="bracket-section" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 18px;">
@@ -13137,11 +13209,7 @@ async function renderBrackets(){
             ${link?`<div style="font-size:12px;margin-top:2px;">${link}</div>`:''}
           </div>
           ${role==='owner'?`<div style="display:flex;gap:8px;align-items:center;">
-            <select id="assignTech_${esc(d.id)}" style="padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
-              <option value="">Select technician…</option>
-              ${techOpts}
-            </select>
-            <button class="btn" onclick="assignBracketDelivery('${esc(d.id)}')">Assign</button>
+            <button class="btn" onclick="openInventoryReassign('${esc(d.id)}')">Assign recipient</button>
           </div>`:`<span style="color:var(--mute);font-size:12px;">Owner assigns</span>`}
         </div>`;
       }
@@ -13150,10 +13218,13 @@ async function renderBrackets(){
 
     html+=`</div>`;
     view.innerHTML=html;
+    if(quiet)window.scrollTo({top:scrollY,behavior:'instant'});
+    startInventoryRefresh();
   }catch(e){
     console.error('renderBrackets failed',e);
-    document.getElementById('view').innerHTML=`<div class="wrap"><div class="section card"><h2>Error loading bracket inventory</h2><p>${esc(e.message)}</p></div></div>`;
-  }
+    if(quiet){const stamp=view.querySelector('.inventory-tools .inventory-note');if(stamp){stamp.textContent='Inventory refresh failed: '+e.message;stamp.classList.add('warn');}}
+    else view.innerHTML=`<div class="wrap"><div class="section card"><h2>Error loading bracket inventory</h2><p>${esc(e.message)}</p><button class="btn" onclick="renderBrackets()">Try again</button></div></div>`;
+  }finally{inventoryLoading=false;}
 }
 
 // Assign a just-delivered bracket order to a technician (adds to their inventory).
@@ -13201,54 +13272,29 @@ async function assignWirePlateDelivery(purchaseId){
   }
 }
 
-async function openBracketEdit(techId, techName, flat, tilting, fullMotion){
-  const modal=document.createElement('div');
-  modal.className='modal';
-  modal.innerHTML=`
-    <div class="sheet">
-      <h2>Set Brackets: ${esc(techName)}</h2>
-      <div class="sub" style="color:var(--mute);font-size:13px;margin:-6px 0 12px;">Type the exact count on hand (this replaces the current number — up or down).</div>
-      <label class="fld">Flat Brackets</label>
-      <input type="number" id="bracketFlat" min="0" value="${Number(flat)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
-      <label class="fld">Tilting Brackets</label>
-      <input type="number" id="bracketTilting" min="0" value="${Number(tilting)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
-      <label class="fld">Full Motion Brackets</label>
-      <input type="number" id="bracketFullMotion" min="0" value="${Number(fullMotion)||0}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px;">
-      <div style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn" onclick="closeBracketModal()" style="flex:1;background:var(--line);color:var(--ink-2);">Cancel</button>
-        <button class="btn" onclick="saveBracketCount('${techId}','${esc(techName)}')" style="flex:1;">Save</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  modal.addEventListener('click',e=>{ if(e.target===modal) closeBracketModal(); });
-  window.bracketModal=modal;
-}
-
-function closeBracketModal(){
-  if(window.bracketModal){ window.bracketModal.remove(); window.bracketModal=null; }
-}
-
-async function saveBracketCount(techId, techName){
-  const flat=parseInt(document.getElementById('bracketFlat').value)||0;
-  const tilting=parseInt(document.getElementById('bracketTilting').value)||0;
-  const fullMotion=parseInt(document.getElementById('bracketFullMotion').value)||0;
-  try{
-    await api('bracket_update',{
-      method:'POST',
-      body:{
-        business:current.slug,
-        technician_id:techId,
-        flat, tilting, full_motion:fullMotion,
-        action:'set',
-      }
-    });
-    toast('✓ Updated bracket count for '+techName);
-    closeBracketModal();
-    renderBrackets();
-  }catch(e){
-    toast('Error: '+e.message);
+function inventoryRecountPayload(form,tech){
+  const qty={};
+  for(const type of Object.keys(INVENTORY_LABELS)){
+    if(!form.querySelector(`[name="count_${type}"]`).checked)continue;
+    const input=form.querySelector(`#recount_${type}`),raw=input.value.trim(),value=Number(raw);
+    if(!raw||!Number.isSafeInteger(value)||value<0){input.focus();throw new Error(`Enter a nonnegative whole number for ${INVENTORY_LABELS[type]}.`);}
+    qty[type]=value;
   }
+  if(!Object.keys(qty).length)throw new Error('Choose the bracket types you actually counted.');
+  const observed=new Date(form.dataset.countedAt);
+  if(isNaN(observed)||observed.getTime()>Date.now()+60000)throw new Error('Enter a valid count time that is not in the future.');
+  return {technician_id:tech.technician_id,action:'set',...qty,expected_updated_at:tech.updated_at||'uninitialized',counted_at:observed.toISOString(),notes:inventoryReason(form)};
+}
+function openBracketEdit(techId){
+  const tech=inventoryTech(techId);if(!tech)return;
+  const fields=Object.entries(INVENTORY_LABELS).map(([type,label])=>`<div class="inventory-count-row"><label><input type="checkbox" name="count_${type}" data-count-type="${type}">${label} — recorded ${Number(tech[type]||0)}</label><input id="recount_${type}" aria-label="Counted ${label.toLowerCase()} brackets" type="number" min="0" step="1" required disabled value="${Number(tech[type]||0)}"></div>`).join('');
+  const form=inventoryDialog(`Physical count: ${tech.technician_name}`,`<p>Count the stock now, then select only the types you actually counted. Other types stay unchanged. Record arrivals and transfers through their separate controls.</p>${fields}${inventoryReasonField('Who counted the stock and where?')}<p class="inventory-note">If stock changes while this form is open, the save will be rejected so you can review the latest movements.</p>`,'Save selected counts',async form=>{await inventoryPost('bracket_update',inventoryRecountPayload(form,tech),form);toast('Selected counts saved');});
+  form.dataset.countedAt=new Date().toISOString();
+  for(const check of form.querySelectorAll('[data-count-type]'))check.onchange=()=>{form.querySelector(`#recount_${check.dataset.countType}`).disabled=!check.checked;};
+}
+function closeBracketModal(){
+  if(window.bracketModal){window.bracketModal.remove();window.bracketModal=null;}
+  if(inventoryRefreshPending){inventoryRefreshPending=false;refreshInventorySnapshot();}
 }
 
 // Wire concealment plates — set a tech's plate count to an exact number.
@@ -13412,11 +13458,21 @@ function invBracketTotal(t){ return (t.flat||0)+(t.tilting||0)+(t.full_motion||0
 // A tech is "low" when ANY single bracket TYPE hits the threshold (≤2) — not the
 // combined total. Running out of Full Motion specifically means you can't do a
 // full-motion job even if your flat/tilting stock is high, so each type warns on
-// its own. Returns the list of low types (empty = not low). Suppressed once a
-// restock for that type is already assigned to the tech and just waiting on
-// delivery (see attachIncomingStock) — the shortage is already being fixed,
-// so it shouldn't keep nagging the owner to reorder something they already did.
-function invLowType(t,type){ return (t[`_incoming_${type}`]||0)<=0 && (t[type]||0)<=LOW_BRACKETS_MAX; }
+// its own. Incoming restock is displayed separately and never hides a physical
+// shortage. Whether to order more depends on that restock and its arrival date.
+function invLowType(t,type){ return (Number(t[type])||0)<=LOW_BRACKETS_MAX; }
+function inventoryRestockHtml(t,type){
+  const incoming=Number(t[`_incoming_${type}`]||0),low=invLowType(t,type),overdue=!!t[`_overdue_${type}`];
+  const verified=t.verified_at?.[type],countNote=verified?`<span class="inventory-note">Counted ${esc(inventoryDate(verified))}</span>`:'';
+  if(!incoming)return (low?'<span class="inventory-note warn">No restock recorded</span>':'')+countNote;
+  const insufficient=(Number(t[type])||0)+incoming<=LOW_BRACKETS_MAX;
+  const eta=t[`_eta_${type}`];
+  return `<span class="inventory-note ${overdue||insufficient?'warn':''}">${incoming} incoming${overdue?' · overdue':insufficient?' · still 2 or fewer after arrival':' · restock ordered'}${eta?' · '+esc(eta):' · arrival unknown'}</span>`+countNote;
+}
+function openInventoryCancel(id){
+  const order=inventoryOrder(id);if(!order)return;
+  inventoryDialog('Cancel unreceived remainder',`<p>Close the outstanding shipment for order ${esc(order.walmart_order_num||'')}. Brackets already received stay on hand. A refund alone does not mean stock was returned.</p>${inventoryReasonField('Cancellation evidence')}`,'Cancel remaining shipment',async form=>{await inventoryPost('bracket_set_status',{id,expected_updated_at:order.updated_at||null,walmart_order_num:order.walmart_order_num,status:'canceled',notes:inventoryReason(form)},form);toast('Remaining shipment canceled');});
+}
 function invLowBracketTypes(t){ return BRACKET_TYPES.filter(ty=>invLowType(t,ty)); }
 function invLowBrackets(t){ return invLowBracketTypes(t).length>0; }
 // Juan is excluded from wire-concealment (plate) low-stock warnings, per owner —
@@ -13432,23 +13488,19 @@ function invIgnorePlates(t){ return /\bjuan\b/i.test(t.technician_name||''); }
 // already-incoming suppression as invLowType, above.
 function invLowPlates(t){ return !invIgnorePlates(t) && !!t.wire_plate_tracked && (t.wire_plate||0)<=LOW_PLATES_MAX && (t._incomingPlates||0)<=0; }
 function invIsLow(t){ return invLowBrackets(t)||invLowPlates(t); }
-// Annotates each tech's inventory row with restock that's already assigned to
-// them but not yet delivered (bracket_purchases.technician matched by NAME —
-// the bracket_purchases API only returns technician_name, not id, same as the
-// existing "Brackets In Route" grouping a few lines up already does; wire
-// plates carry technician_id directly so those match by id). Mutates `inv` in
-// place; call this BEFORE anything reads invLowType/invLowPlates/invIsLow on it.
+// Annotate outstanding quantities from ALL open orders, joined by stable tech id.
+// Received units are excluded; history pagination never changes these totals.
 function attachIncomingStock(inv, bracketPurchases, wireOrders){
   const NOT_DELIVERED=new Set(['in_route','ordered']);
-  for(const t of inv||[]){ t._incoming_flat=0; t._incoming_tilting=0; t._incoming_full_motion=0; t._incomingPlates=0; }
-  const byName=new Map((inv||[]).map(t=>[t.technician_name,t]));
-  for(const p of bracketPurchases||[]){
-    if(!p.technician_name || p.technician_name==='Unassigned') continue;
-    if(!NOT_DELIVERED.has((p.status||'in_route').toLowerCase())) continue;
-    const t=byName.get(p.technician_name); if(!t) continue;
-    t._incoming_flat+=p.flat_qty||0; t._incoming_tilting+=p.tilting_qty||0; t._incoming_full_motion+=p.full_motion_qty||0;
-  }
+  for(const t of inv||[]){for(const type of BRACKET_TYPES){t[`_incoming_${type}`]=0;t[`_overdue_${type}`]=false;t[`_eta_${type}`]=null;}t._incomingPlates=0;}
   const byId=new Map((inv||[]).map(t=>[t.technician_id,t]));
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Denver'});
+  for(const p of bracketPurchases||[]){
+    if(!p.technician_id||!inventoryIsOpen(p))continue;
+    const t=byId.get(p.technician_id);if(!t)continue;
+    const eta=String(p.estimated_delivery||'').slice(0,10),validETA=/^\d{4}-\d{2}-\d{2}$/.test(eta);
+    for(const type of BRACKET_TYPES){const n=inventoryRemaining(p,type);t[`_incoming_${type}`]+=n;if(n>0&&validETA){t[`_overdue_${type}`]||=eta<today;if(!t[`_eta_${type}`]||eta<t[`_eta_${type}`])t[`_eta_${type}`]=eta;}}
+  }
   for(const o of wireOrders||[]){
     if(!o.technician_id || o.credited) continue;
     if(!NOT_DELIVERED.has((o.status||'in_route').toLowerCase())) continue;
@@ -13492,9 +13544,9 @@ async function renderGreeting(){
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
     }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
-    const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
+    const bracketPending=role==='owner' && rest[0] ? inventoryPendingRows(rest[0].pending) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
-    if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
+    if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].open_orders)||[], (rest[3]&&rest[3].orders)||[]);
     const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
@@ -14152,6 +14204,7 @@ document.addEventListener('visibilitychange', ()=>{
   if(Date.now()-lastSessionRefresh>5*60*1000) refreshSessionCache();
   try{
     if(section==='schedule' && calMode==='jobs') pollScheduleIfChanged();
+    else if(section==='brackets')refreshInventorySnapshot();
     else if(onScreen('analytics')||onScreen('handyman')){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
     else if(onScreen('webanalytics')){ if(typeof loadWebAnalytics==='function' && !webLoading) loadWebAnalytics(); }
   }catch(_){/* refresh-on-return is best-effort */}
