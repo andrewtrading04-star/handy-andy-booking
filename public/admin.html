@@ -1316,6 +1316,28 @@
     border:1px solid rgba(255,120,120,.55);color:#ffdada;cursor:pointer;white-space:normal;text-align:center;
     max-width:100%;transition:background .15s;}
   .gstat-warn:hover{background:rgba(239,68,68,.34);}
+  /* Secretary conversion card (see secretaryConversionHtml). Bare -- no bg/
+     border of its own -- so it reads as part of the same dark greeting hero
+     rather than a separate box stacked below it. */
+  .conv-card{margin:0 auto;max-width:820px;width:100%;text-align:center;display:grid;grid-template-columns:180px minmax(0,1fr);align-items:center;column-gap:32px;row-gap:14px;}
+  .conv-head{min-width:0;}
+  .conv-summary{text-align:center;margin-bottom:10px;}
+  .conv-eyebrow{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:#fff;opacity:.92;}
+  .conv-pct{font-family:ui-monospace,monospace;font-size:40px;font-weight:700;
+    letter-spacing:-.025em;line-height:1;margin-top:6px;transition:color .25s ease;
+    font-variant-numeric:tabular-nums;}
+  .conv-stats{display:flex;justify-content:space-evenly;gap:20px;flex-wrap:wrap;margin:0;}
+  .conv-stat{display:flex;flex-direction:column;gap:5px;}
+  .conv-lab{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.13em;
+    text-transform:uppercase;color:#fff;opacity:.72;white-space:nowrap;}
+  .conv-val{font-family:ui-monospace,monospace;font-size:17px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;}
+  .conv-track{grid-column:1/-1;position:relative;height:9px;border-radius:5px;background:rgba(0,0,0,.28);}
+  .conv-fill{height:100%;border-radius:5px;transition:width .3s ease,background .25s ease,box-shadow .25s ease;}
+  .conv-foot{grid-column:1/-1;display:flex;justify-content:space-between;gap:14px;margin-top:0;flex-wrap:wrap;
+    font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.11em;
+    text-transform:uppercase;color:#fff;opacity:.72;}
+  @media (max-width:520px){ .conv-pct{font-size:38px;} }
   /* Temporary note inside the greeting banner (auto-expires) */
   /* Critical alert (e.g. a job with no address) — impossible to miss, all roles. */
   .crit-alert{background:#b91c1c;border:2px solid #ff6b6b;border-radius:12px;padding:14px 16px;margin:0 0 14px;color:#fff;animation:critpulse 1.4s ease-in-out infinite;}
@@ -1440,6 +1462,27 @@
   .payrep .pr-warn .m{ color:#92660b; font-size:12px; border-left:3px solid var(--amber); padding-left:10px; line-height:1.5; }
   .payrep .pr-defer-amt{ color:var(--amber); font-weight:700; white-space:nowrap; }
   .payrep .pr-empty{ color:var(--mute); font-size:13px; padding:18px 0; text-align:center; }
+
+/* ── Notes ─────────────────────────────────────────────────────────────── */
+#noteBanner{display:flex;flex-direction:column;gap:10px}
+#noteBanner:not(:empty){margin-bottom:14px}
+.note-card{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--amber);border-radius:12px;padding:14px 16px}
+.note-x{flex:none;width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--bg);
+  color:var(--ink);font-size:18px;line-height:1;cursor:pointer;font-family:inherit}
+.note-x:hover{background:var(--line)}
+.note-x:disabled{opacity:.5;cursor:default}
+.note-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.note-row:last-child{border-bottom:0}
+.note-pill{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:4px 8px;border-radius:6px;white-space:nowrap}
+.note-pill.read{background:rgba(22,163,74,.14);color:#16a34a}
+.note-pill.wait{background:rgba(217,119,6,.14);color:var(--amber)}
+.note-pill.done{background:rgba(120,120,120,.16);color:var(--mute)}
+.note-del{flex:none;background:none;border:0;color:var(--mute);font-size:14px;cursor:pointer;padding:4px}
+.note-del:hover{color:#b91c1c}
+.note-del:disabled{opacity:.4;cursor:default}
+@media(max-width:600px){.conv-card{grid-template-columns:1fr;gap:12px;}.conv-pct{font-size:34px;}.conv-stats{gap:12px;justify-content:center;}.conv-lab,.conv-foot{font-size:9px;}}
 </style>
 <!-- Stripe.js — loaded up front so "Change card" / charge flows always have
      window.Stripe available (previously only the New Booking flow loaded it
@@ -1579,7 +1622,7 @@
       </div>
     </div>
 
-    <div class="view-scroll"><nav id="hubNavigation" aria-label="Section navigation" hidden></nav><div id="view"></div></div>
+    <div class="view-scroll"><div id="noteBanner"></div><nav id="hubNavigation" aria-label="Section navigation" hidden></nav><div id="view"></div></div>
   </main>
 </div>
 
@@ -1870,7 +1913,8 @@ let anchorDate = '';           // 'YYYY-MM-DD' anchor for the displayed week/day
 let filterArea = '';           // '' = all territories, else service_area id
 let filterTech = 'all';        // all | unassigned | tech id
 let pollTimer = null;
-let alertTimer = null;         // interval handle for the bad-review alert banner
+let alertTimer = null;
+let noteTimer=null;         // interval handle for the bad-review alert banner
 let sessionTimer = null;       // sliding-session refresh (see refreshSessionCache)
 let lastSessionRefresh = 0;
 
@@ -2389,6 +2433,11 @@ function enterApp(){
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
   loadBadAlerts();
+  // Notes ride alongside the bad-review alerts: paint once on sign-in, then
+  // re-check every few minutes so a note posted mid-shift appears without a reload.
+  noteBanner();
+  if(noteTimer) clearInterval(noteTimer);
+  noteTimer=setInterval(()=>{ if(document.hidden) return; noteBanner(); }, 180000);
   if(alertTimer) clearInterval(alertTimer);
   alertTimer=setInterval(()=>{ if(document.hidden) return; loadBadAlerts(); }, 180000);
   // Slide the session while the dashboard is open and visible (see
@@ -8201,6 +8250,133 @@ async function renderTechnicians(){
   }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
 
+// ── Notes ───────────────────────────────────────────────────────────────────
+// Two halves of one feature. noteBanner() paints whatever the CURRENT user
+// still has to read at the top of every screen, so a secretary cannot miss it
+// by sitting on the wrong tab; renderNotes() is the owner's side — write one,
+// see who has read it. Ticking a note off records a read rather than deleting,
+// so a note aimed at both secretaries is cleared by each of them separately.
+const NOTE_MODE_LABEL={ today:'Today only', two_days:'Today & tomorrow', until_read:'Until ticked off' };
+
+async function noteBanner(){
+  const host=document.getElementById('noteBanner');
+  if(!host) return;
+  let notes=[];
+  try{ const d=await api('notes_active'); notes=d.notes||[]; }
+  catch(_){ host.innerHTML=''; return; }   // never let a notes outage block the dashboard
+  if(!notes.length){ host.innerHTML=''; return; }
+  host.innerHTML=notes.map(n=>`
+    <div class="note-card" data-note="${esc(n.id)}">
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:5px;">
+          From ${esc(n.created_by||'Owner')} · ${esc(noteWhen(n.created_at))}
+        </div>
+        <div style="font-size:14.5px;line-height:1.5;white-space:pre-wrap;">${esc(n.body)}</div>
+      </div>
+      <button class="note-x" data-noteread="${esc(n.id)}" title="Mark as read" aria-label="Mark note as read">×</button>
+    </div>`).join('');
+  host.querySelectorAll('[data-noteread]').forEach(b=>{
+    b.onclick=async()=>{
+      const id=b.getAttribute('data-noteread');
+      const card=b.closest('.note-card');
+      card.style.opacity='.4'; b.disabled=true;
+      try{ await api('notes_read',{ method:'POST', body:{ id } }); card.remove(); if(!host.children.length) host.innerHTML=''; }
+      catch(err){ card.style.opacity='1'; b.disabled=false; toast(err.message||'Could not mark that read'); }
+    };
+  });
+}
+function noteWhen(iso){
+  try{ return new Date(iso).toLocaleString('en-US',{ timeZone:tz(), month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); }
+  catch(_){ return ''; }
+}
+
+async function renderNotes(){
+  const view=document.getElementById('view');
+  view.innerHTML=`<div class="wrap">
+    <button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>
+    <h2 style="margin:0 0 4px;">Notes</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:16px;">Anything the secretaries need to know. It shows on their dashboard until they tick it off.</div>
+
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:660px;">
+      <label for="noteBody" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">NOTE</label>
+      <textarea id="noteBody" rows="3" maxlength="2000" placeholder="Anything they need to know today…"
+        style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:11px 13px;resize:vertical;"></textarea>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:flex-end;">
+        <div style="flex:1;min-width:150px;">
+          <label for="noteTarget" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">FOR</label>
+          <select id="noteTarget" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;">
+            <option value="">Both secretaries</option>
+            <option value="handy-andy">Handy Andy only</option>
+            <option value="doms">Dom's only</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:150px;">
+          <label for="noteMode" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">SHOW</label>
+          <select id="noteMode" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;">
+            <option value="today">Today only</option>
+            <option value="two_days">Today &amp; tomorrow</option>
+            <option value="until_read">Until ticked off</option>
+          </select>
+        </div>
+        <button class="btn" id="notePost" style="width:auto;">Post note</button>
+      </div>
+    </div>
+
+    <h3 style="margin:24px 0 8px;font-size:15px;">Recent</h3>
+    <div id="notesRecent" class="empty">Loading…</div>
+  </div>`;
+  document.getElementById('notesBack').onclick=()=>renderOther();
+  document.getElementById('notePost').onclick=async()=>{
+    const bodyEl=document.getElementById('noteBody');
+    const text=bodyEl.value.trim();
+    if(!text){ bodyEl.focus(); return; }
+    const btn=document.getElementById('notePost'); btn.disabled=true; btn.textContent='Posting…';
+    try{
+      await api('notes_add',{ method:'POST', body:{
+        body:text,
+        target:document.getElementById('noteTarget').value||null,
+        mode:document.getElementById('noteMode').value } });
+      bodyEl.value=''; await loadNotesRecent(); noteBanner();
+      toast('Note posted');
+    }catch(err){ toast(err.message||'Could not post that note'); }
+    finally{ btn.disabled=false; btn.textContent='Post note'; }
+  };
+  loadNotesRecent();
+}
+
+async function loadNotesRecent(){
+  const wrap=document.getElementById('notesRecent');
+  if(!wrap) return;
+  try{
+    const d=await api('notes_list');
+    const notes=d.notes||[];
+    if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
+    wrap.className='';
+    wrap.innerHTML=notes.map(n=>{
+      const who=n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'Both';
+      const reads=n.reads||[];
+      const pill=reads.length
+        ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
+        : (n.live ? '<span class="note-pill wait">Unread</span>' : '<span class="note-pill done">Expired unread</span>');
+      return `<div class="note-row">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
+          <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(who)} · ${esc(NOTE_MODE_LABEL[n.mode]||n.mode)} · ${esc(noteWhen(n.created_at))}</div>
+        </div>
+        ${pill}
+        <button class="note-del" data-notedel="${esc(n.id)}" title="Delete note" aria-label="Delete note">🗑</button>
+      </div>`;
+    }).join('');
+    wrap.querySelectorAll('[data-notedel]').forEach(b=>{
+      b.onclick=async()=>{
+        b.disabled=true;
+        try{ await api('notes_delete',{ method:'POST', body:{ id:b.getAttribute('data-notedel') } }); await loadNotesRecent(); noteBanner(); }
+        catch(err){ b.disabled=false; toast(err.message||'Could not delete that'); }
+      };
+    });
+  }catch(err){ wrap.className='empty'; wrap.textContent=err.message||'Could not load notes'; }
+}
+
 // ── "Other" tab: a home for occasional tools (currently Disputes) ────────────
 async function renderOther(){
   const view=document.getElementById('view');
@@ -8208,6 +8384,10 @@ async function renderOther(){
     <h2 style="margin:0 0 4px;">Other</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:16px;">Occasional tools and back-office tasks.</div>
     <div style="display:flex;flex-direction:column;gap:10px;max-width:520px;">
+      <div id="otherNotes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">📌 Notes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Leave a note for the secretaries. It sits on their dashboard until they tick it off, and you can see who read it.</div></div>
+        <div style="display:flex;align-items:center;gap:8px;"><span id="otherNotesCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
+      </div>
       <div id="otherDisputes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🛡️ Disputes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Respond to card chargebacks using the signed authorization on file.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDispCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
@@ -8234,6 +8414,7 @@ async function renderOther(){
       </div>
     </div>
   </div>`;
+  document.getElementById('otherNotes').onclick=()=>renderNotes();
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
   document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
@@ -8243,6 +8424,11 @@ async function renderOther(){
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
   // visible from anywhere in the dashboard, not only once you open this tab.
+  try{
+    const n=await api('notes_list');
+    const liveN=(n.notes||[]).filter(x=>x.live && !(x.reads||[]).length).length;
+    const c=document.getElementById('otherNotesCount'); if(c) c.textContent=liveN?`${liveN} unread`:'';
+  }catch(_){}
   let dispN=0, secN=0;
   try{
     const d=await api('disputes',{ params:{ business:current.slug }});
@@ -13480,7 +13666,7 @@ async function renderGreeting(){
       reqs.push(api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}).catch(()=>({purchases:[]})));
       reqs.push(api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})));
     }
-    // Secretary conversion gauge (Handy Andy / Doms only -- my_call_performance
+    // Secretary conversion card (Handy Andy / Doms only -- my_call_performance
     // 403s any other scope, see api/admin.js). Two non-overlapping trailing
     // 7-day windows off the SAME endpoint the "My Call Performance" screen
     // already uses, so this reads exactly the same calls with exactly the
@@ -13672,11 +13858,11 @@ function paintGreeting(){
   // second dash so it cannot be misread as part of the trend clause.
   const ownerRiskTxt = riskParts.length ? ` · ${riskParts.join(', ')}` : '';
   const ownerSentence = `Profit <b class="gm-big">${money(weekProfit)}</b>${trendTxt}${ownerRiskTxt}`;
-  // Handy Andy / Doms secretaries get the conversion gauge below instead of
-  // the routine "N jobs today" count -- same "only speak up when something
-  // needs attention" rule the owner's line already follows above. The
-  // routine job count is dropped; estimates and review calls stay since
-  // those are actions she still has to take, not just a status readout.
+  // Handy Andy / Doms secretaries get the conversion card below instead of the
+  // routine "N jobs today" count -- same "only speak up when something needs
+  // attention" rule the owner's line already follows above. Estimates and
+  // review calls stay in the text line since those are still actions she has
+  // to take, not just a status readout the card already covers.
   const hasCallPerf = !!(greetingData.callPerf && greetingData.callPerf.thisWeek);
   const quietParts=[];
   if(est>0) quietParts.push(estPart);
@@ -13697,7 +13883,7 @@ function paintGreeting(){
     // "Good afternoon <name>" header and the "Today is… It's currently…"
     // phrasing were dropped at the owner's request; he reads this many times
     // a day and wanted the facts, not the pleasantries.
-    `<div class="greet-line greet-main">${esc(dateStr)}. <b class="gm-big">${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`+
+    (hasCallPerf && role!=='owner' ? (summarySentence ? `<div class="greet-line conv-summary">${summarySentence}</div>` : '') : `<div class="greet-line greet-main">${esc(dateStr)}. <b class="gm-big">${esc(timeStr)}</b> ${esc(greetCity(z))}. ${summarySentence}</div>`)+
     secretaryConversionHtml()+
     greetStatsHtml()+
     greetNoteHtml();
@@ -14024,45 +14210,48 @@ function ndpChartHtml(cached){
   const svg=incomeChartSvg(history, 1500, 'week', 'days', 44);
   return `<div class="ndp-scroll">${svg}</div>`;
 }
-// Secretary conversion gauge: a needle dial + calls/booked score, re-anchored
-// to a rolling 7-day average (one slow morning can't swing it) with an arrow
-// against the PRIOR 7-day window, same pattern as the owner's profit trend
-// above. Reuses my_call_performance's own booked/conversion math (see
-// renderGreeting) so this can never disagree with the My Call Performance
-// screen or the owner's ranking about the same week.
+// Secretary conversion card -- one merged dark-hero card: the 7-day rate is
+// the headline, a true 0-100 bar glows the same hue as the number (red at or
+// below 25%, ramping through amber near 40%, full green at 50% and flat
+// above -- 50% and 90% read the same). Replaces the old
+// semicircular needle gauge per Andrew's approved spec (conversion-bar-spec.pdf).
+// Reuses my_call_performance's own booked/conversion math (see renderGreeting
+// above) so this can never disagree with the My Call Performance screen or
+// the owner's cross-staff ranking about the same week's numbers.
+function convHue(p){
+  if (p <= 25) return 2;                          // red, flat
+  if (p <= 40) return 2  + (p - 25) / 15 * 50;     // red   -> amber
+  if (p <= 50) return 52 + (p - 40) / 10 * 100;    // amber -> green
+  return 152;                                      // green, flat from here up
+}
 function secretaryConversionHtml(){
   const cp=greetingData && greetingData.callPerf;
   if(!cp || !cp.thisWeek) return '';
   const tw=cp.thisWeek, lw=cp.lastWeek;
-  const pct=Number(tw.conversion)||0;
-  const lastPct=lw ? (Number(lw.conversion)||0) : null;
-  const angle=-90 + (Math.min(100,Math.max(0,pct))/100)*180;
-  const trendHtml = lastPct==null ? '' : (()=>{
-    const delta=Math.round((pct-lastPct)*10)/10;
-    const up=delta>=0;
-    return `<div class="gstat-s ${up?'up':'down'}">${up?'&#8593;':'&#8595;'} ${Math.abs(delta)} pts vs last week's ${lastPct}%</div>`;
+  const p=Number(tw.conversion)||0;
+  const prev=(lw && lw.calls) ? (Number(lw.conversion)||0) : null;
+  const h=convHue(p);
+  const color=`hsl(${h} 70% 56%)`, glow=`hsl(${h} 70% 56% / .45)`;
+  const fillW=Math.max(0,Math.min(100,p));
+  const deltaHtml = prev==null ? '' : (()=>{
+    const delta=Math.round((p-prev)*10)/10, up=delta>=0;
+    return `<div class="conv-stat"><span class="conv-lab">vs last week</span>
+      <span class="conv-val" style="color:${up?'#5ef0a0':'#ff9b9b'};">${up?'+':''}${delta.toFixed(1)} pts</span></div>`;
   })();
-  return `<div class="greet-stats" style="grid-template-columns:1fr;margin-top:14px;">
-    <div class="gstat" style="flex-direction:row;align-items:center;gap:18px;text-align:left;">
-      <svg width="104" height="60" viewBox="0 0 132 76" role="img" aria-label="Seven-day conversion rate ${pct}%">
-        <path d="M10,70 A56,56 0 0,1 33.7,26.3" fill="none" stroke="#ff8a8a" stroke-width="10" stroke-linecap="round"/>
-        <path d="M33.7,26.3 A56,56 0 0,1 66,14" fill="none" stroke="#ffc85e" stroke-width="10" stroke-linecap="round"/>
-        <path d="M66,14 A56,56 0 0,1 122,70" fill="none" stroke="#5ef0a0" stroke-width="10" stroke-linecap="round"/>
-        <line x1="66" y1="14" x2="66" y2="4" stroke="rgba(255,255,255,.5)" stroke-width="2"/>
-        <g style="transform:rotate(${angle}deg);transform-origin:66px 70px;">
-          <line x1="66" y1="70" x2="66" y2="22" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-          <circle cx="66" cy="70" r="5" fill="#fff"/>
-        </g>
-      </svg>
-      <div style="min-width:0;">
-        <span class="gstat-l">Conversion, 7-day average</span>
-        <div style="display:flex;align-items:baseline;gap:10px;margin-top:2px;flex-wrap:wrap;">
-          <span class="gstat-v" style="font-size:26px;">${pct}%</span>
-          <span style="font-size:12px;opacity:.8;">${tw.calls} call${tw.calls===1?'':'s'} &middot; ${tw.booked} booked, 7 days</span>
-        </div>
-        ${trendHtml}
-      </div>
+  const z=greetingData.tz||tz();
+  const whenStr=`${esc(greetCity(z))} · ${esc(new Date().toLocaleDateString('en-US',{timeZone:z,weekday:'short'}))} ${esc(new Date().toLocaleTimeString('en-US',{timeZone:z,hour:'numeric',minute:'2-digit'}))}`;
+  return `<div class="conv-card">
+    <div class="conv-head"><div class="conv-eyebrow">Conversion · 7 day</div>
+    <div class="conv-pct" style="color:${color};">${p.toFixed(1)}%</div></div>
+    <div class="conv-stats">
+      <div class="conv-stat"><span class="conv-lab">Calls received</span><span class="conv-val">${tw.calls}</span></div>
+      <div class="conv-stat"><span class="conv-lab">Calls booked</span><span class="conv-val">${tw.booked}</span></div>
+      ${deltaHtml}
     </div>
+    <div class="conv-track">
+      <div class="conv-fill" style="width:${fillW}%;background:${color};box-shadow:0 0 9px 1px ${glow},0 0 22px 3px ${glow};"></div>
+    </div>
+    <div class="conv-foot"><span>7-day rolling</span><span>${whenStr}</span></div>
   </div>`;
 }
 function greetStatsHtml(){

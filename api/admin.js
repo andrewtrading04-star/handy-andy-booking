@@ -523,6 +523,11 @@ export default async function handler(req, res) {
       case 'secretary_changes':      return await secretaryChanges(req, res, db, auth);
       case 'secretary_changes_seen': return await secretaryChangesSeen(req, res, db, auth, body);
       case 'secretaries_list': return await secretariesList(req, res, db, auth);
+      case 'notes_active': return await notesActive(req, res, db, auth);
+      case 'notes_read':   return await notesRead(req, res, db, auth, body);
+      case 'notes_list':   return await notesList(req, res, db, auth);
+      case 'notes_add':    return await notesAdd(req, res, db, auth, body);
+      case 'notes_delete': return await notesDelete(req, res, db, auth, body);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       // Two-way SMS (migration 0109). Deliberately NO owner gate on any of
@@ -13497,6 +13502,120 @@ async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
 // GET — owner-only feed of secretary schedule changes, newest first, with an
 // unread count for the nav badge. Read-only; marking read is a separate POST
 // so simply opening the page doesn't silently clear the badge.
+// ── Daily notes for the secretaries ─────────────────────────────────────────
+// The owner leaves a note; it sits on the secretary's dashboard until she
+// ticks it off. A tick writes a read row rather than deleting anything, so the
+// note survives, the owner can see who read it and when, and a note aimed at
+// both secretaries can be cleared by each of them independently.
+// "Today" is Denver's date, not the server's — a note written at 11pm Bangkok
+// belongs to the Denver day the office is actually working.
+function denverToday() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
+}
+// Who is ticking notes off. Secretaries are scoped to one business, so their
+// slug is a stable fallback when the session carries no display name.
+function noteReader(auth) {
+  return (auth.name || auth.scope || auth.role || 'office').toString();
+}
+// A note is live if its window still covers today. 'until_read' has no end —
+// that is the point of it: it stays until somebody actually acknowledges it.
+function noteIsLive(n, today) {
+  if (n.show_from > today) return false;
+  if (n.mode === 'until_read') return true;
+  const span = n.mode === 'two_days' ? 1 : 0;
+  const end = new Date(n.show_from + 'T00:00:00Z');
+  end.setUTCDate(end.getUTCDate() + span);
+  return today <= end.toISOString().slice(0, 10);
+}
+
+// GET — the notes the CURRENT user still has to read. Owner sees the same feed
+// so they can check what the office is looking at right now.
+async function notesActive(req, res, db, auth) {
+  const today = denverToday();
+  const reader = noteReader(auth);
+  const { data, error } = await db.from('staff_notes')
+    .select('id, target_slug, body, mode, show_from, created_by, created_at')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(100);
+  if (error) throw error;
+
+  const { data: reads } = await db.from('staff_note_reads').select('note_id').eq('reader', reader);
+  const seen = new Set((reads || []).map(r => r.note_id));
+
+  const notes = (data || [])
+    .filter(n => !seen.has(n.id))
+    .filter(n => auth.role === 'owner' || !n.target_slug || n.target_slug === auth.scope)
+    .filter(n => noteIsLive(n, today));
+
+  return res.status(200).json({ notes, count: notes.length });
+}
+
+// POST { id } — tick one off. Anyone signed in may clear their own copy.
+async function notesRead(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('staff_note_reads')
+    .upsert({ note_id: id, reader: noteReader(auth), read_at: new Date().toISOString() },
+            { onConflict: 'note_id,reader' });
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// GET — owner's own view: what was sent recently and who has read it.
+async function notesList(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const today = denverToday();
+  const { data, error } = await db.from('staff_notes')
+    .select('id, target_slug, body, mode, show_from, created_by, created_at')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (error) throw error;
+
+  const ids = (data || []).map(n => n.id);
+  let readsBy = {};
+  if (ids.length) {
+    const { data: reads } = await db.from('staff_note_reads')
+      .select('note_id, reader, read_at').in('note_id', ids);
+    (reads || []).forEach(r => { (readsBy[r.note_id] = readsBy[r.note_id] || []).push(r); });
+  }
+  const notes = (data || []).map(n => ({
+    ...n,
+    live: noteIsLive(n, today),
+    reads: (readsBy[n.id] || []).map(r => ({ reader: r.reader, read_at: r.read_at })),
+  }));
+  return res.status(200).json({ notes });
+}
+
+// POST { body, target, mode } — write one.
+async function notesAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const text = (body.body || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Write something first' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
+  const target = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+  const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
+  const { data, error } = await db.from('staff_notes')
+    .insert({ body: text, target_slug: target, mode, show_from: denverToday(), created_by: auth.name || 'Owner' })
+    .select('id').maybeSingle();
+  if (error) throw error;
+  return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// POST { id } — pull a note back. Soft delete, so its read history survives.
+async function notesDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('staff_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
 async function secretaryChanges(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const { data, error } = await db.from('secretary_schedule_changes')
