@@ -153,6 +153,14 @@ export async function mirrorBooking(ctx = {}) {
         // or a nested object into every booking-list read that loads metadata.
         ...(typeof ctx.landing_page === 'string' && ctx.landing_page ? { landing_page: ctx.landing_page.slice(0, 300) } : {}),
         ...(typeof ctx.traffic_source === 'string' && ctx.traffic_source ? { traffic_source: ctx.traffic_source.slice(0, 300) } : {}),
+        // source_page: the market page that sent the customer to /book (see
+        // widget.js SOURCE); admin.js analyticsOverview credits the booking to
+        // that market. Same hostile-caller rules: path-shaped strings only.
+        ...(typeof ctx.source_page === 'string' && /^\/[A-Za-z0-9/_.~-]{0,299}$/.test(ctx.source_page)
+          ? { source_page: ctx.source_page,
+              ...(['referrer', 'last_page'].includes(ctx.source_page_basis) ? { source_page_basis: ctx.source_page_basis } : {}) }
+          : {}),
+        ...(typeof ctx.site_session_id === 'string' && /^session_\d{13}_[a-z0-9]{1,12}$/.test(ctx.site_session_id) ? { site_session_id: ctx.site_session_id } : {}),
       },
     };
     let booking_id = null;

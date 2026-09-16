@@ -32,7 +32,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech } from './_lib/availability.js';
-import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
+import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
 import { gscQuery } from './_lib/gsc.js';
@@ -3516,6 +3516,7 @@ async function bookingCreate(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const c = body.customer || {};
   if (!c.name && !c.phone) return res.status(400).json({ error: 'Customer name or phone required' });
+  if (c.name && hasDigits(c.name)) return res.status(400).json({ error: 'Please enter a name using letters only — no numbers.' });
   console.log(`[admin] booking create: biz=${biz.slug} customer email=${c.email ? 'present' : 'ABSENT'} phone=${c.phone ? 'present' : 'absent'}`);
 
   // Idempotency: the dashboard sends one key per booking attempt. A double-submit
@@ -5949,7 +5950,7 @@ async function analyticsOverview(req, res, db, auth) {
   const bookingsByBiz = new Map(); // business_id -> [{ city, created_at, cancelled, internal }]
   {
     const { data: bkRows, error: bkErr } = await db.from('bookings')
-      .select('business_id, created_at, status, city, metadata, customer:customers ( email, phone )')
+      .select('business_id, created_at, status, city, state, metadata, customer:customers ( email, phone )')
       .eq('source', 'widget')
       .gte('created_at', since);
     if (bkErr) throw bkErr;
@@ -5963,7 +5964,7 @@ async function analyticsOverview(req, res, db, auth) {
       const landing_page = (bk.metadata && bk.metadata.landing_page) || null;
       const source_page = (bk.metadata && bk.metadata.source_page) || null;
       if (!bookingsByBiz.has(bk.business_id)) bookingsByBiz.set(bk.business_id, []);
-      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page, source_page, created_at: bk.created_at, cancelled, internal });
+      bookingsByBiz.get(bk.business_id).push({ city: bk.city, state: bk.state, landing_page, source_page, created_at: bk.created_at, cancelled, internal });
       if (internal) { e.internal++; continue; }
       if (cancelled) { e.cancelled++; continue; }
       e.kept++;
@@ -6051,19 +6052,37 @@ async function analyticsOverview(req, res, db, auth) {
       //      before Golden), so unattributed bookings go to the metro row the
       //      way they always did, and a sub-page only gets what its page sent.
       const normPath = p => { const s = String(p || '').trim(); return s ? (s.replace(/\/+$/, '') || '/') : null; };
-      const marketByPath = new Map(), marketByCity = new Map();
+      // City keys are city+state first (e.g. "pasadena|tx") so two markets that
+      // both list a same-named city in different states (Houston and LA both
+      // have a Pasadena) don't collide; city-only stays as a fallback for
+      // bookings with no state on file.
+      const marketByPath = new Map(), marketByCityState = new Map(), marketByCity = new Map();
       b.analytics_config.markets.forEach((m, i) => {
         for (const p of (m.paths || [])) { const k = normPath(p); if (k && !marketByPath.has(k)) marketByPath.set(k, i); }
-        for (const c of (m.cities || [])) { const k = String(c).toLowerCase().trim(); if (k && !marketByCity.has(k)) marketByCity.set(k, i); }
+        for (const c of (m.cities || [])) {
+          const city = String(c).toLowerCase().trim();
+          if (!city) continue;
+          if (!marketByCity.has(city)) marketByCity.set(city, i);
+          if (m.state) { const k = `${city}|${String(m.state).toLowerCase().trim()}`; if (!marketByCityState.has(k)) marketByCityState.set(k, i); }
+        }
       });
+      // The metro row a leftover booking lands on when neither its page nor its
+      // city match anything configured -- the FIRST market in config order
+      // (metro before sub-page), matching how an unattributed booking has
+      // always been credited. Never left unmatched: a booking that matches
+      // nothing would silently vanish from both this row and the portfolio
+      // total instead of just being imprecisely placed.
+      const catchAllIdx = 0;
       const bookingMarket = bkAll.map(bk => {
         for (const cand of [bk.source_page, bk.landing_page]) {
           const k = normPath(cand);
           if (k && k !== '/book' && marketByPath.has(k)) return { idx: marketByPath.get(k), basis: 'page' };
         }
-        const c = String(bk.city || '').toLowerCase().trim();
-        if (c && marketByCity.has(c)) return { idx: marketByCity.get(c), basis: 'city' };
-        return null;
+        const city = String(bk.city || '').toLowerCase().trim();
+        const state = String(bk.state || '').toLowerCase().trim();
+        if (city && state && marketByCityState.has(`${city}|${state}`)) return { idx: marketByCityState.get(`${city}|${state}`), basis: 'city' };
+        if (city && marketByCity.has(city)) return { idx: marketByCity.get(city), basis: 'city' };
+        return { idx: catchAllIdx, basis: 'unattributed' };
       });
 
       for (const [mIdx, m] of b.analytics_config.markets.entries()) {
@@ -6098,7 +6117,7 @@ async function analyticsOverview(req, res, db, auth) {
         }
         // Bookings credited to this market by the one-market-per-booking pass above.
         const bookingsNa = false;
-        let kept = 0, cancelled = 0, internal = 0, keptByCity = 0;
+        let kept = 0, cancelled = 0, internal = 0, keptByCity = 0, keptUnattributed = 0;
         const bookingsByDay = new Map();
         bkAll.forEach((bk, i) => {
           const hit = bookingMarket[i];
@@ -6107,6 +6126,7 @@ async function analyticsOverview(req, res, db, auth) {
           if (bk.cancelled) { cancelled++; return; }
           kept++;
           if (hit.basis === 'city') keptByCity++;
+          else if (hit.basis === 'unattributed') keptUnattributed++;
           const d = String(bk.created_at).slice(0, 10);
           bookingsByDay.set(d, (bookingsByDay.get(d) || 0) + 1);
         });
@@ -6127,7 +6147,8 @@ async function analyticsOverview(req, res, db, auth) {
           book_by_day: dayKeys.map(d => (bookByDay.get(d) ? bookByDay.get(d).size : 0)),
           bookings_na: bookingsNa,
           bookings_30d: kept,
-          bookings_by_city_30d: keptByCity, // of bookings_30d, credited by city because the page is unknown
+          bookings_by_city_30d: keptByCity, // of bookings_30d, page unknown but service city matched this market
+          bookings_unattributed_30d: keptUnattributed, // of bookings_30d, neither page nor city matched anything — landed on the catch-all row
           bookings_cancelled_30d: cancelled,
           bookings_internal_30d: internal,
           bookings_by_day: dayKeys.map(d => bookingsByDay.get(d) || 0),
@@ -6440,8 +6461,10 @@ async function customerUpdate(req, res, db, auth, body) {
 
   const patch = {};
   if (body.name !== undefined) {
-    if (!String(body.name).trim()) return res.status(400).json({ error: 'Name is required' });
-    patch.name = String(body.name).trim();
+    const name = String(body.name).trim();
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (hasDigits(name)) return res.status(400).json({ error: 'Please enter a name using letters only — no numbers.' });
+    patch.name = name;
   }
   if (body.phone !== undefined) patch.phone = body.phone ? String(body.phone).trim() : null;
   if (body.email !== undefined) patch.email = body.email ? String(body.email).trim() : null;

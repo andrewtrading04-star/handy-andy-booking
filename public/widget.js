@@ -270,6 +270,47 @@
     } catch (e) {}
     try { return window.location.pathname; } catch (e) { return null; }
   })();
+  // The market page that sent this booking, for the analytics Overview.
+  // LANDING_PAGE above falls back to "/book" when there is no usable referrer,
+  // which says nothing; SOURCE never does. In order:
+  //   1. same-origin referrer page (not /book or /thankyou) -- basis 'referrer'
+  //   2. the last page the ihandyandy.com site tracker saw in this browser,
+  //      localStorage 'ha_last_page' (written in ihandyandy-site
+  //      app/layout.tsx), if under 24h old -- basis 'last_page'
+  //   3. null
+  // Replayed on the 30 days before 2026-09-17, 1+2 cover about 94% of bookings.
+  const SOURCE = (() => {
+    const clean = (p) => { let s = String(p || ''); while (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1); return s || null; };
+    const here = clean(window.location.pathname);
+    // /handyman-booking and /book-assurion are booking-hop pages, not market
+    // pages: /handyman-booking embeds this widget's own estimate.html in an
+    // iframe whose "TV Mounting" tile top-navigates to /book, so it can show
+    // up as a referrer or as ha_last_page and must be skipped the same way
+    // /book and /thankyou are, or it overwrites the real market page.
+    const SKIP = ['/book', '/handyman-booking', '/book-assurion'];
+    const usable = (p) => !!p && p !== here && SKIP.indexOf(p) < 0 && p.indexOf('/thankyou') !== 0;
+    try {
+      if (document.referrer) {
+        const ref = new URL(document.referrer);
+        if (ref.hostname.replace(/^www\./, '') === location.hostname.replace(/^www\./, '')) {
+          const p = clean(ref.pathname);
+          if (usable(p)) return { page: p, basis: 'referrer' };
+        }
+      }
+    } catch (e) {}
+    try {
+      const lp = JSON.parse(localStorage.getItem('ha_last_page') || 'null');
+      const p = lp && typeof lp.p === 'string' ? clean(lp.p) : null;
+      if (usable(p) && typeof lp.t === 'number' && Date.now() - lp.t < 24 * 60 * 60 * 1000) return { page: p, basis: 'last_page' };
+    } catch (e) {}
+    return { page: null, basis: null };
+  })();
+  // The site tracker's per-browser id (public.web_events.session_id), so a
+  // booking can be joined to its visit history exactly instead of by timing.
+  const SITE_SESSION_ID = (() => {
+    try { const s = localStorage.getItem('analytics_session_id') || ''; return /^session_\d{13}_[a-z0-9]{1,12}$/.test(s) ? s : null; }
+    catch (e) { return null; }
+  })();
   async function logEvent(event_type, step_name, value = null, error_message = null) {
     try {
       const loc = resolveLocation();
@@ -2435,6 +2476,9 @@
     couponCode=root.querySelector('#c-coupon')?.value.trim().toUpperCase()||'';
     // SMS-consent checkbox — opt-in, not required to book; recorded with the order.
     const smsConsent=!!(root.querySelector('#c-sms-consent')||{}).checked;
+    if(!customer.first_name){logEvent('form_error','customer',null,'missing first name');return alert('Please enter your first name.');}
+    if(!customer.last_name){logEvent('form_error','customer',null,'missing last name');return alert('Please enter your last name.');}
+    if(/\d/.test(customer.first_name)||/\d/.test(customer.last_name)){logEvent('form_error','customer',null,'digits in name');return alert('Please enter your name using letters only — no numbers.');}
     if(!customer.email){logEvent('form_error','customer',null,'missing email');return alert('Please enter your email address.');}
     if(!customer.phone){logEvent('form_error','customer',null,'missing phone');return alert('Please enter your phone number.');}
     if(!customer.address){logEvent('form_error','customer',null,'missing address');return alert('Please enter your street address.');}
@@ -2648,6 +2692,7 @@
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
       landing_page:LANDING_PAGE, traffic_source:TRAFFIC_SOURCE,
+      source_page:SOURCE.page, source_page_basis:SOURCE.basis, site_session_id:SITE_SESSION_ID,
       ...(NATIVE&&{business:BUSINESS}),
       // Denver 98"+ → require & auto-assign 2 technicians
       ...(needsTwoTechs()&&{min_providers_needed:'2',assignment_method:'auto'}),
