@@ -9692,15 +9692,6 @@ async function renderMyCallPerformance(){
       <span class="gstat-v" style="${color?`color:${color};`:''}">${esc(value)}</span>
       ${sub?`<span class="gstat-s">${esc(sub)}</span>`:''}</div>`;
 
-  if(!d.calls){
-    view.innerHTML=`<div class="wrap">
-      <div class="rc-head"><div><h2 class="rc-title">📞 My Call Performance</h2>
-        <div class="rc-sub">No calls taken through the phone script in this range yet.</div></div></div>
-      <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div></div>`;
-    view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
-    return;
-  }
-
   // Same thresholds the owner's Performance table uses for its rate column, so
   // a number that reads green to her reads green to him.
   const convColor = d.conversion>=50?'#15803d':d.conversion>=30?'#b45309':'#b91c1c';
@@ -9718,6 +9709,19 @@ async function renderMyCallPerformance(){
         <b>${x.booked}</b>/${x.calls} · ${x.conversion}%</div>
     </div>`;
   }).join('') || '<div class="empty">No calls in this range yet.</div>';
+  const audit=d.audit||{audited:0,script_score:null,flagged:0,questions:[],notes:[]};
+  const auditStat=(label,value,sub,color)=>`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:13px 15px;min-width:145px;flex:1;">
+    <div style="font-size:12px;color:var(--mute);font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${esc(label)}</div>
+    <div style="font-size:25px;font-weight:800;line-height:1.1;margin-top:4px;color:${color||'var(--ink)'};">${esc(value)}</div>
+    ${sub?`<div style="font-size:12px;color:var(--mute);margin-top:3px;">${esc(sub)}</div>`:''}</div>`;
+  const auditLabel=key=>String(key||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  const auditQuestions=(audit.questions||[]).map(q=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px;">
+    <span>${esc(auditLabel(q.key))}</span><span style="color:#9a6700;font-weight:700;white-space:nowrap;">Missed ${esc(q.no)} of ${esc(q.asked)}</span></div>`).join('');
+  const auditNotes=(audit.notes||[]).map(n=>`<div style="padding:12px 0;border-bottom:1px solid var(--line2);">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px;color:var(--mute);margin-bottom:5px;">
+      <span>${esc(n.audited_by||'Jiyah')}’s note · ${esc(n.audit_date||'')}</span>
+      ${n.flagged?'<span style="color:#b42318;font-weight:700;">Flagged</span>':''}</div>
+    <div style="font-size:13px;line-height:1.45;color:var(--ink);">${esc(n.notes)}</div></div>`).join('');
 
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div>
@@ -9732,6 +9736,20 @@ async function renderMyCallPerformance(){
       ${stat('Conversion', (d.conversion||0)+'%', 'calls that became jobs', convColor)}
       ${stat('Booked value', money(d.booked_value||0), `${esc(money(d.avg_quote||0))} average quote`)}
     </div>
+
+    <section style="margin:0 0 22px;">
+      <div class="rc-count" style="margin-bottom:8px;">Jiyah’s audit feedback</div>
+      <div style="font-size:13px;color:var(--mute);margin-bottom:10px;">Your script reviews and coaching notes for this period.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        ${auditStat('Script score',audit.script_score==null?'—':audit.script_score+'%',audit.audited?`across ${audit.audited} review${audit.audited===1?'':'s'}`:'No reviews yet','#315ad7')}
+        ${auditStat('Calls reviewed',String(audit.audited||0),'Jiyah’s completed audits')}
+        ${auditStat('Flagged',String(audit.flagged||0),audit.flagged?'Calls to revisit':'No flagged calls',audit.flagged?'#b42318':'#15803d')}
+      </div>
+      ${(audit.questions||[]).length||auditNotes?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+        ${(audit.questions||[]).length?`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;"><div style="font-size:13px;font-weight:800;padding:10px 0 6px;">Coaching focus</div>${auditQuestions}</div>`:''}
+        ${auditNotes?`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;"><div style="font-size:13px;font-weight:800;padding:10px 0 6px;">Jiyah’s notes</div>${auditNotes}</div>`:''}
+      </div>`:`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;color:var(--mute);font-size:13px;">No audit feedback has been added for this period yet.</div>`}
+    </section>
 
     <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(click a day to see the calls)</span></div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
