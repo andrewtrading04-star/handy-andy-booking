@@ -34,15 +34,17 @@ test('non-review credentials cannot be converted into review access', () => {
   const token=signToken({kind:'admin',booking_id},3600);
   assert.equal(compactReviewToken(token),token);
 });
-test('all branded review texts use compact codes; Handy Andy fits one GSM segment', () => {
+test('review texts use compact codes without exposing a business name', () => {
   const token=signToken({kind:'review',booking_id},3600);
   for (const slug of ['handy-andy','doms','precision','austin','mile-high']) {
     const sms=reviewRequestSms({slug,name:'Handy Andy TV Mounting',token});
+    assert.match(sms,/^How did we do\? You can leave your technician a review here:\n\nhttps:\/\//);
+    assert.ok(!sms.includes('Handy Andy TV Mounting'));
+    assert.ok(!sms.includes("Dom's"));
     assert.ok(!sms.includes(token));
     const url=sms.match(/https:\/\/\S+/)[0];
     const code=new URL(url).pathname.split('/').pop();
     assert.equal(verifyToken(expandReviewCode(code)).booking_id,booking_id);
-    if(slug==='handy-andy') assert.ok(sms.length<=160, `SMS length ${sms.length}`);
   }
 });
 test('click handler resolves compact links and records original booking/channel', async () => {

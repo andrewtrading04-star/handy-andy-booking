@@ -9345,7 +9345,7 @@ async function renderAnalyticsHub(){
 const CAU_RANGES={
   today:     { days:1,  offset:0,  label:'Today' },
   yesterday: { days:1,  offset:-1, label:'Yesterday' },
-  '7':       { days:7,  offset:0,  label:'Past 7 days' },
+  '7':       { days:7,  offset:0,  label:'Last 7 days' },
   '30':      { days:30, offset:0,  label:'Last 30 days' },
 };
 let _cauRange='30';
@@ -9675,7 +9675,8 @@ function aiVoiceBadge(status){
 // Her own picker is just 7/30 -- Today/Yesterday come from CAU_RANGES too but
 // aren't offered here; Andrew asked for those two only.
 const MP_RANGES={ '7':CAU_RANGES['7'], '30':CAU_RANGES['30'] };
-let _mpRange='30';
+// This matches the rolling 7-day conversion number on the secretary dashboard.
+let _mpRange='7';
 async function renderMyCallPerformance(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
@@ -19747,7 +19748,9 @@ async function refreshSessionCache(){
   }
 }
 
-if(token && businesses.length){ enterApp(); refreshSessionCache(); }
+// Never paint a cached owner list for a secretary or View As session. The live
+// session check applies the current assignment map before any business appears.
+if(token && businesses.length && role==='owner'){ enterApp(); refreshSessionCache(); }
 else tryAutoLogin();
 </script>
 </body>

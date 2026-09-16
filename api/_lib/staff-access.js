@@ -33,18 +33,14 @@ export const SECRETARY_EXTRA_BUSINESSES = {
 // Every business slug a token may act on: its primary scope plus any extras.
 // Owner ('all') is unrestricted, and returns null meaning "apply no filter".
 //
-// The extras are derived from the LIVE map above, not only from the token:
-// admin tokens are long-lived, and reading the token alone means an
-// already-open dashboard keeps exactly its old access until the person logs
-// out and back in — which reads as "none of the changes are showing" (this
-// happened to Joey the day this was built). The token's own `allowed` list is
-// still honoured too (union), so a View As session behaves identically either
-// way.
+// The list is derived only from the LIVE map above. Tokens last for a while;
+// accepting an old token's `allowed` claim would let a reassigned secretary
+// keep seeing a former business until the token expired. A View As session
+// still behaves identically because it uses this same map.
 export function allowedSlugsFor(auth) {
   if (!auth || auth.scope === 'all') return null;
   const fromScope = SECRETARY_EXTRA_BUSINESSES[auth.scope] || [];
-  const fromToken = Array.isArray(auth.allowed) ? auth.allowed : [];
-  return [auth.scope, ...new Set([...fromScope, ...fromToken])].filter(Boolean);
+  return [auth.scope, ...new Set(fromScope)].filter(Boolean);
 }
 
 // The gate every business-scoped action goes through.

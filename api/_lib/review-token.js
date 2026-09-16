@@ -13,7 +13,6 @@
 // the moment a token is actually needed, so no creation path can ever quietly
 // opt a customer out of review requests again.
 import { signToken, verifyToken } from './auth.js';
-import { smsBrandName } from './sms.js';
 import { compactReviewToken } from './review-code.js';
 
 export const REVIEW_TOKEN_TTL = 2592000; // 30 days, same as bookingCreate always used
@@ -106,15 +105,12 @@ const REVIEW_LINK_PREFIX = {
 
 // The customer-facing review-request text. One template for all three
 // senders (tech app completion in api/tech.js; dashboard completion and the
-// Reviews-tab resend in api/admin.js), so the A2P campaign sample can't drift
-// from what actually goes out. No STOP line: the campaign was approved
-// 2026-09-15 and every automated text already carries the brand name plus
-// opt-out instructions elsewhere (site footer, the widget's own consent
-// text), so this reads as a live two-way exchange rather than a cold blast —
-// same call already made for staff Messages replies.
+// Reviews-tab resend in api/admin.js), so the wording cannot drift between
+// senders. Review requests deliberately omit the business name: after service,
+// the customer only needs one clear action and the review link.
 export function reviewRequestSms({ slug, name, token, clickUrl }) {
   const prefix = REVIEW_LINK_PREFIX[slug];
   const code = token ? compactReviewToken(token) : null;
   const link = prefix && code ? `${prefix}${encodeURIComponent(code)}` : clickUrl;
-  return `${smsBrandName(slug, name)}: How did we do? Leave your technician a review here: ${link}`;
+  return `How did we do? You can leave your technician a review here:\n\n${link}`;
 }
