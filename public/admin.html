@@ -12365,6 +12365,18 @@ function estCard(e){
   // quote exists, and nothing to do at all once declined.
   const canSend=hasQuote&&e.status!=='declined';
   const isApproved=!!e.approved_at;
+  // Per-channel "already sent" — texted_at/emailed_at (migration 0112) say
+  // exactly which channel went out. An estimate sent before that migration
+  // only has the combined legacy contacted_at with no way to tell which
+  // channel it was, so treat that as BOTH sent rather than leaving one
+  // button looking like nothing has gone out yet.
+  const legacySentUnknownChannel=!!(e.contacted_at&&!e.texted_at&&!e.emailed_at);
+  const textSent=!!e.texted_at||legacySentUnknownChannel;
+  const emailSent=!!e.emailed_at||legacySentUnknownChannel;
+  // Once the priced quote has actually reached the customer (by either
+  // channel) or they've approved it, this estimate is no longer a "maybe" —
+  // deleting it or calling it "not a fit" doesn't make sense anymore.
+  const engaged=isApproved||textSent||emailSent;
   const buildLabel=hasQuote?'Edit quote':'Build quote';
   const approvedAt=e.approved_at?new Date(e.approved_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   // Add-ons the customer accepted on the interactive estimate — enumerated on the
@@ -12422,12 +12434,12 @@ function estCard(e){
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <span class="est-status-badge" style="font-size:13px;font-weight:600;color:${EST_COLOR[e.status]||'#16181d'};">${esc(EST_STATUS[e.status]||e.status)}</span>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
-        ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${isApproved?'ghost':''} sm" data-est-sms="${e.id}" title="Send SMS quote">Send text</button>`:''}
-        ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${isApproved?'ghost':''} sm" data-est-email="${e.id}" title="Send email quote">Send email</button>`:''}
+        ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${(isApproved||textSent)?'ghost':''} sm" data-est-sms="${e.id}" title="${textSent?'Text the quote to the customer again':'Send SMS quote'}">${textSent?'Resend text':'Send text'}</button>`:''}
+        ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${(isApproved||emailSent)?'ghost':''} sm" data-est-email="${e.id}" title="${emailSent?'Email the quote to the customer again':'Send email quote'}">${emailSent?'Resend email':'Send email'}</button>`:''}
         ${canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
-        ${e.status!=='declined'?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
-        <button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>
+        ${(!engaged&&e.status!=='declined')?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
+        ${!engaged?`<button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>`:''}
       </span>
     </div>
   </div>`;
