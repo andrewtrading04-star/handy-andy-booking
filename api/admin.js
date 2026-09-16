@@ -11262,9 +11262,10 @@ async function myCallPerformance(req, res, db, auth) {
   const tz = (bizRows && bizRows[0] && bizRows[0].timezone) || 'America/Denver';
   const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
   const to = dayStr(offset), from = dayStr(offset - (days - 1));
+  const emptyAudit = { audited: 0, script_score: null, flagged: 0, questions: [], notes: [] };
   const empty = {
     name, from, to, days, calls: 0, booked: 0, not_booked: 0, estimates: 0,
-    conversion: 0, booked_value: 0, avg_quote: 0, daily: [],
+    conversion: 0, booked_value: 0, avg_quote: 0, daily: [], audit: emptyAudit,
   };
   // Should never happen -- both slugs are seeded business rows every other part
   // of this file assumes exist -- but failing closed with an empty report beats
@@ -11276,13 +11277,24 @@ async function myCallPerformance(req, res, db, auth) {
   // mixed in. The window is [from 00:00, to 24:00) in the BUSINESS timezone.
   const since = localDayStartUTC(tz, offset - (days - 1));
   const until = localDayStartUTC(tz, offset + 1);
-  const { data: calls, error } = await db.from('calls')
-    .select('handled_by, resolution, booking_id, quoted_total, occurred_at, reached_step')
-    .eq('business_id', bizId).eq('kind', 'live')
-    .eq('handled_by', name)
-    .gte('occurred_at', since.toISOString())
-    .lt('occurred_at', until.toISOString());
+  // Audits are queried with the same business, person, and date boundaries as
+  // the performance data. Those values come only from the secretary token, so
+  // changing browser parameters cannot expose another secretary's feedback.
+  const [{ data: calls, error }, { data: audits, error: auditError }] = await Promise.all([
+    db.from('calls')
+      .select('handled_by, resolution, booking_id, quoted_total, occurred_at, reached_step')
+      .eq('business_id', bizId).eq('kind', 'live')
+      .eq('handled_by', name)
+      .gte('occurred_at', since.toISOString())
+      .lt('occurred_at', until.toISOString()),
+    db.from('call_audits')
+      .select('id, audit_date, time_local, answers, flagged, notes, audited_by')
+      .eq('business_id', bizId).eq('handled_by', name)
+      .gte('audit_date', from).lte('audit_date', to)
+      .order('audit_date', { ascending: false }),
+  ]);
   if (error) throw error;
+  if (auditError) throw auditError;
   // Same worked-the-script gate as callAnalytics (owner rule, 2026-08-25): an
   // opened-and-abandoned greet screen is a misclick, not a call, and must not
   // drag this person's own conversion number down. Keep the two definitions
@@ -11317,6 +11329,36 @@ async function myCallPerformance(req, res, db, auth) {
     });
   }
 
+  let auditYes = 0, auditNo = 0, flagged = 0;
+  const auditQuestions = {};
+  for (const audit of (audits || [])) {
+    if (audit.flagged) flagged++;
+    for (const [key, answer] of Object.entries(audit.answers || {})) {
+      if (answer !== 'yes' && answer !== 'no') continue;
+      auditYes += answer === 'yes' ? 1 : 0;
+      auditNo += answer === 'no' ? 1 : 0;
+      const question = auditQuestions[key] || (auditQuestions[key] = { key, asked: 0, no: 0 });
+      question.asked++;
+      if (answer === 'no') question.no++;
+    }
+  }
+  const audit = {
+    audited: (audits || []).length,
+    script_score: auditYes + auditNo ? Math.round(100 * auditYes / (auditYes + auditNo)) : null,
+    flagged,
+    questions: Object.values(auditQuestions)
+      .map(q => ({ ...q, fail_rate: q.asked ? Math.round(100 * q.no / q.asked) : 0 }))
+      .filter(q => q.no > 0)
+      .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked)
+      .slice(0, 3),
+    // Notes are the only individual audit records a secretary receives. Caller
+    // details and audit records belonging to anyone else never leave the API.
+    notes: (audits || []).filter(a => a.notes).slice(0, 12).map(a => ({
+      id: a.id, audit_date: a.audit_date, time_local: a.time_local,
+      notes: a.notes, flagged: !!a.flagged, audited_by: a.audited_by || 'Jiyah',
+    })),
+  };
+
   return res.status(200).json({
     name, from, to, days,
     calls: rows.length,
@@ -11324,7 +11366,7 @@ async function myCallPerformance(req, res, db, auth) {
     conversion: rows.length ? Math.round((booked / rows.length) * 1000) / 10 : 0,
     booked_value: Math.round(bookedValue),
     avg_quote: quotedCount ? Math.round(quotedTotal / quotedCount) : 0,
-    daily,
+    daily, audit,
   });
 }
 
