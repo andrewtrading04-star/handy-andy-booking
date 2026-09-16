@@ -12410,9 +12410,14 @@ function estCard(e){
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);
+  // Status reads as a label on the card, not as one more thing in the row of
+  // action buttons below (where it used to sit and looked like a stray
+  // button with nothing to click). 'new' keeps the existing urgency pill
+  // (age/stale); every other status gets a plain colored status pill here
+  // instead.
   const agePill = e.status==='new'
     ? `<span class="age-pill ${stale?'stale':'ok'}">${stale?`⚠ ${fmtWaitMinutes(estAgeMinutes(e))} — respond now`:`${fmtWaitMinutes(estAgeMinutes(e))} ago`}</span>`
-    : '';
+    : `<span class="age-pill" style="background:${EST_COLOR[e.status]||'#e5e7eb'}22;color:${EST_COLOR[e.status]||'#16181d'};">${esc(EST_STATUS[e.status]||e.status)}</span>`;
   return `<div class="job est-card${stale?' stale':''}${isWeb?' est-card-web':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
@@ -12432,7 +12437,6 @@ function estCard(e){
     <div class="row est-foot">
       <span class="meta" style="font-size:12px;">${e.sms_consent!==true?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <span class="est-status-badge" style="font-size:13px;font-weight:600;color:${EST_COLOR[e.status]||'#16181d'};">${esc(EST_STATUS[e.status]||e.status)}</span>
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
         ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${(isApproved||textSent)?'ghost':''} sm" data-est-sms="${e.id}" title="${textSent?'Text the quote to the customer again':'Send SMS quote'}">${textSent?'Resend text':'Send text'}</button>`:''}
         ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${(isApproved||emailSent)?'ghost':''} sm" data-est-email="${e.id}" title="${emailSent?'Email the quote to the customer again':'Send email quote'}">${emailSent?'Resend email':'Send email'}</button>`:''}
