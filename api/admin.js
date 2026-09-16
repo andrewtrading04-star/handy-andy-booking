@@ -5961,8 +5961,9 @@ async function analyticsOverview(req, res, db, auth) {
       // landing_page lives inside metadata jsonb, not a top-level column — see
       // mirror.js bookingRow.metadata.landing_page.
       const landing_page = (bk.metadata && bk.metadata.landing_page) || null;
+      const source_page = (bk.metadata && bk.metadata.source_page) || null;
       if (!bookingsByBiz.has(bk.business_id)) bookingsByBiz.set(bk.business_id, []);
-      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page, created_at: bk.created_at, cancelled, internal });
+      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page, source_page, created_at: bk.created_at, cancelled, internal });
       if (internal) { e.internal++; continue; }
       if (cancelled) { e.cancelled++; continue; }
       e.kept++;
@@ -6038,7 +6039,34 @@ async function analyticsOverview(req, res, db, auth) {
       const bkAll = bookingsByBiz.get(b.id) || [];
       const out = [];
       const dedup = { visitors: new Set(), book: new Set(), bookByDay: new Map() };
-      for (const m of b.analytics_config.markets) {
+
+      // Each booking is credited to exactly ONE market, decided up front so no
+      // booking is ever counted twice (Denver and Golden share a city list).
+      //   1. By page: metadata.source_page (the market page that sent them to
+      //      /book), else metadata.landing_page when it's a real page. "/book"
+      //      itself says nothing — every market links to the same /book page.
+      //   2. By city, only when the page is unknown: the FIRST market in config
+      //      order whose cities include the booking city. Config lists the
+      //      metro page before its sub-page (Houston before Greenway, Denver
+      //      before Golden), so unattributed bookings go to the metro row the
+      //      way they always did, and a sub-page only gets what its page sent.
+      const normPath = p => { const s = String(p || '').trim(); return s ? (s.replace(/\/+$/, '') || '/') : null; };
+      const marketByPath = new Map(), marketByCity = new Map();
+      b.analytics_config.markets.forEach((m, i) => {
+        for (const p of (m.paths || [])) { const k = normPath(p); if (k && !marketByPath.has(k)) marketByPath.set(k, i); }
+        for (const c of (m.cities || [])) { const k = String(c).toLowerCase().trim(); if (k && !marketByCity.has(k)) marketByCity.set(k, i); }
+      });
+      const bookingMarket = bkAll.map(bk => {
+        for (const cand of [bk.source_page, bk.landing_page]) {
+          const k = normPath(cand);
+          if (k && k !== '/book' && marketByPath.has(k)) return { idx: marketByPath.get(k), basis: 'page' };
+        }
+        const c = String(bk.city || '').toLowerCase().trim();
+        if (c && marketByCity.has(c)) return { idx: marketByCity.get(c), basis: 'city' };
+        return null;
+      });
+
+      for (const [mIdx, m] of b.analytics_config.markets.entries()) {
         const paths = (m.paths || []).map(p => p.replace(/\/+$/, '') || '/');
         const visitors = new Set(), bookVisitors = new Set();
         const byDay = new Map(), bookByDay = new Map();
@@ -6068,27 +6096,20 @@ async function analyticsOverview(req, res, db, auth) {
           }
           if (!lastSeen || (e.last && e.last > lastSeen)) lastSeen = e.last;
         }
-        // Bookings land in a market by the page the customer actually booked
-        // from (bookings.landing_page, captured by the widget at boot — see
-        // widget.js LANDING_PAGE / book.js), not by service city. Two markets
-        // can share the exact same metro and city list (Denver + Golden both
-        // serve Denver-area zips) and still need separate credit: whoever's
-        // page sent the visitor to /book gets the booking, full stop.
-        const pathSet = new Set(paths);
-        const bookingsNa = pathSet.size === 0;
-        let kept = 0, cancelled = 0, internal = 0;
+        // Bookings credited to this market by the one-market-per-booking pass above.
+        const bookingsNa = false;
+        let kept = 0, cancelled = 0, internal = 0, keptByCity = 0;
         const bookingsByDay = new Map();
-        if (!bookingsNa) for (const bk of bkAll) {
-          let lp;
-          try { lp = String(bk.landing_page || '').replace(/\/+$/, '') || null; }
-          catch { lp = null; }
-          if (!lp || !pathSet.has(lp)) continue;
-          if (bk.internal) { internal++; continue; }
-          if (bk.cancelled) { cancelled++; continue; }
+        bkAll.forEach((bk, i) => {
+          const hit = bookingMarket[i];
+          if (!hit || hit.idx !== mIdx) return;
+          if (bk.internal) { internal++; return; }
+          if (bk.cancelled) { cancelled++; return; }
           kept++;
+          if (hit.basis === 'city') keptByCity++;
           const d = String(bk.created_at).slice(0, 10);
           bookingsByDay.set(d, (bookingsByDay.get(d) || 0) + 1);
-        }
+        });
         const v = visitors.size;
         out.push({
           slug: `${b.slug}::${String(m.name).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -6106,6 +6127,7 @@ async function analyticsOverview(req, res, db, auth) {
           book_by_day: dayKeys.map(d => (bookByDay.get(d) ? bookByDay.get(d).size : 0)),
           bookings_na: bookingsNa,
           bookings_30d: kept,
+          bookings_by_city_30d: keptByCity, // of bookings_30d, credited by city because the page is unknown
           bookings_cancelled_30d: cancelled,
           bookings_internal_30d: internal,
           bookings_by_day: dayKeys.map(d => bookingsByDay.get(d) || 0),

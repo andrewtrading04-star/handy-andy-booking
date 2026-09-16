@@ -5511,7 +5511,7 @@ function drawAnaOverview(){
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
-              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};" title="${b.bookings_na?'Not attributable: this market has no landing pages configured':''}">${b.bookings_na?'—':(b.bookings_30d||0).toLocaleString()}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};" title="${b.bookings_na?'Not attributable: this market has no landing pages configured':(b.bookings_by_city_30d?`${b.bookings_by_city_30d} of these credited by service city (the page they came from wasn't captured); the rest by the page they booked from`:'')}">${b.bookings_na?'—':(b.bookings_30d||0).toLocaleString()}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5550,10 +5550,11 @@ function drawAnaOverview(){
         everyone who landed on that metro's pages, measured from full site
         analytics; every other row counts people who opened the booking widget.
         The two are not directly comparable, but <b>Reached /book</b> and
-        <b>Booked</b> are. Bookings land in a market by the page the customer
-        was actually on when they booked, not by service city — so two markets
-        serving the same metro (Denver and Golden, Houston and Greenway) each
-        get credit only for what their own page converted.</div>
+        <b>Booked</b> are. A booking is credited to the market page the customer
+        came from before the booking page. When that page wasn't captured, it's
+        credited by service city to the metro row (HA Denver, HA Houston), never
+        to a sub-page like HA Golden or HA Greenway, so no booking counts twice.
+        Hover a Booked number to see how many were credited by city.</div>
       <div style="margin-top:5px;">Counts on non-market rows come from the
         booking-widget tracking script, so they cover pages carrying that script
         — not raw web traffic to every URL on the domain.</div>
