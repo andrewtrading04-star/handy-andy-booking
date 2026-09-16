@@ -10720,14 +10720,15 @@ function msgDetailHtml(t){
   const who=t.customer_name || t.customer_phone_pretty;
   const key=msgKey(t.our_phone, t.customer_phone);
   let html='<div class="msg-dhead">'
+    +'<div class="msg-conversation-brand">'+msgBrandChip(t)+'</div>'
     +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
     +'<div style="min-width:0;">'
-    +'<div style="margin-bottom:6px;">'+msgBrandChip(t)+'</div>'
     +'<div style="display:flex;align-items:center;gap:4px;">'
     +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">←</button>'
     +'<h2 class="rc-title" style="font-size:18px;margin:0;">'+esc(who)+'</h2>'
     +'</div>'
-    +'<div class="rc-sub">'+esc(t.customer_phone_pretty)+' · '+msgLineNote(t)
+    +'<div class="rc-sub">Customer phone: '+esc(t.customer_phone_pretty||t.customer_phone)+'</div>'
+    +'<div class="rc-sub">Sending line: '+(t.notify_line?'Automated Texts · Shared across businesses':esc(t.our_phone_pretty||t.our_phone))
     +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
     +'</div></div>'
     +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
@@ -10805,9 +10806,8 @@ function msgBrandChip(t){
 function msgLineNote(t){
   // The shared 888 line belongs to no brand, so show it by name rather than
   // as a number customers might try to call back.
-  let s = t.notify_line ? 'to No reply Line' : 'to '+esc(t.our_phone_pretty||t.our_phone);
-  if(t.notify_line) s+=(t.brand_source_label?' · company from '+esc(t.brand_source_label):'');
-  else if(t.business_name) s+=' · '+esc(t.business_name)+' line';
+  let s = t.notify_line ? 'via Automated Texts' : 'to '+esc(t.our_phone_pretty||t.our_phone);
+  if(!t.notify_line&&t.business_name) s+=' · '+esc(t.business_name)+' line';
   if(t.brand_others&&t.brand_others.length) s+=' · <span style="color:#92400e;font-weight:600;">also a customer of '+esc(t.brand_others.join(', '))+'</span>';
   return s;
 }
