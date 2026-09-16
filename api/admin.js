@@ -5949,7 +5949,7 @@ async function analyticsOverview(req, res, db, auth) {
   const bookingsByBiz = new Map(); // business_id -> [{ city, created_at, cancelled, internal }]
   {
     const { data: bkRows, error: bkErr } = await db.from('bookings')
-      .select('business_id, created_at, status, city, customer:customers ( email, phone )')
+      .select('business_id, created_at, status, city, landing_page, customer:customers ( email, phone )')
       .eq('source', 'widget')
       .gte('created_at', since);
     if (bkErr) throw bkErr;
@@ -5959,7 +5959,7 @@ async function analyticsOverview(req, res, db, auth) {
       const internal = isInternalContact(bk.customer);
       const cancelled = bk.status === 'cancelled';
       if (!bookingsByBiz.has(bk.business_id)) bookingsByBiz.set(bk.business_id, []);
-      bookingsByBiz.get(bk.business_id).push({ city: bk.city, created_at: bk.created_at, cancelled, internal });
+      bookingsByBiz.get(bk.business_id).push({ city: bk.city, landing_page: bk.landing_page, created_at: bk.created_at, cancelled, internal });
       if (internal) { e.internal++; continue; }
       if (cancelled) { e.cancelled++; continue; }
       e.kept++;
@@ -6037,7 +6037,6 @@ async function analyticsOverview(req, res, db, auth) {
       const dedup = { visitors: new Set(), book: new Set(), bookByDay: new Map() };
       for (const m of b.analytics_config.markets) {
         const paths = (m.paths || []).map(p => p.replace(/\/+$/, '') || '/');
-        const cities = new Set((m.cities || []).map(c => String(c).toLowerCase()));
         const visitors = new Set(), bookVisitors = new Set();
         const byDay = new Map(), bookByDay = new Map();
         let lastSeen = null, events = 0;
@@ -6066,16 +6065,21 @@ async function analyticsOverview(req, res, db, auth) {
           }
           if (!lastSeen || (e.last && e.last > lastSeen)) lastSeen = e.last;
         }
-        // Bookings land in a market by the service city on the job. A market
-        // with no cities (the homepage) has nothing to attribute: those
-        // visitors' jobs land in whichever metro they booked, so it reports
-        // "not applicable" rather than a zero that reads as a dead funnel.
-        const bookingsNa = cities.size === 0;
+        // Bookings land in a market by the page the customer actually booked
+        // from (bookings.landing_page, captured by the widget at boot — see
+        // widget.js LANDING_PAGE / book.js), not by service city. Two markets
+        // can share the exact same metro and city list (Denver + Golden both
+        // serve Denver-area zips) and still need separate credit: whoever's
+        // page sent the visitor to /book gets the booking, full stop.
+        const pathSet = new Set(paths);
+        const bookingsNa = pathSet.size === 0;
         let kept = 0, cancelled = 0, internal = 0;
         const bookingsByDay = new Map();
         if (!bookingsNa) for (const bk of bkAll) {
-          const city = String(bk.city || '').toLowerCase().trim();
-          if (!city || !cities.has(city)) continue;
+          let lp;
+          try { lp = String(bk.landing_page || '').replace(/\/+$/, '') || null; }
+          catch { lp = null; }
+          if (!lp || !pathSet.has(lp)) continue;
           if (bk.internal) { internal++; continue; }
           if (bk.cancelled) { cancelled++; continue; }
           kept++;

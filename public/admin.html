@@ -5511,7 +5511,7 @@ function drawAnaOverview(){
               <td class="num">${avg.toFixed(1)}</td>
               <td style="width:110px;">${anaSpark(b.visitors_by_day)}</td>
               <td class="num" style="font-weight:700;">${(b.book_visits_30d||0).toLocaleString()}</td>
-              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};" title="${b.bookings_na?'Not attributable: this page has no service city of its own, so its bookings land in the metro the customer booked':''}">${b.bookings_na?'—':(b.bookings_30d||0).toLocaleString()}</td>
+              <td class="num" style="font-weight:700;color:${(b.bookings_30d||0)?'#16a34a':'var(--mute)'};" title="${b.bookings_na?'Not attributable: this market has no landing pages configured':''}">${b.bookings_na?'—':(b.bookings_30d||0).toLocaleString()}</td>
               <td class="num" style="color:var(--mute);">${(b.events_30d||0).toLocaleString()}</td>
               <td style="color:var(--mute);">${esc(anaOverviewAgo(b.last_event))}</td>
             </tr>`;
@@ -5550,9 +5550,10 @@ function drawAnaOverview(){
         everyone who landed on that metro's pages, measured from full site
         analytics; every other row counts people who opened the booking widget.
         The two are not directly comparable, but <b>Reached /book</b> and
-        <b>Booked</b> are. Bookings land in a market by the service city on the
-        job, so the main-site row shows — for Booked: its visitors' jobs are
-        counted in whichever metro they booked.</div>
+        <b>Booked</b> are. Bookings land in a market by the page the customer
+        was actually on when they booked, not by service city — so two markets
+        serving the same metro (Denver and Golden, Houston and Greenway) each
+        get credit only for what their own page converted.</div>
       <div style="margin-top:5px;">Counts on non-market rows come from the
         booking-widget tracking script, so they cover pages carrying that script
         — not raw web traffic to every URL on the domain.</div>
