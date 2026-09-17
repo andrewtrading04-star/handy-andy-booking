@@ -44,10 +44,11 @@
   .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
   .city.hiring .st{color:#5eead4;}
   .city:not(.hiring) .st{color:var(--mute);}
-  .perks{display:flex;flex-direction:column;gap:10px;margin-bottom:24px;}
-  .perk{display:flex;gap:12px;align-items:flex-start;background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:13px 14px;}
-  .perk b{display:block;font-size:14.5px;margin-bottom:2px;}
-  .perk span{color:var(--mute);font-size:13px;line-height:1.45;}
+  .perks{display:flex;flex-direction:column;gap:16px;margin-bottom:26px;padding-top:4px;}
+  .perk{display:flex;gap:12px;align-items:flex-start;}
+  .perk .dot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:none;margin-top:8px;}
+  .perk b{display:block;font-size:15px;}
+  .perk span{color:var(--mute);font-size:13.5px;line-height:1.5;}
   /* Real screenshot of the tech app's Jobs screen -- same classes/colors as
      public/tech.html's own .jobc cards (navy-2 bg, orange time, bold name,
      muted meta), not a generic mockup, so this is honestly what a tech sees. */
@@ -165,12 +166,12 @@
       <div class="city hiring">Los Angeles<span class="st">Hiring now</span></div>
     </div>
     <div class="perks">
-      <div class="perk"><b>You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div>
-      <div class="perk"><b>$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div>
-      <div class="perk"><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div>
-      <div class="perk"><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div>
+      <div class="perk"><span class="dot"></span><div><b>You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div></div>
     </div>
-    <button class="btn" type="button" id="btnApply">Start application</button>
+    <button class="btn" type="button" id="btnApply">Apply for the job</button>
   </div>
 
   <div id="vVideo" class="hidden">
