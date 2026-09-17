@@ -20,7 +20,8 @@ import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendReviewBonusEarnedAlert, sendTechJoinedAlert } from './_lib/owner-notify.js';
-import { normalizeInviteCode, inviteState, inviteBrand, digits10, firstName, weakPin, welcomeSmsText, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
+import { normalizeInviteCode, newInviteCode, inviteState, inviteBrand, digits10, firstName, weakPin, welcomeSmsText, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
+import { publicQuestions, gradeAnswers, RETAKE_COOLDOWN_HOURS, HIRING } from './_lib/apply-quiz.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, saveCardOnFile, resolveChargeablePm, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
@@ -134,6 +135,12 @@ export default async function handler(req, res) {
     // session exists yet; the single-use invite code is the only credential.
     if (action === 'join_info') return await joinInfo(req, res);
     if (action === 'join_complete') return await joinComplete(req, res, body);
+    // Applicant screening quiz (migration 0114): public/apply.html. A pass
+    // mints an ordinary tech_invites row and the browser is handed off to
+    // /join?c=<code>, so account creation itself is 100% the existing,
+    // already-hardened join flow above -- nothing new there.
+    if (action === 'apply_start') return await applyStart(req, res, body);
+    if (action === 'apply_submit') return await applySubmit(req, res, body);
 
     const auth = verifyToken(getBearer(req));
     if (!auth || auth.kind !== 'tech') return res.status(401).json({ error: 'Unauthorized' });
@@ -2762,6 +2769,97 @@ async function joinComplete(req, res, body) {
     console.log(`[join] new tech ${t.id} ${slug}/${metro} ..${String(t.phone).slice(-4)} slots=${slots.length}`);
   }
   return res.status(200).json({ ok: true, token, technician, metro, unstaffed, slot_count: slotCount });
+}
+
+// ── Applicant screening quiz (migration 0114) ────────────────────────────────
+function simpleEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim()); }
+
+// Same name rule as join_complete's self-registered name (see its comment):
+// this is also the first time this string is chosen by whoever holds the
+// link, not typed by staff.
+function applicantName(raw) {
+  const name = String(raw || '').replace(/'/g, '’').replace(/\s+/g, ' ').trim();
+  return (name.length >= 2 && name.length <= 60 && /^[\p{L}\p{M}][\p{L}\p{M} .’-]*$/u.test(name)) ? name : null;
+}
+
+// True if this phone already took the quiz within the cooldown window --
+// checked before showing questions (fast "come back tomorrow") and again at
+// submit (authoritative, closes the race between two tabs).
+async function recentlyScreened(db, phone) {
+  const since = new Date(Date.now() - RETAKE_COOLDOWN_HOURS * 3600e3).toISOString();
+  const d10 = digits10(phone);
+  const { data, error } = await db.from('applicant_screenings')
+    .select('phone, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(500);
+  if (error) throw error;
+  return (data || []).some(r => digits10(r.phone) === d10);
+}
+const RETAKE_MSG = `You already took this test today. Come back after ${RETAKE_COOLDOWN_HOURS} hours and try again.`;
+
+async function applyStart(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const name = applicantName(body.name);
+  if (!name) return res.status(400).json({ field: 'name', error: 'Use letters only for your name (spaces, hyphens and apostrophes are fine).' });
+  if (!simpleEmail(body.email)) return res.status(400).json({ field: 'email', error: 'Enter a valid email address.' });
+  const phone = toE164(body.phone);
+  if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter your 10-digit US cell number.' });
+
+  const db = serviceClient();
+  if (await recentlyScreened(db, phone)) return res.status(409).json({ code: 'RETAKE_BLOCKED', error: RETAKE_MSG });
+  return res.status(200).json({ ok: true, ...publicQuestions() });
+}
+
+async function applySubmit(req, res, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const name = applicantName(body.name);
+  if (!name) return res.status(400).json({ field: 'name', error: 'Use letters only for your name (spaces, hyphens and apostrophes are fine).' });
+  if (!simpleEmail(body.email)) return res.status(400).json({ field: 'email', error: 'Enter a valid email address.' });
+  const phone = toE164(body.phone);
+  if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter your 10-digit US cell number.' });
+  const shortAnswers = {};
+  if (body.short_answers && typeof body.short_answers === 'object') {
+    for (const [k, v] of Object.entries(body.short_answers)) {
+      if (/^q(21|22)$/.test(k)) shortAnswers[k] = String(v || '').slice(0, 2000).trim();
+    }
+  }
+
+  const db = serviceClient();
+  if (await recentlyScreened(db, phone)) return res.status(409).json({ code: 'RETAKE_BLOCKED', error: RETAKE_MSG });
+
+  const { graded, score, total, passed } = gradeAnswers(body.answers);
+
+  let inviteCode = null;
+  if (passed) {
+    inviteCode = newInviteCode();
+    const { error: invErr } = await db.from('tech_invites').insert({
+      business_id: HIRING.businessId, service_area_id: HIRING.serviceAreaId, code: inviteCode,
+      invitee_name: name, invitee_phone: phone,
+      expires_at: new Date(Date.now() + 86400e3).toISOString(),   // 24h -- used immediately, right after passing
+      created_by: 'apply.html',
+    });
+    // A collision (e.g. this phone already has a pending invite from the
+    // owner) must not lose a passing applicant -- fall back to the existing
+    // pending invite's own code so they still hand off into /join.
+    if (invErr) {
+      console.error('[apply] tech_invites insert failed:', invErr.code, invErr.message);
+      const { data: existing } = await db.from('tech_invites')
+        .select('code, invitee_phone').eq('business_id', HIRING.businessId).eq('status', 'pending')
+        .not('invitee_phone', 'is', null).limit(200);
+      const match = (existing || []).find(r => digits10(r.invitee_phone) === digits10(phone));
+      inviteCode = match ? match.code : null;
+    }
+  }
+
+  try {
+    await db.from('applicant_screenings').insert({
+      business_id: HIRING.businessId, service_area_id: HIRING.serviceAreaId,
+      name, email: String(body.email).trim().toLowerCase(), phone,
+      answers: graded, short_answers: shortAnswers, score, total, passed,
+      invite_code: inviteCode,
+    });
+  } catch (e) { console.error('[apply] applicant_screenings insert failed:', e.message); }
+
+  console.log(`[apply] ${name} ..${phone.slice(-4)} ${score}/${total} -> ${passed ? 'passed' : 'failed'}`);
+  return res.status(200).json({ ok: true, passed, score, total, join_link: passed && inviteCode ? `/join?c=${inviteCode}` : null });
 }
 
 // computeJobPay picks rates by the tech's NAME (_lib/payroll.js isJuan /

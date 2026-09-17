@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0A1628">
+<title>Become a Handy Andy technician</title>
+<meta property="og:title" content="Become a Handy Andy technician">
+<meta property="og:description" content="Mount TVs, get paid, set your own hours. Take the quick screening test to apply.">
+<link rel="icon" type="image/svg+xml" href="/favicon-tech.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!--
+  Technician applicant funnel (migration 0114). Indeed sends applicants here.
+  Flow: benefits/cities -> intro video -> contact info -> quiz -> pass/fail.
+  A PASS hands the browser to /join?c=<code> (public/join.html), the same
+  already-hardened account-creation flow the owner's own invites use -- this
+  page never creates a technician itself. Styling mirrors join.html's tokens
+  so the whole path reads as one product.
+-->
+<style>
+  :root{--navy:#0A1628;--navy-2:#0f2036;--navy-3:#16304f;--orange:#FF6B35;--orange-d:#e85a28;
+    --ink:#e8eef6;--mute:#8aa0bd;--line:#1d3552;--green:#27c093;--red:#ff5d5d;
+    --font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --grad:linear-gradient(120deg,#ffb347 0%,#ff7a3d 50%,#ff4d7d 100%);}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{background:var(--navy);}
+  body{font-family:var(--font-sans);color:var(--ink);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
+  button{font-family:inherit;cursor:pointer;}
+  .hidden{display:none !important;}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;padding:calc(22px + env(safe-area-inset-top,0px)) 20px calc(28px + env(safe-area-inset-bottom,0px));}
+  .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
+  .brand{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.07em;margin-bottom:22px;}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none;}
+  h1{font-size:clamp(26px,7.2vw,32px);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin-bottom:10px;}
+  h2{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;}
+  .lead{color:var(--mute);font-size:15px;line-height:1.55;margin-bottom:20px;}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.45);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:800;margin-bottom:18px;}
+  .cities{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:22px;}
+  .city{background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;font-size:13.5px;font-weight:700;color:var(--mute);}
+  .city .st{display:block;font-size:11px;font-weight:700;margin-top:3px;}
+  .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
+  .city.hiring .st{color:#5eead4;}
+  .city:not(.hiring) .st{color:var(--mute);}
+  .perks{display:flex;flex-direction:column;gap:10px;margin-bottom:24px;}
+  .perk{display:flex;gap:12px;align-items:flex-start;background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:13px 14px;}
+  .perk b{display:block;font-size:14.5px;margin-bottom:2px;}
+  .perk span{color:var(--mute);font-size:13px;line-height:1.45;}
+  .btn{display:block;background:var(--orange);color:#fff;border:none;border-radius:12px;padding:17px;font-size:17px;font-weight:800;width:100%;text-align:center;text-decoration:none;}
+  .btn:active{background:var(--orange-d);} .btn:disabled{opacity:.45;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:700;margin-top:10px;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700;}
+  input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:15px 16px;font-size:17px;font-family:inherit;}
+  input:focus{outline:none;border-color:var(--orange);}
+  input.bad{border-color:var(--red);}
+  .err{color:var(--red);font-size:14px;margin:10px 0 0;min-height:20px;text-align:center;line-height:1.4;}
+  .step{font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
+  .video-frame{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;aspect-ratio:16/9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;margin-bottom:18px;}
+  .video-frame .play{width:52px;height:52px;border-radius:50%;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;}
+  .video-frame span{color:var(--mute);font-size:13.5px;padding:0 20px;text-align:center;}
+  .progress{height:5px;background:var(--navy-2);border-radius:3px;margin-bottom:22px;overflow:hidden;}
+  .progress i{display:block;height:5px;background:var(--orange);border-radius:3px;transition:width .2s;}
+  .progress-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mute);font-weight:700;margin-bottom:8px;}
+  .choices{display:flex;flex-direction:column;gap:9px;margin-bottom:22px;}
+  .choice{display:flex;align-items:center;gap:12px;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:14px 15px;font-size:15px;text-align:left;color:var(--ink);}
+  .choice .box{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;}
+  .choice.on{border-color:var(--orange);background:rgba(255,107,53,.1);}
+  .choice.on .box{border-color:var(--orange);background:var(--orange);}
+  textarea{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:14px 15px;font-size:15px;font-family:inherit;line-height:1.5;min-height:110px;resize:vertical;}
+  textarea:focus{outline:none;border-color:var(--orange);}
+  .done-ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:900;color:#fff;margin:14px auto 18px;}
+  .done-ic.pass{background:var(--green);} .done-ic.fail{background:var(--red);}
+  .center{text-align:center;}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite;margin:30vh auto 0;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media(prefers-reduced-motion:reduce){.spinner{animation:none;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="vLanding">
+    <div class="brand"><span class="dot"></span><span>Handy Andy</span></div>
+    <span class="badge">Currently hiring: Los Angeles</span>
+    <h1>Mount TVs. Get paid. No office, no boss standing over you.</h1>
+    <p class="lead">We send jobs straight to your phone through a simple app. Accept a job, go do it, get paid. No paperwork, no complicated software.</p>
+    <div class="cities">
+      <div class="city">Houston<span class="st">Not hiring</span></div>
+      <div class="city">Austin<span class="st">Not hiring</span></div>
+      <div class="city">Denver<span class="st">Not hiring</span></div>
+      <div class="city hiring">Los Angeles<span class="st">Hiring now</span></div>
+    </div>
+    <div class="perks">
+      <div class="perk"><b>You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div>
+      <div class="perk"><b>$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div>
+      <div class="perk"><b>Dead simple app</b><span>See the job, tap accept, get directions. That's it.</span></div>
+      <div class="perk"><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div>
+      <div class="perk"><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div>
+    </div>
+    <button class="btn" type="button" id="btnApply">Start application</button>
+  </div>
+
+  <div id="vVideo" class="hidden">
+    <div class="step">Step 1 of 3</div>
+    <h2>Before you apply</h2>
+    <p class="lead">A quick look at what working with us is actually like.</p>
+    <div class="video-frame">
+      <div class="play">▶</div>
+      <span>This is not a paid subscription. We send you the jobs — here's how it works, and how many to expect a week.</span>
+    </div>
+    <button class="btn" type="button" id="btnToContact">Continue</button>
+  </div>
+
+  <form id="vContact" class="hidden" novalidate>
+    <div class="step">Step 2 of 3</div>
+    <h2>Your info</h2>
+    <p class="lead">So we know who to follow up with, whether or not you pass.</p>
+    <div class="field"><label for="cName">Full name</label>
+      <input type="text" id="cName" autocomplete="name" placeholder="First and last name" maxlength="60"></div>
+    <div class="field"><label for="cEmail">Email</label>
+      <input type="email" id="cEmail" autocomplete="email" placeholder="you@example.com"></div>
+    <div class="field"><label for="cPhone">Mobile number</label>
+      <input type="tel" id="cPhone" autocomplete="tel" inputmode="tel" placeholder="(555) 123-4567"></div>
+    <div class="err" id="contactErr"></div>
+    <button class="btn" type="submit">Start the test</button>
+  </form>
+
+  <div id="vQuiz" class="hidden">
+    <div class="progress-row"><span id="qLabel"></span><span>No same-day retakes</span></div>
+    <div class="progress"><i id="qBar" style="width:0%;"></i></div>
+    <p style="font-weight:700;font-size:17px;margin-bottom:18px;" id="qPrompt"></p>
+    <div class="choices" id="qChoices"></div>
+    <textarea id="qText" class="hidden"></textarea>
+    <div class="err" id="quizErr"></div>
+    <button class="btn" type="button" id="btnNext" style="margin-top:18px;">Next</button>
+  </div>
+
+  <div id="vGrading" class="hidden center">
+    <div class="spinner" role="status" aria-label="Grading"></div>
+  </div>
+
+  <div id="vPass" class="hidden center">
+    <div class="done-ic pass">✓</div>
+    <h1 id="passScore"></h1>
+    <p class="lead">Set up your login and pick your weekly availability to start getting jobs.</p>
+    <button class="btn" type="button" id="btnContinueJoin">Set up my account</button>
+  </div>
+
+  <div id="vFail" class="hidden center">
+    <div class="done-ic fail">✕</div>
+    <h1>Thanks for applying</h1>
+    <p class="lead" id="failMsg">You didn't pass this time. You're welcome to try again tomorrow.</p>
+  </div>
+
+</div>
+<script>
+const API='/api/tech';
+const $=id=>document.getElementById(id);
+const SCREENS=['vLanding','vVideo','vContact','vQuiz','vGrading','vPass','vFail'];
+function show(id){ SCREENS.forEach(s=>$(s).classList.toggle('hidden', s!==id)); window.scrollTo(0,0); }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function call(action,{method='GET',body=null}={}){
+  const url=new URL(API,location.origin); url.searchParams.set('action',action);
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),30000);
+  try{
+    const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
+    const data=await res.json().catch(()=>({}));
+    return { ok:res.ok, status:res.status, data };
+  } finally { clearTimeout(t); }
+}
+
+$('btnApply').addEventListener('click',()=>show('vVideo'));
+$('btnToContact').addEventListener('click',()=>show('vContact'));
+
+// ── Contact form ─────────────────────────────────────────────────────────────
+function clearBad(){ document.querySelectorAll('#vContact .bad').forEach(e=>e.classList.remove('bad')); $('contactErr').textContent=''; }
+function failContact(id,msg){ clearBad(); $(id).classList.add('bad'); $('contactErr').textContent=msg; try{ $(id).focus(); }catch{} return false; }
+function nameVal(){ return $('cName').value.replace(/'/g,'’').replace(/\s+/g,' ').trim(); }
+function checkContact(){
+  const name=nameVal();
+  if(name.length<2 || name.length>60 || !/^[\p{L}\p{M}][\p{L}\p{M} .’-]*$/u.test(name)) return failContact('cName','Use letters only for your name (spaces, hyphens and apostrophes are fine).');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('cEmail').value.trim())) return failContact('cEmail','Enter a valid email address.');
+  const d=$('cPhone').value.replace(/\D/g,'');
+  if((d.length===10)||(d.length===11&&d[0]==='1')) { /* ok */ } else return failContact('cPhone','Enter your 10-digit cell number.');
+  clearBad(); return true;
+}
+['cName','cEmail','cPhone'].forEach(id=>$(id).addEventListener('input',()=>$(id).classList.remove('bad')));
+
+let quizQuestions=[]; // [{key,prompt,choices?}] -- mc then short-answer, in order
+let quizIdx=0;
+const responses={}; // key -> choice index (mc) or text (short-answer)
+
+$('vContact').addEventListener('submit', async e=>{
+  e.preventDefault();
+  if(!checkContact()) return;
+  const btn=e.submitter||$('vContact').querySelector('button[type=submit]');
+  const label=btn.textContent; btn.disabled=true; btn.textContent='Loading…';
+  const r=await call('apply_start',{method:'POST',body:{ name:nameVal(), email:$('cEmail').value.trim(), phone:$('cPhone').value }});
+  btn.disabled=false; btn.textContent=label;
+  if(!r.ok){
+    if(r.data&&r.data.code==='RETAKE_BLOCKED'){ $('contactErr').textContent=r.data.error; return; }
+    const f=r.data&&r.data.field;
+    if(f==='name') return failContact('cName',r.data.error);
+    if(f==='email') return failContact('cEmail',r.data.error);
+    if(f==='phone') return failContact('cPhone',r.data.error);
+    $('contactErr').textContent=(r.data&&r.data.error)||'Something went wrong. Try again.';
+    return;
+  }
+  quizQuestions=[
+    ...(r.data.multiple_choice||[]).map(q=>({...q,type:'mc'})),
+    ...(r.data.short_answer||[]).map(q=>({...q,type:'text'})),
+  ];
+  quizIdx=0;
+  renderQuestion();
+  show('vQuiz');
+});
+
+// ── Quiz ─────────────────────────────────────────────────────────────────────
+function renderQuestion(){
+  const q=quizQuestions[quizIdx];
+  $('qLabel').textContent=`Question ${quizIdx+1} of ${quizQuestions.length}`;
+  $('qBar').style.width=Math.round((quizIdx/quizQuestions.length)*100)+'%';
+  $('qPrompt').textContent=q.prompt;
+  $('quizErr').textContent='';
+  if(q.type==='mc'){
+    $('qText').classList.add('hidden');
+    $('qChoices').classList.remove('hidden');
+    $('qChoices').innerHTML=q.choices.map((c,i)=>`<button type="button" class="choice" data-i="${i}"><span class="box"></span><span>${esc(c)}</span></button>`).join('');
+    $('qChoices').querySelectorAll('.choice').forEach(b=>b.addEventListener('click',()=>{
+      responses[q.key]=Number(b.dataset.i);
+      $('qChoices').querySelectorAll('.choice').forEach(x=>x.classList.toggle('on',x===b));
+      $('quizErr').textContent='';
+    }));
+  } else {
+    $('qChoices').classList.add('hidden');
+    $('qText').classList.remove('hidden');
+    $('qText').value=responses[q.key]||'';
+  }
+  $('btnNext').textContent=(quizIdx===quizQuestions.length-1)?'Submit':'Next';
+}
+$('btnNext').addEventListener('click', async ()=>{
+  const q=quizQuestions[quizIdx];
+  if(q.type==='mc'){
+    if(responses[q.key]==null){ $('quizErr').textContent='Pick an answer first.'; return; }
+  } else {
+    const v=$('qText').value.trim();
+    if(!v){ $('quizErr').textContent='Enter an answer first.'; return; }
+    responses[q.key]=v;
+  }
+  if(quizIdx<quizQuestions.length-1){ quizIdx++; renderQuestion(); return; }
+  await submitQuiz();
+});
+
+async function submitQuiz(){
+  show('vGrading');
+  const answers=quizQuestions.filter(q=>q.type==='mc').map(q=>({key:q.key,choice:responses[q.key]}));
+  const short_answers={};
+  quizQuestions.filter(q=>q.type==='text').forEach(q=>{ short_answers[q.key]=responses[q.key]||''; });
+  const r=await call('apply_submit',{method:'POST',body:{
+    name:nameVal(), email:$('cEmail').value.trim(), phone:$('cPhone').value, answers, short_answers,
+  }});
+  if(!r.ok){
+    if(r.data&&r.data.code==='RETAKE_BLOCKED'){ $('failMsg').textContent=r.data.error; show('vFail'); return; }
+    $('failMsg').textContent=(r.data&&r.data.error)||'Something went wrong. Please try again later.';
+    show('vFail'); return;
+  }
+  if(r.data.passed){
+    $('passScore').textContent=`You passed — ${r.data.score} of ${r.data.total}`;
+    $('btnContinueJoin').onclick=()=>{ location.href=r.data.join_link||'/join'; };
+    show('vPass');
+  } else {
+    $('failMsg').textContent="You didn't pass this time. You're welcome to try again tomorrow.";
+    show('vFail');
+  }
+}
+</script>
+</body>
+</html>

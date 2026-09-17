@@ -18,12 +18,14 @@ import { serviceClient, serviceClientPublic } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual, refreshToken, ADMIN_SESSION_MAX } from './_lib/auth.js';
 import { verifyTwilioSignature, xml, xmlEsc } from './analytics.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
+import { estimateApproveLink } from './_lib/estimate-code.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
+import { QUESTIONS as APPLY_QUESTIONS } from './_lib/apply-quiz.js';
 import { readState as readBracketSyncState, readDispatch as readBracketSyncDispatch, summarizeForDashboard as bracketSyncSummary, dispatchBracketScan } from './_lib/bracket-sync-health.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
@@ -458,6 +460,7 @@ export default async function handler(req, res) {
       case 'tech_availability_set': return await techAvailabilitySet(req, res, db, auth, body);
       case 'tech_availability_exception_set': return await techAvailabilityExceptionSet(req, res, db, auth, body);
       case 'reviews':           return await reviews(req, res, db, auth);
+      case 'applicants':        return await applicants(req, res, db, auth);
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
@@ -9462,6 +9465,53 @@ async function reviews(req, res, db, auth) {
   }));
 
   return res.status(200).json({ reviews: formatted });
+}
+
+// ── Applicant screenings (migration 0114) ───────────────────────────────────
+// Every /apply.html quiz attempt, pass or fail, plus a per-question breakdown
+// so the owner can see which questions actually filter applicants vs. which
+// ones everyone misses (a bad question, not a bad applicant). Owner-only,
+// same as the other Analytics tabs.
+async function applicants(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data: rows, error } = await db.from('applicant_screenings')
+    .select('id, name, email, phone, score, total, passed, answers, short_answers, invite_code, created_at')
+    .order('created_at', { ascending: false }).limit(500);
+  if (error) throw error;
+
+  const list = (rows || []).map(r => ({
+    id: r.id, name: r.name, email: r.email, phone: r.phone,
+    score: r.score, total: r.total, passed: r.passed,
+    short_answers: r.short_answers || {}, invite_code: r.invite_code,
+    created_at: r.created_at,
+  }));
+
+  // Per-question correct rate across every attempt that has that key in its
+  // answers array (a bad/missing key just doesn't count toward that
+  // question's denominator, rather than skewing it as wrong).
+  const stats = new Map(APPLY_QUESTIONS.map(q => [q.key, { key: q.key, prompt: q.prompt, attempts: 0, correct: 0 }]));
+  for (const r of rows || []) {
+    for (const a of Array.isArray(r.answers) ? r.answers : []) {
+      const s = stats.get(a?.key);
+      if (!s) continue;
+      s.attempts += 1;
+      if (a.correct) s.correct += 1;
+    }
+  }
+  const questionStats = [...stats.values()]
+    .map(s => ({ ...s, rate: s.attempts ? Math.round((s.correct / s.attempts) * 100) : null }))
+    .sort((a, b) => (a.rate ?? 101) - (b.rate ?? 101));
+
+  const passedCount = list.filter(r => r.passed).length;
+  return res.status(200).json({
+    applicants: list,
+    question_stats: questionStats,
+    totals: {
+      count: list.length,
+      passed: passedCount,
+      pass_rate: list.length ? Math.round((passedCount / list.length) * 100) : null,
+    },
+  });
 }
 
 // ── Google Business Profile reviews ─────────────────────────────────────────
