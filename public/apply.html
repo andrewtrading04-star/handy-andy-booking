@@ -32,32 +32,32 @@
   .hidden{display:none !important;}
   .wrap{max-width:520px;margin:0 auto;min-height:100vh;padding:calc(22px + env(safe-area-inset-top,0px)) 20px calc(28px + env(safe-area-inset-bottom,0px));}
   .hl{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
-  .brand{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.07em;margin-bottom:22px;}
+  .brand{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.07em;margin-bottom:30px;}
   .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none;}
-  h1{font-size:clamp(26px,7.2vw,32px);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin-bottom:10px;}
+  h1{font-size:clamp(26px,7.2vw,32px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:16px;}
   h2{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;}
-  .lead{color:var(--mute);font-size:15px;line-height:1.55;margin-bottom:20px;}
-  .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.45);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:800;margin-bottom:18px;}
-  .cities{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:22px;}
+  .lead{color:var(--mute);font-size:15px;line-height:1.6;margin-bottom:30px;}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.45);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:800;margin-bottom:24px;}
+  .cities{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:34px;}
   .city{background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;font-size:13.5px;font-weight:700;color:var(--mute);}
   .city .st{display:block;font-size:11px;font-weight:700;margin-top:3px;}
   .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
   .city.hiring .st{color:#5eead4;}
   .city:not(.hiring) .st{color:var(--mute);}
-  .eyebrow{font-size:12.5px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.09em;margin-bottom:12px;}
-  .perks{display:flex;flex-direction:column;gap:16px;margin-bottom:22px;}
-  .perk{display:flex;gap:12px;align-items:flex-start;}
-  .perk .dot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:none;margin-top:8px;}
-  .perk b{display:block;font-size:16px;font-weight:800;}
+  .eyebrow{font-size:12.5px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.09em;margin-bottom:18px;}
+  .perks{display:flex;flex-direction:column;gap:24px;margin-bottom:36px;}
+  .perk{display:flex;gap:14px;align-items:flex-start;}
+  .perk .dot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:none;margin-top:9px;}
+  .perk b{display:block;font-size:16px;font-weight:800;margin-bottom:2px;}
   .perk b.money{color:var(--orange);}
-  .perk span{color:var(--mute);font-size:13.5px;line-height:1.5;}
+  .perk span{color:var(--mute);font-size:13.5px;line-height:1.55;}
   /* Real screenshot of the tech app's Jobs screen -- same classes/colors as
      public/tech.html's own .jobc cards (navy-2 bg, orange time, bold name,
      muted meta), not a generic mockup, so this is honestly what a tech sees. */
   /* Matches the real tech app's Jobs screen: week strip with a badge per day,
      then the day's job cards. Fake names/addresses only -- this is a
      marketing screenshot, not live data. */
-  .appshot{background:#08111f;border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin-bottom:18px;box-shadow:0 18px 40px rgba(0,0,0,.35);}
+  .appshot{background:#08111f;border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin-bottom:34px;box-shadow:0 18px 40px rgba(0,0,0,.35);}
   .ash-head{display:flex;justify-content:flex-end;align-items:center;padding:2px 2px 12px;}
   .ash-head .ctl{display:flex;gap:6px;align-items:center;}
   .ash-today{background:var(--navy-2);border:1px solid var(--line);color:var(--mute);font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;}
@@ -85,7 +85,7 @@
      honest preview of the actual sign-up, not a mockup of one. */
   /* Exact copy of public/join.html's real slot-chip styling -- full-width
      rows with a checkbox box, not a generic pill grid. */
-  .demo{background:var(--navy-2);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:18px;}
+  .demo{background:var(--navy-2);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:34px;}
   .demo .dh{font-size:11.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:10px;}
   .dchips{display:flex;flex-direction:column;gap:8px;}
   .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px;}
@@ -93,9 +93,9 @@
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotchip.on .box{border-color:#fff;background:#fff;color:var(--orange);}
   .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
-  #btnShowDemo{margin-bottom:16px;}
-  .demo{margin-top:16px;}
-  .nofee{display:flex;gap:10px;align-items:flex-start;background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.3);border-radius:14px;padding:13px 14px;margin-bottom:20px;}
+  #btnShowDemo{margin-bottom:8px;}
+  .demo{margin-top:18px;}
+  .nofee{display:flex;gap:10px;align-items:flex-start;background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.3);border-radius:14px;padding:16px;margin-bottom:34px;}
   .nofee .ic{font-size:17px;flex:none;line-height:1.3;}
   .nofee b{display:block;font-size:14.5px;color:#cdeee2;margin-bottom:2px;}
   .nofee span{color:var(--mute);font-size:13px;line-height:1.45;}
@@ -152,7 +152,7 @@
       <div class="dh">Monday</div>
       <div class="dchips" id="demoDay"></div>
     </div>
-    <p class="lead" style="margin-bottom:10px;font-size:13.5px;">Once you're working, this is what your day looks like:</p>
+    <p class="lead" style="margin-top:34px;margin-bottom:16px;font-size:13.5px;">Once you're working, this is what your day looks like:</p>
     <div class="appshot">
       <div class="ash-head">
         <div class="ctl"><span class="ash-today">Today</span><span class="ash-arrow">‹</span><span class="ash-arrow">›</span></div>
