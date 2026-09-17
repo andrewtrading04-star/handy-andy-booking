@@ -44,10 +44,12 @@
   .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
   .city.hiring .st{color:#5eead4;}
   .city:not(.hiring) .st{color:var(--mute);}
-  .perks{display:flex;flex-direction:column;gap:16px;margin-bottom:26px;padding-top:4px;}
+  .eyebrow{font-size:12.5px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.09em;margin-bottom:12px;}
+  .perks{display:flex;flex-direction:column;gap:16px;margin-bottom:22px;}
   .perk{display:flex;gap:12px;align-items:flex-start;}
   .perk .dot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:none;margin-top:8px;}
-  .perk b{display:block;font-size:15px;}
+  .perk b{display:block;font-size:16px;font-weight:800;}
+  .perk b.money{color:var(--orange);}
   .perk span{color:var(--mute);font-size:13.5px;line-height:1.5;}
   /* Real screenshot of the tech app's Jobs screen -- same classes/colors as
      public/tech.html's own .jobc cards (navy-2 bg, orange time, bold name,
@@ -56,8 +58,7 @@
      then the day's job cards. Fake names/addresses only -- this is a
      marketing screenshot, not live data. */
   .appshot{background:#08111f;border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin-bottom:18px;box-shadow:0 18px 40px rgba(0,0,0,.35);}
-  .ash-head{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 12px;}
-  .ash-head .rng{font-size:14.5px;font-weight:700;}
+  .ash-head{display:flex;justify-content:flex-end;align-items:center;padding:2px 2px 12px;}
   .ash-head .ctl{display:flex;gap:6px;align-items:center;}
   .ash-today{background:var(--navy-2);border:1px solid var(--line);color:var(--mute);font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;}
   .ash-arrow{width:26px;height:26px;border-radius:8px;background:var(--navy-2);border:1px solid var(--line);color:var(--mute);display:flex;align-items:center;justify-content:center;font-size:13px;}
@@ -79,11 +80,6 @@
   .tabbar .tb{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;color:var(--mute);font-weight:700;}
   .tabbar .tb.on{color:var(--orange);}
   .tabbar .tb .ic{font-size:16px;}
-  .howsteps{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
-  .howsteps .hs{flex:1;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;text-align:center;}
-  .howsteps .hs b{display:block;font-size:13px;}
-  .howsteps .hs span{display:block;color:var(--mute);font-size:11.5px;margin-top:2px;line-height:1.3;}
-  .howsteps .ar{color:var(--mute);font-size:16px;flex:none;}
   /* Functional availability demo -- same shape as public/join.html's real
      step 2 (quick-select chips + a day/slot grid), so trying it here is an
      honest preview of the actual sign-up, not a mockup of one. */
@@ -97,8 +93,8 @@
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotchip.on .box{border-color:#fff;background:#fff;color:var(--orange);}
   .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
-  .dcount{text-align:center;color:var(--mute);font-size:13px;font-weight:600;margin-top:14px;}
-  .dcount b{color:var(--ink);}
+  #btnShowDemo{margin-bottom:16px;}
+  .demo{margin-top:16px;}
   .nofee{display:flex;gap:10px;align-items:flex-start;background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.3);border-radius:14px;padding:13px 14px;margin-bottom:20px;}
   .nofee .ic{font-size:17px;flex:none;line-height:1.3;}
   .nofee b{display:block;font-size:14.5px;color:#cdeee2;margin-bottom:2px;}
@@ -142,15 +138,23 @@
     <span class="badge">Currently hiring: Los Angeles</span>
     <h1>Pick your hours. We fill the available time slots.</h1>
     <p class="lead">Every week you tell us the days and times you're free. When a customer books one of those times, the job lands on your schedule automatically — no browsing, no bidding, nothing to accept.</p>
-    <div class="demo">
+    <div class="eyebrow">Our best features</div>
+    <div class="perks">
+      <div class="perk"><span class="dot"></span><div><b class="money">You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b class="money">$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b class="money">Weekly direct deposit</b><span>Paid straight to your bank account, every week.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>You choose the area you work in</b><span>Jobs only come from the part of town you tell us you cover.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div></div>
+    </div>
+    <button class="btn ghost" type="button" id="btnShowDemo">See how easy scheduling is</button>
+    <div class="demo hidden" id="demoWrap">
       <div class="dh">Monday</div>
       <div class="dchips" id="demoDay"></div>
-      <div class="dcount" id="demoCount">Pick at least one time</div>
     </div>
-    <p class="lead" style="margin-bottom:10px;font-size:13.5px;">So when someone books Tuesday 2–4 PM and that's one of your times — it just shows up:</p>
+    <p class="lead" style="margin-bottom:10px;font-size:13.5px;">Once you're working, this is what your day looks like:</p>
     <div class="appshot">
       <div class="ash-head">
-        <div class="rng">September 13–19</div>
         <div class="ctl"><span class="ash-today">Today</span><span class="ash-arrow">‹</span><span class="ash-arrow">›</span></div>
       </div>
       <div class="week">
@@ -190,13 +194,6 @@
       <div class="city">Austin<span class="st">Not hiring</span></div>
       <div class="city">Denver<span class="st">Not hiring</span></div>
       <div class="city hiring">Los Angeles<span class="st">Hiring now</span></div>
-    </div>
-    <div class="perks">
-      <div class="perk"><span class="dot"></span><div><b>You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>You choose the area you work in</b><span>Jobs only come from the part of town you tell us you cover.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div></div>
     </div>
     <button class="btn" type="button" id="btnApply">Apply for the job</button>
   </div>
@@ -288,10 +285,14 @@ function paintDemo(){
     b.classList.toggle('on',on);
     b.querySelector('.box').textContent=on?'✓':'';
   });
-  const n=demoSel.size;
-  $('demoCount').innerHTML=n?`<b>${n}</b> time${n===1?'':'s'} picked for Monday`:'Pick at least one time';
 }
 renderDemoDay();
+// Collapsed by default -- revealed on demand so the schedule isn't the first
+// thing on the page.
+$('btnShowDemo').addEventListener('click',()=>{
+  const open=$('demoWrap').classList.toggle('hidden')===false;
+  $('btnShowDemo').textContent=open?'Hide the schedule':'See how easy scheduling is';
+});
 
 async function call(action,{method='GET',body=null}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
