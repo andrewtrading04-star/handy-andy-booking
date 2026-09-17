@@ -52,18 +52,33 @@
   /* Real screenshot of the tech app's Jobs screen -- same classes/colors as
      public/tech.html's own .jobc cards (navy-2 bg, orange time, bold name,
      muted meta), not a generic mockup, so this is honestly what a tech sees. */
-  .appshot{background:#08111f;border:1px solid var(--line);border-radius:20px;padding:16px 16px 18px;margin-bottom:18px;box-shadow:0 18px 40px rgba(0,0,0,.35);}
-  .appshot .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-  .appshot .who{font-size:15px;font-weight:800;}
-  .appshot .sub{color:var(--mute);font-size:12.5px;margin-top:2px;}
-  .appshot .pill{background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.4);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:800;}
+  /* Matches the real tech app's Jobs screen: week strip with a badge per day,
+     then the day's job cards. Fake names/addresses only -- this is a
+     marketing screenshot, not live data. */
+  .appshot{background:#08111f;border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin-bottom:18px;box-shadow:0 18px 40px rgba(0,0,0,.35);}
+  .ash-head{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 12px;}
+  .ash-head .rng{font-size:14.5px;font-weight:700;}
+  .ash-head .ctl{display:flex;gap:6px;align-items:center;}
+  .ash-today{background:var(--navy-2);border:1px solid var(--line);color:var(--mute);font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;}
+  .ash-arrow{width:26px;height:26px;border-radius:8px;background:var(--navy-2);border:1px solid var(--line);color:var(--mute);display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:16px;}
+  .wd{background:var(--navy-2);border:1px solid var(--line);border-radius:10px;padding:8px 2px;text-align:center;}
+  .wd .dn{font-size:9.5px;color:var(--mute);font-weight:700;letter-spacing:.03em;}
+  .wd .dd{font-size:14px;font-weight:800;margin-top:2px;}
+  .wd .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:50%;background:#2b6fd6;color:#fff;font-size:9.5px;font-weight:800;margin-top:4px;padding:0 3px;}
+  .wd.on{background:var(--orange);border-color:var(--orange);}
+  .wd.on .dn,.wd.on .dd{color:#fff;}
+  .wd.on .badge{background:#fff;color:var(--orange);}
   .jobc{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:14px 15px;margin-bottom:10px;}
-  .jobc:last-child{margin-bottom:0;}
-  .jobc{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
   .jobc .t{font-weight:800;font-size:14px;color:var(--orange);}
   .jobc .n{font-weight:700;font-size:15.5px;margin-top:3px;}
-  .jobc .m{color:var(--mute);font-size:13px;margin-top:3px;line-height:1.5;}
-  .jobc .conf{flex:none;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.4);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:800;white-space:nowrap;}
+  .jobc .svc{color:var(--mute);font-size:13px;margin-top:3px;}
+  .jobc .m{color:var(--mute);font-size:13px;margin-top:1px;line-height:1.5;}
+  .jobc .conf{display:inline-block;margin-top:9px;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.4);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:800;}
+  .tabbar{display:flex;justify-content:space-around;padding:10px 0;margin:4px -14px 0;border-top:1px solid var(--line);}
+  .tabbar .tb{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;color:var(--mute);font-weight:700;}
+  .tabbar .tb.on{color:var(--orange);}
+  .tabbar .tb .ic{font-size:16px;}
   .howsteps{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
   .howsteps .hs{flex:1;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;text-align:center;}
   .howsteps .hs b{display:block;font-size:13px;}
@@ -134,18 +149,39 @@
     </div>
     <p class="lead" style="margin-bottom:10px;font-size:13.5px;">So when someone books Tuesday 2–4 PM and that's one of your times — it just shows up:</p>
     <div class="appshot">
-      <div class="bar"><div><div class="who">Today's jobs</div><div class="sub">Los Angeles</div></div><span class="pill">2 jobs</span></div>
+      <div class="ash-head">
+        <div class="rng">September 13–19</div>
+        <div class="ctl"><span class="ash-today">Today</span><span class="ash-arrow">‹</span><span class="ash-arrow">›</span></div>
+      </div>
+      <div class="week">
+        <div class="wd"><div class="dn">SU</div><div class="dd">13</div><span class="badge">1</span></div>
+        <div class="wd"><div class="dn">MO</div><div class="dd">14</div><span class="badge">2</span></div>
+        <div class="wd on"><div class="dn">TU</div><div class="dd">15</div><span class="badge">2</span></div>
+        <div class="wd"><div class="dn">WE</div><div class="dd">16</div><span class="badge">1</span></div>
+        <div class="wd"><div class="dn">TH</div><div class="dd">17</div><span class="badge">2</span></div>
+        <div class="wd"><div class="dn">FR</div><div class="dd">18</div><span class="badge">1</span></div>
+        <div class="wd"><div class="dn">SA</div><div class="dd">19</div><span class="badge">1</span></div>
+      </div>
       <div class="jobc">
-        <div><div class="t">2:00 PM – 4:00 PM</div>
-        <div class="n">Marcus D.</div>
-        <div class="m">65&quot; TV on drywall<br>Silver Lake, CA</div></div>
+        <div class="t">2:00 PM – 4:00 PM</div>
+        <div class="n">J. Alvarez</div>
+        <div class="svc">TV Mounting</div>
+        <div class="m">Example St, Los Angeles, CA</div>
         <span class="conf">Confirmed</span>
       </div>
       <div class="jobc">
-        <div><div class="t">5:00 PM – 8:00 PM</div>
-        <div class="n">Priya K.</div>
-        <div class="m">55&quot; TV over fireplace<br>Culver City, CA</div></div>
+        <div class="t">5:00 PM – 8:00 PM</div>
+        <div class="n">R. Chen</div>
+        <div class="svc">TV Mounting</div>
+        <div class="m">Example Ave, Los Angeles, CA</div>
         <span class="conf">Confirmed</span>
+      </div>
+      <div class="tabbar">
+        <div class="tb on"><span class="ic">📋</span>Jobs</div>
+        <div class="tb"><span class="ic">📅</span>Avail.</div>
+        <div class="tb"><span class="ic">💵</span>Payroll</div>
+        <div class="tb"><span class="ic">⭐</span>Reviews</div>
+        <div class="tb"><span class="ic">📦</span>Stock</div>
       </div>
     </div>
     <div class="nofee"><span class="ic">✓</span><div><b>You never pay for a job</b><span>No lead fees, no subscription, no buy-in. The jobs are free — we send them to you.</span></div></div>
@@ -159,6 +195,7 @@
       <div class="perk"><span class="dot"></span><div><b>You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div></div>
       <div class="perk"><span class="dot"></span><div><b>$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div></div>
       <div class="perk"><span class="dot"></span><div><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div></div>
+      <div class="perk"><span class="dot"></span><div><b>You choose the area you work in</b><span>Jobs only come from the part of town you tell us you cover.</span></div></div>
       <div class="perk"><span class="dot"></span><div><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div></div>
     </div>
     <button class="btn" type="button" id="btnApply">Apply for the job</button>
