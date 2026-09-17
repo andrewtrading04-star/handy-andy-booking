@@ -38,12 +38,19 @@
   h2{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-bottom:6px;}
   .lead{color:var(--mute);font-size:15px;line-height:1.6;margin-bottom:30px;}
   .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(39,192,147,.15);color:#5eead4;border:1px solid rgba(39,192,147,.45);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:800;margin-bottom:24px;}
+  .cs-label{font-size:12.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;}
   .cities{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:34px;}
-  .city{background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;font-size:13.5px;font-weight:700;color:var(--mute);}
-  .city .st{display:block;font-size:11px;font-weight:700;margin-top:3px;}
-  .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
-  .city.hiring .st{color:#5eead4;}
-  .city:not(.hiring) .st{color:var(--mute);}
+  .city{display:flex;align-items:center;gap:10px;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:left;font-family:inherit;}
+  .city .rad{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;}
+  .city .ctxt{display:flex;flex-direction:column;}
+  .city .ctxt b{font-size:13.5px;font-weight:700;color:var(--ink);}
+  .city .st{display:block;font-size:10.5px;font-weight:700;margin-top:2px;color:var(--mute);}
+  .city.on{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.45);cursor:default;}
+  .city.on .rad{border-color:#5eead4;background:#5eead4;}
+  .city.on .rad::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--navy);}
+  .city.on .st{color:#5eead4;}
+  .city.off{opacity:.5;cursor:not-allowed;}
+  .city.off .rad{font-size:10px;opacity:.7;}
   .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:20px 18px;margin-bottom:32px;}
   .fst{padding:16px 0 2px;border-top:1px solid var(--line);}
   .fst b{display:block;font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--orange);}
@@ -92,9 +99,9 @@
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
   .slotchip.on .box{border-color:#fff;background:#fff;color:var(--orange);}
   .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
-  #btnShowDemo{margin-bottom:22px;}
+  #btnShowDemo{margin-bottom:48px;}
   .demo{margin-top:18px;}
-  #btnShowPay{margin:0 0 22px;}
+  #btnShowPay{margin:0 0 48px;}
   /* Real-styled payroll screenshot -- same figures/labels the tech app's
      Payroll tab actually shows (week card, per-job pay, weekly total). Fake
      names and numbers only, for illustration. */
@@ -157,7 +164,6 @@
 
   <div id="vLanding">
     <div class="brand"><span class="dot"></span><span>Handy Andy</span></div>
-    <span class="badge">Currently hiring: Los Angeles</span>
     <h1>Pick your hours. We fill the available time slots.</h1>
     <p class="lead">You set up your account&hellip; tell us when you want to work&hellip; we send jobs that fill your schedule&hellip; you get paid once a week.</p>
     <div class="fgrid">
@@ -248,11 +254,12 @@
       <div class="pw-total"><span>Weekly total</span><b>$1,240</b></div>
     </div>
     <div class="nofee"><span class="ic">✓</span><div><b>You never pay for a job</b><span>No lead fees, subscriptions, the jobs are free.</span></div></div>
+    <div class="cs-label">Select the city you want to work in</div>
     <div class="cities">
-      <div class="city">Houston<span class="st">Not hiring</span></div>
-      <div class="city">Austin<span class="st">Not hiring</span></div>
-      <div class="city">Denver<span class="st">Not hiring</span></div>
-      <div class="city hiring">Los Angeles<span class="st">Hiring now</span></div>
+      <button type="button" class="city on" data-city="la"><span class="rad"></span><span class="ctxt"><b>Los Angeles</b><span class="st">Accepting applications</span></span></button>
+      <button type="button" class="city off" disabled><span class="rad">🔒</span><span class="ctxt"><b>Houston</b><span class="st">Not accepting applications</span></span></button>
+      <button type="button" class="city off" disabled><span class="rad">🔒</span><span class="ctxt"><b>Austin</b><span class="st">Not accepting applications</span></span></button>
+      <button type="button" class="city off" disabled><span class="rad">🔒</span><span class="ctxt"><b>Denver</b><span class="st">Not accepting applications</span></span></button>
     </div>
     <button class="btn" type="button" id="btnApply">Apply for the job</button>
   </div>
