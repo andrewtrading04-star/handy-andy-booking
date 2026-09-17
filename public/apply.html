@@ -72,18 +72,16 @@
   /* Functional availability demo -- same shape as public/join.html's real
      step 2 (quick-select chips + a day/slot grid), so trying it here is an
      honest preview of the actual sign-up, not a mockup of one. */
+  /* Exact copy of public/join.html's real slot-chip styling -- full-width
+     rows with a checkbox box, not a generic pill grid. */
   .demo{background:var(--navy-2);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:18px;}
-  .demo .dh{font-size:15px;font-weight:800;margin-bottom:2px;}
-  .demo .ds{color:var(--mute);font-size:12.5px;margin-bottom:14px;}
-  .quick{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;}
-  .quick button{background:var(--navy-3);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:8px 13px;font-size:12.5px;font-weight:700;}
-  .day{background:var(--navy-3);border:1px solid var(--line);border-radius:12px;padding:11px;margin-bottom:8px;}
-  .day:last-of-type{margin-bottom:0;}
-  .day h4{font-size:11.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;font-weight:700;display:flex;justify-content:space-between;}
-  .day h4 .cnt{color:var(--orange);text-transform:none;letter-spacing:0;}
-  .dchips{display:flex;flex-wrap:wrap;gap:6px;}
-  .slotchip{background:var(--navy);border:1px solid var(--line);color:var(--mute);padding:8px 11px;border-radius:8px;font-size:12.5px;font-weight:700;}
+  .demo .dh{font-size:11.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:10px;}
+  .dchips{display:flex;flex-direction:column;gap:8px;}
+  .slotchip{width:100%;text-align:left;background:var(--navy);border:1px solid var(--line);color:var(--ink);padding:13px 14px;border-radius:10px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px;}
+  .slotchip .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;}
   .slotchip.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .slotchip.on .box{border-color:#fff;background:#fff;color:var(--orange);}
+  .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
   .dcount{text-align:center;color:var(--mute);font-size:13px;font-weight:600;margin-top:14px;}
   .dcount b{color:var(--ink);}
   .nofee{display:flex;gap:10px;align-items:flex-start;background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.3);border-radius:14px;padding:13px 14px;margin-bottom:20px;}
@@ -130,16 +128,8 @@
     <h1>Pick your hours. We fill the available time slots.</h1>
     <p class="lead">Every week you tell us the days and times you're free. When a customer books one of those times, the job lands on your schedule automatically — no browsing, no bidding, nothing to accept.</p>
     <div class="demo">
-      <div class="dh">Try it — this is the real thing</div>
-      <div class="ds">Tap the times you'd want to work. This is the exact screen you'll use once you're in.</div>
-      <div class="quick">
-        <button type="button" data-q="weekdays">+ Weekdays</button>
-        <button type="button" data-q="weekends">+ Weekends</button>
-        <button type="button" data-q="mornings">+ Mornings</button>
-        <button type="button" data-q="evenings">+ Evenings</button>
-        <button type="button" data-q="clear">Clear</button>
-      </div>
-      <div id="demoDays"></div>
+      <div class="dh">Monday</div>
+      <div class="dchips" id="demoDay"></div>
       <div class="dcount" id="demoCount">Pick at least one time</div>
     </div>
     <p class="lead" style="margin-bottom:10px;font-size:13.5px;">So when someone books Tuesday 2–4 PM and that's one of your times — it just shows up:</p>
@@ -234,12 +224,11 @@ const SCREENS=['vLanding','vVideo','vContact','vQuiz','vGrading','vPass','vFail'
 function show(id){ SCREENS.forEach(s=>$(s).classList.toggle('hidden', s!==id)); window.scrollTo(0,0); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-// ── Availability demo (same 5 slots/7 days join.html's real Step 2 uses) ────
+// ── Availability demo (one day, same 5 slots join.html's real Step 2 uses) ──
 // Purely local -- nothing here is saved or sent anywhere. It exists so an
 // applicant can feel the actual weekly-hours screen before they ever create
-// an account, not to collect their picks.
-const DEMO_DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const DEMO_ORDER=[1,2,3,4,5,6,0]; // Monday-first on screen, same as join.html
+// an account, not to collect their picks. One day is enough to get the idea;
+// the real sign-up covers the full week.
 const DEMO_SLOTS=[
   {key:'s1',label:'8:00 AM – 10:00 AM'},
   {key:'s2',label:'11:00 AM – 1:00 PM'},
@@ -248,37 +237,24 @@ const DEMO_SLOTS=[
   {key:'s5',label:'8:00 PM – 10:30 PM',bonus:75},
 ];
 const demoSel=new Set();
-function renderDemoDays(){
-  $('demoDays').innerHTML=DEMO_ORDER.map(d=>`<div class="day"><h4><span>${DEMO_DAYS[d].slice(0,3)}</span><span class="cnt" data-cnt="${d}"></span></h4>
-    <div class="dchips">${DEMO_SLOTS.map(s=>`<button type="button" class="slotchip" data-k="${d}:${s.key}">${esc(s.label)}${s.bonus?` +$${s.bonus}`:''}</button>`).join('')}</div></div>`).join('');
-  $('demoDays').querySelectorAll('.slotchip').forEach(b=>b.addEventListener('click',()=>{
+function renderDemoDay(){
+  $('demoDay').innerHTML=DEMO_SLOTS.map(s=>`<button type="button" class="slotchip" data-k="${s.key}"><span class="box"></span><span>${esc(s.label)}</span>${s.bonus?`<span class="slotbonus">+$${s.bonus} bonus</span>`:''}</button>`).join('');
+  $('demoDay').querySelectorAll('.slotchip').forEach(b=>b.addEventListener('click',()=>{
     const k=b.dataset.k; if(demoSel.has(k)) demoSel.delete(k); else demoSel.add(k);
     paintDemo();
   }));
   paintDemo();
 }
 function paintDemo(){
-  $('demoDays').querySelectorAll('.slotchip').forEach(b=>b.classList.toggle('on',demoSel.has(b.dataset.k)));
-  DEMO_ORDER.forEach(d=>{
-    const n=DEMO_SLOTS.filter(s=>demoSel.has(d+':'+s.key)).length;
-    const c=$('demoDays').querySelector(`[data-cnt="${d}"]`); if(c) c.textContent=n?`${n} picked`:'';
+  $('demoDay').querySelectorAll('.slotchip').forEach(b=>{
+    const on=demoSel.has(b.dataset.k);
+    b.classList.toggle('on',on);
+    b.querySelector('.box').textContent=on?'✓':'';
   });
   const n=demoSel.size;
-  $('demoCount').innerHTML=n?`<b>${n}</b> time${n===1?'':'s'} a week — that's how many chances customers have to book you`:'Pick at least one time';
+  $('demoCount').innerHTML=n?`<b>${n}</b> time${n===1?'':'s'} picked for Monday`:'Pick at least one time';
 }
-const DEMO_QUICK={
-  weekdays:{days:[1,2,3,4,5],slots:['s1','s2','s3','s4']},
-  weekends:{days:[0,6],slots:['s1','s2','s3','s4']},
-  mornings:{days:[0,1,2,3,4,5,6],slots:['s1','s2']},
-  evenings:{days:[0,1,2,3,4,5,6],slots:['s4','s5']},
-};
-document.querySelectorAll('#vLanding [data-q]').forEach(b=>b.addEventListener('click',()=>{
-  const q=b.dataset.q;
-  if(q==='clear') demoSel.clear();
-  else { const p=DEMO_QUICK[q]; p.days.forEach(d=>p.slots.forEach(k=>demoSel.add(d+':'+k))); }
-  paintDemo();
-}));
-renderDemoDays();
+renderDemoDay();
 
 async function call(action,{method='GET',body=null}={}){
   const url=new URL(API,location.origin); url.searchParams.set('action',action);
