@@ -13662,9 +13662,11 @@ function noteIsLive(n, today) {
   return today <= end.toISOString().slice(0, 10);
 }
 
-// GET — the notes the CURRENT user still has to read. Owner sees the same feed
-// so they can check what the office is looking at right now.
+// GET — the notes the CURRENT user still has to read. The owner writes these,
+// so the owner never gets them on their own dashboard (owner rule 2026-09-17);
+// they can still see what was sent and who read it on the Notes page.
 async function notesActive(req, res, db, auth) {
+  if (auth.role === 'owner') return res.status(200).json({ notes: [], count: 0 });
   const today = denverToday();
   const reader = noteReader(auth);
   const { data, error } = await db.from('staff_notes')
@@ -13679,7 +13681,7 @@ async function notesActive(req, res, db, auth) {
 
   const notes = (data || [])
     .filter(n => !seen.has(n.id))
-    .filter(n => auth.role === 'owner' || !n.target_slug || n.target_slug === auth.scope)
+    .filter(n => !n.target_slug || n.target_slug === auth.scope)
     .filter(n => noteIsLive(n, today));
 
   return res.status(200).json({ notes, count: notes.length });
