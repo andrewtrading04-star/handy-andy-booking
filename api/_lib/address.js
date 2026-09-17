@@ -24,6 +24,13 @@ export function isLikelyStreetAddress(s) {
   return true;
 }
 
+// No one's real name contains a digit. Catches the "customer typed something
+// else into the Name box" bug (e.g. a credit card number) the same way
+// isLikelyStreetAddress catches it for the address box.
+export function hasDigits(s) {
+  return /\d/.test(String(s || ''));
+}
+
 export function formatAddress(b) {
   if (!b) return '';
   const esc = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
