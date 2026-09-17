@@ -44,13 +44,12 @@
   .city.hiring{background:rgba(39,192,147,.12);border-color:rgba(39,192,147,.4);color:#cdeee2;}
   .city.hiring .st{color:#5eead4;}
   .city:not(.hiring) .st{color:var(--mute);}
-  .eyebrow{font-size:12.5px;font-weight:800;color:var(--orange);text-transform:uppercase;letter-spacing:.09em;margin-bottom:18px;}
-  .perks{display:flex;flex-direction:column;gap:24px;margin-bottom:36px;}
-  .perk{display:flex;gap:14px;align-items:flex-start;}
-  .perk .dot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:none;margin-top:9px;}
-  .perk b{display:block;font-size:16px;font-weight:800;margin-bottom:2px;}
-  .perk b.money{color:var(--orange);}
-  .perk span{color:var(--mute);font-size:13.5px;line-height:1.55;}
+  .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:20px 18px;margin-bottom:32px;}
+  .fst{padding:16px 0 2px;border-top:1px solid var(--line);}
+  .fst b{display:block;font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--orange);}
+  .fst b.w{color:var(--ink);}
+  .fst em{display:block;font-style:normal;font-size:13px;font-weight:700;margin-top:8px;}
+  .fst span{display:block;font-size:12px;color:var(--mute);line-height:1.45;margin-top:3px;}
   /* Real screenshot of the tech app's Jobs screen -- same classes/colors as
      public/tech.html's own .jobc cards (navy-2 bg, orange time, bold name,
      muted meta), not a generic mockup, so this is honestly what a tech sees. */
@@ -102,6 +101,9 @@
   .btn{display:block;background:var(--orange);color:#fff;border:none;border-radius:12px;padding:17px;font-size:17px;font-weight:800;width:100%;text-align:center;text-decoration:none;}
   .btn:active{background:var(--orange-d);} .btn:disabled{opacity:.45;}
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:700;margin-top:10px;}
+  .btn.glow{border-color:var(--orange);color:var(--orange);box-shadow:0 0 0 0 rgba(255,107,53,.5);animation:glow 2.2s ease-in-out infinite;}
+  @keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(255,107,53,.35),0 0 14px 0 rgba(255,107,53,.15);}50%{box-shadow:0 0 0 6px rgba(255,107,53,0),0 0 26px 4px rgba(255,107,53,.45);}}
+  @media(prefers-reduced-motion:reduce){.btn.glow{animation:none;box-shadow:0 0 20px 2px rgba(255,107,53,.35);}}
   .field{margin-bottom:16px;}
   .field label{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700;}
   input[type=text],input[type=tel],input[type=email]{width:100%;background:var(--navy-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:15px 16px;font-size:17px;font-family:inherit;}
@@ -138,16 +140,15 @@
     <span class="badge">Currently hiring: Los Angeles</span>
     <h1>Pick your hours. We fill the available time slots.</h1>
     <p class="lead">Every week you tell us the days and times you're free. When a customer books one of those times, the job lands on your schedule automatically — no browsing, no bidding, nothing to accept.</p>
-    <div class="eyebrow">Our best features</div>
-    <div class="perks">
-      <div class="perk"><span class="dot"></span><div><b class="money">You keep 100% of tips</b><span>Every dollar a customer tips goes straight to you.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b class="money">$1,000–$3,000 a week</b><span>Depending on how many jobs you take on.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b class="money">Weekly direct deposit</b><span>Paid straight to your bank account, every week.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>You set your hours</b><span>Pick the days and times you're available, every week.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>You choose the area you work in</b><span>Jobs only come from the part of town you tell us you cover.</span></div></div>
-      <div class="perk"><span class="dot"></span><div><b>We send the customers</b><span>No advertising, no quoting, no chasing leads yourself.</span></div></div>
+    <div class="fgrid">
+      <div class="fst"><b>100%</b><em>of tips are yours</em><span>Every dollar a customer tips goes straight to you.</span></div>
+      <div class="fst"><b>$1k&ndash;3k</b><em>a week</em><span>Depending on how many jobs you take on.</span></div>
+      <div class="fst"><b>Weekly</b><em>direct deposit</em><span>Paid straight to your bank, every week.</span></div>
+      <div class="fst"><b class="w">You</b><em>set your hours</em><span>Pick the days and times you're free.</span></div>
+      <div class="fst"><b class="w">You</b><em>pick your area</em><span>Jobs only come from the part of town you cover.</span></div>
+      <div class="fst"><b class="w">We</b><em>send the customers</em><span>No advertising, no quoting, no chasing leads.</span></div>
     </div>
-    <button class="btn ghost" type="button" id="btnShowDemo">See how easy scheduling is</button>
+    <button class="btn ghost glow" type="button" id="btnShowDemo">See how easy scheduling is</button>
     <div class="demo hidden" id="demoWrap">
       <div class="dh">Monday</div>
       <div class="dchips" id="demoDay"></div>
