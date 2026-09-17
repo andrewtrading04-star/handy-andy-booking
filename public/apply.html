@@ -94,7 +94,7 @@
   .slotbonus{display:inline-block;margin-left:auto;background:#16a34a;color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.3px;}
   #btnShowDemo{margin-bottom:8px;}
   .demo{margin-top:18px;}
-  #btnShowPay{margin:0 0 8px;}
+  #btnShowPay{margin:0 0 22px;}
   /* Real-styled payroll screenshot -- same figures/labels the tech app's
      Payroll tab actually shows (week card, per-job pay, weekly total). Fake
      names and numbers only, for illustration. */
@@ -107,7 +107,8 @@
   .pw-jobrow{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);}
   .pw-jobrow:last-child{border-bottom:none;}
   .pw-jobrow .nm{font-weight:700;font-size:14.5px;}
-  .pw-jobrow .sv{color:var(--mute);font-size:12px;margin-top:2px;}
+  .pw-jobrow .sv{color:var(--mute);font-size:12px;margin-top:2px;margin-bottom:5px;}
+  .pw-jobrow .bd{display:flex;justify-content:space-between;gap:14px;color:var(--mute);font-size:11.5px;padding:1px 0;max-width:220px;}
   .pw-jobrow .amt{font-weight:800;font-size:15px;white-space:nowrap;text-align:right;}
   .pw-jobrow .bonus{display:block;color:#5eead4;font-size:10.5px;font-weight:700;margin-top:2px;}
   .pw-total{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
@@ -216,12 +217,33 @@
         <div><span class="lbl">Pay date</span><b>Sep 23</b></div>
       </div>
       <div class="pw-jobs">
-        <div class="pw-jobrow"><div><div class="nm">J. Alvarez</div><div class="sv">TV Mounting &middot; Mon 2:00 PM</div></div><div class="amt">$150</div></div>
-        <div class="pw-jobrow"><div><div class="nm">R. Chen</div><div class="sv">TV Mounting &middot; Mon 5:00 PM</div></div><div class="amt">$165</div></div>
-        <div class="pw-jobrow"><div><div class="nm">D. Osei</div><div class="sv">TV Mounting + Soundbar &middot; Wed 11:00 AM</div></div><div class="amt">$210</div></div>
-        <div class="pw-jobrow"><div><div class="nm">M. Suarez</div><div class="sv">TV Mounting &middot; Thu 8:00 PM</div></div><div class="amt">$280 <span class="bonus">+$75 bonus</span></div></div>
-        <div class="pw-jobrow"><div><div class="nm">K. Patel</div><div class="sv">TV Mounting &middot; Fri 2:00 PM</div></div><div class="amt">$195</div></div>
-        <div class="pw-jobrow"><div><div class="nm">A. Nguyen</div><div class="sv">TV Mounting &middot; Sat 11:00 AM</div></div><div class="amt">$240</div></div>
+        <div class="pw-jobrow"><div><div class="nm">J. Alvarez</div><div class="sv">TV Mounting &middot; Mon 2:00 PM</div>
+          <div class="bd"><span>55&quot; TV</span><span>$90</span></div>
+          <div class="bd"><span>Wire concealment</span><span>$60</span></div>
+        </div><div class="amt">$150</div></div>
+        <div class="pw-jobrow"><div><div class="nm">R. Chen</div><div class="sv">TV Mounting &middot; Mon 5:00 PM</div>
+          <div class="bd"><span>65&quot; TV</span><span>$110</span></div>
+          <div class="bd"><span>Full-motion bracket</span><span>$55</span></div>
+        </div><div class="amt">$165</div></div>
+        <div class="pw-jobrow"><div><div class="nm">D. Osei</div><div class="sv">TV Mounting + Soundbar &middot; Wed 11:00 AM</div>
+          <div class="bd"><span>65&quot; TV</span><span>$110</span></div>
+          <div class="bd"><span>Soundbar mount</span><span>$40</span></div>
+          <div class="bd"><span>Wire concealment</span><span>$60</span></div>
+        </div><div class="amt">$210</div></div>
+        <div class="pw-jobrow"><div><div class="nm">M. Suarez</div><div class="sv">TV Mounting &middot; Thu 8:00 PM</div>
+          <div class="bd"><span>75&quot; TV</span><span>$130</span></div>
+          <div class="bd"><span>Wire concealment</span><span>$75</span></div>
+        </div><div class="amt">$280 <span class="bonus">+$75 bonus</span></div></div>
+        <div class="pw-jobrow"><div><div class="nm">K. Patel</div><div class="sv">TV Mounting &middot; Fri 2:00 PM</div>
+          <div class="bd"><span>55&quot; TV</span><span>$90</span></div>
+          <div class="bd"><span>Full-motion bracket</span><span>$55</span></div>
+          <div class="bd"><span>Wire concealment</span><span>$50</span></div>
+        </div><div class="amt">$195</div></div>
+        <div class="pw-jobrow"><div><div class="nm">A. Nguyen</div><div class="sv">TV Mounting &middot; Sat 11:00 AM</div>
+          <div class="bd"><span>75&quot; TV</span><span>$130</span></div>
+          <div class="bd"><span>Fireplace mount</span><span>$50</span></div>
+          <div class="bd"><span>Wire concealment</span><span>$60</span></div>
+        </div><div class="amt">$240</div></div>
       </div>
       <div class="pw-total"><span>Weekly total</span><b>$1,240</b></div>
     </div>
