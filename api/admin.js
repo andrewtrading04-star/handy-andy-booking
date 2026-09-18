@@ -569,7 +569,7 @@ function displayNameFor(scope) {
 // *_SECRETARY_PHONE env var can't silently stop an alert — an unset var used
 // to mean "text nobody", the quietest possible failure for a waiting customer.
 const JOEY_MOBILE = '3032190118';
-const HEATHER_MOBILE = '7203711561';
+const HEATHER_MOBILE = '7207223653'; // updated 2026-09-18, Heather changed numbers
 
 function secretaryPhoneFor(scope) {
   // Driven off the SAME map that grants access (api/_lib/staff-access.js), so

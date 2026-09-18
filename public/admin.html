@@ -9803,7 +9803,7 @@ async function renderCallAudit(){
 // purpose (unlike Audit/Performance, which follow the sidebar's current
 // business): a routing directory is only useful seen whole, not one row at a
 // time. api/admin.js callNumbers() enforces owner-only server-side.
-const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17203711561':'Heather', '+13374997817':'Owner' };
+const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17207223653':'Heather', '+13374997817':'Owner' }; // Heather's number updated 2026-09-18
 function friendlyForward(e164){
   if(!e164) return 'Voicemail only';
   return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));

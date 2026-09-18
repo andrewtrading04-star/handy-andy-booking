@@ -232,7 +232,7 @@ async function handleAssistantRequest(req, res, message) {
 // daytime forward configured at all, only an after-hours one).
 const DISPATCH_TARGET_BY_NUMBER = {
   '+13032190118': 'joey',
-  '+17203711561': 'heather',
+  '+17207223653': 'heather', // Heather's number updated 2026-09-18 (was +17203711561)
   '+13374997817': 'owner',
 };
 function dispatchTargetFor(e164) {

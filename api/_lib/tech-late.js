@@ -87,7 +87,7 @@ const STAFF_PHONE_ENV = {
 // escalation into nothing. Both owner-confirmed (Joey 2026-08-25, Heather
 // 2026-08-26) and matching both staff_users.phone and each person's
 // tracking-number routing.
-const STAFF_PHONE_FALLBACK = { JOEY_PHONE_NUMBER: '3032190118', HEATHER_PHONE_NUMBER: '7203711561' };
+const STAFF_PHONE_FALLBACK = { JOEY_PHONE_NUMBER: '3032190118', HEATHER_PHONE_NUMBER: '7207223653' }; // Heather's number updated 2026-09-18
 
 function firstName(name) {
   return (name || '').trim().split(/\s+/)[0] || 'Tech';
