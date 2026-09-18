@@ -14772,9 +14772,13 @@ async function wirePlateAssign(req, res, db, auth, body) {
   if (!purchase) return res.status(404).json({ error: 'Delivery not found' });
   if (purchase.technician_id) return res.status(400).json({ error: 'This order is already assigned.' });
 
+  // Brackets/plates are shared across companies (same reasoning as
+  // bracketAssign) — the tech who actually receives the order may belong to
+  // either business, not just the one whose purchase-row tab is loaded here.
   const { data: tech } = await db.from('technicians')
-    .select('id, name').eq('id', techId).eq('business_id', bizId).maybeSingle();
+    .select('id, name, business_id').eq('id', techId).eq('active', true).maybeSingle();
   if (!tech) return res.status(404).json({ error: 'Technician not found' });
+  const techBizId = tech.business_id;
 
   const plates = purchase.plates || 0;
   // Only count plates on-hand when the order is actually delivered AND we can
@@ -14798,7 +14802,7 @@ async function wirePlateAssign(req, res, db, auth, body) {
   if (credit) {
     // Add plates to the tech's on-hand inventory (graceful if 0039 not applied).
     let { data: inv, error: invErr } = await db.from('bracket_inventory')
-      .select('id, wire_plate_qty').eq('technician_id', techId).eq('business_id', bizId).maybeSingle();
+      .select('id, wire_plate_qty').eq('technician_id', techId).eq('business_id', techBizId).maybeSingle();
     if (invErr && /wire_plate_qty/.test(invErr.message || '')) {
       return res.status(400).json({ error: "Plate inventory isn't set up yet (run migration 0039)." });
     }
@@ -14808,7 +14812,7 @@ async function wirePlateAssign(req, res, db, auth, body) {
       if (upErr) throw upErr;
     } else {
       const { error: insErr } = await db.from('bracket_inventory')
-        .insert({ business_id: bizId, technician_id: techId, wire_plate_qty: plates });
+        .insert({ business_id: techBizId, technician_id: techId, wire_plate_qty: plates });
       if (insErr) throw insErr;
     }
   }
