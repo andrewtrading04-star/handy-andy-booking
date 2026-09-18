@@ -2122,7 +2122,7 @@
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
-        <button id="btn-submit" style="${S.btnPri}">${nativeUnstaffed?'Request Appointment':'Complete My Booking ✓'}</button>
+        <button id="btn-submit" style="${S.btnPri}">${nativeUnstaffed?'Get Estimate':'Complete My Booking ✓'}</button>
       </div>`;
   }
 
@@ -2542,14 +2542,14 @@
           showRequestConfirmation(root,smsConsent);
         }else{
           isSubmitting=false;
-          if(submitBtn){submitBtn.textContent='Request Appointment';submitBtn.disabled=false;}
+          if(submitBtn){submitBtn.textContent='Get Estimate';submitBtn.disabled=false;}
           const err=await r.json().catch(()=>({}));
           logEvent('booking_failed','customer',null,err.error||('HTTP '+r.status));
           alert(err.error||'Something went wrong submitting your request. Please try again.');
         }
       }catch(e){
         isSubmitting=false;
-        if(submitBtn){submitBtn.textContent='Request Appointment';submitBtn.disabled=false;}
+        if(submitBtn){submitBtn.textContent='Get Estimate';submitBtn.disabled=false;}
         alert('Something went wrong submitting your request. Please try again.');
       }
       return;
