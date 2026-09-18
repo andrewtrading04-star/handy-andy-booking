@@ -8,13 +8,15 @@ import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFo
 import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod, stripe } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
 import { expandReviewCode } from './_lib/review-code.js';
-import { isLikelyStreetAddress } from './_lib/address.js';
+import { expandEstimateCode } from './_lib/estimate-code.js';
+import { isLikelyStreetAddress, hasDigits } from './_lib/address.js';
 import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracketAlert, maybeSendFirstMultiTvDiscountAlert, maybeSendZeroOrLowProfitAlert, maybeSendLeadGenBookingAlert, gdsUpsellUrlFor, rescheduleUrlFor } from './_lib/owner-notify.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
+const BAD_NAME = 'Please enter your name using letters only — no numbers.';
 
 // Owner rule (2026-08-31): no paid job, any business, any metro, ever books
 // under $139 — "if it's not 139 then I don't want it." A flat floor, not
@@ -344,7 +346,16 @@ function looksLikeReviewToken(raw) {
 }
 
 async function serveReviewClick(req, res) {
-  const rawToken = expandReviewCode(((req.query || {}).token || '').toString()) || '';
+  const rawCode = ((req.query || {}).token || '').toString();
+  // Every brand's /r/<code> redirect (already live on all 15 site domains) was
+  // built for review links only and blindly forwards whatever code it's given
+  // here — so an estimate-approval short link can reuse the exact same site
+  // route with zero changes there: try it as an estimate code first (domain-
+  // separated MAC, so a real review code always fails this check and falls
+  // through below unchanged).
+  const estimateToken = expandEstimateCode(rawCode);
+  if (estimateToken) return serveEstimateClick(req, res, estimateToken);
+  const rawToken = expandReviewCode(rawCode) || '';
   const channel = ((req.query || {}).ch || '').toString().toLowerCase() === 'sms' ? 'sms' : 'email';
   const perChannelCol = channel === 'sms' ? 'review_sms_clicked_at' : 'review_email_clicked_at';
   let t = null;
@@ -386,6 +397,15 @@ async function serveReviewClick(req, res) {
   } catch (e) { /* tracking is best-effort; always redirect */ }
   const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
   return res.redirect(302, `${base}/review.html?token=${encodeURIComponent(rawToken)}`);
+}
+
+// A brand's /r/<code> redirect handed us a code that expanded into a real
+// estimate_approve token (expandEstimateCode already verified shape+MAC+TTL
+// before calling this) — send the customer on to the approve-and-schedule
+// page, same as the long-URL link the email button has always used.
+async function serveEstimateClick(req, res, rawToken) {
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  return res.redirect(302, `${base}/estimate-approve.html?token=${encodeURIComponent(rawToken)}`);
 }
 
 // After creating the booking this handler does several more sequential calls
@@ -735,6 +755,7 @@ async function bookDoms(req, res) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (hasDigits(customer.first_name) || hasDigits(customer.last_name)) return res.status(400).json({ error: BAD_NAME });
   if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
   const parsed = parseSlotId(b.selectedSlot);
@@ -1140,6 +1161,7 @@ async function bookNative(req, res, slug) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (hasDigits(customer.first_name) || hasDigits(customer.last_name)) return res.status(400).json({ error: BAD_NAME });
   if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
   const parsed = parseSlotId(b.selectedSlot);

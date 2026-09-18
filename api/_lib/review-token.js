@@ -84,7 +84,10 @@ export async function ensureReviewToken(db, booking) {
 //     tiny standalone Vercel project (precision-review-link) doing the exact
 //     same redirect at its root path — no /r/ prefix needed since the
 //     subdomain itself is the "r".
-const REVIEW_LINK_PREFIX = {
+// Exported as BRAND_SHORT_LINK_PREFIX too: the /r/<code> redirect on each of
+// these domains is generic (see estimate-code.js) — any brand with a review
+// short-link also gets one for estimate-approval texts, same domain map.
+export const REVIEW_LINK_PREFIX = {
   'handy-andy': 'https://www.ihandyandy.com/r/',
   'doms': 'https://www.domstvmounting.com/r/',
   'mile-high': 'https://www.milehightvmounting.com/r/',
