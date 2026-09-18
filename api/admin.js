@@ -6344,11 +6344,15 @@ async function insightsOverview(req, res, db, auth) {
         s.scheduled_30d++;
         if (b.status === 'cancelled') s.cancelled_30d++;
         else { s.jobs_30d++; if (b.status === 'completed') { s.completed_30d++; s.revenue_30d += Number(b.price) || 0; } }
-        // otw_nudge_sent_ids (see _lib/tech-late.js) — this tech was texted
-        // for running late on this job. Legacy tech_late_notified_ids read the
-        // same way, matching the nudge pass's own idempotency check.
-        const nudged = (b.metadata && (b.metadata.otw_nudge_sent_ids || b.metadata.tech_late_notified_ids)) || [];
-        if (nudged.map(String).includes(String(tid))) s.late_30d++;
+        // staff_late_notified_at (see _lib/tech-late.js), NOT otw_nudge_sent_ids:
+        // the nudge is a routine 10-min-before "you on your way?" check-in that
+        // fires on nearly every job — not lateness. staff_late_notified_at only
+        // gets set once, 45 minutes AFTER the scheduled start, and only if the
+        // tech still hasn't responded — that's a real confirmed-late event
+        // (owner: "I only care about confirmed late, not the warning"). No
+        // per-tech id on a two-tech job (the field is job-level), but none of
+        // this business's late jobs are two-tech, so that gap costs nothing today.
+        if (b.metadata && b.metadata.staff_late_notified_at) s.late_30d++;
       }
       if (b.review_rating && b.reviewed_at) {
         const rt = new Date(b.reviewed_at).getTime();
