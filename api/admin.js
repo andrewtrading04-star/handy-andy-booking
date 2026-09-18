@@ -441,6 +441,7 @@ export default async function handler(req, res) {
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
       case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
+      case 'insights_overview':    return await insightsOverview(req, res, db, auth);
       case 'customers':         return await customers(req, res, db, auth);
       case 'customer_update':   return await customerUpdate(req, res, db, auth, body);
       case 'customer_detail':   return await customerDetail(req, res, db, auth);
@@ -6243,6 +6244,165 @@ async function analyticsOverview(req, res, db, auth) {
     },
   });
 }
+
+// ── Insights (owner dashboard: "what needs my attention") ──────────────────
+// One 60-day bookings pull per business, sliced every way the Insights tab
+// needs: metro trend, tech workload/lateness/reviews, and revenue anomaly.
+// Deliberately NOT a cron/materialized table — the query is a single indexed
+// range scan per business (bookings_business_created_idx-shaped), so computing
+// it fresh on every tab open is cheaper than keeping a cache correct. Revisit
+// only if a business's booking volume ever makes this slow to compute live.
+const INSIGHTS_LATE_THRESHOLD = 3;      // nudges in 30d before a tech is flagged
+const INSIGHTS_OVERWORK_RATIO = 1.5;    // jobs vs team average
+const INSIGHTS_UNDERWORK_RATIO = 0.5;
+const INSIGHTS_METRO_MIN_AVG = 3;       // weekly bookings needed before a swing means anything
+const INSIGHTS_METRO_DROP = 0.25;       // 25% below trailing average = "slow"
+const INSIGHTS_METRO_SPIKE = 0.4;       // 40% above trailing average = "busy"
+const INSIGHTS_REVIEW_MIN_N = 3;        // reviews needed before an average means anything
+
+async function insightsOverview(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+
+  const now = Date.now();
+  const DAY = 86400000;
+  const since60 = new Date(now - 60 * DAY).toISOString();
+  const nowISO = new Date(now).toISOString();
+
+  const [{ data: techRows, error: techErr }, { data: areaRows, error: areaErr }, { data: bkRows, error: bkErr }] = await Promise.all([
+    db.from('technicians').select('id, name, active').eq('business_id', biz.id),
+    db.from('service_areas').select('id, name').eq('business_id', biz.id),
+    // scheduled_at, not created_at: the Zenbooker history import backfilled
+    // years of old jobs with a recent created_at (all stamped at migration
+    // time), so created_at alone would count that whole import as "this
+    // week." scheduled_at is when the job actually happened. Same convention
+    // as avgTicketRange. Upper-bounded at now so a job scheduled for next
+    // week doesn't count as work already done.
+    db.from('bookings')
+      .select('id, technician_id, secondary_technician_id, service_area_id, status, price, review_rating, reviewed_at, scheduled_at, metadata')
+      .eq('business_id', biz.id).gte('scheduled_at', since60).lt('scheduled_at', nowISO),
+  ]);
+  if (techErr) throw techErr;
+  if (areaErr) throw areaErr;
+  if (bkErr) throw bkErr;
+
+  const areaName = new Map((areaRows || []).map(a => [a.id, a.name]));
+  const flags = [];
+
+  // ── Metro trend: this week vs the trailing 4-week weekly average ─────────
+  const metroCur = new Map(), metroTrail = new Map();
+  const cur7 = now - 7 * DAY, trail35 = now - 35 * DAY;
+  for (const b of bkRows || []) {
+    if (b.status === 'cancelled' || !b.service_area_id) continue;
+    const t = new Date(b.scheduled_at).getTime();
+    if (t >= cur7) metroCur.set(b.service_area_id, (metroCur.get(b.service_area_id) || 0) + 1);
+    else if (t >= trail35) metroTrail.set(b.service_area_id, (metroTrail.get(b.service_area_id) || 0) + 1);
+  }
+  const metros = [...areaName.keys()].map(id => {
+    const cur = metroCur.get(id) || 0;
+    const avg = (metroTrail.get(id) || 0) / 4;
+    const pct = avg > 0 ? Math.round(((cur - avg) / avg) * 100) : null;
+    return { id, name: areaName.get(id), bookings_this_week: cur, trailing_weekly_avg: Math.round(avg * 10) / 10, pct_change: pct };
+  }).sort((a, b) => (a.pct_change ?? 0) - (b.pct_change ?? 0));
+  for (const m of metros) {
+    if (m.trailing_weekly_avg < INSIGHTS_METRO_MIN_AVG || m.pct_change == null) continue;
+    if (m.pct_change <= -INSIGHTS_METRO_DROP * 100) flags.push({ severity: 'high', text: `${m.name} is down ${Math.abs(m.pct_change)}% this week vs its trailing average (${m.bookings_this_week} vs ~${m.trailing_weekly_avg}/wk).` });
+    else if (m.pct_change >= INSIGHTS_METRO_SPIKE * 100) flags.push({ severity: 'good', text: `${m.name} is up ${m.pct_change}% this week vs its trailing average (${m.bookings_this_week} vs ~${m.trailing_weekly_avg}/wk).` });
+  }
+
+  // ── Revenue anomaly: portfolio-of-one — this business's own trailing avg ──
+  // Completed jobs only (avgTicketRange's convention) — an assigned-but-not-
+  // yet-done job isn't revenue yet, and counting it would make a normal week
+  // look inflated until those jobs actually close out.
+  let revCur = 0, revTrail = 0;
+  for (const b of bkRows || []) {
+    if (b.status !== 'completed' || !b.price) continue;
+    const t = new Date(b.scheduled_at).getTime();
+    if (t >= cur7) revCur += Number(b.price) || 0;
+    else if (t >= trail35) revTrail += Number(b.price) || 0;
+  }
+  const revAvgWeekly = revTrail / 4;
+  const revPct = revAvgWeekly > 0 ? Math.round(((revCur - revAvgWeekly) / revAvgWeekly) * 100) : null;
+  if (revAvgWeekly >= 500 && revPct != null && revPct <= -20) {
+    flags.push({ severity: 'high', text: `Revenue this week ($${Math.round(revCur)}) is down ${Math.abs(revPct)}% vs the trailing weekly average ($${Math.round(revAvgWeekly)}).` });
+  }
+
+  // ── Per-tech: workload, lateness, review trend ────────────────────────────
+  const cur30 = now - 30 * DAY, prior30 = now - 60 * DAY;
+  const techStats = new Map((techRows || []).filter(t => t.active !== false).map(t => [t.id, {
+    id: t.id, name: t.name,
+    jobs_30d: 0, completed_30d: 0, cancelled_30d: 0, revenue_30d: 0,
+    late_30d: 0, scheduled_30d: 0,
+    reviews_cur: [], reviews_prior: [],
+  }]));
+  for (const b of bkRows || []) {
+    const t = new Date(b.scheduled_at).getTime();
+    for (const tid of [b.technician_id, b.secondary_technician_id]) {
+      const s = tid && techStats.get(tid);
+      if (!s) continue;
+      if (t >= cur30) {
+        s.scheduled_30d++;
+        if (b.status === 'cancelled') s.cancelled_30d++;
+        else { s.jobs_30d++; if (b.status === 'completed') { s.completed_30d++; s.revenue_30d += Number(b.price) || 0; } }
+        // otw_nudge_sent_ids (see _lib/tech-late.js) — this tech was texted
+        // for running late on this job. Legacy tech_late_notified_ids read the
+        // same way, matching the nudge pass's own idempotency check.
+        const nudged = (b.metadata && (b.metadata.otw_nudge_sent_ids || b.metadata.tech_late_notified_ids)) || [];
+        if (nudged.map(String).includes(String(tid))) s.late_30d++;
+      }
+      if (b.review_rating && b.reviewed_at) {
+        const rt = new Date(b.reviewed_at).getTime();
+        if (rt >= cur30) s.reviews_cur.push(b.review_rating);
+        else if (rt >= prior30) s.reviews_prior.push(b.review_rating);
+      }
+    }
+  }
+  const avg = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
+  const techs = [...techStats.values()].map(s => ({
+    id: s.id, name: s.name, jobs_30d: s.jobs_30d, revenue_30d: Math.round(s.revenue_30d),
+    avg_ticket: s.completed_30d ? Math.round((s.revenue_30d / s.completed_30d) * 100) / 100 : null,
+    cancel_rate: s.scheduled_30d ? Math.round((s.cancelled_30d / s.scheduled_30d) * 100) : 0,
+    late_30d: s.late_30d,
+    review_avg_30d: avg(s.reviews_cur), review_n_30d: s.reviews_cur.length,
+    review_avg_prior30d: avg(s.reviews_prior), review_n_prior30d: s.reviews_prior.length,
+  })).sort((a, b) => b.jobs_30d - a.jobs_30d);
+  const activeTechs = techs.filter(t => t.jobs_30d > 0);
+  const teamAvgJobs = activeTechs.length ? activeTechs.reduce((n, t) => n + t.jobs_30d, 0) / activeTechs.length : 0;
+  for (const t of techs) {
+    if (t.late_30d >= INSIGHTS_LATE_THRESHOLD) flags.push({ severity: 'high', text: `${t.name} was texted for running late on ${t.late_30d} job${t.late_30d === 1 ? '' : 's'} in the last 30 days.` });
+    if (activeTechs.length > 1 && teamAvgJobs > 0 && t.jobs_30d >= teamAvgJobs * INSIGHTS_OVERWORK_RATIO && t.jobs_30d >= 5) {
+      flags.push({ severity: 'med', text: `${t.name} worked ${t.jobs_30d} jobs in the last 30 days vs a team average of ${Math.round(teamAvgJobs * 10) / 10}.` });
+    }
+    if (activeTechs.length > 1 && teamAvgJobs > 0 && t.jobs_30d > 0 && t.jobs_30d <= teamAvgJobs * INSIGHTS_UNDERWORK_RATIO) {
+      flags.push({ severity: 'low', text: `${t.name} worked only ${t.jobs_30d} job${t.jobs_30d === 1 ? '' : 's'} in the last 30 days vs a team average of ${Math.round(teamAvgJobs * 10) / 10}.` });
+    }
+    if (t.review_n_30d >= INSIGHTS_REVIEW_MIN_N && t.review_avg_30d < 4.0) {
+      flags.push({ severity: 'high', text: `${t.name}'s reviews averaged ${t.review_avg_30d}★ over the last ${t.review_n_30d} in 30 days.` });
+    } else if (t.review_n_30d >= INSIGHTS_REVIEW_MIN_N && t.review_n_prior30d >= INSIGHTS_REVIEW_MIN_N && t.review_avg_30d <= t.review_avg_prior30d - 0.5) {
+      flags.push({ severity: 'med', text: `${t.name}'s review average slipped from ${t.review_avg_prior30d}★ to ${t.review_avg_30d}★.` });
+    }
+  }
+
+  // ── Estimate funnel (30 days): sent → opened → approved ──────────────────
+  const { data: estRows, error: estErr } = await db.from('estimates')
+    .select('status, texted_at, emailed_at, text_opened_at, email_opened_at, approved_at, created_at')
+    .eq('business_id', biz.id).gte('created_at', new Date(now - 30 * DAY).toISOString());
+  if (estErr && !/text_opened_at|email_opened_at/.test(estErr.message || '')) throw estErr;
+  const est = estErr ? [] : (estRows || []);
+  const sent = est.filter(e => e.texted_at || e.emailed_at);
+  const opened = sent.filter(e => e.text_opened_at || e.email_opened_at);
+  const approved = sent.filter(e => e.approved_at);
+  const declined = est.filter(e => e.status === 'declined');
+  const estimateFunnel = { sent: sent.length, opened: opened.length, approved: approved.length, declined: declined.length };
+  if (sent.length >= 5) {
+    const openRate = Math.round((opened.length / sent.length) * 100);
+    if (openRate < 30) flags.push({ severity: 'med', text: `Only ${openRate}% of the ${sent.length} estimates sent in the last 30 days were ever opened.` });
+  }
+
+  flags.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+  return res.status(200).json({ flags, metros, techs, estimate_funnel: estimateFunnel, revenue: { this_week: Math.round(revCur), trailing_weekly_avg: Math.round(revAvgWeekly), pct_change: revPct } });
+}
+const SEVERITY_ORDER = { high: 0, med: 1, low: 2, good: 3 };
 
 // Owner-only: it spends money on API calls, and it is the owner's tagging
 // decision to re-run, not the office's. Same underlying pass as the cron, so
