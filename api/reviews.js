@@ -16,6 +16,11 @@
 // No auth: everything it returns is already public on Google Maps. It exposes
 // only the reviewer name, rating, text and date — never the technician or
 // booking a review is attributed to internally.
+//
+// When a location is given, the response also carries `pinned_frame_review`:
+// the newest review genuinely left on THAT listing (never a topped-up
+// sibling) whose text mentions a Frame TV, or null if none does. Independent
+// of `reviews` — it may repeat one of those entries, that's fine.
 import { serviceClient } from './_lib/supabase.js';
 import { GMB_LOCATIONS, LOCATIONS_BY_KEY } from '../scripts/lib/gmb-locations.mjs';
 
@@ -32,6 +37,11 @@ const RATING_ONLY_RE = /only left a rating/i;
 // services"). Anything this short is a parse artifact, not a review — the real
 // short ones ("Great work all around 100%") clear this comfortably.
 const MIN_TEXT_LEN = 20;
+
+// Matches "Frame TV", "the frame", "Samsung Frame", etc. \b keeps this from
+// firing on "framed" / "frameless" / other unrelated words that merely
+// contain "frame" as a substring.
+const FRAME_RE = /\bframe\b/i;
 
 function displayable(r) {
   const t = (r.review_text || '').trim();
@@ -168,6 +178,30 @@ export default async function handler(req, res) {
       }
     }
 
+    // Pinned Frame-TV review: its own permanent slot, independent of `picked`
+    // above. It may duplicate one of those entries (fine — same review shown
+    // a second time in its own slot); it is never backfilled or swapped in to
+    // replace anything in `picked`. Only ever sourced from a review genuinely
+    // left on THIS listing — same `.eq('location_key', ...)` restriction as
+    // the primary query above, never a topped-up sibling — so a "look what we
+    // did for Denver" callout can never misrepresent a review actually left
+    // on a different city's listing. Only meaningful with a location.
+    //
+    // One extra lightweight query: a coarse ILIKE pre-filter in SQL (the index
+    // can serve it), then the precise \bframe\b check in JS, since ILIKE alone
+    // would also match "framed" / "frameless". base() already orders newest
+    // first, so the first true match is the newest one.
+    let pinnedFrameReview = null;
+    if (listing) {
+      const { data, error } = await base()
+        .eq('location_key', listing.key)
+        .ilike('review_text', '%frame%')
+        .limit(20);
+      if (error) throw error;
+      const frameReview = (data || []).find((r) => displayable(r) && FRAME_RE.test(r.review_text || ''));
+      if (frameReview) pinnedFrameReview = shape(frameReview, true);
+    }
+
     // Cheap and safe to cache: the upstream ingest runs every 15 minutes, so a
     // 10-minute edge cache never hides a review for meaningfully longer than
     // the pipeline already does.
@@ -195,6 +229,7 @@ export default async function handler(req, res) {
       count: picked.length,
       topped_up: toppedUp,
       reviews: picked,
+      pinned_frame_review: pinnedFrameReview,
     });
   } catch (e) {
     console.error('[reviews]', (e && e.stack) || e);
