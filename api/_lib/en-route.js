@@ -8,7 +8,7 @@
 //                    (see _lib/tech-late.js). No app login required.
 // The wording and the Twilio status-callback wiring live here precisely so the
 // two paths can't drift into saying different things to the customer.
-import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
+import { sendSMSResult, logAutomatedMessage } from './sms.js';
 import { signToken } from './auth.js';
 
 // Matches the tech app's existing default (api/tech.js passed 30 when the tech
@@ -20,14 +20,11 @@ function baseUrl() {
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 }
 
-// Brand first: A2P 10DLC carriers match the name at the start of each text
-// against the registered brand. This exact wording is a campaign sample, so
-// change the sample if you change this. bizSlug is optional; it lets a
-// handy-andy job say "Handy Andy TV Mounting" (see smsBrandName in sms.js).
+// No business-name prefix on customer texts (owner rule, 2026-09-18). The
+// bizName/bizSlug params stay so call sites don't change.
 export function enRouteMessage(techName, bizName, etaMinutes, bizSlug) {
   const who = (techName && String(techName).trim().split(/\s+/)[0]) || 'Your tech';
-  const biz = smsBrandName(bizSlug, bizName);
-  return `${biz}: Heads up! ${who} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival.`;
+  return `Heads up! ${who} is en route (ETA ~${etaMinutes} min). Please prepare for his arrival.`;
 }
 
 // Send the customer their en-route text and record delivery status on the

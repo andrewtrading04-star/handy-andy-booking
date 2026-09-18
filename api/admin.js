@@ -478,6 +478,7 @@ export default async function handler(req, res) {
       case 'review_call_log':   return await reviewCallLog(req, res, db, auth, body);
       case 'review_call_report': return await reviewCallReport(req, res, db, auth);
       case 'bad_reviews':       return await badReviews(req, res, db, auth);
+      case 'bad_review_dismiss': return await badReviewDismiss(req, res, db, auth, body);
       case 'google_reviews':       return await googleReviews(req, res, db, auth);
       case 'google_review_update': return await googleReviewUpdate(req, res, db, auth, body);
       case 'avg_ticket':        return await avgTicketRange(req, res, db, auth);
@@ -7088,11 +7089,9 @@ async function invoiceSend(req, res, db, auth, body) {
     // STOP, gets the invoice by email only.
     smsResult = { ok: false, skipped: 'no_sms_consent' };
   } else if (b.customer.phone) {
-    // Brand first and a STOP line, like every customer text (A2P 10DLC).
-    const smsBrand = smsBrandName(biz.slug, biz.name);
     const text = payUrl
-      ? `${smsBrand}: You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl}`
-      : `${smsBrand}: You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay.`;
+      ? `You have an invoice for ${money(amountDue)}. Pay securely here: ${payUrl}`
+      : `You have an invoice for ${money(amountDue)}. Check your email for details, or call us to pay.`;
     smsResult = await sendSMSResult(b.customer.phone, text);
     await logAutomatedMessage(db, { businessId: biz.id, customerPhone: b.customer.phone, body: text, result: smsResult });
   }
@@ -9663,7 +9662,7 @@ async function badReviews(req, res, db, auth) {
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: revs, error } = await db.from('bookings')
-    .select(`id, business_id, scheduled_at, reviewed_at, review_rating, review_text,
+    .select(`id, business_id, scheduled_at, reviewed_at, review_rating, review_text, metadata,
              customer:customers ( name, phone ),
              technician:technicians!technician_id ( id, name )`)
     .in('business_id', bizIds)
@@ -9673,7 +9672,7 @@ async function badReviews(req, res, db, auth) {
     .limit(50);
   if (error) throw error;
 
-  const alerts = (revs || []).map(r => {
+  const alerts = (revs || []).filter(r => !(r.metadata && r.metadata.review_alert_dismissed_at)).map(r => {
     const biz = bizById.get(r.business_id) || {};
     return {
       id: r.id,
@@ -9689,6 +9688,22 @@ async function badReviews(req, res, db, auth) {
     };
   });
   return res.status(200).json({ alerts, sync_health });
+}
+
+// The X on a bad-review banner. Stamps the booking so the alert stays gone on
+// every device, instead of waiting out the 24h window.
+async function badReviewDismiss(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: b } = await db.from('bookings').select('id, metadata').eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  const { error } = await db.from('bookings')
+    .update({ metadata: { ...(b.metadata || {}), review_alert_dismissed_at: new Date().toISOString() } })
+    .eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // ── Estimates (customer quote requests from the public estimate page) ────────
@@ -10393,12 +10408,12 @@ async function estimateCreate(req, res, db, auth, body) {
   let texted = false;
   if (estPhone && body.sms_consent === true && approveUrl) {
     try {
-      const { total } = quoteTotals(line_items, taxRate);
-      // Brand first (A2P 10DLC), then the greeting.
+      // No brand prefix and no dollar amount: the customer taps the link to see
+      // the price (owner rule, 2026-09-18).
       const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
-      const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}: ` : '';
-      const totalTxt = line_items.length ? `Estimated total $${total.toFixed(2)} (incl. tax). ` : '';
-      const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} your estimate. ${svcTxt}${totalTxt}View & approve it here: ${approveUrl}\n\nReply or call with any questions.`;
+      const svcTxt = (service_label && service_label !== 'Custom Estimate') ? `${service_label}. ` : '';
+      const shortLink = estimateApproveLink({ slug: biz.slug, token: approveToken, fallbackUrl: approveUrl });
+      const msg = `${greeting} your estimate. ${svcTxt}View & approve it here:\n${shortLink}\n\nReply or call with any questions.`;
       const r = await sendSMSResult(estPhone, msg);
       await logAutomatedMessage(db, { businessId: biz.id, customerPhone: estPhone, body: msg, result: r });
       texted = !!r.ok;
@@ -10446,16 +10461,30 @@ async function estimateSendSms(req, res, db, auth, body) {
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
   const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
   const svcTxt = est.service_label ? `${est.service_label}: ` : '';
-  // If the office built priced line items, lead with the total; otherwise fall
-  // back to the request description so the text is never empty/meaningless.
+  // Line items only, never the total — the customer taps the link to see the
+  // price (owner rule, 2026-09-18). Fall back to the request description so
+  // the text is never empty.
   const items = Array.isArray(est.line_items) ? est.line_items : [];
-  const { total } = quoteTotals(items, est.tax_rate);
   const body_txt = items.length
-    ? `${items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')}. Estimated total: $${total.toFixed(2)}${Number(est.tax_rate) > 0 ? ' (incl. tax)' : ''}`
+    ? items.map(it => `${it.qty && it.qty !== 1 ? it.qty + '× ' : ''}${it.description}`).filter(Boolean).slice(0, 4).join('; ')
     : (est.description || 'Your estimate request');
-  // Brand first and a STOP line (A2P 10DLC). This is campaign sample 3 word for
-  // word, so change the sample if you change this.
-  const msg = `${smsBrandName(biz.slug, biz.name)}: ${greeting} the estimate you requested. ${svcTxt}${body_txt}. Reply or call us to get scheduled.`;
+  // Every estimate text must carry an actual booking link — "reply or call" with
+  // nothing to tap left customers replying in plain English instead of ever
+  // reaching the approve-and-schedule screen (see the Kanaan/Barrios incident,
+  // 2026-09-17). Same 90-day signed link the email button uses.
+  // NOTE: this changes the wording of campaign sample 3 on file for A2P 10DLC —
+  // re-verify/re-submit the sample with this link-bearing copy before assuming
+  // it's covered by the existing approval.
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000);
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
+  const shortLink = estimateApproveLink({ slug: biz.slug, token: approveToken, fallbackUrl: approveUrl });
+  const linkTxt = shortLink ? `\nCheck availability & schedule:\n${shortLink}` : ' Reply or call us to get scheduled.';
+  // No brand prefix — same reasoning as the estimate_create SMS above and
+  // reviewRequestSms: A2P 10DLC only requires the brand name once per
+  // conversation, and this text always follows the opt-in confirmation text
+  // (which does name the business), so repeating it here reads as spam.
+  const msg = `${greeting} the estimate you requested. ${svcTxt}${body_txt}.${linkTxt}`;
 
   const r = await sendSMSResult(est.customer_phone, msg);
   await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: r });
@@ -10826,11 +10855,8 @@ async function estimateDecline(req, res, db, auth, body) {
 
   // Explicit opt-in only (A2P 10DLC); the email below still goes out either way.
   if (est.customer_phone && est.sms_consent === true) {
-    // Brand first (A2P 10DLC) and named only once, then the greeting, with a
-    // STOP line like every customer text.
-    const smsBrand = smsBrandName(biz.slug, biz.name);
     const opener = firstName ? `Hi ${firstName}, we're` : "We're";
-    const msg = `${smsBrand}: ${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl}`;
+    const msg = `${opener} sorry, but it looks like your request is outside of what we're able to help with. Here's what we do handle: ${servicesUrl}`;
     smsResult = await sendSMSResult(est.customer_phone, msg);
     await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: smsResult });
   }
@@ -15257,37 +15283,9 @@ async function messagesSend(req, res, db, auth, body) {
   if (inErr) return res.status(503).json({ error: "Couldn't check this conversation. Try again in a moment." });
   if (!(inbound || []).length) return res.status(409).json({ error: 'You can only reply to a customer who has texted this number. Call them instead.' });
 
-  // A2P 10DLC: the FIRST text we send in a conversation must say who we are.
-  // Staff type naturally ("Hi Mark, yes we can..."), so the brand of the line
-  // texted goes in front, once, and only if the typed text doesn't already
-  // have it. Later replies in the same thread go out exactly as typed. No
-  // STOP line here — this is a live two-way reply, not an automated send; the
-  // customer already has STOP instructions from the automated texts and the
-  // registered opt-out keywords still work on this number regardless. "First"
-  // = no earlier outbound text in this thread that could have reached them (a
-  // failed send doesn't count). If that lookup fails, treat it as first: an
-  // extra brand prefix is harmless, a missing one isn't.
-  let outText = text;
-  let firstInThread = true;
-  try {
-    const { data: prior, error: priorErr } = await db.from('messages').select('status')
-      .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer).eq('direction', 'out').limit(200);
-    if (!priorErr) firstInThread = !(prior || []).some(m => !['failed', 'undelivered'].includes(String(m.status || '')));
-  } catch (e) { console.warn('[messages_send] prior-message check failed:', e.message); }
-  if (firstInThread) {
-    let brand = null;
-    if (ctx.biz) {
-      brand = smsBrandName(ctx.biz.slug, ctx.biz.name);
-    } else {
-      // Unmapped line (the toll-free sender): the same brand guess the thread view shows.
-      try {
-        const g = (await brandForUnmappedTexters(db, [customer], await businessesById(db))).get(customer);
-        if (g) brand = smsBrandName(g.slug, g.name);
-      } catch (e) { console.warn('[messages_send] brand lookup failed:', e.message); }
-      if (!brand) brand = smsBrandName(null, null);
-    }
-    if (!outText.toLowerCase().startsWith(brand.toLowerCase())) outText = `${brand}: ${outText}`;
-  }
+  // Replies go out exactly as typed — no business-name prefix on any customer
+  // text (owner rule, 2026-09-18).
+  const outText = text;
 
   // Insert BEFORE sending so the row id can ride along in the status callback.
   // A send whose row we failed to create would be invisible in the thread —

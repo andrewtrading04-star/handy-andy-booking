@@ -24,15 +24,15 @@ import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
 //
 // Keep outgoing copy focused on the booking. Consent and keyword handling
 // are maintained separately from the message template.
-export function bookingConfirmMessage({ bizName, bizSlug, dateStr, timeWindow, techName }) {
-  const biz = smsBrandName(bizSlug, bizName);
+// No business-name prefix on customer texts (owner rule, 2026-09-18).
+export function bookingConfirmMessage({ dateStr, timeWindow, techName }) {
   const when = timeWindow ? `${dateStr} between ${timeWindow}` : dateStr;
   // "he" matches the existing wording in api/admin.js; revisit for both call
   // sites together if the roster ever needs it neutral.
   const techLine = techName
     ? `${String(techName).trim().split(/\s+/)[0]} will text you when he's on the way.`
     : `We'll text you when your tech is on the way.`;
-  return `${biz}: You're booked for ${when}. ${techLine}`;
+  return `You're booked for ${when}. ${techLine}`;
 }
 
 // Send one confirmation for opt-ins that don't produce a booking: the estimate

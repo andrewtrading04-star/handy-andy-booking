@@ -1754,7 +1754,7 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
   // when this thread already had a text either way in the last 12 hours, and
   // for anyone who opted out ("Stop." isn't blocked by Twilio, so we check).
   if (!(await shouldAutoAck(from, to))) return xml(res, '<Response/>');
-  const ackText = `${brand}: Thanks for your text! A team member will reply shortly.`;
+  const ackText = `Thanks for your text! A team member will reply shortly.`;
   await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: ackText, result: { ok: true } });
   return xml(res, `<Response><Message>${xmlEsc(ackText)}</Message></Response>`);
 }
