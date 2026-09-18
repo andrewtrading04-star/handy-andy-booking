@@ -490,6 +490,52 @@ async function isSilentNumber(db, phone) {
   }
 }
 
+// Inserts the `calls` row. Split out of handleVoiceInbound so the IVR-gated
+// path (below) can call it AFTER the caller proves they're not an autodialer,
+// instead of logging every gate failure as a call that never actually rang
+// anyone (owner, 2026-09-18: "if someone calls and doesn't press 1 ... that
+// shouldn't even be tracked" — the row itself, not just its status).
+async function logCallRow(db, { line, from, to, sid, blocked }) {
+  let business_id = null;
+  if (line && line.business_slug) {
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
+    business_id = biz?.id || null;
+  }
+  let customer_id = null;
+  if (from) {
+    const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
+    customer_id = (c || [])[0]?.id || null;
+  }
+  await db.from('calls').insert({
+    business_id,
+    source: 'twilio',
+    kind: 'inbound',
+    caller_phone: from || 'unknown',
+    grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
+    tracking_label: line?.label || null,
+    market: line?.market || null,
+    // The handset actually dialed for THIS call, not the line's daytime
+    // default — on an after-hours line those differ, and the Calls tab's
+    // "routed to" (plus the missed-call text, which is sent to this number)
+    // must name whoever really rang. Only ever set on a row that reaches
+    // this function, which by construction means the call is actually about
+    // to Dial (or was blocked pre-ring — see caller) — never for an IVR-gate
+    // failure, which never calls this at all.
+    forwarded_to: destinationFor(line),
+    twilio_call_sid: sid,
+    occurred_at: new Date().toISOString(),
+    customer_id,
+    // Blocked calls are pre-resolved — nobody needs to call a blocked
+    // number back, so this never sits in the Needs-callback queue.
+    status: blocked ? 'ignored' : 'new',
+    handled_by: blocked ? 'Blocked number' : null,
+    handled_at: blocked ? new Date().toISOString() : null,
+    // An unmapped number is a config gap, never a reason to drop a caller —
+    // same rule as GRASSHOPPER_LINES. The office sees the warning on the card.
+    warnings: blocked ? ['Blocked number — call was rejected before ringing'] : (line ? null : ['Number is not in tracking_numbers - call still connected']),
+  });
+}
+
 // POST /api/analytics?action=voice_inbound — someone dialed a tracking number.
 async function handleVoiceInbound(req, res) {
   const params = await twilioVoiceParams(req, res, 'voice_inbound');
@@ -518,45 +564,20 @@ async function handleVoiceInbound(req, res) {
     // are harmless no-ops and no missed-call text goes out either.
     if (await isSilentNumber(db, from)) return finishVoiceInbound(res, line, params, sid, blocked);
 
+    // A line with the IVR gate on doesn't get logged here at all: whether
+    // this becomes a real, dialed call is only known once the gate resolves,
+    // so the row (and the "routed to" it carries) is created from
+    // handleVoiceGather instead, only on a real press-1. Blocked and AI-bot
+    // calls bypass the gate (see finishVoiceInbound) and are still logged
+    // immediately here, same as before.
+    if (line && line.ivr_gate_enabled && !blocked && !line.ai_bot_enabled) {
+      return finishVoiceInbound(res, line, params, sid, blocked);
+    }
+
     // Log first, forward second — but the whole block is wrapped, because if
     // logging throws the call must still connect. A customer reaching a human
     // matters more than the analytics row.
-    let business_id = null;
-    if (line && line.business_slug) {
-      const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
-      business_id = biz?.id || null;
-    }
-    let customer_id = null;
-    if (from) {
-      const { data: c } = await db.from('customers').select('id').eq('phone', from).limit(1);
-      customer_id = (c || [])[0]?.id || null;
-    }
-    await db.from('calls').insert({
-      business_id,
-      source: 'twilio',
-      kind: 'inbound',
-      caller_phone: from || 'unknown',
-      grasshopper_number: to || null,   // the line dialed; same meaning as in 0080
-      tracking_label: line?.label || null,
-      market: line?.market || null,
-      // The handset actually dialed for THIS call, not the line's daytime
-      // default — on an after-hours line those differ, and the Calls tab's
-      // "routed to" (plus the missed-call text, which is sent to this number)
-      // must name whoever really rang. A blocked number never actually rings
-      // anyone, so this stays descriptive metadata only for those rows.
-      forwarded_to: destinationFor(line),
-      twilio_call_sid: sid,
-      occurred_at: new Date().toISOString(),
-      customer_id,
-      // Blocked calls are pre-resolved — nobody needs to call a blocked
-      // number back, so this never sits in the Needs-callback queue.
-      status: blocked ? 'ignored' : 'new',
-      handled_by: blocked ? 'Blocked number' : null,
-      handled_at: blocked ? new Date().toISOString() : null,
-      // An unmapped number is a config gap, never a reason to drop a caller —
-      // same rule as GRASSHOPPER_LINES. The office sees the warning on the card.
-      warnings: blocked ? ['Blocked number — call was rejected before ringing'] : (line ? null : ['Number is not in tracking_numbers - call still connected']),
-    });
+    await logCallRow(db, { line, from, to, sid, blocked });
   } catch (e) {
     console.error('[voice_inbound] log failed:', e.message);
   }
@@ -590,10 +611,11 @@ async function handleVoiceGather(req, res) {
   const sid = (req.query.sid || '').toString();
   const params = await twilioVoiceParams(req, res, 'voice_gather', { sid });
   if (!params) return;
+  const from = tenDigits(params.From);
   const to = tenDigits(params.To);
   let line = null;
+  const db = serviceClient();
   try {
-    const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
       .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
       .eq('phone', to).maybeSingle();
@@ -602,16 +624,21 @@ async function handleVoiceGather(req, res) {
     console.error('[voice_gather] line lookup failed:', e.message);
   }
   if ((params.Digits || '').toString() !== '1') {
-    // No key, or the wrong key — never voicemail here: a real customer who
-    // mis-taps gets a second chance by simply calling back, and giving a
-    // scam dialer a record/transcribe prompt is exactly the thing the gate
-    // exists to deny it.
-    try {
-      const db = serviceClient();
-      await db.from('calls').update({ status: 'ignored', handled_by: 'No response to IVR prompt', handled_at: new Date().toISOString() })
-        .eq('twilio_call_sid', params.CallSid || '').eq('status', 'new');
-    } catch (e) { console.error('[voice_gather] resolve failed:', e.message); }
+    // No key, or the wrong key — hang up with no row at all (handleVoiceInbound
+    // deliberately skipped logging this call), never voicemail: a real
+    // customer who mis-taps gets a second chance by simply calling back, and
+    // giving a scam dialer a record/transcribe prompt is exactly the thing
+    // the gate exists to deny it.
     return xml(res, '<Response><Hangup/></Response>');
+  }
+  // Passed the gate — this is a real call about to ring someone, so it gets
+  // logged NOW (see logCallRow), with an accurate forwarded_to/"routed to"
+  // instead of one stamped before we knew the call would ever be dialed.
+  // Silent-number test calls still skip the row, same as the non-gated path.
+  try {
+    if (!(await isSilentNumber(db, from))) await logCallRow(db, { line, from, to, sid, blocked: false });
+  } catch (e) {
+    console.error('[voice_gather] log failed:', e.message);
   }
   return xml(res, dialTwiml(line, params.From, sid));
 }
