@@ -6067,50 +6067,6 @@ function webNum(n){ if(n==null)return '—'; return Number(n).toLocaleString('en
 function webShortPath(u){ try{ const p=new URL(u); return (p.pathname+(p.search||''))||'/'; }catch{ return u||'/'; } }
 function webHost(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch{ return u; } }
 
-// ── Applicant screenings (migration 0114) ───────────────────────────────────
-// Everyone who took the /apply.html quiz, pass or fail, plus which questions
-// people actually miss (api/admin.js applicants()).
-async function renderApplicants(){
-  const view=document.getElementById('view');
-  view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
-  let d;
-  try{ d=await api('applicants'); }
-  catch(e){ view.innerHTML=`<div class="ana"><div class="card err" style="padding:18px;">${esc(e.message||'Could not load applicants')}</div></div>`; return; }
-  const t=d.totals||{};
-  const rows=(d.applicants||[]).map(r=>{
-    const sa=r.short_answers||{};
-    const saHtml=Object.keys(sa).length?`<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--mute);font-size:12.5px;">Short answers</summary>
-      <div style="font-size:12.5px;color:var(--mute);margin-top:6px;line-height:1.5;">${Object.values(sa).map(v=>esc(v)).join('<br><br>')}</div></details>`:'';
-    return `<tr>
-      <td>${esc(r.name)}</td>
-      <td>${esc(r.email)}<br><span style="color:var(--mute);">${esc(r.phone)}</span></td>
-      <td>${r.score}/${r.total}</td>
-      <td>${r.passed?'<span style="color:#16a34a;font-weight:700;">Passed</span>':'<span style="color:#dc2626;font-weight:700;">Failed</span>'}</td>
-      <td style="color:var(--mute);font-size:12.5px;">${new Date(r.created_at).toLocaleString()}</td>
-      <td>${saHtml}</td>
-    </tr>`;
-  }).join('');
-  const qRows=(d.question_stats||[]).map(q=>`<tr>
-    <td>${esc(q.prompt)}</td>
-    <td style="color:${q.rate==null?'var(--mute)':q.rate<60?'#dc2626':'inherit'};">${q.rate==null?'—':q.rate+'%'}</td>
-    <td style="color:var(--mute);">${q.attempts}</td>
-  </tr>`).join('');
-  view.innerHTML=`
-    <div class="ana">
-      <div class="ana-head"><div><h1>Applicants</h1><div class="ana-sub">Everyone who took the technician screening test</div></div></div>
-      <div class="stat-row" style="display:flex;gap:12px;margin:14px 0;flex-wrap:wrap;">
-        <div class="card" style="padding:14px 18px;"><div style="color:var(--mute);font-size:12.5px;">Applicants</div><div style="font-size:22px;font-weight:800;">${t.count||0}</div></div>
-        <div class="card" style="padding:14px 18px;"><div style="color:var(--mute);font-size:12.5px;">Pass rate</div><div style="font-size:22px;font-weight:800;">${t.pass_rate==null?'—':t.pass_rate+'%'}</div></div>
-        <div class="card" style="padding:14px 18px;"><div style="color:var(--mute);font-size:12.5px;">Passed</div><div style="font-size:22px;font-weight:800;">${t.passed||0}</div></div>
-      </div>
-      <h2 style="font-size:15px;margin:18px 0 8px;">Every attempt</h2>
-      <table><thead><tr><th>Name</th><th>Contact</th><th>Score</th><th>Result</th><th>When</th><th></th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="6" style="color:var(--mute);">No applicants yet.</td></tr>'}</tbody></table>
-      <h2 style="font-size:15px;margin:22px 0 8px;">Weakest questions</h2>
-      <table><thead><tr><th>Question</th><th class="num">Correct rate</th><th class="num">Attempts</th></tr></thead>
-        <tbody>${qRows||'<tr><td colspan="3" style="color:var(--mute);">No data yet.</td></tr>'}</tbody></table>
-    </div>`;
-}
 async function renderWebAnalytics(){
   const view=document.getElementById('view');
   view.innerHTML=`
@@ -8149,6 +8105,42 @@ function techInviteBlockHtml(inv){
     ${rows?`<div style="margin-top:10px;">${rows}</div>`:''}
   </div>`;
 }
+// ── Applicant screenings (migration 0114) ───────────────────────────────────
+// Everyone who took the /apply screening test, pass or fail, plus which
+// questions people actually miss (api/admin.js applicants()). Sits under the
+// invite card: a pass IS an invite, so this is where the owner looks for
+// who's coming in.
+function applicantsBlockHtml(app){
+  if(!app) return '';
+  if(app.error) return `<div class="job" style="margin-bottom:14px;"><div class="meta">Applicants couldn't load: ${esc(app.error)}.</div></div>`;
+  const t=app.totals||{};
+  const rows=(app.applicants||[]).map(r=>{
+    const sa=r.short_answers||{};
+    const saHtml=Object.keys(sa).length?`<details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--mute);font-size:12.5px;">Short answers</summary>
+      <div style="font-size:12.5px;color:var(--mute);margin-top:6px;line-height:1.5;">${Object.values(sa).map(v=>esc(v)).join('<br><br>')}</div></details>`:'';
+    return `<div style="border-top:1px solid var(--line);padding:10px 0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        ${r.passed?'<span style="color:#16a34a;font-weight:800;font-size:12px;">PASSED</span>':'<span style="color:#dc2626;font-weight:800;font-size:12px;">FAILED</span>'}
+        <b style="font-size:14px;">${esc(r.name)}</b>
+        <span class="meta">${r.score}/${r.total} · ${esc(r.phone)} · ${esc(r.email)}</span>
+      </div>
+      <div class="meta" style="font-size:12.5px;margin-top:4px;">${new Date(r.created_at).toLocaleString()}</div>
+      ${saHtml}
+    </div>`;
+  }).join('');
+  const qRows=(app.question_stats||[]).filter(q=>q.attempts).map(q=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;">
+    <span>${esc(q.prompt)}</span>
+    <span style="flex:none;color:${q.rate<60?'#dc2626':'var(--mute)'};font-weight:700;">${q.rate}% · ${q.attempts}</span>
+  </div>`).join('');
+  return `<div class="job" style="margin-bottom:14px;">
+    <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;"><div class="name">Applicants (screening test)</div>
+        <div class="meta">${t.count||0} took the test · ${t.passed||0} passed${t.pass_rate==null?'':` (${t.pass_rate}%)`} · a pass appears above as an invite</div></div>
+    </div>
+    ${rows?`<div style="margin-top:10px;">${rows}</div>`:'<div class="meta" style="margin-top:10px;">No one has taken the test yet.</div>'}
+    ${qRows?`<details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">Weakest questions (correct rate · attempts)</summary><div style="margin-top:6px;">${qRows}</div></details>`:''}
+  </div>`;
+}
 function wireTechInviteBlock(){
   const nb=document.getElementById('techInviteNew'); if(nb) nb.addEventListener('click',openTechInviteModal);
   document.querySelectorAll('#techInviteCard [data-tinv]').forEach(b=>b.addEventListener('click',()=>techInviteAct(b.dataset.id,b.dataset.tinv,b)));
@@ -8275,9 +8267,13 @@ async function renderTechnicians(){
     // Invites load beside the roster (owner, Handy Andy / Dom's only) and can
     // never take the roster down with them: a failure just shows in their card.
     const wantInvites=role==='owner' && TECH_INVITE_SLUGS.includes(current.slug);
-    const [d,inv]=await Promise.all([
+    // Applicants (the /apply screening test) only ever land in Handy Andy,
+    // so the card shows there alone; same never-take-the-roster-down rule.
+    const wantApplicants=role==='owner' && current.slug==='handy-andy';
+    const [d,inv,app]=await Promise.all([
       api('technicians',{ params:{ business:current.slug }}),
       wantInvites ? api('tech_invites',{ params:{ business:current.slug }}).catch(e=>({ error:e.message })) : Promise.resolve(null),
+      wantApplicants ? api('applicants').catch(e=>({ error:e.message })) : Promise.resolve(null),
     ]);
     techInviteData=inv;
     techRoster=d.technicians||[];
@@ -8287,7 +8283,7 @@ async function renderTechnicians(){
     const inactiveToggle=inactiveTechs.length
       ? `<button type="button" id="toggleInactiveTechs" class="btn ghost sm" style="width:auto;margin-top:6px;">${showInactiveTechs?'Hide':'Show'} ${inactiveTechs.length} inactive tech${inactiveTechs.length===1?'':'s'} (former techs and imported history)</button>`
       : '';
-    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + (shown.map(t=>`
+    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + applicantsBlockHtml(app) + (shown.map(t=>`
       <div class="job" data-id="${t.id}">
         <div class="row">
           <div style="display:flex;align-items:center;gap:10px;">
@@ -9386,7 +9382,6 @@ const ANALYTICS_TABS=[
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
-  { id:'applicants', label:'Applicants', screen:'applicants', show:()=>role==='owner', render:()=>renderApplicants() },
 ];
 // callHubTab starts null and resolves on first render: the owner lands on
 // the Log (the by-number call view they asked for), while secretaries land
