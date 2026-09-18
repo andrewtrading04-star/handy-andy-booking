@@ -5859,6 +5859,25 @@ async function photoGallery(req, res, db, auth) {
 // hand-maintained slug lists the old code kept in analytics.js, log-event.js
 // and admin.html), then does ONE grouped query over the last 30 days of
 // public.events rather than one round trip per business.
+// Read every row of a filtered query past Supabase's 1000-row response cap.
+// One cheap count first, then every page in flight at once — versus the
+// old page-by-page loop, where 13 pages meant 13 sequential round trips.
+// `build(cols, opts)` returns the filtered query; cols/opts are only passed
+// for the count probe.
+async function fetchAllPages(build, { pageSize = 1000, maxPages = 100 } = {}) {
+  const { count, error: countErr } = await build('id', { count: 'exact', head: true });
+  if (countErr) throw countErr;
+  const pages = Math.min(maxPages, Math.ceil((count || 0) / pageSize));
+  const results = await Promise.all(Array.from({ length: pages }, (_, p) =>
+    build().range(p * pageSize, p * pageSize + pageSize - 1)));
+  const rows = [];
+  for (const { data, error } of results) {
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
 async function analyticsOverview(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
@@ -5879,15 +5898,15 @@ async function analyticsOverview(req, res, db, auth) {
     // widget + created_at + session_id. session_id is what turns a raw event
     // count into a PEOPLE count: an event total answers "how busy", not "how
     // many", and one visitor clicking through the funnel can log 20+ rows.
-    // Paginated the same way cityPagesAnalytics/analytics.js already do,
-    // since Supabase caps a single response at 1000 rows.
-    for (let page = 0; page < 100; page++) {
-      const { data, error } = await pub.from('events').select('widget, created_at, session_id, event_type, browser')
-        .in('widget', [...tagToBiz.keys()])
-        .gte('created_at', since)
-        .range(page * 1000, page * 1000 + 999);
-      if (error) throw error;
-      for (const r of data || []) {
+    // Supabase caps a response at 1000 rows; ~12k rows/30d means a dozen
+    // pages, fetched in parallel (see fetchAllPages) rather than one after
+    // another, which alone was 2-3s of this tab's load.
+    {
+      const evRows = await fetchAllPages((cols, opts) =>
+        pub.from('events').select(cols || 'widget, created_at, session_id, event_type, browser', opts)
+          .in('widget', [...tagToBiz.keys()])
+          .gte('created_at', since));
+      for (const r of evRows) {
         // api/log-event.js drops these at the door now, but rows logged before
         // that shipped are still in the table — same rule applied on read so the
         // 30-day window doesn't show two different realities either side of the
@@ -5938,7 +5957,6 @@ async function analyticsOverview(req, res, db, auth) {
         // cannot tell a real job from the owner testing the funnel, nor from a
         // booking cancelled a minute later. Counted from app.bookings below.
       }
-      if (!data || data.length < 1000) break;
     }
   }
 
@@ -6015,16 +6033,16 @@ async function analyticsOverview(req, res, db, auth) {
       // of round trips AND still truncate, silently undercounting markets.
       // Page views alone are a couple of thousand, which is what "which pages
       // did this session touch" actually needs.
+      // Served by the partial index web_events_page_view_created_idx (0116);
+      // without it each page walked every page_view ever logged (2s a page).
       const sess = new Map();
-      for (let page = 0; page < 12; page++) {
-        const { data, error } = await pub.from('web_events')
-          .select('session_id, page_url, created_at, user_agent')
-          .eq('event_type', 'page_view')
-          .ilike('page_url', `%${host}%`)
-          .gte('created_at', since)
-          .range(page * 1000, page * 1000 + 999);
-        if (error) throw error;
-        for (const r of data || []) {
+      {
+        const pvRows = await fetchAllPages((cols, opts) =>
+          pub.from('web_events').select(cols || 'session_id, page_url, created_at, user_agent', opts)
+            .eq('event_type', 'page_view')
+            .ilike('page_url', `%${host}%`)
+            .gte('created_at', since), { maxPages: 12 });
+        for (const r of pvRows) {
           if (isBotUserAgent(r.user_agent)) continue;
           let path;
           try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
@@ -6038,7 +6056,6 @@ async function analyticsOverview(req, res, db, auth) {
           e.days.get(path).add(day);
           if (!e.last || r.created_at > e.last) e.last = r.created_at;
         }
-        if (!data || data.length < 1000) break;
       }
 
       const bkAll = bookingsByBiz.get(b.id) || [];
