@@ -1,6 +1,8 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
-import { sendSMS, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
+import { sendSMS, sendSMSResult, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
+import { smsNotificationsOn } from './_lib/notify.js';
+import { demoMode } from './_lib/demo.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 
@@ -666,8 +668,161 @@ async function handleVoiceStatus(req, res) {
   } catch (e) {
     console.error('[voice_status] update failed:', e.message);
   }
+  // Missed-call text to the caller (see missedCallTextAfterDial below).
+  // Never throws and never alters the TwiML returned below.
+  if (!answered) await missedCallTextAfterDial(params, status);
   if (answered) return xml(res, '<Response><Hangup/></Response>');
   return xml(res, voicemailTwiml(sid));
+}
+
+// ── Missed-call text (owner request, 2026-09-18) ─────────────────────────────
+// When a tracking-line call rings out, text the caller from THAT line with
+// the line's own tracking_numbers.missed_call_text (migration 0117; null or
+// blank = off, so it is enabled per line in data, never in code). The reply
+// lands in the same Messages thread, because the row is keyed (our_phone =
+// the line, customer_phone = the caller) exactly like an inbound text.
+//
+// Hooked HERE, in the <Dial> action, and nowhere else, because this is the one
+// callback that (a) only exists for a call that really rang somebody — a
+// blocked caller gets <Reject/>, an IVR-gate failure gets <Hangup/>, neither
+// ever reaches a <Dial> — and (b) carries DialCallStatus, the only field that
+// separates "a person picked up" from "nobody did". voice_recording is NOT a
+// hook: it also fires for answered calls' recordings and for transcripts.
+//
+// Only these DialCallStatus values are a miss. 'completed' is a pickup (the
+// existing `answered` flag above), and anything unknown or missing sends
+// nothing. Known edge, deliberately not engineered around: when the forwarded
+// cell's OWN carrier voicemail picks up, Twilio sees the dial leg answered
+// ('completed' with a duration), so that caller gets no text.
+const MISSED_DIAL_STATUSES = new Set(['no-answer', 'busy', 'failed', 'canceled']);
+// The parent call's own CallStatus on the action request: 'in-progress' means
+// the caller is still on the line waiting for the voicemail TwiML; any of
+// these means they already hung up and nobody is listening for a response.
+const CALLER_GONE_STATUSES = new Set(['completed', 'canceled', 'busy', 'no-answer', 'failed']);
+
+// Never throws, never changes what handleVoiceStatus returns. When the caller
+// has already hung up there is nobody to keep waiting, so the send is simply
+// awaited. When the caller is still on the line (about to hear the voicemail
+// greeting) the send must not sit in front of that TwiML, so it is handed to
+// Vercel's waitUntil — the same request-context hook @vercel/functions'
+// waitUntil() reads, used directly because this repo has no dependency on that
+// package — and the response goes out immediately. Without that hook (local
+// dev) it falls back to awaiting, bounded by sms.js's 10s send cap: a short
+// pause is better than a text Vercel freezes halfway through.
+async function missedCallTextAfterDial(params, dialStatus) {
+  try {
+    if (!MISSED_DIAL_STATUSES.has(dialStatus)) return;
+    const job = sendMissedCallText(params).catch((e) => {
+      console.error('[missed_call_text] failed:', e && e.message);
+    });
+    const callStatus = (params.CallStatus || '').toString().toLowerCase();
+    if (CALLER_GONE_STATUSES.has(callStatus)) { await job; return; }
+    let ctx = null;
+    try { ctx = globalThis[Symbol.for('@vercel/request-context')]?.get?.() || null; } catch { ctx = null; }
+    if (ctx && typeof ctx.waitUntil === 'function') { ctx.waitUntil(job); return; }
+    await job;
+  } catch (e) {
+    console.error('[missed_call_text] failed:', e && e.message);
+  }
+}
+
+// Every guard fails CLOSED: any lookup error means no text. A missed "sorry"
+// costs nothing; an unwanted text to a staff phone, an opted-out customer or
+// a robocaller costs a carrier complaint on the A2P campaign.
+async function sendMissedCallText(params) {
+  const to = tenDigits(params.To);
+  const rawFrom = (params.From || '').toString().trim();
+  const tag = `[missed_call_text] line ...${to.slice(-4)}`;
+  // Anonymous / withheld / "Restricted" / non-NANP caller IDs never match.
+  if (!/^\+1[2-9]\d{2}[2-9]\d{6}$/.test(rawFrom)) { console.log(`${tag} skipped: caller ID is not a textable US number`); return; }
+  const from = rawFrom.slice(2);
+  const who = `${tag} caller ...${from.slice(-4)}`;
+  // FromCountry is Twilio's own lookup; only trusted when present, so a
+  // callback that omits it still falls back to the +1 check above.
+  const country = (params.FromCountry || '').toString().toUpperCase();
+  if (country && country !== 'US') { console.log(`${who} skipped: caller country ${country}`); return; }
+  if (/^8(00|33|44|55|66|77|88)/.test(from)) { console.log(`${who} skipped: toll-free caller ID`); return; }
+  if (from === to) { console.log(`${who} skipped: caller is the line itself`); return; }
+  if (from === tenDigits(process.env.TWILIO_PHONE_NUMBER || '')) { console.log(`${who} skipped: caller is our toll-free sender`); return; }
+  // Master switch first, so a disabled system leaves no 'failed' rows behind.
+  if (!demoMode() && !smsNotificationsOn()) { console.log(`${who} skipped: SMS notifications are off`); return; }
+
+  const db = serviceClient();
+  const { data: line, error: lineErr } = await db.from('tracking_numbers')
+    .select('phone, business_slug, active, ai_bot_enabled, ai_bot_v2_enabled, forward_to, after_hours_forward_to, missed_call_text')
+    .eq('phone', to).maybeSingle();
+  if (lineErr || !line) { console.log(`${who} skipped: line lookup ${lineErr ? 'failed: ' + lineErr.message : 'found no line'}`); return; }
+  const text = line.missed_call_text == null ? '' : String(line.missed_call_text);
+  if (!text.trim()) return;   // feature off on this line: silent, the normal case
+  if (!line.active) { console.log(`${who} skipped: line inactive`); return; }
+  if (line.ai_bot_enabled || line.ai_bot_v2_enabled) { console.log(`${who} skipped: AI bot line`); return; }
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [ownQ, silentQ, staffQ, blockedQ, optedOut, recentQ, bizQ, custQ] = await Promise.all([
+    db.from('tracking_numbers').select('id').eq('phone', from).limit(1),
+    db.from('silent_numbers').select('id').eq('phone', from).limit(1),
+    db.from('staff_users').select('phone').not('phone', 'is', null),
+    db.from('blocked_numbers').select('id').eq('phone', from).limit(1),
+    smsOptOutState(db, from),
+    // Dedupe: one missed-call text per caller per line per 24h. Every
+    // automated send from a tracking line is this one (the rest leave from
+    // the toll-free), and the row is inserted BEFORE the send (below), so a
+    // Twilio retry of this callback finds it too.
+    db.from('messages').select('id').eq('our_phone', to).eq('customer_phone', from)
+      .eq('direction', 'out').eq('sent_by', 'automated').gte('created_at', since).limit(1),
+    line.business_slug
+      ? db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    db.from('customers').select('id').eq('phone', from).limit(1),
+  ]);
+  const failed = [ownQ, silentQ, staffQ, blockedQ, recentQ].find(q => q.error);
+  if (failed) { console.log(`${who} skipped: guard lookup failed: ${failed.error.message}`); return; }
+  if ((ownQ.data || []).length) { console.log(`${who} skipped: caller is one of our tracking numbers`); return; }
+  if ((blockedQ.data || []).length) { console.log(`${who} skipped: blocked number`); return; }
+  // The owner's handset is in silent_numbers AND staff_users; silent_numbers
+  // only keeps his test calls out of the Calls tab, so it must not stop him
+  // testing this text. Every other staff / handset number is excluded.
+  const isSilent = (silentQ.data || []).length > 0;
+  if (!isSilent) {
+    const staffPhones = new Set((staffQ.data || []).map(s => tenDigits(s.phone)).filter(Boolean));
+    if (staffPhones.has(from)) { console.log(`${who} skipped: staff phone`); return; }
+    if (from === tenDigits(line.forward_to) || from === tenDigits(line.after_hours_forward_to)) { console.log(`${who} skipped: caller is this line's own handset`); return; }
+  }
+  if (optedOut !== false) { console.log(`${who} skipped: ${optedOut === null ? 'opt-out lookup failed' : 'caller opted out of texts'}`); return; }
+  if ((recentQ.data || []).length) { console.log(`${who} skipped: already texted from this line in the last 24h`); return; }
+
+  // Claim BEFORE sending (same pattern as admin.js messagesSend): the row is
+  // the dedupe record and its id rides in the delivery-status token. No row,
+  // no send — an untracked text could repeat on the next retry.
+  const { data: row, error: insErr } = await db.from('messages').insert({
+    business_id: (bizQ && bizQ.data && bizQ.data.id) || null,
+    customer_phone: from,
+    our_phone: to,
+    direction: 'out',
+    body: text,
+    status: 'queued',
+    sent_by: 'automated',
+    customer_id: (custQ && !custQ.error && (custQ.data || [])[0]?.id) || null,
+  }).select('id').single();
+  if (insErr || !row) { console.error(`${who} not sent: message row insert failed: ${insErr ? insErr.message : 'no row'}`); return; }
+
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const statusCallback = base
+    ? `${base}/api/analytics?action=sms_status&token=${encodeURIComponent(signToken({ kind: 'message', message_id: row.id }, 86400))}`
+    : undefined;
+  // FROM the tracking line (in the campaign's sender pool), never the toll-free.
+  const r = await sendSMSResult(from, text, { from: to, statusCallback });
+  if (r.ok) {
+    if (r.sid) await db.from('messages').update({ twilio_sid: r.sid }).eq('id', row.id);
+    // Only from 'queued': a delivery receipt that raced ahead keeps 'delivered'.
+    await db.from('messages').update({ status: 'sent' }).eq('id', row.id).eq('status', 'queued');
+    console.log(`${who} sent${r.demo ? ' (demo)' : ''}`);
+  } else {
+    const why = r.error || `not sent (${r.skipped})`;
+    await db.from('messages').update({ status: 'failed', error: why }).eq('id', row.id);
+    // Twilio error bodies can echo the full To number; logs get last 4 only.
+    console.error(`${who} send failed: ${why.replace(/\+?\d{10,11}/g, (m) => '...' + m.slice(-4))}`);
+  }
 }
 
 // POST /api/analytics?action=voice_recording&sid=... — fires twice: once when
