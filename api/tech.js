@@ -20,7 +20,7 @@ import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.
 import { sendEnRouteSms, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { emailConfig, sendEmail, brandFor, reviewEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendReviewBonusEarnedAlert, sendTechJoinedAlert } from './_lib/owner-notify.js';
-import { normalizeInviteCode, newInviteCode, inviteState, inviteBrand, digits10, firstName, weakPin, welcomeSmsText, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
+import { normalizeInviteCode, newInviteCode, INVITE_TTL_DAYS, inviteState, inviteBrand, digits10, firstName, weakPin, welcomeSmsText, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { publicQuestions, gradeAnswers, RETAKE_COOLDOWN_HOURS, HIRING } from './_lib/apply-quiz.js';
 import { localDayStartUTC, localDateStartUTC, addDaysStr, startOfWeekUTC } from './_lib/time.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, slotKeyForLocalTime, localHHMM, localDateStr } from './_lib/availability.js';
@@ -2782,18 +2782,39 @@ function applicantName(raw) {
   return (name.length >= 2 && name.length <= 60 && /^[\p{L}\p{M}][\p{L}\p{M} .’-]*$/u.test(name)) ? name : null;
 }
 
-// True if this phone already took the quiz within the cooldown window --
-// checked before showing questions (fast "come back tomorrow") and again at
-// submit (authoritative, closes the race between two tabs).
-async function recentlyScreened(db, phone) {
+// The most recent screening for this phone inside the cooldown window, or
+// null -- checked before showing questions (fast "come back tomorrow") and
+// again at submit (authoritative, closes the race between two tabs).
+async function recentScreening(db, phone) {
   const since = new Date(Date.now() - RETAKE_COOLDOWN_HOURS * 3600e3).toISOString();
   const d10 = digits10(phone);
   const { data, error } = await db.from('applicant_screenings')
-    .select('phone, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(500);
+    .select('phone, passed, invite_code, created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
-  return (data || []).some(r => digits10(r.phone) === d10);
+  return (data || []).find(r => digits10(r.phone) === d10) || null;
 }
 const RETAKE_MSG = `You already took this test today. Come back after ${RETAKE_COOLDOWN_HOURS} hours and try again.`;
+
+// Someone who already PASSED today and comes back (closed the tab before
+// finishing /join, lost the link) gets their sign-up link again instead of
+// "come back tomorrow" -- as long as that invite is still claimable.
+async function reissueJoinLink(db, screening) {
+  if (!screening?.passed || !screening.invite_code) return null;
+  const { data: inv } = await db.from('tech_invites').select('status, expires_at').eq('code', screening.invite_code).maybeSingle();
+  if (!inv || inv.status !== 'pending') return null;
+  if (new Date(inv.expires_at).getTime() <= Date.now()) {
+    await db.from('tech_invites').update({ expires_at: new Date(Date.now() + INVITE_TTL_DAYS * 864e5).toISOString() }).eq('code', screening.invite_code);
+  }
+  return `/join?c=${screening.invite_code}`;
+}
+
+// A blocked retake is either "already passed, here's your link again" or
+// "come back tomorrow".
+async function retakeResponse(res, db, screening) {
+  const link = await reissueJoinLink(db, screening);
+  if (link) return res.status(200).json({ ok: true, already_passed: true, join_link: link });
+  return res.status(409).json({ code: 'RETAKE_BLOCKED', error: RETAKE_MSG });
+}
 
 async function applyStart(req, res, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -2804,7 +2825,8 @@ async function applyStart(req, res, body) {
   if (!phone || !/^\+1\d{10}$/.test(phone)) return res.status(400).json({ field: 'phone', error: 'Enter your 10-digit US cell number.' });
 
   const db = serviceClient();
-  if (await recentlyScreened(db, phone)) return res.status(409).json({ code: 'RETAKE_BLOCKED', error: RETAKE_MSG });
+  const prior = await recentScreening(db, phone);
+  if (prior) return await retakeResponse(res, db, prior);
   return res.status(200).json({ ok: true, ...publicQuestions() });
 }
 
@@ -2823,22 +2845,24 @@ async function applySubmit(req, res, body) {
   }
 
   const db = serviceClient();
-  if (await recentlyScreened(db, phone)) return res.status(409).json({ code: 'RETAKE_BLOCKED', error: RETAKE_MSG });
+  const prior = await recentScreening(db, phone);
+  if (prior) return await retakeResponse(res, db, prior);
 
   const { graded, score, total, passed } = gradeAnswers(body.answers);
 
   let inviteCode = null;
   if (passed) {
     inviteCode = newInviteCode();
+    const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 864e5).toISOString();
     const { error: invErr } = await db.from('tech_invites').insert({
       business_id: HIRING.businessId, service_area_id: HIRING.serviceAreaId, code: inviteCode,
-      invitee_name: name, invitee_phone: phone,
-      expires_at: new Date(Date.now() + 86400e3).toISOString(),   // 24h -- used immediately, right after passing
+      invitee_name: name, invitee_phone: phone, expires_at: expiresAt,
       created_by: 'apply.html',
     });
-    // A collision (e.g. this phone already has a pending invite from the
-    // owner) must not lose a passing applicant -- fall back to the existing
-    // pending invite's own code so they still hand off into /join.
+    // A collision (this phone already has a pending invite -- an earlier
+    // pass, or one the owner sent) must not lose a passing applicant: reuse
+    // that invite's own code, and revive it if it has expired, so they still
+    // hand off into /join.
     if (invErr) {
       console.error('[apply] tech_invites insert failed:', invErr.code, invErr.message);
       const { data: existing } = await db.from('tech_invites')
@@ -2846,17 +2870,19 @@ async function applySubmit(req, res, body) {
         .not('invitee_phone', 'is', null).limit(200);
       const match = (existing || []).find(r => digits10(r.invitee_phone) === digits10(phone));
       inviteCode = match ? match.code : null;
+      if (inviteCode) await db.from('tech_invites').update({ expires_at: expiresAt, invitee_name: name }).eq('code', inviteCode);
     }
   }
 
-  try {
-    await db.from('applicant_screenings').insert({
-      business_id: HIRING.businessId, service_area_id: HIRING.serviceAreaId,
-      name, email: String(body.email).trim().toLowerCase(), phone,
-      answers: graded, short_answers: shortAnswers, score, total, passed,
-      invite_code: inviteCode,
-    });
-  } catch (e) { console.error('[apply] applicant_screenings insert failed:', e.message); }
+  // supabase-js reports failures on `error`, it does not throw -- a swallowed
+  // insert here would silently drop the applicant from the Analytics tab.
+  const { error: scrErr } = await db.from('applicant_screenings').insert({
+    business_id: HIRING.businessId, service_area_id: HIRING.serviceAreaId,
+    name, email: String(body.email).trim().toLowerCase(), phone,
+    answers: graded, short_answers: shortAnswers, score, total, passed,
+    invite_code: inviteCode,
+  });
+  if (scrErr) console.error('[apply] applicant_screenings insert failed:', scrErr.code, scrErr.message);
 
   console.log(`[apply] ${name} ..${phone.slice(-4)} ${score}/${total} -> ${passed ? 'passed' : 'failed'}`);
   return res.status(200).json({ ok: true, passed, score, total, join_link: passed && inviteCode ? `/join?c=${inviteCode}` : null });

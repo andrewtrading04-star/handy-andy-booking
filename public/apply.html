@@ -311,7 +311,7 @@
   <div id="vPass" class="hidden center">
     <div class="done-ic pass">✓</div>
     <h1 id="passScore"></h1>
-    <p class="lead">Set up your login and pick your weekly availability to start getting jobs.</p>
+    <p class="lead" id="passLead">Set up your login and pick your weekly availability to start getting jobs.</p>
     <button class="btn" type="button" id="btnContinueJoin">Set up my account</button>
   </div>
 
@@ -418,6 +418,9 @@ $('vContact').addEventListener('submit', async e=>{
     $('contactErr').textContent=(r.data&&r.data.error)||'Something went wrong. Try again.';
     return;
   }
+  // Already passed today (closed the tab before finishing sign-up): straight
+  // back to their sign-up link, no second test.
+  if(r.data.already_passed){ showPass(null,r.data.join_link); return; }
   quizQuestions=[
     ...(r.data.multiple_choice||[]).map(q=>({...q,type:'mc'})),
     ...(r.data.short_answer||[]).map(q=>({...q,type:'text'})),
@@ -477,13 +480,25 @@ async function submitQuiz(){
     show('vFail'); return;
   }
   if(r.data.passed){
-    $('passScore').textContent=`You passed — ${r.data.score} of ${r.data.total}`;
-    $('btnContinueJoin').onclick=()=>{ location.href=r.data.join_link||'/join'; };
-    show('vPass');
+    showPass(`You passed — ${r.data.score} of ${r.data.total}`, r.data.join_link);
   } else {
     $('failMsg').textContent="You didn't pass this time. You're welcome to try again tomorrow.";
     show('vFail');
   }
+}
+// A pass with no sign-up link (invite couldn't be created) must not send
+// them to a dead /join page -- say so plainly instead.
+function showPass(headline, joinLink){
+  $('passScore').textContent=headline||'You already passed';
+  if(joinLink){
+    $('passLead').textContent='Set up your login and pick your weekly availability to start getting jobs.';
+    $('btnContinueJoin').classList.remove('hidden');
+    $('btnContinueJoin').onclick=()=>{ location.href=joinLink; };
+  } else {
+    $('passLead').textContent="We couldn't create your sign-up link just now. Text us at (888) 915-9967 with your name and we'll send it to you.";
+    $('btnContinueJoin').classList.add('hidden');
+  }
+  show('vPass');
 }
 </script>
 </body>
