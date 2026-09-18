@@ -281,7 +281,7 @@
   </div>
 
   <form id="vContact" class="hidden" novalidate>
-    <div class="step">Step 2 of 3</div>
+    <div class="step">Step 1 of 2</div>
     <h2>Your info</h2>
     <p class="lead">So we know who to follow up with, whether or not you pass.</p>
     <div class="field"><label for="cName">Full name</label>
@@ -379,7 +379,9 @@ async function call(action,{method='GET',body=null}={}){
   } finally { clearTimeout(t); }
 }
 
-$('btnApply').addEventListener('click',()=>show('vVideo'));
+// Video step skipped for now (no footage yet) -- straight to the contact
+// form. Re-point this at 'vVideo' once Andrew has the intro video ready.
+$('btnApply').addEventListener('click',()=>show('vContact'));
 $('btnToContact').addEventListener('click',()=>show('vContact'));
 
 // ── Contact form ─────────────────────────────────────────────────────────────
