@@ -1695,8 +1695,8 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
       // Handy Andy's wording is the opt-out message registered on its A2P
       // campaign (and set as Twilio's Advanced Opt-Out reply), word for word.
       const optText = optBrand === HANDY_ANDY_SMS_BRAND
-        ? `${optBrand}: You are unsubscribed and will receive no further messages. Questions? Email contact@ihandyandy.com or call (713) 876-9032.`
-        : `${optBrand}: You are unsubscribed and will receive no further messages.`;
+        ? `You are unsubscribed and will receive no further messages. Questions? Email contact@ihandyandy.com or call (713) 876-9032.`
+        : `You are unsubscribed and will receive no further messages.`;
       // Twilio sends this itself (no send-result to inspect), so it's logged
       // as a plain "sent" the moment the TwiML is built, same as the HELP
       // reply and the default auto-ack below.
@@ -1736,7 +1736,7 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
       : (ld.length === 10 ? `call or text (${ld.slice(0, 3)}) ${ld.slice(3, 6)}-${ld.slice(6)}` : 'reply here and a team member will help you');
     await relayInboundText(line, from, body, business_name, ' (auto: HELP reply sent)');
     console.log(`[sms_inbound] HELP from ...${String(from || '').slice(-4)}: answered with support contact, relayed to staff`);
-    const helpText = `${brand}: For help ${contact}.`;
+    const helpText = `For help ${contact}.`;
     await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: helpText, result: { ok: true } });
     return xml(res, `<Response><Message>${xmlEsc(helpText)}</Message></Response>`);
   }

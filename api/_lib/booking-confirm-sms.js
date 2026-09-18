@@ -17,7 +17,7 @@
 // can't drift into telling customers different things. Every one names the
 // JOB's business, because a Mile High / Precision / Austin customer must not be
 // greeted by whichever company the tech works for.
-import { sendSMSResult, smsBrandName, logAutomatedMessage } from './sms.js';
+import { sendSMSResult, logAutomatedMessage } from './sms.js';
 
 // The window ("12pm - 3pm") is what the customer actually picked and what the
 // confirmation email shows, so prefer it over a precise start time.
@@ -40,7 +40,7 @@ export function bookingConfirmMessage({ dateStr, timeWindow, techName }) {
 // in api/admin.js) and an office estimate sent after the customer's verbal yes
 // (estimateCreate). Never add it to a booking path: the booker would get two.
 export function optInConfirmMessage(bizSlug, bizName) {
-  return `${smsBrandName(bizSlug, bizName)}: You're signed up for appointment and customer-care texts about your job.`;
+  return `You're signed up for appointment and customer-care texts about your job.`;
 }
 
 // Best-effort and never throws, same as sendBookingConfirmSms below: the

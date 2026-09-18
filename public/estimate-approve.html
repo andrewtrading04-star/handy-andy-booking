@@ -136,7 +136,8 @@
     <div id="addonsBox"></div>
     <div id="availBox"></div>
     <div id="summaryBox"></div>
-    <button class="btn" id="approveBtn" disabled>&#10003; Approve</button>
+    <button class="btn" id="approveBtn" disabled>I agree</button>
+    <div class="dhint" style="text-align:center;margin-top:10px;">Payment is taken after the job is complete. Your card won't be charged until the job is complete.</div>
   </div>
 
   <!-- Confirm details: card on file + service address (required to book) -->
@@ -316,7 +317,7 @@ function renderSummary(){
   }
   html += `<div class="sline grand"><span>Estimated total</span><span class="sv tabnums">${money(total)}</span></div></div>`;
   $('summaryBox').innerHTML = html;
-  $('approveBtn').innerHTML = `&#10003; Approve — <span class="tabnums" style="margin-left:2px;">${money(total)}</span>`;
+  $('approveBtn').innerHTML = `I agree`;
   updateApproveState();
 }
 
@@ -394,7 +395,8 @@ function renderAvail(){
 async function load(){
   if (!token){ showError('This approval link is missing its token. Please use the button in your estimate email.'); return; }
   try{
-    const res = await fetch(`${API}?action=estimate_approve_info&token=${encodeURIComponent(token)}`);
+    const via = new URLSearchParams(location.search).get('via') || '';
+    const res = await fetch(`${API}?action=estimate_approve_info&token=${encodeURIComponent(token)}${via?`&via=${encodeURIComponent(via)}`:''}`);
     const data = await res.json();
     if (!res.ok){ showError(data.error || 'We could not load this estimate.'); return; }
     INFO = data;

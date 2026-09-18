@@ -9959,7 +9959,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -9992,6 +9992,19 @@ async function estimates(req, res, db, auth) {
     const isUnstaffed = await unstaffedZipMatcher(db, biz.id, biz.slug);
     for (const e of (data || [])) e.broker_eligible = isUnstaffed(e.customer_zip);
   } catch (e) { console.warn("[admin] estimates: unstaffed check failed:", e.message); }
+
+  // An approved estimate auto-books its job (bookEstimateAppointment stamps
+  // metadata.source_estimate_id), so hand the card the booking id to open
+  // instead of offering to "convert" a job that already exists. Best-effort.
+  try {
+    const ids = (data || []).filter(e => e.status === 'scheduled').map(e => e.id);
+    if (ids.length) {
+      const { data: bks } = await db.from('bookings').select('id, metadata->>source_estimate_id')
+        .eq('business_id', biz.id).in('metadata->>source_estimate_id', ids).neq('status', 'cancelled');
+      const byEst = new Map((bks || []).map(b => [b.source_estimate_id, b.id]));
+      for (const e of (data || [])) if (byEst.has(e.id)) e.booking_id = byEst.get(e.id);
+    }
+  } catch (e) { console.warn('[admin] estimates: booking lookup failed:', e.message); }
 
   return res.status(200).json({ estimates: data || [] });
 }
@@ -10381,7 +10394,7 @@ async function estimateCreate(req, res, db, auth, body) {
   let emailed = false, emailWarning = emailOff;
   if (estEmail && !emailOff) {
     const { subject, html } = estimateEmail(
-      { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate, approveUrl, upsells: publicUpsells(upsells) },
+      { firstName, serviceLabel: service_label || 'Custom Estimate', description, lineItems: line_items, taxRate, approveUrl: approveUrl && `${approveUrl}&via=email`, upsells: publicUpsells(upsells) },
       brandFor(biz.slug)
     );
     try {
@@ -10521,7 +10534,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   // server-side by estimate_approve — no public token column needed on the row.
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000); // 90 days
-  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}&via=email` : '';
   const { subject, html } = estimateEmail(
     { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl, upsells: publicUpsells(est.upsells) },
     brandFor(biz.slug)
@@ -12520,6 +12533,14 @@ async function estimateApproveInfo(req, res, body) {
   const db = serviceClient();
   const est = await fetchEstimateAnyBiz(db, id);
   if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+  // First open per channel: the email button carries ?via=email, the texted
+  // short link carries nothing and counts as text. Best-effort (0115).
+  try {
+    const via = ((req.query.via || (body && body.via) || '').toString() === 'email') ? 'email' : 'text';
+    const col = `${via}_opened_at`;
+    if (!est[col]) await db.from('estimates').update({ [col]: new Date().toISOString() }).eq('id', id).is(col, null);
+  } catch (e) { console.warn('[estimate_approve_info] opened stamp failed:', e.message); }
 
   const items = Array.isArray(est.line_items) ? est.line_items : [];
   const totals = quoteTotals(items, est.tax_rate);

@@ -519,6 +519,9 @@
   .est-approval-addons{margin-top:6px;font-size:12.5px;font-weight:700;color:#15803d;line-height:1.4;}
   .est-approval-addons b{color:#0f172a;}
   .est-sent-line{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--mute);}
+  .est-opened{color:#15803d;font-weight:700;}
+  .est-unopened{color:#b45309;}
+  .est-booked-tag{font-size:12.5px;font-weight:700;color:#15803d;padding:6px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;}
   .est-sent-line b{color:var(--ink-2);}
   /* Estimate aging: a "Needs Response" card past EST_STALE_MINUTES turns red and
      pulses, with its age pill flipping from a grey "X ago" to "respond now". */
@@ -12398,6 +12401,7 @@ function paintEstimates(){
     document.querySelectorAll('#estWrap [data-est-broker]').forEach(b=>b.addEventListener('click',()=>openBrokerPanel(b.dataset.estBroker)));
     document.querySelectorAll('#estWrap [data-est-decline]').forEach(b=>b.addEventListener('click',()=>declineEstimate(b.dataset.estDecline,b)));
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
+    document.querySelectorAll('#estWrap [data-est-openjob]').forEach(b=>b.addEventListener('click',()=>openAlertJob(current.slug, b.dataset.estOpenjob)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
 }
 
@@ -12508,7 +12512,7 @@ function estCard(e){
   const approved = e.status==='declined'
     ? `<div class="est-approval not-approved">🚫 Declined — outside our scope, customer notified</div>`
     : e.approved_at
-    ? `<div class="est-approval approved">✓ Customer approved${approvedAt?` · ${esc(approvedAt)}`:''}</div>${acceptedLine}`
+    ? `<div class="est-approval approved">✓ Customer approved${e.status==='scheduled'?' &amp; booked':''}${approvedAt?` · ${esc(approvedAt)}`:''}</div>${acceptedLine}`
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
       : `<div class="est-approval waiting">${hasQuote?'Waiting on approval':'Quote not prepared'}</div>`);
@@ -12518,8 +12522,11 @@ function estCard(e){
   // customer-local timezone as the "Came in" badge above, for consistency on
   // one card.
   const fmtSentAt=iso=>iso?new Date(iso).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-  const textedLine=e.texted_at?`<div class="est-sent-line">✓ Texted by <b>${esc(e.texted_by||'Office')}</b> · ${esc(fmtSentAt(e.texted_at))}</div>`:'';
-  const emailedLine=e.emailed_at?`<div class="est-sent-line">✓ Emailed by <b>${esc(e.emailed_by||'Office')}</b> · ${esc(fmtSentAt(e.emailed_at))}</div>`:'';
+  // Whether the customer tapped through (text_opened_at/email_opened_at,
+  // migration 0115) rides on the same line as the send it belongs to.
+  const openedTag=(at)=>at?`<span class="est-opened">👁 Opened ${esc(fmtSentAt(at))}</span>`:`<span class="est-unopened">not opened yet</span>`;
+  const textedLine=e.texted_at?`<div class="est-sent-line">✓ Texted by <b>${esc(e.texted_by||'Office')}</b> · ${esc(fmtSentAt(e.texted_at))} · ${openedTag(e.text_opened_at)}</div>`:'';
+  const emailedLine=e.emailed_at?`<div class="est-sent-line">✓ Emailed by <b>${esc(e.emailed_by||'Office')}</b> · ${esc(fmtSentAt(e.emailed_at))} · ${openedTag(e.email_opened_at)}</div>`:'';
   // Estimates sent before migration 0112 only have the combined contacted_at —
   // fall back to that single line so old rows still show something.
   const legacySentLine=(!e.texted_at&&!e.emailed_at&&e.contacted_at)?`<div class="est-sent-line">✓ Sent to customer by <b>${esc(e.contacted_by||'Office')}</b> · ${esc(fmtSentAt(e.contacted_at))}</div>`:'';
@@ -12557,7 +12564,9 @@ function estCard(e){
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
         ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${(isApproved||textSent)?'ghost':''} sm" data-est-sms="${e.id}" title="${textSent?'Text the quote to the customer again':'Send SMS quote'}">${textSent?'Resend text':'Send text'}</button>`:''}
         ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${(isApproved||emailSent)?'ghost':''} sm" data-est-email="${e.id}" title="${emailSent?'Email the quote to the customer again':'Send email quote'}">${emailSent?'Resend email':'Send email'}</button>`:''}
-        ${canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
+        ${(canSend&&isApproved&&e.status==='scheduled')
+          ? (e.booking_id?`<button class="btn sm" data-est-openjob="${esc(e.booking_id)}" title="This approval booked the job automatically — open it on the schedule">Open job →</button>`:`<span class="est-booked-tag">✓ Job booked</span>`)
+          : canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
         ${(!engaged&&e.status!=='declined')?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
         ${!engaged?`<button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>`:''}
