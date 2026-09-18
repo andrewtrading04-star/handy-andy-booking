@@ -5369,17 +5369,47 @@ function insightsFlagsHtml(flags){
     </div>`;
   }).join('')+`</div>`;
 }
+// Click a column header to sort the Metro table by it; same header again
+// reverses. Purely a client-side re-sort of the already-fetched rows (see
+// insightsMetroSort / drawInsights), same click-to-sort UX as the Overview
+// tab's ANA_OV_COLS table.
+const INSIGHTS_METRO_COLS=[
+  {key:'name', label:'Metro'},
+  {key:'bookings_this_week', label:'This week', num:true},
+  {key:'trailing_weekly_avg', label:'Trailing avg/wk', num:true},
+  {key:'pct_change', label:'vs trailing', num:true},
+];
+let insightsMetroSort={key:'bookings_this_week', dir:'desc'};
+function insightsMetrosSorted(metros){
+  const {key,dir}=insightsMetroSort, mul=dir==='asc'?1:-1;
+  return [...metros].sort((a,b)=>{
+    const va=a[key], vb=b[key];
+    // Missing trend data (a metro too quiet to have a trailing average) sorts
+    // last regardless of direction, rather than jumping to the top on asc.
+    if(va==null&&vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    const c=typeof va==='string'?String(va).localeCompare(String(vb)):(va<vb?-1:va>vb?1:0);
+    return c*mul;
+  });
+}
 function insightsMetrosHtml(metros){
   if(!metros||!metros.length) return '';
-  const rows=metros.map(m=>{
+  const sorted=insightsMetrosSorted(metros);
+  const rows=sorted.map(m=>{
     const pct=m.pct_change;
     const pctTxt=pct==null?'—':`${pct>0?'+':''}${pct}%`;
     const pctColor=pct==null?'var(--mute)':pct<=-25?'#dc2626':pct>=40?'#16a34a':'var(--ink-2)';
     return `<tr><td>${esc(m.name)}</td><td>${m.bookings_this_week}</td><td>${m.trailing_weekly_avg}</td><td style="color:${pctColor};font-weight:700;">${pctTxt}</td></tr>`;
   }).join('');
+  const head=INSIGHTS_METRO_COLS.map(c=>{
+    const active=insightsMetroSort.key===c.key;
+    const arrow=active?(insightsMetroSort.dir==='asc'?' ▲':' ▼'):'';
+    return `<th data-inssort="${c.key}" title="Sort by ${esc(c.label)}" style="cursor:pointer;user-select:none;${active?'color:var(--ink);':''}">${esc(c.label)}<span style="font-size:9px;opacity:.75;">${arrow}</span></th>`;
+  }).join('');
   return `<div class="section card"><h2>Bookings by Metro</h2>
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
-      <thead><tr style="text-align:left;color:var(--mute);font-size:11.5px;"><th>Metro</th><th>This week</th><th>Trailing avg/wk</th><th>vs trailing</th></tr></thead>
+      <thead><tr style="text-align:left;color:var(--mute);font-size:11.5px;">${head}</tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
 }
@@ -5413,6 +5443,10 @@ function insightsEstimatesHtml(f){
     ${f.declined?`<div class="meta" style="margin-top:8px;">${f.declined} declined as outside scope.</div>`:''}
   </div>`;
 }
+// Fetched once per tab-open; sort clicks (drawInsights) just re-render from
+// these cached rows instead of re-fetching, same split as
+// renderAnalyticsOverview/drawAnaOverview.
+let insightsCache=null;
 async function renderInsights(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
@@ -5433,12 +5467,25 @@ async function renderInsights(){
   if(lowStock.length){
     flags.unshift({severity:'med',text:`${lowStock.length} tech${lowStock.length===1?' is':'s are'} low on bracket or plate stock — see Bracket Inventory.`});
   }
-  let html=insightsFlagsHtml(flags);
+  insightsCache={flags, metros:d.metros||[], techs:d.techs||[], estimate_funnel:d.estimate_funnel, app:(app&&!app.error)?app:null};
+  drawInsights();
+}
+function drawInsights(){
+  const view=document.getElementById('view');
+  const d=insightsCache; if(!d) return;
+  let html=insightsFlagsHtml(d.flags);
   html+=insightsMetrosHtml(d.metros);
   html+=insightsTechsHtml(d.techs);
   html+=insightsEstimatesHtml(d.estimate_funnel);
-  if(app&&!app.error) html+=applicantsBlockHtml(app);
+  if(d.app) html+=applicantsBlockHtml(d.app);
   view.innerHTML=`<div class="ana">${html}</div>`;
+  view.querySelectorAll('[data-inssort]').forEach(el=>el.addEventListener('click',()=>{
+    const key=el.dataset.inssort;
+    const col=INSIGHTS_METRO_COLS.find(c=>c.key===key);
+    if(insightsMetroSort.key===key) insightsMetroSort={key,dir:insightsMetroSort.dir==='asc'?'desc':'asc'};
+    else insightsMetroSort={key,dir:col&&col.num?'desc':'asc'};
+    drawInsights();
+  }));
 }
 async function renderAnalyticsOverview(){
   const view=document.getElementById('view');
