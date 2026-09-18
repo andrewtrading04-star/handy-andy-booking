@@ -1044,12 +1044,15 @@
       case 'terms':    body=bTerms();    break;
       case 'slots':        body=bSlots();        break;
       case 'request_slots':body=bRequestSlots();break;
-      case 'customer': body=bCustomer(); logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
+      case 'customer': body=bCustomer(); if(!nativeUnstaffed) logEvent('price_displayed', 'customer', calcTotal()+territoryAdjustment()-zipDiscount()-multiTvPerTvAmount()-multiTvFeeAmount()-steppedMultiTvPriceDiscount()); break;
     }
     // Running total on every step except 'zip' (service area/pricing profile
-    // isn't known yet) and 'customer' (bCustomer() already shows its own full
-    // itemized breakdown, so a second total would be redundant there).
-    const footer=(key==='zip'||key==='customer')?'':S.footerBar(Math.round(footerTotal()*100)/100);
+    // isn't known yet), 'customer' (bCustomer() already shows its own full
+    // itemized breakdown, so a second total would be redundant there), and
+    // the whole unstaffed-area request flow — no technician is confirmed for
+    // this area, so no price is ever shown anywhere in that flow (owner,
+    // 2026-09-18), not just on the final summary step.
+    const footer=(key==='zip'||key==='customer'||nativeUnstaffed)?'':S.footerBar(Math.round(footerTotal()*100)/100);
     root.innerHTML=prog+body+footer;
     wire(root);
     // Mount Stripe card element after DOM is ready
@@ -1893,6 +1896,7 @@
       <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${dayHdr}</div>
       <div style="display:grid!important;grid-template-columns:repeat(7,1fr)!important;">${cells}</div>
       ${timeHtml}
+      ${!canContinue?`<p style="color:${ACCENT_LIGHT}!important;font-size:12.5px!important;font-weight:600!important;margin:12px 0 0 0!important;text-align:center!important;">Select ${3-count} more time${3-count===1?'':'s'} to continue</p>`:''}
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
         <button id="btn-next" style="${canContinue?S.btnPri:S.btnDis}" ${!canContinue?'disabled':''}>Continue →</button>
@@ -2056,6 +2060,12 @@
       <div style="margin-bottom:20px!important;">
         <input type="text" id="c-coupon" style="${S.inputL};margin-bottom:0!important;" placeholder="Coupon code (optional)" value="${couponCode}">
       </div>
+      ${nativeUnstaffed?`
+      <div style="background:rgba(${ACCENT_RGB},0.08)!important;border:1.5px solid rgba(${ACCENT_RGB},0.25)!important;border-radius:10px!important;padding:16px 18px!important;margin-bottom:18px!important;font-size:13px!important;color:${T.muted2}!important;line-height:1.6!important;">
+        We don't have a price for you yet — a technician isn't confirmed for
+        your area. Send your request and we'll follow up with pricing once we
+        do.
+      </div>`:`
       <div style="background:rgba(34,197,94,0.08)!important;border:1.5px solid rgba(34,197,94,0.25)!important;border-radius:10px!important;padding:16px 18px!important;margin-bottom:18px!important;">
         <div style="font-size:13px!important;color:${T.muted2}!important;margin-bottom:8px!important;">
           ${itemsHtml}
@@ -2102,14 +2112,13 @@
           </div>`:`<div id="ha-coupon-row" style="display:none!important;"></div>`}
         </div>
         <div style="border-top:1px solid rgba(34,197,94,0.3)!important;padding-top:8px!important;display:flex!important;justify-content:space-between!important;align-items:center!important;">
-          <div style="font-size:14px!important;font-weight:700!important;color:${T.text}!important;">${nativeUnstaffed?'Estimated total':'Total'}</div>
+          <div style="font-size:14px!important;font-weight:700!important;color:${T.text}!important;">Total</div>
           <div id="ha-total" style="font-size:26px!important;font-weight:800!important;color:${T.ok}!important;">$${Math.round((base*(1+TAX_RATE)+tipAmount-(COUPONS[couponCode]||0))*100)/100}</div>
         </div>
-        ${nativeUnstaffed?`<p style="font-size:11px!important;color:${T.muted}!important;margin:8px 0 0 0!important;">Payment is collected after the job is complete.</p>`:''}
-      </div>
+      </div>`}
       <label for="c-sms-consent" style="display:flex!important;align-items:flex-start!important;gap:9px!important;background:${T.inset}!important;border:1px solid ${T.border}!important;border-radius:8px!important;padding:11px 12px!important;margin-bottom:16px!important;cursor:pointer!important;">
         <input type="checkbox" id="c-sms-consent" style="margin:2px 0 0 0!important;flex:0 0 auto!important;width:16px!important;height:16px!important;accent-color:${ACCENT}!important;cursor:pointer!important;">
-        <span style="font-size:12.5px!important;color:${T.muted2}!important;line-height:1.55!important;">I agree to receive appointment and customer-care text messages from ${BUSINESS_NAME} (booking confirmations, technician on-the-way/ETA updates, estimates, invoices, replies about my job, and a post-service follow-up). Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.${BUSINESS==='handy-andy'?' <a href="https://www.ihandyandy.com/privacy-policy" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Privacy Policy</a> &amp; <a href="https://www.ihandyandy.com/terms-of-service#sms-terms" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:inherit!important;text-decoration:underline!important;">Terms</a>':''}</span>
+        <span style="font-size:12.5px!important;color:${T.muted2}!important;line-height:1.55!important;">I agree to receive appointment and customer-care text messages.</span>
       </label>
       <div style="${S.actions}">
         <button id="btn-prev" style="${S.btnSec}">← Back</button>
