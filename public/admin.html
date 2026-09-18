@@ -1095,6 +1095,16 @@
     .mobilebar{display:flex;}
     .week{min-width:880px;}
     .view-scroll{overflow:auto;}
+    /* Nothing may widen the document past the phone — otherwise mobile Chrome
+       expands the layout viewport and zooms the whole CRM out to fit. */
+    html,body{overflow-x:hidden;max-width:100vw;}
+    .cal-head{padding:10px 12px;}
+    .cal-nav{flex-wrap:wrap;flex:1 1 100%;min-width:0;}
+    .range-pill{min-width:0;flex:1 1 auto;font-size:14px;padding:8px 10px;}
+    #jobSearchWrap{flex:1 1 100%;}
+    #jobSearchWrap .job-search-icon{flex:1;min-width:0;}
+    #jobSearchWrap label{flex:none;}
+    #jobSearchWrap input[type=text],#jobSearchWrap input[type=text]:focus{width:100%;min-width:0;}
   }
 
   /* Mobile: New Booking calendar responsiveness */
