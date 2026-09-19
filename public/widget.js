@@ -951,7 +951,7 @@
     const floored=realItemsFloor();
     if(floored>sum+0.001)items.push({label:'Service minimum',qty:1,amount:Math.round((floored-sum)*100)/100});
     const adj=territoryAdjustment();
-    if(adj>0)items.push({label:'Service area surcharge',qty:1,amount:adj});
+    if(adj!==0)items.push({label:adj>0?'Service area surcharge':'Local travel credit',qty:1,amount:adj});
     if(zipDiscount()>0)items.push({label:'Location',qty:1,amount:-zipDiscount()});
     const mFee=multiTvFeeAmount(), mPer=multiTvPerTvAmount(), mPrice=steppedMultiTvPriceDiscount();
     if(mFee>0)items.push({label:'Multi-TV discount',qty:1,amount:-mFee});
@@ -2660,7 +2660,7 @@
     const _slot=(slotsByDate[selectedDate]||[]).find(s=>s.id===selectedSlot)||{};
     const _df=selectedDate?fmtDate(selectedDate):null;
     const _lines=buildLineItems();
-    if(territoryAdjustment()>0)_lines.push({label:'Service area surcharge',qty:1,amount:territoryAdjustment()});
+    if(territoryAdjustment()!==0)_lines.push({label:territoryAdjustment()>0?'Service area surcharge':'Local travel credit',qty:1,amount:territoryAdjustment()});
     // The zip flat adjustment is DELIBERATELY never pushed as its own line
     // here — calcTotal() already carries it invisibly (see realItemsFloor()
     // above), so _taxBase below picks it up for free with no explanatory row

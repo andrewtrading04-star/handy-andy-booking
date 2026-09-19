@@ -147,7 +147,7 @@ function estimateLineItemsTotal(items) {
 // Lines that are money adjustments, not work being performed. Excluded from the
 // "Service:" summary in the notification text — the total already reflects them,
 // and listing them reads as if they were things to install.
-const NON_SERVICE_LINE = /^(service minimum|service area surcharge|location|multi-tv|coupon\b|tax\b|after-hours)/i;
+const NON_SERVICE_LINE = /^(service minimum|service area surcharge|local travel credit|location|multi-tv|coupon\b|tax\b|after-hours)/i;
 
 // One-line "what is this job" summary for the notification text. Deliberately
 // terse: drops the "TV Size: " style question prefix each line carries for the

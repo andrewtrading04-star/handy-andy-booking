@@ -306,7 +306,7 @@ async function travelPayoutMap(db, businessId) {
   if (error) return map;   // column missing or read failed -> no payouts
   for (const r of data || []) {
     const p = Number(r.tech_payout) || 0;
-    if (p > 0) map.set(String(r.postal_code), p);
+    if (p !== 0) map.set(String(r.postal_code), p);
   }
   return map;
 }
@@ -2024,10 +2024,12 @@ async function travelFeesSave(req, res, db, auth, body) {
   if (!ids.length) return res.status(400).json({ error: 'zip_ids required' });
   const surcharge = Number(body.surcharge);
   const payout = Number(body.tech_payout);
-  if (!Number.isFinite(surcharge) || surcharge < 0) return res.status(400).json({ error: 'Customer fee must be a number of $0 or more' });
-  if (!Number.isFinite(payout) || payout < 0) return res.status(400).json({ error: 'Tech payout must be a number of $0 or more' });
-  if (surcharge > TRAVEL_FEE_CEILING || payout > TRAVEL_FEE_CEILING) {
-    return res.status(400).json({ error: `$${Math.max(surcharge, payout)} is above the $${TRAVEL_FEE_CEILING} sanity ceiling for a travel fee — double-check this isn't a typo.` });
+  // Negative is allowed on purpose: a negative customer fee is a local-customer
+  // discount, a negative tech payout is what that tier takes off the tech's pay.
+  if (!Number.isFinite(surcharge)) return res.status(400).json({ error: 'Customer fee must be a number' });
+  if (!Number.isFinite(payout)) return res.status(400).json({ error: 'Tech payout must be a number' });
+  if (Math.abs(surcharge) > TRAVEL_FEE_CEILING || Math.abs(payout) > TRAVEL_FEE_CEILING) {
+    return res.status(400).json({ error: `$${Math.max(Math.abs(surcharge), Math.abs(payout))} is above the $${TRAVEL_FEE_CEILING} sanity ceiling for a travel fee — double-check this isn't a typo.` });
   }
   // Paying the tech more for the drive than the customer is charged for it is
   // nearly always a slip, and it silently loses money on every job in the tier.
@@ -2036,7 +2038,7 @@ async function travelFeesSave(req, res, db, auth, body) {
   if (payout > surcharge && body.confirm_negative !== true) {
     return res.status(409).json({
       code: 'travel_fee_negative',
-      error: `That pays the tech $${(payout - surcharge).toFixed(2)} more per job than the customer is charged. Save it anyway?`,
+      error: `That leaves the business $${(payout - surcharge).toFixed(2)} short on every job in this tier (customer ${surcharge<0?'-':''}$${Math.abs(surcharge)}, tech ${payout<0?'-':''}$${Math.abs(payout)}). Save it anyway?`,
     });
   }
   // business_id in the WHERE clause scopes the write even given a stale id.

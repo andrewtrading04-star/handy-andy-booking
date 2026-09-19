@@ -1209,7 +1209,7 @@ function botBuildSelections(d) {
     const hrs = Math.max(2, Number(d.handymanHours) || 2);
     out.push({ option_id: null, label: `Handyman Labor: ${d.handymanDesc || 'as described'} — ${hrs} hour${hrs === 1 ? '' : 's'}`, price: BOT_HANDYMAN_HOURLY, quantity: hrs });
   }
-  if (d.surcharge > 0) out.push({ option_id: null, label: 'Travel', price: d.surcharge, quantity: 1 });
+  if (d.surcharge !== 0) out.push({ option_id: null, label: d.surcharge > 0 ? 'Travel' : 'Local travel credit', price: d.surcharge, quantity: 1 });
   const ahFee = botAfterHoursFee(d.slotKey, d.date);
   if (ahFee > 0) out.push({ option_id: null, label: 'After-Hours Service Fee (8 PM)', price: ahFee, quantity: 1 });
   const rawSum = out.filter(x => x.label !== 'Service minimum').reduce((s, x) => s + x.price * x.quantity, 0);

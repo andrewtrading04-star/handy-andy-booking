@@ -9471,20 +9471,19 @@ function renderTravelFeesBody(){
       // paying for — call it out rather than leaving it buried in the numbers.
       const unpaid=t.surcharge>0 && t.tech_payout===0;
       const showing=tfShowZips===key;
-      return `<div style="border-top:1px solid var(--line);padding:12px 0;">
+      return `<div data-tfrow="${esc(key)}" style="border-top:1px solid var(--line);padding:12px 0;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <div style="min-width:104px;">
             <div style="font-weight:700;font-size:13.5px;">${esc(a.name)} ${i+1}</div>
             <div style="color:var(--mute);font-size:12px;">${t.zips.length} zip${t.zips.length===1?'':'s'}</div>
           </div>
           <label style="font-size:12px;color:var(--ink-2);">Customer pays
-            <input class="search" type="number" min="0" step="5" value="${t.surcharge}" data-tfsur="${esc(key)}" style="margin:2px 0 0;width:92px;">
+            <input class="search" type="number" step="5" value="${t.surcharge}" data-tfsur style="margin:2px 0 0;width:92px;">
           </label>
           <label style="font-size:12px;color:var(--ink-2);">Tech gets
-            <input class="search" type="number" min="0" step="5" value="${t.tech_payout}" data-tfpay="${esc(key)}" style="margin:2px 0 0;width:92px;">
+            <input class="search" type="number" step="5" value="${t.tech_payout}" data-tfpay style="margin:2px 0 0;width:92px;">
           </label>
-          <div style="font-size:12px;color:var(--mute);min-width:78px;">${free?'no travel fee':'keeps '+money(t.surcharge-t.tech_payout)}</div>
-          <button type="button" class="btn sm" style="width:auto;" data-tfsave="${esc(key)}">Save</button>
+          <div data-tfnote style="font-size:12px;color:var(--mute);min-width:78px;">${free?'no travel fee':'keeps '+money(t.surcharge-t.tech_payout)}</div>
           <button type="button" class="btn ghost sm" style="width:auto;" data-tfzips="${esc(key)}">${showing?'Hide':'Zips'}</button>
         </div>
         ${unpaid?`<div style="font-size:12px;color:#b45309;margin-top:6px;">⚠ The customer is charged ${money(t.surcharge)} for this drive but the tech is paid nothing for it.</div>`:''}
@@ -9525,21 +9524,33 @@ function renderTravelFeesBody(){
     tfShowZips = tfShowZips===b.dataset.tfzips ? null : b.dataset.tfzips;
     renderTravelFeesBody();
   }));
-  view.querySelectorAll('[data-tfsave]').forEach(b=>b.addEventListener('click',()=>tfSave(b)));
+  // No Save button: a tier saves itself when you leave either box.
+  view.querySelectorAll('[data-tfrow] input').forEach(inp=>{
+    inp.addEventListener('change',()=>tfSaveRow(inp.closest('[data-tfrow]')));
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter') inp.blur(); });
+  });
 }
-async function tfSave(btn){
-  const key=btn.dataset.tfsave;
+// Saves are queued so two quick edits (tab from Customer to Tech) can't race
+// each other over a tier key that the first save is about to change.
+let tfQueue=Promise.resolve();
+function tfSaveRow(row){ tfQueue=tfQueue.then(()=>tfSaveNow(row)).catch(()=>{}); }
+async function tfSaveNow(row){
+  if(!row||!row.isConnected) return;
+  const key=row.dataset.tfrow;
   const errEl=document.getElementById('tfErr'); errEl.textContent='';
   const [areaId,sur,pay]=key.split('|');
   const tier=tfTiersFor(areaId).find(t=>String(t.surcharge)===sur && String(t.tech_payout)===pay);
   if(!tier){ errEl.textContent='That tier changed underneath you — reloading.'; renderTravelFees(); return; }
-  const newSur=Number(document.querySelector(`[data-tfsur="${CSS.escape(key)}"]`).value);
-  const newPay=Number(document.querySelector(`[data-tfpay="${CSS.escape(key)}"]`).value);
-  if(!Number.isFinite(newSur)||!Number.isFinite(newPay)||newSur<0||newPay<0){
-    errEl.textContent='Both amounts have to be $0 or more.'; return;
+  const sIn=row.querySelector('[data-tfsur]'), pIn=row.querySelector('[data-tfpay]');
+  const note=row.querySelector('[data-tfnote]');
+  const revert=()=>{ sIn.value=tier.surcharge; pIn.value=tier.tech_payout; };
+  const newSur=Number(sIn.value), newPay=Number(pIn.value);
+  if(sIn.value===''||pIn.value===''||!Number.isFinite(newSur)||!Number.isFinite(newPay)){
+    errEl.textContent='Enter a number for both amounts (negative is fine).'; revert(); return;
   }
+  if(newSur===tier.surcharge && newPay===tier.tech_payout) return;
   const zipIds=tier.zips.map(z=>z.id);
-  btn.disabled=true; btn.textContent='Saving…';
+  if(note) note.textContent='Saving…';
   const send=async confirmNegative=>api('travel_fees_save',{ method:'POST', body:{
     business:current.slug, zip_ids:zipIds, surcharge:newSur, tech_payout:newPay,
     ...(confirmNegative?{confirm_negative:true}:{}),
@@ -9550,15 +9561,32 @@ async function tfSave(btn){
       // Paying the tech more than the customer pays is allowed, but only once
       // it's been said out loud — it loses money on every job in the tier.
       if(e.code!=='travel_fee_negative') throw e;
-      if(!confirm(e.message)){ btn.disabled=false; btn.textContent='Save'; return; }
+      if(!confirm(e.message)){ revert(); if(note) note.textContent=''; return; }
       await send(true);
     }
-    toast(`${tier.zips.length} zip${tier.zips.length===1?'':'s'} updated ✓`);
-    await renderTravelFees();
   }catch(e){
     errEl.textContent=e.message||'Could not save that change.';
-    btn.disabled=false; btn.textContent='Save';
+    revert(); if(note) note.textContent='';
+    return;
   }
+  // Update the local copy instead of refetching, then redraw in place (same
+  // scroll position, same open card, focus kept) — no "Loading…" flash.
+  for(const z of tier.zips){ z.surcharge=newSur; z.tech_payout=newPay; }
+  const ae=document.activeElement;
+  const focusRow=ae&&ae.closest?ae.closest('[data-tfrow]'):null;
+  const focusWhich=ae&&ae.dataset?(ae.dataset.tfsur!==undefined?'sur':ae.dataset.tfpay!==undefined?'pay':null):null;
+  const focusKey=focusRow?(focusRow===row?`${areaId}|${newSur}|${newPay}`:focusRow.dataset.tfrow):null;
+  const y=window.scrollY;
+  renderTravelFeesBody();
+  window.scrollTo(0,y);
+  if(focusKey&&focusWhich){
+    const r=[...document.querySelectorAll('[data-tfrow]')].find(x=>x.dataset.tfrow===focusKey);
+    const el=r&&r.querySelector(focusWhich==='sur'?'[data-tfsur]':'[data-tfpay]');
+    if(el){ el.focus(); el.select&&el.select(); }
+  }
+  const nr=[...document.querySelectorAll('[data-tfrow]')].find(x=>x.dataset.tfrow===`${areaId}|${newSur}|${newPay}`);
+  const nn=nr&&nr.querySelector('[data-tfnote]');
+  if(nn){ const was=nn.textContent; nn.textContent='Saved ✓'; nn.style.color='#15803d'; setTimeout(()=>{ if(nn.isConnected){ nn.textContent=was; nn.style.color=''; } },1500); }
 }
 async function renderMultiTvDiscount(){
   const view=document.getElementById('view');

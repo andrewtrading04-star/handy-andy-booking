@@ -2109,7 +2109,7 @@ async function travelPayoutMap(db, businessId) {
   if (error) return map;
   for (const r of data || []) {
     const p = Number(r.tech_payout) || 0;
-    if (p > 0) map.set(String(r.postal_code), p);
+    if (p !== 0) map.set(String(r.postal_code), p);
   }
   return map;
 }

@@ -623,6 +623,14 @@ export function computeJobPay(job, techName) {
       break;
     }
   }
+  // Local-customer tier: the customer is CREDITED (negative line) and the tier
+  // carries a negative tech payout, which comes off the tech's pay for that job.
+  // Only fires when the ticket really has the credit line AND the zip's payout
+  // is negative, so an ordinary job can never be docked.
+  if (!travelPayout && Number(job.travel_payout) < 0
+      && (job.line_items || []).some(li => Number(li.line_total) < 0 && /local travel credit/i.test(li.name || ''))) {
+    travelPayout = Number(job.travel_payout);
+  }
 
   // ── Special services short-circuit the line-item walk where the rule says so.
   if (special === 'tv_swap') {
@@ -1373,6 +1381,18 @@ function runSelfTests() {
   // Standard fees: $15 -> $12, $65 -> $52, $100 -> $80. Split in half on 2-tech.
   // Direct unit checks of the share function, incl. the off-tier $50 -> $40 case
   // that motivated the switch away from fixed tiers.
+  // Local-customer tier: credit line + negative zip payout docks the tech; without
+  // BOTH (credit line AND negative payout) nothing changes.
+  const localJob=(extra)=>job({ business_slug: 'doms', line_items: [
+    { name: 'TV Size: 32–49 inch', quantity: 1, unit_price: 100, line_total: 100 },
+    { name: 'Local travel credit', line_total: -20, kind: 'fee' },
+  ], ...extra });
+  eq(computeJobPay(localJob({ travel_payout: -10 }), 'TK').pay - computeJobPay(localJob({ travel_payout: 0 }), 'TK').pay, -10, 'local credit + -$10 zip payout docks the tech $10');
+  eq(computeJobPay(job({ business_slug: 'doms', travel_payout: -10, line_items: [
+    { name: 'TV Size: 32–49 inch', quantity: 1, unit_price: 100, line_total: 100 },
+  ] }), 'TK').pay, computeJobPay(job({ business_slug: 'doms', travel_payout: 0, line_items: [
+    { name: 'TV Size: 32–49 inch', quantity: 1, unit_price: 100, line_total: 100 },
+  ] }), 'TK').pay, 'negative zip payout without a credit line changes nothing');
   eq(travelPayoutForSurcharge(0), 0, 'travel share: $0 -> $0');
   eq(travelPayoutForSurcharge(15), 12, 'travel share: $15 -> $12');
   eq(travelPayoutForSurcharge(50), 40, 'travel share: $50 -> $40 (off-tier, the JR Figueroa case)');

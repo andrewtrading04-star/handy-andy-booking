@@ -98,7 +98,7 @@ const isTravelLine = (it) => {
   // pricing" flat fee, and the after-hours fee all live in the travel band.
   // "Second Technician" (kind fee) deliberately does NOT — it's work, so it
   // stays with the other work lines.
-  return /surcharge|travel\s*fee|^\s*travel\s*$|after[\s-]?hours|service\s*minimum|location.?based/i.test(n);
+  return /surcharge|local\s*travel\s*credit|travel\s*fee|^\s*travel\s*$|after[\s-]?hours|service\s*minimum|location.?based/i.test(n);
 };
 const isDiscountLine = (it) =>
   ((it && it.kind) === 'coupon') || /\b(?:discount|coupon)\b/i.test(String((it && it.name) || ''))

@@ -821,8 +821,8 @@ async function bookDoms(req, res) {
   }
   // Add the travel surcharge server-side if the widget didn't already include it,
   // so a stale/tampered widget can never drop it.
-  if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
-    lines.push({ kind: 'fee', name: 'Service area surcharge', quantity: 1, unit_price: surcharge, line_total: surcharge });
+  if (surcharge !== 0 && !lines.some(l => /surcharge|local travel credit/i.test(l.name))) {
+    lines.push({ kind: 'fee', name: surcharge > 0 ? 'Service area surcharge' : 'Local travel credit', quantity: 1, unit_price: surcharge, line_total: surcharge });
   }
   if (couponAmt > 0 && !lines.some(l => /coupon|discount/i.test(l.name))) {
     lines.push({ kind: 'coupon', name: `Coupon ${couponCode}`, quantity: 1, unit_price: -couponAmt, line_total: -couponAmt });
@@ -1245,8 +1245,8 @@ async function bookNative(req, res, slug) {
   }
   // Enforce the money the customer must owe, server-side, so a stale/tampered
   // widget can never drop the surcharge or after-hours fee.
-  if (surcharge > 0 && !lines.some(l => /surcharge/i.test(l.name))) {
-    lines.push({ kind: 'fee', name: 'Service area surcharge', quantity: 1, unit_price: surcharge, line_total: surcharge });
+  if (surcharge !== 0 && !lines.some(l => /surcharge|local travel credit/i.test(l.name))) {
+    lines.push({ kind: 'fee', name: surcharge > 0 ? 'Service area surcharge' : 'Local travel credit', quantity: 1, unit_price: surcharge, line_total: surcharge });
   }
   if (afterHours > 0 && !lines.some(l => /after.?hours/i.test(l.name))) {
     lines.push({ kind: 'fee', name: 'After-hours fee', quantity: 1, unit_price: afterHours, line_total: afterHours });
