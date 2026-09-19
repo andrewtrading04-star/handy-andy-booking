@@ -41,7 +41,7 @@ import { gscQuery } from './_lib/gsc.js';
 import { resolveServiceArea, unstaffedZipMatcher } from './_lib/service-area-resolve.js';
 import { parseMoney, minSellPrice, checkSellPrice } from './_lib/broker-pricing.js';
 import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCustomLines, customLinesOf, brokerRequiredLines } from './_lib/broker-spec.js';
-import { digitsOf, prettyPhone } from './_lib/grasshopper.js';
+import { digitsOf, prettyPhone, GRASSHOPPER_LINES } from './_lib/grasshopper.js';
 import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
 import { bracketTotal as bracketMoveTotal, debitForJob, reconcileJobEdit, creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, recount as ledgerRecount, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
@@ -11631,9 +11631,10 @@ async function myCallPerformance(req, res, db, auth) {
       .gte('occurred_at', since.toISOString())
       .lt('occurred_at', until.toISOString()),
     db.from('call_audits')
-      .select('id, audit_date, time_local, answers, flagged, notes, audited_by')
+      .select('id, audit_date, occurred_at, time_local, caller_name, caller_phone, service, grasshopper_number, answers, flagged, notes, audited_by')
       .eq('business_id', bizId).eq('handled_by', name)
       .gte('audit_date', from).lte('audit_date', to)
+      .order('occurred_at', { ascending: false, nullsFirst: false })
       .order('audit_date', { ascending: false }),
   ]);
   if (error) throw error;
@@ -11694,12 +11695,41 @@ async function myCallPerformance(req, res, db, auth) {
       .filter(q => q.no > 0)
       .sort((a, b) => b.fail_rate - a.fail_rate || b.asked - a.asked)
       .slice(0, 3),
-    // Notes are the only individual audit records a secretary receives. Caller
-    // details and audit records belonging to anyone else never leave the API.
-    notes: (audits || []).filter(a => a.notes).slice(0, 12).map(a => ({
-      id: a.id, audit_date: a.audit_date, time_local: a.time_local,
-      notes: a.notes, flagged: !!a.flagged, audited_by: a.audited_by || 'Jiyah',
-    })),
+    // Notes are the only individual audit records a secretary receives, and
+    // only for calls SHE took (the query above is scoped to her name and
+    // business). Each note carries enough about the call for her to tell which
+    // one it was -- when, who called, which service and line -- plus what the
+    // script check found, because "Great job!" alone tells her nothing about
+    // which call earned it. Audit records belonging to anyone else never
+    // leave the API.
+    notes: (audits || []).filter(a => a.notes).slice(0, 12).map(a => {
+      const digits = digitsOf(a.grasshopper_number);
+      const line = GRASSHOPPER_LINES[digits];
+      // Shown in the BUSINESS timezone, the one she works in. time_local is the
+      // auditor's own clock (Central), so it would read an hour off for Denver.
+      let when = null;
+      if (a.occurred_at) {
+        try {
+          when = new Date(a.occurred_at).toLocaleString('en-US', {
+            timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+          }).replace(/, (\d{1,2}:\d{2})/, ' · $1');
+        } catch { when = null; }
+      }
+      const missed = Object.entries(a.answers || {}).filter(([, v]) => v === 'no').map(([k]) => k);
+      const done = Object.values(a.answers || {}).filter(v => v === 'yes').length;
+      return {
+        id: a.id, audit_date: a.audit_date, time_local: a.time_local,
+        notes: a.notes, flagged: !!a.flagged, audited_by: a.audited_by || 'Jiyah',
+        call: {
+          when,
+          caller_name: (a.caller_name || '').trim() || null,
+          caller_phone: a.caller_phone ? prettyPhone(a.caller_phone) : null,
+          service: a.service && a.service !== 'unknown' ? a.service : null,
+          line: line ? `${line.market} line ${prettyPhone(digits)}` : (digits ? prettyPhone(digits) : null),
+          script_done: done, script_missed: missed,
+        },
+      };
+    }),
   };
 
   return res.status(200).json({

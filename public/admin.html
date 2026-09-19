@@ -9973,14 +9973,30 @@ async function renderMyCallPerformance(){
     <div style="font-size:12px;color:var(--mute);font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${esc(label)}</div>
     <div style="font-size:25px;font-weight:800;line-height:1.1;margin-top:4px;color:${color||'var(--ink)'};">${esc(value)}</div>
     ${sub?`<div style="font-size:12px;color:var(--mute);margin-top:3px;">${esc(sub)}</div>`:''}</div>`;
-  const auditLabel=key=>String(key||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  const auditLabel=key=>AUDIT_LABELS[key]||String(key||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
   const auditQuestions=(audit.questions||[]).map(q=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px;">
     <span>${esc(auditLabel(q.key))}</span><span style="color:#9a6700;font-weight:700;white-space:nowrap;">Missed ${esc(q.no)} of ${esc(q.asked)}</span></div>`).join('');
-  const auditNotes=(audit.notes||[]).map(n=>`<div style="padding:12px 0;border-bottom:1px solid var(--line2);">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px;color:var(--mute);margin-bottom:5px;">
-      <span>${esc(n.audited_by||'Jiyah')}’s note · ${esc(n.audit_date||'')}</span>
-      ${n.flagged?'<span style="color:#b42318;font-weight:700;">Flagged</span>':''}</div>
-    <div style="font-size:13px;line-height:1.45;color:var(--ink);">${esc(n.notes)}</div></div>`).join('');
+  // Each note says WHICH call it is about (when, who called, service, line) and
+  // what the script check found, so a bare "Great job!" is still traceable to a
+  // specific call she can recognize.
+  const auditNotes=(audit.notes||[]).map(n=>{
+    const c=n.call||{};
+    const who=c.caller_name||c.caller_phone
+      ? `${c.caller_name?`<b>${esc(c.caller_name)}</b>`:''}${c.caller_name&&c.caller_phone?' · ':''}${c.caller_phone?esc(c.caller_phone):''}`
+      : '<span style="color:var(--mute);">Caller not recorded</span>';
+    const meta=[c.service,c.line].filter(Boolean).map(esc).join(' · ');
+    const missed=(c.script_missed||[]);
+    const script=missed.length
+      ? `<span style="color:#9a6700;font-weight:700;">Missed:</span> ${missed.map(k=>esc(auditLabel(k))).join(' · ')}`
+      : (c.script_done?`<span style="color:#15803d;font-weight:700;">✓ Followed the whole script</span>`:'');
+    return `<div style="padding:12px 0;border-bottom:1px solid var(--line2);">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:3px;">
+      <span style="font-size:13px;font-weight:800;">${esc(c.when||n.audit_date||'')}</span>
+      ${n.flagged?'<span style="color:#b42318;font-weight:700;font-size:12px;">Flagged</span>':''}</div>
+    <div style="font-size:12.5px;color:var(--ink-2);">${who}</div>
+    ${meta||script?`<div style="font-size:12px;color:var(--mute);margin:2px 0 6px;">${meta}${meta&&script?' · ':''}${script}</div>`:'<div style="height:6px;"></div>'}
+    <div style="font-size:13px;line-height:1.45;color:var(--ink);"><span style="color:var(--mute);">${esc(n.audited_by||'Jiyah')}:</span> ${esc(n.notes)}</div></div>`;
+  }).join('');
 
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div>
