@@ -110,7 +110,7 @@
       // doesn't assume the customer knows they're coming.
       if (d.sms_opt_out || !d.phone){
         $('askWarn').textContent = d.sms_opt_out
-          ? 'This customer did not opt in to texts, so tapping will NOT text them. Call them with your ETA.'
+          ? 'This customer replied STOP to our texts, so tapping will NOT text them. Call them with your ETA.'
           : 'No phone number on file for this customer, so tapping will NOT text them.';
         if (d.phone) $('askWarn').innerHTML += ' <a href="tel:' + encodeURIComponent(d.phone) + '">Call ' + d.phone.replace(/[<>&]/g, '') + '</a>';
         $('askWarn').classList.remove('hide');
@@ -151,7 +151,7 @@
           $('doneCheck').style.background = 'var(--accent)';
           var k = d.sms.skipped;
           $('doneWarn').textContent = k === 'no_sms_consent'
-            ? who + ' did not opt in to texts. Please call them with your ETA.'
+            ? who + ' replied STOP to our texts. Please call them with your ETA.'
             : (k === 'no_customer_phone' || k === 'bad_phone' || !d.phone)
               ? 'No usable phone number on file. Please reach ' + who + ' another way.'
               : 'The text could not be sent right now. Please call ' + who + ' with your ETA.';

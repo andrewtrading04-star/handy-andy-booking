@@ -21,7 +21,7 @@ import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { estimateApproveLink } from './_lib/estimate-code.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
-import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
+import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage, textConsentFor } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
@@ -29,7 +29,7 @@ import { QUESTIONS as APPLY_QUESTIONS } from './_lib/apply-quiz.js';
 import { readState as readBracketSyncState, readDispatch as readBracketSyncDispatch, summarizeForDashboard as bracketSyncSummary, dispatchBracketScan } from './_lib/bracket-sync-health.js';
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
-import { bookingConfirmMessage, sendOptInConfirmSms } from './_lib/booking-confirm-sms.js';
+import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
@@ -3528,6 +3528,8 @@ async function bookingCreate(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const c = body.customer || {};
   if (!c.name && !c.phone) return res.status(400).json({ error: 'Customer name or phone required' });
+  // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+  const smsConsent = await textConsentFor(db, c.phone);
   if (c.name && hasDigits(c.name)) return res.status(400).json({ error: 'Please enter a name using letters only — no numbers.' });
   console.log(`[admin] booking create: biz=${biz.slug} customer email=${c.email ? 'present' : 'ABSENT'} phone=${c.phone ? 'present' : 'absent'}`);
 
@@ -3887,11 +3889,7 @@ async function bookingCreate(req, res, db, auth, body) {
     payment_method: paymentMethod,
     needs_lifting: !!body.needs_lifting,
     tv_size_category: body.tv_size_category || null,
-    // Opt-IN only (A2P 10DLC). The office New Booking and call-intake boxes
-    // start unchecked and are ticked only when the customer says yes to the
-    // verbal script printed on the box, so consent is stored only for an
-    // explicit true. A missing value (older callers) is no consent.
-    sms_consent: body.sms_consent === true,
+    sms_consent: smsConsent,
     idempotency_key: idempotencyKey,
     // Who booked it, for the "Booked by" line on the job detail. Owner = "Admin";
     // a secretary = their name (Heather / Joey). Widget bookings carry source
@@ -4036,9 +4034,9 @@ async function bookingCreate(req, res, db, auth, body) {
   });
   if (statusEventError) postInsertWarning = [postInsertWarning, 'Booking was created, but its status history could not be saved.'].filter(Boolean).join('\n\n');
 
-  // Send booking confirmation SMS to customer (if they opted in). Same test as
-  // the insert above (`=== true`), so the stored row and the text always agree.
-  if (c.phone && scheduled_at && body.sms_consent === true) {
+  // Send booking confirmation SMS to customer. Same value as the insert above,
+  // so the stored row and the text always agree.
+  if (c.phone && scheduled_at && smsConsent) {
     // Use the JOB's local time (tz was resolved from the service area above), so an
     // Austin customer sees Central time — not the business's Mountain time.
     const _d = new Date(scheduled_at);
@@ -4063,11 +4061,6 @@ async function bookingCreate(req, res, db, auth, body) {
       }
       await logAutomatedMessage(db, { businessId: biz.id, customerPhone: c.phone, body: msg, result: _confirmResult });
     } catch (e) { console.error(e); }
-  } else if (c.phone && body.sms_consent === true) {
-    // No appointment time yet, so there is no booking confirmation to send. The
-    // opt-in still gets its one immediate confirmation text (A2P 10DLC / CTIA),
-    // the same one "Mark opted in" sends.
-    await sendOptInConfirmSms({ customerPhone: c.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_create', db, businessId: biz.id }).catch(console.error);
   }
 
   // SMS consent is stored on the booking; do not duplicate it in staff notes.
@@ -4525,21 +4518,13 @@ async function bookingUpdate(req, res, db, auth, body) {
     // (brand, frequency, rates, HELP, STOP). Only on the flip from not opted in
     // to opted in, so re-saving a flag that is already on (stale tab, double
     // click) never texts the customer twice. Best-effort: never fails the save.
-    let optInNote = '';
-    if (patch.sms_consent === true && existing.sms_consent !== true) {
-      if (existing.customer?.phone) {
-        const r = await sendOptInConfirmSms({ customerPhone: existing.customer.phone, bizSlug: biz.slug, bizName: biz.name, tag: 'booking_update', db, businessId: biz.id });
-        optInNote = r.ok ? ' Opt-in confirmation text sent.'
-          : ` Opt-in confirmation text not sent (${String(r.skipped || r.error || 'unknown error').slice(0, 120)}).`;
-      } else {
-        optInNote = ' No phone on file, so no opt-in confirmation text was sent.';
-      }
-    }
-    // Consent changes are a compliance record — leave a note saying who flipped it.
+    // Texts are on for every customer with a phone (owner rule 2026-09-19); this
+    // switch exists to turn them OFF for someone who asked by phone, or back on.
+    // Leave a note saying who flipped it.
     await db.from('booking_notes').insert({
       business_id: biz.id, booking_id: id,
       author_kind: auth.role === 'owner' ? 'owner' : 'secretary', author_id: null, author_name: adminAuthorName(auth),
-      body: `SMS consent turned ${patch.sms_consent ? 'ON' : 'OFF'} from the dashboard${patch.sms_consent ? ' (customer agreed to text updates)' : ''}.${optInNote}`,
+      body: `Texts turned ${patch.sms_consent ? 'ON' : 'OFF'} for this customer from the dashboard.`,
     }).then(({ error }) => { if (error) console.warn('[booking_update] consent note failed:', error.message); });
   }
 
@@ -8366,7 +8351,7 @@ async function reviewResend(req, res, db, auth, body) {
   const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
 
   if (channel === 'sms') {
-    if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No SMS consent on file for this job.' });
+    if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: b.customer?.phone ? 'Texts are turned off for this customer (STOP, or switched off on the job).' : 'No phone number on file for this job.' });
     // The SMS Terms promise ONE post-service follow-up by text (A2P 10DLC). A
     // second is allowed only when the first never reached them; otherwise the
     // reminder goes by email.
@@ -8500,7 +8485,7 @@ async function notificationResend(req, res, db, auth, body) {
 
   if (kind === 'on_the_way_sms') {
     if (!b.customer?.phone) return res.status(400).json({ error: 'No phone number on file for this customer.' });
-    if (!b.sms_consent) return res.status(400).json({ error: 'This customer did not opt in to texts. If they agree by phone, mark them opted in first (Delivery receipts panel).' });
+    if (!b.sms_consent) return res.status(400).json({ error: 'Texts are turned off for this customer (they replied STOP, or it was switched off in the Delivery receipts panel).' });
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
     // Wording comes from _lib/en-route.js so this manual resend, the tech app's
     // "On My Way" button and the one-tap nudge link all say the same thing.
@@ -10494,6 +10479,8 @@ async function estimateCreate(req, res, db, auth, body) {
   // it goes out on.
   const estEmail = (customer_email || '').trim();
   const estPhone = (customer_phone || '').trim();
+  // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+  const estSmsConsent = await textConsentFor(db, estPhone);
   const estName  = (customer_name || '').trim();
   if (!estEmail && !estPhone) {
     return res.status(400).json({ error: 'A phone number or an email address is required to send an estimate' });
@@ -10547,9 +10534,7 @@ async function estimateCreate(req, res, db, auth, body) {
     // quoted (previously left null — the card showed no tax at all).
     tax_rate: taxRate,
     status: 'new',
-    // Explicit opt-in only (A2P): the New Booking box starts unchecked and is
-    // ticked only after the customer's verbal yes.
-    sms_consent: body.sms_consent === true,
+    sms_consent: estSmsConsent,
     source: 'manual',
   }, estimateId ? ['id', 'line_items', 'tax_rate'] : []);
 
@@ -10598,19 +10583,10 @@ async function estimateCreate(req, res, db, auth, body) {
     }
   }
 
-  // A2P 10DLC / CTIA: the verbal yes the office just recorded gets its ONE
-  // opt-in confirmation text first, so the estimate text below is not the
-  // first thing the customer receives. Awaited so it goes out ahead of it.
-  // Best-effort: a failure never blocks the estimate.
-  if (estPhone && body.sms_consent === true) {
-    await sendOptInConfirmSms({ customerPhone: estPhone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate_create', db, businessId: biz.id })
-      .catch(e => console.warn('[estimate_create] opt-in confirmation failed:', e.message));
-  }
-
   // Text the customer the estimate + a link to view/approve it. For a customer
   // who only gave a phone number this IS the delivery, not a bonus copy.
   let texted = false;
-  if (estPhone && body.sms_consent === true && approveUrl) {
+  if (estPhone && estSmsConsent && approveUrl) {
     try {
       // No brand prefix and no dollar amount: the customer taps the link to see
       // the price (owner rule, 2026-09-18).
@@ -10660,7 +10636,7 @@ async function estimateSendSms(req, res, db, auth, body) {
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_phone) return res.status(400).json({ error: 'Customer phone not available for this estimate.' });
   // Explicit opt-in only (A2P 10DLC): a missing answer is not consent.
-  if (est.sms_consent !== true) return res.status(400).json({ error: 'Customer did not consent to receive text messages.' });
+  if (est.sms_consent !== true) return res.status(400).json({ error: 'This customer replied STOP, so we can\'t text them. Send the email instead.' });
 
   const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
   const greeting = firstName ? `Hi ${firstName}, here's` : `Here's`;
@@ -12895,10 +12871,8 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     notes: est.description || null,
     address_line1: cust.line1 || null, city: cust.city || null, state: cust.state || null, postal_code: cust.zip || null,
     payment_required: true, payment_method: 'card',
-    // Carry the estimate's answer through. This used to hard-code true, so a
-    // customer who declined texts on the estimate form was texted anyway.
-    // Explicit opt-in only (A2P 10DLC): a missing answer is not consent.
-    sms_consent: est.sms_consent === true,
+    // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+    sms_consent: await textConsentFor(db, cust.phone),
     stripe_customer_id: card.customerId, stripe_payment_method_id: card.pmId || null,
     metadata: { booked_by: 'Estimate approval (auto-booked)', source_estimate_id: est.id },
   };

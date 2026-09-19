@@ -14,6 +14,7 @@ import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracke
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
+import { textConsentFor } from './_lib/sms.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 const BAD_NAME = 'Please enter your name using letters only — no numbers.';
@@ -975,6 +976,8 @@ async function bookDoms(req, res) {
 
   // ── Write the booking (creates customer, booking, line items, status event,
   // review token) and get the new id back.
+  // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+  const smsConsent = await textConsentFor(db, customer.phone);
   let result = {};
   try {
     result = (await mirrorBooking({
@@ -989,7 +992,7 @@ async function bookDoms(req, res) {
       duration_minutes: 120,
       service_name: "Dom's TV Mounting",
       idempotency_key: b.idempotency_key || null,
-      sms_consent: b.sms_consent === true,   // explicit opt-in only (A2P); the widget always posts a boolean
+      sms_consent: smsConsent,
       stripe_account: 'doms',
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -1127,7 +1130,7 @@ async function bookDoms(req, res) {
   // ── "You're booked" text. Awaited on purpose (see _lib/booking-confirm-sms.js).
   await sendBookingConfirmSms({
     customerPhone: customer.phone,
-    smsConsent: b.sms_consent,
+    smsConsent,
     bizName: "Dom's TV Mounting",
     bizSlug: 'doms',
     techName: technicianName,
@@ -1382,6 +1385,8 @@ async function bookNative(req, res, slug) {
     || !!(!b.payment_method_id && b.card_skipped);
 
   // ── Write the booking (customer, booking, line items, status event, review token).
+  // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+  const smsConsent = await textConsentFor(db, customer.phone);
   let result = {};
   try {
     result = (await mirrorBooking({
@@ -1396,7 +1401,7 @@ async function bookNative(req, res, slug) {
       duration_minutes: 120,
       service_name: 'TV Mounting',
       idempotency_key: b.idempotency_key || null,
-      sms_consent: b.sms_consent === true,   // explicit opt-in only (A2P); the widget always posts a boolean
+      sms_consent: smsConsent,
       stripe_account: slug,
       customer: {
         first_name: customer.first_name, last_name: customer.last_name,
@@ -1535,7 +1540,7 @@ async function bookNative(req, res, slug) {
   // the cross-hired tech's home company.
   await sendBookingConfirmSms({
     customerPhone: customer.phone,
-    smsConsent: b.sms_consent,
+    smsConsent,
     bizName: DISPLAY.name,
     bizSlug: slug,
     techName: technicianName,

@@ -1728,7 +1728,7 @@
            to the script in the label. Ticking it without asking is texting
            someone who never opted in. -->
       <div class="nb-consent-row" style="display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;">
-        <input type="checkbox" id="nbSmsConsent" style="cursor:pointer;width:18px;height:18px;flex-shrink:0;margin-top:1px;">
+        <input type="checkbox" id="nbSmsConsent" checked style="cursor:pointer;width:18px;height:18px;flex-shrink:0;margin-top:1px;">
         <label for="nbSmsConsent" id="nbSmsConsentLabel" style="cursor:pointer;font-size:13px;margin:0;">Customer said yes to texts. Read this word for word first: “Handy Andy TV Mounting can text you about this job: booking confirmations, technician on-the-way and ETA updates, estimates, invoices, replies about your job, and one follow-up after the service. It’s optional and not required to book. Message frequency varies. Message and data rates may apply. Reply HELP for help or STOP to opt out. Our SMS Terms are at ihandyandy.com/terms-of-service and our Privacy Policy is at ihandyandy.com/privacy-policy. Would you like to receive these text messages?”</label>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
@@ -3295,7 +3295,7 @@ function notificationLog(b){
     // Skips are stamped by _lib/en-route.js. The Resend button appears only
     // once the blocker is gone (office marked them opted in / added a phone),
     // so the row isn't a dead end — the server re-checks both anyway.
-    else if(st==='skipped_no_consent') rows.push(notifPill('On the way (text)','✕','#f87171','Not sent — customer did not opt in to texts',when,canText?resendAttrs:null));
+    else if(st==='skipped_no_consent') rows.push(notifPill('On the way (text)','✕','#f87171','Not sent — texts are off for this customer (STOP, or switched off below)',when,canText?resendAttrs:null));
     else if(st==='skipped_no_phone') rows.push(notifPill('On the way (text)','✕','#f87171','Not sent — no phone on file',when,canText?resendAttrs:null));
     else rows.push(notifPill('On the way (text)','…','#fbbf24','Sending',when,resendAttrs));
   }
@@ -3304,7 +3304,7 @@ function notificationLog(b){
     const resendAttrs={kind:'review_sms',id:b.id};
     if(st==='delivered') rows.push(notifPill('Review request (text)','✓','#4ade80','Delivered',when,null));
     else if(st==='failed'||st==='undelivered') rows.push(notifPill('Review request (text)','✕','#f87171','Not delivered',when,resendAttrs));
-    else if(st==='skipped_no_consent') rows.push(notifPill('Review request (text)','✕','#f87171','Not sent — customer did not opt in to texts',when,canText?resendAttrs:null));
+    else if(st==='skipped_no_consent') rows.push(notifPill('Review request (text)','✕','#f87171','Not sent — texts are off for this customer (STOP, or switched off below)',when,canText?resendAttrs:null));
     else if(st==='skipped_no_phone') rows.push(notifPill('Review request (text)','✕','#f87171','Not sent — no phone on file',when,canText?resendAttrs:null));
     else rows.push(notifPill('Review request (text)','…','#fbbf24','Sending',when,null));
   }
@@ -3326,7 +3326,7 @@ document.getElementById('bkBody')?.addEventListener('click', async (e)=>{
   const cbtn=e.target.closest('.notif-consent-btn');
   if(cbtn){
     const id=cbtn.dataset.ncId, value=cbtn.dataset.ncValue==='true';
-    if(value && !confirm('Mark this customer as opted in to texts?\n\nOnly if they said yes after you read this word for word:\n\n“'+smsConsentScript(current)+'”\n\nThey get a confirmation text now, then texts about this job (automated texts each say STOP to opt out).')) return;
+    if(!value && !confirm('Turn texts OFF for this customer? They will not get on-the-way, review, or invoice texts for this job.')) return;
     cbtn.disabled=true; cbtn.textContent='…';
     try{
       await api('booking_update',{ method:'POST', body:{ business:current.slug, id, action:'sms_consent', value }});
@@ -12974,7 +12974,7 @@ function estCard(e){
       ${photo}
     </div>
     <div class="row est-foot">
-      <span class="meta" style="font-size:12px;">${e.sms_consent!==true?'<span style="color:var(--mute);">no SMS consent</span>':''}</span>
+      <span class="meta" style="font-size:12px;">${(e.customer_phone&&e.sms_consent!==true)?'<span style="color:var(--mute);">texts off (STOP)</span>':''}</span>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
         ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${(isApproved||textSent)?'ghost':''} sm" data-est-sms="${e.id}" title="${textSent?'Text the quote to the customer again':'Send SMS quote'}">${textSent?'Resend text':'Send text'}</button>`:''}
@@ -17560,8 +17560,8 @@ async function renderCallWiz(){
         </label>
       </div>
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;font-size:12.5px;cursor:pointer;">
-        <input type="checkbox" id="cwSmsConsent"${c.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;">
-        <span>Customer said yes to texts. Read this word for word first: “${esc(smsConsentScript(current))}”</span>
+        <input type="checkbox" id="cwSmsConsent"${c.sms===false?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;">
+        <span>${TEXTS_ON_LABEL}</span>
       </label>
       <button type="button" class="btn" id="cwBookNow" style="margin-bottom:7px;">Book it</button>
       <button type="button" class="btn ghost" id="cwCustBack">Back</button>`;
@@ -17614,7 +17614,7 @@ async function renderCallWiz(){
       </div>
       <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">Either one is enough — whichever they'd rather give.</div>
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${callWiz.cust&&callWiz.cust.sms?' checked':''} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>Customer said yes to texts. Read this word for word first: “${esc(smsConsentScript(current))}”</span></label>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>${TEXTS_ON_LABEL}</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
@@ -17660,6 +17660,10 @@ document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpse
 // the text box only on a spoken yes. For Handy Andy it matches
 // ihandyandy.com/sms-opt-in exactly; other brands hear the same script under
 // their own name, without the links (only ihandyandy.com hosts SMS Terms).
+// Owner rule (2026-09-19): every customer with a phone number gets job texts.
+// The box only exists to switch them OFF for someone who asks; the server
+// treats the phone number itself as the opt-in regardless.
+const TEXTS_ON_LABEL='Text this customer job updates (on for everyone with a phone number — untick only if they ask not to be texted; they can also reply STOP).';
 function smsConsentScript(biz){
   const slug=biz&&biz.slug;
   const brand=slug==='handy-andy'?'Handy Andy TV Mounting':((biz&&biz.name)||'We');
@@ -17672,7 +17676,7 @@ async function openNewBooking(prefill){
     closeCallWiz();
   }
   // The consent script names the brand being booked (smsConsentScript above).
-  { const l=document.getElementById('nbSmsConsentLabel'); if(l) l.textContent=`Customer said yes to texts. Read this word for word first: “${smsConsentScript(current)}”`; }
+  { const l=document.getElementById('nbSmsConsentLabel'); if(l) l.textContent=TEXTS_ON_LABEL; }
   closeSidebar();
   // Reset on every open (not just when _estimateOnly is set) since this modal
   // is reused for both jobs and estimates: without an unconditional reset,

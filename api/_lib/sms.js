@@ -40,6 +40,19 @@ export const SMS_START_RE = /^\s*(start|unstop)[\s.!]*$/i;
 // our own sends must check. `phone` is the 10-digit form those rows store.
 // Returns null when the lookup fails, so each caller decides what a failure
 // means (never "not opted out" by accident).
+// Owner rule (2026-09-19): a customer who gave us their phone number has
+// opted in to texts about their job — no consent checkbox, no script, no
+// exceptions. The ONLY thing that turns texts off is the customer replying
+// STOP (smsOptOutState below; STOP handling also writes false onto their
+// rows). Every place a booking or estimate is created stores this, so the
+// send gates that read sms_consent keep working unchanged.
+export async function textConsentFor(db, phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (d.length < 10) return false;
+  const p = d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+  return (await smsOptOutState(db, p)) !== true;
+}
+
 export async function smsOptOutState(db, phone) {
   try {
     const { data, error } = await db.from('messages').select('body')

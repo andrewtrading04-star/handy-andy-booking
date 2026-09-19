@@ -13,8 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
-import { sendSMS, toE164 } from './_lib/sms.js';
-import { sendOptInConfirmSms } from './_lib/booking-confirm-sms.js';
+import { sendSMS, toE164, textConsentFor } from './_lib/sms.js';
 import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
 
@@ -277,9 +276,8 @@ async function submit(req, res, db) {
     preferred_slots,
     line_items,
     source: 'widget',
-    // SMS is opt-in only: every form's consent box is unchecked by default, so a
-    // missing or non-boolean value means NO consent (A2P 10DLC / CTIA).
-    sms_consent: body.sms_consent === true,
+    // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
+    sms_consent: await textConsentFor(db, phone),
   };
 
   // Quote at the rate the customer was actually shown (the widget sends its own
@@ -301,15 +299,6 @@ async function submit(req, res, db) {
   // text and no [SMS] log line at all. Awaiting costs ~1s on a form submit and
   // makes delivery (and its logging) deterministic.
   const notifications = [];
-
-  // A2P 10DLC / CTIA: a customer who ticked the SMS opt-in box (the
-  // /handyman-booking estimate form, or the widget's unstaffed-area request)
-  // gets ONE immediate opt-in confirmation text. Only when consent really was
-  // stored (insertResilient can strip a missing column). Best-effort and
-  // awaited with the rest below, so it can never fail the request.
-  if (inserted && inserted.sms_consent === true && phone) {
-    notifications.push(sendOptInConfirmSms({ customerPhone: phone, bizSlug: biz.slug, bizName: biz.name, tag: 'estimate', db, businessId: biz.id }));
-  }
 
   // Notify staff (owner + secretary) per business settings, PLUS the
   // business's secretary (Heather/Joey) directly via env var — guarantees they

@@ -390,8 +390,8 @@ async function websiteLeadSync(req, res) {
     status: 'new',
     // No card was taken and nothing was quoted: this is raw inbound interest.
     line_items: [], preferred_slots: [],
-    // Don't text the customer off a form fill they didn't opt in on.
-    sms_consent: false,
+    // A phone number IS the opt-in (owner rule 2026-09-19).
+    sms_consent: !!phone,
   };
   if (b.received_at) { const d = new Date(b.received_at); if (!isNaN(d)) row.created_at = d.toISOString(); }
 
@@ -762,6 +762,34 @@ export default async function handler(req, res) {
   // 2026-07-31 when Zenbooker was canceled — it can never run again (there's
   // no account left to import from) and its dependency (_lib/doms-import.js)
   // and driver page (public/import-doms.html) were deleted with it.
+
+  // TEMPORARY one-shot (2026-09-19, removed in the next commit): send the
+  // "You're booked" text to the upcoming jobs that were skipped under the old
+  // opt-in rule. Guarded by a random single-use token, not by any env secret.
+  if (action === 'resend_confirms_once') {
+    if ((req.query.key || '') !== '9a08a2c2fd8c24d37075b3c3bde080eea9095c88d9712b0a') return res.status(401).json({ error: 'no' });
+    const { SLOTS } = await import('./_lib/availability.js');
+    const { logAutomatedMessage } = await import('./_lib/sms.js');
+    const db = serviceClient();
+    const out = [];
+    for (const id of ['9856fbec-3b5b-4305-b48e-99f9454981ef', 'c7653e16-6312-4986-b0d1-a03c5a2ec9e5', '1ac50c97-a871-48ca-81ea-7bbd72da9a4a']) {
+      const { data: b } = await db.from('bookings')
+        .select('id, scheduled_at, business_id, sms_consent, customer:customers(name, phone), tech:technicians!technician_id(name), area:service_areas(timezone)')
+        .eq('id', id).maybeSingle();
+      if (!b || !b.customer?.phone || b.sms_consent !== true) { out.push({ id, skipped: 'no row/phone/consent' }); continue; }
+      const tz = b.area?.timezone || 'America/Denver';
+      const d = new Date(b.scheduled_at);
+      const dateStr = d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
+      const hhmm = d.toLocaleTimeString('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' });
+      const slot = SLOTS.find(s => s.start === hhmm);
+      const timeStr = d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+      const msg = bookingConfirmMessage({ dateStr: slot ? dateStr : `${dateStr} at ${timeStr}`, timeWindow: slot ? slot.label : '', techName: b.tech?.name || null });
+      const r = await sendSMSResult(b.customer.phone, msg);
+      await logAutomatedMessage(db, { businessId: b.business_id, customerPhone: b.customer.phone, body: msg, result: r });
+      out.push({ name: b.customer.name, phone: b.customer.phone, sent: !!r.ok, why: r.skipped || r.error || null, msg });
+    }
+    return res.status(200).json({ out });
+  }
 
   // 24-hour appointment reminders. Secured by CRON_SECRET (NOT the admin bearer)
   // so a scheduled trigger (Vercel Cron / GitHub Actions hourly) can call it.
