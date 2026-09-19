@@ -534,12 +534,14 @@ export default async function handler(req, res) {
       case 'notes_list':   return await notesList(req, res, db, auth);
       case 'notes_add':    return await notesAdd(req, res, db, auth, body);
       case 'notes_delete': return await notesDelete(req, res, db, auth, body);
+      case 'notes_update': return await notesUpdate(req, res, db, auth, body);
       case 'notes_photo':  return await notesPhoto(req, res, db, auth, body);
       case 'notes_replies_seen': return await notesRepliesSeen(req, res, db, auth);
       case 'tech_notes_targets': return await techNotesTargets(req, res, db, auth);
       case 'tech_notes_add':     return await techNotesAdd(req, res, db, auth, body);
       case 'tech_notes_list':    return await techNotesList(req, res, db, auth);
       case 'tech_notes_delete':  return await techNotesDelete(req, res, db, auth, body);
+      case 'tech_notes_update':  return await techNotesUpdate(req, res, db, auth, body);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       // Two-way SMS (migration 0109). Deliberately NO owner gate on any of
@@ -14051,6 +14053,48 @@ async function notesAdd(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, id: data && data.id });
 }
 
+// Editing a posted note. The composer sends the same fields as a fresh post.
+// Timing: a new schedule reschedules it; "send now" on a not-yet-sent note
+// sends it now; otherwise the original window is kept. Returns the patch to
+// apply, or { error } for a 400.
+function noteEditPatch(existing, body) {
+  const text = (body.body || '').toString().trim();
+  if (!text) return { error: 'Write something first' };
+  if (text.length > 2000) return { error: 'Note is too long (2000 characters max)' };
+  const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : existing.mode;
+  const patch = { body: text, mode, photo_urls: cleanNotePhotos(body.photos) };
+  if (body.send_date || body.send_time) {
+    const when = resolveSendAt(body);
+    if (when.error) return { error: when.error };
+    patch.send_at = when.send_at; patch.show_from = when.show_from;
+  } else if (noteIsScheduled(existing)) {
+    patch.send_at = null; patch.show_from = denverToday();
+  }
+  // The audience already ticked the old wording off; a changed note needs to
+  // show again or nobody sees the fix.
+  patch.reshow = text !== existing.body
+    || JSON.stringify(patch.photo_urls) !== JSON.stringify(existing.photo_urls || []);
+  return { patch };
+}
+
+// POST { id, body, target, mode, photos, send_date?, send_time? } — edit one.
+async function notesUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: existing } = await db.from('staff_notes').select('id, body, mode, show_from, send_at, photo_urls').eq('id', id).is('deleted_at', null).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'That note is gone' });
+  const r = noteEditPatch(existing, body);
+  if (r.error) return res.status(400).json({ error: r.error });
+  const { reshow, ...patch } = r.patch;
+  if ('target' in body) patch.target_slug = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+  const { error } = await db.from('staff_notes').update(patch).eq('id', id);
+  if (error) throw error;
+  if (reshow) await db.from('staff_note_reads').delete().eq('note_id', id).is('reply', null);
+  return res.status(200).json({ ok: true, reshown: reshow });
+}
+
 // ── Notes for technicians ────────────────────────────────────────────────────
 // Same idea as the secretary notes, aimed at the tech app: the owner writes a
 // note, it shows at the top of the tech's Jobs screen until its window ends or
@@ -14113,7 +14157,10 @@ async function techNotesList(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const today = denverToday();
   const { data, error } = await db.from('tech_notes')
-    .select('id, body, target_type, technician_id, city, mode, show_from, send_at, photo_urls, created_by, created_at, tech:technicians ( name )')
+    // tech_notes reaches technicians two ways (technician_id, and through
+    // tech_note_dismissals), so the embed has to name the FK or PostgREST
+    // refuses with "more than one relationship was found".
+    .select('id, body, target_type, technician_id, city, mode, show_from, send_at, photo_urls, created_by, created_at, tech:technicians!tech_notes_technician_id_fkey ( name )')
     .is('deleted_at', null).order('created_at', { ascending: false }).limit(40);
   if (error) throw error;
   const ids = (data || []).map(n => n.id);
@@ -14125,7 +14172,7 @@ async function techNotesList(req, res, db, auth) {
   }
   const notes = (data || []).map(n => ({
     id: n.id, body: n.body, mode: n.mode, photo_urls: n.photo_urls || [], created_by: n.created_by, created_at: n.created_at,
-    target_type: n.target_type,
+    target_type: n.target_type, technician_id: n.technician_id || null, city: n.city || null,
     target_label: n.target_type === 'all' ? 'Every technician' : n.target_type === 'city' ? `Every tech in ${n.city}` : (n.tech?.name || 'One technician'),
     live: noteIsLive(n, today),
     scheduled: noteIsScheduled(n), send_at: n.send_at || null,
@@ -14143,6 +14190,36 @@ async function techNotesDelete(req, res, db, auth, body) {
   const { error } = await db.from('tech_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
   if (error) throw error;
   return res.status(200).json({ ok: true });
+}
+
+// POST { id, body, target_type, technician_id?, city?, mode, photos, send_* } — edit one.
+async function techNotesUpdate(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: existing } = await db.from('tech_notes').select('id, body, mode, show_from, send_at, photo_urls, target_type').eq('id', id).is('deleted_at', null).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'That note is gone' });
+  const r = noteEditPatch(existing, body);
+  if (r.error) return res.status(400).json({ error: r.error });
+  const { reshow, ...patch } = r.patch;
+  if (['tech', 'city', 'all'].includes(body.target_type)) {
+    patch.target_type = body.target_type; patch.technician_id = null; patch.city = null;
+    if (body.target_type === 'tech') {
+      const { data: t } = await db.from('technicians').select('id').eq('id', (body.technician_id || '').toString()).eq('active', true).maybeSingle();
+      if (!t) return res.status(400).json({ error: 'Pick a technician' });
+      patch.technician_id = t.id;
+    } else if (body.target_type === 'city') {
+      const city = (body.city || '').toString().trim();
+      const { data: areas } = await db.from('service_areas').select('name').eq('name', city).limit(1);
+      if (!city || !(areas || []).length) return res.status(400).json({ error: 'Pick a city' });
+      patch.city = city;
+    }
+  }
+  const { error } = await db.from('tech_notes').update(patch).eq('id', id);
+  if (error) throw error;
+  if (reshow) await db.from('tech_note_dismissals').delete().eq('note_id', id);
+  return res.status(200).json({ ok: true, reshown: reshow });
 }
 
 // POST { id } — pull a note back. Soft delete, so its read history survives.

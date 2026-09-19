@@ -161,6 +161,8 @@
   .card{background:var(--navy-2);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;}
   .card h3{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
   .card .big-name{font-size:20px;font-weight:800;}
+  .card .job-biz{font-size:24px;font-weight:900;letter-spacing:.03em;line-height:1.15;color:var(--orange);margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line);}
+  body.doms .card .job-biz{color:var(--blue);}
   .kv{font-size:15px;margin:7px 0;line-height:1.5;}
   .kv a{color:var(--blue);text-decoration:none;}
   /* Doms iconography — Font Awesome 6 glyphs, brand-accented */
@@ -1179,7 +1181,9 @@ async function showDetail(id){
         <div class="xco-banner-s">You're covering this appointment for ${esc(forCo)}${ownCo?`, not ${esc(ownCo)}`:''}.</div>
       </div>`;})():''}
       <div class="card">
-        <h3>${esc(j.slot_time||fmtTime(j.scheduled_at))} · ${statusBadge(j.status)}</h3>
+        <!-- Owner rule (2026-09-19): the company this job is FOR sits big and
+             bold at the top of every job, whichever company the tech belongs to. -->
+        <div class="job-biz">${esc((j.company_name||(tech&&tech.company_name)||'').toUpperCase())}</div>
         <div class="big-name">${esc(j.customer_name)}</div>
         <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}

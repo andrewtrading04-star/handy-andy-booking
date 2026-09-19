@@ -8567,7 +8567,7 @@ function notePhotoPicker(host){
     busy.textContent='';
   };
   paint();
-  return { urls:()=>urls.slice(), busy:()=>!!busy.textContent, reset:()=>{ urls=[]; paint(); } };
+  return { urls:()=>urls.slice(), busy:()=>!!busy.textContent, reset:()=>{ urls=[]; paint(); }, set:(list)=>{ urls=(list||[]).filter(Boolean).slice(0,NOTE_MAX_PHOTOS); paint(); } };
 }
 
 async function noteBanner(){
@@ -8663,7 +8663,31 @@ function noteSendWire(p, postBtn){
   return {
     fields:()=>sel.value==='later'?{ send_date:date.value, send_time:document.getElementById(p+'Time').value }:{},
     reset:()=>{ sel.value='now'; when.style.display='none'; postBtn.textContent=idle; },
+    // Load a note's existing schedule into the control (editing). A note that
+    // is still waiting to go out shows its Denver date + time; a sent one shows "now".
+    set:(sendAtIso, scheduled)=>{
+      if(scheduled&&sendAtIso){
+        const parts=new Intl.DateTimeFormat('en-CA',{ timeZone:'America/Denver', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(new Date(sendAtIso));
+        const g=t=>(parts.find(x=>x.type===t)||{}).value||'';
+        sel.value='later'; when.style.display=''; date.value=`${g('year')}-${g('month')}-${g('day')}`;
+        document.getElementById(p+'Time').value=`${g('hour').replace('24','00')}:${g('minute')}`;
+      } else { sel.value='now'; when.style.display='none'; }
+    },
     idle,
+  };
+}
+// Both composers double as editors: pencil on a Recent row loads the note
+// into the form, the Post button becomes "Save changes", and Cancel puts the
+// form back. Returns helpers the pane uses to know what it is saving.
+function noteEditMode(postBtn, onCancel){
+  let id=null, cancel=document.createElement('button');
+  cancel.type='button'; cancel.className='btn ghost'; cancel.style.cssText='width:auto;display:none;'; cancel.textContent='Cancel';
+  postBtn.insertAdjacentElement('afterend', cancel);
+  cancel.onclick=()=>{ id=null; cancel.style.display='none'; postBtn.textContent='Post note'; onCancel(); };
+  return {
+    id:()=>id,
+    start:(noteId)=>{ id=noteId; cancel.style.display=''; postBtn.textContent='Save changes'; postBtn.scrollIntoView({ block:'center', behavior:'smooth' }); },
+    stop:()=>{ id=null; cancel.style.display='none'; postBtn.textContent='Post note'; },
   };
 }
 function noteScheduledPill(n){
@@ -8724,27 +8748,40 @@ function renderStaffNotesPane(){
     <div id="notesRecent" class="empty">Loading…</div>`;
   const picker=notePhotoPicker(document.getElementById('notePhotoHost'));
   const sendCtl=noteSendWire('note', document.getElementById('notePost'));
+  const clearForm=()=>{ document.getElementById('noteBody').value=''; picker.reset(); sendCtl.reset(); };
+  const editCtl=noteEditMode(document.getElementById('notePost'), clearForm);
+  _staffNoteEdit=(n)=>{
+    document.getElementById('noteBody').value=n.body||'';
+    document.getElementById('noteTarget').value=n.target_slug||'';
+    document.getElementById('noteMode').value=n.mode||'today';
+    picker.set(n.photo_urls); sendCtl.set(n.send_at, n.scheduled);
+    editCtl.start(n.id);
+  };
   document.getElementById('notePost').onclick=async()=>{
     const bodyEl=document.getElementById('noteBody');
     const text=bodyEl.value.trim();
     if(!text){ bodyEl.focus(); return; }
     if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
     const btn=document.getElementById('notePost');
-    const send=sendCtl.fields(), scheduled=!!send.send_date;
-    btn.disabled=true; btn.textContent='Posting…';
+    const send=sendCtl.fields(), scheduled=!!send.send_date, editing=editCtl.id();
+    btn.disabled=true; btn.textContent=editing?'Saving…':'Posting…';
     try{
-      await api('notes_add',{ method:'POST', body:{
-        body:text,
-        target:document.getElementById('noteTarget').value||null,
-        mode:document.getElementById('noteMode').value,
-        photos:picker.urls(), ...send } });
-      bodyEl.value=''; picker.reset(); sendCtl.reset(); await loadNotesRecent(); noteBanner();
-      toast(scheduled?'Note scheduled':'Note posted');
-    }catch(err){ toast(err.message||'Could not post that note'); }
-    finally{ btn.disabled=false; btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
+      const payload={ body:text, target:document.getElementById('noteTarget').value||null, mode:document.getElementById('noteMode').value, photos:picker.urls(), ...send };
+      if(editing){
+        const r=await api('notes_update',{ method:'POST', body:{ id:editing, ...payload } });
+        editCtl.stop(); clearForm(); await loadNotesRecent(); noteBanner();
+        toast(r.reshown?'Note updated — it will show again for everyone':'Note updated');
+      } else {
+        await api('notes_add',{ method:'POST', body:payload });
+        clearForm(); await loadNotesRecent(); noteBanner();
+        toast(scheduled?'Note scheduled':'Note posted');
+      }
+    }catch(err){ toast(err.message||'Could not save that note'); }
+    finally{ btn.disabled=false; if(!editCtl.id()) btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
   };
   loadNotesRecent();
 }
+let _staffNoteEdit=null, _techNoteEdit=null;
 
 async function loadNotesRecent(){
   const wrap=document.getElementById('notesRecent');
@@ -8771,9 +8808,13 @@ async function loadNotesRecent(){
           ${replies}
         </div>
         ${pill}
+        <button class="note-del" data-noteedit="${esc(n.id)}" title="Edit note" aria-label="Edit note">✏️</button>
         <button class="note-del" data-notedel="${esc(n.id)}" title="Delete note" aria-label="Delete note">🗑</button>
       </div>`;
     }).join('');
+    wrap.querySelectorAll('[data-noteedit]').forEach(b=>{
+      b.onclick=()=>{ const n=notes.find(x=>x.id===b.getAttribute('data-noteedit')); if(n&&_staffNoteEdit) _staffNoteEdit(n); };
+    });
     wrap.querySelectorAll('[data-notedel]').forEach(b=>{
       b.onclick=async()=>{
         b.disabled=true;
@@ -8838,23 +8879,40 @@ async function renderTechNotesPane(){
   typeEl.onchange=fillWho; fillWho();
   const picker=notePhotoPicker(document.getElementById('tnPhotoHost'));
   const sendCtl=noteSendWire('tn', document.getElementById('tnPost'));
+  const clearForm=()=>{ document.getElementById('tnBody').value=''; picker.reset(); sendCtl.reset(); };
+  const editCtl=noteEditMode(document.getElementById('tnPost'), clearForm);
+  _techNoteEdit=(n)=>{
+    document.getElementById('tnBody').value=n.body||'';
+    typeEl.value=n.target_type||'all'; fillWho();
+    if(n.target_type==='tech') whoEl.value=n.technician_id||'';
+    if(n.target_type==='city') whoEl.value=n.city||'';
+    document.getElementById('tnMode').value=n.mode||'today';
+    picker.set(n.photo_urls); sendCtl.set(n.send_at, n.scheduled);
+    editCtl.start(n.id);
+  };
   document.getElementById('tnPost').onclick=async()=>{
     const bodyEl=document.getElementById('tnBody');
     const text=bodyEl.value.trim();
     if(!text){ bodyEl.focus(); return; }
     if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
     const t=typeEl.value;
-    const send=sendCtl.fields(), scheduled=!!send.send_date;
+    const send=sendCtl.fields(), scheduled=!!send.send_date, editing=editCtl.id();
     const payload={ body:text, target_type:t, mode:document.getElementById('tnMode').value, photos:picker.urls(), ...send };
     if(t==='tech') payload.technician_id=whoEl.value;
     if(t==='city') payload.city=whoEl.value;
-    const btn=document.getElementById('tnPost'); btn.disabled=true; btn.textContent='Posting…';
+    const btn=document.getElementById('tnPost'); btn.disabled=true; btn.textContent=editing?'Saving…':'Posting…';
     try{
-      await api('tech_notes_add',{ method:'POST', body:payload });
-      bodyEl.value=''; picker.reset(); sendCtl.reset(); await loadTechNotesRecent();
-      toast(scheduled?'Note scheduled':'Note posted');
-    }catch(err){ toast(err.message||'Could not post that note'); }
-    finally{ btn.disabled=false; btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
+      if(editing){
+        const r=await api('tech_notes_update',{ method:'POST', body:{ id:editing, ...payload } });
+        editCtl.stop(); clearForm(); await loadTechNotesRecent();
+        toast(r.reshown?'Note updated — it will show again for every tech':'Note updated');
+      } else {
+        await api('tech_notes_add',{ method:'POST', body:payload });
+        clearForm(); await loadTechNotesRecent();
+        toast(scheduled?'Note scheduled':'Note posted');
+      }
+    }catch(err){ toast(err.message||'Could not save that note'); }
+    finally{ btn.disabled=false; if(!editCtl.id()) btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
   };
   loadTechNotesRecent();
 }
@@ -8879,9 +8937,13 @@ async function loadTechNotesRecent(){
           <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(n.target_label)} · ${esc((NOTE_MODE_LABEL[n.mode]||n.mode).replace('ticked off','they tap X'))} · ${esc(noteWhen(n.created_at))}</div>
         </div>
         ${pill}
+        <button class="note-del" data-tnedit="${esc(n.id)}" title="Edit note" aria-label="Edit note">✏️</button>
         <button class="note-del" data-tndel="${esc(n.id)}" title="Delete note" aria-label="Delete note">🗑</button>
       </div>`;
     }).join('');
+    wrap.querySelectorAll('[data-tnedit]').forEach(b=>{
+      b.onclick=()=>{ const n=notes.find(x=>x.id===b.getAttribute('data-tnedit')); if(n&&_techNoteEdit) _techNoteEdit(n); };
+    });
     wrap.querySelectorAll('[data-tndel]').forEach(b=>{
       b.onclick=async()=>{
         b.disabled=true;
