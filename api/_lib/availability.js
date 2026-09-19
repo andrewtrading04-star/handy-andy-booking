@@ -551,6 +551,11 @@ async function weekJobCounts(db, techIds, dateStr, tz) {
 // on repeated calls.
 async function pickFairest(db, eligible, dateStr, tz) {
   if (!eligible.length) return null;
+  // Owner-set booking priority (technicians.booking_priority, higher first)
+  // narrows the pool to the top tier; the fairness round-robin then only runs
+  // among techs of equal priority. Everyone at 0 = the old behaviour exactly.
+  const top = Math.max(...eligible.map(t => Number(t.booking_priority) || 0));
+  eligible = eligible.filter(t => (Number(t.booking_priority) || 0) === top);
   if (eligible.length === 1) return eligible[0].id;
   const counts = await weekJobCounts(db, eligible.map(t => t.id), dateStr, tz);
   let best = eligible[0], bestCount = counts.get(eligible[0].id) || 0;
@@ -584,7 +589,8 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   // Only this metro's technicians may be assigned its jobs (Houston -> Juan,
   // Austin -> Zach, …), so a booking never lands on a tech from another city.
   const baseQ = (cols) => { let q = db.from('technicians').select(cols).eq('business_id', biz.id).eq('active', true); if (serviceAreaId) q = q.eq('service_area_id', serviceAreaId); return q.order('created_at', { ascending: true }); };
-  let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day');
+  let { data: techs, error: techErr } = await baseQ('id, max_jobs_per_day, booking_priority');
+  if (techErr && /booking_priority/.test(techErr.message || '')) ({ data: techs, error: techErr } = await baseQ('id, max_jobs_per_day'));
   if (techErr && /max_jobs_per_day/.test(techErr.message || '')) ({ data: techs } = await baseQ('id'));
   // Sole-technician lock: for a locked brand this leaves at most one tech, and
   // the cross-hire fallback below is likewise filtered, so no path can assign
@@ -629,7 +635,8 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
       const pBaseQ = (cols) => db.from('technicians').select(cols)
         .eq('business_id', partner.partnerBizId).eq('active', true).eq('service_area_id', partner.partnerServiceAreaId)
         .order('created_at', { ascending: true });
-      let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day');
+      let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day, booking_priority');
+      if (pErr && /booking_priority/.test(pErr.message || '')) ({ data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day'));
       if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
       const partnerEligible = await eligibleFrom(applySoleTech(businessSlug, pTechs || []));
       const partnerPick = await pickFairest(db, partnerEligible, dateStr, tz);

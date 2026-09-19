@@ -6802,7 +6802,7 @@ async function technicians(req, res, db, auth) {
   // (0034) is the per-tech daily cap; photo_url/bio_years/bio_blurb (0060) power
   // the "Meet your tech" confirmation-email block. All optional — drop whichever
   // column the DB doesn't have yet so the roster always loads.
-  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash, photo_url, bio_years, bio_blurb, review_invite_sent_at';
+  let cols = 'id, name, phone, email, status, active, service_area_id, max_jobs_per_day, pin_hash, photo_url, bio_years, bio_blurb, review_invite_sent_at, booking_priority';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('technicians').select(cols).eq('business_id', biz.id).order('name'));
@@ -7566,6 +7566,10 @@ async function technicianUpdate(req, res, db, auth, body) {
   if (auth.role === 'owner' && body.max_jobs_per_day !== undefined) {
     const v = body.max_jobs_per_day;
     patch.max_jobs_per_day = (v === '' || v == null) ? null : Math.max(0, Math.floor(Number(v)) || 0);
+  }
+  // Booking priority — owner only. Higher = offered new online bookings first.
+  if (auth.role === 'owner' && body.booking_priority !== undefined) {
+    patch.booking_priority = Math.min(9, Math.max(0, Math.floor(Number(body.booking_priority)) || 0));
   }
   // Bio for the "Meet your tech" confirmation-email block. bio_years is a
   // non-negative whole number or null (blank = don't show a years claim).

@@ -8483,6 +8483,13 @@ async function renderTechnicians(){
           <span class="meta" style="font-size:13px;">Max jobs per day</span>
           <input type="number" min="0" inputmode="numeric" class="maxjobs" value="${t.max_jobs_per_day!=null?t.max_jobs_per_day:''}" placeholder="No limit" style="width:110px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
           <span class="meta" style="font-size:12px;color:var(--mute);">leave blank for no limit</span>
+        </div>
+        <div class="actions" style="align-items:center;margin-top:8px;">
+          <span class="meta" style="font-size:13px;">Booking priority</span>
+          <select class="bkprio" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;">
+            ${[[0,'Normal'],[1,'Preferred — gets jobs first'],[2,'Top choice — gets jobs before everyone']].map(([v,l])=>`<option value="${v}" ${(Number(t.booking_priority)||0)===v?'selected':''}>${l}</option>`).join('')}
+          </select>
+          <span class="meta" style="font-size:12px;color:var(--mute);">when several techs are free for the same slot</span>
         </div>`:''}
       </div>`).join('') + inactiveToggle || '<div class="empty">No technicians.</div>');
     const tgl=document.getElementById('toggleInactiveTechs');
@@ -8493,6 +8500,7 @@ async function renderTechnicians(){
       const id=card.dataset.id;
       card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
       const mj=card.querySelector('.maxjobs'); if(mj) mj.addEventListener('change',e=>saveTech({ id, max_jobs_per_day:e.target.value }));
+      const bp=card.querySelector('.bkprio'); if(bp) bp.addEventListener('change',e=>saveTech({ id, booking_priority:e.target.value }));
       card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
         if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim()); }
         if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }
