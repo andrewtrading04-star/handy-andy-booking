@@ -349,7 +349,7 @@ function stepContact(){
     <input type="text" id="czip" value="${esc(state.zip)}" placeholder="e.g. 80203" inputmode="numeric" maxlength="5" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)" autocomplete="postal-code">
     <div class="consent">
       <input type="checkbox" id="consent" ${state.consent?'checked':''}>
-      <label for="consent">I agree to receive appointment and customer-care text messages from ${esc(consentBrand())} (booking confirmations, technician on-the-way/ETA updates, estimates, invoices, replies about my job, and a post-service follow-up). Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply HELP for help, STOP to opt out.${consentLinks}</label>
+      <label for="consent">I agree to receive texts from ${esc(consentBrand())} about my booking and job. Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help. Consent is not a condition of purchase.${consentLinks}</label>
     </div>`;
   return shell('Contact', 'Where should we reach you?', '', inner,
     { nextLabel:'Submit request', nextDisabled: !(state.name.trim() && state.phone.trim() && state.zip.trim()) });
