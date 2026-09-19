@@ -2420,7 +2420,7 @@ async function techNotesActive(req, res, db, auth) {
   const myCity = me?.area?.name || null;
 
   const { data, error } = await db.from('tech_notes')
-    .select('id, body, target_type, technician_id, city, mode, show_from, photo_urls, created_by, created_at')
+    .select('id, body, target_type, technician_id, city, mode, show_from, send_at, photo_urls, created_by, created_at')
     .is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
   const { data: gone } = await db.from('tech_note_dismissals').select('note_id').eq('technician_id', auth.tech_id);

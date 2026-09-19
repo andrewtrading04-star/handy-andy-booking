@@ -8628,6 +8628,50 @@ function noteWhen(iso){
 const NOTE_FIELD_CSS='width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;';
 const NOTE_LABEL_CSS='display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;';
 
+// "Send" control shared by both composers: right now, or at a chosen date and
+// time. The time is DENVER time (the office's clock, not this browser's — the
+// owner is usually in Bangkok), and the server converts it (resolveSendAt in
+// _lib/notes.js). While scheduled, the note is invisible to its audience.
+function noteSendHtml(p){
+  return `<div style="flex:1;min-width:170px;">
+      <label for="${p}Send" style="${NOTE_LABEL_CSS}">SEND</label>
+      <select id="${p}Send" style="${NOTE_FIELD_CSS}">
+        <option value="now">Right now</option>
+        <option value="later">Schedule for later…</option>
+      </select>
+    </div>
+    <div id="${p}When" style="display:none;flex:1 1 100%;">
+      <label style="${NOTE_LABEL_CSS}">DATE &amp; TIME <span style="font-weight:500;text-transform:none;">(Denver time)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="date" id="${p}Date" style="${NOTE_FIELD_CSS}flex:1;min-width:140px;">
+        <input type="time" id="${p}Time" value="08:00" style="${NOTE_FIELD_CSS}flex:1;min-width:120px;">
+      </div>
+    </div>`;
+}
+// Wires the toggle + relabels the Post button; returns a reader for the fields.
+function noteSendWire(p, postBtn){
+  const sel=document.getElementById(p+'Send'), when=document.getElementById(p+'When'), date=document.getElementById(p+'Date');
+  const idle=postBtn.textContent;
+  const denverToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Denver'}).format(new Date());
+  date.min=denverToday();
+  sel.onchange=()=>{
+    const later=sel.value==='later';
+    when.style.display=later?'':'none';
+    if(later&&!date.value) date.value=denverToday();
+    postBtn.textContent=later?'Schedule note':idle;
+  };
+  return {
+    fields:()=>sel.value==='later'?{ send_date:date.value, send_time:document.getElementById(p+'Time').value }:{},
+    reset:()=>{ sel.value='now'; when.style.display='none'; postBtn.textContent=idle; },
+    idle,
+  };
+}
+function noteScheduledPill(n){
+  let when='';
+  try{ when=new Date(n.send_at).toLocaleString('en-US',{ timeZone:'America/Denver', weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); }catch(_){}
+  return `<span class="note-pill wait" title="Hidden from everyone until then. Delete it to cancel.">🕒 Sends ${esc(when)} Denver</span>`;
+}
+
 async function renderNotes(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="wrap">
@@ -8672,28 +8716,32 @@ function renderStaffNotesPane(){
             <option value="until_read">Until ticked off</option>
           </select>
         </div>
+        ${noteSendHtml('note')}
         <button class="btn" id="notePost" style="width:auto;">Post note</button>
       </div>
     </div>
     <h3 style="margin:24px 0 8px;font-size:15px;">Recent</h3>
     <div id="notesRecent" class="empty">Loading…</div>`;
   const picker=notePhotoPicker(document.getElementById('notePhotoHost'));
+  const sendCtl=noteSendWire('note', document.getElementById('notePost'));
   document.getElementById('notePost').onclick=async()=>{
     const bodyEl=document.getElementById('noteBody');
     const text=bodyEl.value.trim();
     if(!text){ bodyEl.focus(); return; }
     if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
-    const btn=document.getElementById('notePost'); btn.disabled=true; btn.textContent='Posting…';
+    const btn=document.getElementById('notePost');
+    const send=sendCtl.fields(), scheduled=!!send.send_date;
+    btn.disabled=true; btn.textContent='Posting…';
     try{
       await api('notes_add',{ method:'POST', body:{
         body:text,
         target:document.getElementById('noteTarget').value||null,
         mode:document.getElementById('noteMode').value,
-        photos:picker.urls() } });
-      bodyEl.value=''; picker.reset(); await loadNotesRecent(); noteBanner();
-      toast('Note posted');
+        photos:picker.urls(), ...send } });
+      bodyEl.value=''; picker.reset(); sendCtl.reset(); await loadNotesRecent(); noteBanner();
+      toast(scheduled?'Note scheduled':'Note posted');
     }catch(err){ toast(err.message||'Could not post that note'); }
-    finally{ btn.disabled=false; btn.textContent='Post note'; }
+    finally{ btn.disabled=false; btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
   };
   loadNotesRecent();
 }
@@ -8711,7 +8759,7 @@ async function loadNotesRecent(){
       const reads=n.reads||[];
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
-        : (n.live ? '<span class="note-pill wait">Unread</span>' : '<span class="note-pill done">Expired unread</span>');
+        : (n.scheduled ? noteScheduledPill(n) : n.live ? '<span class="note-pill wait">Unread</span>' : '<span class="note-pill done">Expired unread</span>');
       const replies=reads.filter(r=>r.reply).map(r=>`<div class="note-reply">
           <b>${esc(r.reader)}</b> replied${r.reply_new?' <span class="note-pill wait" style="margin-left:4px;">New</span>':''} · <span style="color:var(--mute);">${esc(noteWhen(r.replied_at))}</span>
           <div style="white-space:pre-wrap;margin-top:3px;">${esc(r.reply)}</div></div>`).join('');
@@ -8772,6 +8820,7 @@ async function renderTechNotesPane(){
             <option value="until_read">Until they tap X</option>
           </select>
         </div>
+        ${noteSendHtml('tn')}
         <button class="btn" id="tnPost" style="width:auto;">Post note</button>
       </div>
     </div>
@@ -8788,22 +8837,24 @@ async function renderTechNotesPane(){
   };
   typeEl.onchange=fillWho; fillWho();
   const picker=notePhotoPicker(document.getElementById('tnPhotoHost'));
+  const sendCtl=noteSendWire('tn', document.getElementById('tnPost'));
   document.getElementById('tnPost').onclick=async()=>{
     const bodyEl=document.getElementById('tnBody');
     const text=bodyEl.value.trim();
     if(!text){ bodyEl.focus(); return; }
     if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
     const t=typeEl.value;
-    const payload={ body:text, target_type:t, mode:document.getElementById('tnMode').value, photos:picker.urls() };
+    const send=sendCtl.fields(), scheduled=!!send.send_date;
+    const payload={ body:text, target_type:t, mode:document.getElementById('tnMode').value, photos:picker.urls(), ...send };
     if(t==='tech') payload.technician_id=whoEl.value;
     if(t==='city') payload.city=whoEl.value;
     const btn=document.getElementById('tnPost'); btn.disabled=true; btn.textContent='Posting…';
     try{
       await api('tech_notes_add',{ method:'POST', body:payload });
-      bodyEl.value=''; picker.reset(); await loadTechNotesRecent();
-      toast('Note posted');
+      bodyEl.value=''; picker.reset(); sendCtl.reset(); await loadTechNotesRecent();
+      toast(scheduled?'Note scheduled':'Note posted');
     }catch(err){ toast(err.message||'Could not post that note'); }
-    finally{ btn.disabled=false; btn.textContent='Post note'; }
+    finally{ btn.disabled=false; btn.textContent=sendCtl.fields().send_date?'Schedule note':sendCtl.idle; }
   };
   loadTechNotesRecent();
 }
@@ -8820,7 +8871,7 @@ async function loadTechNotesRecent(){
       const seen=n.dismissed||[];
       const pill=seen.length
         ? `<span class="note-pill read" title="${esc(seen.map(s=>s.name).join(', '))}">Seen by ${esc(seen.map(s=>s.name).join(', '))}</span>`
-        : (n.live ? '<span class="note-pill wait">Not dismissed</span>' : '<span class="note-pill done">Expired</span>');
+        : (n.scheduled ? noteScheduledPill(n) : n.live ? '<span class="note-pill wait">Not dismissed</span>' : '<span class="note-pill done">Expired</span>');
       return `<div class="note-row">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>

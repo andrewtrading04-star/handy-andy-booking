@@ -87,7 +87,7 @@ function bookingStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
-import { denverToday, noteIsLive, cleanNotePhotos, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
+import { denverToday, noteIsLive, noteIsScheduled, resolveSendAt, cleanNotePhotos, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
@@ -13975,7 +13975,7 @@ async function notesActive(req, res, db, auth) {
   const today = denverToday();
   const reader = noteReader(auth);
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, created_by, created_at, photo_urls')
+    .select('id, target_slug, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(100);
@@ -14013,7 +14013,7 @@ async function notesList(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const today = denverToday();
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, created_by, created_at, photo_urls')
+    .select('id, target_slug, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(40);
@@ -14029,6 +14029,7 @@ async function notesList(req, res, db, auth) {
   const notes = (data || []).map(n => ({
     ...n,
     live: noteIsLive(n, today),
+    scheduled: noteIsScheduled(n),
     reads: (readsBy[n.id] || []).map(r => ({
       reader: r.reader, read_at: r.read_at,
       reply: r.reply || null, replied_at: r.replied_at || null, reply_new: !!(r.reply && !r.reply_seen_at),
@@ -14067,8 +14068,10 @@ async function notesAdd(req, res, db, auth, body) {
   if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
   const target = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
   const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
+  const when = resolveSendAt(body);
+  if (when.error) return res.status(400).json({ error: when.error });
   const { data, error } = await db.from('staff_notes')
-    .insert({ body: text, target_slug: target, mode, show_from: denverToday(), created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
+    .insert({ body: text, target_slug: target, mode, show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
     .select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
@@ -14109,8 +14112,10 @@ async function techNotesAdd(req, res, db, auth, body) {
   if (!targetType) return res.status(400).json({ error: 'Choose who this is for' });
   const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
 
+  const when = resolveSendAt(body);
+  if (when.error) return res.status(400).json({ error: when.error });
   const row = {
-    body: text, target_type: targetType, mode, show_from: denverToday(),
+    body: text, target_type: targetType, mode, show_from: when.show_from, send_at: when.send_at,
     created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos),
   };
   if (targetType === 'tech') {
@@ -14134,7 +14139,7 @@ async function techNotesList(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const today = denverToday();
   const { data, error } = await db.from('tech_notes')
-    .select('id, body, target_type, technician_id, city, mode, show_from, photo_urls, created_by, created_at, tech:technicians ( name )')
+    .select('id, body, target_type, technician_id, city, mode, show_from, send_at, photo_urls, created_by, created_at, tech:technicians ( name )')
     .is('deleted_at', null).order('created_at', { ascending: false }).limit(40);
   if (error) throw error;
   const ids = (data || []).map(n => n.id);
@@ -14149,6 +14154,7 @@ async function techNotesList(req, res, db, auth) {
     target_type: n.target_type,
     target_label: n.target_type === 'all' ? 'Every technician' : n.target_type === 'city' ? `Every tech in ${n.city}` : (n.tech?.name || 'One technician'),
     live: noteIsLive(n, today),
+    scheduled: noteIsScheduled(n), send_at: n.send_at || null,
     dismissed: dismissedBy[n.id] || [],
   }));
   return res.status(200).json({ notes });
