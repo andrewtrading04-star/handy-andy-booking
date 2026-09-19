@@ -567,6 +567,8 @@
   .nb-ups-custom-row input:focus{outline:none;border-color:var(--accent);}
   .nb-ups-add{border:1.5px dashed var(--line);background:transparent;color:var(--ink-2);font:inherit;font-weight:700;font-size:12.5px;border-radius:9px;padding:9px;cursor:pointer;width:100%;margin-top:8px;}
   .nb-ups-add:hover{border-color:var(--accent);color:var(--accent);}
+  .nb-ups-tech{margin:4px 0 14px;padding:12px 13px;border-radius:11px;background:#f6f8fb;border:1px solid var(--line);}
+  .nb-ups-tech .fld{font-size:14px;text-transform:none;letter-spacing:0;}
   .nb-ups-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 4px;padding:11px 13px;border-radius:11px;background:#f6f8fb;border:1px solid var(--line);}
   .nb-ups-foot-lab{font-size:12px;color:var(--ink-2);font-weight:600;}
   .nb-ups-foot-val{font-weight:800;font-size:15px;}
@@ -1773,6 +1775,11 @@
       <div id="nbUpsellPanel" class="nb-ups hidden">
         <div class="nb-ups-hd">Would you like to recommend any additional work?</div>
         <div class="nb-ups-sub">Tap to add it to the estimate. The customer chooses what to keep — it doesn't change this booking.</div>
+        <div class="nb-ups-tech">
+          <label class="fld" for="nbUpsTech" style="margin:0 0 6px;">Who goes on this job</label>
+          <select class="search" id="nbUpsTech" style="margin:0;"><option value="">Any tech (default)</option></select>
+          <div class="es-help" id="nbUpsTechHelp">The customer sees every tech's open times.</div>
+        </div>
         <div id="nbUpsChips" class="nb-ups-chips"></div>
         <div id="nbUpsCustom"></div>
         <button type="button" class="nb-ups-add" id="nbUpsAddCustom">+ Something else…</button>
@@ -9093,7 +9100,7 @@ async function renderDomainWatch(){
       </div>
       <div id="dwMsg" style="font-size:13px;color:var(--mute);margin-top:8px;"></div>
     </div>
-    <h3 style="margin:24px 0 8px;font-size:15px;">Watching</h3>
+    <div style="height:22px;"></div>
     <div id="dwList" class="empty">Loading…</div>
   </div>`;
   document.getElementById('dwBack').onclick=()=>renderOther();
@@ -9106,16 +9113,34 @@ async function renderDomainWatch(){
       const order={ available:0, likely_available:1, pending_delete:2, redemption:3, unchecked:4, error:5, unsupported:6, taken:7 };
       rows.sort((a,b)=>(order[a.status]-order[b.status])||a.domain.localeCompare(b.domain));
       wrap.className='';
-      wrap.innerHTML=`${d.owner_phone_set?'':'<div class="empty" style="text-align:left;margin-bottom:8px;">No owner phone number is set, so text alerts are off. Email and the banner still work.</div>'}`+rows.map(r=>{
+      const rowHtml=r=>{
         const c=DOMAIN_STATUS_COLOR[r.status]||'#6b7280';
         const hot=r.status==='available'||r.status==='likely_available'||r.status==='pending_delete';
-        const bits=[r.last_checked_at?('Checked '+noteWhen(r.last_checked_at)):'Not checked yet', r.expires_at&&r.status!=='available'?('Expires '+domWhen(r.expires_at)):'', r.registrar||'', r.last_error?('Note: '+r.last_error):''].filter(Boolean).join(' · ');
+        let when='';
+        if(r.status==='pending_delete'&&r.status_since) when='Should drop by about '+domWhen(new Date(new Date(r.status_since).getTime()+5*86400000).toISOString());
+        else if(r.status==='redemption'&&r.status_since) when='Could drop around '+domWhen(new Date(new Date(r.status_since).getTime()+35*86400000).toISOString());
+        const bits=[when, r.last_checked_at?('Checked '+noteWhen(r.last_checked_at)):'Not checked yet', r.expires_at&&r.status!=='available'?('Expires '+domWhen(r.expires_at)):'', r.registrar||'', r.last_error?('Note: '+r.last_error):''].filter(Boolean).join(' · ');
         return `<div class="note-row"${hot?' style="border-left:4px solid '+c+';"':''}>
           <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:700;">${esc(r.domain)}</div>
             <div style="color:var(--mute);font-size:12px;margin-top:3px;">${esc(bits)}</div></div>
           <span class="note-pill" style="background:${c}1a;color:${c};white-space:nowrap;">${esc(DOMAIN_STATUS_LABEL[r.status]||r.status)}</span>
           <button class="note-del" data-domdel="${esc(r.id)}" title="Stop watching" aria-label="Stop watching ${esc(r.domain)}">🗑</button>
-        </div>`; }).join('');
+        </div>`;
+      };
+      const groups=[
+        { title:'Available now', sub:'Nobody owns these right now. Buy them.', statuses:['available','likely_available'], empty:'None right now.' },
+        { title:'Dropping soon (about 5 days)', sub:'The owner let these expire and they are in the final stretch. Each is released on its own day within about 5 days. This is your window to line up a backorder.', statuses:['pending_delete'], empty:'None right now. A domain shows up here the day it enters its last 5 days.' },
+        { title:'Coming up (about 35 days out)', sub:'Expired and being held by the registrar. The owner can still reclaim these. If they do not, they move to dropping soon.', statuses:['redemption'], empty:'None right now.' },
+        { title:'Still taken, or not checked', sub:'', statuses:['taken','unchecked','unsupported','error'], empty:'' },
+      ];
+      const sect=g=>{
+        const items=rows.filter(r=>g.statuses.includes(r.status));
+        if(!items.length&&!g.empty) return '';
+        return `<div style="margin:0 0 22px;"><div style="font-size:17px;font-weight:800;">${esc(g.title)} <span style="color:var(--mute);font-weight:600;font-size:14px;">${items.length}</span></div>
+          ${g.sub?`<div style="color:var(--mute);font-size:13px;margin:2px 0 8px;max-width:660px;line-height:1.45;">${esc(g.sub)}</div>`:''}
+          ${items.length?items.map(rowHtml).join(''):`<div class="empty" style="text-align:left;padding:10px 0;">${esc(g.empty)}</div>`}</div>`;
+      };
+      wrap.innerHTML=`${d.owner_phone_set?'':'<div class="empty" style="text-align:left;margin-bottom:8px;">No owner phone number is set, so text alerts are off. Email and the banner still work.</div>'}`+groups.map(sect).join('');
       wrap.querySelectorAll('[data-domdel]').forEach(b=>b.onclick=async()=>{
         b.disabled=true;
         try{ await api('domain_watch_delete',{ method:'POST', body:{ id:b.getAttribute('data-domdel') } }); await load(); domainBanner(); }
@@ -20191,6 +20216,7 @@ async function sendEstimateFromBooking(upsells){
         return catSel?.value || 'Custom Service';
       })(),
       sms_consent: document.getElementById('nbSmsConsent').checked,
+      technician_id: (document.getElementById('nbUpsTech')||{}).value || null,
     }});
     // estimate_create returns 201 + warning when the estimate ROW saved but
     // the email didn't go out (send failure / notifications off / no API key).

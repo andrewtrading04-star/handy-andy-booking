@@ -10537,6 +10537,14 @@ async function estimateCreate(req, res, db, auth, body) {
   // ride on the estimate so the customer can toggle them on the approve page.
   const upsells = sanitizeUpsells(body.upsells);
 
+  // Optional: tie this quote to one technician (0122). Blank = any tech.
+  let estTechId = null;
+  if (body.technician_id) {
+    const { data: tRow } = await db.from('technicians').select('id').eq('id', String(body.technician_id)).eq('active', true).maybeSingle();
+    if (!tRow) return res.status(400).json({ error: 'That technician is not available. Pick another.' });
+    estTechId = tRow.id;
+  }
+
   // Create the estimate record. insertResilientEstimate() tolerates a column
   // being absent (line_items before 0028, upsells before 0048) by dropping it
   // and retrying, so an estimate is never lost to schema drift.
@@ -10560,6 +10568,7 @@ async function estimateCreate(req, res, db, auth, body) {
     status: 'new',
     sms_consent: estSmsConsent,
     source: 'manual',
+    ...(estTechId ? { technician_id: estTechId } : {}),
   }, estimateId ? ['id', 'line_items', 'tax_rate'] : []);
 
   if (createErr?.code === '23505' && estimateId) {
