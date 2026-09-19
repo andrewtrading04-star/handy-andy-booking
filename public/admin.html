@@ -12655,7 +12655,7 @@ function estCard(e){
     ? `<div class="est-approval approved">✓ Customer approved${e.status==='scheduled'?' &amp; booked':''}${approvedAt?` · ${esc(approvedAt)}`:''}</div>${acceptedLine}`
     : (isNotApproved(e)
       ? `<div class="est-approval not-approved">🚫 Not approved · no response in ${NOT_APPROVED_DAYS}+ days</div>`
-      : `<div class="est-approval waiting">${hasQuote?'Waiting on approval':'Quote not prepared'}</div>`);
+      : `<div class="est-approval waiting">${!hasQuote?'Quote not prepared':(textSent||emailSent)?'Waiting on approval':'Quote prepared · not sent yet'}</div>`);
   // Who sent this estimate to the customer, and when — shown per channel
   // (texted_at/emailed_at, migration 0112) so a quote sent BOTH ways shows
   // both confirmations instead of the more recent one hiding the other. Same
