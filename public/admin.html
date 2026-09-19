@@ -1852,6 +1852,8 @@
     <input class="search" id="esService" placeholder="e.g. Drywall Repair">
     <label class="fld">Description <span style="text-transform:none;font-weight:500;color:var(--mute);">(shown to customer, optional)</span></label>
     <textarea class="search" id="esDesc" placeholder="A short summary of the work" style="min-height:60px;resize:vertical;"></textarea>
+    <label class="fld">Note to customer <span style="text-transform:none;font-weight:500;color:var(--mute);">(shown on their estimate page and in the quote email)</span></label>
+    <textarea class="search" id="esCustNote" maxlength="1500" placeholder="e.g. We'll bring a ladder. Please have the fixtures accessible." style="min-height:60px;resize:vertical;"></textarea>
     <label class="fld">Line Items</label>
     <div class="es-lines-head"><span>Description</span><span>Qty</span><span>Price</span><span></span></div>
     <div class="es-lines" id="esLines"></div>
@@ -12870,6 +12872,7 @@ function openEstimateEdit(id){
   document.getElementById('esEmailNote').textContent=e.customer_email?'':'no email on file';
   document.getElementById('esService').value=e.service_label||'';
   document.getElementById('esDesc').value=e.description||'';
+  document.getElementById('esCustNote').value=e.customer_note||'';
   document.getElementById('esNotes').value=e.notes||'';
   document.getElementById('esErr').textContent='';
   // Tax toggle: ON by default for a fresh quote; reflect the stored rate when a
@@ -12903,6 +12906,7 @@ document.getElementById('esSave').addEventListener('click',async()=>{
       business: current.slug, id,
       service_label: document.getElementById('esService').value.trim(),
       description: document.getElementById('esDesc').value.trim(),
+      customer_note: document.getElementById('esCustNote').value.trim(),
       customer_email: document.getElementById('esEmail').value.trim(),
       notes: document.getElementById('esNotes').value.trim(),
       line_items: esReadLines(),

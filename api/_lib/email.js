@@ -912,6 +912,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
   const firstName = (details.firstName || '').trim();
   const serviceLabel = (details.serviceLabel || '').trim();
   const description = (details.description || '').trim();
+  const customerNote = (details.customerNote || '').trim();
   const approveUrl = (details.approveUrl || '').trim();
   // Sign-aware: discount lines are legitimately negative and must read
   // "-$30.00", never "$-30.00".
@@ -1024,6 +1025,15 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
             </td></tr>
           </table>
         </td></tr>
+
+        ${customerNote ? `
+        <!-- Note from the office (estimates.customer_note) -->
+        <tr><td style="padding:10px 28px 4px;">
+          <div style="background:${tintBg};border-left:4px solid ${accent};border-radius:8px;padding:14px 16px;">
+            <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${accent};margin:0 0 6px;">A note from us</div>
+            <div style="font-size:14px;color:#3a4453;line-height:1.6;white-space:pre-wrap;">${esc(customerNote)}</div>
+          </div>
+        </td></tr>` : ''}
 
         ${hasUpsells ? `
         <!-- Recommended add-ons teaser -->

@@ -243,7 +243,15 @@ function renderQuote(info){
   } else {
     body = `<div class="muted" style="white-space:pre-wrap;">${esc(info.description||'Details of your estimate request.')}</div>`;
   }
-  $('quoteBox').innerHTML = `<div class="quote">${svc}${body}</div>`;
+  // Office's note to the customer (estimates.customer_note, migration 0118).
+  const note = (info.customer_note||'').trim();
+  const noteHtml = note
+    ? `<div style="margin-top:14px;padding:13px 15px;border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:8px;">
+         <div style="font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:5px;">A note from us</div>
+         <div style="font-size:14px;line-height:1.55;white-space:pre-wrap;">${esc(note)}</div>
+       </div>`
+    : '';
+  $('quoteBox').innerHTML = `<div class="quote">${svc}${body}${noteHtml}</div>`;
 }
 
 // ── Recommended add-ons (tappable) ──

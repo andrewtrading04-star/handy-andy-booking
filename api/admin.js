@@ -10140,7 +10140,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -10231,6 +10231,9 @@ async function estimateUpdate(req, res, db, auth, body) {
   if (typeof body.notes === 'string') patch.notes = body.notes.trim() || null;
   if (typeof body.service_label === 'string') patch.service_label = body.service_label.trim() || null;
   if (typeof body.description === 'string') patch.description = body.description.trim();
+  // Shown to the customer on the approve page and in the quote email (0118).
+  // Capped so a pasted wall of text can't blow up the email.
+  if (typeof body.customer_note === 'string') patch.customer_note = body.customer_note.trim().slice(0, 1500) || null;
   // The address the quote gets emailed to. Editable because the office often
   // has to create the estimate BEFORE the full scope is known (Joey typed a
   // placeholder so she could add a TV dismount, then had no way to correct it
@@ -10699,7 +10702,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.id) return res.status(400).json({ error: 'id required' });
 
-  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_email, service_label, description, upsells');
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_email, service_label, description, upsells, customer_note');
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (!est.customer_email) return res.status(400).json({ error: 'Customer email not available for this estimate.' });
   if (!emailNotificationsOn()) return res.status(503).json({ error: 'Email notifications are turned off until the account is approved.' });
@@ -10717,7 +10720,7 @@ async function estimateSendEmail(req, res, db, auth, body) {
   const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000); // 90 days
   const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}&via=email` : '';
   const { subject, html } = estimateEmail(
-    { firstName, serviceLabel: est.service_label, description: est.description, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl, upsells: publicUpsells(est.upsells) },
+    { firstName, serviceLabel: est.service_label, description: est.description, customerNote: est.customer_note, lineItems: est.line_items, taxRate: est.tax_rate, approveUrl, upsells: publicUpsells(est.upsells) },
     brandFor(biz.slug)
   );
 
@@ -12051,7 +12054,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent';
+  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, customer_note, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -12744,6 +12747,7 @@ async function estimateApproveInfo(req, res, body) {
     stripe_pk: bookingStripePk(slug),
     service_label: est.service_label || '',
     description: est.description || '',
+    customer_note: est.customer_note || '',
     line_items: items,
     tax_rate: Number(est.tax_rate) || 0,
     totals,
