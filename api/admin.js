@@ -33,7 +33,7 @@ import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
-import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot } from './_lib/availability.js';
 import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -10138,7 +10138,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, technician_id, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -10254,6 +10254,17 @@ async function estimateUpdate(req, res, db, auth, body) {
         return res.status(400).json({ error: 'That does not look like a valid email address.' });
       }
       patch.customer_email = em || null;
+    }
+  }
+  // Which technician this quote is for (0122). Blank = any tech. A named tech
+  // must be active; they may belong to the partner company (cross-company).
+  if (body.technician_id !== undefined) {
+    const tid = body.technician_id == null ? '' : String(body.technician_id).trim();
+    if (!tid) patch.technician_id = null;
+    else {
+      const { data: tRow } = await db.from('technicians').select('id').eq('id', tid).eq('active', true).maybeSingle();
+      if (!tRow) return res.status(400).json({ error: 'That technician is not available. Pick another.' });
+      patch.technician_id = tRow.id;
     }
   }
   if (Array.isArray(body.line_items)) patch.line_items = sanitizeLineItems(body.line_items);
@@ -12073,7 +12084,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, customer_note, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent';
+  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, customer_note, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent, technician_id';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -12143,7 +12154,7 @@ async function estimateSlots(req, res) {
     return res.status(200).json({ days: [], timezone: est.business?.timezone || 'America/Denver' });
   }
   try {
-    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId });
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, onlyTechId: est.technician_id || null });
     return res.status(200).json({ days: result.days || [], timezone: result.timezone || 'America/Denver' });
   } catch (e) {
     console.warn('[estimate_slots] availability lookup failed:', e.message);
@@ -12752,7 +12763,15 @@ async function estimateApproveInfo(req, res, body) {
   const menu = publicUpsells(est.upsells);
   const acceptedIds = Array.isArray(est.accepted_upsells) ? est.accepted_upsells.map(u => u && u.id) : null;
   const slug = est.business?.slug || 'handy-andy';
+  // First name only of the tech this quote is tied to, so the times list can
+  // say "Times with Steve". Null when the quote is open to any tech.
+  let techFirstName = null;
+  if (est.technician_id) {
+    const { data: tr } = await db.from('technicians').select('name').eq('id', est.technician_id).maybeSingle();
+    techFirstName = tr && tr.name ? String(tr.name).split(/\s+/)[0] : null;
+  }
   return res.status(200).json({
+    technician_first_name: techFirstName,
     business_slug: slug,
     business_name: est.business?.name || 'Handy Andy',
     customer_name: est.customer_name || '',
@@ -12821,7 +12840,11 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   // second choice) — only someone actually scheduled to work that slot, and
   // only from THIS metro's roster (a multi-metro business must never book its
   // Austin tech onto a Denver estimate just because slot keys match).
-  const technician_id = await pickAvailableTech(db, [{ bizId: biz.id, serviceAreaId: bookingAreaId }], slot.date, slot.slot_key, areaTz, null, false, true);
+  // An estimate tied to one tech books ONLY that tech (never falls back to
+  // someone else, or the customer would be told Steve and get a stranger).
+  const technician_id = est.technician_id
+    ? ((await techIsOpenForSlot(db, est.technician_id, slot.date, slot.slot_key, areaTz)) ? est.technician_id : null)
+    : await pickAvailableTech(db, [{ bizId: biz.id, serviceAreaId: bookingAreaId }], slot.date, slot.slot_key, areaTz, null, false, true);
   if (!technician_id) {
     const e = new Error("That time isn't available anymore — please pick another time.");
     e.conflict = true;

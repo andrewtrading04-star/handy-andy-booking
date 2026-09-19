@@ -276,7 +276,23 @@ export function parseSlotId(id) {
 // techs in Central, and only the metro's own techs may take its jobs). `timezone`
 // (optional) overrides the zone explicitly; otherwise the area's, then the
 // business's, then Denver. Omit both for a single-area business (e.g. Doms).
-export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null, crossHire = false }) {
+// A tech is "open" for one exact date + slot when they marked it available
+// (recurring or exception), have no job on it, and are under their daily cap.
+// The same three tests pickOpenTech applies, for ONE named tech — used when an
+// estimate is tied to a specific technician (estimates.technician_id).
+export async function techIsOpenForSlot(db, techId, dateStr, slotKey, tz) {
+  const { data: t } = await db.from('technicians').select('id, active, max_jobs_per_day').eq('id', techId).maybeSingle();
+  if (!t || !t.active) return false;
+  const keys = await recurringPlusExceptions(db, techId, dateStr, dayOfWeekFor(dateStr));
+  if (!keys.has(slotKey)) return false;
+  const { taken, jobCount } = await bookedSlotsOneTech(db, techId, dateStr, tz);
+  if (t.max_jobs_per_day != null && jobCount >= Number(t.max_jobs_per_day)) return false;
+  return !taken.has(slotKey);
+}
+
+// `onlyTechId` narrows the pool to that ONE technician (whatever business or
+// metro they belong to) — an estimate the office tied to a specific tech.
+export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null, crossHire = false, onlyTechId = null }) {
   // Allow booking up to ~3 months out (cap kept as a sanity bound on the batched queries).
   const horizon = Math.max(1, Math.min(Number(days) || 30, 95));
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
@@ -318,6 +334,15 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   // Sole-technician lock, applied AFTER the cross-hire fold so it also strips
   // any partner-roster tech that borrowing would otherwise have added.
   techs = applySoleTech(businessSlug, techs);
+
+  // Office picked one tech for this customer: only they can be offered, even
+  // if they belong to the partner company, and the sole-tech lock is the
+  // office's own explicit choice here, so it does not strip them.
+  if (onlyTechId) {
+    const { data: one } = await db.from('technicians').select('id, max_jobs_per_day').eq('id', onlyTechId).eq('active', true).maybeSingle();
+    techs = one ? [one] : [];
+    if (one) maxByTech.set(one.id, one.max_jobs_per_day == null ? null : Number(one.max_jobs_per_day));
+  }
 
   const techIds = (techs || []).map(t => t.id);
   if (!techIds.length) return { days: [], timezone: tz };

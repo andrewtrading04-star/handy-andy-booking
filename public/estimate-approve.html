@@ -229,7 +229,9 @@ function show(id){ ['approveSection','detailsSection','doneSection','alreadySect
 function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'); e.textContent=msg; e.classList.add('show'); }
 
 // ── Base quote (locked) ──
+let TECH_FIRST='';   // set when the office tied this quote to one technician
 function renderQuote(info){
+  TECH_FIRST = (info && info.technician_first_name) || '';
   const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)!==0)&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
   const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
   let body;
@@ -352,7 +354,7 @@ async function loadAvail(){
     AVAIL_DAYS = (Array.isArray(data.days)?data.days:[]).filter(d=>d.timeslots && d.timeslots.length).slice(0,45);
     availTz = data.timezone || '';
     if (!AVAIL_DAYS.length){
-      $('availBox').innerHTML = `<div class="avail"><div class="avail-h">Appointment time</div><div class="avail-empty">We don't have any open times to show right now — please call us to book instead of using this form.</div></div>`;
+      $('availBox').innerHTML = `<div class="avail"><div class="avail-h">Appointment time</div><div class="avail-empty">${TECH_FIRST?esc(TECH_FIRST)+" doesn't have any":"We don't have any"} open times to show right now — please call us to book instead of using this form.</div></div>`;
       updateApproveState();
       return;
     }
@@ -388,7 +390,7 @@ function renderAvail(){
     ? `<div class="picks"><span class="picks-lbl">Your appointment:</span>${pickedSlots.map((p,i)=>`<span class="pickchip">${esc(whenLabel(p))}<button data-rm="${i}" aria-label="remove">&times;</button></span>`).join('')}</div>`
     : '';
   box.innerHTML = `<div class="avail">
-    <div class="avail-h">Pick your appointment time</div>
+    <div class="avail-h">${TECH_FIRST?'Pick a time with '+esc(TECH_FIRST):'Pick your appointment time'}</div>
     <div class="avail-p">Choose a date and time below — this books your job instantly.</div>
     <div class="dates">${datesHtml}</div>
     <div class="slots">${slotsHtml}</div>
