@@ -15,7 +15,7 @@ import { sendEmail } from './email.js';
 
 const BOOTSTRAP_URL = 'https://data.iana.org/rdap/dns.json';
 const FETCH_TIMEOUT_MS = 9000;
-const CONCURRENCY = 6;
+const CONCURRENCY = 8;
 
 // A domain worth an alert: sure-thing available, or about to drop.
 export const ALERT_STATUSES = new Set(['available', 'pending_delete', 'likely_available']);
@@ -110,7 +110,12 @@ function alertText(row, res) {
 
 // Check every watched domain (or just `onlyIds`), save the results, and text
 // the owner about anything newly alert-worthy. Returns a summary.
-export async function runDomainWatch(db, { onlyIds = null, sendAlerts = true } = {}) {
+// digest: fold every alert from this run into ONE text and ONE email (the
+//   owner pasting 100 domains must not get 100 messages). Runs with 2+ alerts
+//   are folded automatically too.
+// quiet:  send nothing at all. The alerts are still recorded as delivered, and
+//   the dashboard banner and the list page still show them.
+export async function runDomainWatch(db, { onlyIds = null, sendAlerts = true, digest = false, quiet = false } = {}) {
   let q = db.from('domain_watch').select('*').order('created_at');
   if (onlyIds) q = q.in('id', onlyIds);
   const { data: rows, error } = await q;
@@ -154,7 +159,30 @@ export async function runDomainWatch(db, { onlyIds = null, sendAlerts = true } =
   let texted = 0, emailed = 0;
   const phone = process.env.OWNER_PHONE_NUMBER;
   const ownerEmail = process.env.OWNER_EMAIL || 'andrewtrading04@gmail.com';
-  if (sendAlerts) {
+  const markDone = (a) => db.from('domain_watch').update({ notified_status: a.status, notified_at: new Date().toISOString() }).eq('id', a.id);
+  const emailWrap = (title, inner) => `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.5"><h2 style="margin:0 0 8px">${title}</h2>${inner}<p style="color:#666;font-size:13px">From your Domain watch list in the CRM (Other &gt; Domain watch).</p></div>`;
+
+  if (sendAlerts && alerts.length && quiet) {
+    for (const a of alerts) await markDone(a);
+  } else if (sendAlerts && alerts.length && (digest || alerts.length > 1)) {
+    // ONE text and ONE email covering every alert in this run.
+    const groups = [
+      ['available', 'Available now'], ['likely_available', 'Likely available'], ['pending_delete', 'Dropping soon (about 5 days)'],
+    ].map(([st, label]) => ({ label, items: alerts.filter(a => a.status === st).map(a => a.domain) })).filter(g => g.items.length);
+    const smsList = groups.map(g => `${g.label} (${g.items.length}): ${g.items.slice(0, 6).join(', ')}${g.items.length > 6 ? ` +${g.items.length - 6} more` : ''}`).join('. ');
+    const smsMsg = `DOMAIN WATCH: ${alerts.length} domains need attention. ${smsList}. Full list in the CRM under Other > Domain watch.`;
+    let ok = false;
+    if (phone) {
+      try { await sendSMS(phone, smsMsg); texted++; ok = true; }
+      catch (e) { console.warn('[domain_watch] digest text failed:', e.message); }
+    }
+    try {
+      const inner = groups.map(g => `<h3 style="margin:14px 0 4px">${g.label} (${g.items.length})</h3><ul style="margin:0;padding-left:20px">${g.items.map(d => `<li>${d}</li>`).join('')}</ul>`).join('');
+      const r = await sendEmail({ slug: 'handy-andy', to: ownerEmail, subject: `Domain watch: ${alerts.length} domains need attention`, html: emailWrap(`${alerts.length} domains need attention`, inner) });
+      if (r && r.sent) { emailed++; ok = true; }
+    } catch (e) { console.warn('[domain_watch] digest email failed:', e.message); }
+    if (ok) for (const a of alerts) await markDone(a);
+  } else if (sendAlerts) {
     for (const a of alerts) {
       let ok = false;
       if (phone) {
@@ -162,13 +190,10 @@ export async function runDomainWatch(db, { onlyIds = null, sendAlerts = true } =
         catch (e) { console.warn('[domain_watch] alert text failed for', a.domain, e.message); }
       }
       try {
-        const r = await sendEmail({
-          slug: 'handy-andy', to: ownerEmail, subject: `${a.subject}: ${a.domain}`,
-          html: `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.5"><h2 style="margin:0 0 8px">${a.subject}: ${a.domain}</h2><p>${a.msg}</p><p style="color:#666;font-size:13px">From your Domain watch list in the CRM (Other &gt; Domain watch).</p></div>`,
-        });
+        const r = await sendEmail({ slug: 'handy-andy', to: ownerEmail, subject: `${a.subject}: ${a.domain}`, html: emailWrap(`${a.subject}: ${a.domain}`, `<p>${a.msg}</p>`) });
         if (r && r.sent) { emailed++; ok = true; }
       } catch (e) { console.warn('[domain_watch] alert email failed for', a.domain, e.message); }
-      if (ok) await db.from('domain_watch').update({ notified_status: a.status, notified_at: new Date().toISOString() }).eq('id', a.id);
+      if (ok) await markDone(a);
     }
   }
   const tally = {}; for (const r of results) tally[r.status] = (tally[r.status] || 0) + 1;

@@ -14171,7 +14171,15 @@ async function domainWatchAdd(req, res, db, auth, body) {
     added = data || [];
     // Check the new ones right now so the list shows a real answer immediately
     // (an already-available one still texts once, then stays quiet).
-    try { await runDomainWatch(db, { onlyIds: added.map(r => r.id) }); }
+    // A pasted batch sends AT MOST one text and one email, and nothing at all
+    // if a domain-watch message already went out in the last 10 minutes (so
+    // several pastes in a row stay quiet). The banner and list still show
+    // everything either way; the daily check goes back to its normal rules.
+    try {
+      const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: recent } = await db.from('domain_watch').select('id').gte('notified_at', since).limit(1);
+      await runDomainWatch(db, { onlyIds: added.map(r => r.id), digest: true, quiet: !!(recent && recent.length) });
+    }
     catch (e) { console.warn('[domain_watch_add] first check failed:', e.message); }
   }
   return res.status(200).json({ ok: true, added: added.length, duplicates: good.length - fresh.length, skipped: bad });
