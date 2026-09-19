@@ -9111,7 +9111,9 @@ async function renderDomainWatch(){
       const d=await api('domain_watch_list'); const rows=d.domains||[];
       if(!rows.length){ wrap.className='empty'; wrap.textContent='Nothing on the list yet.'; return; }
       const order={ available:0, likely_available:1, pending_delete:2, redemption:3, unchecked:4, error:5, unsupported:6, taken:7 };
-      rows.sort((a,b)=>(order[a.status]-order[b.status])||a.domain.localeCompare(b.domain));
+      // Soonest expiration first, furthest last; ones with no known expiry go at the bottom.
+      const expMs=r=>r.expires_at?new Date(r.expires_at).getTime():Infinity;
+      rows.sort((a,b)=>(expMs(a)===expMs(b)?0:(expMs(a)<expMs(b)?-1:1))||a.domain.localeCompare(b.domain));
       wrap.className='';
       const rowHtml=r=>{
         const c=DOMAIN_STATUS_COLOR[r.status]||'#6b7280';
