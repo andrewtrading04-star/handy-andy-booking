@@ -87,6 +87,7 @@ function bookingStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
+import { denverToday, noteIsLive, cleanNotePhotos, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
@@ -533,6 +534,12 @@ export default async function handler(req, res) {
       case 'notes_list':   return await notesList(req, res, db, auth);
       case 'notes_add':    return await notesAdd(req, res, db, auth, body);
       case 'notes_delete': return await notesDelete(req, res, db, auth, body);
+      case 'notes_photo':  return await notesPhoto(req, res, db, auth, body);
+      case 'notes_replies_seen': return await notesRepliesSeen(req, res, db, auth);
+      case 'tech_notes_targets': return await techNotesTargets(req, res, db, auth);
+      case 'tech_notes_add':     return await techNotesAdd(req, res, db, auth, body);
+      case 'tech_notes_list':    return await techNotesList(req, res, db, auth);
+      case 'tech_notes_delete':  return await techNotesDelete(req, res, db, auth, body);
       case 'places_autocomplete': return await placesAutocomplete(req, res, auth);
       case 'place_details':       return await placeDetails(req, res, auth);
       // Two-way SMS (migration 0109). Deliberately NO owner gate on any of
@@ -13953,27 +13960,13 @@ async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
 // ticks it off. A tick writes a read row rather than deleting anything, so the
 // note survives, the owner can see who read it and when, and a note aimed at
 // both secretaries can be cleared by each of them independently.
-// "Today" is Denver's date, not the server's — a note written at 11pm Bangkok
-// belongs to the Denver day the office is actually working.
-function denverToday() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
-}
+// denverToday / noteIsLive live in _lib/notes.js (shared with the tech app's
+// notes, api/tech.js).
 // Who is ticking notes off. Secretaries are scoped to one business, so their
 // slug is a stable fallback when the session carries no display name.
 function noteReader(auth) {
   return (auth.name || auth.scope || auth.role || 'office').toString();
 }
-// A note is live if its window still covers today. 'until_read' has no end —
-// that is the point of it: it stays until somebody actually acknowledges it.
-function noteIsLive(n, today) {
-  if (n.show_from > today) return false;
-  if (n.mode === 'until_read') return true;
-  const span = n.mode === 'two_days' ? 1 : 0;
-  const end = new Date(n.show_from + 'T00:00:00Z');
-  end.setUTCDate(end.getUTCDate() + span);
-  return today <= end.toISOString().slice(0, 10);
-}
-
 // GET — the notes the CURRENT user still has to read. The owner writes these,
 // so the owner never gets them on their own dashboard (owner rule 2026-09-17);
 // they can still see what was sent and who read it on the Notes page.
@@ -13982,7 +13975,7 @@ async function notesActive(req, res, db, auth) {
   const today = denverToday();
   const reader = noteReader(auth);
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, created_by, created_at')
+    .select('id, target_slug, body, mode, show_from, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(100);
@@ -13999,14 +13992,18 @@ async function notesActive(req, res, db, auth) {
   return res.status(200).json({ notes, count: notes.length });
 }
 
-// POST { id } — tick one off. Anyone signed in may clear their own copy.
+// POST { id, reply? } — tick one off. Anyone signed in may clear their own
+// copy. A reply is optional: leave it out and this is the plain tick-off.
 async function notesRead(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
-  const { error } = await db.from('staff_note_reads')
-    .upsert({ note_id: id, reader: noteReader(auth), read_at: new Date().toISOString() },
-            { onConflict: 'note_id,reader' });
+  const reply = (body.reply || '').toString().trim();
+  if (reply.length > 1000) return res.status(400).json({ error: 'Reply is too long (1000 characters max)' });
+  const now = new Date().toISOString();
+  const row = { note_id: id, reader: noteReader(auth), read_at: now };
+  if (reply) { row.reply = reply; row.replied_at = now; row.reply_seen_at = null; }
+  const { error } = await db.from('staff_note_reads').upsert(row, { onConflict: 'note_id,reader' });
   if (error) throw error;
   return res.status(200).json({ ok: true });
 }
@@ -14016,7 +14013,7 @@ async function notesList(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const today = denverToday();
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, created_by, created_at')
+    .select('id, target_slug, body, mode, show_from, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(40);
@@ -14026,18 +14023,42 @@ async function notesList(req, res, db, auth) {
   let readsBy = {};
   if (ids.length) {
     const { data: reads } = await db.from('staff_note_reads')
-      .select('note_id, reader, read_at').in('note_id', ids);
+      .select('note_id, reader, read_at, reply, replied_at, reply_seen_at').in('note_id', ids);
     (reads || []).forEach(r => { (readsBy[r.note_id] = readsBy[r.note_id] || []).push(r); });
   }
   const notes = (data || []).map(n => ({
     ...n,
     live: noteIsLive(n, today),
-    reads: (readsBy[n.id] || []).map(r => ({ reader: r.reader, read_at: r.read_at })),
+    reads: (readsBy[n.id] || []).map(r => ({
+      reader: r.reader, read_at: r.read_at,
+      reply: r.reply || null, replied_at: r.replied_at || null, reply_new: !!(r.reply && !r.reply_seen_at),
+    })),
   }));
   return res.status(200).json({ notes });
 }
 
-// POST { body, target, mode } — write one.
+// POST — the owner has opened the Notes page: every reply on screen is now
+// "seen", which is what clears the "new replies" count on Other.
+async function notesRepliesSeen(req, res, db, auth) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { error } = await db.from('staff_note_reads')
+    .update({ reply_seen_at: new Date().toISOString() })
+    .not('reply', 'is', null).is('reply_seen_at', null);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// POST { image } — upload one photo for a note (owner only). The browser
+// shrinks it first; the note is then posted with the returned URLs.
+async function notesPhoto(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const up = await uploadImage(body.image, NOTE_PHOTO_PREFIX);
+  return res.status(200).json({ ok: true, url: up.url });
+}
+
+// POST { body, target, mode, photos } — write one.
 async function notesAdd(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
@@ -14047,10 +14068,101 @@ async function notesAdd(req, res, db, auth, body) {
   const target = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
   const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
   const { data, error } = await db.from('staff_notes')
-    .insert({ body: text, target_slug: target, mode, show_from: denverToday(), created_by: auth.name || 'Owner' })
+    .insert({ body: text, target_slug: target, mode, show_from: denverToday(), created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
     .select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// ── Notes for technicians ────────────────────────────────────────────────────
+// Same idea as the secretary notes, aimed at the tech app: the owner writes a
+// note, it shows at the top of the tech's Jobs screen until its window ends or
+// the tech taps the X (a per-tech dismissal, so a note for several techs is
+// cleared by each one separately). Three targets: one technician, every tech
+// in a city, or everyone. City is matched by service-area NAME across
+// businesses, because Denver is one place to the owner even though Handy Andy
+// and Dom's each have their own Denver service area.
+
+// GET — what the composer offers to aim at.
+async function techNotesTargets(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data, error } = await db.from('technicians')
+    .select('id, name, business:businesses ( slug, name ), area:service_areas ( name )')
+    .eq('active', true).order('name');
+  if (error) throw error;
+  const techs = (data || []).map(t => ({
+    id: t.id, name: t.name, business_slug: t.business?.slug || '', business_name: t.business?.name || '',
+    city: t.area?.name || '',
+  }));
+  const cities = [...new Set(techs.map(t => t.city).filter(Boolean))].sort();
+  return res.status(200).json({ techs, cities });
+}
+
+// POST { body, target_type, technician_id?, city?, mode, photos } — write one.
+async function techNotesAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const text = (body.body || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Write something first' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
+  const targetType = ['tech', 'city', 'all'].includes(body.target_type) ? body.target_type : null;
+  if (!targetType) return res.status(400).json({ error: 'Choose who this is for' });
+  const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
+
+  const row = {
+    body: text, target_type: targetType, mode, show_from: denverToday(),
+    created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos),
+  };
+  if (targetType === 'tech') {
+    const tid = (body.technician_id || '').toString();
+    const { data: t } = await db.from('technicians').select('id').eq('id', tid).eq('active', true).maybeSingle();
+    if (!t) return res.status(400).json({ error: 'Pick a technician' });
+    row.technician_id = t.id;
+  } else if (targetType === 'city') {
+    const city = (body.city || '').toString().trim();
+    const { data: areas } = await db.from('service_areas').select('name').eq('name', city).limit(1);
+    if (!city || !(areas || []).length) return res.status(400).json({ error: 'Pick a city' });
+    row.city = city;
+  }
+  const { data, error } = await db.from('tech_notes').insert(row).select('id').maybeSingle();
+  if (error) throw error;
+  return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// GET — recent tech notes with who has dismissed each, for the owner's list.
+async function techNotesList(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const today = denverToday();
+  const { data, error } = await db.from('tech_notes')
+    .select('id, body, target_type, technician_id, city, mode, show_from, photo_urls, created_by, created_at, tech:technicians ( name )')
+    .is('deleted_at', null).order('created_at', { ascending: false }).limit(40);
+  if (error) throw error;
+  const ids = (data || []).map(n => n.id);
+  const dismissedBy = {};
+  if (ids.length) {
+    const { data: ds } = await db.from('tech_note_dismissals')
+      .select('note_id, dismissed_at, tech:technicians ( name )').in('note_id', ids);
+    (ds || []).forEach(d => { (dismissedBy[d.note_id] = dismissedBy[d.note_id] || []).push({ name: d.tech?.name || 'Tech', at: d.dismissed_at }); });
+  }
+  const notes = (data || []).map(n => ({
+    id: n.id, body: n.body, mode: n.mode, photo_urls: n.photo_urls || [], created_by: n.created_by, created_at: n.created_at,
+    target_type: n.target_type,
+    target_label: n.target_type === 'all' ? 'Every technician' : n.target_type === 'city' ? `Every tech in ${n.city}` : (n.tech?.name || 'One technician'),
+    live: noteIsLive(n, today),
+    dismissed: dismissedBy[n.id] || [],
+  }));
+  return res.status(200).json({ notes });
+}
+
+// POST { id } — pull a tech note back (soft delete; dismissal history stays).
+async function techNotesDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = (body.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('tech_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
 }
 
 // POST { id } — pull a note back. Soft delete, so its read history survives.

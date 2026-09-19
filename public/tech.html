@@ -176,6 +176,15 @@
   body.has-bottombar .statusbar{bottom:64px;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--navy-3);border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;z-index:50;}
 
+  /* Notes from the owner (tech_notes) — X in the corner dismisses for this tech */
+  .owner-note{position:relative;margin:0 16px 12px;padding:14px 46px 14px 15px;background:rgba(255,176,32,.13);
+    border:1px solid rgba(255,176,32,.40);border-left:4px solid var(--amber);border-radius:12px;}
+  .owner-note .on-h{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);margin-bottom:5px;}
+  .owner-note .on-b{color:#ffe7b0;font-size:15px;font-weight:600;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
+  .owner-note .on-photos{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .owner-note .on-photos img{width:84px;height:84px;object-fit:cover;border-radius:9px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;display:block;}
+  .owner-note .on-x{position:absolute;top:8px;right:9px;width:32px;height:32px;border-radius:50%;border:none;
+    background:rgba(255,255,255,.14);color:#ffe7b0;font-size:17px;line-height:1;cursor:pointer;}
   /* Targeted notice banner (e.g. coverage notes for specific techs) */
   .tech-notice{display:flex;align-items:flex-start;gap:10px;margin:0 16px 12px;padding:13px 15px;
     background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.40);border-radius:12px;
@@ -328,6 +337,7 @@
       </div>
     </div>
     <div id="critAlert"></div>
+    <div id="techNoteBanners"></div>
     <div id="reviewBanners"></div>
     <div id="techNotice" class="tech-notice hidden"></div>
     <div class="weekbar">
@@ -887,9 +897,34 @@ async function showJobs(date){
   applyIconTheme();
   document.getElementById('techName').textContent=tech?tech.name:'';
   renderTechNotice();
+  loadTechNotes();
   loadReviewBanners();
   loadBonusPopup();
   await loadWeek();
+}
+
+// Notes from the owner — one card per live note aimed at this tech (by name,
+// by city, or everyone). The X dismisses it for this tech only, server-side, so
+// it never comes back on any device; the photos open in the lightbox.
+async function loadTechNotes(){
+  const box=document.getElementById('techNoteBanners'); if(!box) return;
+  try{
+    const d=await api('tech_notes_active');
+    const notes=d.notes||[];
+    box.innerHTML=notes.map(n=>`<div class="owner-note" data-id="${esc(n.id)}">
+      <div class="on-h">Note from ${esc(n.created_by||'Andrew')}</div>
+      <div class="on-b">${esc(n.body)}</div>
+      ${(n.photo_urls||[]).length?`<div class="on-photos">${n.photo_urls.map(u=>`<img src="${esc(u)}" data-photo="${esc(u)}" loading="lazy" alt="Photo attached to the note">`).join('')}</div>`:''}
+      <button class="on-x" aria-label="Dismiss note" data-dismiss="${esc(n.id)}">✕</button>
+    </div>`).join('');
+    box.querySelectorAll('[data-dismiss]').forEach(b=>b.onclick=()=>dismissTechNote(b.getAttribute('data-dismiss')));
+    box.querySelectorAll('[data-photo]').forEach(i=>i.onclick=()=>openLightbox(i.getAttribute('data-photo')));
+  }catch(e){ /* best-effort — never block the jobs screen on this */ }
+}
+async function dismissTechNote(id){
+  const el=document.querySelector(`.owner-note[data-id="${id}"]`);
+  if(el) el.remove();   // optimistic — feels instant
+  try{ await api('tech_note_dismiss',{method:'POST',body:{id}}); }catch(e){ /* it would simply reappear on the next open */ }
 }
 
 // Bonus popup. Queued rather than stacked — if two bonuses are waiting the

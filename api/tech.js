@@ -37,6 +37,7 @@ function jobStripePk(slug) {
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage } from './_lib/storage.js';
+import { denverToday, noteIsLive } from './_lib/notes.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan, isRetired } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -172,6 +173,8 @@ export default async function handler(req, res) {
       case 'bracket_inventory_set': return await bracketInventorySet(req, res, db, auth, body);
       case 'review_listings': return await techReviewListings(req, res, db, auth);
       case 'review_checkin_set': return await techReviewCheckinSet(req, res, db, auth, body);
+      case 'tech_notes_active':  return await techNotesActive(req, res, db, auth);
+      case 'tech_note_dismiss':  return await techNoteDismiss(req, res, db, auth, body);
       case 'tech_bonus_unseen': return await techBonusUnseen(req, res, db, auth);
       case 'tech_bonus_ack':    return await techBonusAck(req, res, db, auth, body);
       case 'me': return await me(req, res, db, auth);
@@ -2400,6 +2403,49 @@ async function techBonusAck(req, res, db, auth, body) {
   const { error } = await db.from('tech_bonuses')
     .update({ acknowledged_at: new Date().toISOString() })
     .eq('id', id).eq('technician_id', auth.tech_id).is('acknowledged_at', null);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+// ── Notes from the owner (main Jobs screen banner) ──────────────────────────
+// Written in api/admin.js (tech_notes_add). A note reaches THIS tech when it is
+// aimed at them by name, at every tech in their city (matched on their service
+// area's name), or at everyone; it is still inside its show window; and this
+// tech hasn't tapped its X. Dismissal is per tech, so one tech clearing a note
+// aimed at the whole city never hides it from the others.
+async function techNotesActive(req, res, db, auth) {
+  const { data: me, error: meErr } = await db.from('technicians')
+    .select('id, area:service_areas ( name )').eq('id', auth.tech_id).maybeSingle();
+  if (meErr) throw meErr;
+  const myCity = me?.area?.name || null;
+
+  const { data, error } = await db.from('tech_notes')
+    .select('id, body, target_type, technician_id, city, mode, show_from, photo_urls, created_by, created_at')
+    .is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
+  if (error) throw error;
+  const { data: gone } = await db.from('tech_note_dismissals').select('note_id').eq('technician_id', auth.tech_id);
+  const dismissed = new Set((gone || []).map(g => g.note_id));
+
+  const today = denverToday();
+  const notes = (data || [])
+    .filter(n => !dismissed.has(n.id))
+    .filter(n => n.target_type === 'all'
+      || (n.target_type === 'tech' && n.technician_id === auth.tech_id)
+      || (n.target_type === 'city' && myCity && n.city === myCity))
+    .filter(n => noteIsLive(n, today))
+    .map(n => ({ id: n.id, body: n.body, photo_urls: n.photo_urls || [], created_by: n.created_by, created_at: n.created_at }));
+  return res.status(200).json({ notes });
+}
+
+async function techNoteDismiss(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.id || '').toString().trim();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  // Keyed on the SESSION's tech id, so a tech can only ever clear their own
+  // copy. Upsert: a double-tap or a retry after flaky signal is a no-op.
+  const { error } = await db.from('tech_note_dismissals')
+    .upsert({ note_id: id, technician_id: auth.tech_id, dismissed_at: new Date().toISOString() },
+            { onConflict: 'note_id,technician_id' });
   if (error) throw error;
   return res.status(200).json({ ok: true });
 }

@@ -1496,6 +1496,13 @@
 .note-del{flex:none;background:none;border:0;color:var(--mute);font-size:14px;cursor:pointer;padding:4px}
 .note-del:hover{color:#b91c1c}
 .note-del:disabled{opacity:.4;cursor:default}
+.note-photos{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.note-photos:empty{display:none}
+.note-photos img{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block}
+.np-thumb{position:relative}
+.np-thumb img{cursor:default}
+.np-thumb button{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;border:0;background:#111;color:#fff;font-size:14px;line-height:1;cursor:pointer;padding:0}
+.note-reply{margin-top:10px;background:rgba(37,99,235,.07);border-left:3px solid var(--accent);border-radius:6px;padding:8px 11px;font-size:13px;line-height:1.45}
 @media(max-width:600px){.conv-card{grid-template-columns:1fr;gap:12px;}.conv-pct{font-size:34px;}.conv-stats{gap:12px;justify-content:center;}.conv-lab,.conv-foot{font-size:9px;}}
 </style>
 <!-- Stripe.js — loaded up front so "Change card" / charge flows always have
@@ -8509,12 +8516,59 @@ async function renderTechnicians(){
 }
 
 // ── Notes ───────────────────────────────────────────────────────────────────
-// Two halves of one feature. noteBanner() paints whatever the CURRENT user
-// still has to read at the top of every screen, so a secretary cannot miss it
-// by sitting on the wrong tab; renderNotes() is the owner's side — write one,
-// see who has read it. Ticking a note off records a read rather than deleting,
-// so a note aimed at both secretaries is cleared by each of them separately.
+// Two audiences, one page. "Secretaries": noteBanner() paints whatever the
+// CURRENT user still has to read at the top of every screen, so a secretary
+// cannot miss it by sitting on the wrong tab; she can tick it off with the X or
+// (optionally) send a reply back. "Technicians": the owner aims a note at one
+// tech, every tech in a city, or everyone; it shows at the top of the tech
+// app until it expires or the tech taps the X. Both can carry photos. Ticking /
+// dismissing records a row rather than deleting, so a note aimed at several
+// people is cleared by each of them separately and the owner sees who did.
 const NOTE_MODE_LABEL={ today:'Today only', two_days:'Today & tomorrow', until_read:'Until ticked off' };
+const NOTE_MAX_PHOTOS=4;
+let _notesTab='staff';
+
+// Thumbnails for a note's photos; tapping one opens the shared lightbox.
+function notePhotosHtml(urls){
+  urls=(urls||[]).filter(Boolean);
+  if(!urls.length) return '';
+  return `<div class="note-photos">${urls.map(u=>`<img src="${esc(u)}" data-notephoto="${esc(u)}" loading="lazy" alt="Note photo">`).join('')}</div>`;
+}
+document.addEventListener('click',e=>{
+  const img=e.target.closest&&e.target.closest('[data-notephoto]');
+  if(img) openLightbox(img.getAttribute('data-notephoto'));
+});
+
+// Photo picker used by both composers. Each photo is shrunk and uploaded the
+// moment it's chosen (notes_photo), so "Post note" only has to send URLs.
+function notePhotoPicker(host){
+  let urls=[];
+  host.innerHTML=`<div class="note-photos np-thumbs"></div>
+    <button type="button" class="btn ghost sm np-add" style="width:auto;margin-top:8px;">📷 Add photo</button>
+    <input type="file" accept="image/*" multiple class="np-file" style="display:none;">
+    <span class="np-busy" style="margin-left:8px;font-size:12px;color:var(--mute);"></span>`;
+  const thumbs=host.querySelector('.np-thumbs'), add=host.querySelector('.np-add'), file=host.querySelector('.np-file'), busy=host.querySelector('.np-busy');
+  const paint=()=>{
+    thumbs.innerHTML=urls.map((u,i)=>`<div class="np-thumb"><img src="${esc(u)}" alt="Photo to attach"><button type="button" data-i="${i}" title="Remove photo" aria-label="Remove photo">×</button></div>`).join('');
+    thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
+    add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
+  };
+  add.onclick=()=>file.click();
+  file.onchange=async()=>{
+    const files=[...file.files].slice(0,NOTE_MAX_PHOTOS-urls.length); file.value='';
+    for(let i=0;i<files.length;i++){
+      busy.textContent=`Uploading ${i+1} of ${files.length}…`;
+      try{
+        const dataUrl=await compressImage(files[i],1400,0.8);
+        const r=await api('notes_photo',{ method:'POST', body:{ image:dataUrl }});
+        urls.push(r.url); paint();
+      }catch(err){ toast(err.message||'Could not upload that photo'); }
+    }
+    busy.textContent='';
+  };
+  paint();
+  return { urls:()=>urls.slice(), busy:()=>!!busy.textContent, reset:()=>{ urls=[]; paint(); } };
+}
 
 async function noteBanner(){
   const host=document.getElementById('noteBanner');
@@ -8530,16 +8584,39 @@ async function noteBanner(){
           From ${esc(n.created_by||'Owner')} · ${esc(noteWhen(n.created_at))}
         </div>
         <div style="font-size:14.5px;line-height:1.5;white-space:pre-wrap;">${esc(n.body)}</div>
+        ${notePhotosHtml(n.photo_urls)}
+        <div class="note-replybox" style="display:none;margin-top:10px;">
+          <textarea rows="2" maxlength="1000" placeholder="Optional — write back to ${esc(n.created_by||'Owner')}…"
+            style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:9px 11px;resize:vertical;"></textarea>
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <button type="button" class="btn sm" data-notesend="${esc(n.id)}" style="width:auto;">Send reply</button>
+            <button type="button" class="btn ghost sm" data-notereplycancel style="width:auto;">Cancel</button>
+          </div>
+        </div>
+        <button type="button" class="btn ghost sm" data-notereply style="width:auto;margin-top:8px;">↩ Reply</button>
       </div>
-      <button class="note-x" data-noteread="${esc(n.id)}" title="Mark as read" aria-label="Mark note as read">×</button>
+      <button class="note-x" data-noteread="${esc(n.id)}" title="Dismiss" aria-label="Dismiss note">×</button>
     </div>`).join('');
+  const clear=(card)=>{ card.remove(); if(!host.children.length) host.innerHTML=''; };
   host.querySelectorAll('[data-noteread]').forEach(b=>{
     b.onclick=async()=>{
       const id=b.getAttribute('data-noteread');
       const card=b.closest('.note-card');
       card.style.opacity='.4'; b.disabled=true;
-      try{ await api('notes_read',{ method:'POST', body:{ id } }); card.remove(); if(!host.children.length) host.innerHTML=''; }
+      try{ await api('notes_read',{ method:'POST', body:{ id } }); clear(card); }
       catch(err){ card.style.opacity='1'; b.disabled=false; toast(err.message||'Could not mark that read'); }
+    };
+  });
+  host.querySelectorAll('.note-card').forEach(card=>{
+    const box=card.querySelector('.note-replybox'), link=card.querySelector('[data-notereply]'), ta=card.querySelector('textarea');
+    link.onclick=()=>{ box.style.display=''; link.style.display='none'; ta.focus(); };
+    card.querySelector('[data-notereplycancel]').onclick=()=>{ box.style.display='none'; link.style.display=''; ta.value=''; };
+    const send=card.querySelector('[data-notesend]');
+    send.onclick=async()=>{
+      const reply=ta.value.trim(); if(!reply){ ta.focus(); return; }
+      send.disabled=true; send.textContent='Sending…';
+      try{ await api('notes_read',{ method:'POST', body:{ id:send.getAttribute('data-notesend'), reply } }); toast('Reply sent'); clear(card); }
+      catch(err){ send.disabled=false; send.textContent='Send reply'; toast(err.message||'Could not send that reply'); }
     };
   });
 }
@@ -8548,29 +8625,48 @@ function noteWhen(iso){
   catch(_){ return ''; }
 }
 
+const NOTE_FIELD_CSS='width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;';
+const NOTE_LABEL_CSS='display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;';
+
 async function renderNotes(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="wrap">
     <button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>
     <h2 style="margin:0 0 4px;">Notes</h2>
-    <div class="sub" style="color:var(--mute);margin-bottom:16px;">Anything the secretaries need to know. It shows on their dashboard until they tick it off.</div>
+    <div class="sub" style="color:var(--mute);margin-bottom:14px;">${_notesTab==='tech'
+      ? 'Leave a note for your technicians. It shows at the top of their app until it expires or they tap the X.'
+      : 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'}</div>
+    <div class="est-filters" style="margin-bottom:14px;">
+      <button type="button" class="seg-btn ${_notesTab==='staff'?'on':''}" data-notestab="staff">For secretaries</button>
+      <button type="button" class="seg-btn ${_notesTab==='tech'?'on':''}" data-notestab="tech">For technicians</button>
+    </div>
+    <div id="notesPane"></div>
+  </div>`;
+  document.getElementById('notesBack').onclick=()=>renderOther();
+  view.querySelectorAll('[data-notestab]').forEach(b=>b.onclick=()=>{ _notesTab=b.dataset.notestab; renderNotes(); });
+  if(_notesTab==='tech') renderTechNotesPane(); else renderStaffNotesPane();
+}
 
+function renderStaffNotesPane(){
+  const pane=document.getElementById('notesPane');
+  pane.innerHTML=`
     <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:660px;">
-      <label for="noteBody" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">NOTE</label>
+      <label for="noteBody" style="${NOTE_LABEL_CSS}">NOTE</label>
       <textarea id="noteBody" rows="3" maxlength="2000" placeholder="Anything they need to know today…"
-        style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:11px 13px;resize:vertical;"></textarea>
+        style="${NOTE_FIELD_CSS}resize:vertical;"></textarea>
+      <div id="notePhotoHost" style="margin-top:8px;"></div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:flex-end;">
         <div style="flex:1;min-width:150px;">
-          <label for="noteTarget" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">FOR</label>
-          <select id="noteTarget" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;">
+          <label for="noteTarget" style="${NOTE_LABEL_CSS}">FOR</label>
+          <select id="noteTarget" style="${NOTE_FIELD_CSS}">
             <option value="">Both secretaries</option>
             <option value="handy-andy">Handy Andy only</option>
             <option value="doms">Dom's only</option>
           </select>
         </div>
         <div style="flex:1;min-width:150px;">
-          <label for="noteMode" style="display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:6px;">SHOW</label>
-          <select id="noteMode" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;font-size:14px;padding:10px 12px;">
+          <label for="noteMode" style="${NOTE_LABEL_CSS}">SHOW</label>
+          <select id="noteMode" style="${NOTE_FIELD_CSS}">
             <option value="today">Today only</option>
             <option value="two_days">Today &amp; tomorrow</option>
             <option value="until_read">Until ticked off</option>
@@ -8579,22 +8675,22 @@ async function renderNotes(){
         <button class="btn" id="notePost" style="width:auto;">Post note</button>
       </div>
     </div>
-
     <h3 style="margin:24px 0 8px;font-size:15px;">Recent</h3>
-    <div id="notesRecent" class="empty">Loading…</div>
-  </div>`;
-  document.getElementById('notesBack').onclick=()=>renderOther();
+    <div id="notesRecent" class="empty">Loading…</div>`;
+  const picker=notePhotoPicker(document.getElementById('notePhotoHost'));
   document.getElementById('notePost').onclick=async()=>{
     const bodyEl=document.getElementById('noteBody');
     const text=bodyEl.value.trim();
     if(!text){ bodyEl.focus(); return; }
+    if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
     const btn=document.getElementById('notePost'); btn.disabled=true; btn.textContent='Posting…';
     try{
       await api('notes_add',{ method:'POST', body:{
         body:text,
         target:document.getElementById('noteTarget').value||null,
-        mode:document.getElementById('noteMode').value } });
-      bodyEl.value=''; await loadNotesRecent(); noteBanner();
+        mode:document.getElementById('noteMode').value,
+        photos:picker.urls() } });
+      bodyEl.value=''; picker.reset(); await loadNotesRecent(); noteBanner();
       toast('Note posted');
     }catch(err){ toast(err.message||'Could not post that note'); }
     finally{ btn.disabled=false; btn.textContent='Post note'; }
@@ -8616,10 +8712,15 @@ async function loadNotesRecent(){
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
         : (n.live ? '<span class="note-pill wait">Unread</span>' : '<span class="note-pill done">Expired unread</span>');
+      const replies=reads.filter(r=>r.reply).map(r=>`<div class="note-reply">
+          <b>${esc(r.reader)}</b> replied${r.reply_new?' <span class="note-pill wait" style="margin-left:4px;">New</span>':''} · <span style="color:var(--mute);">${esc(noteWhen(r.replied_at))}</span>
+          <div style="white-space:pre-wrap;margin-top:3px;">${esc(r.reply)}</div></div>`).join('');
       return `<div class="note-row">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
+          ${notePhotosHtml(n.photo_urls)}
           <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(who)} · ${esc(NOTE_MODE_LABEL[n.mode]||n.mode)} · ${esc(noteWhen(n.created_at))}</div>
+          ${replies}
         </div>
         ${pill}
         <button class="note-del" data-notedel="${esc(n.id)}" title="Delete note" aria-label="Delete note">🗑</button>
@@ -8629,6 +8730,111 @@ async function loadNotesRecent(){
       b.onclick=async()=>{
         b.disabled=true;
         try{ await api('notes_delete',{ method:'POST', body:{ id:b.getAttribute('data-notedel') } }); await loadNotesRecent(); noteBanner(); }
+        catch(err){ b.disabled=false; toast(err.message||'Could not delete that'); }
+      };
+    });
+    // The owner has now been shown every reply, so they stop counting as new.
+    if(notes.some(n=>(n.reads||[]).some(r=>r.reply_new))) api('notes_replies_seen',{ method:'POST', body:{} }).catch(()=>{});
+  }catch(err){ wrap.className='empty'; wrap.textContent=err.message||'Could not load notes'; }
+}
+
+async function renderTechNotesPane(){
+  const pane=document.getElementById('notesPane');
+  pane.innerHTML='<div class="empty">Loading…</div>';
+  let targets;
+  try{ targets=await api('tech_notes_targets'); }
+  catch(err){ pane.innerHTML=`<div class="empty">${esc(err.message||'Could not load technicians')}</div>`; return; }
+  const techs=targets.techs||[], cities=targets.cities||[];
+  pane.innerHTML=`
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:660px;">
+      <label for="tnBody" style="${NOTE_LABEL_CSS}">NOTE</label>
+      <textarea id="tnBody" rows="3" maxlength="2000" placeholder="Anything they need to know…"
+        style="${NOTE_FIELD_CSS}resize:vertical;"></textarea>
+      <div id="tnPhotoHost" style="margin-top:8px;"></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:flex-end;">
+        <div style="flex:1;min-width:170px;">
+          <label for="tnType" style="${NOTE_LABEL_CSS}">FOR</label>
+          <select id="tnType" style="${NOTE_FIELD_CSS}">
+            <option value="tech">One technician</option>
+            <option value="city">Every tech in a city</option>
+            <option value="all">Every technician</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:170px;" id="tnWhoWrap">
+          <label for="tnWho" id="tnWhoLabel" style="${NOTE_LABEL_CSS}">TECHNICIAN</label>
+          <select id="tnWho" style="${NOTE_FIELD_CSS}"></select>
+        </div>
+        <div style="flex:1;min-width:150px;">
+          <label for="tnMode" style="${NOTE_LABEL_CSS}">SHOW</label>
+          <select id="tnMode" style="${NOTE_FIELD_CSS}">
+            <option value="today">Today only</option>
+            <option value="two_days">Today &amp; tomorrow</option>
+            <option value="until_read">Until they tap X</option>
+          </select>
+        </div>
+        <button class="btn" id="tnPost" style="width:auto;">Post note</button>
+      </div>
+    </div>
+    <h3 style="margin:24px 0 8px;font-size:15px;">Recent</h3>
+    <div id="tnRecent" class="empty">Loading…</div>`;
+  const typeEl=document.getElementById('tnType'), whoEl=document.getElementById('tnWho'), whoWrap=document.getElementById('tnWhoWrap');
+  const fillWho=()=>{
+    const t=typeEl.value;
+    whoWrap.style.display=t==='all'?'none':'';
+    document.getElementById('tnWhoLabel').textContent=t==='city'?'CITY':'TECHNICIAN';
+    whoEl.innerHTML=t==='city'
+      ? cities.map(c=>{ const n=techs.filter(x=>x.city===c).length; return `<option value="${esc(c)}">${esc(c)} (${n} tech${n===1?'':'s'})</option>`; }).join('')
+      : techs.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} — ${esc(x.business_name)}${x.city?' · '+esc(x.city):''}</option>`).join('');
+  };
+  typeEl.onchange=fillWho; fillWho();
+  const picker=notePhotoPicker(document.getElementById('tnPhotoHost'));
+  document.getElementById('tnPost').onclick=async()=>{
+    const bodyEl=document.getElementById('tnBody');
+    const text=bodyEl.value.trim();
+    if(!text){ bodyEl.focus(); return; }
+    if(picker.busy()){ toast('Wait for the photo to finish uploading'); return; }
+    const t=typeEl.value;
+    const payload={ body:text, target_type:t, mode:document.getElementById('tnMode').value, photos:picker.urls() };
+    if(t==='tech') payload.technician_id=whoEl.value;
+    if(t==='city') payload.city=whoEl.value;
+    const btn=document.getElementById('tnPost'); btn.disabled=true; btn.textContent='Posting…';
+    try{
+      await api('tech_notes_add',{ method:'POST', body:payload });
+      bodyEl.value=''; picker.reset(); await loadTechNotesRecent();
+      toast('Note posted');
+    }catch(err){ toast(err.message||'Could not post that note'); }
+    finally{ btn.disabled=false; btn.textContent='Post note'; }
+  };
+  loadTechNotesRecent();
+}
+
+async function loadTechNotesRecent(){
+  const wrap=document.getElementById('tnRecent');
+  if(!wrap) return;
+  try{
+    const d=await api('tech_notes_list');
+    const notes=d.notes||[];
+    if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
+    wrap.className='';
+    wrap.innerHTML=notes.map(n=>{
+      const seen=n.dismissed||[];
+      const pill=seen.length
+        ? `<span class="note-pill read" title="${esc(seen.map(s=>s.name).join(', '))}">Seen by ${esc(seen.map(s=>s.name).join(', '))}</span>`
+        : (n.live ? '<span class="note-pill wait">Not dismissed</span>' : '<span class="note-pill done">Expired</span>');
+      return `<div class="note-row">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
+          ${notePhotosHtml(n.photo_urls)}
+          <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(n.target_label)} · ${esc((NOTE_MODE_LABEL[n.mode]||n.mode).replace('ticked off','they tap X'))} · ${esc(noteWhen(n.created_at))}</div>
+        </div>
+        ${pill}
+        <button class="note-del" data-tndel="${esc(n.id)}" title="Delete note" aria-label="Delete note">🗑</button>
+      </div>`;
+    }).join('');
+    wrap.querySelectorAll('[data-tndel]').forEach(b=>{
+      b.onclick=async()=>{
+        b.disabled=true;
+        try{ await api('tech_notes_delete',{ method:'POST', body:{ id:b.getAttribute('data-tndel') } }); await loadTechNotesRecent(); }
         catch(err){ b.disabled=false; toast(err.message||'Could not delete that'); }
       };
     });
@@ -8643,7 +8849,7 @@ async function renderOther(){
     <div class="sub" style="color:var(--mute);margin-bottom:16px;">Occasional tools and back-office tasks.</div>
     <div style="display:flex;flex-direction:column;gap:10px;max-width:520px;">
       <div id="otherNotes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div><div style="font-weight:700;">📌 Notes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Leave a note for the secretaries. It sits on their dashboard until they tick it off, and you can see who read it.</div></div>
+        <div><div style="font-weight:700;">📌 Notes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Leave a note, with photos, for the secretaries or your technicians. You can see who read it, and secretaries can write back.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherNotesCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
       <div id="otherDisputes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
@@ -8685,7 +8891,9 @@ async function renderOther(){
   try{
     const n=await api('notes_list');
     const liveN=(n.notes||[]).filter(x=>x.live && !(x.reads||[]).length).length;
-    const c=document.getElementById('otherNotesCount'); if(c) c.textContent=liveN?`${liveN} unread`:'';
+    const newReplies=(n.notes||[]).reduce((s,x)=>s+(x.reads||[]).filter(r=>r.reply_new).length,0);
+    const c=document.getElementById('otherNotesCount');
+    if(c) c.textContent=[liveN?`${liveN} unread`:'', newReplies?`${newReplies} new repl${newReplies===1?'y':'ies'}`:''].filter(Boolean).join(' · ');
   }catch(_){}
   let dispN=0, secN=0;
   try{
