@@ -1908,7 +1908,7 @@
           <div class="es-h">The job</div>
           <label class="fld" for="esService">Service / title</label>
           <input class="search" id="esService" placeholder="e.g. Drywall Repair">
-          <label class="fld" for="esDesc">Description <span class="es-opt">(shown to customer, optional)</span></label>
+          <label class="fld" for="esDesc">Description <span class="es-opt">(the customer only sees this when the quote has no line items)</span></label>
           <textarea class="search" id="esDesc" placeholder="A short summary of the work" style="min-height:60px;resize:vertical;"></textarea>
           <label class="fld" for="esCustNote">Note to customer <span class="es-opt">(on their estimate page and in the quote email)</span></label>
           <textarea class="search" id="esCustNote" maxlength="1500" placeholder="e.g. We'll bring a ladder. Please have the fixtures accessible." style="min-height:60px;resize:vertical;"></textarea>
@@ -13367,7 +13367,9 @@ function esRenderPreview(){
   const title = $('esService').value.trim() || 'Your estimate';
   $('esPvTitle').textContent = title;
   $('esPvBy').textContent = current ? 'Prepared by ' + (bizName(current.slug) || '') : '';
-  $('esPvDesc').textContent = $('esDesc').value.trim();
+  const pvLines = esReadLines();
+  // Mirrors the real page: the description only shows when there are no priced lines.
+  $('esPvDesc').textContent = pvLines.length ? '' : $('esDesc').value.trim();
   const note = $('esCustNote').value.trim();
   $('esPvNote').textContent = note ? 'A note from us: ' + note : '';
   const lines = esReadLines();
