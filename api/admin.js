@@ -12100,7 +12100,7 @@ function approveTokenEstimateId(raw) {
 // business is fetched separately (not via an embed) so the column-drop retry
 // can't mangle a comma-containing join.
 async function fetchEstimateAnyBiz(db, id) {
-  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, customer_note, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent, technician_id';
+  let cols = 'id, business_id, service_id, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, service_label, description, customer_note, line_items, tax_rate, approved_at, preferred_slots, upsells, accepted_upsells, approved_total, sms_consent, technician_id, notes';
   let data, error;
   for (let i = 0; i < 8; i++) {
     ({ data, error } = await db.from('estimates').select(cols).eq('id', id).maybeSingle());
@@ -12913,7 +12913,11 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
     status: 'assigned', source: 'estimate',
     scheduled_at,
     subtotal: totals.subtotal, price: totals.total,
-    notes: est.description || null,
+    // An estimate's internal notes never reach the job, EXCEPT a "Payroll
+    // override: $X" line, which the payroll engine reads from the booking's
+    // notes. Carrying just that line means the pay the office wrote on the
+    // quote is the pay the tech actually gets (owner rule 2026-09-19).
+    notes: [est.description, (String(est.notes || '').match(/payroll\s*override\s*:?\s*\$?\s*\d+(?:\.\d{1,2})?/i) || [])[0]].filter(Boolean).join(String.fromCharCode(10, 10)) || null,
     address_line1: cust.line1 || null, city: cust.city || null, state: cust.state || null, postal_code: cust.zip || null,
     payment_required: true, payment_method: 'card',
     // A phone number IS the opt-in (owner rule 2026-09-19); only a prior STOP says no.
