@@ -2216,7 +2216,11 @@ export default async function handler(req, res) {
     const lostValue = abandoned.reduce((n, s) => n + (s.lastPrice || 0), 0);
 
     // ── Recent sessions feed ────────────────────────────────────────────────
+    // Sessions under 10 seconds (someone glanced at the ZIP box and left) are
+    // noise in this feed, so they're left out — feed only: totals, funnel and
+    // bounce counts above still include them. A booked session always stays.
     const recentSessions = [...sess]
+      .filter(s => s.booked || (s.lastTs - s.firstTs) / 1000 >= 10)
       .sort((a, b) => b.lastTs - a.lastTs)
       .slice(0, 30)
       .map(s => ({
