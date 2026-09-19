@@ -1674,7 +1674,7 @@
       </div>
     </div>
 
-    <div class="view-scroll"><div id="noteBanner"></div><nav id="hubNavigation" aria-label="Section navigation" hidden></nav><div id="view"></div></div>
+    <div class="view-scroll"><div id="domainBanner"></div><div id="noteBanner"></div><nav id="hubNavigation" aria-label="Section navigation" hidden></nav><div id="view"></div></div>
   </main>
 </div>
 
@@ -2540,8 +2540,9 @@ function enterApp(){
   // Notes ride alongside the bad-review alerts: paint once on sign-in, then
   // re-check every few minutes so a note posted mid-shift appears without a reload.
   noteBanner();
+  domainBanner();
   if(noteTimer) clearInterval(noteTimer);
-  noteTimer=setInterval(()=>{ if(document.hidden) return; noteBanner(); }, 180000);
+  noteTimer=setInterval(()=>{ if(document.hidden) return; noteBanner(); domainBanner(); }, 180000);
   if(alertTimer) clearInterval(alertTimer);
   alertTimer=setInterval(()=>{ if(document.hidden) return; loadBadAlerts(); }, 180000);
   // Slide the session while the dashboard is open and visible (see
@@ -9043,6 +9044,109 @@ async function loadTechNotesRecent(){
   }catch(err){ wrap.className='empty'; wrap.textContent=err.message||'Could not load notes'; }
 }
 
+
+// ── Domain watch (Other > Domain watch, owner only) ─────────────────────────
+// A dashboard banner for any watched domain that can be bought (or is about to
+// drop). Same X-to-dismiss pattern as the other alerts; it comes back if the
+// domain moves to a different alert state.
+const DOMAIN_STATUS_LABEL={ available:'Available now', likely_available:'Likely available', pending_delete:'Dropping soon', redemption:'In redemption (owner can still reclaim)', taken:'Taken', unchecked:'Not checked yet', unsupported:'Cannot check this ending', error:'Check failed' };
+const DOMAIN_STATUS_COLOR={ available:'#15803d', likely_available:'#15803d', pending_delete:'#b45309', redemption:'#6b7280', taken:'#6b7280', unchecked:'#6b7280', unsupported:'#6b7280', error:'#b91c1c' };
+async function domainBanner(){
+  const host=document.getElementById('domainBanner');
+  if(!host) return;
+  if(role!=='owner'){ host.innerHTML=''; return; }
+  let alerts=[];
+  try{ const d=await api('domain_watch_alerts'); alerts=d.alerts||[]; }
+  catch(_){ host.innerHTML=''; return; }
+  if(!alerts.length){ host.innerHTML=''; return; }
+  host.innerHTML=alerts.map(a=>{
+    const drop=a.status==='pending_delete';
+    return `<div class="note-card" data-dom="${esc(a.id)}" style="border-left:5px solid ${drop?'#f59e0b':'#16a34a'};">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${drop?'#b45309':'#15803d'};margin-bottom:4px;">${drop?'Domain dropping soon':a.status==='likely_available'?'Domain likely available':'Domain available'}</div>
+        <div style="font-size:20px;font-weight:800;">${esc(a.domain)}</div>
+        <div style="font-size:13.5px;color:var(--mute);margin-top:3px;">${drop?'In pending delete. Should be released within about 5 days.':a.status==='likely_available'?'No DNS and no public registry record. Verify, then buy.':'Nobody owns it right now. Buy it before someone else does.'}</div>
+        <button type="button" class="btn sm" data-domopen="${esc(a.id)}" style="width:auto;margin-top:8px;">Open Domain watch</button>
+      </div>
+      <button class="note-x" data-domx="${esc(a.id)}" title="Dismiss" aria-label="Dismiss domain alert">×</button>
+    </div>`; }).join('');
+  host.querySelectorAll('[data-domopen]').forEach(b=>b.onclick=()=>renderDomainWatch());
+  host.querySelectorAll('[data-domx]').forEach(b=>b.onclick=async()=>{
+    const card=b.closest('.note-card'); card.style.opacity='.4'; b.disabled=true;
+    try{ await api('domain_watch_dismiss',{ method:'POST', body:{ id:b.getAttribute('data-domx') } }); card.remove(); }
+    catch(err){ card.style.opacity='1'; b.disabled=false; toast(err.message||'Could not dismiss that'); }
+  });
+}
+function domWhen(iso){ try{ return iso?new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''; }catch(_){ return ''; } }
+async function renderDomainWatch(){
+  const view=document.getElementById('view');
+  view.innerHTML=`<div class="wrap">
+    <button class="btn ghost" id="dwBack" style="width:auto;margin-bottom:12px;">← Other</button>
+    <h2 style="margin:0 0 4px;">Domain watch</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:14px;max-width:660px;">Paste the domains you want, one per line. Every day around 2:30 PM Denver time each one is checked against its registry. When one can be bought, or enters its last days before dropping, you get a text, an email, and a banner on this dashboard. Nothing is ever bought for you.</div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:660px;">
+      <label for="dwText" style="${NOTE_LABEL_CSS}">DOMAINS TO WATCH</label>
+      <textarea id="dwText" rows="5" placeholder="example.com&#10;another-name.net" style="${NOTE_FIELD_CSS}resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn" id="dwAdd" style="width:auto;">Add to watch list</button>
+        <button class="btn ghost" id="dwNow" style="width:auto;">Check all now</button>
+      </div>
+      <div id="dwMsg" style="font-size:13px;color:var(--mute);margin-top:8px;"></div>
+    </div>
+    <h3 style="margin:24px 0 8px;font-size:15px;">Watching</h3>
+    <div id="dwList" class="empty">Loading…</div>
+  </div>`;
+  document.getElementById('dwBack').onclick=()=>renderOther();
+  const msg=t=>{ document.getElementById('dwMsg').textContent=t||''; };
+  const load=async()=>{
+    const wrap=document.getElementById('dwList'); if(!wrap) return;
+    try{
+      const d=await api('domain_watch_list'); const rows=d.domains||[];
+      if(!rows.length){ wrap.className='empty'; wrap.textContent='Nothing on the list yet.'; return; }
+      const order={ available:0, likely_available:1, pending_delete:2, redemption:3, unchecked:4, error:5, unsupported:6, taken:7 };
+      rows.sort((a,b)=>(order[a.status]-order[b.status])||a.domain.localeCompare(b.domain));
+      wrap.className='';
+      wrap.innerHTML=`${d.owner_phone_set?'':'<div class="empty" style="text-align:left;margin-bottom:8px;">No owner phone number is set, so text alerts are off. Email and the banner still work.</div>'}`+rows.map(r=>{
+        const c=DOMAIN_STATUS_COLOR[r.status]||'#6b7280';
+        const hot=r.status==='available'||r.status==='likely_available'||r.status==='pending_delete';
+        const bits=[r.last_checked_at?('Checked '+noteWhen(r.last_checked_at)):'Not checked yet', r.expires_at&&r.status!=='available'?('Expires '+domWhen(r.expires_at)):'', r.registrar||'', r.last_error?('Note: '+r.last_error):''].filter(Boolean).join(' · ');
+        return `<div class="note-row"${hot?' style="border-left:4px solid '+c+';"':''}>
+          <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:700;">${esc(r.domain)}</div>
+            <div style="color:var(--mute);font-size:12px;margin-top:3px;">${esc(bits)}</div></div>
+          <span class="note-pill" style="background:${c}1a;color:${c};white-space:nowrap;">${esc(DOMAIN_STATUS_LABEL[r.status]||r.status)}</span>
+          <button class="note-del" data-domdel="${esc(r.id)}" title="Stop watching" aria-label="Stop watching ${esc(r.domain)}">🗑</button>
+        </div>`; }).join('');
+      wrap.querySelectorAll('[data-domdel]').forEach(b=>b.onclick=async()=>{
+        b.disabled=true;
+        try{ await api('domain_watch_delete',{ method:'POST', body:{ id:b.getAttribute('data-domdel') } }); await load(); domainBanner(); }
+        catch(err){ b.disabled=false; toast(err.message||'Could not remove that'); }
+      });
+    }catch(err){ wrap.className='empty'; wrap.textContent=err.message||'Could not load the list'; }
+  };
+  document.getElementById('dwAdd').onclick=async()=>{
+    const ta=document.getElementById('dwText'), btn=document.getElementById('dwAdd');
+    if(!ta.value.trim()){ ta.focus(); return; }
+    btn.disabled=true; btn.textContent='Checking…'; msg('Adding and checking each one. This can take a few seconds.');
+    try{
+      const r=await api('domain_watch_add',{ method:'POST', body:{ text:ta.value } });
+      ta.value='';
+      msg(`Added ${r.added}${r.duplicates?`, ${r.duplicates} already on the list`:''}${(r.skipped||[]).length?`. Skipped, not domains: ${r.skipped.slice(0,5).join(', ')}`:''}.`);
+      await load(); domainBanner();
+    }catch(err){ msg(err.message||'Could not add those'); }
+    finally{ btn.disabled=false; btn.textContent='Add to watch list'; }
+  };
+  document.getElementById('dwNow').onclick=async()=>{
+    const btn=document.getElementById('dwNow'); btn.disabled=true; btn.textContent='Checking…'; msg('Checking every domain now…');
+    try{
+      const r=await api('domain_watch_check',{ method:'POST', body:{} });
+      msg(`Checked ${r.checked}.${(r.alerts||[]).length?` ${(r.alerts||[]).length} need attention; alerts sent.`:' Nothing new to act on.'}`);
+      await load(); domainBanner();
+    }catch(err){ msg(err.message||'Could not check'); }
+    finally{ btn.disabled=false; btn.textContent='Check all now'; }
+  };
+  load();
+}
+
 // ── "Other" tab: a home for occasional tools (currently Disputes) ────────────
 async function renderOther(){
   const view=document.getElementById('view');
@@ -9054,6 +9158,10 @@ async function renderOther(){
         <div><div style="font-weight:700;">📌 Notes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Leave a note, with photos, for the secretaries or your technicians. You can see who read it, and secretaries can write back.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherNotesCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
+      ${role==='owner'?`<div id="otherDomains" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">🌐 Domain watch</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Paste domains you want. Checked once a day. You get a text, an email, and a banner here the moment one can be bought.</div></div>
+        <div style="display:flex;align-items:center;gap:8px;"><span id="otherDomainCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
+      </div>`:''}
       <div id="otherDisputes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🛡️ Disputes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Respond to card chargebacks using the signed authorization on file.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDispCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
@@ -9082,6 +9190,11 @@ async function renderOther(){
   </div>`;
   document.getElementById('otherNotes').onclick=()=>renderNotes();
   document.getElementById('otherDisputes').onclick=()=>renderDisputes();
+  { const dw=document.getElementById('otherDomains');
+    if(dw){
+      dw.onclick=()=>renderDomainWatch();
+      api('domain_watch_alerts').then(d=>{ const n=(d.alerts||[]).length; const c=document.getElementById('otherDomainCount'); if(c&&n) c.textContent=n+' buyable'; }).catch(()=>{});
+    } }
   document.getElementById('otherSecretaries').onclick=()=>renderSecretaries();
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
   document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();

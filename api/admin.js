@@ -34,6 +34,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot } from './_lib/availability.js';
+import { parseDomainList, runDomainWatch } from './_lib/domain-watch.js';
 import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
 import { saveAuthorization, buildDisputeEvidence } from './_lib/authorization.js';
@@ -535,6 +536,12 @@ export default async function handler(req, res) {
       case 'notes_add':    return await notesAdd(req, res, db, auth, body);
       case 'notes_delete': return await notesDelete(req, res, db, auth, body);
       case 'notes_update': return await notesUpdate(req, res, db, auth, body);
+      case 'domain_watch_list':   return await domainWatchList(req, res, db, auth);
+      case 'domain_watch_add':    return await domainWatchAdd(req, res, db, auth, body);
+      case 'domain_watch_delete': return await domainWatchDelete(req, res, db, auth, body);
+      case 'domain_watch_alerts':  return await domainWatchAlerts(req, res, db, auth);
+      case 'domain_watch_dismiss': return await domainWatchDismiss(req, res, db, auth, body);
+      case 'domain_watch_check':  return await domainWatchCheck(req, res, db, auth, body);
       case 'notes_photo':  return await notesPhoto(req, res, db, auth, body);
       case 'notes_replies_seen': return await notesRepliesSeen(req, res, db, auth);
       case 'tech_notes_targets': return await techNotesTargets(req, res, db, auth);
@@ -14120,6 +14127,87 @@ async function notesUpdate(req, res, db, auth, body) {
   if (error) throw error;
   if (reshow) await db.from('staff_note_reads').delete().eq('note_id', id).is('reply', null);
   return res.status(200).json({ ok: true, reshown: reshow });
+}
+
+// ── Domain watch (Other > Domain watch) ──────────────────────────────────────
+// The owner pastes domains he wants; a daily cron (api/migrate.js
+// domain_watch_check) looks each one up and texts him when one becomes
+// registrable. Owner only. Nothing here ever buys a domain.
+const DOMAIN_WATCH_MAX = 500;
+
+async function domainWatchList(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data, error } = await db.from('domain_watch')
+    .select('id, domain, status, status_since, expires_at, registrar, last_checked_at, last_error, notified_at, created_at')
+    .order('created_at', { ascending: false }).limit(DOMAIN_WATCH_MAX);
+  if (error) throw error;
+  return res.status(200).json({ domains: data || [], owner_phone_set: !!process.env.OWNER_PHONE_NUMBER });
+}
+
+// POST { text } — paste any list; junk lines are reported back, never silently dropped.
+async function domainWatchAdd(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { good, bad } = parseDomainList(body.text);
+  if (!good.length) return res.status(400).json({ error: bad.length ? `Nothing here looks like a domain: ${bad.slice(0, 5).join(', ')}` : 'Paste at least one domain' });
+  const { data: existing } = await db.from('domain_watch').select('domain');
+  const have = new Set((existing || []).map(r => r.domain));
+  const fresh = good.filter(d => !have.has(d));
+  if ((existing || []).length + fresh.length > DOMAIN_WATCH_MAX) return res.status(400).json({ error: `The watch list is limited to ${DOMAIN_WATCH_MAX} domains` });
+  let added = [];
+  if (fresh.length) {
+    const { data, error } = await db.from('domain_watch')
+      .insert(fresh.map(domain => ({ domain, created_by: auth.name || 'Owner' }))).select('id');
+    if (error) throw error;
+    added = data || [];
+    // Check the new ones right now so the list shows a real answer immediately
+    // (an already-available one still texts once, then stays quiet).
+    try { await runDomainWatch(db, { onlyIds: added.map(r => r.id) }); }
+    catch (e) { console.warn('[domain_watch_add] first check failed:', e.message); }
+  }
+  return res.status(200).json({ ok: true, added: added.length, duplicates: good.length - fresh.length, skipped: bad });
+}
+
+// GET — domains in an alert state the owner has not dismissed (dashboard banner).
+async function domainWatchAlerts(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(200).json({ alerts: [] });
+  const { data, error } = await db.from('domain_watch')
+    .select('id, domain, status, status_since, expires_at, alert_dismissed_status')
+    .in('status', ['available', 'pending_delete', 'likely_available']);
+  if (error) return res.status(200).json({ alerts: [] });   // never let this break the dashboard
+  return res.status(200).json({ alerts: (data || []).filter(r => r.alert_dismissed_status !== r.status) });
+}
+
+// POST { id } — hide the banner for the domain's CURRENT state. If it later
+// changes to a different alert state the banner comes back.
+async function domainWatchDismiss(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const id = String(body.id || '');
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: row } = await db.from('domain_watch').select('status').eq('id', id).maybeSingle();
+  if (!row) return res.status(404).json({ error: 'Not on the list' });
+  const { error } = await db.from('domain_watch').update({ alert_dismissed_status: row.status }).eq('id', id);
+  if (error) throw error;
+  return res.status(200).json({ ok: true });
+}
+
+async function domainWatchDelete(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const ids = (Array.isArray(body.ids) ? body.ids : [body.id]).map(x => String(x || '')).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'id required' });
+  const { error } = await db.from('domain_watch').delete().in('id', ids);
+  if (error) throw error;
+  return res.status(200).json({ ok: true, removed: ids.length });
+}
+
+// POST {} — "check now": the same run the daily cron does.
+async function domainWatchCheck(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const summary = await runDomainWatch(db, {});
+  return res.status(200).json({ ok: true, ...summary });
 }
 
 // ── Notes for technicians ────────────────────────────────────────────────────

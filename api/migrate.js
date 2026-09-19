@@ -10,6 +10,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
+import { runDomainWatch } from './_lib/domain-watch.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { enRouteMessage } from './_lib/en-route.js';
@@ -1046,6 +1047,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[photo_logo_scan]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Daily domain-watch check: looks up every domain on the owner's watch list
+  // (Other > Domain watch) and texts the owner when one becomes registrable or
+  // enters pending delete. Secured by CRON_SECRET like the other crons.
+  //   &dry=1   check and report, but send no texts
+  if (action === 'domain_watch_check') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dry = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await runDomainWatch(serviceClient(), { sendAlerts: !dry });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[domain_watch_check]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
